@@ -165,11 +165,11 @@ hiraku launch logreg-baseline -- uv run python train.py --seed 1
 The integration environment includes:
 
 ```text
-WAKIKU_EXPERIMENT_ID
-WAKIKU_GIT_COMMIT
-WAKIKU_TRACKING_BACKEND
-WAKIKU_MLFLOW_EXPERIMENT_ID   # MLflow backend
-WAKIKU_TABLE_PATH             # table backend
+HARIKU_EXPERIMENT_ID
+HARIKU_GIT_COMMIT
+HARIKU_TRACKING_BACKEND
+HARIKU_MLFLOW_EXPERIMENT_ID   # MLflow backend
+HARIKU_TABLE_PATH             # table backend
 ```
 
 The configured MLflow tracking URI is exposed through the standard `MLFLOW_TRACKING_URI` variable. Project code persists the injected commit as MLflow's standard `mlflow.source.git.commit` tag. For a table, project code writes it to the required `commit` column.
