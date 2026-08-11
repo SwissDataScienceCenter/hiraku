@@ -7,6 +7,8 @@ It defines a shared protocol and conventions around standard data science practi
 **Why Hiraku?**
 In renku (連句), the traditional Japanese art of collaborative linked poetry, hiraku (平句) are the regular verses where the sequence develops, shifts, and explores new directions — making the name a natural metaphor for iterative, exploratory research.
 
+> Treat the name as internal code name; better suggestions are welcome :)
+
 
 ## The problem
 
@@ -18,14 +20,13 @@ In the experimental phase of a data science project, the problem, data, and obje
 4. analyzing and comparing results, and
 5. iterating or concluding.
 
-While established tools support individual stages of this cycle (Git for version control, Weights & Biases or MLflow for experiment tracking, and notebooks for analysis, etc), the meta-level information that connects these stages is often only loosely documented. It is distributed across artifacts such as personal research notes, code commits, notebooks, experiment runs, checkpoints, analysis notes, and final method choices, while also incorporating feedback from domain experts and collaborators.
+While standard tools support individual stages of this cycle (Git for version control, Weights & Biases or MLflow for experiment tracking, and notebooks for analysis, etc), the meta-level information that connects these stages is often only loosely documented.
 
-This fragmentation creates a gap in traceability: ideas, hypotheses, implementation, experiment lineage, results, and conclusions are not consistently linked or documented as part of a coherent research process. As AI-assisted and agentic research workflows become more capable, the lack of conventions becomes an increasingly bottleneck for governance. Without a lightweight but explicit protocol for capturing the research process, AI systems cannot reliably inspect prior work, understand why decisions were made, propose meaningful next steps, reproduce conclusions, or effectively support data scientists through iterative experimentation.
+This fragmentation creates inherent barrier for effective human-AI collaboration: ideas, hypotheses, implementation, experiment lineage, results, and conclusions are not consistently linked or documented as part of a coherent research process. Without a lightweight but explicit protocol for capturing the research process, AI systems cannot reliably inspect prior work, understand why decisions were made, propose meaningful next steps, reproduce conclusions, or effectively support data scientists through iterative experimentation.
 
 Hiraku addresses this gap by establishing conventions, workflows, and tools for AI-assisted data science research. It supports two distinct working modes:
 
-
-* **Guided mode**: A guided, step-by-step AI-assisted research workflow, where the data scientist explicitly specifies and approves each step, and inspects and reviews artifacts agent artifacts before proceeding.
+* **Guided mode**: A guided, step-by-step AI-assisted research workflow, where the data scientist explicitly specifies and approves each step, and inspects and reviews artifacts before proceeding.
 * **Auto mode**: An agentic, closed-loop “autoresearch” mode, where the agent implements, runs, analyzes, and iterates on experiments within the defined protocol and scope, exposing all artifacts for post-hoc human verification.
 
 
@@ -35,11 +36,14 @@ The proof of concept establishes a minimal working version of Hiraku. The proof 
 
 ## Core workflow: Tracking the experiment life-cycle
 
-An *experiment* is the main unit in the Hiraku framework, representing a user-defined implementation scope. It may implement a baseline, reproduce an existing method, define a new hypothesis, or capture a similarly scoped research task. It is roughly comparable to the work captured by a Git feature branch. All information relevant to the experiment is recorded in a markdown file, linking commits and experimental runs with a tracking backend (e.g., MLFlow). GitHub pull requests (or GitLab merge requests) provide a standard reviewing surface before an experiment is concluded and merged into main.
+An *experiment* is the main unit in the Hiraku framework, representing a user-defined implementation scope. It is roughly comparable to the work captured by a Git feature branch, for example, an experiment may introduce a baseline, reproduce an existing method, evaluate a new hypothesis, or capture a similarly scoped, user-defined research task. All information relevant to the experiment is recorded in a markdown file, linking description, implenentation plan, commits and experimental runs. We fall back to standard tooling whereever possible:
+- Git is used for code and documentation tracking, branches capture experiment related commits.
+- GitHub pull requests (or GitLab merge requests) provide a standard reviewing surface before an experiment is concluded and merged into main.
+- A tracking backend (MLflow, CSV/TSV table, W&B, etc) is used to track experiment runs and metrics.
 
 ### Experiment record: `experiment.md`
 
-The central record and only data that is directly managed by the experiment records. Experiments are recorded in markdown files:
+The only data that is directly managed are experiment records. Each experiment is recorded in a single markdown file:
 ```text
 experiments/<experiment-id>/experiment.md
 ```
@@ -51,39 +55,8 @@ The `experiment.md` file links the following elements:
 
 The user and agent continuously update the markdown to document ideas, code, changes and results. Hiraku cli (`hiraku`) and agent skill (`/hiraku`) supports with experiment creation, implementation, documentation, and run comparison (leaderboard).
 
-### Workflow
-The following sequence illustrates the intended workflow. The sequence can be run step-by-step, guided by the data scientist, or autonomously iterated end-to-end, in which case the data scientist reviews the final experiment.md, or corresponding pull request.
 
-```bash
-# Setup
-hiraku init  # creates hiraku project and configuration file `.hiraku`
-
-# 1. create experiment
-hiraku exp create logreg-baseline --mode guided --tracking-backend mlflow  # deterministic via cli
-git checkout exp/logreg-baseline  # default branch for experiment code
-/hiraku "create an experiment that implements a logistic regression baseline"  # agent assisted workflow
-hiraku exp list  # list all experiments
-hiraku exp show logreg-baseline  # detailed information
-
-# 2. implement and commit (user guided)
-/hiraku "implement logreg-baseline"
-git commit  # data scientist reviews code and commits
-
-# 3. launch experiment and track on mlflow 
-hiraku launch logreg-baseline:train  # training entrypoint 
-hiraku launch logreg-baseline:hpo  # hyperparameter optimization entrypoint
-hiraku runs logreg-baseline  --sort val/cross_entropy # list all mlflow runs that link to the experiment. each run refers to experiment-id, commit, args or parameters, which can be listed here
-
-# 4. analyzing and updating documentation
-/hiraku "compare the new runs and update the experiment.md, then create a pull request for reviewing"
-
-# 5. data scientist inspects, code, results etc and decides next steps
-hiraku runs logreg-baseline  # experiment leaderboard
-hiraku runs  # cross-experiment leaderboard
-```
-
-`experiment.md` combines small machine-readable front matter with continuously updated free-form documentation:
-
+**Example:**
 ```markdown
 ---
 id: logreg-baseline
@@ -109,6 +82,38 @@ Implement and evaluate a reproducible logistic regression baseline.
 ## Decisions and next steps
 ```
 
+### Workflow
+The following sequence illustrates the intended workflow. The sequence can be run step-by-step, guided by the data scientist, or autonomously iterated end-to-end, in which case the data scientist reviews the final experiment.md, code and run data, optionally exposed via a corresponding pull request.
+
+```bash
+# Setup
+hiraku init  # creates hiraku project and configuration file `.hiraku`
+
+# 1. create experiment
+hiraku exp create logreg-baseline --mode guided --tracking-backend mlflow  # deterministic via cli
+git checkout exp/logreg-baseline  # default branch for experiment code
+/hiraku "create an experiment that implements a logistic regression baseline"  # agent assisted workflow
+hiraku exp list  # list all experiments
+hiraku exp show logreg-baseline  # experiment details, --json returns machine-readable output
+
+# 2. implement and commit (user guided)
+/hiraku "implement logreg-baseline"
+git commit  # data scientist reviews code and commits
+
+# 3. launch experiment and track on mlflow 
+hiraku launch logreg-baseline:train  # training entrypoint 
+hiraku launch logreg-baseline:hpo  # hyperparameter optimization entrypoint
+hiraku runs logreg-baseline  --sort val/cross_entropy # list all mlflow runs that link to the experiment. each run refers to experiment-id, commit, args or parameters, which can be listed here
+
+# 4. analyzing and updating documentation
+/hiraku "compare the new runs and update the experiment.md, then create a pull request for reviewing"
+
+# 5. data scientist inspects, code, results etc and decides next steps
+hiraku runs logreg-baseline  # experiment leaderboard
+hiraku runs  # cross-experiment leaderboard
+```
+
+
 ### Configuration
 
 `hiraku init` creates `.hiraku.yml`, the experiment directory, and the repository-local Hiraku skill.
@@ -117,6 +122,7 @@ An MLflow-backed project uses configuration shaped like:
 
 ```yaml
 experiments_dir: experiments
+experiment_template: experiments/template.md
 tracking:
   backend: mlflow
   tracking_uri: http://localhost:5000
@@ -124,6 +130,8 @@ tracking:
 
 
 ## Command-line interface
+
+> This section defines the intended CLI shape for the proof of concept.
 
 Short command names are primary. `hiraku experiment` is also accepted as a long alias for `hiraku exp`.
 
@@ -202,21 +210,12 @@ The skill acts as a router for focused workflows that are loaded when required:
 - launching and analyzing runs; and
 - performing a bounded autonomous research loop.
 
-These are internal skill workflows, not public slash subcommands. Users interact naturally, for example:
 
-```text
-Use the Hiraku skill to create an experiment for implementing the paper's baseline.
+## Approval, review and verification protocol
 
-Use the Hiraku skill to implement the next step of logreg-baseline in guided mode.
+The workflow supports two modes of operation, `guided` and `auto`. In the guided mode, the data scientist explicitly reviews and approves each step, agent generates artifacts or runs code only on explicit request. In auto mode, the agent approaches the task autonomously to implement, run, analyze, and iterate on experiments within the defined protocol and scope, exposing all artifacts for post-hoc human verification.
 
-Use the Hiraku skill to run the approved autonomous loop for larger-context-window.
-```
-
-Codex is the initially tested agent runtime. The skill uses a repository-local, reusable shape to make later compatibility with other skill-aware agents possible, but the PoC does not claim support that has not been tested.
-
-## Review and approval protocol
-
-The mode in `experiment.md` defines agent behavior, not a security boundary. Enforcement remains the responsibility of Git protections, sandboxing, credentials, and execution infrastructure.
+> The mode in `experiment.md` defines agent behavior, not a security boundary. Enforcement remains the responsibility of Git protections, sandboxing, credentials, and execution infrastructure.
 
 ### Guided mode
 
@@ -227,7 +226,7 @@ The mode in `experiment.md` defines agent behavior, not a security boundary. Enf
 3. experiment launch; and
 4. updating findings, and conclusion.
 
-In guided mode, the agent does not commit changes or launch experiments without explicit human approval. 
+> In guided mode, the agent is instructed to not commit changes or launch experiments without explicit human approval. 
 
 ### Auto mode
 
@@ -238,58 +237,13 @@ In `auto` mode, the data scientist approves the scope, evaluation protocol, perm
 - launch experiments;
 - inspect and compare results;
 - update findings and next steps; and
-- select the next in-scope iteration.
+- accept/reject previous changes and select the next in-scope iteration.
 
 The agent pauses for approval before changing scope, evaluation, permitted commands, resource bounds, permissions, or mode. Merging into a protected branch always requires explicit human approval.
 
 Both modes use the same data model. They differ only in when the human reviews and approves actions.
 
-## Sources of truth
-
-- `experiment.md` records research intent, interpretation, findings, and decisions.
-- Git records exact durable implementation and documentation state.
-- MLflow or the experiment's results table records executions and results.
-- Hiraku resolves, validates, and presents the links between them; it does not duplicate their ownership.
-
-Pull and merge requests are natural review surfaces over these sources, but PR/MR automation is not part of the PoC.
-
-## Demo and acceptance criteria
-
-The PoC will include:
-
-1. one small, fast toy experiment; and
-2. one larger LLM experiment based on the autoresearch use case.
-
-Both cases exercise guided and auto modes.
-
-
-## Out of scope for the proof of concept
-
-- The "outer loop" of brainstorming or autonomously creating several experiment scopes.
-- Capturing or standardizing agent conversations, traces, chain-of-thought, or tool-call histories.
-- Enforcing approval policies through Hiraku itself.
-- Versioning datasets, benchmarks, environments, or evaluation protocols.
-- Certifying that metrics are scientifically comparable.
-- A dashboard or other graphical interface.
-- A universal launcher for Slurm, Run:AI, Kubernetes, CI/CD, or institutional infrastructure.
-- Named entrypoints, sweeps, HPO controllers, distributed execution, or resource scheduling.
-- Cross-experiment Leaderboards.
-- Multi-agent orchestration.
-- An MCP server or tracking backends beyond MLflow and CSV/TSV.
-- Ingesting or normalizing run artifacts.
-
-## Roadmap
-
-- named commands such as `hiraku launch <experiment-id>:train`, after evaluating whether Hiraku should define a small entrypoint file or integrate an existing format;
-- a dashboard over the same Git and tracking sources;
-- cross-experiment Leaderboards, where the user explicitly asserts benchmark and metric compatibility;
-- additional run-tracking adapters (w&b);
-- MCP tools when structured remote interaction provides value beyond the CLI and skill;
-- infrastructure-specific launch adapters;
-- an outer loop for proposing and approving new experiments.
-
-
-## Target installation
+## Installation
 
 For local development, the intended workflow is:
 
@@ -308,8 +262,31 @@ hiraku --help
 ```
 
 
+## Roadmap
 
-## Appendix: RenkuAI naming framework
+> Features listed here are considered out-of-scope for the proof of concept, but should be taken into account for later iteration.
+
+- Github/GitLab pull request integration for reviewing and approving experiments.
+- The "outer loop" of brainstorming or autonomously creating several experiment scopes.
+- Improving the "inner loop" by defining exploration strategies.
+- Capturing or standardizing agent conversations, traces, chain-of-thought, or tool-call histories.
+- Enforcing approval policies and integration with sandboxing.
+- A dashboard or other graphical interface.
+- Visualizing lineage inferred from git DAG.
+- Integration of named entrypoints, launcher and HPO (check if existing tools could be used).
+- Cross-experiment Leaderboards
+- Additional run-tracking adapters (w&b);
+
+## Out of scope
+
+> Features listed here are not considered part of the Hiraku framework.
+
+- Versioning of datasets, benchmarks, environments, or evaluation protocols is up to the user; these can be specified in code or referenced in agent instructions.
+
+
+## Appendix: A naming framework for Renku AI
+
+> The proposed naming framework came up in Chatbot interactions. It simply notes a seemingly fitting analogy between Renku-related terminology and an agentic research framework; it has been neither verified with a Japanese speaker, nor is it intended or approved for broader use. 
 
 **Renku** — the Japanese tradition of collaborative linked verse — is proposed as a naming framework for a family of research tools. Each name draws first from its role in a Renku sequence, and from there maps onto a stage or function of research:
 
