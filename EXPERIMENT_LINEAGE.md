@@ -1,0 +1,14 @@
+Problem: 
+- We want to track lineage of experiments and hypotheses, or candidate implementations.
+- Naturally, since runs launch from designed commits, the goal is to leverage the git commit graph for this.
+- When several runs start from the same commit, they are treated as equal.
+- Creating hypothesis should be "cheap". The user might look at the current experiment and be like "try the independent ideas A, B, C, D all in parallel, then combine the ones that work best". Or test X, if it doesn't 'work, "discard" the idea (but we want to still be able to reproduce the discarded idea, and have some record)
+
+Modelling ideas:
+- Linear model: All commits stay on experiment branch. Commits that are not better are reverted.
+- Linear model with discard: All commits stay on the experiment branch. Use hard reset and discard changes. Discarded hypothesis are recorded with all hypothesis in a csv? Or just with the runs?
+- Branch model: Each hypothesis goes into a sub-tree with a new branch. The experiment starts in experiments/{exp-name}/root, and moves to experiments/{exp-name}/head (tracking the best). For a new hypothesis from which we start run, we create a new hypothesis branch, e.g. experiment/{exp-name}/add-batch-norm, experiment/{exp-name}/increase-layers, etc, so we can jump between branches. The only thing is that branches are moved along the head, so whenever the intent changes, the agent/user has to create a new branch
+- Tag model: experiments live in separate branches. We use tags to designate workable hypothesis (typically commits from which we launch runs). So the user/agent switches between tagged commits to continue with different ideas. The branch tracks the best idea so far.
+- Custom refs: Same as tags but using refs instead of tags. Almost same, but tags let us track metadata nicely.
+- Jujutsu/jj: We use jj and named change sets for each hypothesis. jj supports the branching model nicely. But we add a heavy dependencies for users, and jj trees cannot be easily shared via git, unless all relevant jj-commits are bookmarked with some convention (which goes bach to the branch model essentially). of course we could also use tags via jj, which has some advantages such as going between changes is more natural, but there is no real advantage compared to just using git tags.
+- With any of the above, we could add a hypotheses.csv or results.csv tracking all hypothesis tested (commit, description, expected, results metrics, etc). But this is almost the same as collecting runs, except that we can easily create it before the run launches, and update it afterwards. Potentially a results.csv can be combined with any of the above.

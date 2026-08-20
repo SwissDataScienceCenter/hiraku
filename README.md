@@ -34,6 +34,20 @@ Hiraku addresses this gap by establishing conventions, workflows, and tools for 
 
 The proof of concept establishes a minimal working version of Hiraku. The proof of concept is complete when two demo cases can execute this loop in both working modes and expose enough evidence for a human to review what happened. Metric improvement is measured, but it is not a condition for success. The initial version will include a first implementation of the command-line interface and the agent skill.
 
+### impl1 status
+
+The current implementation provides the guided vertical slice: project initialization, experiment
+creation and Git branch management, named entrypoint launching, CSV/TSV run tracking, and ranked
+per-experiment run inspection. It installs a repository-local Hiraku skill with guided and bounded
+auto-mode instructions. Two guided examples are included:
+
+- [`examples/smoke`](examples/smoke) verifies the lifecycle with deterministic synthetic scores.
+- [`examples/heart-disease`](examples/heart-disease) compares logistic regression and a random
+  forest on the checksum-pinned UCI Cleveland Heart Disease cohort.
+
+The examples do not yet demonstrate both cases in auto mode, so the broader PoC completion
+criterion above remains open.
+
 ## Core workflow: Tracking the experiment life-cycle
 
 An *experiment* is the main unit in the Hiraku framework, representing a user-defined implementation scope. It is roughly comparable to the work captured by a Git feature branch, for example, an experiment may introduce a baseline, reproduce an existing method, evaluate a new hypothesis, or capture a similarly scoped, user-defined research task. All information relevant to the experiment is recorded in a markdown file, linking description, implenentation plan, commits and experimental runs. We fall back to standard tooling whereever possible:
@@ -50,7 +64,7 @@ experiments/<experiment-id>/experiment.md
 The `experiment.md` file links the following elements:
 - **Documention** describing the experiment scope, implementation, and results,
 - **Git commits** via a specified experiment branch,
-- **Entrypoints** specified in a `launch.yml`
+- **Entrypoints** specified in `experiments/<experiment-id>/launch.yml`
 - **Runs** for tracking metrics, via a specified backend (MLflow, CSV/TSV table, W&B, etc).
 
 The user and agent continuously update the markdown to document ideas, code, changes and results. Hiraku cli (`hiraku`) and agent skill (`/hiraku`) supports with experiment creation, implementation, documentation, and run comparison (leaderboard).
@@ -62,7 +76,6 @@ The user and agent continuously update the markdown to document ideas, code, cha
 id: logreg-baseline
 branch: exp/logreg-baseline
 mode: guided
-mlflow_experiment_id: "42"
 ---
 
 # Logistic regression baseline
@@ -87,11 +100,10 @@ The following sequence illustrates the intended workflow. The sequence can be ru
 
 ```bash
 # Setup
-hiraku init  # creates hiraku project and configuration file `.hiraku`
+hiraku init  # creates Hiraku project configuration in `.hiraku.yml`
 
 # 1. create experiment
-hiraku exp create logreg-baseline --mode guided --tracking-backend mlflow  # deterministic via cli
-git checkout exp/logreg-baseline  # default branch for experiment code
+hiraku exp create logreg-baseline --mode guided  # creates and switches to exp/logreg-baseline
 /hiraku "create an experiment that implements a logistic regression baseline"  # agent assisted workflow
 hiraku exp list  # list all experiments
 hiraku exp show logreg-baseline  # experiment details, --json returns machine-readable output
@@ -100,17 +112,15 @@ hiraku exp show logreg-baseline  # experiment details, --json returns machine-re
 /hiraku "implement logreg-baseline"
 git commit  # data scientist reviews code and commits
 
-# 3. launch experiment and track on mlflow 
-hiraku launch logreg-baseline:train  # training entrypoint 
-hiraku launch logreg-baseline:hpo  # hyperparameter optimization entrypoint
-hiraku runs logreg-baseline  --sort val/cross_entropy # list all mlflow runs that link to the experiment. each run refers to experiment-id, commit, args or parameters, which can be listed here
+# 3. launch named entrypoints and inspect the tracked table
+hiraku launch logreg-baseline:train
+hiraku runs logreg-baseline --sort val/cross_entropy --ascending
 
 # 4. analyzing and updating documentation
 /hiraku "compare the new runs and update the experiment.md, then create a pull request for reviewing"
 
-# 5. data scientist inspects, code, results etc and decides next steps
+# 5. data scientist inspects code and results and decides next steps
 hiraku runs logreg-baseline  # experiment leaderboard
-hiraku runs  # cross-experiment leaderboard
 ```
 
 
@@ -118,15 +128,22 @@ hiraku runs  # cross-experiment leaderboard
 
 `hiraku init` creates `.hiraku.yml`, the experiment directory, and the repository-local Hiraku skill.
 
-An MLflow-backed project uses configuration shaped like:
+A table-backed impl1 project uses configuration shaped like:
 
 ```yaml
 experiments_dir: experiments
 experiment_template: experiments/template.md
+policies:
+  guided: .hiraku/policies/guided.md
+  auto: .hiraku/policies/auto.md
 tracking:
-  backend: mlflow
-  tracking_uri: http://localhost:5000
+  backend: table
+  path: .hiraku/runs.csv
 ```
+
+All configured paths are repository-relative and must remain inside the project root. The table
+format is inferred from `.csv` or `.tsv`. The generated `.hiraku/.gitignore` ignores the default run
+table so completed runs do not dirty the worktree and block later launches.
 
 
 ## Command-line interface
@@ -148,18 +165,34 @@ This creates the default configuration, `experiments/`, and install agent skills
 ```bash
 hiraku exp create logreg-baseline
 hiraku exp create larger-context-window --mode auto
+hiraku exp create custom-branch --branch research/custom-branch
 hiraku exp list
 hiraku exp list --json
 hiraku exp show logreg-baseline
 hiraku exp show logreg-baseline --json
 ```
 
-New experiments default to `guided` mode. Users and agents update the Markdown directly; the PoC does not provide field-level update commands.
+New experiments default to `guided` mode and `exp/<experiment-id>`. Creation requires a clean
+worktree, creates and switches to the branch, and generates `experiment.md`, `policy.md`, and
+`launch.yml`. Users and agents update these files directly; impl1 has no field-level update commands.
 
-### Launch project code
+### Launch named project entrypoints
+
+Define fixed commands in `experiments/logreg-baseline/launch.yml`:
+
+```yaml
+entrypoints:
+  train:
+    command: ["uv", "run", "python", "train.py", "--seed", "1"]
+    cwd: "."
+    env:
+      MODEL_FAMILY: "logistic"
+```
+
+Then commit the manifest and project code and launch it:
 
 ```bash
-hiraku launch logreg-baseline -- uv run python train.py --seed 1
+hiraku launch logreg-baseline:train
 ```
 
 `hiraku launch`:
@@ -167,20 +200,24 @@ hiraku launch logreg-baseline -- uv run python train.py --seed 1
 1. resolves the experiment and tracking configuration;
 2. rejects a dirty Git working tree;
 3. records the current commit SHA;
-4. injects the experiment ID, commit SHA, backend type, and resolved backend destination into the child environment; and
-5. executes the command and propagates its exit status.
+4. resolves the fixed argv, safe project-relative working directory, and environment from the
+   experiment manifest;
+5. injects the experiment ID, commit SHA, backend type, and resolved table destination into the child environment; and
+6. executes the command directly without a shell and propagates its exit status.
 
 The integration environment includes:
 
 ```text
-HARIKU_EXPERIMENT_ID
-HARIKU_GIT_COMMIT
-HARIKU_TRACKING_BACKEND
-HARIKU_MLFLOW_EXPERIMENT_ID   # MLflow backend
-HARIKU_TABLE_PATH             # table backend
+HIRAKU_EXPERIMENT_ID
+HIRAKU_GIT_COMMIT
+HIRAKU_TRACKING_BACKEND
+HIRAKU_TABLE_PATH
 ```
 
-The configured MLflow tracking URI is exposed through the standard `MLFLOW_TRACKING_URI` variable. Project code persists the injected commit as MLflow's standard `mlflow.source.git.commit` tag. For a table, project code writes it to the required `commit` column.
+Project code appends rows to `HIRAKU_TABLE_PATH` and writes the injected values to the required
+`experiment_id` and `commit` columns. Hiraku deliberately does not require a row to appear after a
+successful child process; the launcher remains a thin local wrapper rather than a scheduler or
+tracking SDK.
 
 The launcher is a thin local command wrapper, not a scheduler or job-dispatch system.
 
@@ -193,11 +230,14 @@ hiraku runs logreg-baseline --sort accuracy --descending
 hiraku runs logreg-baseline --json
 ```
 
-Without sorting, `hiraku runs` lists all runs. With `--sort`, it renders the experiment's Leaderboard. `--ascending` or `--descending` is required whenever `--sort` is used.
+The experiment ID is required in impl1. Without sorting, `hiraku runs <id>` preserves table order.
+With `--sort`, it renders that experiment's leaderboard. Exactly one of `--ascending` or
+`--descending` is required whenever `--sort` is used.
 
 Rows with missing or non-numeric sort values remain visible after ranked rows. Human output is a table. JSON output contains the same flattened run collection so the agent skill can consume it without scraping terminal formatting.
 
-For MLflow, Hiraku flattens available run metadata, parameters, and metrics into this view. For CSV/TSV, it preserves the table's columns.
+CSV/TSV source columns and string values are preserved. Sorted JSON rows receive an ordinal
+`_rank`; rows with missing or non-numeric metrics have no rank.
 
 ## Agent skill
 
@@ -261,6 +301,12 @@ uv tool install .
 hiraku --help
 ```
 
+To run the Heart Disease example, include its optional dependencies:
+
+```bash
+uv sync --extra heart-demo
+```
+
 
 ## Roadmap
 
@@ -273,7 +319,7 @@ hiraku --help
 - Enforcing approval policies and integration with sandboxing.
 - A dashboard or other graphical interface.
 - Visualizing lineage inferred from git DAG.
-- Integration of named entrypoints, launcher and HPO (check if existing tools could be used).
+- HPO and scheduler integration around named entrypoints.
 - Cross-experiment Leaderboards
 - Additional run-tracking adapters (w&b);
 

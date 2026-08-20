@@ -1,0 +1,8 @@
+entrypoints:
+  logistic:
+    command: ["python", "train.py", "--model", "logistic"]
+    cwd: examples/heart-disease
+  random-forest:
+    command: ["python", "train.py", "--model", "random-forest"]
+    cwd: examples/heart-disease
+
