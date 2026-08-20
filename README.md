@@ -24,50 +24,54 @@ While standard tools support individual stages of this cycle (Git for version co
 
 This fragmentation creates inherent barrier for effective human-AI collaboration: ideas, hypotheses, implementation, experiment lineage, results, and conclusions are not consistently linked or documented as part of a coherent research process. Without a lightweight but explicit protocol for capturing the research process, AI systems cannot reliably inspect prior work, understand why decisions were made, propose meaningful next steps, reproduce conclusions, or effectively support data scientists through iterative experimentation.
 
-Hiraku addresses this gap by establishing conventions, workflows, and tools for AI-assisted data science research. It supports two distinct working modes:
+Hiraku addresses this gap by establishing conventions, workflows, and tools for AI-assisted data science research. An experiment keeps its agent program separate from the policy that constrains it. Hiraku ships complete templates for two common workflows:
 
-* **Guided mode**: A guided, step-by-step AI-assisted research workflow, where the data scientist explicitly specifies and approves each step, and inspects and reviews artifacts before proceeding.
-* **Auto mode**: An agentic, closed-loop “autoresearch” mode, where the agent implements, runs, analyzes, and iterates on experiments within the defined protocol and scope, exposing all artifacts for post-hoc human verification.
+* **Guided template**: A step-by-step program paired with a policy where the data scientist explicitly approves each checkpoint and reviews artifacts before proceeding.
+* **Auto template**: An agentic, closed-loop program paired with a bounded policy under which the agent implements, runs, analyzes, and iterates, exposing all artifacts for post-hoc human verification.
 
 
 ## Proof of concept
 
-The proof of concept establishes a minimal working version of Hiraku. The proof of concept is complete when two demo cases can execute this loop in both working modes and expose enough evidence for a human to review what happened. Metric improvement is measured, but it is not a condition for success. The initial version will include a first implementation of the command-line interface and the agent skill.
+The proof of concept establishes a minimal working version of Hiraku. The proof of concept is complete when two demo cases can execute this loop using both guided and autonomous programs and policies, exposing enough evidence for a human to review what happened. Metric improvement is measured, but it is not a condition for success. The initial version will include a first implementation of the command-line interface and the agent skill.
 
-### impl1 status
+### PoC scope
 
-The current implementation provides the guided vertical slice: project initialization, experiment
+The next implementation will provide the guided vertical slice: project initialization, experiment
 creation and Git branch management, named entrypoint launching, CSV/TSV run tracking, and ranked
 per-experiment run inspection. It installs a repository-local Hiraku skill with guided and bounded
-auto-mode instructions. Two guided examples are included:
+auto-workflow instructions. The PoC examples are organized as standalone repository templates:
 
 - [`examples/smoke`](examples/smoke) verifies the lifecycle with deterministic synthetic scores.
 - [`examples/heart-disease`](examples/heart-disease) compares logistic regression and a random
   forest on the checksum-pinned UCI Cleveland Heart Disease cohort.
+- A third example following [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) is planned; its detailed design remains open.
 
-The examples do not yet demonstrate both cases in auto mode, so the broader PoC completion
-criterion above remains open.
+The intermediate lineage level between experiments and runs is still under design.
 
 ## Core workflow: Tracking the experiment life-cycle
 
-An *experiment* is the main unit in the Hiraku framework, representing a user-defined implementation scope. It is roughly comparable to the work captured by a Git feature branch, for example, an experiment may introduce a baseline, reproduce an existing method, evaluate a new hypothesis, or capture a similarly scoped, user-defined research task. All information relevant to the experiment is recorded in a markdown file, linking description, implenentation plan, commits and experimental runs. We fall back to standard tooling whereever possible:
+An *experiment* is the main unit in the Hiraku framework, representing a user-defined implementation scope. It is roughly comparable to the work captured by a Git feature branch, for example, an experiment may introduce a baseline, reproduce an existing method, evaluate a new hypothesis, or capture a similarly scoped, user-defined research task. Its versioned files connect the scientific record, agent program, operating policy, executable entrypoints, commits, and experimental runs. We fall back to standard tooling whereever possible:
 - Git is used for code and documentation tracking, branches capture experiment related commits.
 - GitHub pull requests (or GitLab merge requests) provide a standard reviewing surface before an experiment is concluded and merged into main.
 - A tracking backend (MLflow, CSV/TSV table, W&B, etc) is used to track experiment runs and metrics.
 
-### Experiment record: `experiment.md`
+### Experiment record and controls
 
-The only data that is directly managed are experiment records. Each experiment is recorded in a single markdown file:
+Each experiment contains four directly managed files:
 ```text
-experiments/<experiment-id>/experiment.md
+experiments/<experiment-id>/
+  experiment.md
+  program.md
+  policy.md
+  launch.yml
 ```
-The `experiment.md` file links the following elements:
-- **Documention** describing the experiment scope, implementation, and results,
-- **Git commits** via a specified experiment branch,
-- **Entrypoints** specified in `experiments/<experiment-id>/launch.yml`
-- **Runs** for tracking metrics, via a specified backend (MLflow, CSV/TSV table, W&B, etc).
+Their roles are:
+- **`experiment.md`** documents scientific scope, evaluation, findings, conclusions, and decisions.
+- **`program.md`** defines the workflow or research algorithm followed by the agent.
+- **`policy.md`** defines permissions, approval boundaries, resource limits, and stopping conditions.
+- **`launch.yml`** defines deterministic executable entrypoints.
 
-The user and agent continuously update the markdown to document ideas, code, changes and results. Hiraku cli (`hiraku`) and agent skill (`/hiraku`) supports with experiment creation, implementation, documentation, and run comparison (leaderboard).
+Policy constrains program: a program cannot grant itself additional authority. The copied files are independently editable and authoritative for the experiment. Hiraku CLI (`hiraku`) and agent skill (`/hiraku`) support experiment creation, implementation, documentation, and run comparison (leaderboard).
 
 
 **Example:**
@@ -75,7 +79,6 @@ The user and agent continuously update the markdown to document ideas, code, cha
 ---
 id: logreg-baseline
 branch: exp/logreg-baseline
-mode: guided
 ---
 
 # Logistic regression baseline
@@ -103,7 +106,7 @@ The following sequence illustrates the intended workflow. The sequence can be ru
 hiraku init  # creates Hiraku project configuration in `.hiraku.yml`
 
 # 1. create experiment
-hiraku exp create logreg-baseline --mode guided  # creates and switches to exp/logreg-baseline
+hiraku exp create logreg-baseline --template guided  # creates and switches to exp/logreg-baseline
 /hiraku "create an experiment that implements a logistic regression baseline"  # agent assisted workflow
 hiraku exp list  # list all experiments
 hiraku exp show logreg-baseline  # experiment details, --json returns machine-readable output
@@ -132,10 +135,8 @@ A table-backed impl1 project uses configuration shaped like:
 
 ```yaml
 experiments_dir: experiments
-experiment_template: experiments/template.md
-policies:
-  guided: .hiraku/policies/guided.md
-  auto: .hiraku/policies/auto.md
+templates_dir: .hiraku/templates
+default_template: guided
 tracking:
   backend: table
   path: .hiraku/runs.csv
@@ -143,7 +144,7 @@ tracking:
 
 All configured paths are repository-relative and must remain inside the project root. The table
 format is inferred from `.csv` or `.tsv`. The generated `.hiraku/.gitignore` ignores the default run
-table so completed runs do not dirty the worktree and block later launches.
+table.
 
 
 ## Command-line interface
@@ -158,13 +159,15 @@ Short command names are primary. `hiraku experiment` is also accepted as a long 
 hiraku init
 ```
 
-This creates the default configuration, `experiments/`, and install agent skills `.agents/skills/hiraku/`.
+This creates the default configuration, `experiments/`, complete templates under
+`.hiraku/templates/{guided,auto}/`, and the agent skill `.agents/skills/hiraku/`.
 
 ### Create and inspect experiments
 
 ```bash
 hiraku exp create logreg-baseline
-hiraku exp create larger-context-window --mode auto
+hiraku exp create larger-context-window --template auto
+hiraku exp create custom-workflow --template my-template
 hiraku exp create custom-branch --branch research/custom-branch
 hiraku exp list
 hiraku exp list --json
@@ -172,9 +175,11 @@ hiraku exp show logreg-baseline
 hiraku exp show logreg-baseline --json
 ```
 
-New experiments default to `guided` mode and `exp/<experiment-id>`. Creation requires a clean
-worktree, creates and switches to the branch, and generates `experiment.md`, `policy.md`, and
-`launch.yml`. Users and agents update these files directly; impl1 has no field-level update commands.
+New experiments default to the `guided` template and branch `exp/<experiment-id>`. Creation does
+not require a clean worktree. Each directory under `.hiraku/templates/` is a complete bundle of
+`experiment.md`, `program.md`, `policy.md`, and `launch.yml`; projects may add their own templates.
+Creation copies the selected bundle and does not record its name in the resulting experiment.
+Users and agents update the copied files directly; impl1 has no field-level update commands.
 
 ### Launch named project entrypoints
 
@@ -189,35 +194,43 @@ entrypoints:
       MODEL_FAMILY: "logistic"
 ```
 
-Then commit the manifest and project code and launch it:
+Launch the current repository state directly, including uncommitted and untracked changes:
 
 ```bash
 hiraku launch logreg-baseline:train
 ```
 
+For a reproducible launch, execute an exact commit in an isolated temporary Git worktree:
+
+```bash
+hiraku launch --commit HEAD logreg-baseline:train
+hiraku launch --commit <commit-sha> logreg-baseline:train
+```
+
 `hiraku launch`:
 
 1. resolves the experiment and tracking configuration;
-2. rejects a dirty Git working tree;
-3. records the current commit SHA;
-4. resolves the fixed argv, safe project-relative working directory, and environment from the
-   experiment manifest;
-5. injects the experiment ID, commit SHA, backend type, and resolved table destination into the child environment; and
-6. executes the command directly without a shell and propagates its exit status.
+2. runs the current working tree as a non-reproducible source unless `--commit` is supplied;
+3. for `--commit`, resolves the ref and creates a temporary detached worktree containing the exact committed snapshot;
+4. resolves the fixed argv, safe project-relative working directory, and environment from the selected source tree;
+5. injects the experiment ID, source provenance, backend type, and original project's resolved table destination into the child environment;
+6. executes the command directly without a shell and propagates its exit status; and
+7. removes a temporary worktree without changing the active checkout.
 
 The integration environment includes:
 
 ```text
 HIRAKU_EXPERIMENT_ID
-HIRAKU_GIT_COMMIT
 HIRAKU_TRACKING_BACKEND
 HIRAKU_TABLE_PATH
 ```
 
-Project code appends rows to `HIRAKU_TABLE_PATH` and writes the injected values to the required
-`experiment_id` and `commit` columns. Hiraku deliberately does not require a row to appear after a
-successful child process; the launcher remains a thin local wrapper rather than a scheduler or
-tracking SDK.
+Source provenance distinguishes non-reproducible working-tree launches from reproducible
+commit-backed launches. A working-tree launch may record `HEAD` only as its base commit and does
+not capture or hash local diffs. A commit-backed launch records the resolved commit SHA. Exact
+persistence fields will be finalized with the intermediate lineage model. Hiraku deliberately does
+not require a row to appear after a successful child process; the launcher remains a thin local
+wrapper rather than a scheduler or tracking SDK.
 
 The launcher is a thin local command wrapper, not a scheduler or job-dispatch system.
 
@@ -246,31 +259,37 @@ CSV/TSV source columns and string values are preserved. Sorted JSON rows receive
 The skill acts as a router for focused workflows that are loaded when required:
 
 - creating and refining an experiment;
-- implementing its current plan;
+- executing its program within its policy;
 - launching and analyzing runs; and
 - performing a bounded autonomous research loop.
 
 
-## Approval, review and verification protocol
+## Programs, policies, approval, and review
 
-The workflow supports two modes of operation, `guided` and `auto`. In the guided mode, the data scientist explicitly reviews and approves each step, agent generates artifacts or runs code only on explicit request. In auto mode, the agent approaches the task autonomously to implement, run, analyze, and iterate on experiments within the defined protocol and scope, exposing all artifacts for post-hoc human verification.
+Hiraku separates the program that describes an agent's research workflow from the policy that
+defines its authority and boundaries. `guided` and `auto` are complete initialization templates,
+not persistent experiment modes. Projects may define additional templates without changing the
+underlying experiment model.
 
-> The mode in `experiment.md` defines agent behavior, not a security boundary. Enforcement remains the responsibility of Git protections, sandboxing, credentials, and execution infrastructure.
+> `policy.md` guides agent behavior; it is not a security boundary. Enforcement remains the responsibility of Git protections, sandboxing, credentials, and execution infrastructure.
 
-### Guided mode
+### Guided template
 
-`guided` is the default. The data scientist directs the work and reviews the relevant artifacts before the agent proceeds through these checkpoints:
+`guided` is the default template. It initializes a stepwise program and a policy under which the
+data scientist reviews the relevant artifacts before the agent proceeds through these checkpoints:
 
 1. experiment scope and implementation plan;
 2. implementation and proposed commit;
 3. experiment launch; and
 4. updating findings, and conclusion.
 
-> In guided mode, the agent is instructed to not commit changes or launch experiments without explicit human approval. 
+> Under the guided policy, the agent is instructed not to commit changes or launch experiments without explicit human approval.
 
-### Auto mode
+### Auto template
 
-In `auto` mode, the data scientist approves the scope, evaluation protocol, permitted commands, resource bounds, and stopping conditions before the loop starts. Within those boundaries, the agent may:
+The `auto` template initializes a closed-loop program and a bounded policy. The data scientist
+approves the scope, evaluation protocol, permitted commands, resource bounds, and stopping
+conditions before the loop starts. Within those boundaries, the agent may:
 
 - update the implementation plan;
 - modify and commit code;
@@ -279,9 +298,12 @@ In `auto` mode, the data scientist approves the scope, evaluation protocol, perm
 - update findings and next steps; and
 - accept/reject previous changes and select the next in-scope iteration.
 
-The agent pauses for approval before changing scope, evaluation, permitted commands, resource bounds, permissions, or mode. Merging into a protected branch always requires explicit human approval.
+The agent pauses for approval before changing scope, program, evaluation, permitted commands,
+resource bounds, permissions, or policy. Merging into a protected branch always requires explicit
+human approval.
 
-Both modes use the same data model. They differ only in when the human reviews and approves actions.
+Both templates produce the same data model. Their copied programs and policies may evolve
+independently afterward.
 
 ## Installation
 
@@ -301,11 +323,23 @@ uv tool install .
 hiraku --help
 ```
 
-To run the Heart Disease example, include its optional dependencies:
+### Running the examples
+
+Each example is a repository template. Copy it outside the Hiraku checkout before initializing it;
+do not create nested Git repositories inside `examples/`:
 
 ```bash
-uv sync --extra heart-demo
+cp -R examples/heart-disease ../hiraku-heart-disease
+cd ../hiraku-heart-disease
+git init -b main
+hiraku init
+git add .
+git commit -m "initialize Heart Disease example"
 ```
+
+Entrypoints and paths in an example are relative to the copied repository root. Each example
+declares its own dependencies and its README continues the experiment-specific workflow. Automated
+tests follow the same copy-and-`git init` process in temporary repositories.
 
 
 ## Roadmap
@@ -319,6 +353,7 @@ uv sync --extra heart-demo
 - Enforcing approval policies and integration with sandboxing.
 - A dashboard or other graphical interface.
 - Visualizing lineage inferred from git DAG.
+- An intermediate lineage level between experiments and runs, including its final name and schema.
 - HPO and scheduler integration around named entrypoints.
 - Cross-experiment Leaderboards
 - Additional run-tracking adapters (w&b);
