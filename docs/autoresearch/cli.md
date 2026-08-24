@@ -1,12 +1,37 @@
 # Using it
 
+## Install
+
+Nothing is on your PATH until the package is installed. From the repository root:
+
 ```bash
-uv sync                 # or: pip install -e '.[ui]'
+uv sync --extra ui           # creates .venv and installs hiraku-auto + Streamlit
+uv run hiraku-auto --help
+```
+
+`uv run` prefixes every command below. To drop the prefix, activate the environment once:
+
+```bash
+source .venv/bin/activate
 hiraku-auto --help
 ```
 
-No required dependencies. PyYAML is used when importable, with a fallback parser for the
-front-matter subset; `[ui]` adds Streamlit.
+With pip instead:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e '.[ui]'
+hiraku-auto --help
+```
+
+Without installing anything at all — useful for a quick look at a clone:
+
+```bash
+PYTHONPATH=src python3 -m hiraku_auto --project examples/natix-vo tree
+```
+
+The package itself has no required dependencies (PyYAML is used when importable, with a fallback
+parser for the front-matter subset). The `ui` extra adds Streamlit, which `hiraku-auto ui` needs.
 
 ## Ten minutes, end to end
 
