@@ -1,0 +1,4 @@
+entrypoints:
+  retrieve:
+    command: ["uv", "run", "python", "-m", "pr.retrieve", "--topk", "10", "--seed", "1"]
+    cwd: .

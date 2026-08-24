@@ -1,0 +1,4 @@
+entrypoints:
+  exclude-radius:
+    command: ["uv", "run", "python", "-m", "pr.contamination", "--radius-m", "50", "--seed", "1"]
+    cwd: .

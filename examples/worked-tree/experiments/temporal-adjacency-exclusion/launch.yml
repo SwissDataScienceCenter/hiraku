@@ -1,0 +1,7 @@
+entrypoints:
+  exclude-30s:
+    command: ["uv", "run", "python", "-m", "pr.contamination", "--window-s", "30", "--seed", "1"]
+    cwd: .
+  exclude-60s:
+    command: ["uv", "run", "python", "-m", "pr.contamination", "--window-s", "60", "--seed", "1"]
+    cwd: .

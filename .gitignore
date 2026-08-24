@@ -2,3 +2,5 @@
 __MACOSX/
 
 scratch/
+# git worktrees for parallel experiments
+.worktrees/

@@ -1,0 +1,5 @@
+# [Fill in the real entrypoint.]
+entrypoints:
+  odometry:
+    command: ["uv", "run", "python", "-m", "vo.run", "--backend", "vggt-long", "--seed", "1"]
+    cwd: .

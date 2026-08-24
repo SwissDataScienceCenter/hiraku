@@ -1,0 +1,5 @@
+experiments_dir: experiments
+experiment_template: experiments/template.md
+tracking:
+  backend: table
+  path: .hiraku/runs.csv

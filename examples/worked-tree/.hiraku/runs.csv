@@ -1,0 +1,14 @@
+run_id,experiment_id,commit,run_kind,reproducible,launched_at,entrypoint,seed,python_version,lockfile_sha256,platform,accelerator,recall_at_1,recall_at_5,verified_precision,contaminated_frac,notes
+r-0001,retrieval-baseline,4c1f9a02d7b81e6350aa9c4f2d18e7b6a0c33f51,commit,true,2026-08-10T09:14:02Z,retrieve,1,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.884,0.951,0.712,0.094,
+r-0002,retrieval-baseline,4c1f9a02d7b81e6350aa9c4f2d18e7b6a0c33f51,commit,true,2026-08-10T11:02:47Z,retrieve,2,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.879,0.948,0.706,0.092,
+r-0003,geometric-verification,7b3e5c81f09a2d64e5178cbb3a90f4d2e6187c0a,commit,true,2026-08-12T08:31:19Z,verify,1,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.858,0.944,0.961,,promoted leader
+r-0004,geometric-verification,7b3e5c81f09a2d64e5178cbb3a90f4d2e6187c0a,commit,true,2026-08-12T14:07:55Z,verify-seed2,2,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.861,0.945,0.957,,promotion reproduction
+r-0005,geometric-verification,7b3e5c81f09a2d64e5178cbb3a90f4d2e6187c0a,commit,true,2026-08-13T09:44:10Z,verify,3,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.857,0.943,0.959,,
+r-0006,ransac-threshold-sweep,a19d4f70c2b8e5316d0af9214e7c8b35019fd6e2,commit,true,2026-08-15T07:22:33Z,verify,1,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.869,0.947,0.948,,ransac 1.5px
+r-0007,ransac-threshold-sweep,a19d4f70c2b8e5316d0af9214e7c8b35019fd6e2,commit,true,2026-08-15T09:58:41Z,verify,1,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.858,0.944,0.961,,ransac 3.0px
+r-0008,ransac-threshold-sweep,a19d4f70c2b8e5316d0af9214e7c8b35019fd6e2,commit,true,2026-08-15T12:31:08Z,verify,1,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.852,0.941,0.957,,ransac 4.5px
+r-0009,ransac-threshold-sweep,a19d4f70c2b8e5316d0af9214e7c8b35019fd6e2,commit,true,2026-08-15T15:05:52Z,verify,1,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.847,0.938,0.939,,ransac 6.0px
+r-0010,vggt-pose-consistency,c58a1e93b7d04f26518ac0b9e3417d6f2058ba7c,worktree,false,2026-08-17T16:48:12Z,verify-pose,1,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.871,0.949,0.902,,debugging run - not evidence
+r-0011,vggt-pose-consistency,e2470bd6a1c839f57204eb1d95c6083af71b2e94,commit,true,2026-08-19T10:15:37Z,verify-pose,1,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.869,0.948,0.913,,precision 0.037 short of floor
+r-0012,temporal-adjacency-exclusion,f81c05e3a927d4b6108fe5c294a7db30516ce8f2,commit,true,2026-08-19T13:40:21Z,exclude-30s,1,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.872,0.946,,0.061,window 30s
+r-0013,temporal-adjacency-exclusion,f81c05e3a927d4b6108fe5c294a7db30516ce8f2,commit,true,2026-08-20T08:12:05Z,exclude-60s,1,3.14.0,9f2c7d1a4b6e8035,Linux-6.8.0-x86_64,1x NVIDIA A100 40GB,0.844,0.933,,0.058,window 60s

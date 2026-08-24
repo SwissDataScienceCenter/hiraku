@@ -1,0 +1,5 @@
+# [Fill in what was actually run.]
+entrypoints:
+  odometry:
+    command: ["uv", "run", "python", "-m", "vo.run", "--backend", "rig", "--seed", "1"]
+    cwd: .

@@ -1,0 +1,1 @@
+run_id,experiment_id,commit,run_kind,reproducible,launched_at,entrypoint,seed,python_version,lockfile_sha256,platform,accelerator,ate_rmse_m,drift_pct,completion_rate,align_median_err_m,align_success_rate,notes

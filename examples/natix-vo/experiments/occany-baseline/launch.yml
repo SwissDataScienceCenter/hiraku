@@ -1,0 +1,5 @@
+# [Fill in the real entrypoint. Argv array, executed without a shell.]
+entrypoints:
+  odometry:
+    command: ["uv", "run", "python", "-m", "vo.run", "--backend", "occany", "--seed", "1"]
+    cwd: .

@@ -1,0 +1,4 @@
+entrypoints:
+  verify-pose:
+    command: ["uv", "run", "python", "-m", "pr.verify_pose", "--consistency", "0.15", "--seed", "1"]
+    cwd: .

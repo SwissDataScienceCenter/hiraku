@@ -1,0 +1,7 @@
+entrypoints:
+  verify:
+    command: ["uv", "run", "python", "-m", "pr.verify", "--ransac-px", "3.0", "--seed", "1"]
+    cwd: .
+  verify-seed2:
+    command: ["uv", "run", "python", "-m", "pr.verify", "--ransac-px", "3.0", "--seed", "2"]
+    cwd: .
