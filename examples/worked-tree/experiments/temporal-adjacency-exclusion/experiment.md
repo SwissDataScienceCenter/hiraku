@@ -1,7 +1,7 @@
 ---
 id: temporal-adjacency-exclusion
 branch: exp/temporal-adjacency-exclusion
-mode: guided
+mode: auto
 goal: candidate-contamination
 kind: baseline
 status: concluded

@@ -89,5 +89,6 @@ the protocol and bounds are not yet written down.
 ## View it
 
 ```bash
-python tools/hiraku_dash.py examples/natix-vo -o dashboard.html
+hiraku-auto --project examples/natix-vo dash -o dashboard.html
+hiraku-auto --project examples/natix-vo ui
 ```

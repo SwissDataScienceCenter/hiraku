@@ -1,0 +1,188 @@
+# Using it
+
+```bash
+uv sync                 # or: pip install -e '.[ui]'
+hiraku-auto --help
+```
+
+No required dependencies. PyYAML is used when importable, with a fallback parser for the
+front-matter subset; `[ui]` adds Streamlit.
+
+## Ten minutes, end to end
+
+```bash
+mkdir vo-research && cd vo-research && git init
+hiraku-auto init --name "NATIX VO"
+
+hiraku-auto goal add vo-backend-selection \
+  --metric ate_rmse_m --direction minimize --target 3.0 \
+  --gate-metric completion_rate \
+  --question "Which VO backend produces usable trajectories on NATIX video?"
+
+hiraku-auto exp create occany-baseline --goal vo-backend-selection --kind baseline \
+  --status approved --expectation "OccAny defines the reference every backend is measured against."
+
+hiraku-auto exp create vggt-omega --parent occany-baseline --status approved \
+  --expectation "Global feed-forward pose lowers ate_rmse_m without lowering completion_rate."
+
+hiraku-auto tree
+hiraku-auto check
+```
+
+`exp create` writes `experiments/<id>/experiment.md`, creates branch `exp/<id>`, and refreshes every
+parent's **Children** section. `--parent` is what makes it a child; `--goal` is inherited from the
+parent when omitted.
+
+Then declare an entrypoint and run it:
+
+```yaml
+# experiments/vggt-omega/launch.yml
+entrypoints:
+  train:
+    command: ["uv", "run", "python", "-m", "vo.run", "--backend", "vggt-omega"]
+    cwd: .
+```
+
+```bash
+git add -A && git commit -m "vggt-omega entrypoint"
+hiraku-auto launch vggt-omega:train --commit HEAD --seed 1
+hiraku-auto launch vggt-omega:train --commit HEAD --seed 2
+hiraku-auto runs vggt-omega --sort ate_rmse_m --ascending
+```
+
+### Reporting metrics
+
+The launcher writes the provenance columns itself. Your code reports its numbers by writing one JSON
+object to `$HIRAKU_METRICS_PATH`; those keys become columns on the row.
+
+```python
+import json, os
+json.dump({"ate_rmse_m": 2.41, "completion_rate": 0.93},
+          open(os.environ["HIRAKU_METRICS_PATH"], "w"))
+```
+
+Also injected: `HIRAKU_EXPERIMENT_ID`, `HIRAKU_GIT_COMMIT`, `HIRAKU_RUN_ID`, `HIRAKU_RUN_KIND`,
+`HIRAKU_REPRODUCIBLE`, `HIRAKU_ENTRYPOINT`, `HIRAKU_SEED`, `HIRAKU_TABLE_PATH`,
+`HIRAKU_PROJECT_ROOT`.
+
+### Reproducible or not
+
+`--commit <ref>` checks that commit out into a temporary worktree and runs there, leaving your
+checkout alone: `run_kind: commit`, `reproducible: true`. Without it the run uses the working tree
+including uncommitted changes: `reproducible: false`, and **the promotion gate refuses it** however
+good the number.
+
+## Parallel experiments
+
+```bash
+hiraku-auto worktree add vggt-omega
+hiraku-auto worktree add vggt-long
+```
+
+One checkout and one virtual environment per active experiment, on one repository — which is what
+lets two backends with conflicting dependencies run at the same time. All runs land in the one
+project run table, so the comparison still works.
+
+## Calling the agent
+
+```bash
+hiraku-auto agent design   vo-backend-selection      # propose the tree for a goal
+hiraku-auto agent analyze  vggt-omega                # write findings from the runs
+hiraku-auto agent triage   rig-camera-vo             # classify a failure, decide on a child
+hiraku-auto agent discover vo-backend-selection      # literature -> proposals
+```
+
+Default command is `claude -p <prompt>`. Override with `--agent-cmd` or `HIRAKU_AGENT_CMD`
+(`codex exec`, a local model, anything that reads a prompt argument and prints a reply).
+
+**The agent decides; the tool writes.** Each workflow sends the project state as JSON plus the rules
+for that workflow, and requires one JSON object back. This package applies it. That split is the
+point: file writes stay deterministic, a bad suggestion is a diff you can revert, and the agent
+cannot wander outside the workflow.
+
+Useful flags:
+
+- `--dry-run` — print the prompt and call nothing. Paste it into any model yourself.
+- `--no-apply` — call the agent, write nothing, show what it returned.
+- `--show-raw` — print the raw reply alongside.
+
+What each workflow may do:
+
+| Workflow | Writes | Never |
+|---|---|---|
+| `design` | proposed experiments under a goal | approves or launches anything |
+| `analyze` | Findings, Conclusions, verdict; flags a promotion *candidate* | promotes |
+| `triage` | the parent's Findings/Conclusions/verdict, the investigation test, any justified child | creates a child for a class A defect, or while the parent is open |
+| `discover` | proposals in `research/proposals/` | creates experiments |
+
+Class A (execution defect) is enforced in code: no verdict is set and no child is created, because
+the expectation was never tested.
+
+## The loop
+
+```bash
+hiraku-auto next vo-backend-selection            # what would happen next; no agent call
+hiraku-auto loop vo-backend-selection --max-iterations 5 --launch train
+```
+
+The ordering is deterministic Python, not a judgement call: analyse a running node → launch an
+approved one → analyse runs with no verdict → triage a concluded one → ask about proposals →
+exhausted. The loop stops at every point where the policy says a human decides — a proposal awaiting
+approval, an investigation test that failed, a run that exited non-zero. Without `--launch` it will
+not start runs at all.
+
+## Promotion
+
+```bash
+hiraku-auto promote vggt-omega --run r-20260824-161851-0ed3 --signed-off-by "Qianqian Zou"
+```
+
+Five conditions, each checked in code and each printed:
+
+1. **better** — beats the incumbent on the goal's `primary_metric`, and does not degrade
+   `gate_metric`.
+2. **reproducible** — `run_kind: commit`.
+3. **protocol** — the goal record at the run's commit matches the goal record now. This catches
+   changing the evaluation protocol to win, which is otherwise invisible.
+4. **reproduced** — another seed on the same commit, agreeing within `agreement_tolerance` from
+   `research/config.md`.
+5. **signed_off** — a name in `guided`; in `auto`, satisfied by (4).
+
+Nothing is written unless all five pass. `--force` records it anyway, marked as forced.
+
+## Viewing
+
+```bash
+hiraku-auto dash -o dashboard.html    # one self-contained page, no network
+hiraku-auto ui                        # Streamlit
+```
+
+The Streamlit app shows the tree, each node's record and runs, pending proposals and the
+leaderboard, and offers the same actions as the CLI — every one of which writes to the markdown
+records, so anything done there shows up in `git diff`. Editing prose in the browser is deliberately
+absent: findings belong in a record, in a diff a reviewer can read.
+
+## Every command
+
+```
+init                                   create a project
+goal add|list|show                     research questions
+exp create|list|show|set               experiments; --parent makes it a child
+tree [--goal] [--json]                 the tree
+check [--strict]                       validate records and the run table
+sync                                   regenerate Children sections
+launch <exp>:<entrypoint> [--commit]   run and record
+runs [<exp>] [--sort M --ascending]    list or rank
+agent design|analyze|triage|discover   call the agent
+next <goal>                            what the loop would do next
+loop <goal> [--launch <entrypoint>]    bounded loop
+promote <exp> --run <id>               the promotion gate
+proposal list|accept|decline           agent proposals
+worktree add|remove|list <exp>         one checkout per active experiment
+dash [-o FILE] / ui [--port]           the viewers
+```
+
+`check` finds: dangling `parent`/`goal`, duplicate IDs, cycles, a goal that disagrees with the
+parent's, a record id that disagrees with its directory, concluded-without-verdict, a verdict on a
+node that is not concluded, an unknown `kind`/`status`/`verdict`/`origin`, a missing expectation, a
+child whose mode widens its parent's, and a run row naming an unknown experiment.

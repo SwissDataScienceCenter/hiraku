@@ -1,7 +1,7 @@
 ---
 id: depth-scale-drift
 branch: exp/depth-scale-drift
-mode: auto
+mode: guided
 goal: same-place-verification
 parent: vggt-pose-consistency
 kind: diagnostic
@@ -61,8 +61,8 @@ Investigation test, as recorded at proposal:
 6. **Proportionate** — reuses existing outputs, so cost is minutes, against a precision shortfall
    that currently blocks the node.
 
-All six hold. Parent is `auto`, so this could be created within budget; it is held at `proposed`
-because it is the example's illustration of a pending decision.
+All six hold. Its parent is `guided`, so this child is `guided` too — a child may narrow its
+parent's mode, never widen it — and it stays at `proposed` until the researcher approves it.
 
 ## Children
 

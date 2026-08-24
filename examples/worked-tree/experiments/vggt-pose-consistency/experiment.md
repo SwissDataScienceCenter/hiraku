@@ -1,7 +1,7 @@
 ---
 id: vggt-pose-consistency
 branch: exp/vggt-pose-consistency
-mode: auto
+mode: guided
 goal: same-place-verification
 parent: retrieval-baseline
 kind: hypothesis

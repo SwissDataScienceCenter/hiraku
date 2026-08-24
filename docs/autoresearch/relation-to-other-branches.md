@@ -78,9 +78,9 @@ human decision even in `auto` mode.
 
 ### 6. A dashboard
 
-Their plan defers dashboards. `tools/hiraku_dash.py` is a read-only static generator, deliberately
-outside the package and with no CLI dependency, so it can be dropped or replaced without touching
-anything else.
+Their plan defers dashboards. This branch ships two read-only viewers — `hiraku-auto dash` writes
+one self-contained HTML page, `hiraku-auto ui` serves a Streamlit app. Both render the same snapshot
+the agent and `check` read, so no viewer can disagree with the records.
 
 ### 7. Environment provenance
 
@@ -107,10 +107,20 @@ it can drift per node. Their design gains flexibility, in that an experiment can
 algorithm; this one gains uniformity. If the bundles land, the reconciliation is probably that
 `program.md` references a shared workflow by name rather than restating it.
 
-### 10. No `src/` code here
+### 10. A second package, not a competing one
 
-They have a working CLI with tests and CI. This branch writes none, on purpose, so it can be argued
-about before anything is built. [README.md](README.md) lists what it implies for the CLI.
+They have a working `hiraku` CLI for the experiment/run mechanics. This branch adds a separate
+package, `hiraku_auto`, with its own console script `hiraku-auto`.
+
+Deliberately a different name and a different import path, so both can be installed at once and
+neither has to win a merge. `hiraku-auto` covers the layer above theirs — goals, the tree, triage,
+the promotion gate, the agent driver — and reads and writes the same `experiment.md`, `launch.yml`
+and run-table conventions, so a project can use either or both. If the two are merged, the natural
+result is one package with `hiraku_auto`'s commands folded in, not two implementations of `launch`.
+
+The one genuine overlap is `launch`: both implement it, and the versions differ (this one injects
+more provenance and writes the run row itself; see difference 7). That is the one place a merge
+has to choose.
 
 ## If both are merged
 

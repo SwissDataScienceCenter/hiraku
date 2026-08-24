@@ -1,7 +1,7 @@
 ---
 id: gps-radius-exclusion
 branch: exp/gps-radius-exclusion
-mode: guided
+mode: auto
 goal: candidate-contamination
 parent: temporal-adjacency-exclusion
 kind: diagnostic

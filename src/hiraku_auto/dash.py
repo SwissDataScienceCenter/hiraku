@@ -1,151 +1,21 @@
-#!/usr/bin/env python3
-"""Render a Hiraku project's experiment tree as one self-contained HTML page.
+"""Rendering a project as one self-contained HTML page.
 
-    python tools/hiraku_dash.py <project-dir> -o dashboard.html
-
-Read-only. The markdown records and the run table are the source of truth; this script is a
-projection of them and never writes into the project. See docs/autoresearch/dashboard.md.
-
-Standard library only. PyYAML is used for front matter when importable, with a fallback parser
-covering the subset documented in docs/autoresearch/data-model.md.
-
-Parsing produces a plain dict (`load_project`) and rendering is a pure function of it (`render`),
-so a future `hiraku dash --serve` can reuse the first half and re-render on change.
+Read-only. `tree.to_dict` is the data contract; this module turns it into HTML and nothing else, so
+the same snapshot feeds the terminal, the agent, the Streamlit app and this page.
 """
 
 from __future__ import annotations
 
-import argparse
-import csv
 import html
 import json
 import re
-import sys
-from pathlib import Path
 from typing import Any
 
-try:  # pragma: no cover - optional dependency
-    import yaml
-except ImportError:  # pragma: no cover
-    yaml = None
-
-STATUSES = ["proposed", "approved", "running", "concluded", "abandoned"]
-VERDICTS = ["supports", "refutes", "inconclusive"]
-KINDS = ["baseline", "hypothesis", "diagnostic", "ablation", "combination"]
-
-
-# --------------------------------------------------------------------------- parsing
-
-
-def _scalar(raw: str) -> Any:
-    text = raw.strip()
-    if not text:
-        return None
-    if text[0] in "\"'" and text[-1] == text[0] and len(text) > 1:
-        return text[1:-1]
-    if text.startswith("[") and text.endswith("]"):
-        inner = text[1:-1].strip()
-        if not inner:
-            return []
-        return [_scalar(part) for part in inner.split(",")]
-    low = text.lower()
-    if low in {"true", "yes"}:
-        return True
-    if low in {"false", "no"}:
-        return False
-    if low in {"null", "none", "~"}:
-        return None
-    try:
-        return int(text)
-    except ValueError:
-        pass
-    try:
-        return float(text)
-    except ValueError:
-        return text
-
-
-def _fallback_yaml(text: str) -> dict[str, Any]:
-    """Indentation-aware parser for the front-matter subset: scalars, inline lists,
-    dash lists, and nested mappings. Deliberately not a general YAML implementation."""
-    root: dict[str, Any] = {}
-    stack: list[tuple[int, Any]] = [(-1, root)]
-    for line in text.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip())
-        stripped = line.strip()
-        while len(stack) > 1 and indent <= stack[-1][0]:
-            stack.pop()
-        container = stack[-1][1]
-        if stripped.startswith("- "):
-            if isinstance(container, list):
-                container.append(_scalar(stripped[2:]))
-            continue
-        if ":" not in stripped:
-            continue
-        key, _, rest = stripped.partition(":")
-        key = key.strip()
-        rest = rest.strip()
-        if not isinstance(container, dict):
-            continue
-        if rest == "":
-            child: Any = {}
-            container[key] = child
-            stack.append((indent, child))
-        else:
-            container[key] = _scalar(rest)
-    return _prune(root)
-
-
-def _prune(node: Any) -> Any:
-    """An empty mapping is how the fallback represents `key:` with nothing under it."""
-    if isinstance(node, dict):
-        return {k: (None if v == {} else _prune(v)) for k, v in node.items()}
-    return node
-
-
-def load_yaml(text: str) -> dict[str, Any]:
-    if yaml is not None:
-        try:
-            data = yaml.safe_load(text)
-        except Exception:
-            return _fallback_yaml(text)
-        return data if isinstance(data, dict) else {}
-    return _fallback_yaml(text)
-
-
-def parse_front_matter(text: str) -> tuple[dict[str, Any], str]:
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
-        return {}, text
-    for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
-            return load_yaml("".join(lines[1:index])), "".join(lines[index + 1 :])
-    return {}, text
-
-
-def split_sections(body: str) -> dict[str, str]:
-    """Map level-2 heading text to the markdown beneath it."""
-    sections: dict[str, str] = {}
-    current: str | None = None
-    buffer: list[str] = []
-    for line in body.splitlines():
-        match = re.match(r"^##\s+(.*)$", line)
-        if match:
-            if current is not None:
-                sections[current] = "\n".join(buffer).strip()
-            current = match.group(1).strip()
-            buffer = []
-        elif current is not None:
-            buffer.append(line)
-    if current is not None:
-        sections[current] = "\n".join(buffer).strip()
-    return sections
+from .config import Project
+from .tree import Forest, build, to_dict
 
 
 def section(sections: dict[str, str], *names: str) -> str:
-    """First matching section, by case-insensitive prefix."""
     for name in names:
         for key, value in sections.items():
             if key.lower().startswith(name.lower()):
@@ -264,207 +134,6 @@ def markdown(text: str) -> str:
         else:
             index += 1
     return "".join(out)
-
-
-# --------------------------------------------------------------------------- loading
-
-
-def read(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
-        return ""
-
-
-def load_project(root: Path) -> dict[str, Any]:
-    config_path = root / ".hiraku.yml"
-    if not config_path.is_file():
-        raise SystemExit(f"No .hiraku.yml in {root} — not a Hiraku project.")
-    config = load_yaml(read(config_path))
-
-    experiments_dir = root / str(config.get("experiments_dir") or "experiments")
-    tracking = config.get("tracking") or {}
-    table_path = root / str(tracking.get("path") or ".hiraku/runs.csv")
-    research_dir = root / "research"
-
-    project_front, project_body = parse_front_matter(read(research_dir / "config.md"))
-    project = {
-        "name": project_front.get("project") or root.name,
-        "front": project_front,
-        "sections": split_sections(project_body),
-    }
-
-    goals: dict[str, dict[str, Any]] = {}
-    for path in sorted((research_dir / "goals").glob("*.md")):
-        front, body = parse_front_matter(read(path))
-        goal_id = str(front.get("id") or path.stem)
-        goals[goal_id] = {
-            "id": goal_id,
-            "front": front,
-            "sections": split_sections(body),
-            "source": str(path.relative_to(root)),
-        }
-
-    experiments: dict[str, dict[str, Any]] = {}
-    duplicates: list[str] = []
-    for path in sorted(experiments_dir.glob("*/experiment.md")):
-        front, body = parse_front_matter(read(path))
-        exp_id = str(front.get("id") or path.parent.name)
-        if exp_id in experiments:
-            # Two records claiming one ID would silently collapse into one node, so the
-            # second is dropped and reported rather than overwriting the first.
-            duplicates.append(
-                f"`{exp_id}`: claimed by both `{experiments[exp_id]['dir_name']}` and "
-                f"`{path.parent.name}`; the second record is ignored."
-            )
-            continue
-        experiments[exp_id] = {
-            "id": exp_id,
-            "front": front,
-            "sections": split_sections(body),
-            "source": str(path.relative_to(root)),
-            "dir_name": path.parent.name,
-        }
-
-    proposals: list[dict[str, Any]] = []
-    for path in sorted((research_dir / "proposals").glob("*.md")):
-        front, body = parse_front_matter(read(path))
-        proposals.append(
-            {
-                "id": str(front.get("id") or path.stem),
-                "front": front,
-                "sections": split_sections(body),
-                "source": str(path.relative_to(root)),
-            }
-        )
-
-    runs = load_runs(table_path)
-    warnings = sorted(set(duplicates) | set(resolve(experiments, goals)))
-    attach_runs(experiments, runs)
-
-    return {
-        "root": str(root),
-        "project": project,
-        "goals": goals,
-        "experiments": experiments,
-        "proposals": proposals,
-        "runs": runs,
-        "leaderboard": read(research_dir / "leaderboard.md"),
-        "table_path": str(table_path.relative_to(root)) if table_path.is_file() else None,
-        "warnings": warnings,
-    }
-
-
-def load_runs(path: Path) -> list[dict[str, str]]:
-    if not path.is_file():
-        return []
-    delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
-    with path.open(encoding="utf-8", newline="") as stream:
-        return [
-            {k: (v or "") for k, v in row.items() if k}
-            for row in csv.DictReader(stream, delimiter=delimiter)
-        ]
-
-
-def resolve(experiments: dict[str, Any], goals: dict[str, Any]) -> list[str]:
-    """Fill inherited goals, link children, and report every inconsistency found."""
-    warnings: list[str] = []
-
-    for exp in experiments.values():
-        exp["children"] = []
-        front = exp["front"]
-        parent = front.get("parent")
-        exp["parent"] = str(parent) if parent else None
-        parents = front.get("parents")
-        exp["parents"] = [str(p) for p in parents] if isinstance(parents, list) else []
-        goal = front.get("goal")
-        exp["goal"] = str(goal) if goal else None
-
-    # Inherit goal from the parent chain.
-    for exp in experiments.values():
-        if exp["goal"]:
-            continue
-        seen: set[str] = set()
-        cursor = exp["parent"]
-        while cursor and cursor in experiments and cursor not in seen:
-            seen.add(cursor)
-            inherited = experiments[cursor]["front"].get("goal")
-            if inherited:
-                exp["goal"] = str(inherited)
-                break
-            cursor = experiments[cursor].get("parent")
-
-    for exp in experiments.values():
-        exp_id = exp["id"]
-        front = exp["front"]
-
-        if exp["id"] != exp["dir_name"]:
-            warnings.append(f"`{exp_id}`: front-matter id disagrees with directory `{exp['dir_name']}`.")
-        if exp["goal"] and exp["goal"] not in goals:
-            warnings.append(f"`{exp_id}`: goal `{exp['goal']}` does not exist.")
-        if not exp["goal"]:
-            warnings.append(f"`{exp_id}`: no goal, and none inherited from a parent.")
-
-        for parent_id in ([exp["parent"]] if exp["parent"] else []) + exp["parents"]:
-            if parent_id not in experiments:
-                warnings.append(f"`{exp_id}`: parent `{parent_id}` does not exist.")
-                continue
-            experiments[parent_id]["children"].append(exp_id)
-            parent_goal = experiments[parent_id]["goal"]
-            if parent_goal and exp["goal"] and parent_goal != exp["goal"]:
-                warnings.append(
-                    f"`{exp_id}`: goal `{exp['goal']}` disagrees with parent `{parent_id}`"
-                    f" (`{parent_goal}`)."
-                )
-
-        status = front.get("status")
-        verdict = front.get("verdict")
-        kind = front.get("kind")
-        if status and status not in STATUSES:
-            warnings.append(f"`{exp_id}`: unknown status `{status}`.")
-        if kind and kind not in KINDS:
-            warnings.append(f"`{exp_id}`: unknown kind `{kind}`.")
-        if verdict and verdict not in VERDICTS:
-            warnings.append(f"`{exp_id}`: unknown verdict `{verdict}`.")
-        if status == "concluded" and not verdict:
-            warnings.append(f"`{exp_id}`: concluded without a verdict.")
-        if verdict and status != "concluded":
-            warnings.append(f"`{exp_id}`: has a verdict but status is `{status}`.")
-        if not front.get("expectation"):
-            warnings.append(f"`{exp_id}`: no expectation recorded.")
-
-    # Cycles.
-    for exp_id in experiments:
-        seen = set()
-        cursor = experiments[exp_id]["parent"]
-        while cursor and cursor in experiments:
-            if cursor in seen or cursor == exp_id:
-                warnings.append(f"`{exp_id}`: parent chain contains a cycle.")
-                break
-            seen.add(cursor)
-            cursor = experiments[cursor]["parent"]
-
-    for exp in experiments.values():
-        exp["children"].sort()
-    return sorted(set(warnings))
-
-
-def attach_runs(experiments: dict[str, Any], runs: list[dict[str, str]]) -> None:
-    for exp in experiments.values():
-        exp["runs"] = [r for r in runs if r.get("experiment_id") == exp["id"]]
-
-
-def roots_of(model: dict[str, Any], goal_id: str) -> list[str]:
-    experiments = model["experiments"]
-    return sorted(
-        exp_id
-        for exp_id, exp in experiments.items()
-        if exp["goal"] == goal_id
-        and not (exp["parent"] in experiments or any(p in experiments for p in exp["parents"]))
-    )
-
-
-# --------------------------------------------------------------------------- rendering
 
 
 CSS = """
@@ -616,6 +285,16 @@ document.getElementById('theme').addEventListener('click', ()=>{
 const first = document.querySelector('.node');
 if(first) select(first.dataset.id, false);
 """
+
+
+def roots_of(model: dict[str, Any], goal_id: str) -> list[str]:
+    experiments = model["experiments"]
+    return sorted(
+        exp_id
+        for exp_id, exp in experiments.items()
+        if exp["goal"] == goal_id
+        and not (exp["parent"] in experiments or any(p in experiments for p in exp["parents"]))
+    )
 
 
 def node_html(model: dict[str, Any], exp_id: str, seen: set[str]) -> str:
@@ -821,23 +500,63 @@ def render(model: dict[str, Any]) -> str:
 </body></html>"""
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("project", type=Path, help="directory containing .hiraku.yml")
-    parser.add_argument("-o", "--out", type=Path, default=Path("dashboard.html"))
-    args = parser.parse_args()
-
-    model = load_project(args.project.resolve())
-    args.out.write_text(render(model), encoding="utf-8")
-
-    print(
-        f"{args.out}: {len(model['goals'])} goals, {len(model['experiments'])} experiments, "
-        f"{len(model['runs'])} runs"
-    )
-    for warning in model["warnings"]:
-        print(f"  check: {re.sub('`', '', warning)}", file=sys.stderr)
-    return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def render_project(project: Project, forest: Forest | None = None) -> str:
+    """Convenience: build the snapshot and render it."""
+    forest = forest or build(project)
+    model = to_dict(forest)
+    return render(adapt(model, project))
+
+
+def adapt(model: dict[str, Any], project: Project) -> dict[str, Any]:
+    """Shape `tree.to_dict` output into what `render` expects."""
+    from .records import read_record
+
+    project_front: dict[str, Any] = {}
+    project_sections: dict[str, str] = {}
+    if project.config_md.is_file():
+        record = read_record(project.config_md)
+        project_front, project_sections = record.front, record.sections
+
+    experiments = {
+        nid: {
+            "id": nid,
+            "front": data["front"],
+            "sections": data["sections"],
+            "goal": data["goal"],
+            "parent": data["parent"],
+            "parents": data["parents"],
+            "children": data["children"],
+            "runs": data["runs"],
+            "source": data["path"],
+            "dir_name": nid,
+        }
+        for nid, data in model["experiments"].items()
+    }
+    goals = {
+        gid: {"id": gid, "front": data["front"], "sections": data["sections"], "source": ""}
+        for gid, data in model["goals"].items()
+    }
+    proposals = [
+        {"id": pid, "front": data["front"], "sections": data["sections"], "source": ""}
+        for pid, data in model["proposals"].items()
+    ]
+    leaderboard = ""
+    if project.leaderboard.is_file():
+        leaderboard = project.leaderboard.read_text(encoding="utf-8")
+    return {
+        "root": str(project.root),
+        "project": {
+            "name": project_front.get("project") or project.root.name,
+            "front": project_front,
+            "sections": project_sections,
+        },
+        "goals": goals,
+        "experiments": experiments,
+        "proposals": proposals,
+        "runs": model["runs"],
+        "leaderboard": leaderboard,
+        "table_path": project.rel(project.table_path) if project.table_path.is_file() else None,
+        "warnings": model["issues"],
+    }

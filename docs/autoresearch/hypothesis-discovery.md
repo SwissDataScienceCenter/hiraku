@@ -33,7 +33,7 @@ with an author and a context, not an instruction to the agent. In practice:
 
 ## What a proposal must contain
 
-The template is in [`templates/proposal.md`](../../templates/proposal.md). The
+The template is in [`templates/proposal.md`](../../src/hiraku_auto/templates/proposal.md). The
 fields exist so a researcher can decide in under a minute, which is the only way this feature gets
 used rather than skipped.
 

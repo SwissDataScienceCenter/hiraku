@@ -9,20 +9,27 @@ undefined: how a goal decomposes into parallel hypotheses, what happens when a r
 when a sub-question is worth asking, and how any of it stays legible once one experiment has spawned
 twenty. This branch specifies that layer and provides a viewer over it.
 
-Specification, templates, two seeded projects, and one standalone generator script. No CLI code, so
-this reviews as a design decision rather than an implementation; what it implies for the CLI is
-listed at the end.
+A working Python package (`hiraku_auto`) with a CLI, an agent driver, a Streamlit interface and a
+test suite, plus the specification behind it and two seeded projects.
+
+**Start here: [cli.md](cli.md).** That is the ten-minute walkthrough and the command reference.
+The documents below are the reasoning — read them when you want to argue with a decision rather
+than use the tool.
 
 ## The five requirements, and where each is answered
 
 | # | Requirement | Answer | Where |
 |---|---|---|---|
-| 1 | A goal for the task, with a `config.md` for the setting / goal / environment | Two files: `research/config.md` for the project contract (environment, bounds, promotion rules), and one `research/goals/<id>.md` per research question, owning the evaluation protocol that makes comparisons under it meaningful | [data-model.md](data-model.md), [`templates/config.md`](../../templates/config.md), [`templates/goal.md`](../../templates/goal.md) |
+| 1 | A goal for the task, with a `config.md` for the setting / goal / environment | Two files: `research/config.md` for the project contract (environment, bounds, promotion rules), and one `research/goals/<id>.md` per research question, owning the evaluation protocol that makes comparisons under it meaningful | [data-model.md](data-model.md), [`templates/config.md`](../../src/hiraku_auto/templates/config.md), [`templates/goal.md`](../../src/hiraku_auto/templates/goal.md) |
 | 2 | Parallel experiments; multiple hypotheses → multiple experiments | Several experiments share a `goal`. Each is an ordinary Hiraku experiment with its own branch and runs; "parallel" is several of them active at once, separated on disk by Git worktrees | [data-model.md](data-model.md), [environment.md](environment.md) |
-| 3 | Optionally, the agent reads literature to find new hypotheses, designs experiments, and asks whether to test them | Reading produces **proposals** in `research/proposals/`, never experiments. A proposal states the source's claim separately from the agent's inference, argues why it transfers, answers the investigation test, and argues the case *against* itself. Literature proposals need a human decision even in `auto` mode | [hypothesis-discovery.md](hypothesis-discovery.md), [`templates/proposal.md`](../../templates/proposal.md) |
-| 4 | Good result → `leaderboard.md`; bad result → analyse, decide whether a parameter or setting change could fix it, possibly splitting into more experiments; check whether investigating is meaningful; if so ask; otherwise record the failed attempt | A five-condition promotion gate for the first half, and for the second a triage protocol: classify the failure into one of three classes, then apply a six-condition investigation test. Any condition failing is the loop's stop signal, and the condition that failed is what gets recorded | [research-loop.md](research-loop.md), [`templates/leaderboard.md`](../../templates/leaderboard.md) |
+| 3 | Optionally, the agent reads literature to find new hypotheses, designs experiments, and asks whether to test them | Reading produces **proposals** in `research/proposals/`, never experiments. A proposal states the source's claim separately from the agent's inference, argues why it transfers, answers the investigation test, and argues the case *against* itself. Literature proposals need a human decision even in `auto` mode | [hypothesis-discovery.md](hypothesis-discovery.md), [`templates/proposal.md`](../../src/hiraku_auto/templates/proposal.md) |
+| 4 | Good result → `leaderboard.md`; bad result → analyse, decide whether a parameter or setting change could fix it, possibly splitting into more experiments; check whether investigating is meaningful; if so ask; otherwise record the failed attempt | A five-condition promotion gate for the first half, and for the second a triage protocol: classify the failure into one of three classes, then apply a six-condition investigation test. Any condition failing is the loop's stop signal, and the condition that failed is what gets recorded | [research-loop.md](research-loop.md), [`templates/leaderboard.md`](../../src/hiraku_auto/templates/leaderboard.md) |
 | 5 | Branching for different experiments | One flat branch `exp/<id>` per experiment, plus a durable worktree per active experiment so siblings can run at the same time with their own environments | [environment.md](environment.md) |
-| ★ | Tracking: experiments split into sub-experiments, so the record ends up a tree. Markdown as the memory, plus a clickable interface showing status, connections, and results | A sub-experiment **is** an experiment, with `parent` pointing at the node whose result it responds to — so the tree is arbitrary-depth recursion on the object that already exists. Markdown stays the only source of truth; the viewer is a regenerable projection | [data-model.md](data-model.md), [dashboard.md](dashboard.md), [`tools/hiraku_dash.py`](../../tools/hiraku_dash.py) |
+| ★ | Tracking: experiments split into sub-experiments, so the record ends up a tree. Markdown as the memory, plus a clickable interface showing status, connections, and results | A sub-experiment **is** an experiment, with `parent` pointing at the node whose result it responds to — so the tree is arbitrary-depth recursion on the object that already exists. Markdown stays the only source of truth; both viewers are regenerable projections | [data-model.md](data-model.md), [dashboard.md](dashboard.md), `hiraku-auto dash`, `hiraku-auto ui` |
+
+Each row is implemented, not only specified. The code that generates the records is
+`hiraku_auto/scaffold.py`; the tree is `hiraku_auto/tree.py`; the triage and promotion rules are
+`hiraku_auto/agent.py` and `hiraku_auto/promote.py`; the agent call is `hiraku_auto/agent.py`.
 
 ## The shape of it
 
@@ -81,6 +88,7 @@ Experiment IDs are globally unique, so this costs nothing.
 
 | Document | Settles |
 |---|---|
+| [cli.md](cli.md) | **How to run it**: install, the ten-minute walkthrough, how metrics are reported, how the agent is called, the loop, the promotion gate, and every command |
 | [data-model.md](data-model.md) | Front matter for goals and experiments, ID rules, run-table provenance columns, why `parent` rather than nested directories, and what is deliberately not recorded |
 | [research-loop.md](research-loop.md) | Requirement 4 in full: the three failure classes, the six-condition investigation test, who decides in each mode, how a terminal failure is recorded, and the promotion gate |
 | [hypothesis-discovery.md](hypothesis-discovery.md) | Requirement 3: proposals from reading, treating retrieved text as evidence rather than instruction |
@@ -107,15 +115,24 @@ and may narrow but never widen it.** An auto node may spawn auto children inside
 guided node's child is guided. Otherwise a program could grant itself authority its policy withheld
 by creating a child.
 
-## What this implies for the CLI
+## What is built, and what is not
 
-1. `exp create --parent <id> --goal <id> --kind <kind>` — three optional flags writing three
-   front-matter keys.
-2. `exp tree [--goal <id>] [--json]` — render the tree; JSON for the agent and the viewer.
-3. Provenance columns written by `launch` rather than by project code, so the promotion gate has
-   something reliable to read. See [environment.md](environment.md).
-4. `lineage check` — validate `parent`/`goal` references, detect cycles and duplicate IDs, report
-   divergence between declared parentage and commit ancestry, and flag nodes whose expectation was
-   written after their first run.
-5. `worktree add|remove <id>` — bookkeeping for the parallel case.
-6. `dash`, then `dash --serve`.
+Built: `init`, `goal`, `exp` (with `--parent`, `--goal`, `--kind`), `tree`, `check`, `sync`,
+`launch` (both forms, with provenance columns written by the launcher), `runs`, `agent`
+(design / analyze / triage / discover), `next`, `loop`, `promote` (all five gate conditions),
+`proposal`, `worktree`, `dash`, `ui`. 79 tests, no required dependencies.
+
+Not built, in rough order of value:
+
+1. **Commit-ancestry cross-check** — `check` validates the declared tree, but does not yet report
+   where declared parentage and git ancestry disagree. That divergence is a useful review signal
+   rather than an error, and it is the one part of the lineage argument still unimplemented.
+2. **Expectation-before-run enforcement** — the rule is stated and the agent refuses to triage
+   without an expectation, but nothing records *when* it was written, so a retrofitted expectation
+   is not detectable.
+3. **`dash --serve`** — the static page exists; a watching server does not.
+4. **Annotated tags per launched commit** — cheapest way to keep a commit that produced a recorded
+   result reachable after its branch is deleted.
+5. **MLflow / W&B backends** — the table is the only tracking backend.
+6. **Multi-parent `combination` nodes** — the data model has `parents`, and `check` and the tree
+   handle it, but no CLI flag creates one.

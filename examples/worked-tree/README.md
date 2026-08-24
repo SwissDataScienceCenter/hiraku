@@ -30,7 +30,7 @@ no invented results.
 | The promotion gate, passing | `geometric-verification` on `r-0003` with `r-0004` as reproduction |
 | The promotion gate, refusing | `research/leaderboard.md`, "Not promoted, worth knowing" |
 | A goal with no leader yet | `candidate-contamination` |
-| `mode: auto` narrowed by a policy | `vggt-pose-consistency/policy.md` |
+| `mode: auto` on a root, with a bounded policy | `temporal-adjacency-exclusion/policy.md` |
 | Mixed metric columns in one run table | `verified_precision` and `contaminated_frac`, blank where inapplicable |
 
 ## The tree
@@ -40,19 +40,20 @@ same-place-verification            verified_precision ↑ target 0.95
 └── retrieval-baseline             baseline    concluded  supports
     ├── geometric-verification     hypothesis  concluded  supports   ← promoted leader
     │   └── ransac-threshold-sweep ablation    concluded  inconclusive
-    └── vggt-pose-consistency      hypothesis  running    (auto)
+    └── vggt-pose-consistency      hypothesis  running
         └── depth-scale-drift      diagnostic  proposed   (agent-diagnostic)
 
 candidate-contamination            contaminated_frac ↓ target 0.02
-├── temporal-adjacency-exclusion   baseline    concluded  refutes
-│   └── gps-radius-exclusion       diagnostic  approved   (agent-diagnostic)
+├── temporal-adjacency-exclusion   baseline    concluded  refutes   (auto)
+│   └── gps-radius-exclusion       diagnostic  approved   (auto, agent-diagnostic)
 └── sequence-level-dedup           hypothesis  proposed   (agent-literature)
 ```
 
 ## View it
 
 ```bash
-python tools/hiraku_dash.py examples/worked-tree -o dashboard.html
+hiraku-auto --project examples/worked-tree dash -o dashboard.html
+hiraku-auto --project examples/worked-tree ui
 ```
 
 ## Layout
@@ -70,6 +71,8 @@ experiments/<id>/policy.md        present only where it differs from the project
 experiments/template.md           the body template, extended with Expectation and Children
 ```
 
-`policy.md` is included only for `vggt-pose-consistency`, the one `auto` node. The guided nodes would
+`policy.md` is included only for `temporal-adjacency-exclusion`, the one `auto` node. It is a root,
+which is what lets it be `auto` at all: a child may narrow its parent's mode, never widen it, so an
+`auto` node under a `guided` parent is rejected by `hiraku-auto check`. The guided nodes would
 carry a copy of the standard guided policy; it is omitted here to keep the example readable rather
 than because it is optional.

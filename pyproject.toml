@@ -1,0 +1,43 @@
+[project]
+name = "hiraku-auto"
+version = "0.1.0"
+description = "Autoresearch over a Hiraku experiment tree: goals, parallel hypotheses, failure triage, a gated leaderboard, and an agent driver."
+readme = { file = "docs/autoresearch/README.md", content-type = "text/markdown" }
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Qianqian Zou", email = "qianqian.zou@datascience.ch" }]
+
+# No required dependencies. PyYAML is used when present; a fallback front-matter parser covers the
+# documented subset, so the CLI runs on a bare interpreter.
+dependencies = []
+
+[project.optional-dependencies]
+yaml = ["PyYAML>=6.0"]
+ui = ["streamlit>=1.30", "PyYAML>=6.0"]
+dev = ["pytest>=8.0", "ruff>=0.5", "PyYAML>=6.0"]
+
+[project.scripts]
+hiraku-auto = "hiraku_auto.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hiraku_auto"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# dash.py embeds the page's CSS and JS as string literals; wrapping them would hurt readability.
+"src/hiraku_auto/dash.py" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

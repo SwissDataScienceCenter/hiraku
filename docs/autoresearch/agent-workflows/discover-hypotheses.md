@@ -37,7 +37,7 @@ Prefer primary sources. A blog post describing a paper is a pointer to the paper
 ## 3. Write proposals
 
 One file per idea in `research/proposals/<id>.md`, from
-[`templates/proposal.md`](../../../templates/proposal.md). Answer the investigation
+[`templates/proposal.md`](../../../src/hiraku_auto/templates/proposal.md). Answer the investigation
 test from [research-loop.md](../research-loop.md) in full — condition 3, novelty against the tree,
 is the one that matters most here.
 

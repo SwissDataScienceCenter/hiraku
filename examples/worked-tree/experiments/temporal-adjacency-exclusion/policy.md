@@ -5,16 +5,17 @@ in the repository is not approval.
 
 ## Approved scope
 
-Pose-consistency verification on retrieved pairs, and diagnostics of its own failure modes. The
-descriptor, the retrieval stage, and the goal's evaluation protocol are fixed and out of scope.
+Candidate-exclusion rules for the contamination goal, and diagnostics of their failure modes. The
+ground-truth revisit definition, the splits, and the goal's evaluation protocol are fixed and out of
+scope.
 
 ## Evaluation protocol
 
-The `same-place-verification` protocol, unmodified. Splits are never regenerated.
+The `candidate-contamination` protocol, unmodified. Splits are never regenerated.
 
 ## Permitted commands
 
-`uv run python -m pr.verify_pose`, `uv run python -m pr.diagnose`, and read-only git. Nothing that
+`uv run python -m pr.contamination`, `uv run python -m pr.diagnose`, and read-only git. Nothing that
 installs dependencies, writes outside the project, or reaches the network.
 
 ## Resource limits
@@ -24,7 +25,8 @@ per run; at most 2 concurrent worktrees.
 
 ## Stopping conditions
 
-Success: precision at or above 0.95 with recall above 0.858, reproduced at a second seed.
+Success: contaminated_frac at or below 0.02 with a recall cost under 0.01, reproduced at a second
+seed.
 Exhaustion: no child passes the investigation test. Failure: the same class of failure three times.
 Escalation: any bound above, any protocol or scope change, any new dependency or dataset.
 

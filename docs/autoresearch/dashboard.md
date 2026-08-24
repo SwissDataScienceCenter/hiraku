@@ -4,10 +4,10 @@ Markdown is the memory. The dashboard is a **projection** of it — generated, d
 regenerable, and never a place where information originates. Anything typed into a viewer instead of
 a record is lost on the next regeneration, so the viewer is deliberately read-only.
 
-`tools/hiraku_dash.py` reads a project and writes one self-contained HTML file.
+`hiraku-auto dash` reads a project and writes one self-contained HTML file; `hiraku-auto ui` serves the same data as a Streamlit app.
 
 ```bash
-python tools/hiraku_dash.py examples/natix-vo -o dashboard.html
+hiraku-auto --project examples/natix-vo dash -o dashboard.html
 ```
 
 No dependencies beyond the standard library (PyYAML is used if importable, with a fallback parser
@@ -56,10 +56,9 @@ The generator reads only:
 It writes exactly one file and never touches the project. Being read-only is what makes it safe to
 run in a hook or in CI.
 
-Once `hiraku exp tree --json` exists, the generator should consume that instead of re-parsing
-records, so tree construction and validation live in one place. Until then the two must agree, and
-the generator deliberately reimplements nothing beyond parsing — no inference, no defaults that the
-CLI would not also apply.
+The generator consumes `tree.to_dict` — the same snapshot the terminal, the agent and the
+Streamlit app read — so tree construction and validation live in one place and no viewer can
+disagree with `hiraku-auto check`.
 
 ## Route to a live server
 
