@@ -445,6 +445,8 @@ def cmd_next(args: argparse.Namespace) -> int:
         print("pending:    " + ", ".join(suggestion["pending"]))
     if suggestion.get("leader"):
         print(f"leader:     {suggestion['leader'].get('run_id')}")
+    for line in suggestion.get("next_commands") or []:
+        print(f"  {line}")
     return 0
 
 

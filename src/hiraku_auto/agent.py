@@ -473,8 +473,24 @@ def suggest_next(forest: Forest, goal_id: str) -> dict[str, Any]:
     Deterministic on purpose: the ordering of work is policy, not judgement, so it stays in code
     where it can be read and tested.
     """
+    if goal_id not in forest.goals:
+        raise HirakuError(f"Goal '{goal_id}' does not exist.")
     nodes = [forest.nodes[nid] for nid in forest.subtree_all(goal_id)]
     goal = forest.goals.get(goal_id)
+
+    # An empty goal is not an exhausted one. Distinguishing them matters: "exhausted" is a
+    # finding, "empty" is a prompt to design the tree.
+    if not nodes:
+        return {
+            "action": "design",
+            "why": "the goal has no experiments yet",
+            "next_commands": [
+                f"hiraku-auto agent design {goal_id}    # let the agent propose the tree",
+                f"hiraku-auto agent discover {goal_id}  # or search the literature first",
+                "hiraku-auto exp create <id> --goal "
+                f"{goal_id} --kind baseline --expectation \"...\"",
+            ],
+        }
     metric = str((goal.front if goal else {}).get("primary_metric") or "")
     direction = str((goal.front if goal else {}).get("direction") or "minimize")
 
@@ -501,6 +517,6 @@ def suggest_next(forest: Forest, goal_id: str) -> dict[str, Any]:
     leader = best([r for n in nodes for r in n.runs], metric, direction) if metric else None
     return {
         "action": "exhausted",
-        "why": "every node is concluded and nothing is proposed",
+        "why": f"all {len(nodes)} node(s) are concluded and nothing is proposed",
         "leader": leader,
     }

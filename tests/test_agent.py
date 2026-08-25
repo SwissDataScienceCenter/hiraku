@@ -265,3 +265,23 @@ def test_suggest_next_reports_exhaustion(project):
     forest.nodes["baseline"].children = ["candidate"]
     forest.nodes["candidate"].children = ["baseline"]
     assert agent_mod.suggest_next(forest, "vo-backend")["action"] == "exhausted"
+
+
+def test_an_empty_goal_is_not_an_exhausted_one(bare_project):
+    """The state right after `goal add`: reporting "exhausted" there would read as a finding."""
+    from hiraku_auto.scaffold import create_goal
+
+    create_goal(bare_project, "brand-new", primary_metric="err")
+    suggestion = agent_mod.suggest_next(build(bare_project), "brand-new")
+    assert suggestion["action"] == "design"
+    assert "no experiments yet" in suggestion["why"]
+    assert any("agent design" in c for c in suggestion["next_commands"])
+
+
+def test_suggest_next_rejects_an_unknown_goal(project):
+    import pytest as _pytest
+
+    from hiraku_auto.errors import HirakuError
+
+    with _pytest.raises(HirakuError, match="does not exist"):
+        agent_mod.suggest_next(build(project), "no-such-goal")
