@@ -235,3 +235,96 @@ def test_a_project_nested_in_an_unrelated_repo_is_not_hoisted(bare_project):
     assert inner.shared_root == nested
     assert inner.table_path.is_relative_to(nested)
     assert inner.research_dir.is_relative_to(nested)
+
+
+# --------------------------------------------------------------------------- containers
+
+
+def _fake_container(project, image_bytes=b"fake sif image"):
+    """A stand-in for `apptainer exec`: runs the trailing argv on the host."""
+    fake = project.root / "fake-apptainer"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'while [ "$1" != "--" ] && [ $# -gt 0 ]; do\n'
+        '  case "$1" in exec|--nv) shift;; *.sif) shift;; *) break;; esac\n'
+        "done\n"
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    image = project.root / "images" / "vggt.sif"
+    image.parent.mkdir(exist_ok=True)
+    image.write_bytes(image_bytes)
+    return fake, image
+
+
+def test_container_image_and_digest_are_recorded(entrypoint):
+    """For a container the image IS the environment: without its identity, `reproducible: true`
+    would claim more than the row knows."""
+    import hashlib
+
+    fake, image = _fake_container(entrypoint)
+    (entrypoint.experiments_dir / "candidate" / "launch.yml").write_text(
+        f'entrypoints:\n'
+        f'  train:\n'
+        f'    command: ["{fake}", "exec", "--nv", "images/vggt.sif", "python3", "train.py"]\n'
+        f'    cwd: .\n'
+        f'    container:\n'
+        f'      image: images/vggt.sif\n',
+        encoding="utf-8",
+    )
+    gitops.run_git(entrypoint.root, "add", "-A")
+    gitops.run_git(entrypoint.root, "commit", "-qm", "container entrypoint")
+
+    result = launch(entrypoint, "candidate", "train", commit="HEAD", seed=1)
+    assert result.exit_code == 0
+    assert result.row["container_image"] == "images/vggt.sif"
+    expected = hashlib.sha256(image.read_bytes()).hexdigest()
+    assert result.row["container_digest"] == f"sha256:{expected}"
+    assert result.row["ate_rmse_m"] == 2.001  # the code inside the container still reported
+
+
+def test_image_digest_is_cached_and_invalidated_by_a_rebuild(entrypoint):
+    from hiraku_auto.launcher import image_digest
+
+    _fake_container(entrypoint)
+    container = {"image": "images/vggt.sif"}
+    _, first = image_digest(entrypoint, container)
+    cache = entrypoint.table_path.parent / "image-digests.json"
+    assert cache.is_file() and first in cache.read_text(encoding="utf-8")
+
+    _, again = image_digest(entrypoint, container)
+    assert again == first
+
+    # A rebuilt image changes size and mtime, so the cache key changes with it.
+    (entrypoint.root / "images" / "vggt.sif").write_bytes(b"a different, rebuilt image")
+    _, rebuilt = image_digest(entrypoint, container)
+    assert rebuilt != first
+
+
+def test_digest_cmd_wins_over_hashing(entrypoint):
+    from hiraku_auto.launcher import image_digest
+
+    _fake_container(entrypoint)
+    image, digest = image_digest(
+        entrypoint,
+        {"image": "ghcr.io/lab/vggt:2.1", "digest_cmd": ["echo", "sha256:deadbeef"]},
+    )
+    assert image == "ghcr.io/lab/vggt:2.1"
+    assert digest == "sha256:deadbeef"
+
+
+def test_a_registry_reference_without_digest_cmd_records_the_reference_only(entrypoint):
+    from hiraku_auto.launcher import image_digest
+
+    image, digest = image_digest(entrypoint, {"image": "ghcr.io/lab/vggt:latest"})
+    assert image == "ghcr.io/lab/vggt:latest" and digest == ""
+
+
+def test_container_block_is_validated():
+    with pytest.raises(HirakuError, match="needs a string 'image'"):
+        resolve_entrypoint({"x": {"command": ["true"], "container": {"digest_cmd": ["x"]}}}, "x")
+    with pytest.raises(HirakuError, match="digest_cmd must be an argv list"):
+        resolve_entrypoint(
+            {"x": {"command": ["true"], "container": {"image": "i", "digest_cmd": "nope"}}}, "x"
+        )

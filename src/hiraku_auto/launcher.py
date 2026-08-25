@@ -37,6 +37,10 @@ from .runs import append_run
 
 LOCKFILES = ("uv.lock", "poetry.lock", "requirements.txt", "environment.yml", "Pipfile.lock")
 
+# Hashing a multi-gigabyte image on every run would be wasteful, so digests are cached by
+# (path, size, mtime). Delete the file to force a rehash.
+DIGEST_CACHE = "image-digests.json"
+
 
 @dataclass
 class LaunchResult:
@@ -90,6 +94,67 @@ def detect_accelerator() -> str:
     return ""
 
 
+def image_digest(project: Any, container: dict[str, Any]) -> tuple[str, str]:
+    """(image, digest) for a containerised run.
+
+    For a container, the image IS the environment: `lockfile_sha256` and `interpreter` describe
+    the launcher's side of the bind mount, not what the code ran against. Without the image
+    identity a container run's `reproducible: true` would be claiming more than it knows.
+
+    An explicit `digest_cmd` wins. Otherwise a local image file is hashed, cached by
+    (path, size, mtime) so a large image is hashed once. A registry reference with no
+    `digest_cmd` records the reference alone — pin it by tag digest or set `digest_cmd`.
+    """
+    image = str(container.get("image") or "")
+    if not image:
+        return "", ""
+
+    digest_cmd = container.get("digest_cmd")
+    if digest_cmd:
+        try:
+            out = subprocess.run(
+                list(digest_cmd), capture_output=True, text=True, timeout=120, cwd=str(project.root)
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise HirakuError(f"container.digest_cmd failed: {exc}") from exc
+        if out.returncode != 0:
+            raise HirakuError(
+                f"container.digest_cmd exited {out.returncode}: {(out.stderr or '')[:200]}"
+            )
+        return image, out.stdout.strip().splitlines()[0] if out.stdout.strip() else ""
+
+    candidate = Path(image)
+    if not candidate.is_absolute():
+        candidate = project.root / image
+    if not candidate.is_file():
+        return image, ""
+
+    stat = candidate.stat()
+    key = f"{candidate.resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
+    cache_path = project.table_path.parent / DIGEST_CACHE
+    cache: dict[str, str] = {}
+    if cache_path.is_file():
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError):
+            cache = {}
+    if key in cache:
+        return image, cache[key]
+
+    digest = hashlib.sha256()
+    with candidate.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    value = f"sha256:{digest.hexdigest()}"
+    cache[key] = value
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    return image, value
+
+
 def load_entrypoints(directory: Path) -> dict[str, Any]:
     path = directory / "launch.yml"
     if not path.is_file():
@@ -103,7 +168,7 @@ def load_entrypoints(directory: Path) -> dict[str, Any]:
 
 def resolve_entrypoint(
     entrypoints: dict[str, Any], name: str
-) -> tuple[list[str], str, dict[str, str], str]:
+) -> tuple[list[str], str, dict[str, str], str, dict[str, Any]]:
     spec = entrypoints.get(name)
     if spec is None:
         raise HirakuError(
@@ -127,7 +192,19 @@ def resolve_entrypoint(
     venv = str(spec.get("venv") or "")
     if venv and (Path(venv).is_absolute() or ".." in Path(venv).parts):
         raise HirakuError(f"Entrypoint '{name}' has a venv outside the project: {venv}")
-    return command, cwd, clean_env, venv
+
+    container = spec.get("container") or {}
+    if container and not isinstance(container, dict):
+        raise HirakuError(f"Entrypoint '{name}': 'container' must be a mapping.")
+    if container:
+        if not isinstance(container.get("image"), str) or not container["image"]:
+            raise HirakuError(f"Entrypoint '{name}': container needs a string 'image'.")
+        digest_cmd = container.get("digest_cmd")
+        if digest_cmd is not None and (
+            not isinstance(digest_cmd, list) or not all(isinstance(c, str) for c in digest_cmd)
+        ):
+            raise HirakuError(f"Entrypoint '{name}': container.digest_cmd must be an argv list.")
+    return command, cwd, clean_env, venv, dict(container)
 
 
 def launch(
@@ -158,7 +235,9 @@ def launch(
     try:
         exp_dir = source_root / project.rel(record.path.parent)
         entrypoints = load_entrypoints(exp_dir)
-        command, cwd, manifest_env, venv = resolve_entrypoint(entrypoints, entrypoint)
+        command, cwd, manifest_env, venv, container = resolve_entrypoint(
+            entrypoints, entrypoint
+        )
         workdir = (exp_dir / cwd).resolve()
 
         metrics_path = Path(tempfile.mkstemp(prefix="hiraku-metrics-", suffix=".json")[1])
@@ -213,12 +292,23 @@ def launch(
         if seed is not None:
             env["HIRAKU_SEED"] = str(seed)
 
+        container_image, container_digest = image_digest(project, container)
+        if container and not container_digest:
+            print(
+                f"warning: no digest for image '{container_image}'. The run will record the "
+                f"reference only, so the environment is not pinned. Set container.digest_cmd.",
+                file=sys.stderr,
+            )
+
         if dry_run:
             print(f"would run: {' '.join(command)}")
             print(f"       in: {workdir}")
             print(f"  run_kind: {'commit' if reproducible else 'worktree'}")
             print(f"    commit: {recorded_commit or '(no repository)'}")
             print(f"      venv: {venv or '(inherits the caller environment)'}")
+            if container:
+                print(f"     image: {container_image}")
+                print(f"    digest: {container_digest or '(none — not pinned)'}")
             print(f" run table: {project.table_path}")
             return LaunchResult(run_id=run_id, exit_code=0, row={}, reproducible=reproducible)
 
@@ -252,6 +342,8 @@ def launch(
             "lockfile_sha256": f"{lockfile_name}:{lockfile_hash}" if lockfile_hash else "",
             "interpreter": shutil.which(command[0], path=env.get("PATH")) or command[0],
             "venv": venv_dir,
+            "container_image": container_image,
+            "container_digest": container_digest,
             "platform": f"{platform.system()}-{platform.release()}-{platform.machine()}",
             "accelerator": detect_accelerator(),
         }

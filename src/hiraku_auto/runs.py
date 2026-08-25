@@ -34,6 +34,8 @@ PROVENANCE_COLUMNS = (
     "lockfile_sha256",
     "interpreter",
     "venv",
+    "container_image",
+    "container_digest",
     "platform",
     "accelerator",
 )

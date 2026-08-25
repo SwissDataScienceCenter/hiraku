@@ -147,16 +147,77 @@ is broken, and `init` gitignores `.venv` and `experiments/*/.venv*` for that rea
 from the machine, and `lockfile_sha256` is what records which dependency set ran. If you need the
 dependencies pinned to the commit too, use a container and record the image digest as a metric.
 
-For a container, nothing special is needed — the command is argv, so it just works:
+### Containers
+
+The command is argv, so a container needs nothing special to *run*. What it does need is a recorded
+identity: inside a container, `lockfile_sha256` and `interpreter` describe the launcher's side of
+the bind mount, not what the code ran against, so without the image the row's `reproducible: true`
+would claim more than it knows. Declare it:
 
 ```yaml
 entrypoints:
   train:
     command: ["apptainer", "exec", "--nv", "images/vggt.sif", "python", "-m", "vo.run"]
     cwd: .
+    container:
+      image: images/vggt.sif
 ```
 
-Have the entrypoint report the image digest alongside its metrics, and the run row carries it.
+`container_image` and `container_digest` become columns on the row. A local image file is hashed and
+the digest **cached** by (path, size, mtime), so a multi-gigabyte `.sif` is hashed once and a rebuild
+invalidates it automatically. For a registry reference, give the command that resolves it — otherwise
+only the reference is recorded and `launch` warns that the environment is not pinned:
+
+```yaml
+    container:
+      image: ghcr.io/lab/vggt:2.1
+      digest_cmd: ["docker", "image", "inspect", "--format", "{{.Id}}", "ghcr.io/lab/vggt:2.1"]
+```
+
+#### One base image, per-experiment packages
+
+Two ways, and the second is usually the right one.
+
+**Bake an image per experiment.** `base.def` → `vggt-omega.sif`, `vggt-long.sif`. Fully pinned, and
+`--commit` then isolates dependencies as well as code. The cost is a rebuild per change and tens of
+gigabytes of near-identical images.
+
+**One base image plus an overlay venv per experiment.** The base image carries the heavy, shared
+layer — CUDA, torch — and each experiment adds only its own packages, in a venv created with
+`--system-site-packages` so it *inherits* from the image instead of duplicating it:
+
+```bash
+cd experiments/vggt-omega
+apptainer exec ../../images/base.sif python -m venv --system-site-packages .overlay
+apptainer exec ../../images/base.sif .overlay/bin/pip install -r requirements.txt
+```
+
+```yaml
+entrypoints:
+  train:
+    command: ["apptainer", "exec", "--nv", "../../images/base.sif", "python", "-m", "vo.run"]
+    cwd: .
+    venv: .overlay          # PATH and VIRTUAL_ENV, passed through into the container
+    container:
+      image: ../../images/base.sif
+```
+
+`launch` sets `VIRTUAL_ENV` and prepends `.overlay/bin` to `PATH` in the *host* process; Apptainer
+passes the host environment through and bind-mounts the current directory by default, so the same
+absolute path is valid on both sides and `python` inside the container resolves to the overlay. The
+row then records both halves — the image digest and the overlay path — which together identify the
+environment.
+
+Two caveats worth knowing before you rely on this:
+
+- **Docker does not pass the host environment or mount the cwd by default.** Under Docker the
+  passthrough has to be explicit in the command: `-v $PWD:$PWD -w $PWD -e VIRTUAL_ENV -e PATH`.
+  Apptainer and Singularity do it for you, which is why they are the easier fit on a GPU cluster.
+- **Create the overlay from inside the container**, as above. A venv built by the host Python points
+  at the host interpreter, and the ABI will not match the image's.
+
+For the sharpest pinning, do both: an overlay for iteration, and a baked image once a result is worth
+promoting.
 
 ## Parallel experiments
 
