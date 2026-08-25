@@ -120,6 +120,29 @@ hiraku-auto agent discover vo-backend-selection      # literature -> proposals
 Default command is `claude -p <prompt>`. Override with `--agent-cmd` or `HIRAKU_AGENT_CMD`
 (`codex exec`, a local model, anything that reads a prompt argument and prints a reply).
 
+### Authentication and cost
+
+No API key is needed if `claude` is already logged in — this package spawns `claude` as a
+subprocess and inherits your environment, so whatever authenticates your interactive `claude`
+authenticates these calls. Claude Code needs a Pro, Max, Team, Enterprise, or Console account;
+`ANTHROPIC_API_KEY` is one option, not a requirement.
+
+**Check where your `-p` usage is billed before running `loop` unattended.** Users have reported
+that `claude -p` in print mode bills as API usage rather than against a Max subscription, even when
+logged in via OAuth with no `ANTHROPIC_API_KEY` set
+([anthropics/claude-code#43333](https://github.com/anthropics/claude-code/issues/43333) — closed,
+resolution unclear). Whether that still holds is worth verifying on your own account rather than
+assuming either way: run one `hiraku-auto agent analyze` and look at your usage before turning the
+loop loose.
+
+Prompts here are not small — the whole goal subtree and its runs go into every call — so the cost
+per call scales with the size of the tree. Ways to keep it bounded:
+
+- `--dry-run` prints the prompt and calls nothing. Use it first to see what a call would send.
+- `--no-apply` calls the agent but writes nothing.
+- `loop --max-iterations N` caps the calls; without `--launch` it starts no runs at all.
+- `HIRAKU_AGENT_CMD` points the whole thing at a local model, at which point cost is your GPU.
+
 **The agent decides; the tool writes.** Each workflow sends the project state as JSON plus the rules
 for that workflow, and requires one JSON object back. This package applies it. That split is the
 point: file writes stay deterministic, a bad suggestion is a diff you can revert, and the agent
