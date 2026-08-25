@@ -69,15 +69,30 @@ def _project(args: argparse.Namespace):
 
 def cmd_init(args: argparse.Namespace) -> int:
     root = Path(args.path or ".").resolve()
+    # Validate before creating anything, so a refused init leaves no empty directory behind.
+    if not args.allow_in_tool_repo and scaffold.tool_repo_root(root) is not None:
+        scaffold.init_project(root, allow_in_tool_repo=False)  # raises with the full message
     root.mkdir(parents=True, exist_ok=True)
-    written = scaffold.init_project(root, name=args.name, force=args.force)
+    written = scaffold.init_project(
+        root,
+        name=args.name,
+        force=args.force,
+        git=args.git,
+        allow_in_tool_repo=args.allow_in_tool_repo,
+    )
     for path in written:
         print(f"created {path.relative_to(root)}")
     if not written:
         print("nothing to do — project already initialised")
-    else:
-        print(f"\nproject ready at {root}")
-        print("next: hiraku-auto goal add <goal-id> --metric <name> --direction minimize")
+        return 0
+    print(f"\nproject ready at {root}")
+    if args.git and gitops.is_repo(root):
+        print("git repository initialised")
+    elif not gitops.is_repo(root):
+        print("note: not a git repository. `git init` here, or re-run with --git —")
+        print("      commit-backed runs and the promotion gate both need git.")
+    print(f"\nnext:\n  cd {root}")
+    print("  hiraku-auto goal add <goal-id> --metric <name> --direction minimize")
     return 0
 
 
@@ -629,10 +644,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("init", help="create a project")
-    p.add_argument("path", nargs="?", default=".")
+    p = sub.add_parser("init", help="create a research project (in its own directory)")
+    p.add_argument("path", nargs="?", default=".", help="created if it does not exist")
     p.add_argument("--name")
+    p.add_argument("--git", action="store_true", help="also run `git init` if needed")
     p.add_argument("--force", action="store_true", help="fill in missing files; never overwrites")
+    p.add_argument(
+        "--allow-in-tool-repo",
+        action="store_true",
+        help="permit init inside the hiraku-auto source tree (you almost never want this)",
+    )
     p.set_defaults(func=cmd_init)
 
     goal = sub.add_parser("goal", help="research questions").add_subparsers(dest="a", required=True)

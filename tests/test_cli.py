@@ -143,3 +143,45 @@ def _rows(project):
     from hiraku_auto.runs import read_runs
 
     return read_runs(project.table_path).rows
+
+
+def test_init_refuses_inside_the_tool_repo(tmp_path, capsys):
+    """The mistake this prevents: init in the source tree writes research/ and .hiraku/ into it."""
+    fake_tool = tmp_path / "hiraku"
+    (fake_tool / "src" / "hiraku_auto").mkdir(parents=True)
+    (fake_tool / "src" / "hiraku_auto" / "cli.py").write_text("", encoding="utf-8")
+
+    code, _, err = run(capsys, "init", str(fake_tool))
+    assert code == 2
+    assert "inside the hiraku-auto source repository" in err
+    assert "hiraku-research" in err            # suggests where to put it instead
+    assert not (fake_tool / ".hiraku.yml").exists()
+    assert not (fake_tool / "research").exists()
+
+    # A subdirectory of the tool repo is refused too.
+    code, _, err = run(capsys, "init", str(fake_tool / "my-research"))
+    assert code == 2 and "source repository" in err
+    assert not (fake_tool / "my-research").exists()  # no empty directory left behind
+
+
+def test_init_in_the_tool_repo_can_be_forced(tmp_path, capsys):
+    fake_tool = tmp_path / "hiraku"
+    (fake_tool / "src" / "hiraku_auto").mkdir(parents=True)
+    (fake_tool / "src" / "hiraku_auto" / "cli.py").write_text("", encoding="utf-8")
+    code, _, _ = run(capsys, "init", str(fake_tool), "--allow-in-tool-repo")
+    assert code == 0 and (fake_tool / ".hiraku.yml").is_file()
+
+
+def test_init_git_creates_the_repository(tmp_path, capsys):
+    from hiraku_auto import gitops
+
+    target = tmp_path / "natix-research"
+    code, out, _ = run(capsys, "init", str(target), "--git", "--name", "NATIX")
+    assert code == 0
+    assert gitops.is_repo(target)
+    assert "git repository initialised" in out
+
+
+def test_init_without_git_says_so(tmp_path, capsys):
+    code, out, _ = run(capsys, "init", str(tmp_path / "plain"))
+    assert code == 0 and "not a git repository" in out

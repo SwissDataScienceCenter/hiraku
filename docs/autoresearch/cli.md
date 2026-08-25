@@ -33,11 +33,36 @@ PYTHONPATH=src python3 -m hiraku_auto --project examples/natix-vo tree
 The package itself has no required dependencies (PyYAML is used when importable, with a fallback
 parser for the front-matter subset). The `ui` extra adds Streamlit, which `hiraku-auto ui` needs.
 
+## The tool repo and your research repo are different repositories
+
+`hiraku-auto init` creates a *research project*: `research/`, `experiments/`, `.hiraku/`, `.agents/`.
+That belongs in its own repository, not in the tool's source tree — so `init` refuses to run inside
+the hiraku-auto checkout and tells you where to put it instead. One command does the whole thing,
+including creating the directory and the git repository:
+
+```bash
+hiraku-auto init ~/PycharmProjects/natix-research --git --name "NATIX VO"
+cd ~/PycharmProjects/natix-research
+```
+
+**The installed command works from anywhere.** `pip install -e .` writes an absolute path into
+`.venv/bin/hiraku-auto` and into the `.pth` file, so once the environment is on your `PATH` the
+command does not care what directory you are in — `cd` into your research repo and use it normally.
+Three ways to have it available:
+
+```bash
+source ~/PycharmProjects/hiraku/.venv/bin/activate       # per shell session
+ln -s ~/PycharmProjects/hiraku/.venv/bin/hiraku-auto ~/.local/bin/   # once, permanently
+~/PycharmProjects/hiraku/.venv/bin/hiraku-auto --help    # absolute path, no setup
+```
+
+Every command also takes `--project <path>`, so you can drive a project without `cd`-ing into it.
+
 ## Ten minutes, end to end
 
 ```bash
-mkdir vo-research && cd vo-research && git init
-hiraku-auto init --name "NATIX VO"
+hiraku-auto init ~/PycharmProjects/natix-research --git --name "NATIX VO"
+cd ~/PycharmProjects/natix-research
 
 hiraku-auto goal add vo-backend-selection \
   --metric ate_rmse_m --direction minimize --target 3.0 \

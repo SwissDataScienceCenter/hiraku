@@ -4,3 +4,9 @@ __MACOSX/
 scratch/
 # git worktrees for parallel experiments
 .worktrees/
+
+# hiraku-auto: machine state, never committed
+.venv
+.venv-*
+experiments/*/.venv
+experiments/*/.venv-*

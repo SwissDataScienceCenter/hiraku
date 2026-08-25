@@ -90,14 +90,44 @@ def _load_template(project: Project | None, name: str) -> str:
 # --------------------------------------------------------------------------- init
 
 
+def tool_repo_root(start: Path) -> Path | None:
+    """The hiraku-auto source checkout containing `start`, if any.
+
+    A research project must not be created inside the tool's own repository: `init` would drop
+    `research/`, `.hiraku/` and `.agents/` into the source tree, and the tool's `.gitignore` and
+    git history would start tracking research state.
+    """
+    for directory in [start, *start.parents]:
+        if (directory / "src" / "hiraku_auto" / "cli.py").is_file():
+            return directory
+    return None
+
+
 def init_project(
     root: Path,
     *,
     name: str | None = None,
     force: bool = False,
+    git: bool = False,
+    allow_in_tool_repo: bool = False,
 ) -> list[Path]:
     """Create a project: config, directories, templates, an empty run table, and the skill."""
     root = Path(root).resolve()
+
+    if not allow_in_tool_repo:
+        tool_root = tool_repo_root(root)
+        if tool_root is not None:
+            suggested = tool_root.parent / f"{tool_root.name}-research"
+            raise HirakuError(
+                f"{root} is inside the hiraku-auto source repository ({tool_root}).\n"
+                f"A research project belongs in its own repository, or `init` would write "
+                f"research/ and .hiraku/ into the tool's source tree.\n\n"
+                f"  hiraku-auto init {suggested} --git --name '<project name>'\n\n"
+                f"To look at the bundled projects instead:\n"
+                f"  hiraku-auto --project {tool_root}/examples/worked-tree tree\n\n"
+                f"Pass --allow-in-tool-repo only if you really mean to."
+            )
+
     config_path = root / CONFIG_NAME
     if config_path.exists() and not force:
         raise HirakuError(f"{config_path} already exists. Use --force to add missing files only.")
@@ -137,6 +167,11 @@ def init_project(
     written.extend(install_skill(root, force=force))
     if _ensure_gitignore(root):
         written.append(root / ".gitignore")
+    if git:
+        from . import gitops
+
+        if not gitops.is_repo(root):
+            gitops.run_git(root, "init", "-q")
     return written
 
 
