@@ -369,6 +369,8 @@ absent: findings belong in a record, in a diff a reviewer can read.
 
 ## Every command
 
+The complete, generated reference with every flag is [commands.md](commands.md). Summary:
+
 ```
 init                                   create a project
 goal add|list|show                     research questions

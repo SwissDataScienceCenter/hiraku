@@ -88,6 +88,7 @@ Experiment IDs are globally unique, so this costs nothing.
 
 | Document | Settles |
 |---|---|
+| [commands.md](commands.md) | **Every command and flag**, generated from the parser |
 | [cli.md](cli.md) | **How to run it**: install, the ten-minute walkthrough, how metrics are reported, how the agent is called, the loop, the promotion gate, and every command |
 | [data-model.md](data-model.md) | Front matter for goals and experiments, ID rules, run-table provenance columns, why `parent` rather than nested directories, and what is deliberately not recorded |
 | [research-loop.md](research-loop.md) | Requirement 4 in full: the three failure classes, the six-condition investigation test, who decides in each mode, how a terminal failure is recorded, and the promotion gate |
