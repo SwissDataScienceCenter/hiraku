@@ -50,14 +50,21 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def lockfile_digest(root: Path) -> tuple[str, str]:
-    """(filename, sha256) of the first lockfile found. Identity of the dependency set without
-    storing it — two runs sharing the hash had the same dependencies."""
-    for name in LOCKFILES:
-        candidate = root / name
-        if candidate.is_file():
-            digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
-            return name, digest[:16]
+def lockfile_digest(*roots: Path) -> tuple[str, str]:
+    """(label, sha256 prefix) of the first lockfile found, searching `roots` in order.
+
+    Identity of the dependency set without storing it: two runs sharing the hash had the same
+    dependencies. The experiment's own directory is searched before the project root, because an
+    experiment with its own environment has its own lockfile — recording the project's would name
+    the wrong file, which is worse than recording nothing.
+    """
+    for root in roots:
+        for name in LOCKFILES:
+            candidate = root / name
+            if candidate.is_file():
+                digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+                label = name if root == roots[-1] else f"{root.name}/{name}"
+                return label, digest[:16]
     return "", ""
 
 
@@ -96,7 +103,7 @@ def load_entrypoints(directory: Path) -> dict[str, Any]:
 
 def resolve_entrypoint(
     entrypoints: dict[str, Any], name: str
-) -> tuple[list[str], str, dict[str, str]]:
+) -> tuple[list[str], str, dict[str, str], str]:
     spec = entrypoints.get(name)
     if spec is None:
         raise HirakuError(
@@ -117,7 +124,10 @@ def resolve_entrypoint(
     for key in clean_env:
         if key.startswith("HIRAKU_"):
             raise HirakuError(f"Entrypoint '{name}' may not set reserved variable {key}.")
-    return command, cwd, clean_env
+    venv = str(spec.get("venv") or "")
+    if venv and (Path(venv).is_absolute() or ".." in Path(venv).parts):
+        raise HirakuError(f"Entrypoint '{name}' has a venv outside the project: {venv}")
+    return command, cwd, clean_env, venv
 
 
 def launch(
@@ -148,16 +158,44 @@ def launch(
     try:
         exp_dir = source_root / project.rel(record.path.parent)
         entrypoints = load_entrypoints(exp_dir)
-        command, cwd, manifest_env = resolve_entrypoint(entrypoints, entrypoint)
+        command, cwd, manifest_env, venv = resolve_entrypoint(entrypoints, entrypoint)
         workdir = (exp_dir / cwd).resolve()
 
         metrics_path = Path(tempfile.mkstemp(prefix="hiraku-metrics-", suffix=".json")[1])
         metrics_path.write_text("{}", encoding="utf-8")
 
-        lockfile_name, lockfile_hash = lockfile_digest(source_root)
+        lockfile_name, lockfile_hash = lockfile_digest(
+            project.experiments_dir / experiment_id, source_root
+        )
         env = os.environ.copy()
         env.update(manifest_env)
         env.update(extra_env or {})
+
+        # A per-experiment environment: prepend its bin/ so `python` in the command resolves
+        # there. This is what lets two backends with conflicting dependencies coexist, without
+        # the launcher having to know anything about how the environment was built.
+        #
+        # Resolved against the LIVE checkout, never the temporary commit worktree. A virtual
+        # environment is machine state, not commit state: its paths are absolute, so a copy at a
+        # new path is broken, and it is not something you commit. `--commit` therefore isolates
+        # code, not dependencies — which dependency set ran is recorded by lockfile_sha256.
+        venv_dir = ""
+        if venv:
+            live_exp_dir = project.experiments_dir / experiment_id
+            candidate = (
+                (live_exp_dir / venv) if (live_exp_dir / venv).exists() else (project.root / venv)
+            )
+            if not candidate.is_dir():
+                raise HirakuError(
+                    f"Entrypoint '{entrypoint}' names venv '{venv}', which does not exist "
+                    f"(looked in {live_exp_dir} and {project.root}). Create it first, e.g. "
+                    f"`cd {project.rel(live_exp_dir)} && uv venv {venv}`."
+                )
+            bindir = candidate / ("Scripts" if os.name == "nt" else "bin")
+            venv_dir = str(candidate)
+            env["VIRTUAL_ENV"] = venv_dir
+            env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+            env.pop("PYTHONHOME", None)
         env.update(
             {
                 "HIRAKU_EXPERIMENT_ID": experiment_id,
@@ -180,6 +218,8 @@ def launch(
             print(f"       in: {workdir}")
             print(f"  run_kind: {'commit' if reproducible else 'worktree'}")
             print(f"    commit: {recorded_commit or '(no repository)'}")
+            print(f"      venv: {venv or '(inherits the caller environment)'}")
+            print(f" run table: {project.table_path}")
             return LaunchResult(run_id=run_id, exit_code=0, row={}, reproducible=reproducible)
 
         started = time.monotonic()
@@ -210,6 +250,8 @@ def launch(
             "seed": "" if seed is None else seed,
             "python_version": platform.python_version(),
             "lockfile_sha256": f"{lockfile_name}:{lockfile_hash}" if lockfile_hash else "",
+            "interpreter": shutil.which(command[0], path=env.get("PATH")) or command[0],
+            "venv": venv_dir,
             "platform": f"{platform.system()}-{platform.release()}-{platform.machine()}",
             "accelerator": detect_accelerator(),
         }

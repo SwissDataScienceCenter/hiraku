@@ -32,6 +32,8 @@ PROVENANCE_COLUMNS = (
     "seed",
     "python_version",
     "lockfile_sha256",
+    "interpreter",
+    "venv",
     "platform",
     "accelerator",
 )

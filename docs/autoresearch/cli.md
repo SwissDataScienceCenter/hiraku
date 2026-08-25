@@ -97,6 +97,67 @@ checkout alone: `run_kind: commit`, `reproducible: true`. Without it the run use
 including uncommitted changes: `reproducible: false`, and **the promotion gate refuses it** however
 good the number.
 
+## Environments
+
+Two different things get called "the environment", and keeping them apart matters:
+
+1. **The tool's environment** — the `.venv` at the repository root that `uv sync` creates. It holds
+   `hiraku-auto` and Streamlit and nothing else. The package has no required dependencies, so this
+   is tiny and you never touch it again.
+2. **Each experiment's environment** — where OccAny, VGGT-Omega and VGGT-Long actually run. These
+   need *different, conflicting* libraries: different torch, different CUDA, sometimes different
+   Python. This is the one that matters, and it is per experiment, not per project.
+
+`launch` never assumes the second one. Pick the level of isolation the experiment needs:
+
+| Level | How | Isolates |
+|---|---|---|
+| Inherit the caller | no `venv:` key | nothing — fine for a quick baseline |
+| Per-experiment venv | `venv: .venv` in the entrypoint | Python packages |
+| Conda / mamba env | `venv: /path/to/conda/envs/vggt` — any directory with a `bin/` works | Python packages and native libs conda manages |
+| Container | put it in `command`: `["apptainer", "exec", "vggt.sif", "python", "train.py"]` | the whole userspace, including CUDA userland |
+| Separate worktree | `hiraku-auto worktree add <exp>` | the *code*, so siblings can run at once |
+
+A per-experiment venv, which is the common case:
+
+```bash
+cd experiments/vggt-omega
+uv venv .venv && .venv/bin/pip install -r requirements.txt
+cd ../vggt-long
+uv venv .venv && .venv/bin/pip install -r requirements.txt   # a different torch, no conflict
+```
+
+```yaml
+# experiments/vggt-omega/launch.yml
+entrypoints:
+  train:
+    command: ["python", "-m", "vo.run", "--backend", "vggt-omega"]
+    cwd: .
+    venv: .venv        # resolved in the experiment dir, then the project root
+```
+
+`launch` prepends that environment's `bin/` to `PATH` and sets `VIRTUAL_ENV`, so `python` in the
+command resolves there. The row records `venv`, the resolved `interpreter`, and
+`lockfile_sha256` — read from the **experiment's own** lockfile if it has one, falling back to the
+project's.
+
+**A venv is machine state, not commit state.** Its paths are absolute, so a copy at a different path
+is broken, and `init` gitignores `.venv` and `experiments/*/.venv*` for that reason. It follows that
+`--commit` isolates *code*, not dependencies: the code comes from the commit, the environment comes
+from the machine, and `lockfile_sha256` is what records which dependency set ran. If you need the
+dependencies pinned to the commit too, use a container and record the image digest as a metric.
+
+For a container, nothing special is needed — the command is argv, so it just works:
+
+```yaml
+entrypoints:
+  train:
+    command: ["apptainer", "exec", "--nv", "images/vggt.sif", "python", "-m", "vo.run"]
+    cwd: .
+```
+
+Have the entrypoint report the image digest alongside its metrics, and the run row carries it.
+
 ## Parallel experiments
 
 ```bash
@@ -104,9 +165,19 @@ hiraku-auto worktree add vggt-omega
 hiraku-auto worktree add vggt-long
 ```
 
-One checkout and one virtual environment per active experiment, on one repository — which is what
-lets two backends with conflicting dependencies run at the same time. All runs land in the one
-project run table, so the comparison still works.
+One checkout per active experiment on one repository — no second clone, no shared object store to
+copy. Each has its own working tree and its own environment, so two backends with conflicting
+dependencies run at the same time.
+
+A worktree is a full checkout, so it contains its own `.hiraku.yml` and project discovery stops
+there. The run table, `research/`, and the leaderboard therefore resolve to the **main** checkout
+regardless of which worktree you are in — otherwise each worktree would keep a private table and
+nothing would be comparable. Only `experiments/` is local, which is what you want: that is the code.
+
+```bash
+cd .worktrees/vggt-omega
+hiraku-auto launch vggt-omega:train --commit HEAD --seed 1   # writes to the shared table
+```
 
 ## Calling the agent
 

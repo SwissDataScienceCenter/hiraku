@@ -135,7 +135,39 @@ def init_project(
         written.append(project.table_path)
 
     written.extend(install_skill(root, force=force))
+    if _ensure_gitignore(root):
+        written.append(root / ".gitignore")
     return written
+
+
+GITIGNORE_ENTRIES = (
+    "# hiraku-auto: machine state, never committed",
+    ".worktrees/",
+    ".venv",
+    ".venv-*",
+    "experiments/*/.venv",
+    "experiments/*/.venv-*",
+)
+
+
+def _ensure_gitignore(root: Path) -> bool:
+    """Append the entries that keep environments and worktrees out of the repository.
+
+    A virtual environment has absolute paths baked in, so committing one produces a copy that is
+    broken at any other path — including the temporary worktree a `--commit` run uses. Appends
+    only what is missing, and never rewrites existing lines.
+    """
+    path = root / ".gitignore"
+    existing = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    missing = [e for e in GITIGNORE_ENTRIES if e not in existing]
+    if not missing or missing == [GITIGNORE_ENTRIES[0]]:
+        return False
+    body = "\n".join(missing)
+    with path.open("a", encoding="utf-8") as stream:
+        if existing and existing[-1].strip():
+            stream.write("\n")
+        stream.write(body + "\n")
+    return True
 
 
 def install_skill(root: Path, *, force: bool = False) -> list[Path]:

@@ -140,3 +140,98 @@ def _set_tolerance(project, value: float) -> None:
     )
     gitops.run_git(project.root, "add", "-A")
     gitops.run_git(project.root, "commit", "-qm", "tolerance")
+
+
+# --------------------------------------------------------------------------- per-experiment envs
+
+
+def test_run_table_is_shared_by_linked_worktrees(entrypoint):
+    """A worktree is a full checkout, so discovery stops there. The table must not fork: two
+    experiments running in parallel worktrees have to land in one table to be comparable."""
+    from hiraku_auto.config import load_project
+
+    worktree = entrypoint.root / ".worktrees" / "candidate"
+    gitops.worktree_add(entrypoint.root, worktree, "exp/candidate")
+    inner = load_project(worktree)
+
+    assert inner.root == worktree
+    assert inner.in_worktree
+    assert inner.table_path == entrypoint.table_path
+    assert inner.leaderboard == entrypoint.leaderboard
+    # Code, by contrast, is local to the worktree.
+    assert inner.experiments_dir != entrypoint.experiments_dir
+
+
+def test_main_checkout_is_not_treated_as_a_worktree(entrypoint):
+    assert not entrypoint.in_worktree
+    assert entrypoint.shared_root == entrypoint.root
+
+
+def test_entrypoint_venv_is_activated_and_recorded(entrypoint):
+    """The mechanism that lets two backends hold conflicting dependencies."""
+    import subprocess as sp
+    import sys
+
+    exp_dir = entrypoint.experiments_dir / "candidate"
+    sp.run([sys.executable, "-m", "venv", str(exp_dir / ".venv-cand")], check=True,
+           capture_output=True)
+    (exp_dir / "launch.yml").write_text(
+        'entrypoints:\n'
+        '  train:\n'
+        '    command: ["python", "train.py"]\n'
+        '    cwd: .\n'
+        '    venv: .venv-cand\n',
+        encoding="utf-8",
+    )
+    gitops.run_git(entrypoint.root, "add", "-A")
+    gitops.run_git(entrypoint.root, "commit", "-qm", "venv entrypoint")
+
+    result = launch(entrypoint, "candidate", "train", commit="HEAD", seed=1)
+    assert result.exit_code == 0
+    assert ".venv-cand" in result.row["venv"]
+    assert ".venv-cand" in result.row["interpreter"]
+
+
+def test_missing_venv_is_a_clear_error(entrypoint):
+    exp_dir = entrypoint.experiments_dir / "candidate"
+    (exp_dir / "launch.yml").write_text(
+        'entrypoints:\n  train:\n    command: ["python3", "train.py"]\n    venv: .venv-nope\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(HirakuError, match="does not exist"):
+        launch(entrypoint, "candidate", "train")
+
+
+def test_venv_cannot_escape_the_project():
+    with pytest.raises(HirakuError, match="venv outside"):
+        resolve_entrypoint({"x": {"command": ["true"], "venv": "../../etc"}}, "x")
+
+
+def test_experiment_lockfile_wins_over_the_project_one(entrypoint):
+    from hiraku_auto.launcher import lockfile_digest
+
+    exp_dir = entrypoint.experiments_dir / "candidate"
+    (entrypoint.root / "uv.lock").write_text("project deps\n", encoding="utf-8")
+    (exp_dir / "uv.lock").write_text("experiment deps\n", encoding="utf-8")
+
+    label, digest = lockfile_digest(exp_dir, entrypoint.root)
+    assert label == "candidate/uv.lock"
+    project_label, project_digest = lockfile_digest(entrypoint.root)
+    assert digest != project_digest and project_label == "uv.lock"
+
+
+def test_a_project_nested_in_an_unrelated_repo_is_not_hoisted(bare_project):
+    """A project inside some larger repository is its own root. Only a *linked worktree* hoists,
+    and conflating the two silently moved every shared path out of the project."""
+    from hiraku_auto.config import load_project
+    from hiraku_auto.scaffold import init_project
+
+    nested = bare_project.root / "examples" / "inner"
+    nested.mkdir(parents=True)
+    init_project(nested, name="inner")
+    inner = load_project(nested)
+
+    assert not inner.in_worktree
+    assert inner.shared_root == nested
+    assert inner.table_path.is_relative_to(nested)
+    assert inner.research_dir.is_relative_to(nested)
