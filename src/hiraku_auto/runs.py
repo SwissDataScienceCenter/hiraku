@@ -7,13 +7,20 @@ knowing about it in advance.
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import math
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .errors import HirakuError
+
+try:  # POSIX only; parallel appends on Windows fall back to no locking.
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 REQUIRED_COLUMNS = ("experiment_id", "commit")
 
@@ -87,12 +94,43 @@ def read_runs(path: Path) -> RunTable:
     return RunTable(path=path, fieldnames=fieldnames, rows=rows)
 
 
+@contextlib.contextmanager
+def _table_lock(path: Path):
+    """Serialise writers to one run table.
+
+    Appending can widen the header, which is a read-modify-write of the whole file. Two runs
+    finishing at the same moment — the normal case once experiments run in parallel — would
+    otherwise interleave and lose rows. The lock is a sidecar file so it never appears in the
+    table itself.
+    """
+    if fcntl is None:  # pragma: no cover - Windows
+        yield
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    handle = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        os.close(handle)
+
+
 def append_run(path: Path, row: dict[str, Any]) -> None:
     """Append one row, widening the header if the row carries new columns.
 
     Rewriting to widen is not an edit of recorded data: existing values are preserved exactly and
     only empty cells are added, so the table stays append-only in meaning.
+
+    Holds an exclusive lock for the whole read-modify-write, so concurrent runs cannot interleave.
     """
+    with _table_lock(path):
+        _append_locked(path, row)
+
+
+def _append_locked(path: Path, row: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     delimiter = _delimiter(path)
     stringified = {k: ("" if v is None else str(v)) for k, v in row.items()}

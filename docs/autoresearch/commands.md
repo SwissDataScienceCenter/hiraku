@@ -25,6 +25,7 @@ Guides: [cli.md](cli.md) for the walkthrough and the environment/container setup
 | `next` | what the loop would do next, without calling anything |
 | `loop` | bounded loop, stopping wherever a human decides |
 | `promote --run <id>` | the five-condition gate |
+| `report <goal>` | assemble the goal's report from the records |
 | `proposal list\|accept\|decline` | the agent's pending queue |
 | `worktree add\|remove\|list` | one checkout per active experiment |
 | `dash` / `ui` | the static page / the Streamlit app |
@@ -34,14 +35,14 @@ Guides: [cli.md](cli.md) for the walkthrough and the environment/container setup
 ### `hiraku-auto --help`
 ```
 usage: hiraku-auto [-h] [--project PROJECT]
-                   {init,goal,exp,tree,check,sync,launch,runs,agent,next,loop,promote,proposal,worktree,dash,ui}
+                   {init,goal,exp,tree,check,sync,launch,runs,agent,next,loop,promote,proposal,worktree,report,dash,ui}
                    ...
 
 Autoresearch over a Hiraku experiment tree: goals, parallel hypotheses,
 failure triage, a gated leaderboard, and an agent that designs and analyses.
 
 positional arguments:
-  {init,goal,exp,tree,check,sync,launch,runs,agent,next,loop,promote,proposal,worktree,dash,ui}
+  {init,goal,exp,tree,check,sync,launch,runs,agent,next,loop,promote,proposal,worktree,report,dash,ui}
     init                create a research project (in its own directory)
     goal                research questions: the metric, the target, the
                         evaluation protocol
@@ -59,6 +60,8 @@ positional arguments:
     promote             put a run through the promotion gate
     proposal            agent proposals awaiting a decision
     worktree            one checkout per active experiment
+    report              assemble a goal's report from the records: known,
+                        ruled out, still open
     dash                write the HTML tree viewer
     ui                  run the Streamlit interface
 
@@ -334,7 +337,8 @@ options:
 ### `hiraku-auto loop --help`
 ```
 usage: hiraku-auto loop [-h] [--max-iterations MAX_ITERATIONS]
-                        [--launch ENTRYPOINT] [--commit COMMIT] [--seed SEED]
+                        [--max-parallel N] [--gpus SPEC] [--launch ENTRYPOINT]
+                        [--commit COMMIT] [--seed SEED]
                         [--agent-cmd AGENT_CMD] [--timeout TIMEOUT]
                         goal
 
@@ -345,8 +349,13 @@ options:
   -h, --help            show this help message and exit
   --max-iterations MAX_ITERATIONS
                         hard cap on agent calls
+  --max-parallel N      launch up to N approved experiments at once (default
+                        1, i.e. sequential)
+  --gpus SPEC           '8' for devices 0-7, or an explicit list '0,1,4,5';
+                        one device per slot via CUDA_VISIBLE_DEVICES
   --launch ENTRYPOINT   allow the loop to launch this entrypoint
-  --commit COMMIT       ref for launches the loop makes
+  --commit COMMIT       ref for launches the loop makes; default is each
+                        experiment's own branch
   --seed SEED
   --agent-cmd AGENT_CMD
                         default: 'claude -p'
@@ -426,6 +435,18 @@ positional arguments:
 options:
   -h, --help         show this help message and exit
   --force            remove even with local changes
+```
+
+### `hiraku-auto report --help`
+```
+usage: hiraku-auto report [-h] [-o FILE] goal
+
+positional arguments:
+  goal
+
+options:
+  -h, --help           show this help message and exit
+  -o FILE, --out FILE  write to a file instead of stdout
 ```
 
 ### `hiraku-auto dash --help`

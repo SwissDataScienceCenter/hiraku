@@ -49,6 +49,7 @@ Guides: [cli.md](cli.md) for the walkthrough and the environment/container setup
 | `next` | what the loop would do next, without calling anything |
 | `loop` | bounded loop, stopping wherever a human decides |
 | `promote --run <id>` | the five-condition gate |
+| `report <goal>` | assemble the goal's report from the records |
 | `proposal list\\|accept\\|decline` | the agent's pending queue |
 | `worktree add\\|remove\\|list` | one checkout per active experiment |
 | `dash` / `ui` | the static page / the Streamlit app |

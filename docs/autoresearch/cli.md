@@ -336,6 +336,28 @@ exhausted. The loop stops at every point where the policy says a human decides �
 approval, an investigation test that failed, a run that exited non-zero. Without `--launch` it will
 not start runs at all.
 
+## Running several at once
+
+```bash
+hiraku-auto loop <goal> --launch train --max-parallel 8 --gpus 8
+```
+
+Every approved node with no runs yet is launched together, up to `--max-parallel`. `--gpus 8` means
+devices 0–7; an explicit list works too (`--gpus 0,1,4,5`), and each slot gets one device via
+`CUDA_VISIBLE_DEVICES`. More slots than devices wraps, so a slot always has one.
+
+Each run defaults to **its own branch** as the commit ref, not `HEAD`. Parallel siblings usually
+hold different code, and the launcher already gives every commit-backed run its own temporary
+worktree — so the runs are isolated from each other and stay reproducible, with no durable worktree
+to manage. Override with `--commit <ref>` to put them all on one commit.
+
+All rows land in the one project run table. Appending can widen the header, which is a
+read-modify-write of the whole file, so the writer takes an exclusive lock for the duration —
+without it, two runs finishing at the same moment would interleave and lose rows.
+
+The loop stops on the first failed member and names it. `--max-parallel 1`, the default, is the old
+sequential behaviour.
+
 ## Promotion
 
 ```bash
@@ -354,6 +376,25 @@ Five conditions, each checked in code and each printed:
 5. **signed_off** — a name in `guided`; in `auto`, satisfied by (4).
 
 Nothing is written unless all five pass. `--force` records it anyway, marked as forced.
+
+## The report
+
+```bash
+hiraku-auto report <goal>                 # to stdout
+hiraku-auto report <goal> -o report.md    # to a file
+```
+
+Assembles the goal's story from the records: the question, where it stands, the tree, **what is
+known**, **what was ruled out**, **what is still open**, the runs, and the gaps.
+
+It is deterministic and calls no model. Every judgement in it is *quoted* from an experiment's
+Findings or Conclusions — the prose an agent or you wrote, with the run IDs it cites. This module
+only assembles and orders. That is what makes the report safe to regenerate and diff: if it changed,
+a record changed.
+
+Two things it will not do: call an unpromoted run a result (it says "a candidate, not a result"),
+and hide a thin record — the **Gaps** section lists every node under the goal that fails
+`hiraku-auto check`, because a report can only quote what was written.
 
 ## Viewing
 

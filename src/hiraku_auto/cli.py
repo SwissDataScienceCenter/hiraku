@@ -27,6 +27,7 @@ from typing import Any
 from . import agent as agent_mod
 from . import dash, gitops, scaffold
 from . import promote as promote_mod
+from . import report as report_mod
 from .config import load_project
 from .errors import HirakuError
 from .launcher import launch as do_launch
@@ -450,6 +451,95 @@ def cmd_next(args: argparse.Namespace) -> int:
     return 0
 
 
+def _launchable(forest, goal_id: str) -> list[str]:
+    """Approved nodes with no runs yet — the ones a batch may start."""
+    return [
+        nid
+        for nid in forest.subtree_all(goal_id)
+        if forest.nodes[nid].status == "approved" and not forest.nodes[nid].runs
+    ]
+
+
+def _devices(spec: str | None, slots: int) -> list[str]:
+    """One CUDA_VISIBLE_DEVICES value per concurrent slot.
+
+    `--gpus 0,1,2,3` pins explicit devices; `--gpus 8` means devices 0..7. Empty means the runs
+    inherit whatever the caller had, which is right for CPU work and wrong for a shared cluster.
+    """
+    if not spec:
+        return [""] * slots
+    if "," in spec:
+        ids = [s.strip() for s in spec.split(",") if s.strip()]
+    else:
+        try:
+            ids = [str(i) for i in range(int(spec))]
+        except ValueError:
+            ids = [spec.strip()]
+    if not ids:
+        return [""] * slots
+    return [ids[i % len(ids)] for i in range(slots)]
+
+
+def launch_batch(
+    project,
+    experiment_ids: list[str],
+    entrypoint: str,
+    *,
+    max_parallel: int,
+    gpus: str | None = None,
+    commit: str | None = None,
+    seed: Any = None,
+) -> list[tuple[str, Any]]:
+    """Launch several experiments at once, one GPU per slot.
+
+    Each run defaults to its own branch as the commit ref, so parallel runs are isolated by the
+    launcher's own temporary worktrees and stay reproducible — no durable worktree needed, and no
+    two runs sharing a checkout.
+    """
+    import concurrent.futures as futures
+
+    devices = _devices(gpus, max_parallel)
+    results: list[tuple[str, Any]] = []
+
+    def one(index: int, experiment_id: str):
+        record = load_experiment(project, experiment_id)
+        ref = commit
+        if ref is None:
+            branch = str(record.front.get("branch") or "")
+            ref = branch if branch and gitops.branch_exists(project.root, branch) else "HEAD"
+        device = devices[index % len(devices)]
+        extra = {"CUDA_VISIBLE_DEVICES": device} if device else None
+        return do_launch(
+            project, experiment_id, entrypoint, commit=ref, seed=seed, extra_env=extra
+        )
+
+    with futures.ThreadPoolExecutor(max_workers=max(1, max_parallel)) as pool:
+        pending = {
+            pool.submit(one, index, eid): eid for index, eid in enumerate(experiment_ids)
+        }
+        for future in futures.as_completed(pending):
+            experiment_id = pending[future]
+            try:
+                results.append((experiment_id, future.result()))
+            except HirakuError as exc:
+                print(f"  {experiment_id}: {exc}", file=sys.stderr)
+                results.append((experiment_id, None))
+    return results
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    project = _project(args)
+    text = report_mod.render(project, args.goal)
+    if args.out:
+        output = Path(args.out)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf-8")
+        print(f"wrote {output}")
+    else:
+        print(text)
+    return 0
+
+
 def cmd_loop(args: argparse.Namespace) -> int:
     """Bounded loop. Stops at every point the policy says a human decides."""
     project = _project(args)
@@ -472,17 +562,36 @@ def cmd_loop(args: argparse.Namespace) -> int:
                 print(f"stopping: '{suggestion['experiment']}' is ready to launch.")
                 print("  pass --launch <entrypoint> to let the loop launch it")
                 return 0
-            result = do_launch(
+            batch = _launchable(forest, args.goal)[: max(1, args.max_parallel)]
+            if not batch:
+                batch = [suggestion["experiment"]]
+            if len(batch) > 1:
+                print(
+                    f"  launching {len(batch)} in parallel"
+                    + (f" on devices {args.gpus}" if args.gpus else "")
+                    + ": "
+                    + ", ".join(batch)
+                )
+            results = launch_batch(
                 project,
-                suggestion["experiment"],
+                batch,
                 args.launch,
-                commit=args.commit or "HEAD",
+                max_parallel=args.max_parallel,
+                gpus=args.gpus,
+                commit=args.commit,
                 seed=args.seed,
             )
-            print(f"  run {result.run_id}, exit {result.exit_code}")
-            if result.exit_code != 0:
-                print("stopping: the run failed")
-                return result.exit_code
+            failed = []
+            for experiment_id, result in results:
+                if result is None:
+                    failed.append(experiment_id)
+                    continue
+                print(f"  {experiment_id}: run {result.run_id}, exit {result.exit_code}")
+                if result.exit_code != 0:
+                    failed.append(experiment_id)
+            if failed:
+                print(f"stopping: {len(failed)} run(s) failed: {', '.join(failed)}")
+                return 1
             continue
         if action in {"analyze", "triage"}:
             runner = agent_mod.run_analyze if action == "analyze" else agent_mod.run_triage
@@ -769,9 +878,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("goal")
     p.add_argument("--max-iterations", type=int, default=5, help="hard cap on agent calls")
     p.add_argument(
+        "--max-parallel",
+        type=int,
+        default=1,
+        metavar="N",
+        help="launch up to N approved experiments at once (default 1, i.e. sequential)",
+    )
+    p.add_argument(
+        "--gpus",
+        metavar="SPEC",
+        help="'8' for devices 0-7, or an explicit list '0,1,4,5'; one device per slot via "
+        "CUDA_VISIBLE_DEVICES",
+    )
+    p.add_argument(
         "--launch", metavar="ENTRYPOINT", help="allow the loop to launch this entrypoint"
     )
-    p.add_argument("--commit", default="HEAD", help="ref for launches the loop makes")
+    p.add_argument(
+        "--commit",
+        help="ref for launches the loop makes; default is each experiment's own branch",
+    )
     p.add_argument("--seed")
     p.add_argument("--agent-cmd", help=f"default: {agent_mod.DEFAULT_AGENT_CMD!r}")
     p.add_argument("--timeout", type=int, default=agent_mod.DEFAULT_TIMEOUT, help="seconds")
@@ -804,6 +929,13 @@ def build_parser() -> argparse.ArgumentParser:
     wt.add_argument("id", nargs="?", help="experiment id; omit for `list`")
     wt.add_argument("--force", action="store_true", help="remove even with local changes")
     wt.set_defaults(func=cmd_worktree)
+
+    p = sub.add_parser(
+        "report", help="assemble a goal's report from the records: known, ruled out, still open"
+    )
+    p.add_argument("goal")
+    p.add_argument("-o", "--out", metavar="FILE", help="write to a file instead of stdout")
+    p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("dash", help="write the HTML tree viewer")
     p.add_argument("-o", "--out", default="dashboard.html", help="output file")
