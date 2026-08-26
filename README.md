@@ -662,6 +662,7 @@ This stage focusing on refining the hiraku skill, optimizing it for different re
     - in branching mode, show the lineage of experiments and their relationships
     - a plot of a selected metric over time for all experiments, with the ability to filter by experiment or status. the plot should show the performance "frontier" as in the autoresearch example.
     - the plot is interactive, hovering over a run, shows run details, experiment details. 
+    - for plotting, use Altair/Vega-Lite charts
 
 ### Open Questions
 - is cross task listing of experiments and runs needed and feasible? E.g. the records may live in different branches, have inconsistent metrics, etc.
