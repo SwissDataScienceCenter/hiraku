@@ -620,7 +620,8 @@ This stage focusing on refining the hiraku skill, optimizing it for different re
   - advanced demonstrates the branching workflow, and PR/MR integration.
 
 - **MLFLOW Tracking backend**
-  - add support for remote tracking uri
+  - Support remote MLflow with `mlflow_tracking_uri: https://mlflow.example.org`, mutually exclusive with the local `mlflow_tracking_db` setting.
+  - Accept remote HTTP(S) tracking URIs, use standard MLflow authentication and TLS environment variables, never store credentials in Hiraku configuration, and never fall back to local SQLite after a remote error.
 
 ### Stage 4: Dashboard
 
