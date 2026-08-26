@@ -1,0 +1,9 @@
+entrypoints:
+  evaluate:
+    command: [uv, run, --extra, heart-demo, python, examples/heart-disease/train.py]
+    cwd: .
+auto:
+  allowed_entrypoints: [evaluate]
+  implement:
+    command: [uv, run, --extra, heart-demo, python, examples/heart-disease/implement.py]
+    cwd: .

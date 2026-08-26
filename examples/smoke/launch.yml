@@ -1,0 +1,12 @@
+entrypoints:
+  evaluate:
+    command: [uv, run, python, examples/smoke/evaluate.py]
+    cwd: .
+  fail:
+    command: [uv, run, python, examples/smoke/evaluate.py, --fail]
+    cwd: .
+auto:
+  allowed_entrypoints: [evaluate]
+  implement:
+    command: [uv, run, python, examples/smoke/implement.py]
+    cwd: .

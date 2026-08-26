@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hiraku"
+version = "0.1.0"
+description = "Goal-oriented guided and bounded-autonomous research workflows"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "PyYAML>=6.0.2",
+  "rich>=13.9",
+  "typer>=0.15",
+]
+
+[project.optional-dependencies]
+tui = ["textual>=1.0"]
+dev = ["pytest>=8.3", "pytest-cov>=6.0", "ruff>=0.9"]
+heart-demo = ["numpy>=2.0", "scikit-learn>=1.6"]
+
+[project.scripts]
+hiraku = "hiraku.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hiraku"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
