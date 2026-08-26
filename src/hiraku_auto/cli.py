@@ -1,17 +1,17 @@
 """Command-line interface.
 
     hiraku-auto init
-    hiraku-auto goal add | list | show
+    hiraku-auto goal add | draft | list | show
     hiraku-auto exp create | list | show | set | tree
     hiraku-auto launch <experiment>:<entrypoint> [--commit REF]
     hiraku-auto runs [<experiment>] [--sort METRIC --descending]
-    hiraku-auto agent design|triage|discover|analyze
+    hiraku-auto agent draft|design|triage|discover|analyze
     hiraku-auto next <goal>
     hiraku-auto loop <goal>
     hiraku-auto promote <experiment> --run <run-id>
     hiraku-auto proposal list | accept | decline
     hiraku-auto worktree add | remove | list
-    hiraku-auto check | sync | dash | ui
+    hiraku-auto check | sync | context | dash | ui
 
 argparse rather than a CLI framework, so the package installs with no required dependencies.
 """
@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from . import agent as agent_mod
+from . import context as context_mod
 from . import dash, gitops, scaffold
 from . import promote as promote_mod
 from . import report as report_mod
@@ -41,9 +42,27 @@ from .records import (
     load_proposals,
     save_experiment,
     save_proposal,
+    unset_markers,
 )
 from .runs import rank, read_runs
 from .tree import build, render_ascii, to_dict
+
+
+def _red(text: str) -> str:
+    """Highlight, but only where a terminal will render it. Piped output stays plain."""
+    return f"\033[31m{text}\033[0m" if sys.stdout.isatty() else text
+
+
+def _print_unset(project: Any, record: Any, *, prefix: str = "") -> int:
+    """Print every value nobody has supplied yet. These are what stop a goal being usable."""
+    markers = unset_markers(record)
+    if not markers:
+        return 0
+    print(_red(f"\n{prefix}{len(markers)} value(s) still unset — fill these in before running:"))
+    for section, needed in markers:
+        print(_red(f"  [{section}] {needed}"))
+    print(f"\n  edit {project.rel(record.path)}, then: hiraku-auto check")
+    return len(markers)
 
 
 def _table(rows: list[dict[str, Any]], columns: list[str]) -> str:
@@ -112,6 +131,94 @@ def cmd_goal_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_goal_draft(args: argparse.Namespace) -> int:
+    """Ask the agent to write the goal record, then hand it back for review.
+
+    The blank template asks the researcher to invent a metric definition and an evaluation protocol
+    from nothing. This asks the agent to draft both from the project's own files, and to mark every
+    value it could not ground rather than guessing it. What comes back is a draft to correct.
+    """
+    project = _project(args)
+    question = args.question or ""
+    if args.question_file:
+        question = Path(args.question_file).read_text(encoding="utf-8")
+    if not question.strip() and not sys.stdin.isatty():
+        question = sys.stdin.read()
+
+    result = agent_mod.run_draft(
+        project,
+        args.id,
+        question,
+        instruction=args.instruction or "",
+        command=agent_mod.agent_command(args.agent_cmd) if args.agent_cmd else None,
+        dry_run=args.dry_run,
+        apply=not args.no_apply,
+        revise=args.revise,
+        with_experiments=args.with_experiments,
+        use_context=_context_choice(args),
+        extra_context=args.context or [],
+        timeout=args.timeout,
+    )
+    if args.dry_run:
+        print(result.prompt)
+        return 0
+    print(result.context.summary())
+    for path in result.written:
+        print(f"wrote {project.rel(path)}")
+    if not result.written:
+        print("nothing written (--no-apply)")
+        return 0
+
+    record = load_goals(project).get(args.id)
+    grounding = result.data.get("grounding") or []
+    if not grounding:
+        print(
+            "\nwarning: the agent grounded nothing in your project files. Check that "
+            "`hiraku-auto context` lists the files that describe this project."
+        )
+    else:
+        print(f"\ngrounded {len(grounding)} claim(s) in the project's own files.")
+    if result.data.get("notes"):
+        print(f"\nnotes: {result.data['notes']}")
+
+    outstanding = _print_unset(project, record) if record else 0
+    print("\nnext:")
+    print(f"  hiraku-auto goal show {args.id}          # read the whole draft")
+    if outstanding:
+        print("  # then replace the unset values above — the promotion gate compares every run")
+        print("  # against this protocol, so a hole here means no run can ever be promoted")
+    print(f"  hiraku-auto agent design {args.id}       # once the protocol is settled")
+    return 0
+
+
+def cmd_context(args: argparse.Namespace) -> int:
+    """What would be sent to the agent, before anything is sent. Look before you call."""
+    project = _project(args)
+    bundle = context_mod.collect(project, extra=args.add or [], enabled=True)
+    if args.json:
+        print(json.dumps(bundle.to_state(), indent=2))
+        return 0
+    print("sources: " + (", ".join(bundle.sources) or "(none configured)"))
+    rows = [
+        {
+            "file": f.rel,
+            "chars": f"{len(f.text):,}",
+            "of": f"{f.bytes_total:,}" if f.truncated else "",
+        }
+        for f in bundle.files
+    ]
+    print(_table(rows, ["file", "chars", "of"]))
+    for note in bundle.skipped:
+        print(f"omitted: {note}")
+    print(f"\n{bundle.summary()}")
+    print(
+        "\nThese excerpts are included in the prompt for the draft, design and discover "
+        "workflows.\nEdit `context.sources` in research/config.md to change the list, or pass "
+        "--no-context\nto a single agent call."
+    )
+    return 0
+
+
 def cmd_goal_list(args: argparse.Namespace) -> int:
     project = _project(args)
     forest = build(project)
@@ -146,6 +253,7 @@ def cmd_goal_show(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2, default=str))
     else:
         print(record.path.read_text(encoding="utf-8"))
+        _print_unset(project, record)
     return 0
 
 
@@ -379,6 +487,34 @@ def cmd_runs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _context_choice(args: argparse.Namespace) -> bool | None:
+    """None means "whatever this workflow does by default"."""
+    if getattr(args, "no_context", False):
+        return False
+    if getattr(args, "context", None):
+        return True
+    return None
+
+
+def _warn_unset_goal(project: Any, goal_id: str) -> None:
+    """A goal with holes in its protocol produces work that cannot be promoted. Say so first."""
+    record = load_goals(project).get(goal_id)
+    if record is None:
+        return
+    markers = unset_markers(record)
+    if not markers:
+        return
+    print(
+        _red(
+            f"warning: goal '{goal_id}' has {len(markers)} unset value(s) in its record. "
+            "Gate condition 4\n"
+            "         compares a run against this goal's evaluation protocol, so anything "
+            "designed now\n"
+            "         may be unpromotable. `hiraku-auto goal show " + goal_id + "` lists them.\n"
+        )
+    )
+
+
 def cmd_agent(args: argparse.Namespace) -> int:
     project = _project(args)
     command = agent_mod.agent_command(args.agent_cmd) if args.agent_cmd else None
@@ -387,8 +523,17 @@ def cmd_agent(args: argparse.Namespace) -> int:
         command=command,
         dry_run=args.dry_run,
         apply=not args.no_apply,
+        use_context=_context_choice(args),
+        extra_context=args.context or [],
         timeout=args.timeout,
     )
+    if args.workflow in {"design", "discover"} and not args.dry_run:
+        _warn_unset_goal(project, args.target)
+    if args.workflow == "draft":
+        raise HirakuError(
+            "Drafting a goal is `hiraku-auto goal draft <id> --question \"...\"` — it needs the "
+            "question, which this command has nowhere to put."
+        )
     if args.workflow == "design":
         result = agent_mod.run_design(project, args.target, **kwargs)
     elif args.workflow == "discover":
@@ -403,6 +548,8 @@ def cmd_agent(args: argparse.Namespace) -> int:
     if args.dry_run:
         print(result.prompt)
         return 0
+    if result.context:
+        print(result.context.summary())
     if args.show_raw:
         print(result.raw)
     if result.data.get("blocked"):
@@ -778,6 +925,38 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--gate-metric", help="a metric that must not degrade (e.g. completion_rate)")
     p.add_argument("--question")
     p.set_defaults(func=cmd_goal_add)
+    p = goal.add_parser(
+        "draft",
+        help="write the goal record with the agent, from a question and the project's own files",
+    )
+    p.add_argument("id")
+    p.add_argument("--question", help="the research question, in your own words")
+    p.add_argument("--question-file", metavar="PATH", help="read the question from a file")
+    p.add_argument(
+        "--revise",
+        action="store_true",
+        help="rewrite an existing goal's drafted sections, keeping its History",
+    )
+    p.add_argument(
+        "--with-experiments",
+        action="store_true",
+        help="also create the agent's suggested first experiments, as proposed nodes",
+    )
+    p.add_argument("--instruction", help="extra context for the agent")
+    p.add_argument(
+        "--context",
+        action="append",
+        metavar="PATH",
+        help="an extra file or glob to send along; repeatable",
+    )
+    p.add_argument(
+        "--no-context", action="store_true", help="send no project files at all"
+    )
+    p.add_argument("--agent-cmd", help=f"default: {agent_mod.DEFAULT_AGENT_CMD!r}")
+    p.add_argument("--dry-run", action="store_true", help="print the prompt, call nothing")
+    p.add_argument("--no-apply", action="store_true", help="call the agent but write no files")
+    p.add_argument("--timeout", type=int, default=agent_mod.DEFAULT_TIMEOUT, help="seconds")
+    p.set_defaults(func=cmd_goal_draft)
     p = goal.add_parser("list", help="one row per goal, with node and run counts")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=cmd_goal_list)
@@ -839,6 +1018,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("sync", help="regenerate Children sections from parent links")
     p.set_defaults(func=cmd_sync)
 
+    p = sub.add_parser(
+        "context", help="list the project files the agent would be given, before sending any"
+    )
+    p.add_argument(
+        "--add", action="append", metavar="PATH", help="also resolve this file or glob"
+    )
+    p.add_argument("--json", action="store_true", help="the bundle exactly as the agent sees it")
+    p.set_defaults(func=cmd_context)
+
     p = sub.add_parser("launch", help="run an entrypoint and record the run")
     p.add_argument("target", metavar="EXPERIMENT:ENTRYPOINT")
     p.add_argument(
@@ -862,6 +1050,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("workflow", choices=list(agent_mod.WORKFLOWS))
     p.add_argument("target", help="goal id for design/discover; experiment id for triage/analyze")
     p.add_argument("--instruction", help="extra context for the agent")
+    p.add_argument(
+        "--context",
+        action="append",
+        metavar="PATH",
+        help="an extra project file or glob to send along; repeatable",
+    )
+    p.add_argument(
+        "--no-context",
+        action="store_true",
+        help="send no project files (design and discover send them by default)",
+    )
     p.add_argument("--agent-cmd", help=f"default: {agent_mod.DEFAULT_AGENT_CMD!r}")
     p.add_argument("--dry-run", action="store_true", help="print the prompt, call nothing")
     p.add_argument("--no-apply", action="store_true", help="call the agent but write no files")

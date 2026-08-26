@@ -260,6 +260,117 @@ def create_goal(
     return path
 
 
+PROTOCOL_PARTS: tuple[tuple[str, str], ...] = (
+    ("dataset", "Dataset and version"),
+    ("splits", "Splits"),
+    ("metrics", "Metrics"),
+    ("seeds", "Seeds"),
+    ("held_fixed", "Held fixed"),
+)
+
+PROTOCOL_PREAMBLE = (
+    "Fixed **before** any run, and inherited unchanged by every experiment under this goal. An "
+    "experiment needing a different protocol is answering a different question and belongs under a "
+    "different goal.\n"
+)
+
+
+def _protocol_markdown(protocol: dict[str, Any]) -> str:
+    """The five-part protocol, always all five, with a marker where a part is missing.
+
+    A protocol that quietly omits `seeds` looks complete. One that says `**[UNSET: seeds]**` in the
+    same place cannot be mistaken for a decision anybody made.
+    """
+    lines = [PROTOCOL_PREAMBLE]
+    for key, label in PROTOCOL_PARTS:
+        value = str(protocol.get(key) or "").strip()
+        if not value:
+            value = f"**[UNSET: {label.lower()} — the agent returned nothing for this]**"
+        lines.append(f"### {label}\n\n{value}\n")
+    lines.append(
+        "Changing anything here invalidates every comparison already made under this goal."
+    )
+    return "\n".join(lines)
+
+
+def apply_goal_draft(
+    project: Project,
+    goal_id: str,
+    data: dict[str, Any],
+    *,
+    revise: bool = False,
+) -> Path:
+    """Write a goal record from a `draft` reply.
+
+    Creating is the normal path. `revise` rewrites the drafted sections of an existing goal while
+    keeping its History, so a second draft after filling in some UNSET markers is not a data loss.
+    """
+    validate_id(goal_id, "Goal ID")
+    path = goal_path(project, goal_id)
+    direction = str(data.get("direction") or "minimize")
+    if direction not in {"minimize", "maximize"}:
+        direction = "minimize"
+
+    created = not path.exists()
+    if not created:
+        if not revise:
+            raise HirakuError(
+                f"Goal '{goal_id}' already exists ({project.rel(path)}). Pass --revise to rewrite "
+                f"its drafted sections, or draft under a different id."
+            )
+        record = read_record(path)
+        record.append_section("History", f"- {today()} — goal redrafted from the question.")
+    else:
+        create_goal(
+            project,
+            goal_id,
+            primary_metric=str(data.get("primary_metric") or "metric"),
+            direction=direction,
+            target=data.get("target"),
+            gate_metric=data.get("gate_metric") or None,
+            title=str(data.get("title") or "") or None,
+        )
+        record = read_record(path)
+
+    record.front["primary_metric"] = str(data.get("primary_metric") or "metric")
+    record.front["direction"] = direction
+    if data.get("target") is not None:
+        record.front["target"] = data["target"]
+    if data.get("gate_metric"):
+        record.front["gate_metric"] = str(data["gate_metric"])
+
+    for key, section in (
+        ("question", "Question"),
+        ("why_it_matters", "Why it matters"),
+        ("success_criterion", "Success criterion"),
+        ("out_of_scope", "Out of scope"),
+        ("open_threads", "Open threads"),
+    ):
+        value = str(data.get(key) or "").strip()
+        if value:
+            record.set_section(section, value)
+
+    protocol = data.get("evaluation_protocol")
+    if isinstance(protocol, dict):
+        record.set_section("Evaluation protocol", _protocol_markdown(protocol))
+
+    if created:
+        record.append_section(
+            "History", f"- {today()} — drafted by the agent from the researcher's question."
+        )
+
+    grounding = data.get("grounding")
+    if isinstance(grounding, list) and grounding:
+        lines = ["**Drafted from the project's own files.**", ""]
+        for item in grounding:
+            if isinstance(item, dict) and item.get("claim"):
+                lines.append(f"- {item['claim']} — `{item.get('source', 'unattributed')}`")
+        record.append_section("History", "\n".join(lines))
+
+    write_record(record, GOAL_KEYS)
+    return path
+
+
 def create_experiment(
     project: Project,
     experiment_id: str,

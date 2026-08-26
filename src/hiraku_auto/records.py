@@ -17,6 +17,22 @@ from .errors import HirakuError
 
 ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
+# A value nobody has supplied yet, written in place rather than guessed. The marker exists so that
+# "we don't know the dataset checksum" survives as a fact in the record instead of being smoothed
+# over by a plausible sentence — `check` reports it, and the report prints it.
+UNSET_PATTERN = re.compile(r"\*\*\[UNSET:\s*([^\]]*?)\s*\]\*\*")
+
+
+def unset_markers(record: Record) -> list[tuple[str, str]]:
+    """Every `**[UNSET: ...]**` in a record, as (section name, what is needed)."""
+    found: list[tuple[str, str]] = []
+    for name, text in record.sections.items():
+        found += [(name, m.group(1)) for m in UNSET_PATTERN.finditer(text)]
+    for key, value in record.front.items():
+        if isinstance(value, str):
+            found += [(f"front matter `{key}`", m.group(1)) for m in UNSET_PATTERN.finditer(value)]
+    return found
+
 KINDS = ("baseline", "hypothesis", "diagnostic", "ablation", "combination")
 STATUSES = ("proposed", "approved", "running", "concluded", "abandoned")
 VERDICTS = ("supports", "refutes", "inconclusive")

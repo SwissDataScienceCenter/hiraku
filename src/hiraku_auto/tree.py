@@ -20,6 +20,7 @@ from .records import (
     load_experiments,
     load_goals,
     load_proposals,
+    unset_markers,
 )
 from .runs import RunTable, read_runs
 
@@ -219,6 +220,13 @@ def check(forest: Forest) -> list[str]:
                 break
             seen.add(cursor)
             cursor = nodes[cursor].parent
+
+    # Values nobody has supplied yet. These are the ones that make a run unpromotable no matter how
+    # well it goes: gate condition 4 compares the run against the goal's evaluation protocol, and a
+    # protocol with a hole in it has nothing to compare against.
+    for goal_id, record in goals.items():
+        for section, needed in unset_markers(record):
+            issues.append(f"{goal_id}: unset in '{section}' — {needed}")
 
     known = set(nodes)
     for row in forest.table.rows:

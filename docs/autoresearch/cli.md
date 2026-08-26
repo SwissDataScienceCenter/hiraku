@@ -64,10 +64,18 @@ Every command also takes `--project <path>`, so you can drive a project without 
 hiraku-auto init ~/PycharmProjects/natix-research --git --name "NATIX VO"
 cd ~/PycharmProjects/natix-research
 
+# Either write the goal yourself...
 hiraku-auto goal add vo-backend-selection \
   --metric ate_rmse_m --direction minimize --target 3.0 \
   --gate-metric completion_rate \
   --question "Which VO backend produces usable trajectories on NATIX video?"
+
+# ...or let the agent draft it from your question and the project's own files, then review it.
+# Values it cannot ground come back as **[UNSET: ...]** markers instead of guesses.
+hiraku-auto context                       # what the agent will be allowed to read
+hiraku-auto goal draft vo-backend-selection \
+  --question "which VO backend works on our NATIX dashcam video? OccAny is the current one"
+hiraku-auto goal show vo-backend-selection   # lists what is still unset
 
 hiraku-auto exp create occany-baseline --goal vo-backend-selection --kind baseline \
   --status approved --expectation "OccAny defines the reference every backend is measured against."
@@ -268,6 +276,7 @@ hiraku-auto launch vggt-omega:train --commit HEAD --seed 1   # writes to the sha
 ## Calling the agent
 
 ```bash
+hiraku-auto goal draft     vo-backend-selection --question "..."   # write the goal record
 hiraku-auto agent design   vo-backend-selection      # propose the tree for a goal
 hiraku-auto agent analyze  vggt-omega                # write findings from the runs
 hiraku-auto agent triage   rig-camera-vo             # classify a failure, decide on a child
@@ -276,6 +285,24 @@ hiraku-auto agent discover vo-backend-selection      # literature -> proposals
 
 Default command is `claude -p <prompt>`. Override with `--agent-cmd` or `HIRAKU_AGENT_CMD`
 (`codex exec`, a local model, anything that reads a prompt argument and prints a reply).
+
+### Web access
+
+`claude -p` starts with no tools permitted, so `discover` will search nothing and cite only what the
+model already believed — it says so in its `notes`, and those citations are unverified. To let it
+actually read:
+
+```bash
+hiraku-auto agent discover <goal> --agent-cmd 'claude -p --allowedTools WebSearch,WebFetch'
+export HIRAKU_AGENT_CMD='claude -p --allowedTools WebSearch,WebFetch'   # or set it once
+```
+
+### Project context
+
+`draft`, `design` and `discover` also send excerpts of the project's own files — `CLAUDE.md`, the
+README, `docs/**` — so the agent uses your definitions instead of asking for them. Run
+`hiraku-auto context` to see exactly what would be sent before the first call; `--context PATH` adds
+a file, `--no-context` sends none. Full details in [goal-drafting.md](goal-drafting.md).
 
 ### Authentication and cost
 
@@ -414,7 +441,7 @@ The complete, generated reference with every flag is [commands.md](commands.md).
 
 ```
 init                                   create a project
-goal add|list|show                     research questions
+goal add|draft|list|show               research questions; draft writes one with the agent
 exp create|list|show|set               experiments; --parent makes it a child
 tree [--goal] [--json]                 the tree
 check [--strict]                       validate records and the run table
@@ -422,6 +449,7 @@ sync                                   regenerate Children sections
 launch <exp>:<entrypoint> [--commit]   run and record
 runs [<exp>] [--sort M --ascending]    list or rank
 agent design|analyze|triage|discover   call the agent
+context [--add PATH] [--json]          project files the agent would be given
 next <goal>                            what the loop would do next
 loop <goal> [--launch <entrypoint>]    bounded loop
 promote <exp> --run <id>               the promotion gate

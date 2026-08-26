@@ -35,14 +35,14 @@ Guides: [cli.md](cli.md) for the walkthrough and the environment/container setup
 ### `hiraku-auto --help`
 ```
 usage: hiraku-auto [-h] [--project PROJECT]
-                   {init,goal,exp,tree,check,sync,launch,runs,agent,next,loop,promote,proposal,worktree,report,dash,ui}
+                   {init,goal,exp,tree,check,sync,context,launch,runs,agent,next,loop,promote,proposal,worktree,report,dash,ui}
                    ...
 
 Autoresearch over a Hiraku experiment tree: goals, parallel hypotheses,
 failure triage, a gated leaderboard, and an agent that designs and analyses.
 
 positional arguments:
-  {init,goal,exp,tree,check,sync,launch,runs,agent,next,loop,promote,proposal,worktree,report,dash,ui}
+  {init,goal,exp,tree,check,sync,context,launch,runs,agent,next,loop,promote,proposal,worktree,report,dash,ui}
     init                create a research project (in its own directory)
     goal                research questions: the metric, the target, the
                         evaluation protocol
@@ -51,6 +51,8 @@ positional arguments:
     tree                render the experiment tree
     check               validate every record and the run table
     sync                regenerate Children sections from parent links
+    context             list the project files the agent would be given,
+                        before sending any
     launch              run an entrypoint and record the run
     runs                list or rank runs
     agent               call Claude Code to design, triage, discover or
@@ -91,16 +93,18 @@ options:
 
 ### `hiraku-auto goal --help`
 ```
-usage: hiraku-auto goal [-h] {add,list,show} ...
+usage: hiraku-auto goal [-h] {add,draft,list,show} ...
 
 positional arguments:
-  {add,list,show}
-    add            create a goal
-    list           one row per goal, with node and run counts
-    show           print a goal record
+  {add,draft,list,show}
+    add                 create a goal
+    draft               write the goal record with the agent, from a question
+                        and the project's own files
+    list                one row per goal, with node and run counts
+    show                print a goal record
 
 options:
-  -h, --help       show this help message and exit
+  -h, --help            show this help message and exit
 ```
 
 ### `hiraku-auto goal add --help`
@@ -122,6 +126,38 @@ options:
   --gate-metric GATE_METRIC
                         a metric that must not degrade (e.g. completion_rate)
   --question QUESTION
+```
+
+### `hiraku-auto goal draft --help`
+```
+usage: hiraku-auto goal draft [-h] [--question QUESTION]
+                              [--question-file PATH] [--revise]
+                              [--with-experiments] [--instruction INSTRUCTION]
+                              [--context PATH] [--no-context]
+                              [--agent-cmd AGENT_CMD] [--dry-run] [--no-apply]
+                              [--timeout TIMEOUT]
+                              id
+
+positional arguments:
+  id
+
+options:
+  -h, --help            show this help message and exit
+  --question QUESTION   the research question, in your own words
+  --question-file PATH  read the question from a file
+  --revise              rewrite an existing goal's drafted sections, keeping
+                        its History
+  --with-experiments    also create the agent's suggested first experiments,
+                        as proposed nodes
+  --instruction INSTRUCTION
+                        extra context for the agent
+  --context PATH        an extra file or glob to send along; repeatable
+  --no-context          send no project files at all
+  --agent-cmd AGENT_CMD
+                        default: 'claude -p'
+  --dry-run             print the prompt, call nothing
+  --no-apply            call the agent but write no files
+  --timeout TIMEOUT     seconds
 ```
 
 ### `hiraku-auto goal list --help`
@@ -266,6 +302,16 @@ options:
   -h, --help  show this help message and exit
 ```
 
+### `hiraku-auto context --help`
+```
+usage: hiraku-auto context [-h] [--add PATH] [--json]
+
+options:
+  -h, --help  show this help message and exit
+  --add PATH  also resolve this file or glob
+  --json      the bundle exactly as the agent sees it
+```
+
 ### `hiraku-auto launch --help`
 ```
 usage: hiraku-auto launch [-h] [--commit REF] [--seed SEED] [--dry-run]
@@ -300,13 +346,13 @@ options:
 
 ### `hiraku-auto agent --help`
 ```
-usage: hiraku-auto agent [-h] [--instruction INSTRUCTION]
-                         [--agent-cmd AGENT_CMD] [--dry-run] [--no-apply]
-                         [--show-raw] [--timeout TIMEOUT]
-                         {design,triage,discover,analyze} target
+usage: hiraku-auto agent [-h] [--instruction INSTRUCTION] [--context PATH]
+                         [--no-context] [--agent-cmd AGENT_CMD] [--dry-run]
+                         [--no-apply] [--show-raw] [--timeout TIMEOUT]
+                         {draft,design,triage,discover,analyze} target
 
 positional arguments:
-  {design,triage,discover,analyze}
+  {draft,design,triage,discover,analyze}
   target                goal id for design/discover; experiment id for
                         triage/analyze
 
@@ -314,6 +360,10 @@ options:
   -h, --help            show this help message and exit
   --instruction INSTRUCTION
                         extra context for the agent
+  --context PATH        an extra project file or glob to send along;
+                        repeatable
+  --no-context          send no project files (design and discover send them
+                        by default)
   --agent-cmd AGENT_CMD
                         default: 'claude -p'
   --dry-run             print the prompt, call nothing

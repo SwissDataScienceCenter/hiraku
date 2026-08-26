@@ -9,6 +9,17 @@ bounds:
 promotion:
   reproduction_seeds: 1
   agreement_tolerance: 0.01
+context:
+  sources:
+    - CLAUDE.md
+    - AGENTS.md
+    - README.md
+    - docs/**/*.md
+    - notes/**/*.md
+    - research/config.md
+  max_files: 40
+  max_bytes_per_file: 20000
+  max_total_bytes: 200000
 ---
 
 # Research configuration
@@ -47,6 +58,18 @@ the first time it is inconvenient.
 - `reproduction_seeds` — additional seeds required before a result reaches `leaderboard.md`
 - `agreement_tolerance` — how far the reproduction may differ and still count
 - Sign-off: who or what signs off in `guided` and in `auto`
+
+## Context
+
+The files in `context.sources` are excerpted into the agent's prompt for the `draft`, `design` and
+`discover` workflows, so it knows this project's terms rather than asking you what they mean. Run
+`hiraku-auto context` to see exactly what would be sent, and trim this list if anything there should
+not leave the machine. `context: {sources: []}` turns it off entirely.
+
+Point it at whatever already describes the project: the memory file the coding agent reads, the
+README, design notes, a metric definitions page. Source trees are not swept — name a specific file
+with `hiraku-auto agent design <goal> --context src/pipeline.py` when a module is the thing that
+needs reading.
 
 ## Data
 

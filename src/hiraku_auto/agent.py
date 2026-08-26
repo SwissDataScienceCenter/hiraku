@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import context as context_mod
 from .config import Project
 from .errors import AgentError, HirakuError
 from .prompts import PROMPT_DIR
@@ -32,15 +33,23 @@ from .records import (
     load_experiment,
     load_goal,
     save_experiment,
+    validate_id,
 )
 from .runs import best
-from .scaffold import create_experiment, create_proposal, today
+from .scaffold import apply_goal_draft, create_experiment, create_proposal, today
 from .tree import Forest, build, to_dict
 
 DEFAULT_AGENT_CMD = "claude -p"
 DEFAULT_TIMEOUT = 900
 
-WORKFLOWS = ("design", "triage", "discover", "analyze")
+WORKFLOWS = ("draft", "design", "triage", "discover", "analyze")
+
+# Where reading the project's own files earns its place in the prompt. `draft` and `design` are
+# writing the terms the rest of the loop inherits, and `discover` is judging whether an outside
+# idea applies here — all three are worse without the project's own definitions. `triage` and
+# `analyze` reason about runs that already happened, where the run table is the evidence and extra
+# prose is dead weight; pass --context there if a particular file is genuinely needed.
+CONTEXT_BY_DEFAULT = ("draft", "design", "discover")
 
 
 @dataclass
@@ -50,6 +59,7 @@ class AgentRun:
     raw: str = ""
     data: dict[str, Any] = field(default_factory=dict)
     written: list[Path] = field(default_factory=list)
+    context: context_mod.Bundle = field(default_factory=context_mod.Bundle)
 
 
 # --------------------------------------------------------------------------- prompt assembly
@@ -61,6 +71,30 @@ def agent_command(override: str | None = None) -> list[str]:
     if not parts:
         raise AgentError("Agent command is empty.")
     return parts
+
+
+def gather_context(
+    project: Project,
+    workflow: str,
+    *,
+    use: bool | None = None,
+    extra: list[str] | None = None,
+) -> context_mod.Bundle:
+    """The project's own files, for the workflows that are better for having read them.
+
+    `use=None` means "whatever this workflow does by default"; True and False are the explicit
+    `--context` / `--no-context` answers and always win.
+    """
+    enabled = (workflow in CONTEXT_BY_DEFAULT) if use is None else use
+    if extra and use is not False:
+        enabled = True
+    return context_mod.collect(project, extra=list(extra or []), enabled=enabled)
+
+
+def attach_context(state: dict[str, Any], bundle: context_mod.Bundle) -> dict[str, Any]:
+    if bundle:
+        state["project_context"] = bundle.to_state()
+    return state
 
 
 def build_prompt(
@@ -228,6 +262,101 @@ def _require(data: dict[str, Any], key: str, kind: type) -> Any:
     return value
 
 
+def run_draft(
+    project: Project,
+    goal_id: str,
+    question: str,
+    *,
+    instruction: str = "",
+    command: list[str] | None = None,
+    dry_run: bool = False,
+    apply: bool = True,
+    revise: bool = False,
+    with_experiments: bool = False,
+    use_context: bool | None = None,
+    extra_context: list[str] | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> AgentRun:
+    """Turn a question in the researcher's own words into a goal record they can review.
+
+    This is the step that used to be a blank template. The agent reads the project's own files,
+    writes the metric, the success criterion and the five-part evaluation protocol, and marks with
+    `**[UNSET: ...]**` every value it could not ground — so what reaches the researcher is a draft
+    to correct rather than a form to fill.
+    """
+    validate_id(goal_id, "Goal ID")
+    if not question.strip():
+        raise HirakuError("A question is required: pass --question, or --question-file.")
+
+    forest = build(project)
+    bundle = gather_context(project, "draft", use=use_context, extra=extra_context)
+    existing = forest.goals.get(goal_id)
+    state = attach_context(
+        {
+            "task": "draft a goal record",
+            "goal_id": goal_id,
+            "researcher_question": question.strip(),
+            "existing_goal": (
+                {"front": existing.front, "sections": existing.sections} if existing else None
+            ),
+            "other_goals": {
+                gid: {
+                    "primary_metric": record.front.get("primary_metric"),
+                    "question": record.section("Question")[:400],
+                }
+                for gid, record in forest.goals.items()
+                if gid != goal_id
+            },
+            "project_bounds": _project_front(project).get("bounds", {}),
+        },
+        bundle,
+    )
+    prompt = build_prompt("draft", state, instruction=instruction, project=project)
+    result = AgentRun(workflow="draft", prompt=prompt, context=bundle)
+    if dry_run:
+        return result
+
+    result.raw = call_agent(prompt, command=command, timeout=timeout, cwd=project.root)
+    result.data = extract_json(result.raw)
+    if not result.data.get("primary_metric"):
+        raise AgentError("Agent reply is missing a valid 'primary_metric' (str).")
+    if not apply:
+        return result
+
+    result.written.append(apply_goal_draft(project, goal_id, result.data, revise=revise))
+
+    if with_experiments:
+        for item in result.data.get("first_experiments") or []:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            path = create_experiment(
+                project,
+                str(item["id"]),
+                goal=goal_id,
+                kind=str(item.get("kind") or "hypothesis"),
+                status="proposed",
+                origin="agent-diagnostic",
+                expectation=str(item.get("expectation") or ""),
+                scope=str(item.get("scope") or ""),
+            )
+            record = load_experiment(project, str(item["id"]))
+            if item.get("rationale"):
+                record.append_section(
+                    "Decisions and next steps", f"**Why this node exists.** {item['rationale']}"
+                )
+            save_experiment(record)
+            result.written.append(path)
+    return result
+
+
+def _project_front(project: Project) -> dict[str, Any]:
+    if not project.config_md.is_file():
+        return {}
+    from .records import read_record
+
+    return read_record(project.config_md).front
+
+
 def run_design(
     project: Project,
     goal_id: str,
@@ -236,14 +365,20 @@ def run_design(
     command: list[str] | None = None,
     dry_run: bool = False,
     apply: bool = True,
+    use_context: bool | None = None,
+    extra_context: list[str] | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     forest = build(project)
     load_goal(project, goal_id)
+    bundle = gather_context(project, "design", use=use_context, extra=extra_context)
     prompt = build_prompt(
-        "design", slim_state(forest, goal=goal_id), instruction=instruction, project=project
+        "design",
+        attach_context(slim_state(forest, goal=goal_id), bundle),
+        instruction=instruction,
+        project=project,
     )
-    result = AgentRun(workflow="design", prompt=prompt)
+    result = AgentRun(workflow="design", prompt=prompt, context=bundle)
     if dry_run:
         return result
 
@@ -287,19 +422,22 @@ def run_triage(
     command: list[str] | None = None,
     dry_run: bool = False,
     apply: bool = True,
+    use_context: bool | None = None,
+    extra_context: list[str] | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     forest = build(project)
     if experiment_id not in forest.nodes:
         raise HirakuError(f"Experiment '{experiment_id}' does not exist.")
     node = forest.nodes[experiment_id]
+    bundle = gather_context(project, "triage", use=use_context, extra=extra_context)
     prompt = build_prompt(
         "triage",
-        slim_state(forest, goal=node.goal, focus=experiment_id),
+        attach_context(slim_state(forest, goal=node.goal, focus=experiment_id), bundle),
         instruction=instruction,
         project=project,
     )
-    result = AgentRun(workflow="triage", prompt=prompt)
+    result = AgentRun(workflow="triage", prompt=prompt, context=bundle)
     if dry_run:
         return result
 
@@ -371,14 +509,20 @@ def run_discover(
     command: list[str] | None = None,
     dry_run: bool = False,
     apply: bool = True,
+    use_context: bool | None = None,
+    extra_context: list[str] | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     forest = build(project)
     load_goal(project, goal_id)
+    bundle = gather_context(project, "discover", use=use_context, extra=extra_context)
     prompt = build_prompt(
-        "discover", slim_state(forest, goal=goal_id), instruction=instruction, project=project
+        "discover",
+        attach_context(slim_state(forest, goal=goal_id), bundle),
+        instruction=instruction,
+        project=project,
     )
-    result = AgentRun(workflow="discover", prompt=prompt)
+    result = AgentRun(workflow="discover", prompt=prompt, context=bundle)
     if dry_run:
         return result
 
@@ -419,6 +563,8 @@ def run_analyze(
     command: list[str] | None = None,
     dry_run: bool = False,
     apply: bool = True,
+    use_context: bool | None = None,
+    extra_context: list[str] | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     forest = build(project)
@@ -427,13 +573,14 @@ def run_analyze(
     node = forest.nodes[experiment_id]
     if not node.runs:
         raise HirakuError(f"'{experiment_id}' has no runs to analyse.")
+    bundle = gather_context(project, "analyze", use=use_context, extra=extra_context)
     prompt = build_prompt(
         "analyze",
-        slim_state(forest, goal=node.goal, focus=experiment_id),
+        attach_context(slim_state(forest, goal=node.goal, focus=experiment_id), bundle),
         instruction=instruction,
         project=project,
     )
-    result = AgentRun(workflow="analyze", prompt=prompt)
+    result = AgentRun(workflow="analyze", prompt=prompt, context=bundle)
     if dry_run:
         return result
 

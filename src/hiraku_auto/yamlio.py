@@ -45,18 +45,44 @@ def _scalar(raw: str) -> Any:
         return text
 
 
+def _child_is_a_list(lines: list[str], index: int, indent: int) -> bool:
+    """Look ahead from a `key:` line: does a block sequence follow, or a nested mapping?
+
+    YAML allows a sequence's items at the key's own indent as well as deeper, so the indent alone
+    cannot decide it.
+    """
+    for line in lines[index + 1 :]:
+        child_indent = len(line) - len(line.lstrip())
+        if child_indent > indent:
+            return line.strip().startswith("- ")
+        if child_indent == indent:
+            return line.strip().startswith("- ")
+        return False
+    return False
+
+
 def _fallback_load(text: str) -> dict[str, Any]:
     root: dict[str, Any] = {}
     stack: list[tuple[int, Any]] = [(-1, root)]
-    for line in text.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
+    lines = [
+        line
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    for index, line in enumerate(lines):
         indent = len(line) - len(line.lstrip())
         stripped = line.strip()
-        while len(stack) > 1 and indent <= stack[-1][0]:
+        item = stripped.startswith("- ")
+        while len(stack) > 1:
+            depth, container = stack[-1]
+            if indent > depth:
+                break
+            # A sequence item at its key's own indent still belongs to that sequence.
+            if indent == depth and item and isinstance(container, list):
+                break
             stack.pop()
         container = stack[-1][1]
-        if stripped.startswith("- "):
+        if item:
             if isinstance(container, list):
                 container.append(_scalar(stripped[2:]))
             continue
@@ -65,7 +91,7 @@ def _fallback_load(text: str) -> dict[str, Any]:
         key, _, rest = stripped.partition(":")
         key, rest = key.strip(), rest.strip()
         if rest == "":
-            child: dict[str, Any] = {}
+            child: Any = [] if _child_is_a_list(lines, index, indent) else {}
             container[key] = child
             stack.append((indent, child))
         else:
