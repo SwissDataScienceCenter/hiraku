@@ -1,0 +1,4 @@
+tasks_dir: tasks
+templates_dir: .hiraku/templates
+default_template: guided
+tracking_backend: table

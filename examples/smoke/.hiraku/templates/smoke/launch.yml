@@ -1,0 +1,6 @@
+entrypoints:
+  train:
+    command: ["uv", "run", "python", "train.py"]
+    args:
+      seed: 1
+    cwd: "."
