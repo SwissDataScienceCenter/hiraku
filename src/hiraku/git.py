@@ -14,9 +14,7 @@ class GitAdapter:
         self.root = root
 
     def _run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-        result = subprocess.run(
-            ["git", *args], cwd=self.root, text=True, capture_output=True, check=False
-        )
+        result = subprocess.run(["git", *args], cwd=self.root, text=True, capture_output=True, check=False)
         if check and result.returncode:
             detail = result.stderr.strip() or result.stdout.strip() or "Git command failed."
             raise HirakuError(detail)
@@ -43,10 +41,7 @@ class GitAdapter:
         return result.stdout.strip()
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
-        return (
-            self._run("merge-base", "--is-ancestor", ancestor, descendant, check=False).returncode
-            == 0
-        )
+        return self._run("merge-base", "--is-ancestor", ancestor, descendant, check=False).returncode == 0
 
     def current_branch(self) -> str:
         result = self._run("symbolic-ref", "--quiet", "--short", "HEAD", check=False)

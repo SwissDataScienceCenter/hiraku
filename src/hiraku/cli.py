@@ -79,17 +79,21 @@ def goal_create(
 ) -> None:
     """Create a Goal and import its launch manifest."""
     result = execute(
-        lambda: core().goals.create(
-            goal_id,
-            metric,
-            direction,
-            launch,
-            title=title,
-            objective=objective,
-            target=target,
-            evaluation_protocol=protocol,
-            constraints=constraint or [],
-        ).to_dict()
+        lambda: (
+            core()
+            .goals.create(
+                goal_id,
+                metric,
+                direction,
+                launch,
+                title=title,
+                objective=objective,
+                target=target,
+                evaluation_protocol=protocol,
+                constraints=constraint or [],
+            )
+            .to_dict()
+        )
     )
     output(result, json_output)
 
@@ -103,15 +107,17 @@ def goal_list(json_output: Annotated[bool, typer.Option("--json")] = False) -> N
     table = Table("Goal", "Metric", "Direction", "Baseline", "Status")
     for goal in values:
         table.add_row(
-            goal["id"], goal["metric"], goal["direction"], goal["baseline_commit"][:12], goal["status"]
+            goal["id"],
+            goal["metric"],
+            goal["direction"],
+            goal["baseline_commit"][:12],
+            goal["status"],
         )
     console.print(table)
 
 
 @goal_app.command("show")
-def goal_show(
-    goal_id: str, json_output: Annotated[bool, typer.Option("--json")] = False
-) -> None:
+def goal_show(goal_id: str, json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
     value = execute(lambda: core().goals.get(goal_id).to_dict())
     output(value if json_output else json.dumps(value, indent=2), json_output)
 
@@ -128,16 +134,20 @@ def goal_update(
     direction: Annotated[str | None, typer.Option()] = None,
 ) -> None:
     value = execute(
-        lambda: core().goals.update(
-            goal_id,
-            title=title,
-            objective=objective,
-            evaluation_protocol=protocol,
-            constraints=constraint,
-            launch_path=launch,
-            metric=metric,
-            direction=direction,
-        ).to_dict()
+        lambda: (
+            core()
+            .goals.update(
+                goal_id,
+                title=title,
+                objective=objective,
+                evaluation_protocol=protocol,
+                constraints=constraint,
+                launch_path=launch,
+                metric=metric,
+                direction=direction,
+            )
+            .to_dict()
+        )
     )
     output(value, True)
 
@@ -151,9 +161,7 @@ def experiment_create(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     value = execute(
-        lambda: core().experiments.create(
-            reference, hypothesis, kind=kind, parent=parent, origin="guided"
-        ).to_dict()
+        lambda: core().experiments.create(reference, hypothesis, kind=kind, parent=parent, origin="guided").to_dict()
     )
     if json_output:
         output(value, True)
@@ -176,24 +184,24 @@ def experiment_list(
     table = Table("Goal/Experiment", "Kind", "Parent", "Status", "Verdict", "Origin")
     for item in values:
         table.add_row(
-            f"{item['goal_id']}/{item['id']}", item["kind"], item["parent_id"] or "—",
-            item["status"], item["verdict"] or "—", item["origin"],
+            f"{item['goal_id']}/{item['id']}",
+            item["kind"],
+            item["parent_id"] or "—",
+            item["status"],
+            item["verdict"] or "—",
+            item["origin"],
         )
     console.print(table)
 
 
 @experiment_app.command("show")
-def experiment_show(
-    reference: str, json_output: Annotated[bool, typer.Option("--json")] = False
-) -> None:
+def experiment_show(reference: str, json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
     value = execute(lambda: core().experiments.get(reference).to_dict())
     output(value if json_output else json.dumps(value, indent=2), json_output)
 
 
 @experiment_app.command("tree")
-def experiment_tree(
-    goal_id: str, json_output: Annotated[bool, typer.Option("--json")] = False
-) -> None:
+def experiment_tree(goal_id: str, json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
     forest = execute(lambda: core().lineage.forest(goal_id))
     if json_output:
         output(forest, True)
@@ -259,7 +267,9 @@ def run_log(
         execute(lambda: (_ for _ in ()).throw(HirakuError("No active Run; pass --run-id.")))
     execute(
         lambda: core().runs.log(
-            active or "", _parse_assignments(param, "Parameter"), _parse_assignments(metric, "Metric")
+            active or "",
+            _parse_assignments(param, "Parameter"),
+            _parse_assignments(metric, "Metric"),
         )
     )
     console.print(f"Logged values for {active}.")
@@ -304,9 +314,15 @@ def runs_command(
         output(rows, True)
         return
     fields = ["_rank", "id", "experiment_id", "entrypoint", "status"]
-    dynamic = sorted({key for row in rows for key in row if key not in fields and key not in {
-        "goal_id", "commit_sha", "exit_code", "provenance", "started_at", "finished_at"
-    }})
+    dynamic = sorted(
+        {
+            key
+            for row in rows
+            for key in row
+            if key not in fields
+            and key not in {"goal_id", "commit_sha", "exit_code", "provenance", "started_at", "finished_at"}
+        }
+    )
     shown = [field for field in fields if any(field in row for row in rows)] + dynamic
     table = Table(*shown)
     for row in rows:

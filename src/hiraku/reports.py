@@ -86,8 +86,7 @@ class ReportService:
             for node in nodes:
                 marker = "  " * depth + "- "
                 lines.append(
-                    f"{marker}`{node['id']}` — {node['status']}"
-                    + (f" / {node['verdict']}" if node["verdict"] else "")
+                    f"{marker}`{node['id']}` — {node['status']}" + (f" / {node['verdict']}" if node["verdict"] else "")
                 )
                 render(node["children"], depth + 1)
 
@@ -101,8 +100,6 @@ class ReportService:
                 )
         lines.extend(["", "## Runs", ""])
         for run in snapshot["runs"]:
-            lines.append(
-                f"- `{run['id']}` — `{run['experiment_id']}` / {run['entrypoint']} / {run['status']}"
-            )
+            lines.append(f"- `{run['id']}` — `{run['experiment_id']}` / {run['entrypoint']} / {run['status']}")
         destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return destination

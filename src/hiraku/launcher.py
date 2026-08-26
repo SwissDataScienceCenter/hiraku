@@ -73,9 +73,7 @@ class Launcher:
             if not self.git.is_ancestor(experiment.parent_commit, commit) or not self.git.is_ancestor(
                 commit, experiment.branch
             ):
-                raise HirakuError(
-                    f"Commit {commit[:12]} is not a source revision on branch '{experiment.branch}'."
-                )
+                raise HirakuError(f"Commit {commit[:12]} is not a source revision on branch '{experiment.branch}'.")
             context = self.git.detached_worktree(commit)
         else:
             self.git.ensure_clean()
@@ -89,9 +87,7 @@ class Launcher:
             context = nullcontext(self.config.root)
 
         if experiment.evaluated_commit and experiment.evaluated_commit != commit:
-            raise HirakuError(
-                f"Experiment is frozen at {experiment.evaluated_commit[:12]}; requested {commit[:12]}."
-            )
+            raise HirakuError(f"Experiment is frozen at {experiment.evaluated_commit[:12]}; requested {commit[:12]}.")
 
         with context as execution_root:
             cwd = (execution_root / definition["cwd"]).resolve()
@@ -143,8 +139,6 @@ class Launcher:
                 self.runs.ingest_metrics_file(run_id, metrics_path)
             except HirakuError as exc:
                 with self.db.transaction() as connection:
-                    record_event(
-                        connection, "run", run_id, "metric_ingest_failed", {"error": str(exc)}
-                    )
+                    record_event(connection, "run", run_id, "metric_ingest_failed", {"error": str(exc)})
             self.runs.finalize(run_id, status, exit_code)
             return run_id, exit_code or 0

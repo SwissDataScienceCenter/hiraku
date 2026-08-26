@@ -74,8 +74,6 @@ def test_lineage_cycle_is_detected(project):
     app.experiments.freeze(first, app.git.head_commit())
     app.experiments.create("demo/second", "second", parent="demo/first")
     with app.db.transaction() as connection:
-        connection.execute(
-            "UPDATE experiments SET parent_id='second' WHERE goal_id='demo' AND id='first'"
-        )
+        connection.execute("UPDATE experiments SET parent_id='second' WHERE goal_id='demo' AND id='first'")
     with pytest.raises(HirakuError, match="cycle"):
         app.lineage.forest("demo")

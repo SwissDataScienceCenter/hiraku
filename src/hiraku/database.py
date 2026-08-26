@@ -124,9 +124,7 @@ class Database:
             if row is None:
                 connection.execute("INSERT INTO schema_version(version) VALUES (?)", (SCHEMA_VERSION,))
             elif row["version"] != SCHEMA_VERSION:
-                raise HirakuError(
-                    f"Unsupported state schema {row['version']}; expected {SCHEMA_VERSION}."
-                )
+                raise HirakuError(f"Unsupported state schema {row['version']}; expected {SCHEMA_VERSION}.")
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -150,7 +148,6 @@ def record_event(
     payload: dict[str, Any] | None = None,
 ) -> None:
     connection.execute(
-        "INSERT INTO events(entity_type, entity_id, event_type, payload_json, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO events(entity_type, entity_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
         (entity_type, entity_id, event_type, json.dumps(payload or {}, sort_keys=True), utc_now()),
     )

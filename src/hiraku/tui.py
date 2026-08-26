@@ -32,13 +32,9 @@ def run_tui(core: HirakuApp) -> None:
             tree: Tree[str] = Tree("Hiraku")
             tree.id = "lineage"
             for goal in goals:
-                goal_node = tree.root.add(
-                    f"{goal.title} [{goal.metric} {goal.direction}]", expand=True
-                )
+                goal_node = tree.root.add(f"{goal.title} [{goal.metric} {goal.direction}]", expand=True)
 
-                def add_experiments(
-                    parent_node: Any, nodes: list[dict[str, Any]], goal_id: str = goal.id
-                ) -> None:
+                def add_experiments(parent_node: Any, nodes: list[dict[str, Any]], goal_id: str = goal.id) -> None:
                     for experiment in nodes:
                         label = (
                             f"{experiment['id']} ({experiment['kind']}, {experiment['status']}, "
@@ -54,14 +50,22 @@ def run_tui(core: HirakuApp) -> None:
                             metrics = [
                                 f"{key}={value}"
                                 for key, value in run.items()
-                                if key not in {
-                                    "id", "goal_id", "experiment_id", "commit_sha", "entrypoint",
-                                    "status", "exit_code", "started_at", "finished_at", "provenance",
-                                } and not key.startswith("param/")
+                                if key
+                                not in {
+                                    "id",
+                                    "goal_id",
+                                    "experiment_id",
+                                    "commit_sha",
+                                    "entrypoint",
+                                    "status",
+                                    "exit_code",
+                                    "started_at",
+                                    "finished_at",
+                                    "provenance",
+                                }
+                                and not key.startswith("param/")
                             ]
-                            run_node = exp_node.add(
-                                f"{run['id']} {run['status']} " + ", ".join(metrics)
-                            )
+                            run_node = exp_node.add(f"{run['id']} {run['status']} " + ", ".join(metrics))
                             parameters = [
                                 f"{key.removeprefix('param/')}={value}"
                                 for key, value in run.items()
@@ -83,14 +87,12 @@ def run_tui(core: HirakuApp) -> None:
                 if proposals:
                     proposal_node = goal_node.add("Auto proposals", expand=True)
                     for proposal in proposals:
-                        proposal_node.add_leaf(
-                            f"{proposal['id']} → {proposal['experiment_id']} ({proposal['status']})"
-                        )
+                        proposal_node.add_leaf(f"{proposal['id']} → {proposal['experiment_id']} ({proposal['status']})")
             tree.root.expand()
             yield tree
             yield Static(
-                "Read-only projection of .hiraku/state.db\n\n"
-                "↑/↓ navigate  Enter expand/collapse\nq quit", id="help"
+                "Read-only projection of .hiraku/state.db\n\n↑/↓ navigate  Enter expand/collapse\nq quit",
+                id="help",
             )
             yield Footer()
 

@@ -29,8 +29,7 @@ class AutoService:
         return self.app.proposals.create(
             goal_id,
             f"auto-{number:03d}",
-            f"A bounded alternative implementation may improve {goal.metric} relative to "
-            "the immutable Goal baseline.",
+            f"A bounded alternative implementation may improve {goal.metric} relative to the immutable Goal baseline.",
         )
 
     def get_proposal(self, proposal_id: str) -> dict[str, Any]:
@@ -43,11 +42,7 @@ class AutoService:
         pending = self.app.proposals.list(goal_id, status="pending")
         proposal = pending[0] if pending else self.discover(goal_id)
         reference = f"{goal_id}/{proposal['experiment_id']}"
-        parent = (
-            f"{goal_id}/{proposal['parent_experiment_id']}"
-            if proposal["parent_experiment_id"]
-            else None
-        )
+        parent = f"{goal_id}/{proposal['parent_experiment_id']}" if proposal["parent_experiment_id"] else None
         try:
             experiment = self.app.experiments.create(
                 reference,
@@ -56,9 +51,7 @@ class AutoService:
                 origin="auto",
             )
         except HirakuError as exc:
-            self.app.events.record(
-                "proposal", proposal["id"], "implementation_failure", {"error": str(exc)}
-            )
+            self.app.events.record("proposal", proposal["id"], "implementation_failure", {"error": str(exc)})
             raise
         self.app.proposals.admit(proposal["id"], experiment.id)
         return experiment.to_dict()
@@ -79,20 +72,14 @@ class AutoService:
             raise HirakuError("Auto mode requires approved 'auto.allowed_entrypoints'.")
         implementation = goal.launch_manifest.get("auto", {}).get("implement")
         if not implementation:
-            raise HirakuError(
-                "Auto loop requires an approved fixed 'auto.implement' command in the Goal manifest."
-            )
+            raise HirakuError("Auto loop requires an approved fixed 'auto.implement' command in the Goal manifest.")
         deadline = time.monotonic() + time_budget.total_seconds()
         created = 0
         launched = 0
         failures = 0
         baseline = [item for item in self.app.experiments.list(goal_id) if item.kind == "baseline"]
-        if baseline and (
-            not baseline[0].evaluated_commit or not self.app.runs.rows(goal_id, baseline[0].id)
-        ):
-            raise HirakuError(
-                f"Baseline Experiment '{goal_id}/{baseline[0].id}' must be evaluated before auto mode."
-            )
+        if baseline and (not baseline[0].evaluated_commit or not self.app.runs.rows(goal_id, baseline[0].id)):
+            raise HirakuError(f"Baseline Experiment '{goal_id}/{baseline[0].id}' must be evaluated before auto mode.")
         if not baseline and time.monotonic() < deadline:
             reference = f"{goal_id}/auto-baseline"
             try:
@@ -107,15 +94,8 @@ class AutoService:
                 launched += 1
             except HirakuError as exc:
                 failures += 1
-                self.app.events.record(
-                    "experiment", reference, "execution_failure", {"error": str(exc)}
-                )
-        while (
-            failures == 0
-            and created < max_experiments
-            and launched < max_runs
-            and time.monotonic() < deadline
-        ):
+                self.app.events.record("experiment", reference, "execution_failure", {"error": str(exc)})
+        while failures == 0 and created < max_experiments and launched < max_runs and time.monotonic() < deadline:
             experiment = self.next(goal_id)
             created += 1
             reference = f"{goal_id}/{experiment['id']}"
@@ -123,18 +103,14 @@ class AutoService:
                 self.app.experiments.implement_auto(reference, implementation)
             except HirakuError as exc:
                 failures += 1
-                self.app.events.record(
-                    "experiment", reference, "implementation_failure", {"error": str(exc)}
-                )
+                self.app.events.record("experiment", reference, "implementation_failure", {"error": str(exc)})
                 break
             try:
                 self.app.launcher.launch(f"{reference}:{entrypoints[0]}")
                 launched += 1
             except HirakuError as exc:
                 failures += 1
-                self.app.events.record(
-                    "experiment", reference, "execution_failure", {"error": str(exc)}
-                )
+                self.app.events.record("experiment", reference, "execution_failure", {"error": str(exc)})
                 break
             self._analyze(goal_id, experiment["id"], goal.metric, goal.direction)
         stop_reason = (
@@ -156,9 +132,7 @@ class AutoService:
 
     def _analyze(self, goal_id: str, experiment_id: str, metric: str, direction: str) -> None:
         candidate_rows = self.app.runs.rows(goal_id, experiment_id)
-        baseline_ids = [
-            item.id for item in self.app.experiments.list(goal_id) if item.kind == "baseline"
-        ]
+        baseline_ids = [item.id for item in self.app.experiments.list(goal_id) if item.kind == "baseline"]
 
         def numeric(rows: list[dict[str, Any]]) -> list[float]:
             values: list[float] = []
@@ -170,9 +144,7 @@ class AutoService:
             return values
 
         candidate = numeric(candidate_rows)
-        baseline = numeric(
-            [row for baseline_id in baseline_ids for row in self.app.runs.rows(goal_id, baseline_id)]
-        )
+        baseline = numeric([row for baseline_id in baseline_ids for row in self.app.runs.rows(goal_id, baseline_id)])
         if not candidate or not baseline:
             verdict = "inconclusive"
         elif direction == "max":

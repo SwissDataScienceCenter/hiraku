@@ -22,9 +22,7 @@ ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
 def validate_id(value: str, label: str) -> None:
     if not ID_PATTERN.fullmatch(value):
-        raise HirakuError(
-            f"Invalid {label} '{value}'. Use lowercase letters, numbers, '.', '_' or '-'."
-        )
+        raise HirakuError(f"Invalid {label} '{value}'. Use lowercase letters, numbers, '.', '_' or '-'.")
 
 
 def split_experiment_ref(value: str) -> tuple[str, str]:
@@ -114,17 +112,13 @@ class GoalService:
     ) -> Goal:
         goal = self.get(goal_id)
         with self.db.transaction() as connection:
-            run_count = connection.execute(
-                "SELECT COUNT(*) FROM runs WHERE goal_id = ?", (goal_id,)
-            ).fetchone()[0]
+            run_count = connection.execute("SELECT COUNT(*) FROM runs WHERE goal_id = ?", (goal_id,)).fetchone()[0]
             locked_change = any(
-                value is not None
-                for value in (metric, direction, evaluation_protocol, constraints, launch_path)
+                value is not None for value in (metric, direction, evaluation_protocol, constraints, launch_path)
             )
             if run_count and locked_change:
                 raise HirakuError(
-                    "Metric, direction, protocol, constraints, and launch permissions cannot "
-                    "change after Runs exist."
+                    "Metric, direction, protocol, constraints, and launch permissions cannot change after Runs exist."
                 )
             manifest = load_manifest(launch_path.resolve()) if launch_path else goal.launch_manifest
             connection.execute(
@@ -245,9 +239,7 @@ class ExperimentService:
                     "SELECT * FROM experiments WHERE goal_id=? ORDER BY created_at,id", (goal_id,)
                 ).fetchall()
             else:
-                rows = connection.execute(
-                    "SELECT * FROM experiments ORDER BY goal_id,created_at,id"
-                ).fetchall()
+                rows = connection.execute("SELECT * FROM experiments ORDER BY goal_id,created_at,id").fetchall()
         return [Experiment.from_row(row) for row in rows]
 
     def freeze(self, experiment: Experiment, commit: str) -> Experiment:
@@ -394,9 +386,7 @@ class RunService:
                     "SELECT value FROM run_parameters WHERE run_id=? AND key=?", (run_id, key)
                 ).fetchone()
                 if existing and existing["value"] != value:
-                    raise HirakuError(
-                        f"Run parameter '{key}' is immutable (already '{existing['value']}')."
-                    )
+                    raise HirakuError(f"Run parameter '{key}' is immutable (already '{existing['value']}').")
                 connection.execute(
                     "INSERT OR IGNORE INTO run_parameters(run_id,key,value) VALUES (?,?,?)",
                     (run_id, key, value),
@@ -588,8 +578,7 @@ class ProposalService:
     def admit(self, proposal_id: str, experiment_id: str) -> dict[str, Any]:
         with self.db.transaction() as connection:
             result = connection.execute(
-                "UPDATE proposals SET status='admitted',admitted_experiment_id=? "
-                "WHERE id=? AND status='pending'",
+                "UPDATE proposals SET status='admitted',admitted_experiment_id=? WHERE id=? AND status='pending'",
                 (experiment_id, proposal_id),
             )
             if result.rowcount != 1:

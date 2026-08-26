@@ -67,9 +67,7 @@ def validate_manifest(raw: Any) -> dict[str, Any]:
             raise HirakuError("Manifest 'auto.implement' must be a command definition.")
         definition = auto["implement"]
         command = definition.get("command")
-        if not isinstance(command, list) or not command or not all(
-            isinstance(value, str) for value in command
-        ):
+        if not isinstance(command, list) or not command or not all(isinstance(value, str) for value in command):
             raise HirakuError("Manifest 'auto.implement.command' must be a non-empty string list.")
         cwd = definition.get("cwd", ".")
         pure = PurePosixPath(cwd)
@@ -77,26 +75,25 @@ def validate_manifest(raw: Any) -> dict[str, Any]:
             raise HirakuError("Manifest 'auto.implement.cwd' must stay inside the project.")
         env = definition.get("env", {})
         if not isinstance(env, dict) or not all(
-            isinstance(key, str) and isinstance(value, (str, int, float, bool))
-            for key, value in env.items()
+            isinstance(key, str) and isinstance(value, (str, int, float, bool)) for key, value in env.items()
         ):
             raise HirakuError("Manifest 'auto.implement.env' must contain scalar values.")
         overlap = RESERVED_ENV.intersection(env)
         if overlap:
             raise HirakuError(f"Auto implementation overrides reserved environment: {sorted(overlap)}")
         allowed = auto.get("allowed_entrypoints")
-        if not isinstance(allowed, list) or not allowed or not all(
-            isinstance(name, str) and name in clean["entrypoints"] for name in allowed
+        if (
+            not isinstance(allowed, list)
+            or not allowed
+            or not all(isinstance(name, str) and name in clean["entrypoints"] for name in allowed)
         ):
-            raise HirakuError(
-                "Manifest 'auto.allowed_entrypoints' must name one or more defined entrypoints."
-            )
+            raise HirakuError("Manifest 'auto.allowed_entrypoints' must name one or more defined entrypoints.")
         clean["auto"] = {
             "allowed_entrypoints": allowed,
             "implement": {
                 "command": command,
                 "cwd": cwd,
                 "env": {key: str(value) for key, value in env.items()},
-            }
+            },
         }
     return clean

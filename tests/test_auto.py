@@ -18,9 +18,7 @@ def test_auto_proposal_becomes_ordinary_experiment(project):
 
 def test_auto_loop_obeys_bounds_and_uses_shared_runs(project):
     _, app = project
-    result = AutoService(app).loop(
-        "demo", max_experiments=2, max_runs=2, time_budget=parse_duration("30s")
-    )
+    result = AutoService(app).loop("demo", max_experiments=2, max_runs=2, time_budget=parse_duration("30s"))
     assert result["experiments_created"] == 2
     assert result["runs_launched"] == 2
     experiments = app.experiments.list("demo")
@@ -37,6 +35,4 @@ def test_auto_requires_an_evaluated_existing_baseline(project):
     _, app = project
     app.experiments.create("demo/baseline", "baseline", kind="baseline")
     with pytest.raises(HirakuError, match="must be evaluated"):
-        AutoService(app).loop(
-            "demo", max_experiments=2, max_runs=2, time_budget=parse_duration("30s")
-        )
+        AutoService(app).loop("demo", max_experiments=2, max_runs=2, time_budget=parse_duration("30s"))

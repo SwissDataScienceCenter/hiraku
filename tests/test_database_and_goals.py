@@ -14,9 +14,7 @@ def test_init_and_goal_use_sqlite_with_manifest_projection(project):
     assert goal.metric == "score"
     assert goal.direction == "max"
     assert goal.launch_manifest["entrypoints"]["evaluate"]["command"] == ["python", "evaluate.py"]
-    guided = (root / ".agents" / "skills" / "hiraku" / "guided.md").read_text(
-        encoding="utf-8"
-    )
+    guided = (root / ".agents" / "skills" / "hiraku" / "guided.md").read_text(encoding="utf-8")
     assert "explicit user approval" in guided
     with app.db.connect() as connection:
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1

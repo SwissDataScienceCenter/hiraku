@@ -8,6 +8,18 @@ version = "0.1.0"
 description = "Goal-oriented guided and bounded-autonomous research workflows"
 readme = "README.md"
 requires-python = ">=3.12"
+keywords = ["research", "workflow", "automation", "AI"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
   "PyYAML>=6.0.2",
   "rich>=13.9",
@@ -18,6 +30,12 @@ dependencies = [
 tui = ["textual>=1.0"]
 dev = ["pytest>=8.3", "pytest-cov>=6.0", "ruff>=0.9"]
 heart-demo = ["numpy>=2.0", "scikit-learn>=1.6"]
+all = ["hiraku[tui, dev, heart-demo]"]
+
+[project.urls]
+Homepage = "https://github.com/SwissDataScienceCenter/hiraku"
+Repository = "https://github.com/SwissDataScienceCenter/hiraku.git"
+Issues = "https://github.com/SwissDataScienceCenter/hiraku/issues"
 
 [project.scripts]
 hiraku = "hiraku.cli:main"
@@ -29,6 +47,17 @@ packages = ["src/hiraku"]
 testpaths = ["tests"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
+indent-width = 4
 target-version = "py312"
 
+[tool.ruff.lint]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

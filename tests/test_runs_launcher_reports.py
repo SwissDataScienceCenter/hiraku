@@ -68,11 +68,13 @@ def test_startup_failure_is_durable(project):
     _, app = project
     goal = app.goals.get("demo")
     manifest = goal.launch_manifest
-    manifest["entrypoints"]["missing"] = {"command": ["definitely-not-a-program"], "cwd": ".", "env": {}}
+    manifest["entrypoints"]["missing"] = {
+        "command": ["definitely-not-a-program"],
+        "cwd": ".",
+        "env": {},
+    }
     with app.db.transaction() as connection:
-        connection.execute(
-            "UPDATE goals SET launch_manifest_json=? WHERE id='demo'", (json.dumps(manifest),)
-        )
+        connection.execute("UPDATE goals SET launch_manifest_json=? WHERE id='demo'", (json.dumps(manifest),))
     app.experiments.create("demo/startup", "startup")
     with pytest.raises(HirakuError, match="Could not start"):
         app.launcher.launch("demo/startup:missing")
