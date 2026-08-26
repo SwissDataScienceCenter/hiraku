@@ -13,6 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 yaml = ["PyYAML>=6.0"]
+mlflow = ["mlflow>=2.9"]
 ui = ["streamlit>=1.30", "PyYAML>=6.0"]
 dev = ["pytest>=8.0", "ruff>=0.5", "PyYAML>=6.0"]
 

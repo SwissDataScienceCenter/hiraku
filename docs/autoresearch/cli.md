@@ -252,6 +252,92 @@ Two caveats worth knowing before you rely on this:
 For the sharpest pinning, do both: an overlay for iteration, and a baked image once a result is worth
 promoting.
 
+## Tracking, and MLflow
+
+`.hiraku/runs.csv` is always written, and it is the source of truth. That is not a preference: the
+promotion gate compares `run_kind`, `lockfile_sha256`, `container_digest` and the goal record *as it
+stood at the run's commit*, and MLflow has no column for any of those. A project whose runs lived
+only in MLflow could not evaluate its own gate, and `check` would need a network connection to
+answer a question about local files.
+
+So the backend is `table` or `table+mlflow`. There is deliberately no `mlflow` alone.
+
+### Where to configure it
+
+`research/config.md` front matter — the project contract, one place:
+
+```yaml
+tracking:
+  backend: table+mlflow
+  mlflow:
+    tracking_uri: http://mlflow.example.org:5000   # empty -> MLFLOW_TRACKING_URI, then ./mlruns
+    experiment: null                                # null -> use the goal id
+    tags:
+      team: sdsc
+```
+
+`.hiraku.yml` may also carry a `tracking:` block (it already owns `path`); `research/config.md`
+wins key by key, because that is the file a researcher edits.
+
+Two optional overrides:
+
+```yaml
+# research/goals/<id>.md — name the MLflow experiment for this goal
+mlflow_experiment: natix-crossdomain-2026Q3
+```
+
+```yaml
+# experiments/<id>/launch.yml — turn the mirror off for one node
+tracking:
+  backend: table
+```
+
+An experiment may **narrow** tracking to `table`; it may never widen it. Same rule as `mode` and the
+project bounds — a node that could switch mirroring on for itself could send data somewhere the
+project never agreed to. Trying to widen it is an error that says so.
+
+Do **not** configure it in `research/proposals/`. A proposal may be declined and never run, and it
+is consumed when accepted — so anything written there is either meaningless or lost. It is also an
+agent-written file, and where your data is uploaded is not the agent's decision.
+
+### What gets mirrored
+
+| Hiraku | MLflow |
+|---|---|
+| goal | experiment (`mlflow_experiment`, else the goal id) |
+| run | run, named by the `run_id` |
+| provenance columns (`commit`, `seed`, `lockfile_sha256`, `run_kind`, …) | params |
+| numeric metrics your entrypoint reported | metrics |
+| `run_id`, `goal`, `experiment_id`, `reproducible` | tags `hiraku.*` |
+| `mlflow_run_id` column in `runs.csv` | the MLflow run id |
+
+The last row is the point: the two records name each other, so a run found in the MLflow UI can be
+traced back to its experiment record and its commit.
+
+### Check it before a long run
+
+```bash
+pip install 'mlflow>=2.9'          # or: pip install -e '.[mlflow]' in the tool repo
+hiraku-auto tracking               # what is resolved, and whether the server answers
+hiraku-auto tracking --experiment dinov3-swap
+```
+
+```
+backend:     table+mlflow
+run table:   .hiraku/runs.csv   (always written)
+mlflow uri:  http://mlflow.example.org:5000
+experiment:  dinov3-crossdomain
+  tag hiraku.experiment_id = dinov3-swap
+  tag hiraku.goal = dinov3-crossdomain
+
+mirror reachable
+```
+
+**A broken mirror never costs you a run.** If the server is down or `mlflow` is not installed, the
+run is recorded in the table as normal, `mlflow_run_id` stays empty, and the launch prints one
+warning. Losing a row because a tracking server was unreachable would be a far worse failure than
+an un-mirrored run.
+
 ## Parallel experiments
 
 ```bash
@@ -526,6 +612,7 @@ launch <exp>:<entrypoint> [--commit]   run and record
 runs [<exp>] [--sort M --ascending]    list or rank
 agent design|analyze|triage|discover   call the agent
 context [--add PATH] [--json]          project files the agent would be given
+tracking [--experiment ID]             where runs are recorded; MLflow reachability
 logs [--show latest] [--prompt]        every agent call: prompt, reply, duration
 next <goal>                            what the loop would do next
 loop <goal> [--launch <entrypoint>]    bounded loop

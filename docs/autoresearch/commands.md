@@ -35,14 +35,14 @@ Guides: [cli.md](cli.md) for the walkthrough and the environment/container setup
 ### `hiraku-auto --help`
 ```
 usage: hiraku-auto [-h] [--project PROJECT]
-                   {init,goal,exp,tree,check,sync,context,logs,launch,runs,agent,next,loop,promote,proposal,worktree,report,dash,ui}
+                   {init,goal,exp,tree,check,sync,context,tracking,logs,launch,runs,agent,next,loop,promote,proposal,worktree,report,dash,ui}
                    ...
 
 Autoresearch over a Hiraku experiment tree: goals, parallel hypotheses,
 failure triage, a gated leaderboard, and an agent that designs and analyses.
 
 positional arguments:
-  {init,goal,exp,tree,check,sync,context,logs,launch,runs,agent,next,loop,promote,proposal,worktree,report,dash,ui}
+  {init,goal,exp,tree,check,sync,context,tracking,logs,launch,runs,agent,next,loop,promote,proposal,worktree,report,dash,ui}
     init                create a research project (in its own directory)
     goal                research questions: the metric, the target, the
                         evaluation protocol
@@ -53,6 +53,8 @@ positional arguments:
     sync                regenerate Children sections from parent links
     context             list the project files the agent would be given,
                         before sending any
+    tracking            where runs are recorded, and whether the MLflow mirror
+                        is reachable
     logs                every agent call: the prompt sent, the reply, how long
     launch              run an entrypoint and record the run
     runs                list or rank runs
@@ -344,6 +346,19 @@ options:
   -h, --help  show this help message and exit
   --add PATH  also resolve this file or glob
   --json      the bundle exactly as the agent sees it
+```
+
+### `hiraku-auto tracking --help`
+```
+usage: hiraku-auto tracking [-h] [--experiment EXPERIMENT] [--goal GOAL]
+                            [--json]
+
+options:
+  -h, --help            show this help message and exit
+  --experiment EXPERIMENT
+                        resolve as it would be for this experiment
+  --goal GOAL           name the goal, when no experiment is given
+  --json                machine-readable output
 ```
 
 ### `hiraku-auto logs --help`

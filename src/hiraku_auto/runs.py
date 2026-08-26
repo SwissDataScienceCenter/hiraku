@@ -45,6 +45,7 @@ PROVENANCE_COLUMNS = (
     "container_digest",
     "platform",
     "accelerator",
+    "mlflow_run_id",
 )
 
 

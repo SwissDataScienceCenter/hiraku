@@ -9,6 +9,11 @@ bounds:
 promotion:
   reproduction_seeds: 1
   agreement_tolerance: 0.01
+tracking:
+  backend: table            # table | table+mlflow
+  mlflow:
+    tracking_uri:           # e.g. http://mlflow.example.org:5000; empty = ./mlruns
+    experiment:             # empty = use the goal id as the MLflow experiment name
 context:
   sources:
     - CLAUDE.md
@@ -46,6 +51,22 @@ How the environment is built, and what a run may assume.
   comparable
 - Determinism: whether runs are expected bit-reproducible at a fixed seed, and if not, the sources
   of variance
+
+## Tracking
+
+`.hiraku/runs.csv` is always written and is the source of truth: the promotion gate compares
+`run_kind`, `lockfile_sha256`, `container_digest` and the goal record as it stood at the run's
+commit, and MLflow has no column for any of those. So the backend is `table` or `table+mlflow` —
+there is no `mlflow` alone, and `hiraku-auto check` and `promote` never need a network.
+
+With `table+mlflow`, each finished run is also logged to MLflow: provenance as params, numeric
+metrics as metrics, and `hiraku.run_id` / `hiraku.goal` / `hiraku.experiment_id` as tags. The
+MLflow run id comes back into the `mlflow_run_id` column, so the two records point at each other.
+A goal maps to an MLflow *experiment* — same idea, one set of comparable runs — using the goal id
+unless the goal declares `mlflow_experiment:` in its front matter.
+
+An experiment may narrow this to `table` in its `launch.yml`; it may never widen it.
+Run `hiraku-auto tracking` to see what is resolved and whether the server answers.
 
 ## Bounds
 

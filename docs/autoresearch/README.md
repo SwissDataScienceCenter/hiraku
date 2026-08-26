@@ -94,6 +94,7 @@ Experiment IDs are globally unique, so this costs nothing.
 | [research-loop.md](research-loop.md) | Requirement 4 in full: the three failure classes, the six-condition investigation test, who decides in each mode, how a terminal failure is recorded, and the promotion gate |
 | [goal-drafting.md](goal-drafting.md) | The first step: giving the agent the project's own files (`CLAUDE.md`, README, docs) so it drafts the goal record and its evaluation protocol, and marks with `**[UNSET: ...]**` every value it could not ground rather than guessing |
 | [hypothesis-discovery.md](hypothesis-discovery.md) | Requirement 3: proposals from reading, treating retrieved text as evidence rather than instruction |
+| [cli.md](cli.md) *(Tracking section)* | Where MLflow is configured, why the run table stays the source of truth, and the narrow-never-widen rule for a per-experiment override |
 | [environment.md](environment.md) | Requirements 1 and 5: the reproduce-minimum capture set, and worktrees for parallel separation |
 | [dashboard.md](dashboard.md) | The viewer's data contract, what it must never become, and the route to a live server |
 | [relation-to-other-branches.md](relation-to-other-branches.md) | Where this branch deliberately keeps the conventions of `feat/poc-implementation-1`/`-2` so the pieces compose, and the ten places it diverges |

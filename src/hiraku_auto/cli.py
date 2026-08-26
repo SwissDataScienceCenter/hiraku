@@ -11,7 +11,7 @@
     hiraku-auto promote <experiment> --run <run-id>
     hiraku-auto proposal list | accept | decline
     hiraku-auto worktree add | remove | list
-    hiraku-auto check | sync | context | logs | dash | ui
+    hiraku-auto check | sync | context | tracking | logs | dash | ui
 
 argparse rather than a CLI framework, so the package installs with no required dependencies.
 """
@@ -29,6 +29,7 @@ from . import context as context_mod
 from . import dash, gitops, scaffold
 from . import promote as promote_mod
 from . import report as report_mod
+from . import tracking as tracking_mod
 from .config import load_project
 from .errors import HirakuError
 from .launcher import launch as do_launch
@@ -87,6 +88,52 @@ def _agent_hooks() -> agent_mod.Hooks:
         sys.stdout.flush()
 
     return agent_mod.Hooks(start=start, tick=tick, done=done)
+
+
+def cmd_tracking(args: argparse.Namespace) -> int:
+    """Where runs are recorded, and whether the mirror actually works — before a long run."""
+    project = _project(args)
+    forest = build(project)
+    goal = args.goal
+    if args.experiment and not goal:
+        node = forest.nodes.get(args.experiment)
+        goal = node.goal if node else None
+    resolved = tracking_mod.resolve(project, args.experiment, goal_id=goal)
+
+    if args.json:
+        payload = {
+            "backend": resolved.backend, "tracking_uri": resolved.tracking_uri,
+            "experiment_name": resolved.experiment_name, "tags": resolved.tags,
+            "narrowed_by": resolved.narrowed_by, "table": project.rel(project.table_path),
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"backend:     {resolved.backend}")
+    print(f"run table:   {project.rel(project.table_path)}   (always written)")
+    if resolved.narrowed_by:
+        print(f"narrowed by: {resolved.narrowed_by}")
+    if not resolved.mirrors:
+        print("\nNo mirror configured. To add one, in research/config.md front matter:\n")
+        print("  tracking:")
+        print("    backend: table+mlflow")
+        print("    mlflow:")
+        print("      tracking_uri: http://mlflow.example.org:5000")
+        print("      experiment: null        # null = use the goal id")
+        return 0
+
+    print(f"mlflow uri:  {resolved.tracking_uri or '(from MLFLOW_TRACKING_URI, or ./mlruns)'}")
+    print(f"experiment:  {resolved.experiment_name or '(hiraku)'}")
+    for key, value in sorted(resolved.tags.items()):
+        print(f"  tag {key} = {value}")
+
+    problem = tracking_mod.check(project, resolved)
+    if problem:
+        print(_red(f"\nmirror NOT usable: {problem}"))
+        print("Runs will still be recorded in the run table; each one will print this warning.")
+        return 1
+    print("\nmirror reachable")
+    return 0
 
 
 def cmd_logs(args: argparse.Namespace) -> int:
@@ -1172,6 +1219,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--json", action="store_true", help="the bundle exactly as the agent sees it")
     p.set_defaults(func=cmd_context)
+
+    p = sub.add_parser(
+        "tracking", help="where runs are recorded, and whether the MLflow mirror is reachable"
+    )
+    p.add_argument("--experiment", help="resolve as it would be for this experiment")
+    p.add_argument("--goal", help="name the goal, when no experiment is given")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.set_defaults(func=cmd_tracking)
 
     p = sub.add_parser("logs", help="every agent call: the prompt sent, the reply, how long")
     p.add_argument("--limit", type=int, default=20, help="how many calls to list")

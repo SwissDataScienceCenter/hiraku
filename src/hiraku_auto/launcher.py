@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import gitops, yamlio
+from . import gitops, tracking, yamlio
 from .config import Project
 from .errors import HirakuError
 from .records import load_experiment
@@ -207,6 +207,22 @@ def resolve_entrypoint(
     return command, cwd, clean_env, venv, dict(container)
 
 
+def _goal_of(project: Project, experiment_id: str) -> str | None:
+    """The goal an experiment belongs to, inherited through its parent chain.
+
+    Read lazily and defensively: mirroring must never be the reason a launch fails, so a broken
+    tree means "no goal name" rather than an exception on the way to recording a finished run.
+    """
+    try:
+        from .tree import build
+
+        forest = build(project)
+        node = forest.nodes.get(experiment_id)
+        return node.goal if node else None
+    except Exception:
+        return None
+
+
 def launch(
     project: Project,
     experiment_id: str,
@@ -350,6 +366,16 @@ def launch(
         for key, value in metrics.items():
             if key not in row:
                 row[key] = value
+
+        # Mirror before appending, so the mlflow run id lands in the same row. A mirror failure is
+        # a warning: the row is the record, the mirror is a convenience.
+        resolved = tracking.resolve(
+            project, experiment_id, goal_id=_goal_of(project, experiment_id)
+        )
+        extra, warning = tracking.log_run(project, resolved, row)
+        row.update(extra)
+        if warning:
+            print(f"warning: {warning}", file=sys.stderr)
 
         append_run(project.table_path, row)
         return LaunchResult(
