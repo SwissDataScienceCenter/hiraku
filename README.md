@@ -61,15 +61,17 @@ Their roles are:
 - **`experiments/`** contains mutable experiment records.
 
 
-The task-level `task.md` synthesizes task documentation, reviewed findings and conclusions across experiments. The local `experiments/` directory contains mutable experiment records during their lifecycle.
+The task-level `task.md` is the canonical review document. It synthesizes task documentation, experiment branches, runs, analysis, open questions, reviewed findings, conclusions, decisions, and a final changelog. Its complete Markdown content is also used verbatim as the pull-request or merge-request description in Stage 2. The local `experiments/` directory contains mutable experiment records during their lifecycle.
 
 
 **Example:**
 ```markdown
 ---
 id: logreg-baseline
+summary: Logistic regression baseline for heart-disease prediction
 goal: Implement and tune a logistic regression baseline for the Cleveland Heart Disease dataset. The deciding metric is validation cross-entropy on the validation split.
 branch: hiraku/task/logreg-baseline
+pr_id:
 ---
 
 # Logistic regression baseline
@@ -87,6 +89,8 @@ Reduce validation cross-entropy while training only on the training split.
 ## Conclusions
 
 ## Decisions and next steps
+
+## Changelog
 ```
 
 ### Experiment records
@@ -103,13 +107,14 @@ hypothesis:
 status: proposed
 decision: pending
 commit:
+branch:
 entrypoints: []
 conclusion:
 created_at: "2026-08-26T10:15:30.123456Z"
 updated_at: "2026-08-26T10:15:30.123456Z"
 ```
 
-Creation requires only `id`. Hiraku copies `task_id` from the containing task, records UTC ISO-8601 `created_at` and `updated_at` timestamps, and initializes the other fields to their empty values when they are not provided. The user may provide or update `summary`, `hypothesis`, and the other mutable fields at any time; `hiraku experiment set` refreshes `updated_at` while preserving `created_at`. The stored `task_id` must agree with the containing directory. Before a reproducible launch, the experiment must be bound to one exact `commit` and name at least one entrypoint. Stage 1 validates individual field values but does not enforce cross-field invariants or lifecycle transitions among `status`, `decision`, and `conclusion`.
+Creation requires only `id`. Hiraku copies `task_id` from the containing task, records UTC ISO-8601 `created_at` and `updated_at` timestamps, and initializes the other fields to their empty values when they are not provided. The optional `branch` records the Git branch assigned to a Stage 2 branched experiment; an empty value denotes the linear workflow. The user may provide or update `summary`, `hypothesis`, and the other mutable fields at any time; `hiraku experiment set` refreshes `updated_at` while preserving `created_at`. The stored `task_id` must agree with the containing directory. Before a reproducible launch, the experiment must be bound to one exact `commit` and name at least one entrypoint. Stage 1 validates individual field values but does not enforce cross-field invariants or lifecycle transitions among `status`, `decision`, and `conclusion`.
 
 Larger experiments may use Markdown for narrative documentation, the frontmatter follows the same yaml structure as outlined above
 
@@ -122,6 +127,7 @@ hypothesis:
 status: proposed
 decision: pending
 commit:
+branch:
 entrypoints: []
 conclusion:
 created_at: "2026-08-26T10:15:30.123456Z"
@@ -205,9 +211,11 @@ hiraku runs logreg-baseline  # task leaderboard, grouped by experiment where use
 The simplest, default workflow is linear: create a local experiment record, implement and commit its source snapshot, bind the record, launch runs, and update the record through evaluation and decision. Rejecting or deleting the local record does not add a Git commit; implementation changes can be reverted or reset using the task's normal Git workflow. The task-level `task.md` synthesizes the reviewed findings that should persist in Git.
 
 #### Advanced branching workflow
-Stage 2 adds experiment hierarchies and branching. This allows several ideas to be explored in parallel or a task to backtrack to previous experiments. Experiment lineage is represented as a DAG defined by the Git commit history. Candidate representations include:
-- git branches: experiments are tracked by additional experiment branches, git worktrees can be used to checkout several experiments in parallel. if branches become too heavy, we can fall back to tags or custom refs.
-- jujutsu (jj): jj naturally supports a tree based workflow.
+Stage 2 adds Git experiment branches so several ideas can be explored in parallel or a task can backtrack to a prior branch or commit. A branched experiment is created with `hiraku exp create ... --branch [--from <ref>]`. The default branch is `hiraku/experiment/<task-id>/<experiment-id>`, and the selected branch is recorded in the experiment record. `--from` may resolve another branch or commit and defaults to task-branch HEAD. Without `--branch`, the experiment remains on the task branch.
+
+If the branch already exists, Hiraku warns and attempts to switch to it without resetting it. If switching fails, Hiraku prints manual Git instructions. Worktrees, merges, conflict handling, and advancing the task branch after accepting an experiment remain normal Git operations directed by the user or task program. Hiraku does not mutate the task branch as a side effect of setting `decision: accepted`.
+
+Experiment lineage is a DAG derived from Git commit history rather than copied into records. Experiment records retain the file-database limitation: by default they are uncommitted or committed directly to the task branch, even when implementation work occurs on an experiment branch.
 
 ### Configuration
 
@@ -220,6 +228,8 @@ tasks_dir: tasks
 templates_dir: .hiraku/templates
 default_template: guided
 tracking_backend: table
+review_provider: github  # optional; github or gitlab
+review_remote: origin    # optional
 ```
 
 All configured paths are repository-relative and must remain inside the project root. The table format is inferred from `.csv` or `.tsv`. 
@@ -246,7 +256,6 @@ This creates the default configuration, `tasks/`, complete templates under
 hiraku task create logreg-baseline
 hiraku task create larger-context-window --template auto
 hiraku task create custom-workflow --template my-template
-hiraku task create custom-branch --branch research/custom-branch
 hiraku task  # compact metadata for the current task
 hiraku task show logreg-baseline
 hiraku task show logreg-baseline --verbose
@@ -255,7 +264,7 @@ hiraku task entrypoints
 hiraku task entrypoints logreg-baseline --json
 ```
 
-New tasks default to the `guided` template and branch `hiraku/task/<task-id>`. Task creation does not switch branches; it creates the task files and prints instructions for switching to the task branch. Creation does not require a clean worktree. Each directory under `.hiraku/templates/` is a complete bundle of `task.md`, `program.md`, and `launch.yml`; projects may add their own templates.
+New tasks default to the `guided` template and canonical branch `hiraku/task/<task-id>`. The branch is derived from the task ID, recorded in `task.md`, and cannot be set arbitrarily. Task front matter also contains a required one-line `summary`. Stage 2 uses it as the review title and records the persistent provider identity as optional `pr_id` for GitHub or `mr_id` for GitLab. Task creation does not switch branches; it creates the task files and prints instructions for switching to the task branch. Creation does not require a clean worktree. Each directory under `.hiraku/templates/` is a complete bundle of `task.md`, `program.md`, and `launch.yml`; projects may add their own templates.
 Creation copies the selected bundle and does not record its name in the resulting task. The Hiraku skill checks that implementation work occurs on the task branch. It switches branches only when directed by the user, except that it may switch automatically when the working tree is clean and doing so is consistent with the user's instructions.
 
 `hiraku task` is shorthand for showing the task inferred from the current task branch. Task display is compact by default and includes only front-matter metadata; `--verbose` also renders the Markdown body. JSON follows the same rule and includes `body` only with `--verbose`. `hiraku task entrypoints [task]` lists the named entrypoints defined by the selected task's current `launch.yml`.
@@ -271,6 +280,7 @@ hiraku experiment show logreg-baseline:add-batch-norm
 hiraku experiment set logreg-baseline:add-batch-norm --commit HEAD
 hiraku experiment delete logreg-baseline:add-batch-norm
 hiraku exp list logreg-baseline
+hiraku exp create logreg-baseline:parallel-idea --branch --from HEAD~2
 ```
 
 `hiraku exp` is an alias for `hiraku experiment`. YAML and Markdown records normalize to the same core fields. Direct editing is supported. `list` without a task resolves to the current task, and its human-readable table includes both the experiment summary and hypothesis.
@@ -346,6 +356,7 @@ hiraku runs logreg-baseline
 hiraku runs logreg-baseline --sort test/mse --ascending
 hiraku runs logreg-baseline --sort accuracy --descending
 hiraku runs logreg-baseline --json
+hiraku runs logreg-baseline --all  # MLflow only
 ```
 
 Experiment and run listings are always scoped to one task, supplied explicitly or inferred from the current task branch. Cross-task listing is not part of the PoC. Experiment listings read the local YAML and Markdown registry and enrich each record with derived launches, runs, metrics, and Git parents. Without sorting, a run listing preserves table order. With `--sort`, it renders the selected runs and can group them by experiment. Exactly one of `--ascending` or `--descending` is required whenever `--sort` is used.
@@ -356,6 +367,28 @@ CSV/TSV source columns and string values are preserved. Sorted JSON rows receive
 `_rank`; rows with missing or non-numeric metrics have no rank.
 
 The table backend requires each run producer to record a UTC ISO-8601 `created_at` timestamp. Hiraku injects launch context but does not invent or append the run row, so timestamp creation remains the responsibility of the tracking backend or training script.
+
+### Create or update a review
+
+Stage 2 provides:
+
+```bash
+hiraku review create [task] [--base <branch>] [--remote <name>] [--review <id>] [--push]
+```
+
+The provider is configured explicitly as `review_provider: github` or `review_provider: gitlab`; it is not inferred from the remote hostname. The optional project `review_remote` may be overridden by `--remote`. The base defaults to the remote repository's default branch.
+
+Reviews always use the canonical task branch as head. When invoked from an experiment branch, Hiraku infers the task and reviews its task branch without changing the active checkout. The required task `summary` is the review title. `task.md` is the complete review description: the provider description is fully replaced with the file's current Markdown on every update. Each task template ends in `## Changelog`, and reviewed task updates append a concise entry there.
+
+Hiraku resolves an existing review from `--review <id>` or the task's provider-matching `pr_id` or `mr_id`; conflicting values fail without mutation. A GitHub project rejects `mr_id`, and a GitLab project rejects `pr_id`. If no identifier is present, Hiraku searches the resolved head/base pair. Any matches, including closed reviews, are listed with instructions to select one explicitly, and Hiraku makes no provider change. If there are no matches, first-time creation requires the canonical task branch to be checked out; from an experiment branch, Hiraku stops before provider mutation and prints switch-and-rerun instructions. It then creates the review, records the returned `pr_id` or `mr_id` in `task.md`, and synchronizes the full updated file to the new review. Preview and updates using an explicit or recorded identifier remain available from experiment branches.
+
+Hiraku never pushes implicitly. If an unpublished task branch is reviewed without `--push`, it prints `task.md` and exact instructions for publishing and rerunning. `--push` authorizes pushing only the task branch. Hiraku may create or update a pull request or merge request, but never approves or merges it.
+
+### MLflow tracking backend
+
+Stage 2 supports `tracking_backend: mlflow` as an optional installation extra and uses a local file-backed MLflow store only. The store defaults to `<project-root>/mlruns/`; an optional safe project-relative `mlflow_tracking_dir` overrides it. Each task specifies `mlflow_experiment` in `task.md` front matter. Remote tracking servers, registry URIs, and authentication are outside the PoC.
+
+Hiraku uses MLflow's native run ID and start time as `run_id` and `created_at`. User code records `task_id`, semantic `experiment_id`, and `commit` as MLflow parameters. JSON keeps `params`, `metrics`, and `tags` namespaced. For a metric logged several times, run inspection uses MLflow's returned latest-timestamp value; metric history is not part of Stage 2. By default, listings show only runs with all required provenance and a matching task ID, while warning about omitted runs. The MLflow-only `--all` option reveals invalid, wrong-task, or unassociated runs with explicit warnings and leaves runs without numeric sort values unranked.
 
 ## Agent skill
 
@@ -457,15 +490,15 @@ Stage 1 provides the minimal vertical slice: project initialization, task creati
 
 - **Task model and CLI**
   - Provide `init`, `task`, `experiment`, `launch`, and `runs` commands.
-  - Create and inspect tasks, storing `id`, `branch`, and a one-line `goal` in `task.md` front matter, with an optional detailed goal in the body.
-  - Create tasks associated with `hiraku/task/<task-id>` without automatically switching branches, and print branch-switch instructions.
+  - Create and inspect tasks, storing `id`, `branch`, required one-line `summary`, and one-line `goal` in `task.md` front matter, with an optional detailed goal in the body. Stage 2 uses `summary` as the review title and optional provider-matching `pr_id` or `mr_id` as the persistent review identity.
+  - Derive every task branch as `hiraku/task/<task-id>`, record it without allowing arbitrary branch names, do not switch automatically, and print branch-switch instructions.
   - Resolve the current task from an explicit `[task:]object`, `--task <id>`, or the current task branch; reject conflicting selectors. Experiment-branch resolution is added with experiment branches in Stage 2.
   - Support `task create`, `task show`, and `task entrypoints`; omit `task list`.
   - Treat `hiraku task` as compact `task show` for the current task, and include the Markdown body only with `--verbose`.
 
 - **Experiment registry**
   - Support one experiment record per ID as YAML or Markdown with YAML front matter; reject duplicate extensions and unknown structured fields.
-  - Use the core fields `id`, `task_id`, `summary`, `hypothesis`, `status`, `decision`, `commit`, `entrypoints`, `conclusion`, `created_at`, and `updated_at`, with optional `description`.
+  - Use the core fields `id`, `task_id`, `summary`, `hypothesis`, `status`, `decision`, `commit`, `branch`, `entrypoints`, `conclusion`, `created_at`, and `updated_at`, with optional `description`.
   - Create records from an ID, initializing the remaining fields, including an empty summary.
   - Record UTC creation and update timestamps; preserve `created_at` and refresh `updated_at` on CLI mutations.
   - Validate statuses as `proposed`, `active`, `evaluated`, or `abandoned`, and decisions as `pending`, `accepted`, `rejected`, or `inconclusive`; defer cross-field and lifecycle-transition validation.
@@ -502,30 +535,54 @@ Stage 1 provides the minimal vertical slice: project initialization, task creati
 
 - **Experiment branching**
   - Support parallel exploration and backtracking through experiment branches.
-  - Create and switch to branches named `hiraku/experiment/<task>/<experiment>`.
-  - Provide `hiraku experiment branch [task:]experiment [--from <ref>]`, defaulting to the task branch HEAD.
+  - Extend `hiraku experiment create` / `hiraku exp create` with the Boolean `--branch` flag and optional `--from <ref>`.
+  - Derive `hiraku/experiment/<task>/<experiment>`, record it in the experiment, and switch to it. `--from` accepts another branch or commit and defaults to task-branch HEAD.
+  - Warn and switch without resetting when the branch already exists; print manual instructions if switching fails.
   - Leave merging, rejection, conflict handling, and worktree orchestration to normal Git and task programs.
+  - Keep task-branch advancement on acceptance as a standard Git operation outside Hiraku CLI management.
 
 - **Review integration**
-  - Provide `hiraku review create <task> --base <branch>`. `<task>` is optional and can be inferred.
-  - Detect GitHub or GitLab from the remote and use authenticated `gh` or `glab`.
-  - Confirm before pushing an unpublished branch.
+  - Provide `hiraku review create [task] [--base <branch>] [--remote <name>] [--review <id>] [--push]`; infer the task from task or experiment branches and always review the task branch.
+  - Configure GitHub or GitLab explicitly in `.hiraku.yml` and use authenticated `gh` or `glab`; allow an optional configured/default remote and CLI override.
+  - Default the base to the remote repository's default branch.
+  - Never push without explicit `--push`; otherwise preview `task.md` and print manual publication instructions.
   - Create or update pull requests and merge requests, but never approve or merge them.
-  - Fully replace the generated review description on every update, and include a changelog.
-  - Render task information and a normalized experiment summary equivalent to `hiraku experiment list`, including local records whether or not they are committed.
+  - Select reviews by CLI or provider-matching `pr_id`/`mr_id`. Without one, list matching head/base reviews without mutation; create a review and record the appropriate identifier only when no match exists and the task branch is checked out.
+  - Use `task.md` verbatim as the complete review description and fully replace the remote description on update.
+  - Require `task.md` to synthesize experiment branches, runs, analysis, open questions, conclusions, and decisions, ending with an appended `## Changelog` section.
 
 - **MLflow tracking backend**
   - Support `.hiraku.yml` configuration with `tracking_backend: mlflow`.
+  - Store MLflow data at project-root `mlruns/` by default, with a safe project-relative `mlflow_tracking_dir` override.
   - Support task-level configuration for `mlflow_experiment: <experiment-name>`.
-  - Establish the user convention that the mlflow run records the required fields: `run_id`, `task_id`, `experiment_id`, `commit`, and UTC `created_at`.
+  - Support only a local file-backed MLflow store in Stage 2 and package MLflow as an optional extra.
+  - Use MLflow's native run ID and start time; require user code to log `task_id`, semantic `experiment_id`, and `commit` as parameters.
+  - Keep parameters, metrics, and tags namespaced, and use MLflow's latest-timestamp value for each metric key.
+  - Show only provenance-complete matching-task runs by default; provide MLflow-only `--all` to reveal invalid or unassociated runs with warnings.
 
 - **Autoresearch example**
-  - Add a GPU-oriented copy or adaptation of [Karpathy's autoresearch](https://github.com/karpathy/autoresearch), expressing its loop through Hiraku tasks, experiments, runs, programs, and branches.
-  - Validate the example structurally without requiring GPU execution in automated tests.
+  - Copy and adapt the latest [Karpathy autoresearch](https://github.com/karpathy/autoresearch) revision at implementation time, pin its exact SHA, preserve its MIT license/attribution, and adopt its `program.md` into Hiraku.
+  - Use table tracking by default, support and test a local MLflow mode, and validate orchestration in CI through a separate behaviorally equivalent CPU mock. GPU testing remains manual.
 
-### Stage 3: Skill refinement and additional features
-This stage focusing on refining the hiraku skill, optimizing it for different research tasks.
+### Stage 3: Skill refinement, documentation and additional features
+This stage focusing on refining the hiraku skill, optimizing it for different research tasks, and adding user documentation.
 
+- **SKILL REFINEMENT**
+  - establish the hiraku skill as an entrypoint that with a general Hiraku overview and routes to the appropriate sub-skill based on the current context and user input.
+  - define sub-skills for two main workflows:
+    - review: udpate task.md, push to remote, create or update PR/MR, etc
+    - research: check that the task is fully specified, this skill handles one experiment lifecycle from creation to conclusion.
+  - these skills will provide a starting point for further manual refinement.
+  - refine the default program.md for auto and guided templates, ensuring they are clear, concise, and effective for guiding the agent's behavior. for auto research, take inspiration from the Karpathy autoresearch program.md. Create three variants: linear with reset, linear with revert, and branching.
+
+- **USER DOCUMENTATION**
+  - refine the examples used in the readme to be more consistent and illustrative of the intended workflow. E.g. the task level example instructions should not impose the model family, experiments should provide example models like logistic regression and random forest.
+  - the heart disease example should additionally have an example auto research flow.
+  - add user documentation in docs/
+  - add quickstart.md, tutorial.md and advanced.md
+
+- **MLFLOW Tracking backend**
+  - add support for remote tracking uri
 
 ### Open Questions
 - is cross task listing of experiments and runs needed and feasible? E.g. the records may live in different branches, have inconsistent metrics, etc.
