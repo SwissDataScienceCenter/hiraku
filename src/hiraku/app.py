@@ -8,6 +8,7 @@ from .git import GitAdapter
 from .launcher import Launcher
 from .reports import ReportService
 from .services import (
+    AnalysisService,
     EventService,
     ExperimentService,
     GoalService,
@@ -28,6 +29,7 @@ class HirakuApp:
     lineage: LineageService
     proposals: ProposalService
     events: EventService
+    analysis: AnalysisService
     launcher: Launcher
     reports: ReportService
 
@@ -43,6 +45,7 @@ def build_app(config: Config | None = None) -> HirakuApp:
     lineage = LineageService(experiments)
     proposals = ProposalService(db, goals)
     events = EventService(db)
+    analysis = AnalysisService(goals, experiments, runs, events)
     launcher = Launcher(config, db, git, goals, experiments, runs)
     reports = ReportService(config, goals, lineage, runs, proposals, events)
     return HirakuApp(
@@ -55,6 +58,7 @@ def build_app(config: Config | None = None) -> HirakuApp:
         lineage,
         proposals,
         events,
+        analysis,
         launcher,
         reports,
     )

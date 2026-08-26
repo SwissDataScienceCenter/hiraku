@@ -1,0 +1,6 @@
+version: 1
+state:
+  backend: sqlite
+  path: .hiraku/state.db
+reports:
+  path: .hiraku/reports

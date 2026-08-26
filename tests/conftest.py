@@ -22,6 +22,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     git(root, "init", "-b", "main")
     git(root, "config", "user.email", "hiraku@example.test")
     git(root, "config", "user.name", "Hiraku Test")
+    git(root, "config", "commit.gpgsign", "false")
     (root / "evaluate.py").write_text(
         """import json, os, sys
 from pathlib import Path

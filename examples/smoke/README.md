@@ -31,3 +31,16 @@ hiraku experiment create smoke/better-v2 --parent smoke/better --hypothesis "A r
 hiraku launch smoke/better-v2:evaluate
 ```
 
+To exercise the unattended runtime-neutral protocol, create a fresh `smoke` Goal and run:
+
+```bash
+hiraku auto loop smoke \
+  --adapter examples/smoke/protocol_adapter.py \
+  --max-experiments 2 \
+  --max-runs 2 \
+  --time-budget 5m
+```
+
+The reference adapter is deterministic and intentionally contains no agent SDK or vendor command.
+It demonstrates the transport only: a real integration places its own agent behind the same JSON
+stdin/stdout contract.

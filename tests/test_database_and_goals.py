@@ -4,6 +4,7 @@ import pytest
 
 from hiraku.database import SCHEMA_VERSION
 from hiraku.errors import HirakuError
+from hiraku.manifest import validate_manifest
 
 
 def test_init_and_goal_use_sqlite_with_manifest_projection(project):
@@ -53,3 +54,13 @@ def test_invalid_manifest_is_concise(project):
     app.git._run("commit", "-m", "bad manifest fixture")
     with pytest.raises(HirakuError, match="string list"):
         app.goals.create("bad", "score", "max", bad)
+
+
+def test_agent_auto_manifest_does_not_require_fixed_implementation_command():
+    manifest = validate_manifest(
+        {
+            "entrypoints": {"evaluate": {"command": ["python", "evaluate.py"]}},
+            "auto": {"allowed_entrypoints": ["evaluate"]},
+        }
+    )
+    assert manifest["auto"] == {"allowed_entrypoints": ["evaluate"]}

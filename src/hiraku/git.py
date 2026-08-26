@@ -55,6 +55,16 @@ class GitAdapter:
     def has_changes(self) -> bool:
         return bool(self._run("status", "--porcelain", "--untracked-files=all").stdout.strip())
 
+    def changed_paths(self) -> set[str]:
+        paths: set[str] = set()
+        output = self._run("status", "--porcelain", "--untracked-files=all").stdout
+        for line in output.splitlines():
+            value = line[3:].strip()
+            if " -> " in value:
+                value = value.split(" -> ", 1)[1]
+            paths.add(value.strip('"'))
+        return paths
+
     def commit_all(self, message: str) -> str:
         if not self.has_changes():
             raise HirakuError("The implementation command produced no source changes.")

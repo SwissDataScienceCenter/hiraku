@@ -38,8 +38,10 @@ This branch is intentionally smaller and operationally simpler than the earlier 
 - The baseline is an Experiment with `kind=baseline`, but there is no promotion/current-best pointer.
 - There is no automatic statistical significance engine, MLflow/W&B adapter, scheduler, dashboard
   server, remote collaboration, or multi-parent combination node.
-- The CLI auto loop uses an approved fixed implementation command from `launch.yml`. A skill-aware
-  agent can use `auto next` for richer implementation work.
+- The repository-local skill lets any capable coding agent drive the loop with portable CLI
+  primitives. Unattended integrations use the same loop through a versioned JSON adapter protocol;
+  Hiraku does not hard-code an agent vendor, model, SDK, or CLI.
 
-Read [cli.md](cli.md) for the executable walkthrough, [data-model.md](data-model.md) for storage,
-and [research-loop.md](research-loop.md) for guided/auto behavior.
+Read [cli.md](cli.md) for the executable walkthrough, [agent-protocol.md](agent-protocol.md) for
+runtime integration, [data-model.md](data-model.md) for storage, and
+[research-loop.md](research-loop.md) for guided/auto behavior.

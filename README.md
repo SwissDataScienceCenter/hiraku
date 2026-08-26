@@ -147,7 +147,12 @@ entrypoints:
   evaluate:
     command: [uv, run, python, evaluate.py]
     cwd: .
+auto:
+  allowed_entrypoints: [evaluate]
 ```
+
+Agent-driven auto mode needs only the approved entrypoint list. A fixed `auto.implement` command is
+optional and exists solely for deterministic, non-agent integration loops.
 
 
 ## Command-line interface
@@ -242,6 +247,43 @@ non-numeric values remain visible afterward. JSON contains flattened metric and 
 
 ### Auto mode
 
+When a coding agent is already running in the repository, ask it to use the installed Hiraku skill
+and conduct bounded autoresearch for the Goal. The skill is runtime-neutral and drives the shared
+core with these machine-readable primitives:
+
+> Use the repository-local Hiraku skill. For Goal `heart-disease`, conduct bounded autoresearch
+> using at most 5 Experiments, 20 Runs, and 2 hours. Use only the Goal's approved entrypoints and
+> stop before changing its scope, protocol, constraints, manifest, or budgets.
+
+```bash
+hiraku auto context heart-disease
+hiraku auto baseline heart-disease
+hiraku auto proposal create heart-disease/random-forest \
+  --hypothesis "Random forest improves ROC AUC."
+hiraku auto next heart-disease
+# agent edits source on the checked-out branch
+hiraku auto implement heart-disease/random-forest --summary "Implemented random forest."
+hiraku launch heart-disease/random-forest:evaluate
+hiraku auto analyze heart-disease/random-forest
+```
+
+For an unattended integration, provide any executable adapter implementing Hiraku's versioned JSON
+stdin/stdout protocol:
+
+```bash
+hiraku auto loop heart-disease \
+  --adapter ./my-agent-adapter \
+  --max-experiments 5 \
+  --max-runs 20 \
+  --time-budget 2h
+```
+
+Hiraku does not hard-code an agent vendor, model, SDK, or CLI. The adapter receives `propose`,
+`implement`, and `analyze` requests; all lifecycle changes still pass through the same Goal,
+Experiment, Run, Git, and event services.
+
+The deterministic manifest-driven fallback remains available for integration examples:
+
 ```bash
 hiraku auto proposal discover heart-disease
 hiraku auto proposal list heart-disease
@@ -249,10 +291,9 @@ hiraku auto next heart-disease
 hiraku auto loop heart-disease --max-experiments 5 --max-runs 20 --time-budget 2h
 ```
 
-The bounded loop uses the same core services as guided mode. It admits proposals, runs an approved
-fixed implementation command from the Goal manifest, commits source, launches, compares with the
-baseline, and concludes Experiments. It stops before changing Goal scope, protocol, permissions,
-policy, or resource limits.
+That fallback runs the approved fixed implementation command from the Goal manifest; it is useful
+for deterministic smoke testing but does not generate hypotheses with an AI agent. Both paths stop
+before changing Goal scope, protocol, permissions, policy, or resource limits.
 
 ### TUI and reports
 
@@ -311,9 +352,10 @@ human approval.
 ### Auto mode
 
 Before auto mode starts, the data scientist approves the Goal, baseline, metric, direction,
-evaluation protocol, allowed entrypoints, implementation command, maximum Experiments, maximum Runs,
-time/compute budget, and policy. Within those limits, the agent may create proposals, implement and
-commit Experiments, launch Runs, analyze metrics, and conclude hypotheses.
+evaluation protocol, allowed entrypoints, maximum Experiments, maximum Runs, time/compute budget,
+and policy. Within those limits, the agent may create proposals, implement and commit Experiments,
+launch Runs, analyze metrics, and conclude hypotheses. A deterministic demo may additionally approve
+a fixed manifest implementation command.
 
 It must stop before changing Goal objective, baseline definition, metric, direction, protocol,
 constraints, program/policy, permissions, or resource limits. Both modes use the same data model and

@@ -3,11 +3,13 @@
 Keep literature or agent reasoning in a Proposal until a human or approved auto policy admits it:
 
 ```bash
-hiraku auto proposal discover <goal>
+hiraku auto context <goal>
+hiraku auto proposal create <goal>/<experiment> --hypothesis "<falsifiable claim>"
 hiraku auto proposal list <goal>
 hiraku auto next <goal>
 ```
 
-A proposal must state the claim, transfer rationale, expected metric, counterargument, and bounded
-implementation plan. Admission creates an ordinary Experiment and never bypasses Goal constraints.
-
+A proposal record contains the intended Experiment ID, falsifiable claim, and optional parent.
+Generate it using the Goal context, transfer rationale, expected metric movement, counterargument,
+and a bounded implementation plan. Admission creates an ordinary Experiment and never bypasses Goal
+constraints.

@@ -17,12 +17,13 @@ source diff, Run evidence, and conclusion.
 
 ## Auto mode
 
-Before `hiraku auto loop`, the human approves the Goal, allowed entrypoints, implementation command,
-experiment/run limits, time budget, and policy. The loop is serial in v0.1 and uses the same
-ExperimentService, Launcher, RunService, and lineage queries as guided mode.
+Before autonomous work, the human approves the Goal, allowed entrypoints, experiment/run limits,
+time budget, and policy. A skill-aware agent drives the portable CLI cycle directly; an unattended
+runtime connects through the versioned JSON adapter protocol. Both use the same ExperimentService,
+Launcher, RunService, and lineage queries as guided mode. The loop is serial in v0.1.
 
 It stops before changing Goal scope, metric, direction, protocol, constraints, manifest permissions,
-budgets, or policy. Fixed implementation, launch, and research-result failures are recorded as
+budgets, or policy. Agent, implementation, launch, and research-result failures are recorded as
 events. A missing or non-numeric metric yields `inconclusive`; a numeric result is compared to the
 best recorded baseline value and yields `supports` or `refutes`.
 
@@ -39,4 +40,3 @@ exact commit for reproducibility.
 An Experiment conclusion records the evidence-backed interpretation. This PoC does not make an
 accepted/current-best pointer, merge branches, or decide statistical significance. A later release
 can add a promotion policy without changing the Goal/Experiment/Run lineage model.
-

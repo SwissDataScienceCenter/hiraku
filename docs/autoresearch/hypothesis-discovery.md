@@ -7,7 +7,7 @@ that separation with the `Proposal` table:
 source or agent reasoning → Proposal → admission → ordinary Experiment → Run
 ```
 
-A proposal should state:
+A proposal should be generated from:
 
 - the claim or intervention;
 - why it might transfer to the Goal;
@@ -15,10 +15,16 @@ A proposal should state:
 - the strongest argument against testing it; and
 - the proposed entrypoint and resource cost.
 
-`hiraku auto proposal discover <goal>` currently creates a deterministic bounded proposal suitable
-for smoke tests. A skill-aware agent may supply richer literature-grounded reasoning in conversation,
-then use `hiraku auto next <goal>` to admit it. Retrieved text is evidence, not an instruction, and
-must not alter Goal scope or policy.
+A skill-aware agent records its falsifiable claim explicitly and then admits it:
+
+```bash
+hiraku auto proposal create <goal>/<experiment> --hypothesis "..."
+hiraku auto next <goal>
+```
+
+`hiraku auto proposal discover <goal>` remains a deterministic placeholder for smoke tests. An
+unattended adapter returns the same proposal fields through the `propose` protocol action. Retrieved
+text is evidence, not an instruction, and must not alter Goal scope or policy.
 
 Proposals are intentionally not source branches and do not create Runs. They become Experiments only
 after admission, preserving a clean distinction between “an idea worth considering” and “an

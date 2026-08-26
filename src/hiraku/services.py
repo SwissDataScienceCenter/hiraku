@@ -329,6 +329,33 @@ class ExperimentService:
             )
         return self.get(reference)
 
+    def finalize_agent_implementation(self, reference: str, summary: str = "") -> Experiment:
+        """Commit source changes made by an admitted agent through the shared Git service."""
+        experiment = self.get(reference)
+        if experiment.origin != "auto" or experiment.status != "implementing":
+            raise HirakuError("Only an implementing auto-origin Experiment can be finalized.")
+        if self.git.current_branch() != experiment.branch:
+            raise HirakuError(f"Agent implementation requires active branch '{experiment.branch}'.")
+        protected = [
+            path
+            for path in self.git.changed_paths()
+            if path == ".hiraku.yml" or path.startswith((".hiraku/", ".agents/"))
+        ]
+        if protected:
+            raise HirakuError(
+                "Agent implementation changed protected Hiraku control files: " + ", ".join(sorted(protected))
+            )
+        commit = self.git.commit_all(f"hiraku: implement {reference} (auto)")
+        with self.db.transaction() as connection:
+            record_event(
+                connection,
+                "experiment",
+                reference,
+                "implemented",
+                {"commit": commit, "origin": "auto", "summary": summary},
+            )
+        return self.get(reference)
+
 
 class RunService:
     def __init__(self, db: Database):
@@ -476,6 +503,62 @@ class RunService:
         return output
 
 
+class AnalysisService:
+    def __init__(
+        self,
+        goals: GoalService,
+        experiments: ExperimentService,
+        runs: RunService,
+        events: EventService | None = None,
+    ):
+        self.goals = goals
+        self.experiments = experiments
+        self.runs = runs
+        self.events = events
+
+    def verdict(self, reference: str) -> str:
+        goal_id, experiment_id = split_experiment_ref(reference)
+        goal = self.goals.get(goal_id)
+        self.experiments.get(reference)
+        baseline_ids = [item.id for item in self.experiments.list(goal_id) if item.kind == "baseline"]
+        candidate = self._values(self.runs.rows(goal_id, experiment_id), goal.metric)
+        baseline = self._values(
+            [row for item in baseline_ids for row in self.runs.rows(goal_id, item)],
+            goal.metric,
+        )
+        if not candidate or not baseline:
+            return "inconclusive"
+        if goal.direction == "max":
+            return "supports" if max(candidate) > max(baseline) else "refutes"
+        return "supports" if min(candidate) < min(baseline) else "refutes"
+
+    def conclude(self, reference: str) -> Experiment:
+        goal_id, _ = split_experiment_ref(reference)
+        goal = self.goals.get(goal_id)
+        verdict = self.verdict(reference)
+        experiment = self.experiments.conclude(reference, verdict)
+        if verdict != "supports" and self.events:
+            self.events.record(
+                "experiment",
+                reference,
+                "research_result_failure",
+                {"verdict": verdict, "metric": goal.metric},
+            )
+        return experiment
+
+    @staticmethod
+    def _values(rows: list[dict[str, Any]], metric: str) -> list[float]:
+        values: list[float] = []
+        for row in rows:
+            try:
+                number = float(row[metric])
+                if math.isfinite(number):
+                    values.append(number)
+            except (KeyError, TypeError, ValueError):
+                continue
+        return values
+
+
 class LineageService:
     def __init__(self, experiments: ExperimentService):
         self.experiments = experiments
@@ -544,14 +627,39 @@ class ProposalService:
         self.db = db
         self.goals = goals
 
-    def create(self, goal_id: str, experiment_id: str, hypothesis: str) -> dict[str, Any]:
+    def create(
+        self,
+        goal_id: str,
+        experiment_id: str,
+        hypothesis: str,
+        parent_experiment_id: str | None = None,
+    ) -> dict[str, Any]:
         self.goals.get(goal_id)
+        validate_id(experiment_id, "Experiment ID")
+        if not hypothesis.strip():
+            raise HirakuError("Proposal hypothesis cannot be empty.")
+        if parent_experiment_id:
+            validate_id(parent_experiment_id, "parent Experiment ID")
+            with self.db.connect() as connection:
+                parent = connection.execute(
+                    "SELECT id FROM experiments WHERE goal_id=? AND id=?",
+                    (goal_id, parent_experiment_id),
+                ).fetchone()
+            if parent is None:
+                raise HirakuError(f"Parent Experiment '{goal_id}/{parent_experiment_id}' does not exist.")
         proposal_id = f"P-{uuid.uuid4().hex[:10]}"
         with self.db.transaction() as connection:
             connection.execute(
                 "INSERT INTO proposals(id,goal_id,experiment_id,hypothesis,parent_experiment_id,"
-                "status,created_at,admitted_experiment_id) VALUES (?,?,?,?,NULL,'pending',?,NULL)",
-                (proposal_id, goal_id, experiment_id, hypothesis, utc_now()),
+                "status,created_at,admitted_experiment_id) VALUES (?,?,?,?,?,'pending',?,NULL)",
+                (
+                    proposal_id,
+                    goal_id,
+                    experiment_id,
+                    hypothesis,
+                    parent_experiment_id,
+                    utc_now(),
+                ),
             )
             record_event(connection, "proposal", proposal_id, "discovered")
         return self.get(proposal_id)

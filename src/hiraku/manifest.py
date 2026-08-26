@@ -63,24 +63,8 @@ def validate_manifest(raw: Any) -> dict[str, Any]:
         }
     auto = raw.get("auto")
     if auto is not None:
-        if not isinstance(auto, dict) or not isinstance(auto.get("implement"), dict):
-            raise HirakuError("Manifest 'auto.implement' must be a command definition.")
-        definition = auto["implement"]
-        command = definition.get("command")
-        if not isinstance(command, list) or not command or not all(isinstance(value, str) for value in command):
-            raise HirakuError("Manifest 'auto.implement.command' must be a non-empty string list.")
-        cwd = definition.get("cwd", ".")
-        pure = PurePosixPath(cwd)
-        if not isinstance(cwd, str) or pure.is_absolute() or ".." in pure.parts:
-            raise HirakuError("Manifest 'auto.implement.cwd' must stay inside the project.")
-        env = definition.get("env", {})
-        if not isinstance(env, dict) or not all(
-            isinstance(key, str) and isinstance(value, (str, int, float, bool)) for key, value in env.items()
-        ):
-            raise HirakuError("Manifest 'auto.implement.env' must contain scalar values.")
-        overlap = RESERVED_ENV.intersection(env)
-        if overlap:
-            raise HirakuError(f"Auto implementation overrides reserved environment: {sorted(overlap)}")
+        if not isinstance(auto, dict):
+            raise HirakuError("Manifest 'auto' must be a mapping.")
         allowed = auto.get("allowed_entrypoints")
         if (
             not isinstance(allowed, list)
@@ -88,12 +72,29 @@ def validate_manifest(raw: Any) -> dict[str, Any]:
             or not all(isinstance(name, str) and name in clean["entrypoints"] for name in allowed)
         ):
             raise HirakuError("Manifest 'auto.allowed_entrypoints' must name one or more defined entrypoints.")
-        clean["auto"] = {
-            "allowed_entrypoints": allowed,
-            "implement": {
+        clean["auto"] = {"allowed_entrypoints": allowed}
+        definition = auto.get("implement")
+        if definition is not None:
+            if not isinstance(definition, dict):
+                raise HirakuError("Manifest 'auto.implement' must be a command definition.")
+            command = definition.get("command")
+            if not isinstance(command, list) or not command or not all(isinstance(value, str) for value in command):
+                raise HirakuError("Manifest 'auto.implement.command' must be a non-empty string list.")
+            cwd = definition.get("cwd", ".")
+            pure = PurePosixPath(cwd)
+            if not isinstance(cwd, str) or pure.is_absolute() or ".." in pure.parts:
+                raise HirakuError("Manifest 'auto.implement.cwd' must stay inside the project.")
+            env = definition.get("env", {})
+            if not isinstance(env, dict) or not all(
+                isinstance(key, str) and isinstance(value, (str, int, float, bool)) for key, value in env.items()
+            ):
+                raise HirakuError("Manifest 'auto.implement.env' must contain scalar values.")
+            overlap = RESERVED_ENV.intersection(env)
+            if overlap:
+                raise HirakuError(f"Auto implementation overrides reserved environment: {sorted(overlap)}")
+            clean["auto"]["implement"] = {
                 "command": command,
                 "cwd": cwd,
                 "env": {key: str(value) for key, value in env.items()},
-            },
-        }
+            }
     return clean

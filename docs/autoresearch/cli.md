@@ -91,14 +91,22 @@ hiraku experiment abandon heart-disease/failed-attempt
 ## Auto commands
 
 ```bash
+hiraku auto context heart-disease
+hiraku auto baseline heart-disease
+hiraku auto proposal create heart-disease/random-forest \
+  --hypothesis "Random forest improves ROC AUC."
 hiraku auto proposal discover heart-disease
 hiraku auto proposal list heart-disease
 hiraku auto next heart-disease
+hiraku auto implement heart-disease/random-forest --summary "Implemented the proposed model."
+hiraku auto analyze heart-disease/random-forest
 hiraku auto loop heart-disease --max-experiments 5 --max-runs 20 --time-budget 2h
 ```
 
-`auto loop` creates an automatic baseline when needed, admits proposals, runs the manifest's
-approved implementation command, commits the source, launches the approved entrypoint, compares
-against the baseline, and records a verdict. The implementation command is intentionally fixed and
-argv-based; it is not an LLM or scheduler.
+The portable agent workflow uses `context`, `baseline`, `proposal create`, `next`, `implement`, the
+normal launcher, and `analyze`. An already-running coding agent follows these commands directly
+through the repository-local skill.
 
+`auto loop --adapter <executable>` provides unattended execution through the runtime-neutral JSON
+protocol. Without `--adapter`, `auto loop` retains the deterministic manifest implementation path
+for cheap integration demos. That fallback is workflow automation, not hypothesis-generating AI.
