@@ -385,6 +385,33 @@ without it, two runs finishing at the same moment would interleave and lose rows
 The loop stops on the first failed member and names it. `--max-parallel 1`, the default, is the old
 sequential behaviour.
 
+## Deleting a record
+
+There is no undo, so both commands refuse rather than strand anything:
+
+```bash
+hiraku-auto goal rm <goal>                      # only if nothing depends on it
+hiraku-auto goal rm <goal> --with-experiments    # take its experiment records too
+hiraku-auto exp rm <exp>                        # only if it has no children
+hiraku-auto exp rm <exp> --with-children        # take the subtree
+```
+
+- **A goal with experiments under it is refused.** Every comparison those experiments record is
+  only meaningful under this goal's evaluation protocol; removing the goal from under them strands
+  them. Move them with `exp set <id> --goal <other>`, or pass `--with-experiments`.
+- **An experiment with children is refused**, for the same reason in miniature: they would point at
+  a parent that no longer exists. Re-parent with `exp set <id> --parent <other>`, or pass
+  `--with-children`.
+- **Anything with recorded runs is refused.** The run table is append-only history and is never
+  rewritten, so deleting the record leaves rows pointing at nothing and `check` reports them
+  forever. `--force` goes through anyway; usually what you want instead is
+  `exp set <id> --status abandoned`, which keeps the result and takes the node out of the loop.
+- **Git branches and worktrees are never destroyed.** A branch can hold committed work, so `rm`
+  prints the exact `git branch -D` and `hiraku-auto worktree remove` commands and leaves the
+  decision to you.
+
+Run `hiraku-auto check` afterwards to confirm nothing dangles.
+
 ## Promotion
 
 ```bash
@@ -441,8 +468,8 @@ The complete, generated reference with every flag is [commands.md](commands.md).
 
 ```
 init                                   create a project
-goal add|draft|list|show               research questions; draft writes one with the agent
-exp create|list|show|set               experiments; --parent makes it a child
+goal add|draft|list|show|rm            research questions; draft writes one with the agent
+exp create|list|show|set|rm            experiments; --parent makes it a child
 tree [--goal] [--json]                 the tree
 check [--strict]                       validate records and the run table
 sync                                   regenerate Children sections

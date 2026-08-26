@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
+import shutil
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
 
@@ -536,6 +539,157 @@ def sync_children(project: Project) -> list[Path]:
             node.record.set_section("Children", text)
             touched.append(write_record(node.record, EXPERIMENT_KEYS))
     return touched
+
+
+# --------------------------------------------------------------------------- removal
+
+
+@dataclass
+class Removal:
+    """What a delete took out, and what it deliberately left behind."""
+
+    paths: list[Path] = dataclass_field(default_factory=list)
+    left_behind: list[str] = dataclass_field(default_factory=list)
+
+
+def _members(project: Project, goal_id: str) -> list[str]:
+    """Every experiment under a goal, including ones that inherit it through a parent."""
+    from .tree import build
+
+    return sorted(build(project).subtree_all(goal_id))
+
+
+def _descendants(project: Project, experiment_id: str) -> list[str]:
+    from .tree import build
+
+    forest = build(project)
+    if experiment_id not in forest.nodes:
+        raise HirakuError(f"Experiment '{experiment_id}' does not exist.")
+    out: list[str] = []
+    frontier = [experiment_id]
+    while frontier:
+        current = frontier.pop()
+        out.append(current)
+        frontier += forest.nodes[current].children
+    return sorted(set(out))
+
+
+def _run_rows(project: Project, experiment_ids: set[str]) -> int:
+    from .runs import read_runs
+
+    table = read_runs(project.table_path)
+    return sum(1 for r in table.rows if r.get("experiment_id") in experiment_ids)
+
+
+def _drop_experiment_dirs(project: Project, ids: list[str], removal: Removal) -> None:
+    """Delete the records. Branches, worktrees and run rows are never touched here.
+
+    A branch may hold committed work and the run table is append-only history; destroying either
+    on a `rm` would make the command unsafe to reach for. What is left behind is reported instead,
+    with the command to finish the job.
+    """
+    from . import gitops
+
+    for experiment_id in ids:
+        directory = project.experiments_dir / experiment_id
+        record_path = experiment_path(project, experiment_id)
+        # Read the declared branch before the record goes: a renamed branch is still the one
+        # holding the work, and guessing `exp/<id>` would name the wrong ref.
+        branch = f"exp/{experiment_id}"
+        if record_path.is_file():
+            branch = str(read_record(record_path).front.get("branch") or branch)
+        if directory.is_dir():
+            shutil.rmtree(directory)
+            removal.paths.append(directory)
+        worktree = project.root / ".worktrees" / experiment_id
+        if worktree.exists():
+            removal.left_behind.append(
+                f"worktree {project.rel(worktree)} — "
+                f"hiraku-auto worktree remove {experiment_id}"
+            )
+        if gitops.is_repo(project.root) and gitops.branch_exists(project.root, branch):
+            removal.left_behind.append(f"branch {branch} — git branch -D {branch}")
+
+
+def remove_experiment(
+    project: Project,
+    experiment_id: str,
+    *,
+    with_children: bool = False,
+    force: bool = False,
+) -> Removal:
+    """Delete an experiment record, and optionally the subtree under it."""
+    validate_id(experiment_id, "Experiment ID")
+    ids = _descendants(project, experiment_id)
+    children = [i for i in ids if i != experiment_id]
+    if children and not with_children:
+        raise HirakuError(
+            f"'{experiment_id}' has {len(children)} descendant(s): {', '.join(children)}.\n"
+            f"Deleting it alone would leave them pointing at a parent that no longer exists. "
+            f"Pass --with-children to delete the subtree, or re-parent them first with "
+            f"`hiraku-auto exp set <id> --parent <other>`."
+        )
+    target = set(ids) if with_children else {experiment_id}
+    rows = _run_rows(project, target)
+    if rows and not force:
+        raise HirakuError(
+            f"{rows} recorded run(s) belong to {'these experiments' if with_children else 'it'}. "
+            f"The run table is append-only history and is never rewritten, so those rows would be "
+            f"left pointing at records that no longer exist, and `check` would report them "
+            f"forever.\nSet `status: abandoned` instead (`hiraku-auto exp set {experiment_id} "
+            f"--status abandoned`) to keep the result and stop the loop touching it, or pass "
+            f"--force if you really mean to delete a measured experiment."
+        )
+    removal = Removal()
+    _drop_experiment_dirs(project, sorted(target, reverse=True), removal)
+    sync_children(project)
+    return removal
+
+
+def remove_goal(
+    project: Project,
+    goal_id: str,
+    *,
+    with_experiments: bool = False,
+    force: bool = False,
+) -> Removal:
+    """Delete a goal record, its pending proposals, and optionally its experiments."""
+    path = goal_path(project, validate_id(goal_id, "Goal ID"))
+    if not path.is_file():
+        raise HirakuError(f"Goal '{goal_id}' does not exist ({project.rel(path)}).")
+
+    from .records import load_proposals
+
+    members = _members(project, goal_id)
+    if members and not with_experiments:
+        raise HirakuError(
+            f"Goal '{goal_id}' still has {len(members)} experiment(s): {', '.join(members)}.\n"
+            f"Every comparison they record is only meaningful under this goal's evaluation "
+            f"protocol, so removing the goal from under them would strand them.\n"
+            f"Move them (`hiraku-auto exp set <id> --goal <other>`), delete them "
+            f"(`hiraku-auto exp rm <id>`), or pass --with-experiments to delete them with the goal."
+        )
+    rows = _run_rows(project, set(members))
+    if rows and not force:
+        raise HirakuError(
+            f"{rows} recorded run(s) belong to this goal's experiments. The run table is "
+            f"append-only history and is never rewritten, so those rows would be left pointing at "
+            f"records that no longer exist.\nSet `status: abandoned` in "
+            f"{project.rel(path)} instead — that keeps the record and its results while taking the "
+            f"goal out of the loop — or pass --force if you really mean to delete measured work."
+        )
+
+    removal = Removal()
+    if with_experiments:
+        _drop_experiment_dirs(project, sorted(members, reverse=True), removal)
+    for record in load_proposals(project).values():
+        if record.front.get("goal") == goal_id:
+            record.path.unlink()
+            removal.paths.append(record.path)
+    path.unlink()
+    removal.paths.append(path)
+    sync_children(project)
+    return removal
 
 
 def set_fields(record: Record, updates: dict[str, Any]) -> Record:

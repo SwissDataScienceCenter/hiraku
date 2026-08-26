@@ -93,15 +93,17 @@ options:
 
 ### `hiraku-auto goal --help`
 ```
-usage: hiraku-auto goal [-h] {add,draft,list,show} ...
+usage: hiraku-auto goal [-h] {add,draft,list,show,rm} ...
 
 positional arguments:
-  {add,draft,list,show}
+  {add,draft,list,show,rm}
     add                 create a goal
     draft               write the goal record with the agent, from a question
                         and the project's own files
     list                one row per goal, with node and run counts
     show                print a goal record
+    rm                  delete a goal record; refuses while experiments or
+                        runs depend on it
 
 options:
   -h, --help            show this help message and exit
@@ -181,16 +183,33 @@ options:
   --json      front matter and sections as JSON
 ```
 
-### `hiraku-auto exp --help`
+### `hiraku-auto goal rm --help`
 ```
-usage: hiraku-auto exp [-h] {create,list,show,set} ...
+usage: hiraku-auto goal rm [-h] [--with-experiments] [--force] id
 
 positional arguments:
-  {create,list,show,set}
+  id
+
+options:
+  -h, --help          show this help message and exit
+  --with-experiments  delete the goal's experiment records too (branches and
+                      worktrees are kept)
+  --force             delete even though runs were recorded; the run rows stay
+                      and become orphans
+```
+
+### `hiraku-auto exp --help`
+```
+usage: hiraku-auto exp [-h] {create,list,show,set,rm} ...
+
+positional arguments:
+  {create,list,show,set,rm}
     create              create an experiment and its branch
     list                one row per experiment
     show                print a record and its runs
     set                 edit front matter on an existing record
+    rm                  delete an experiment record; refuses while children or
+                        runs depend on it
 
 options:
   -h, --help            show this help message and exit
@@ -273,6 +292,20 @@ options:
   --expectation EXPECTATION
   --clear KEY [KEY ...]
                         remove these keys
+```
+
+### `hiraku-auto exp rm --help`
+```
+usage: hiraku-auto exp rm [-h] [--with-children] [--force] id
+
+positional arguments:
+  id
+
+options:
+  -h, --help       show this help message and exit
+  --with-children  delete the whole subtree beneath it as well
+  --force          delete even though runs were recorded; the run rows stay
+                   and become orphans
 ```
 
 ### `hiraku-auto tree --help`

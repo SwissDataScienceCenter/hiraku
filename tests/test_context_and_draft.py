@@ -255,3 +255,76 @@ def test_a_reply_without_a_metric_is_refused(bare_project, tmp_path):
         agent_mod.run_draft(
             bare_project, "vggt-pose", "q", command=fake_agent(tmp_path, '{"title": "x"}')
         )
+
+
+# --------------------------------------------------------------------------- removal
+
+
+def test_goal_rm_deletes_an_empty_goal_and_its_proposals(bare_project, tmp_path):
+    from hiraku_auto.scaffold import create_goal, create_proposal, remove_goal
+
+    create_goal(bare_project, "mistake", primary_metric="x")
+    create_proposal(bare_project, "an-idea", goal="mistake", origin="agent-literature")
+
+    removal = remove_goal(bare_project, "mistake")
+    names = {p.name for p in removal.paths}
+    assert names == {"mistake.md", "an-idea.md"}
+    assert not (bare_project.goals_dir / "mistake.md").exists()
+    assert check(build(bare_project)) == []
+
+
+def test_goal_rm_refuses_while_experiments_hang_off_it(project):
+    from hiraku_auto.scaffold import remove_goal
+
+    with pytest.raises(HirakuError, match="still has 2 experiment"):
+        remove_goal(project, "vo-backend")
+    assert (project.goals_dir / "vo-backend.md").is_file()
+
+
+def test_goal_rm_with_experiments_takes_the_subtree_but_not_the_branches(project):
+    from hiraku_auto import gitops
+    from hiraku_auto.scaffold import remove_goal
+
+    gitops.create_branch(project.root, "exp/candidate")
+    removal = remove_goal(project, "vo-backend", with_experiments=True)
+    assert not (project.experiments_dir / "baseline").exists()
+    assert not (project.experiments_dir / "candidate").exists()
+    assert not (project.goals_dir / "vo-backend.md").exists()
+    # Branches may hold committed work, so `rm` names them instead of destroying them.
+    assert any("git branch -D exp/candidate" in note for note in removal.left_behind)
+
+
+def test_removal_refuses_once_a_run_is_recorded(entrypoint):
+    from hiraku_auto.launcher import launch
+    from hiraku_auto.scaffold import remove_experiment, remove_goal
+
+    launch(entrypoint, "candidate", "train", seed="1")
+
+    with pytest.raises(HirakuError, match="append-only history"):
+        remove_experiment(entrypoint, "candidate")
+    with pytest.raises(HirakuError, match="append-only history"):
+        remove_goal(entrypoint, "vo-backend", with_experiments=True)
+    assert (entrypoint.experiments_dir / "candidate").is_dir()
+
+    # --force is the way through, and the orphaned row is then visible in `check`.
+    remove_experiment(entrypoint, "candidate", force=True)
+    assert any("unknown experiment 'candidate'" in i for i in check(build(entrypoint)))
+
+
+def test_exp_rm_refuses_to_orphan_its_children(project):
+    from hiraku_auto.scaffold import remove_experiment
+
+    with pytest.raises(HirakuError, match="1 descendant"):
+        remove_experiment(project, "baseline")
+
+    remove_experiment(project, "baseline", with_children=True)
+    assert not (project.experiments_dir / "candidate").exists()
+
+
+def test_exp_rm_of_a_leaf_resyncs_the_parent(project):
+    from hiraku_auto.records import load_experiment
+    from hiraku_auto.scaffold import remove_experiment
+
+    remove_experiment(project, "candidate")
+    assert "None." in load_experiment(project, "baseline").section("Children")
+    assert check(build(project)) == []

@@ -1,8 +1,8 @@
 """Command-line interface.
 
     hiraku-auto init
-    hiraku-auto goal add | draft | list | show
-    hiraku-auto exp create | list | show | set | tree
+    hiraku-auto goal add | draft | list | show | rm
+    hiraku-auto exp create | list | show | set | rm | tree
     hiraku-auto launch <experiment>:<entrypoint> [--commit REF]
     hiraku-auto runs [<experiment>] [--sort METRIC --descending]
     hiraku-auto agent draft|design|triage|discover|analyze
@@ -255,6 +255,33 @@ def cmd_goal_show(args: argparse.Namespace) -> int:
         print(record.path.read_text(encoding="utf-8"))
         _print_unset(project, record)
     return 0
+
+
+def _report_removal(project: Any, removal: Any) -> int:
+    for path in removal.paths:
+        print(f"removed {project.rel(path)}")
+    if removal.left_behind:
+        print("\nleft alone (delete these yourself if you mean to):")
+        for note in removal.left_behind:
+            print(f"  {note}")
+    print("\n  hiraku-auto check   # confirm nothing is left dangling")
+    return 0
+
+
+def cmd_goal_rm(args: argparse.Namespace) -> int:
+    project = _project(args)
+    removal = scaffold.remove_goal(
+        project, args.id, with_experiments=args.with_experiments, force=args.force
+    )
+    return _report_removal(project, removal)
+
+
+def cmd_exp_rm(args: argparse.Namespace) -> int:
+    project = _project(args)
+    removal = scaffold.remove_experiment(
+        project, args.id, with_children=args.with_children, force=args.force
+    )
+    return _report_removal(project, removal)
 
 
 def cmd_exp_create(args: argparse.Namespace) -> int:
@@ -964,6 +991,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     p.add_argument("--json", action="store_true", help="front matter and sections as JSON")
     p.set_defaults(func=cmd_goal_show)
+    p = goal.add_parser(
+        "rm", help="delete a goal record; refuses while experiments or runs depend on it"
+    )
+    p.add_argument("id")
+    p.add_argument(
+        "--with-experiments",
+        action="store_true",
+        help="delete the goal's experiment records too (branches and worktrees are kept)",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="delete even though runs were recorded; the run rows stay and become orphans",
+    )
+    p.set_defaults(func=cmd_goal_rm)
 
     exp = sub.add_parser(
         "exp", help="experiments; a sub-experiment is an experiment with a --parent"
@@ -1003,6 +1045,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--expectation")
     p.add_argument("--clear", nargs="+", metavar="KEY", help="remove these keys")
     p.set_defaults(func=cmd_exp_set)
+    p = exp.add_parser(
+        "rm", help="delete an experiment record; refuses while children or runs depend on it"
+    )
+    p.add_argument("id")
+    p.add_argument(
+        "--with-children",
+        action="store_true",
+        help="delete the whole subtree beneath it as well",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="delete even though runs were recorded; the run rows stay and become orphans",
+    )
+    p.set_defaults(func=cmd_exp_rm)
 
     p = sub.add_parser("tree", help="render the experiment tree")
     p.add_argument("--goal", help="one goal only")
