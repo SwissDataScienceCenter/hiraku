@@ -11,7 +11,7 @@
     hiraku-auto promote <experiment> --run <run-id>
     hiraku-auto proposal list | accept | decline
     hiraku-auto worktree add | remove | list
-    hiraku-auto check | sync | context | dash | ui
+    hiraku-auto check | sync | context | logs | dash | ui
 
 argparse rather than a CLI framework, so the package installs with no required dependencies.
 """
@@ -46,6 +46,94 @@ from .records import (
 )
 from .runs import rank, read_runs
 from .tree import build, render_ascii, to_dict
+
+
+def _agent_hooks() -> agent_mod.Hooks:
+    """Say what is about to happen, tick while it does, and say how long it took.
+
+    `claude -p` prints nothing until it is finished, and a design or discover call takes minutes.
+    Without this the terminal is blank and indistinguishable from a hang.
+    """
+    state = {"last": -99.0}
+
+    def start(info: dict[str, Any]) -> None:
+        print(f"agent:   {info['command']}   ({info['workflow']} -> {info['target']})")
+        if info.get("context") and info["context"] != "context: none":
+            print(f"{info['context']}")
+        print(f"prompt:  {info['prompt_chars']:,} characters")
+        print(f"log:     {info['log']}/")
+        print(f"waiting for a reply (timeout {info['timeout']}s; Ctrl-C is safe, nothing is "
+              f"written until it returns)")
+        sys.stdout.flush()
+
+    def tick(elapsed: float) -> None:
+        interactive = sys.stderr.isatty()
+        if elapsed - state["last"] < (2.0 if interactive else 30.0):
+            return
+        state["last"] = elapsed
+        text = f"  ... {int(elapsed)}s"
+        if interactive:
+            print(f"\r{text}      ", end="", file=sys.stderr, flush=True)
+        else:
+            print(text, file=sys.stderr, flush=True)
+
+    def done(info: dict[str, Any]) -> None:
+        if sys.stderr.isatty() and state["last"] >= 0:
+            print("\r" + " " * 24 + "\r", end="", file=sys.stderr, flush=True)
+        if info.get("error"):
+            print(f"agent failed after {info['seconds']}s — prompt kept in {info['log']}/")
+        else:
+            print(f"agent replied in {info['seconds']}s")
+        sys.stdout.flush()
+
+    return agent_mod.Hooks(start=start, tick=tick, done=done)
+
+
+def cmd_logs(args: argparse.Namespace) -> int:
+    """Every agent call this project has made: the prompt sent, the reply, how long it took."""
+    project = _project(args)
+    entries = agent_mod.read_logs(project, limit=args.limit)
+    if not entries:
+        print(f"no agent calls logged yet ({project.rel(agent_mod.logs_root(project))}/)")
+        return 0
+
+    if args.show:
+        wanted = entries[0] if args.show == "latest" else None
+        if wanted is None:
+            matches = [e for e in entries if args.show in e["id"]]
+            if not matches:
+                raise HirakuError(f"No logged call matches '{args.show}'.")
+            wanted = matches[0]
+        directory = wanted["path"]
+        name = "prompt.md" if args.prompt else "reply.txt"
+        print(f"# {wanted['id']}\n")
+        print(json.dumps({k: v for k, v in wanted.items() if k != "path"}, indent=2, default=str))
+        target = directory / name
+        print(f"\n# {name}\n")
+        print(target.read_text(encoding="utf-8") if target.is_file() else "(not written)")
+        return 0
+
+    if args.json:
+        print(json.dumps(entries, indent=2, default=str))
+        return 0
+    rows = [
+        {
+            "when": str(e.get("started", e["id"][:19])),
+            "workflow": str(e.get("workflow", "")),
+            "target": str(e.get("target", "")),
+            "secs": str(e.get("seconds", "")),
+            "reply": f"{e['reply_chars']:,}" if e.get("reply_chars") else "",
+            "result": "error" if e.get("error") else "ok",
+        }
+        for e in entries
+    ]
+    print(_table(rows, ["when", "workflow", "target", "secs", "reply", "result"]))
+    for entry in entries:
+        if entry.get("error"):
+            print(f"\n{entry['id']}: {entry['error']}")
+    print("\n  hiraku-auto logs --show latest            # the newest reply in full")
+    print("  hiraku-auto logs --show latest --prompt   # what was sent")
+    return 0
 
 
 def _red(text: str) -> str:
@@ -157,12 +245,12 @@ def cmd_goal_draft(args: argparse.Namespace) -> int:
         with_experiments=args.with_experiments,
         use_context=_context_choice(args),
         extra_context=args.context or [],
+        hooks=_agent_hooks(),
         timeout=args.timeout,
     )
     if args.dry_run:
         print(result.prompt)
         return 0
-    print(result.context.summary())
     for path in result.written:
         print(f"wrote {project.rel(path)}")
     if not result.written:
@@ -554,6 +642,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
         apply=not args.no_apply,
         use_context=_context_choice(args),
         extra_context=args.context or [],
+        hooks=_agent_hooks(),
         timeout=args.timeout,
     )
     if args.workflow in {"design", "discover"} and not args.dry_run:
@@ -577,8 +666,6 @@ def cmd_agent(args: argparse.Namespace) -> int:
     if args.dry_run:
         print(result.prompt)
         return 0
-    if result.context:
-        print(result.context.summary())
     if args.show_raw:
         print(result.raw)
     if result.data.get("blocked"):
@@ -1085,6 +1172,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--json", action="store_true", help="the bundle exactly as the agent sees it")
     p.set_defaults(func=cmd_context)
+
+    p = sub.add_parser("logs", help="every agent call: the prompt sent, the reply, how long")
+    p.add_argument("--limit", type=int, default=20, help="how many calls to list")
+    p.add_argument(
+        "--show", metavar="ID", help="print one call in full; 'latest' for the newest"
+    )
+    p.add_argument(
+        "--prompt", action="store_true", help="with --show, print the prompt instead of the reply"
+    )
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.set_defaults(func=cmd_logs)
 
     p = sub.add_parser("launch", help="run an entrypoint and record the run")
     p.add_argument("target", metavar="EXPERIMENT:ENTRYPOINT")

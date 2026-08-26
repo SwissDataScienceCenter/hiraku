@@ -15,12 +15,16 @@ environments. Override with --agent-cmd or HIRAKU_AGENT_CMD (e.g. "codex exec", 
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -60,6 +64,22 @@ class AgentRun:
     data: dict[str, Any] = field(default_factory=dict)
     written: list[Path] = field(default_factory=list)
     context: context_mod.Bundle = field(default_factory=context_mod.Bundle)
+    log: Path | None = None
+    seconds: float = 0.0
+
+
+@dataclass
+class Hooks:
+    """Where the caller gets told what is happening.
+
+    An agent call is a minutes-long subprocess that prints nothing until it finishes. Without
+    these the terminal sits blank and the only honest thing a researcher can conclude is that
+    something has hung.
+    """
+
+    start: Callable[[dict[str, Any]], None] | None = None
+    tick: Callable[[float], None] | None = None
+    done: Callable[[dict[str, Any]], None] | None = None
 
 
 # --------------------------------------------------------------------------- prompt assembly
@@ -226,30 +246,168 @@ def call_agent(
     command: list[str] | None = None,
     timeout: int = DEFAULT_TIMEOUT,
     cwd: Path | None = None,
+    progress: Callable[[float], None] | None = None,
 ) -> str:
+    """Run the agent, calling `progress(elapsed_seconds)` while waiting.
+
+    Popen rather than `subprocess.run` so the wait is interruptible: `run` blocks until the
+    process exits, which is the whole reason nothing appeared on the terminal for minutes. The
+    pipes are drained on their own threads, because a reply large enough to fill the OS pipe
+    buffer would otherwise deadlock the child against a parent that is only polling.
+    """
     argv = command or agent_command()
     if shutil.which(argv[0]) is None:
         raise AgentError(
             f"Agent command '{argv[0]}' not found on PATH. Install Claude Code, or pass "
             f"--agent-cmd, or use --dry-run to print the prompt and run it yourself."
         )
-    try:
-        completed = subprocess.run(
-            [*argv, prompt],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(cwd) if cwd else None,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise AgentError(f"Agent timed out after {timeout}s.") from exc
-    if completed.returncode != 0:
+    process = subprocess.Popen(  # noqa: S603
+        [*argv, prompt],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(cwd) if cwd else None,
+    )
+    buffers: dict[str, str] = {"out": "", "err": ""}
+
+    def drain(stream: Any, key: str) -> None:
+        buffers[key] = stream.read() or ""
+
+    readers = [
+        threading.Thread(target=drain, args=(process.stdout, "out"), daemon=True),
+        threading.Thread(target=drain, args=(process.stderr, "err"), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+
+    started = time.monotonic()
+    while True:
+        try:
+            process.wait(timeout=0.5)
+            break
+        except subprocess.TimeoutExpired:
+            elapsed = time.monotonic() - started
+            if elapsed > timeout:
+                process.kill()
+                process.wait()
+                raise AgentError(
+                    f"Agent timed out after {timeout}s. Raise it with --timeout, or run the "
+                    f"prompt yourself: the exact text is in the log directory."
+                ) from None
+            if progress:
+                progress(elapsed)
+    for reader in readers:
+        reader.join(timeout=5)
+
+    if process.returncode != 0:
         raise AgentError(
-            f"Agent exited {completed.returncode}: {(completed.stderr or completed.stdout)[:500]}"
+            f"Agent exited {process.returncode}: {(buffers['err'] or buffers['out'])[:500]}"
         )
-    if not completed.stdout.strip():
+    if not buffers["out"].strip():
         raise AgentError("Agent produced no output.")
-    return completed.stdout
+    return buffers["out"]
+
+
+# --------------------------------------------------------------------------- logging
+
+
+LOG_DIRNAME = "agent-logs"
+
+
+def logs_root(project: Project) -> Path:
+    return project.root / ".hiraku" / LOG_DIRNAME
+
+
+def _open_log(project: Project, workflow: str, target: str) -> Path:
+    stamp = _dt.datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    directory = logs_root(project) / f"{stamp}-{workflow}-{target}"
+    suffix = 1
+    while directory.exists():
+        suffix += 1
+        directory = logs_root(project) / f"{stamp}-{workflow}-{target}-{suffix}"
+    directory.mkdir(parents=True)
+    return directory
+
+
+def read_logs(project: Project, limit: int = 20) -> list[dict[str, Any]]:
+    """The most recent calls, newest first. Each entry is what `meta.json` recorded."""
+    root = logs_root(project)
+    if not root.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for directory in sorted(root.iterdir(), reverse=True):
+        if not directory.is_dir():
+            continue
+        meta_path = directory / "meta.json"
+        meta: dict[str, Any] = {"id": directory.name, "path": directory}
+        if meta_path.is_file():
+            try:
+                meta.update(json.loads(meta_path.read_text(encoding="utf-8")))
+            except json.JSONDecodeError:
+                meta["error"] = "meta.json is not readable"
+        else:
+            meta["error"] = "still running, or the process was killed"
+        meta["id"], meta["path"] = directory.name, directory
+        out.append(meta)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _invoke(
+    project: Project,
+    workflow: str,
+    target: str,
+    prompt: str,
+    bundle: context_mod.Bundle,
+    *,
+    command: list[str] | None,
+    timeout: int,
+    hooks: Hooks | None,
+) -> tuple[str, Path, float]:
+    """One agent call: announced before it starts, ticking while it waits, logged either way."""
+    argv = command or agent_command()
+    directory = _open_log(project, workflow, target)
+    (directory / "prompt.md").write_text(prompt, encoding="utf-8")
+
+    info: dict[str, Any] = {
+        "workflow": workflow,
+        "target": target,
+        "command": " ".join(argv),
+        "prompt_chars": len(prompt),
+        "context": bundle.summary(),
+        "log": project.rel(directory),
+        "started": _dt.datetime.now().isoformat(timespec="seconds"),
+        "timeout": timeout,
+    }
+
+    def write_meta(extra: dict[str, Any]) -> None:
+        (directory / "meta.json").write_text(
+            json.dumps({**info, **extra}, indent=2, default=str), encoding="utf-8"
+        )
+
+    if hooks and hooks.start:
+        hooks.start(info)
+    started = time.monotonic()
+    try:
+        raw = call_agent(
+            prompt,
+            command=argv,
+            timeout=timeout,
+            cwd=project.root,
+            progress=hooks.tick if hooks else None,
+        )
+    except Exception as exc:
+        write_meta({"seconds": round(time.monotonic() - started, 1), "error": str(exc)})
+        if hooks and hooks.done:
+            hooks.done({**info, "seconds": round(time.monotonic() - started, 1), "error": str(exc)})
+        raise
+    seconds = round(time.monotonic() - started, 1)
+    (directory / "reply.txt").write_text(raw, encoding="utf-8")
+    write_meta({"seconds": seconds, "reply_chars": len(raw), "error": None})
+    if hooks and hooks.done:
+        hooks.done({**info, "seconds": seconds, "error": None})
+    return raw, directory, seconds
 
 
 # --------------------------------------------------------------------------- workflows
@@ -275,6 +433,7 @@ def run_draft(
     with_experiments: bool = False,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
+    hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     """Turn a question in the researcher's own words into a goal record they can review.
@@ -316,7 +475,9 @@ def run_draft(
     if dry_run:
         return result
 
-    result.raw = call_agent(prompt, command=command, timeout=timeout, cwd=project.root)
+    result.raw, result.log, result.seconds = _invoke(
+        project, "draft", goal_id, prompt, bundle, command=command, timeout=timeout, hooks=hooks
+    )
     result.data = extract_json(result.raw)
     if not result.data.get("primary_metric"):
         raise AgentError("Agent reply is missing a valid 'primary_metric' (str).")
@@ -367,6 +528,7 @@ def run_design(
     apply: bool = True,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
+    hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     forest = build(project)
@@ -382,7 +544,9 @@ def run_design(
     if dry_run:
         return result
 
-    result.raw = call_agent(prompt, command=command, timeout=timeout, cwd=project.root)
+    result.raw, result.log, result.seconds = _invoke(
+        project, "design", goal_id, prompt, bundle, command=command, timeout=timeout, hooks=hooks
+    )
     result.data = extract_json(result.raw)
     proposed = _require(result.data, "experiments", list)
     if not apply:
@@ -424,6 +588,7 @@ def run_triage(
     apply: bool = True,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
+    hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     forest = build(project)
@@ -441,7 +606,10 @@ def run_triage(
     if dry_run:
         return result
 
-    result.raw = call_agent(prompt, command=command, timeout=timeout, cwd=project.root)
+    result.raw, result.log, result.seconds = _invoke(
+        project, "triage", experiment_id, prompt, bundle,
+        command=command, timeout=timeout, hooks=hooks,
+    )
     result.data = extract_json(result.raw)
     data = result.data
     if data.get("blocked"):
@@ -511,6 +679,7 @@ def run_discover(
     apply: bool = True,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
+    hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     forest = build(project)
@@ -526,7 +695,9 @@ def run_discover(
     if dry_run:
         return result
 
-    result.raw = call_agent(prompt, command=command, timeout=timeout, cwd=project.root)
+    result.raw, result.log, result.seconds = _invoke(
+        project, "discover", goal_id, prompt, bundle, command=command, timeout=timeout, hooks=hooks
+    )
     result.data = extract_json(result.raw)
     proposals = _require(result.data, "proposals", list)
     if not apply:
@@ -565,6 +736,7 @@ def run_analyze(
     apply: bool = True,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
+    hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     forest = build(project)
@@ -584,7 +756,10 @@ def run_analyze(
     if dry_run:
         return result
 
-    result.raw = call_agent(prompt, command=command, timeout=timeout, cwd=project.root)
+    result.raw, result.log, result.seconds = _invoke(
+        project, "analyze", experiment_id, prompt, bundle,
+        command=command, timeout=timeout, hooks=hooks,
+    )
     result.data = extract_json(result.raw)
     if not apply:
         return result

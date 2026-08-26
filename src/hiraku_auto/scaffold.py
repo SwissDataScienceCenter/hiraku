@@ -181,6 +181,7 @@ def init_project(
 GITIGNORE_ENTRIES = (
     "# hiraku-auto: machine state, never committed",
     ".worktrees/",
+    ".hiraku/agent-logs/",
     ".venv",
     ".venv-*",
     "experiments/*/.venv",

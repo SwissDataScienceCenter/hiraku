@@ -375,3 +375,81 @@ def test_exp_rm_of_a_leaf_resyncs_the_parent(project):
     remove_experiment(project, "candidate")
     assert "None." in load_experiment(project, "baseline").section("Children")
     assert check(build(project)) == []
+
+
+# --------------------------------------------------------------------------- progress and logs
+
+
+def test_every_call_is_logged_with_its_prompt_and_reply(project, tmp_path):
+    reply = json.dumps({"experiments": [], "notes": "nothing to add"})
+    result = agent_mod.run_design(project, "vo-backend", command=fake_agent(tmp_path, reply))
+
+    assert result.log is not None and result.log.is_dir()
+    assert "vo-backend" in result.log.name and "design" in result.log.name
+    assert "investigation test" in (result.log / "prompt.md").read_text().lower()
+    assert (result.log / "reply.txt").read_text() == result.raw
+
+    meta = json.loads((result.log / "meta.json").read_text())
+    assert meta["workflow"] == "design" and meta["target"] == "vo-backend"
+    assert meta["error"] is None and meta["seconds"] >= 0
+
+    entries = agent_mod.read_logs(project)
+    assert entries[0]["id"] == result.log.name
+
+
+def test_a_failed_call_still_leaves_the_prompt_and_the_reason(project, tmp_path):
+    from hiraku_auto.errors import AgentError
+
+    with pytest.raises(AgentError):
+        agent_mod.run_design(project, "vo-backend", command=fake_agent(tmp_path, "not json"))
+
+    entry = agent_mod.read_logs(project)[0]
+    assert entry["error"] is None  # the call itself succeeded; extraction is what failed
+    assert (entry["path"] / "prompt.md").is_file()
+
+
+def test_hooks_fire_around_the_call(project, tmp_path):
+    seen: dict[str, object] = {}
+    hooks = agent_mod.Hooks(
+        start=lambda info: seen.setdefault("start", info),
+        tick=lambda elapsed: seen.setdefault("ticked", True),
+        done=lambda info: seen.setdefault("done", info),
+    )
+    agent_mod.run_design(
+        project,
+        "vo-backend",
+        command=fake_agent(tmp_path, json.dumps({"experiments": []})),
+        hooks=hooks,
+    )
+    start = seen["start"]
+    assert start["workflow"] == "design" and start["target"] == "vo-backend"
+    assert start["prompt_chars"] > 0 and start["log"].endswith("-design-vo-backend")
+    assert seen["done"]["error"] is None
+
+
+def test_a_slow_agent_ticks_and_a_hung_one_times_out(project, tmp_path):
+    import stat
+    import sys as _sys
+
+    from hiraku_auto.errors import AgentError
+
+    script = tmp_path / "sleeper.py"
+    script.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    ticks: list[float] = []
+    with pytest.raises(AgentError, match="timed out after 1s"):
+        agent_mod.call_agent(
+            "hi",
+            command=[_sys.executable, str(script)],
+            timeout=1,
+            progress=ticks.append,
+        )
+    assert ticks, "the caller must hear about a wait it cannot see"
+
+
+def test_a_reply_larger_than_the_pipe_buffer_does_not_deadlock(project, tmp_path):
+    """Draining on threads is what makes this safe; `run` with a poll loop would hang."""
+    big = json.dumps({"experiments": [], "notes": "x" * 200_000})
+    result = agent_mod.run_design(project, "vo-backend", command=fake_agent(tmp_path, big))
+    assert len(result.raw) > 200_000

@@ -286,6 +286,55 @@ hiraku-auto agent discover vo-backend-selection      # literature -> proposals
 Default command is `claude -p <prompt>`. Override with `--agent-cmd` or `HIRAKU_AGENT_CMD`
 (`codex exec`, a local model, anything that reads a prompt argument and prints a reply).
 
+### Seeing what it is doing
+
+An agent call is a subprocess that prints nothing until it finishes, and design or discover on a
+real tree takes minutes. So every call announces itself first and ticks while it waits:
+
+```
+$ hiraku-auto agent design vggt-dinov3
+agent:   claude -p   (design -> vggt-dinov3)
+context: 5 file(s), 12,904 characters, 2 from outside this project
+prompt:  41,203 characters
+log:     .hiraku/agent-logs/2026-08-26T110307-design-vggt-dinov3/
+waiting for a reply (timeout 900s; Ctrl-C is safe, nothing is written until it returns)
+  ... 64s
+agent replied in 71.3s
+wrote experiments/dinov2-retrieval/experiment.md
+```
+
+The tick rewrites one line on a terminal and prints every 30 s when output is piped or redirected,
+so a log file from an unattended run stays readable.
+
+Nothing is written to any record until the reply comes back and parses, so Ctrl-C during the wait
+leaves the project exactly as it was.
+
+### The log
+
+Every call — including one that fails — writes `prompt.md`, `reply.txt` and `meta.json` under
+`.hiraku/agent-logs/<timestamp>-<workflow>-<target>/`. That directory is gitignored: it is a
+transcript, not a record.
+
+```bash
+hiraku-auto logs                          # the last 20 calls, with durations
+hiraku-auto logs --show latest            # the newest reply, in full
+hiraku-auto logs --show latest --prompt   # exactly what was sent
+hiraku-auto logs --show 2026-08-26T1103   # any call, matched by a prefix of its id
+hiraku-auto logs --json                   # machine-readable
+```
+
+```
+$ hiraku-auto logs
+when                 workflow  target       secs   reply   result
+-------------------  --------  -----------  -----  ------  ------
+2026-08-26T11:03:07  design    vggt-dinov3  71.3   4,102   ok
+2026-08-26T10:41:55  discover  vggt-dinov3  184.0  9,540   ok
+2026-08-26T10:22:03  draft     vggt-dinov3  38.2   0       error
+```
+
+The prompt is kept even when the call fails, so a timeout or a malformed reply leaves you something
+to paste into an interactive `claude` session rather than nothing at all.
+
 ### Web access
 
 `claude -p` starts with no tools permitted, so `discover` will search nothing and cite only what the
@@ -477,6 +526,7 @@ launch <exp>:<entrypoint> [--commit]   run and record
 runs [<exp>] [--sort M --ascending]    list or rank
 agent design|analyze|triage|discover   call the agent
 context [--add PATH] [--json]          project files the agent would be given
+logs [--show latest] [--prompt]        every agent call: prompt, reply, duration
 next <goal>                            what the loop would do next
 loop <goal> [--launch <entrypoint>]    bounded loop
 promote <exp> --run <id>               the promotion gate
