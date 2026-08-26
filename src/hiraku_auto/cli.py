@@ -204,17 +204,19 @@ def cmd_context(args: argparse.Namespace) -> int:
             "file": f.rel,
             "chars": f"{len(f.text):,}",
             "of": f"{f.bytes_total:,}" if f.truncated else "",
+            "where": "another repo" if f.outside else "",
         }
         for f in bundle.files
     ]
-    print(_table(rows, ["file", "chars", "of"]))
+    print(_table(rows, ["file", "chars", "of", "where"]))
     for note in bundle.skipped:
         print(f"omitted: {note}")
     print(f"\n{bundle.summary()}")
     print(
         "\nThese excerpts are included in the prompt for the draft, design and discover "
         "workflows.\nEdit `context.sources` in research/config.md to change the list, or pass "
-        "--no-context\nto a single agent call."
+        "--no-context\nto a single agent call. Paths may point outside this project — the code "
+        "repository a\nresearch project studies is usually a separate checkout."
     )
     return 0
 

@@ -17,6 +17,10 @@ context:
     - docs/**/*.md
     - notes/**/*.md
     - research/config.md
+    # Paths may reach outside this project — a research project usually studies a
+    # separate code repository. Absolute paths and ../ both work, for example:
+    #   - ../mapillary_alignment/CLAUDE.md
+    #   - ../mapillary_alignment/docs/**/*.md
   max_files: 40
   max_bytes_per_file: 20000
   max_total_bytes: 200000
@@ -70,6 +74,12 @@ Point it at whatever already describes the project: the memory file the coding a
 README, design notes, a metric definitions page. Source trees are not swept — name a specific file
 with `hiraku-auto agent design <goal> --context src/pipeline.py` when a module is the thing that
 needs reading.
+
+Sources may reach outside this project. That is the normal case: the research project holds the
+records, and the code being studied lives in its own repository, so
+`../mapillary_alignment/CLAUDE.md` is a sensible source. Credential locations (`.ssh`, `.env`,
+`.netrc`, keyrings) are refused wherever they appear, and a bare home or filesystem root is
+refused rather than swept.
 
 ## Data
 

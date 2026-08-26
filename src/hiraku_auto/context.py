@@ -17,6 +17,8 @@ Three properties matter and are enforced here rather than left to the agent:
 
 from __future__ import annotations
 
+import glob
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -58,6 +60,17 @@ SKIP_PARTS = {
 }
 SKIP_RELATIVE_PREFIXES = ("research/goals/", "research/experiments/", "research/proposals/")
 
+# Refused wherever they appear, however the pattern was written. Context goes into the prompt
+# verbatim, so a glob that wanders into a credential store is not a mistake worth allowing once.
+SENSITIVE_PARTS = {
+    ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".password-store", ".gem",
+    "Keychains", "gcloud", "secrets", ".secrets",
+}
+SENSITIVE_NAMES = {
+    ".netrc", "_netrc", ".npmrc", ".pypirc", ".git-credentials", "credentials", "id_rsa",
+    "id_ed25519", ".env", ".env.local",
+}
+
 
 @dataclass
 class ContextFile:
@@ -66,8 +79,14 @@ class ContextFile:
     bytes_total: int
     truncated: bool = False
 
+    @property
+    def outside(self) -> bool:
+        return self.rel.startswith("..") or self.rel.startswith("/")
+
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"path": self.rel, "content": self.text}
+        if self.outside:
+            out["from"] = "another repository, named as a context source"
         if self.truncated:
             out["truncated"] = f"first {len(self.text)} of {self.bytes_total} characters"
         return out
@@ -104,8 +123,10 @@ class Bundle:
     def summary(self) -> str:
         if not self.files:
             return "context: none"
+        outside = sum(1 for f in self.files if f.outside)
         return (
             f"context: {len(self.files)} file(s), {self.total_chars:,} characters"
+            + (f", {outside} from outside this project" if outside else "")
             + (f", {len(self.skipped)} omitted" if self.skipped else "")
         )
 
@@ -157,25 +178,76 @@ def _excluded(path: Path, rel: str) -> bool:
     return path.name.startswith(".") and path.suffix not in TEXT_SUFFIXES
 
 
-def _resolve(project: Project, pattern: str) -> list[Path]:
-    """One source pattern to the files it names, inside the project only."""
-    candidate = Path(pattern)
-    if candidate.is_absolute():
-        try:
-            candidate.relative_to(project.root)
-        except ValueError as exc:
-            raise HirakuError(
-                f"Context source '{pattern}' is outside the project. Only files under "
-                f"{project.root} can be sent."
-            ) from exc
-        return [candidate] if candidate.is_file() else []
+def label(project: Project, path: Path) -> str:
+    """How a file is named in the bundle, and to the agent.
 
-    if any(ch in pattern for ch in "*?["):
-        return sorted(p for p in project.root.glob(pattern) if p.is_file())
-    direct = project.root / pattern
-    if direct.is_dir():
-        return sorted(p for p in direct.rglob("*.md") if p.is_file())
-    return [direct] if direct.is_file() else []
+    Inside the project, the project-relative path. Outside it, a relative path like
+    `../mapillary_alignment/CLAUDE.md` — short, unambiguous about which repository it came from,
+    and it does not put the researcher's home directory into a prompt.
+    """
+    resolved, root = Path(path).resolve(), project.root.resolve()
+    try:
+        return str(resolved.relative_to(root))
+    except ValueError:
+        return os.path.relpath(resolved, root)
+
+
+def _refuse_sensitive(pattern: str, path: Path) -> None:
+    """Credential stores are never context, however the pattern was written.
+
+    Reaching outside the project is legitimate — the research project and the code it studies are
+    usually separate repositories. Reaching into a keyring is not, and a `**` glob in the wrong
+    place is how that happens by accident rather than on purpose.
+    """
+    parts = set(path.parts)
+    if parts & SENSITIVE_PARTS or path.name in SENSITIVE_NAMES:
+        raise HirakuError(
+            f"Context source '{pattern}' resolves to {path}, which looks like credentials or "
+            f"private keys. Context is sent to the agent verbatim, so this is refused."
+        )
+
+
+def _expand_directory(directory: Path) -> list[Path]:
+    """A directory named as a source means its markdown, not its entire contents."""
+    home = Path.home()
+    if directory in {Path(directory.anchor), home} or directory.parent == Path(directory.anchor):
+        raise HirakuError(
+            f"Context source '{directory}' is a whole home or filesystem directory. Name the "
+            f"specific folder or file you mean — a sweep from here would send far more than you "
+            f"intend."
+        )
+    return sorted(p for p in directory.rglob("*.md") if p.is_file())
+
+
+def _resolve(project: Project, pattern: str) -> list[Path]:
+    """One source pattern to the files it names.
+
+    Relative patterns resolve against the project root; absolute ones, and relative ones that
+    climb out with `..`, are allowed and reach other repositories on purpose. Only credential
+    locations and bare home/filesystem roots are refused.
+    """
+    raw = os.path.expanduser(pattern.strip())
+    if not raw:
+        return []
+    has_glob = any(ch in raw for ch in "*?[")
+    candidate = Path(raw)
+
+    if candidate.is_absolute():
+        found = (
+            [Path(m) for m in glob.glob(raw, recursive=True)]
+            if has_glob
+            else (_expand_directory(candidate) if candidate.is_dir() else [candidate])
+        )
+    elif has_glob:
+        found = [Path(m) for m in glob.glob(str(project.root / raw), recursive=True)]
+    else:
+        direct = project.root / raw
+        found = _expand_directory(direct) if direct.is_dir() else [direct]
+
+    files = [p for p in found if p.is_file()]
+    for path in files:
+        _refuse_sensitive(pattern, path)
+    return sorted(files)
 
 
 def collect(
@@ -203,7 +275,7 @@ def collect(
             if resolved in seen:
                 continue
             seen.add(resolved)
-            rel = project.rel(path)
+            rel = label(project, path)
 
             if _excluded(path, rel):
                 continue

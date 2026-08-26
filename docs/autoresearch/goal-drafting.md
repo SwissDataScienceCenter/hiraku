@@ -46,6 +46,25 @@ Points worth knowing:
   there should not leave the machine. `context: {sources: []}` turns it off entirely.
 - **Source trees are not swept.** Only the patterns you list. Name a specific module with
   `--context src/pipeline.py` when the code itself is what needs reading.
+- **Sources may point outside the project.** This is the normal case: the research project holds
+  the records, and the code it studies is a separate checkout. Both forms work —
+
+  ```yaml
+  context:
+    sources:
+      - CLAUDE.md                                # this project
+      - ../mapillary_alignment/CLAUDE.md         # the code repository next door
+      - ../mapillary_alignment/docs/**/*.md
+      - /Users/you/PycharmProjects/other/README.md
+  ```
+
+  and `--context ../mapillary_alignment/CLAUDE.md` does it for one call. Outside files are marked
+  `another repo` in `hiraku-auto context` and labelled `../mapillary_alignment/CLAUDE.md` in the
+  prompt, so it stays obvious which repository a definition came from — and your home directory
+  never ends up in a prompt.
+- **Credential locations are refused** wherever a pattern lands on them: `.ssh`, `.gnupg`, `.aws`,
+  `.env`, `.netrc`, keyrings and the like. So is naming a bare home or filesystem root, which a
+  stray `**` would otherwise sweep.
 - **Records are excluded** even if a glob would match them. `research/goals/`, `research/experiments/`
   and `research/proposals/` are already in the state at full length; sending them twice wastes the
   budget and invites the agent to reason from the stale copy.

@@ -9,6 +9,7 @@ its reply into `check`, rather than being quietly smoothed into prose.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from test_agent import fake_agent
@@ -69,11 +70,57 @@ def test_the_total_cap_holds_across_files(bare_project):
     assert bundle.skipped
 
 
-def test_an_absolute_path_outside_the_project_is_refused(bare_project, tmp_path):
-    outside = tmp_path / "elsewhere.md"
-    outside.write_text("secret", "utf-8")
-    with pytest.raises(HirakuError, match="outside the project"):
-        context_mod.collect(bare_project, extra=[str(outside)])
+def test_a_sibling_repository_can_be_named_as_a_source(bare_project, tmp_path):
+    """The research project and the code it studies are usually separate repositories."""
+    sibling = tmp_path / "mapillary_alignment"
+    sibling.mkdir()
+    (sibling / "CLAUDE.md").write_text("reprojection error is median pixel L2.", "utf-8")
+
+    bundle = context_mod.collect(bare_project, extra=[str(sibling / "CLAUDE.md")])
+    entry = next(f for f in bundle.files if f.rel.endswith("CLAUDE.md"))
+    assert entry.rel == "../mapillary_alignment/CLAUDE.md"
+    assert entry.outside
+    assert "another repository" in entry.to_dict()["from"]
+    assert "from outside this project" in bundle.summary()
+    assert "median pixel L2" in entry.text
+
+
+def test_a_relative_path_may_climb_out_of_the_project(bare_project, tmp_path):
+    sibling = tmp_path / "code-repo"
+    (sibling / "docs").mkdir(parents=True)
+    (sibling / "docs" / "metrics.md").write_text("the metric is defined here", "utf-8")
+
+    bundle = context_mod.collect(bare_project, extra=["../code-repo/docs/**/*.md"])
+    assert [f.rel for f in bundle.files if f.outside] == ["../code-repo/docs/metrics.md"]
+
+
+def test_a_whole_sibling_directory_expands_to_its_markdown(bare_project, tmp_path):
+    sibling = tmp_path / "code-repo"
+    (sibling / "docs").mkdir(parents=True)
+    (sibling / "docs" / "a.md").write_text("a", "utf-8")
+    (sibling / "big.bin").write_bytes(b"\x00" * 10)
+
+    bundle = context_mod.collect(bare_project, extra=[str(sibling)])
+    assert [f.rel for f in bundle.files if f.outside] == ["../code-repo/docs/a.md"]
+
+
+def test_credential_locations_are_refused_wherever_they_are(bare_project, tmp_path):
+    keys = tmp_path / ".ssh"
+    keys.mkdir()
+    (keys / "notes.md").write_text("private", "utf-8")
+    with pytest.raises(HirakuError, match="credentials or private keys"):
+        context_mod.collect(bare_project, extra=[str(keys / "notes.md")])
+
+    env = tmp_path / "repo"
+    env.mkdir()
+    (env / ".env").write_text("TOKEN=abc", "utf-8")
+    with pytest.raises(HirakuError, match="credentials or private keys"):
+        context_mod.collect(bare_project, extra=[str(env / ".env")])
+
+
+def test_a_home_or_filesystem_root_is_refused(bare_project):
+    with pytest.raises(HirakuError, match="whole home or filesystem directory"):
+        context_mod.collect(bare_project, extra=[str(Path.home())])
 
 
 def test_collection_can_be_turned_off_two_ways(bare_project):
