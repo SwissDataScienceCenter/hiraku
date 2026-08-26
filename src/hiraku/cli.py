@@ -187,10 +187,19 @@ def dispatch(args: argparse.Namespace) -> int:
                 print(json_dump(rows))
             else:
                 display_rows = [
-                    {**row, "commit": short_commit(row.get("commit", ""))} for row in rows
+                    {
+                        **row,
+                        "branch": (
+                            f"{'* ' if row.get('contained_in_task_branch') else '  '}"
+                            f"{row.get('branch') or '-'}"
+                        ),
+                        "commit": short_commit(row.get("commit", "")),
+                    }
+                    for row in rows
                 ]
                 columns = [
                     "id",
+                    "branch",
                     "summary",
                     "hypothesis",
                     "status",
@@ -199,6 +208,20 @@ def dispatch(args: argparse.Namespace) -> int:
                     "run_count",
                 ]
                 print(render_table(display_rows, columns))
+                if rows:
+                    task = read_task(project, task_id)
+                    print(f"\n* bound commit is contained in {task.branch}")
+                incomplete = [
+                    row["id"]
+                    for row in rows
+                    if row.get("decision") == "accepted" and not row.get("contained_in_task_branch")
+                ]
+                if incomplete:
+                    print(
+                        "Warning: accepted experiment(s) not contained in the task branch: "
+                        f"{', '.join(incomplete)}.",
+                        file=sys.stderr,
+                    )
             return 0
         task_id, experiment_id = selected_object(project, args.experiment, args.task)
         if args.experiment_command == "create":

@@ -366,7 +366,7 @@ hiraku runs logreg-baseline --json
 hiraku runs logreg-baseline --all  # MLflow only
 ```
 
-Experiment and run listings are always scoped to one task, supplied explicitly or inferred from the current task branch. Cross-task listing is not part of the PoC. Experiment listings read the local YAML and Markdown registry and enrich each record with derived launches, runs, metrics, and Git parents.
+Experiment and run listings are always scoped to one task, supplied explicitly or inferred from the current task branch. Cross-task listing is not part of the PoC. Experiment listings read the local YAML and Markdown registry and enrich each record with derived launches, runs, metrics, and Git parents. The human experiment table includes each recorded branch. A `*` prefix marks experiments whose exact bound commit is contained in the task branch, followed by a legend naming that branch. This ancestry marker is a Git integration fact kept separate from the semantic `decision`; an accepted experiment without the marker emits a warning. Unbound, missing, squashed, or cherry-picked commits receive no marker because exact ancestry cannot establish their integration.
 
 The default human run table is a compact review view. It shows abbreviated run and commit IDs, experiment, timestamp, status when available, useful MLflow parameters, and selected metrics. It omits the redundant task ID, nested backend objects, MLflow system tags, and a false commit-mismatch field. `--verbose` shows complete flattened metadata without duplicating the nested `params`, `metrics`, and `tags` objects. Human-readable commit hashes use ten characters throughout the CLI; stored records and JSON retain exact hashes.
 

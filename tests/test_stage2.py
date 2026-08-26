@@ -55,6 +55,46 @@ def test_experiment_branch_existing_ref_is_not_reset(repository: Path) -> None:
     assert run(repository, "git", "rev-parse", branch).stdout.strip() == expected
 
 
+def test_experiment_list_marks_task_branch_containment(repository: Path) -> None:
+    hiraku(repository, "task", "create", "baseline")
+    run(repository, "git", "switch", "hiraku/task/baseline")
+    run(repository, "git", "add", ".")
+    run(repository, "git", "commit", "-m", "create task")
+    branch = "hiraku/experiment/baseline/parallel"
+    hiraku(repository, "exp", "create", "baseline:parallel", "--branch")
+    (repository / "implementation.txt").write_text("parallel\n", encoding="utf-8")
+    run(repository, "git", "add", ".")
+    run(repository, "git", "commit", "-m", "implement parallel experiment")
+    hiraku(
+        repository,
+        "exp",
+        "set",
+        "baseline:parallel",
+        "--commit",
+        "HEAD",
+        "--decision",
+        "accepted",
+    )
+
+    before = hiraku(repository, "exp", "list", "baseline")
+    assert branch in before.stdout
+    assert f"* {branch}" not in before.stdout
+    assert "accepted experiment(s) not contained" in before.stderr
+
+    run(repository, "git", "add", ".")
+    run(repository, "git", "commit", "-m", "record accepted experiment")
+    run(repository, "git", "switch", "hiraku/task/baseline")
+    run(repository, "git", "merge", "--ff-only", branch)
+
+    after = hiraku(repository, "exp", "list", "baseline")
+    assert f"* {branch}" in after.stdout
+    assert "* bound commit is contained in hiraku/task/baseline" in after.stdout
+    assert after.stderr == ""
+    structured = json.loads(hiraku(repository, "exp", "list", "baseline", "--json").stdout)
+    assert structured[0]["branch"] == branch
+    assert structured[0]["contained_in_task_branch"] is True
+
+
 def test_branch_flag_is_boolean_and_from_requires_it(repository: Path) -> None:
     hiraku(repository, "task", "create", "baseline")
     invalid = hiraku(

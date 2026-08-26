@@ -177,11 +177,14 @@ Candidate derived fields include:
 
 Define a stable JSON schema for these fields. Store only the selected `branch` in the experiment record; lineage remains derived from Git.
 
+The human `experiment list` table includes the recorded branch for every experiment. Prefix the branch with `*` when the exact bound commit is contained in the task branch and print a legend identifying the marker and task branch. Use `-` for an experiment without a recorded branch; it may still receive the marker when its bound commit is contained. Keep the explicit `contained_in_task_branch` Boolean in JSON instead of encoding the marker into structured data. An accepted experiment without the marker produces a warning. Squash merges and cherry-picks do not qualify because exact Git ancestry cannot prove that the bound implementation commit was integrated.
+
 Acceptance criteria:
 
 - linear, sibling, backtracked, and multi-parent histories produce deterministic lineage output;
 - missing or deleted local branches do not erase lineage available from bound commits;
 - unbound and missing commits are represented without crashing; and
+- human listings include branches, mark task-branch containment compactly, and warn when accepted experiments are not contained;
 - human listings remain readable while JSON retains the full structured lineage.
 
 ### 6. Document and verify experiment acceptance
