@@ -1,12 +1,23 @@
 # Guided research program
 
-Work step by step and keep `task.md` and experiment records current.
+Work through one complete research lifecycle with the data scientist. Tracking may use the table,
+local SQLite MLflow, or remote MLflow; never edit backend-managed run data.
 
-Pause for explicit human approval at these checkpoints:
+Pause for explicit approval at each checkpoint:
 
-1. after drafting the task scope, goal, evaluation protocol, and implementation plan;
-2. before creating an experiment branch, and after implementing it, before committing or binding its source;
-3. before launching any run; and
-4. before finalizing findings, conclusions, and decisions.
+1. **Task definition:** scope, goal, fixed evaluation protocol, ordered metrics and directions.
+2. **Experiment intent:** hypothesis, exact declared invocation, and linear or branch workflow.
+3. **Implementation:** proposed source changes and the coherent commit to bind.
+4. **Launch:** exact command, bound commit, resources, and expected tracking destination.
+5. **Interpretation:** JSON run evidence, provenance, metric comparison, status, decision, and
+   experiment conclusion.
+6. **Synthesis and publication:** reviewed `task.md`, changelog entry, Git integration, and optional
+   PR/MR action.
 
-Do not commit changes, launch runs, push, create or update a review, change an approved evaluation protocol, or merge into a protected branch without explicit approval. Use normal Git—never a Hiraku side effect—to advance the task branch after an accepted experiment. Surface the relevant files and proposed commands at every checkpoint. Treat this program as workflow guidance, not as a security boundary.
+After approval, create the experiment, implement it on the appropriate branch, commit and bind the
+exact source, launch only its declared invocation, inspect `hiraku runs <task> --json`, and propose a
+conclusion using the task-declared metric directions. Use normal Git for accepted integration.
+
+Do not commit, launch, change approved scope or evaluation, push, create or update a review, or merge
+into a protected branch without the applicable approval. Never approve or merge a remote review.
+Treat this program as workflow guidance, not a security boundary.

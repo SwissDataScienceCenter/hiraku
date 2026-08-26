@@ -9,6 +9,10 @@ import pytest
 import yaml
 from conftest import hiraku, run
 
+from hiraku.config import load_project
+from hiraku.errors import HirakuError
+from hiraku.tracking import MlflowBackend
+
 mlflow = pytest.importorskip("mlflow")
 PROJECT_ROOT = Path(__file__).parents[1]
 
@@ -127,6 +131,84 @@ Path("environment.json").write_text(json.dumps({key: os.environ.get(key) for key
     assert values["HIRAKU_MLFLOW_TRACKING_URI"] == expected
     assert values["MLFLOW_TRACKING_URI"] == expected
     assert values["HIRAKU_MLFLOW_EXPERIMENT"] == "baseline-runs"
+
+
+def test_remote_mlflow_uri_is_injected_without_local_fallback(repository: Path) -> None:
+    config_path = repository / ".hiraku.yml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config.update(
+        {
+            "tracking_backend": "mlflow",
+            "mlflow_tracking_uri": "https://mlflow.example.org/api",
+        }
+    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    hiraku(repository, "task", "create", "remote")
+    task_path = repository / "tasks/remote/task.md"
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace(
+            'branch: "hiraku/task/remote"',
+            'mlflow_experiment: "remote-runs"\nbranch: "hiraku/task/remote"',
+        ),
+        encoding="utf-8",
+    )
+    script = repository / "capture_remote.py"
+    script.write_text(
+        """import json
+import os
+from pathlib import Path
+
+Path("remote-environment.json").write_text(json.dumps({
+    "hiraku": os.environ["HIRAKU_MLFLOW_TRACKING_URI"],
+    "mlflow": os.environ["MLFLOW_TRACKING_URI"],
+    "table": os.environ.get("HIRAKU_TABLE_PATH"),
+}))
+""",
+        encoding="utf-8",
+    )
+    launch = {"entrypoints": {"capture": {"command": ["python", "capture_remote.py"], "cwd": "."}}}
+    (repository / "tasks/remote/launch.yml").write_text(
+        yaml.safe_dump(launch, sort_keys=False), encoding="utf-8"
+    )
+    hiraku(repository, "launch", "remote:capture")
+    values = json.loads((repository / "remote-environment.json").read_text(encoding="utf-8"))
+    assert values == {
+        "hiraku": "https://mlflow.example.org/api",
+        "mlflow": "https://mlflow.example.org/api",
+        "table": None,
+    }
+
+
+def test_remote_mlflow_error_is_actionable_and_redacted(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = repository / ".hiraku.yml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config.update(
+        {
+            "tracking_backend": "mlflow",
+            "mlflow_tracking_uri": "https://mlflow.example.org",
+        }
+    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    hiraku(repository, "task", "create", "remote")
+    task_path = repository / "tasks/remote/task.md"
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace(
+            'branch: "hiraku/task/remote"',
+            'mlflow_experiment: "remote-runs"\nbranch: "hiraku/task/remote"',
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_query(*args: object, **kwargs: object) -> object:
+        raise mlflow.exceptions.MlflowException("server exposed secret-token")
+
+    monkeypatch.setattr(mlflow.tracking.MlflowClient, "get_experiment_by_name", fail_query)
+    backend = MlflowBackend(load_project(repository))
+    with pytest.raises(HirakuError, match="connectivity.*authentication") as raised:
+        backend.read_runs("remote")
+    assert "secret-token" not in str(raised.value)
 
 
 def test_autoresearch_cpu_mock_supports_mlflow(tmp_path: Path) -> None:

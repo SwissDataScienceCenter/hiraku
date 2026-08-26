@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -17,6 +18,7 @@ CONFIG_FIELDS = {
     "default_template",
     "tracking_backend",
     "mlflow_tracking_db",
+    "mlflow_tracking_uri",
     "review_provider",
     "review_remote",
 }
@@ -30,6 +32,7 @@ class Project:
     default_template: str
     tracking_backend: str
     mlflow_tracking_db: Path
+    remote_mlflow_tracking_uri: str | None
     review_provider: str | None
     review_remote: str | None
 
@@ -45,7 +48,13 @@ class Project:
 
     @property
     def mlflow_tracking_uri(self) -> str:
+        if self.remote_mlflow_tracking_uri:
+            return self.remote_mlflow_tracking_uri
         return f"sqlite:///{self.mlflow_tracking_db.as_posix()}"
+
+    @property
+    def remote_mlflow(self) -> bool:
+        return self.remote_mlflow_tracking_uri is not None
 
 
 def find_root(start: Path | None = None) -> Path:
@@ -79,6 +88,31 @@ def load_project(start: Path | None = None) -> Project:
         raise ValidationError("tracking_backend must be 'table' or 'mlflow'.")
     if "mlflow_tracking_db" in raw and values["tracking_backend"] != "mlflow":
         raise ValidationError("mlflow_tracking_db is valid only with tracking_backend: mlflow.")
+    remote_mlflow_tracking_uri = raw.get("mlflow_tracking_uri")
+    if remote_mlflow_tracking_uri is not None:
+        if values["tracking_backend"] != "mlflow":
+            raise ValidationError(
+                "mlflow_tracking_uri is valid only with tracking_backend: mlflow."
+            )
+        if not isinstance(remote_mlflow_tracking_uri, str) or not remote_mlflow_tracking_uri:
+            raise ValidationError("mlflow_tracking_uri must be a non-empty HTTP(S) URL.")
+        if remote_mlflow_tracking_uri != remote_mlflow_tracking_uri.strip():
+            raise ValidationError("mlflow_tracking_uri must not contain surrounding whitespace.")
+        parsed_uri = urlparse(remote_mlflow_tracking_uri)
+        if parsed_uri.scheme not in {"http", "https"} or not parsed_uri.netloc:
+            raise ValidationError("mlflow_tracking_uri must be an HTTP(S) URL.")
+        if parsed_uri.username is not None or parsed_uri.password is not None:
+            raise ValidationError(
+                "mlflow_tracking_uri must not contain credentials; use standard MLflow "
+                "authentication environment variables."
+            )
+        if parsed_uri.query or parsed_uri.fragment:
+            raise ValidationError(
+                "mlflow_tracking_uri must not contain a query or fragment; use standard MLflow "
+                "authentication environment variables for credentials."
+            )
+    if "mlflow_tracking_db" in raw and remote_mlflow_tracking_uri is not None:
+        raise ValidationError("mlflow_tracking_db and mlflow_tracking_uri are mutually exclusive.")
     review_provider = raw.get("review_provider")
     review_remote = raw.get("review_remote")
     if review_provider is not None and review_provider not in {"github", "gitlab"}:
@@ -94,6 +128,7 @@ def load_project(start: Path | None = None) -> Project:
         default_template=values["default_template"],
         tracking_backend=values["tracking_backend"],
         mlflow_tracking_db=safe_relative(root, values["mlflow_tracking_db"], "mlflow_tracking_db"),
+        remote_mlflow_tracking_uri=remote_mlflow_tracking_uri,
         review_provider=review_provider,
         review_remote=review_remote,
     )

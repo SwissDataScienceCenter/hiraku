@@ -82,6 +82,30 @@ def test_heart_disease_example_is_checksum_pinned_and_structurally_valid(
         for entrypoint in launch["entrypoints"].values()
     )
 
+    hiraku(
+        destination,
+        "task",
+        "create",
+        "heart-disease-auto",
+        "--template",
+        "heart-disease-auto",
+    )
+    auto_task = json.loads(
+        hiraku(destination, "task", "show", "heart-disease-auto", "--json").stdout
+    )
+    assert auto_task["metrics"] == [
+        {"name": "val/log_loss", "direction": "minimize"},
+        {"name": "val/accuracy", "direction": "maximize"},
+    ]
+    auto_dir = destination / "tasks/heart-disease-auto"
+    auto_program = (auto_dir / "program.md").read_text(encoding="utf-8")
+    assert "Iteration limit or wall-clock limit:" in auto_program
+    assert "existing dependencies only" in auto_program
+    assert "local CPU only" in auto_program
+    assert "hiraku runs <task> --json" in auto_program
+    auto_launch = yaml.safe_load((auto_dir / "launch.yml").read_text(encoding="utf-8"))
+    assert set(auto_launch["entrypoints"]) == {"logistic", "random-forest"}
+
 
 def test_autoresearch_example_is_pinned_and_cpu_mock_runs(tmp_path: Path) -> None:
     destination = tmp_path / "autoresearch"
@@ -103,12 +127,12 @@ def test_autoresearch_example_is_pinned_and_cpu_mock_runs(tmp_path: Path) -> Non
         assert heading in program
     assert "LOOP FOREVER:" in program
     assert "**NEVER STOP**" in program
-    assert "git revert --no-edit <implementation-commit>" in program
-    assert "git reset --hard <iteration-starting-commit>" in program
-    assert "hiraku exp create <tag>:<experiment-id> --branch" in program
-    assert "git merge --ff-only hiraku/experiment/<tag>/<experiment-id>" in program
-    assert "Keep the rejected experiment branch" in program
-    assert "Do not create a separate `results.tsv`" in program
+    assert "git revert --no-edit <experiment-commit>" in program
+    assert "git reset back to where you started" in program
+    assert "hiraku exp create <task>:<experiment-id> --branch" in program
+    assert "merge `hiraku/experiment/<task>/<experiment-id>`" in program
+    assert "without merging, keeping the experiment branch" in program
+    assert "Do not edit the run table" in program
     hiraku(destination, "task", "create", "autoresearch", "--template", "autoresearch")
     copied_program = (destination / "tasks/autoresearch/program.md").read_text(encoding="utf-8")
     assert copied_program == program

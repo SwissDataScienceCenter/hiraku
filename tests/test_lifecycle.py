@@ -7,12 +7,57 @@ from pathlib import Path
 import yaml
 from conftest import hiraku, run
 
+from hiraku.config import load_project
+
 
 def test_init_is_idempotent(repository: Path) -> None:
     result = hiraku(repository, "init")
     assert "already initialized" in result.stdout
     assert (repository / ".agents/skills/hiraku/SKILL.md").is_file()
+    assert (repository / ".agents/skills/hiraku/references/research.md").is_file()
+    assert (repository / ".agents/skills/hiraku/references/review.md").is_file()
     assert (repository / ".hiraku/templates/auto/program.md").is_file()
+
+
+def test_skill_routes_workflows_and_preserves_customized_resources(repository: Path) -> None:
+    skill_dir = repository / ".agents/skills/hiraku"
+    router = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+    research = (skill_dir / "references/research.md").read_text(encoding="utf-8")
+    review = (skill_dir / "references/review.md").read_text(encoding="utf-8")
+    assert "references/research.md" in router
+    assert "references/review.md" in router
+    assert "program.md" in router
+    assert "hiraku runs <task> --json" in research
+    assert "Never edit `runs.csv` or MLflow data" in research
+    assert "## Changelog" in review
+    assert "Never approve or merge" in review
+
+    customized = skill_dir / "references/research.md"
+    customized.write_text(research + "\nProject-specific guidance.\n", encoding="utf-8")
+    result = hiraku(repository, "init", check=False)
+    assert result.returncode == 2
+    assert "Refusing to overwrite customized file" in result.stderr
+    assert customized.read_text(encoding="utf-8").endswith("Project-specific guidance.\n")
+
+
+def test_bundled_programs_define_stage_three_boundaries(repository: Path) -> None:
+    guided = (repository / ".hiraku/templates/guided/program.md").read_text(encoding="utf-8")
+    autonomous = (repository / ".hiraku/templates/auto/program.md").read_text(encoding="utf-8")
+    for checkpoint in (
+        "Task definition",
+        "Experiment intent",
+        "Implementation",
+        "Launch",
+        "Interpretation",
+        "Synthesis and publication",
+    ):
+        assert checkpoint in guided
+    assert "explicit approval at each checkpoint" in guided
+    assert "hiraku runs <task> --json" in guided
+    assert "Iteration limit and other stopping conditions" in autonomous
+    assert "Within those bounds, repeat this loop" in autonomous
+    assert "hiraku runs <task> --json" in autonomous
+    assert "Never edit tracking data" in autonomous
 
 
 def test_task_and_experiment_lifecycle(repository: Path) -> None:
@@ -312,6 +357,42 @@ def test_task_metric_declarations_are_validated(repository: Path) -> None:
     invalid = hiraku(repository, "task", "show", "metrics", check=False)
     assert invalid.returncode == 2
     assert "must be minimize or maximize" in invalid.stderr
+
+
+def test_remote_mlflow_configuration_contract(repository: Path) -> None:
+    config_path = repository / ".hiraku.yml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config.update(
+        {
+            "tracking_backend": "mlflow",
+            "mlflow_tracking_uri": "https://mlflow.example.org",
+        }
+    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    project = load_project(repository)
+    assert project.remote_mlflow is True
+    assert project.mlflow_tracking_uri == "https://mlflow.example.org"
+
+    config["mlflow_tracking_db"] = "tracking/mlflow.db"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    conflict = hiraku(repository, "task", "show", "missing", check=False)
+    assert conflict.returncode == 2
+    assert "mutually exclusive" in conflict.stderr
+
+    config.pop("mlflow_tracking_db")
+    config["mlflow_tracking_uri"] = "https://user:secret@mlflow.example.org"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    credentials = hiraku(repository, "task", "show", "missing", check=False)
+    assert credentials.returncode == 2
+    assert "must not contain credentials" in credentials.stderr
+    assert "secret" not in credentials.stderr
+
+    config["mlflow_tracking_uri"] = "https://mlflow.example.org?token=secret-token"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    query_secret = hiraku(repository, "task", "show", "missing", check=False)
+    assert query_secret.returncode == 2
+    assert "must not contain a query or fragment" in query_secret.stderr
+    assert "secret-token" not in query_secret.stderr
 
 
 def test_experiment_launch_must_match_declared_invocation(repository: Path) -> None:

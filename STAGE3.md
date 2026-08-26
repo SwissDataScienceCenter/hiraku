@@ -190,6 +190,52 @@ Acceptance criteria:
 - task, experiment, and run responsibilities remain distinct; and
 - links point readers to the appropriate detailed document instead of duplicating long procedures.
 
+### 8.1 README example contract
+
+Use one consistent heart-disease storyline as the primary README example. The task is strategy-neutral:
+
+```yaml
+id: heart-disease
+summary: Improve heart-disease risk prediction
+goal: Minimize validation log loss on the checksum-pinned Cleveland cohort.
+metrics:
+  - name: val/log_loss
+    direction: minimize
+  - name: val/accuracy
+    direction: maximize
+branch: hiraku/task/heart-disease
+```
+
+The task fixes the dataset, split, preprocessing constraints, and evaluation metrics without prescribing a model family. Concrete strategies appear only as experiments:
+
+1. `logistic-baseline` tests regularized logistic regression as the minimal linear workflow;
+2. `random-forest` tests whether nonlinear feature interactions improve validation performance and demonstrates run comparison; and
+3. `stronger-regularization`, or an equivalently small refinement, demonstrates experiment branching, lineage, acceptance, and task-branch containment.
+
+Use this continuous narrative across the README: define the task, run the logistic baseline, compare the random forest, optionally refine on an experiment branch, synthesize `task.md`, and create or update a PR/MR.
+
+Keep the supporting examples distinct:
+
+- `examples/smoke` is the shortest installation and tracking-contract check, with one deterministic run and no modeling narrative;
+- the guided heart-disease template is the main README and linear-tutorial example;
+- `heart-disease-auto` demonstrates a bounded CPU-feasible autonomous loop over the same fixed data and evaluation protocol; and
+- `examples/autoresearch` demonstrates the long-running single-GPU autonomous loop with `revert`, `reset`, and `branch` history modes.
+
+README section ownership:
+
+- core concepts, task records, experiment records, entrypoints, the minimal workflow, run comparison, branching, acceptance, and review integration use the heart-disease storyline;
+- tracking configuration shows the same heart-disease experiments under table, local SQLite MLflow, and remote MLflow;
+- installation verification links to smoke; and
+- autonomous research summarizes and links to heart-disease-auto and autoresearch rather than mixing those loops into the introductory walkthrough.
+
+Acceptance criteria:
+
+- task-level examples never impose logistic regression or random forest as part of the task goal;
+- each experiment has a concrete hypothesis and a declared invocation matching the example launch configuration;
+- examples do not change identities or metrics between README sections;
+- smoke, guided heart disease, heart-disease-auto, and autoresearch each have one clearly stated purpose; and
+- README, quickstart, tutorial, advanced guide, and example READMEs follow this same division of responsibilities.
+
 ## 9. Add the documentation set
 
 Create a `docs/` directory with three audience-oriented documents.

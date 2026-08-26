@@ -71,14 +71,23 @@ class TableBackend:
 class MlflowBackend:
     def __init__(self, project: Project) -> None:
         self.project = project
-        project.mlflow_tracking_db.parent.mkdir(parents=True, exist_ok=True)
+        if not project.remote_mlflow:
+            project.mlflow_tracking_db.parent.mkdir(parents=True, exist_ok=True)
         try:
+            from mlflow.exceptions import MlflowException
             from mlflow.tracking import MlflowClient
         except ImportError as exc:
             raise HirakuError(
                 "MLflow tracking requires the optional dependency; install hiraku[mlflow]."
             ) from exc
-        self.client = MlflowClient(tracking_uri=project.mlflow_tracking_uri)
+        self.mlflow_exception = MlflowException
+        try:
+            self.client = MlflowClient(tracking_uri=project.mlflow_tracking_uri)
+        except MlflowException as exc:
+            raise HirakuError(
+                "Could not initialize the configured MLflow store; check connectivity and "
+                "standard MLflow authentication settings."
+            ) from exc
 
     def read_runs(self, task_id: str, include_all: bool = False) -> RunResult:
         task = read_task(self.project, task_id)
@@ -87,13 +96,22 @@ class MlflowBackend:
             raise ValidationError(
                 f"Task {task_id!r} requires mlflow_experiment with tracking_backend: mlflow."
             )
-        experiment = self.client.get_experiment_by_name(task.mlflow_experiment)
-        if experiment is None:
+        try:
+            experiment = self.client.get_experiment_by_name(task.mlflow_experiment)
+        except self.mlflow_exception as exc:
             raise HirakuError(
-                f"MLflow experiment {task.mlflow_experiment!r} does not exist in "
-                f"{self.project.mlflow_tracking_db}."
-            )
-        values = self.client.search_runs([experiment.experiment_id])
+                "Could not query the configured MLflow store; check connectivity and standard "
+                "MLflow authentication settings."
+            ) from exc
+        if experiment is None:
+            raise HirakuError(f"MLflow experiment {task.mlflow_experiment!r} does not exist.")
+        try:
+            values = self.client.search_runs([experiment.experiment_id])
+        except self.mlflow_exception as exc:
+            raise HirakuError(
+                "Could not query runs from the configured MLflow store; check connectivity and "
+                "standard MLflow authentication settings."
+            ) from exc
         if not values:
             raise HirakuError(f"MLflow experiment {task.mlflow_experiment!r} contains no runs.")
         rows: list[dict[str, Any]] = []

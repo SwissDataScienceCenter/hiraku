@@ -1,7 +1,7 @@
 ---
 id: "{{id}}"
-summary: "Compare heart-disease model families"
-goal: "Compare logistic regression and random forest on validation cross-entropy for the checksum-pinned UCI Cleveland cohort."
+summary: "Improve heart-disease risk prediction"
+goal: "Minimize validation log loss on the checksum-pinned Cleveland cohort."
 metrics:
   - name: val/log_loss
     direction: minimize
@@ -18,7 +18,7 @@ Minimize validation log loss while training only on the fixed training split.
 
 ## Implementation plan
 
-Compare a logistic regression baseline and a random forest through one shared preprocessing and evaluation pipeline.
+Evaluate candidate modeling strategies through one shared preprocessing and evaluation pipeline.
 
 ## Evaluation protocol
 

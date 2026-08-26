@@ -67,23 +67,23 @@ The task-level `task.md` is the canonical review document. It synthesizes task d
 **Example:**
 ```markdown
 ---
-id: logreg-baseline
-summary: Logistic regression baseline for heart-disease prediction
-goal: Implement and tune a logistic regression baseline for the Cleveland Heart Disease dataset. The deciding metric is validation cross-entropy on the validation split.
+id: heart-disease
+summary: Improve heart-disease risk prediction
+goal: Minimize validation log loss on the checksum-pinned Cleveland cohort.
 metrics:
   - name: val/log_loss
     direction: minimize
   - name: val/accuracy
     direction: maximize
-branch: hiraku/task/logreg-baseline
+branch: hiraku/task/heart-disease
 pr_id:
 ---
 
-# Logistic regression baseline
+# Heart-disease risk prediction
 
 ## Goal
 
-Reduce validation cross-entropy while training only on the training split.
+Minimize validation log loss while training only on the fixed training split.
 
 ## Implementation plan
 
@@ -105,10 +105,10 @@ The PoC uses a file based experiment database. Experiment records form a local, 
 Both formats share a small core schema understood by Hiraku:
 
 ```yaml
-id: add-batch-norm
-task_id: logreg-baseline
-summary: Test batch normalization
-hypothesis:
+id: logistic-baseline
+task_id: heart-disease
+summary: Logistic regression baseline
+hypothesis: Regularized logistic regression provides a calibrated baseline.
 status: proposed
 decision: pending
 commit:
@@ -125,10 +125,10 @@ Larger experiments may use Markdown for narrative documentation, the frontmatter
 
 ```markdown
 ---
-id: compare-model-families
-task_id: logreg-baseline
-summary: Compare model families
-hypothesis:
+id: random-forest
+task_id: heart-disease
+summary: Random forest comparison
+hypothesis: Nonlinear feature interactions improve validation log loss.
 status: proposed
 decision: pending
 commit:
@@ -158,11 +158,16 @@ A set of named entrypoints is defined in `launch.yml` at the task level. Each en
 
 ```yaml
 entrypoints:
-  train:
+  logistic:
     command: ["uv", "run", "python", "train.py"]
     args:
-      seed: 1
-      regularization: 0.01
+      model: logistic
+      seed: 42
+  random-forest:
+    command: ["uv", "run", "python", "train.py"]
+    args:
+      model: random_forest
+      seed: 42
     positionals: []
     cwd: "."
 ```
@@ -171,14 +176,13 @@ An experiment records an ordered list of concrete launch invocations. Each strin
 
 ```yaml
 entrypoints:
-  - train
-  - train --regularization 0.1
-  - evaluate --split validation
+  - logistic
+  - random-forest
 ```
 
 Invocation strings use shell-like quoting only to split text into tokens; they are never executed through a shell. Pipes, redirects, substitutions, environment assignments, and other shell syntax have no special behavior. The first token must name an entrypoint and the string must not be empty. List order is preserved and exact duplicates are invalid.
 
-For an experiment-associated launch, the requested entrypoint and trailing CLI arguments must exactly match one declared invocation after tokenization. For example, `hiraku launch --experiment stronger-reg logreg-baseline:train --regularization 0.1` matches `train --regularization 0.1`. Experiment arguments are appended after the command, positional arguments, and named arguments resolved from `launch.yml`. Consequently, repeated-option precedence is determined by the child program; an experiment invocation cannot structurally remove a default from `launch.yml`. A project that needs materially different defaults should define another named entrypoint.
+For an experiment-associated launch, the requested entrypoint and trailing CLI arguments must exactly match one declared invocation after tokenization. For example, `hiraku launch --experiment logistic-baseline heart-disease:logistic` matches `logistic`. Experiment arguments are appended after the command, positional arguments, and named arguments resolved from `launch.yml`. Consequently, repeated-option precedence is determined by the child program; an experiment invocation cannot structurally remove a default from `launch.yml`. A project that needs materially different defaults should define another named entrypoint.
 
 ### Example workflow
 The following sequence illustrates the intended workflow. It can be run step-by-step or autonomously within the task program's boundaries. The data scientist can review the mutable experiment record at any point; reviewed conclusions are later summarized in `task.md` and, in stage 2, in a pull request or merge request.
@@ -188,26 +192,26 @@ The following sequence illustrates the intended workflow. It can be run step-by-
 hiraku init  # creates Hiraku project configuration in `.hiraku.yml`
 
 # 1. create task
-hiraku task create logreg-baseline --template guided  # creates the task and prints branch-switch instructions
-/hiraku "set the task goal to reduce validation cross-entropy"  # agent-assisted workflow
-hiraku task show logreg-baseline  # task details, --json returns machine-readable output
+hiraku task create heart-disease --template guided  # creates the task and prints branch-switch instructions
+/hiraku "define the fixed heart-disease evaluation protocol"  # agent-assisted workflow
+hiraku task show heart-disease  # task details, --json returns machine-readable output
 
 # 2. create an experiment, then implement and bind it
-hiraku experiment create logreg-baseline:stronger-regularization  --summary "Test stronger regularization"
-/hiraku "test whether stronger regularization improves logreg-baseline"
-git commit -m "implement stronger regularization"
-hiraku experiment set logreg-baseline:stronger-regularization --commit HEAD
+hiraku experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic
+/hiraku "implement the approved logistic baseline"
+git commit -m "implement logistic baseline"
+hiraku experiment set heart-disease:logistic-baseline --commit HEAD
 
 # 3. launch named entrypoints and inspect the tracked table
-hiraku launch --experiment stronger-regularization logreg-baseline:train
-hiraku runs logreg-baseline --sort val/cross_entropy --ascending
+hiraku launch --experiment logistic-baseline heart-disease:logistic
+hiraku runs heart-disease --sort val/log_loss --ascending
 
 # 4. analyze the runs and update the local experiment record
-/hiraku "conclude stronger-regularization and record the decision"
+/hiraku "conclude logistic-baseline and record the decision"
 
 # 5. summarize reviewed findings in tracked task documentation
 /hiraku "summarize the reviewed experiments in task.md"
-hiraku runs logreg-baseline  # task leaderboard, grouped by experiment where useful
+hiraku runs heart-disease  # task leaderboard, grouped by experiment where useful
 ```
 
 ### Experiments: Linear workflow and branching
@@ -258,15 +262,15 @@ This creates the default configuration, `tasks/`, complete templates under
 ### Create and inspect tasks
 
 ```bash
-hiraku task create logreg-baseline
-hiraku task create larger-context-window --template auto
+hiraku task create heart-disease
+hiraku task create heart-disease-auto --template auto
 hiraku task create custom-workflow --template my-template
 hiraku task  # compact metadata for the current task
-hiraku task show logreg-baseline
-hiraku task show logreg-baseline --verbose
-hiraku task show logreg-baseline --json
+hiraku task show heart-disease
+hiraku task show heart-disease --verbose
+hiraku task show heart-disease --json
 hiraku task entrypoints
-hiraku task entrypoints logreg-baseline --json
+hiraku task entrypoints heart-disease --json
 ```
 
 New tasks default to the `guided` template and canonical branch `hiraku/task/<task-id>`. The branch is derived from the task ID, recorded in `task.md`, and cannot be set arbitrarily. Task front matter also contains a required one-line `summary`. Stage 2 uses it as the review title and records the persistent provider identity as optional `pr_id` for GitHub or `mr_id` for GitLab. Task creation does not switch branches; it creates the task files and prints instructions for switching to the task branch. Creation does not require a clean worktree. Each directory under `.hiraku/templates/` is a complete bundle of `task.md`, `program.md`, and `launch.yml`; projects may add their own templates.
@@ -277,54 +281,52 @@ Creation copies the selected bundle and does not record its name in the resultin
 ### Create and inspect experiments
 
 ```bash
-hiraku experiment create logreg-baseline:add-batch-norm --summary "Test batch normalization"
-hiraku experiment create logreg-baseline:model-search --summary "Compare model families" --format markdown
+hiraku experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --entrypoint logistic
+hiraku experiment create heart-disease:random-forest --summary "Random forest comparison" --entrypoint random-forest --format markdown
 hiraku experiment list
-hiraku experiment list logreg-baseline
-hiraku experiment show logreg-baseline:add-batch-norm
-hiraku experiment set logreg-baseline:add-batch-norm --commit HEAD
-hiraku experiment delete logreg-baseline:add-batch-norm
-hiraku exp list logreg-baseline
-hiraku exp create logreg-baseline:parallel-idea --branch --from HEAD~2
+hiraku experiment list heart-disease
+hiraku experiment show heart-disease:logistic-baseline
+hiraku experiment set heart-disease:logistic-baseline --commit HEAD
+hiraku experiment delete heart-disease:logistic-baseline
+hiraku exp list heart-disease
+hiraku exp create heart-disease:stronger-regularization --branch --from HEAD
 ```
 
 `hiraku exp` is an alias for `hiraku experiment`. YAML and Markdown records normalize to the same core fields. Direct editing is supported. `list` without a task resolves to the current task, and its human-readable table includes both the experiment summary and hypothesis.
 
 ### Launch named project entrypoints
 
-Define fixed commands in the task directory, e.g., `tasks/logreg-baseline/launch.yml`:
+Define fixed commands in the task directory, e.g., `tasks/heart-disease/launch.yml`:
 
 ```yaml
 entrypoints:
-  train:
+  logistic:
     command: ["uv", "run", "python", "train.py"]
     args:
-      seed: 1
-      regularization: 0.01
+      model: logistic
+      seed: 42
     positionals: []
     cwd: "."
-    env:
-      MODEL_FAMILY: "logistic"
 ```
 
 Launch the current repository state directly as a non-reproducible debugging execution:
 
 ```bash
-hiraku launch logreg-baseline:train
+hiraku launch heart-disease:logistic
 ```
 
 For a reproducible launch, execute an exact commit in an isolated temporary Git worktree:
 
 ```bash
-hiraku launch --commit HEAD logreg-baseline:train
-hiraku launch --commit <commit-sha> logreg-baseline:train
-hiraku launch --experiment add-batch-norm logreg-baseline:train
+hiraku launch --commit HEAD heart-disease:logistic
+hiraku launch --commit <commit-sha> heart-disease:logistic
+hiraku launch --experiment logistic-baseline heart-disease:logistic
 ```
 
 Flags after the entrypoint are appended to the fixed command. E.g.,
 
 ```bash
-hiraku launch logreg-baseline:train --seed 42
+hiraku launch heart-disease:logistic --seed 7
 ```
 
 `hiraku launch`:
@@ -355,15 +357,15 @@ The launcher is a thin, customizable, local command wrapper, not a scheduler or 
 
 ```bash
 hiraku experiment list
-hiraku experiment list logreg-baseline
+hiraku experiment list heart-disease
 hiraku runs
-hiraku runs logreg-baseline
-hiraku runs logreg-baseline --sort test/mse --ascending
-hiraku runs logreg-baseline --sort accuracy --descending
-hiraku runs logreg-baseline --metrics val/log_loss,val/accuracy
-hiraku runs logreg-baseline --verbose
-hiraku runs logreg-baseline --json
-hiraku runs logreg-baseline --all  # MLflow only
+hiraku runs heart-disease
+hiraku runs heart-disease --sort val/log_loss --ascending
+hiraku runs heart-disease --sort val/accuracy --descending
+hiraku runs heart-disease --metrics val/log_loss,val/accuracy
+hiraku runs heart-disease --verbose
+hiraku runs heart-disease --json
+hiraku runs heart-disease --all  # MLflow only
 ```
 
 Experiment and run listings are always scoped to one task, supplied explicitly or inferred from the current task branch. Cross-task listing is not part of the PoC. Experiment listings read the local YAML and Markdown registry and enrich each record with derived launches, runs, metrics, and Git parents. The human experiment table includes each recorded branch. A `*` prefix marks experiments whose exact bound commit is contained in the task branch, followed by a legend naming that branch. This ancestry marker is a Git integration fact kept separate from the semantic `decision`; an accepted experiment without the marker emits a warning. Unbound, missing, squashed, or cherry-picked commits receive no marker because exact ancestry cannot establish their integration.
@@ -397,12 +399,26 @@ Hiraku never pushes implicitly. If an unpublished task branch is reviewed withou
 
 ### MLflow tracking backend
 
-Stage 2 supports `tracking_backend: mlflow` as an optional installation extra and uses a local SQLite MLflow store only. The database defaults to `<project-root>/mlflow.db`; an optional safe project-relative `mlflow_tracking_db` overrides it. Each task specifies `mlflow_experiment` in `task.md` front matter. Remote tracking servers, registry URIs, and authentication are outside the PoC.
+MLflow is an optional installation extra. It uses a local SQLite database at
+`<project-root>/mlflow.db` by default; a safe project-relative `mlflow_tracking_db` overrides it.
+Alternatively, `mlflow_tracking_uri` selects a remote HTTP(S) tracking server. The local override and
+remote URI are mutually exclusive. Each task specifies `mlflow_experiment` in `task.md` front matter.
 
 ```yaml
 tracking_backend: mlflow
 mlflow_tracking_db: mlflow.db  # optional
 ```
+
+For remote tracking, omit `mlflow_tracking_db`:
+
+```yaml
+tracking_backend: mlflow
+mlflow_tracking_uri: https://mlflow.example.org
+```
+
+Hiraku passes a remote URI unchanged to launches and run inspection. Authentication and TLS use
+standard MLflow environment variables; credentials must not be embedded in `.hiraku.yml`. Remote
+errors never fall back to local SQLite. Hiraku does not provision or administer the server.
 
 Hiraku constructs an absolute `sqlite:///` tracking URI for the database under the original project root. Committed launches therefore write to the same database even though their source executes from a detached temporary worktree.
 
@@ -459,6 +475,10 @@ Both templates produce the same data model. Their copied programs may evolve ind
 
 ## Installation
 
+Choose the level of detail you need: [Quickstart](docs/quickstart.md),
+[linear tutorial](docs/tutorial.md), or
+[advanced branching, reviews, and remote tracking](docs/advanced.md).
+
 For local development, the intended workflow is:
 
 ```bash
@@ -498,13 +518,20 @@ The smoke and heart-disease examples select their run writer from
 the optional MLflow dependency automatically for an MLflow launch, while the writer uses only
 the backend-specific tracking location injected by Hiraku.
 
+The guided [`examples/heart-disease`](examples/heart-disease) flow is the main tutorial example; its
+`heart-disease-auto` template runs the same fixed evaluation in a bounded CPU-only autonomous loop.
+[`examples/smoke`](examples/smoke) is only the shortest installation and tracking-contract check.
+
 Stage 2 also includes [`examples/autoresearch`](examples/autoresearch), pinned to upstream commit `228791fb499afffb54b46200aca536f79142f117`. It vendors the upstream GPU training and preparation code with MIT attribution, closely adapts the original autonomous program to Hiraku tasks, experiments, and runs, lets the user choose `revert`, `reset`, or retained-experiment-`branch` history, and provides a CPU-only contract entrypoint for automated workflow validation.
 
 
 
 ## Proof of concept
 
-The proof of concept is delivered in two stages. The first stage establishes a minimal working version of Hiraku. It is complete when the demo cases can execute the core loop using both guided and autonomous programs, exposing enough evidence for a human to review what happened. Metric improvement is measured, but it is not a condition for success. The second stage extends that foundation with pull-request and merge-request integration and branching experiment workflows.
+The proof of concept is delivered in stages. The first stage establishes a minimal working version
+of Hiraku, the second adds branching, review integration, and MLflow, and the third refines agent
+workflows, documentation, and remote MLflow support. Metric improvement is measured, but is not a
+condition for framework success.
 
 ### Stage 1: Minimal Working Version
 

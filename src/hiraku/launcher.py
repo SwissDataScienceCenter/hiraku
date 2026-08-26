@@ -265,7 +265,8 @@ def _execute(
         environment["HIRAKU_TABLE_PATH"] = str(project.runs_path(task_id))
     else:
         environment.pop("HIRAKU_TABLE_PATH", None)
-        project.mlflow_tracking_db.parent.mkdir(parents=True, exist_ok=True)
+        if not project.remote_mlflow:
+            project.mlflow_tracking_db.parent.mkdir(parents=True, exist_ok=True)
         task = read_task(project, task_id)
         if not task.mlflow_experiment:
             raise ValidationError(

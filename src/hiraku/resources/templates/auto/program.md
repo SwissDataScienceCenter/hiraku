@@ -1,16 +1,34 @@
 # Bounded autonomous research program
 
-Before starting, obtain human approval for the task goal and scope, evaluation protocol, permitted commands, resource bounds, permissions, and stopping conditions. Record these boundaries in this file or `task.md`.
-
-Within the approved boundaries, the agent may update the plan, create and switch canonical experiment branches, create experiment records, implement and commit experiments, bind source commits, launch declared entrypoints, inspect and compare results, update findings, accept or reject changes, and choose the next in-scope iteration.
-
-Pause before changing the goal, scope, evaluation protocol, permitted commands, resource bounds, permissions, tracking backend, or stopping conditions. Never approve or merge a remote review, and never merge into a protected branch without explicit human approval. Use normal Git to advance a task branch after acceptance. Stop when an approved stopping condition is met and expose all task, experiment, Git, launch, run, and review artifacts. Treat this program as workflow guidance, not as a security boundary.
+Before starting, obtain human approval and record every boundary below. Do not begin while any
+required boundary is blank.
 
 ## Approved boundaries
 
 - Goal and scope:
-- Evaluation protocol:
-- Permitted commands:
-- Resource bounds:
-- Permissions:
-- Stopping conditions:
+- Fixed evaluation protocol and ordered metric directions:
+- Permitted commands and editable files:
+- Resource and time limits:
+- Permissions, including commit, branch, and integration authority:
+- Iteration limit and other stopping conditions:
+
+Within those bounds, repeat this loop:
+
+1. inspect `task.md`, `program.md`, experiments, entrypoints, and `hiraku runs <task> --json`;
+2. choose one in-scope hypothesis and create its experiment record and permitted branch;
+3. implement one coherent change, commit it, and bind the exact commit;
+4. launch only the experiment's declared invocation;
+5. diagnose crashes or provenance mismatches, then compare task-declared metrics in their declared
+   directions;
+6. record status, decision, and conclusion; integrate or reject with normal Git as authorized; and
+7. stop if a stopping condition is met, otherwise select the next experiment.
+
+Pause when a boundary is missing, contradictory, or would be exceeded; when scope, evaluation,
+commands, dependencies, resources, permissions, tracking backend, or stopping conditions would
+change; or when safe progress requires an unapproved external mutation. Failed candidates may be
+rejected, while implementation failures should be corrected or recorded separately.
+
+At completion, synthesize reviewed evidence, decisions, open questions, and next steps in `task.md`
+for human review. Never edit tracking data, approve or merge a remote review, implicitly push, or
+merge into a protected branch without authorization. Research logic is identical for table, local
+SQLite MLflow, and remote MLflow. Treat this program as workflow guidance, not a security boundary.
