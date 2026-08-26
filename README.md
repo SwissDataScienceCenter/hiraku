@@ -381,6 +381,31 @@ CSV/TSV source columns and string values are preserved. Sorted JSON rows receive
 
 The table backend requires each run producer to record a UTC ISO-8601 `created_at` timestamp. Hiraku injects launch context but does not invent or append the run row, so timestamp creation remains the responsibility of the tracking backend or training script.
 
+### Open the experiment dashboard
+
+Install the dashboard extra, then open a strictly read-only dashboard for an explicit or current
+task:
+
+```bash
+uv sync --extra dashboard
+hiraku dashboard heart-disease
+```
+
+The command starts a local server on `127.0.0.1` using an available port, opens the browser, and runs
+until interrupted. `--no-open` prints the URL without opening a browser; `--host` and `--port` allow
+explicit overrides. A manual refresh reloads task, experiment, Git, and tracking data without file
+watching or polling.
+
+The dashboard renders `task.md`, experiment and run tables, Git-derived lineage for branched
+experiments, and an Altair/Vega-Lite metric timeline. Its performance frontier is the cumulative
+minimum or maximum according to the selected task metric. Experiment and experiment-status filters
+update the run table and chart and recompute the frontier from visible numeric runs. Run execution
+status remains metadata rather than a separate filter.
+
+All browser assets are pinned and bundled for offline use. The dashboard never edits records, run
+data, Git state, or reviews. Table dashboards require `hiraku[dashboard]`; MLflow dashboards require
+both the `dashboard` and `mlflow` extras.
+
 ### Create or update a review
 
 Stage 2 provides:
@@ -488,6 +513,9 @@ uv sync
 uv run hiraku --help
 ```
 
+Install optional dashboard support with `uv sync --extra dashboard`, or both dashboard and MLflow
+with `uv sync --extra dashboard --extra mlflow`.
+
 To install `hiraku` from a checkout onto `PATH` without activating its virtual environment:
 
 ```bash
@@ -529,9 +557,9 @@ Stage 2 also includes [`examples/autoresearch`](examples/autoresearch), pinned t
 ## Proof of concept
 
 The proof of concept is delivered in stages. The first stage establishes a minimal working version
-of Hiraku, the second adds branching, review integration, and MLflow, and the third refines agent
-workflows, documentation, and remote MLflow support. Metric improvement is measured, but is not a
-condition for framework success.
+of Hiraku, the second adds branching, review integration, and MLflow, the third refines agent
+workflows, documentation, and remote MLflow support, and the fourth adds a task-scoped experiment
+dashboard. Metric improvement is measured, but is not a condition for framework success.
 
 ### Stage 1: Minimal Working Version
 
@@ -653,20 +681,25 @@ This stage focusing on refining the hiraku skill, optimizing it for different re
 ### Stage 4: Dashboard
 
 - **Dashboard**
-  - add an experiment dashboard to visualize and review experiments.
-  - start with `hiraku dashboard [task]`
-  - it shows: 
-    - task.md
-    - list of experiments and their status, decision, and summary
-    - list of runs and their metrics, sorted by a selected metric
-    - in branching mode, show the lineage of experiments and their relationships
-    - a plot of a selected metric over time for all experiments, with the ability to filter by experiment or status. the plot should show the performance "frontier" as in the autoresearch example.
-    - the plot is interactive, hovering over a run, shows run details, experiment details. 
-    - for plotting, use Altair/Vega-Lite charts
+  - Provide `hiraku dashboard [task]` as a strictly read-only task review surface.
+  - Start a loopback server, open the browser by default, support `--no-open`, and refresh manually
+    without watchers or polling.
+  - Show the canonical `task.md`, experiment status/decision/summary, compact runs and metrics,
+    warnings, and Git-derived lineage for branched experiments.
+  - Plot the selected metric over time with Altair/Vega-Lite and overlay a direction-aware cumulative
+    performance frontier.
+  - Filter by experiment and experiment status, applying the same visible set to the run table and
+    recomputed frontier; keep execution status as run metadata.
+  - Expose exact run and experiment provenance through hover and expanded details.
+  - Package dashboard dependencies as `hiraku[dashboard]` and bundle pinned Vega browser assets for
+    offline rendering.
 
 ### Open Questions
 - is cross task listing of experiments and runs needed and feasible? E.g. the records may live in different branches, have inconsistent metrics, etc.
 - `hiraku run list` is missing, inconsistent with `hiraku experiment list` / make the CLI more consistent?
+- use refs instead of branches if user doesn't want to clutter their branch space.
+- tag / ref root nodes?
+- use jj as branching backended - optionally.
 
 ### Deferred
 
@@ -679,8 +712,6 @@ This stage focusing on refining the hiraku skill, optimizing it for different re
   - Standardized capture of agent conversations, traces, chain-of-thought, or tool-call histories.
 
 - **Lineage and project interface**
-  - A dashboard or other graphical interface.
-  - Visualization of lineage inferred from the Git DAG.
   - Synchronization, backup, or remote hosting of the local experiment registry.
 
 - **Execution and tracking integrations**

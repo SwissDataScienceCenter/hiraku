@@ -12,6 +12,11 @@ dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
 mlflow = ["mlflow>=3.0"]
+dashboard = [
+  "altair>=6.0,<7",
+  "bleach>=6.2,<7",
+  "Markdown>=3.8,<4",
+]
 
 [project.scripts]
 hiraku = "hiraku.cli:main"

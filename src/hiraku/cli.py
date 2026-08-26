@@ -77,6 +77,9 @@ def parser() -> argparse.ArgumentParser:
     from hiraku.reviews import add_review_parser
 
     add_review_parser(commands)
+    from hiraku.dashboard import add_dashboard_parser
+
+    add_dashboard_parser(commands)
     return root
 
 
@@ -268,6 +271,10 @@ def dispatch(args: argparse.Namespace) -> int:
         from hiraku.reviews import review_create
 
         return review_create(project, args)
+    if args.command == "dashboard":
+        from hiraku.dashboard import run_dashboard
+
+        return run_dashboard(project, args)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

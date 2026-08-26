@@ -34,7 +34,9 @@ class RunResult:
 
 
 class TrackingBackend(Protocol):
-    def read_runs(self, task_id: str, include_all: bool = False) -> RunResult: ...
+    def read_runs(
+        self, task_id: str, include_all: bool = False, allow_empty: bool = False
+    ) -> RunResult: ...
 
 
 def add_runs_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -58,7 +60,9 @@ class TableBackend:
     def __init__(self, project: Project) -> None:
         self.project = project
 
-    def read_runs(self, task_id: str, include_all: bool = False) -> RunResult:
+    def read_runs(
+        self, task_id: str, include_all: bool = False, allow_empty: bool = False
+    ) -> RunResult:
         if include_all:
             raise ValidationError("--all is available only with tracking_backend: mlflow.")
         read_task(self.project, task_id)
@@ -89,7 +93,9 @@ class MlflowBackend:
                 "standard MLflow authentication settings."
             ) from exc
 
-    def read_runs(self, task_id: str, include_all: bool = False) -> RunResult:
+    def read_runs(
+        self, task_id: str, include_all: bool = False, allow_empty: bool = False
+    ) -> RunResult:
         task = read_task(self.project, task_id)
         known_experiments = {record.id for record in list_experiments(self.project, task_id)}
         if not task.mlflow_experiment:
@@ -104,6 +110,11 @@ class MlflowBackend:
                 "MLflow authentication settings."
             ) from exc
         if experiment is None:
+            if allow_empty:
+                return RunResult(
+                    [],
+                    [f"MLflow experiment {task.mlflow_experiment!r} does not exist yet."],
+                )
             raise HirakuError(f"MLflow experiment {task.mlflow_experiment!r} does not exist.")
         try:
             values = self.client.search_runs([experiment.experiment_id])
@@ -113,6 +124,8 @@ class MlflowBackend:
                 "standard MLflow authentication settings."
             ) from exc
         if not values:
+            if allow_empty:
+                return RunResult([], [])
             raise HirakuError(f"MLflow experiment {task.mlflow_experiment!r} contains no runs.")
         rows: list[dict[str, Any]] = []
         omitted: list[str] = []
@@ -445,9 +458,12 @@ def _nearest_parent_experiments(
 
 
 def enrich_experiments(
-    project: Project, task_id: str, records: list[ExperimentRecord]
+    project: Project,
+    task_id: str,
+    records: list[ExperimentRecord],
+    runs: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    runs = read_runs(project, task_id)
+    runs = read_runs(project, task_id) if runs is None else runs
     task = read_task(project, task_id)
     try:
         task_commit: str | None = resolve_commit(project.root, task.branch)

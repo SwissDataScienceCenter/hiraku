@@ -76,6 +76,39 @@ reads the same run.
 Use `hiraku runs --all` only with MLflow to diagnose wrong-task, incomplete, or unassociated runs.
 Commit mismatches and missing provenance remain actionable under every backend.
 
+## Experiment dashboard
+
+Install the optional dashboard dependencies and open one task:
+
+```bash
+uv sync --extra dashboard
+hiraku dashboard heart-disease
+```
+
+Hiraku binds an available port on `127.0.0.1`, prints the URL, opens the browser, and runs until
+`Ctrl-C`. Use `--no-open` in a headless terminal. `--host` and `--port` are explicit overrides; a
+non-loopback host prints a warning because the server has no authentication or TLS.
+
+The dashboard is strictly read-only. It cannot update experiments, launch runs, merge branches,
+push, or create reviews. The refresh button reloads current task, experiment, Git, and tracking data
+on request; there is no watcher or background polling.
+
+The selected metric defaults to the task's first declaration. The frontier is the cumulative minimum
+for `minimize` and cumulative maximum for `maximize`. Selecting experiments or experiment statuses
+filters both the run table and chart, then recomputes the frontier from only visible numeric runs.
+Run execution status remains visible metadata. Missing or non-numeric values stay inspectable but do
+not enter the frontier.
+
+Experiment lineage comes from exact Git ancestry. The containment indication means an experiment's
+exact bound commit is in the task branch; it is separate from the scientific `decision`. Squash
+merges and cherry-picks do not establish containment of the original commit.
+
+Table dashboards require `hiraku[dashboard]`. MLflow dashboards require both `dashboard` and
+`mlflow`; local SQLite and the bundled Vega assets work offline. A remote MLflow dashboard contacts
+only its configured server, uses standard MLflow authentication, redacts failures, and never falls
+back to SQLite. Commit mismatches, omitted MLflow runs, and accepted-but-uncontained experiments are
+shown as warnings.
+
 ## Custom templates and operational boundaries
 
 Each directory under `.hiraku/templates/` is a complete `task.md`, `program.md`, and `launch.yml`

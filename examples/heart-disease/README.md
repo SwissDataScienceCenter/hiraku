@@ -38,6 +38,15 @@ hiraku launch --experiment random-forest heart-disease:random-forest
 hiraku runs heart-disease --sort val/log_loss --ascending
 ```
 
+With the dashboard extra installed, review the same evidence interactively:
+
+```bash
+hiraku dashboard heart-disease
+```
+
+Switch between `val/log_loss` and `val/accuracy`, compare the two experiments, and inspect the
+direction-aware frontier. The dashboard is read-only; use the CLI or Hiraku skill to update records.
+
 Both models use the same checksum-verified cohort, preprocessing rules, stratified validation split, seed, and metrics. The downloaded file is ignored by Git; provenance is established by the URL, checksum, split protocol, source commit, and tracked run configuration.
 
 For a bounded autonomous task, create the second complete template instead:

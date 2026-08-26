@@ -103,6 +103,37 @@ def test_mlflow_filtering_all_and_ranking(
     assert valid.info.run_id in verbose
 
 
+def test_dashboard_normalizes_local_mlflow_runs(repository: Path) -> None:
+    pytest.importorskip("altair")
+    pytest.importorskip("bleach")
+    pytest.importorskip("markdown")
+    from hiraku.dashboard import build_dashboard, filter_dashboard
+
+    configure_mlflow(repository, "baseline", "baseline-dashboard-runs")
+    hiraku(repository, "exp", "create", "baseline:trial", "--status", "evaluated")
+    empty = build_dashboard(load_project(repository), "baseline")
+    assert empty["runs"] == []
+    assert "does not exist yet" in empty["warnings"][0]
+    tracking_uri = sqlite_uri(repository / "tracking/mlflow.db")
+    client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+    experiment_id = client.create_experiment("baseline-dashboard-runs")
+    recorded = client.create_run(experiment_id)
+    client.log_param(recorded.info.run_id, "task_id", "baseline")
+    client.log_param(recorded.info.run_id, "experiment_id", "trial")
+    client.log_param(recorded.info.run_id, "commit", "b" * 40)
+    client.log_param(recorded.info.run_id, "seed", "42")
+    client.log_metric(recorded.info.run_id, "score", 0.81)
+    client.set_terminated(recorded.info.run_id)
+
+    snapshot = build_dashboard(load_project(repository), "baseline")
+    assert snapshot["tracking_backend"] == "mlflow"
+    assert snapshot["metrics"] == ["score"]
+    assert snapshot["runs"][0]["params"]["seed"] == "42"
+    assert snapshot["runs"][0]["metrics"] == {"score": 0.81}
+    view = filter_dashboard(snapshot, metric="score")
+    assert view["frontier"][0]["frontier"] == 0.81
+
+
 def test_mlflow_launch_environment_uses_original_project_store(repository: Path) -> None:
     configure_mlflow(repository, "baseline", "baseline-runs")
     script = repository / "capture.py"

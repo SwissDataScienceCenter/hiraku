@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Hiraku dashboard</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/vega.min.js" defer></script>
+  <script src="/assets/vega-lite.min.js" defer></script>
+  <script src="/assets/vega-embed.min.js" defer></script>
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to dashboard</a>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">平</span><span>Hiraku</span></div>
+    <div class="top-actions">
+      <span id="backend-badge" class="badge"></span>
+      <button id="refresh" type="button">Refresh data</button>
+    </div>
+  </header>
+  <main id="main" aria-busy="true">
+    <section id="error" class="error hidden" role="alert"></section>
+    <section class="hero panel">
+      <div>
+        <p class="eyebrow">Research task</p>
+        <h1 id="task-title">Loading dashboard…</h1>
+        <p id="task-goal" class="goal"></p>
+      </div>
+      <dl id="task-meta" class="meta-grid"></dl>
+    </section>
+
+    <section id="warnings-panel" class="warnings panel hidden" aria-labelledby="warnings-title">
+      <h2 id="warnings-title">Attention</h2>
+      <ul id="warnings"></ul>
+    </section>
+
+    <section class="controls panel" aria-labelledby="controls-title">
+      <div>
+        <p class="eyebrow">Evidence controls</p>
+        <h2 id="controls-title">Explore runs</h2>
+      </div>
+      <label>Metric<select id="metric"></select></label>
+      <label>Experiments<select id="experiment-filter" multiple></select></label>
+      <label>Experiment status<select id="status-filter" multiple></select></label>
+      <div id="direction" class="direction"></div>
+    </section>
+
+    <section id="counts" class="count-grid" aria-label="Dashboard counts"></section>
+
+    <section class="panel" aria-labelledby="chart-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Performance</p><h2 id="chart-title">Metric frontier</h2></div>
+        <p id="chart-note" class="muted"></p>
+      </div>
+      <div id="chart-empty" class="empty hidden">No numeric runs match this view.</div>
+      <div id="chart" aria-label="Metric values over time and cumulative performance frontier"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="experiments-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Research registry</p><h2 id="experiments-title">Experiments</h2></div>
+        <span class="legend"><i class="contained-dot"></i> contained in task branch</span>
+      </div>
+      <div id="experiments-table" class="table-wrap"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="runs-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Tracked evidence</p><h2 id="runs-title">Runs</h2></div>
+        <p class="muted">Sorted by the selected metric; exact provenance is in each detail row.</p>
+      </div>
+      <div id="runs-table" class="table-wrap"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="lineage-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Git ancestry</p><h2 id="lineage-title">Experiment lineage</h2></div>
+        <p class="muted">Edges are derived from exact bound commits.</p>
+      </div>
+      <div id="lineage" class="lineage"></div>
+    </section>
+
+    <section class="panel document" aria-labelledby="document-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Canonical review</p><h2 id="document-title">Task document</h2></div>
+        <code>task.md</code>
+      </div>
+      <article id="task-document" class="markdown"></article>
+    </section>
+  </main>
+</body>
+</html>
