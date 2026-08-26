@@ -92,6 +92,31 @@ def test_parameters_immutable_metrics_update(project):
     assert app.runs.rows("demo", "logging")[0]["score"] == "0.2"
 
 
+def test_current_best_and_experiment_outcome(project):
+    _, app = project
+    baseline = app.experiments.create("demo/baseline", "reference", kind="baseline")
+    baseline_run = app.runs.create(baseline, app.git.head_commit(), "evaluate", {})
+    app.runs.log(baseline_run, {}, {"score": "0.75"})
+    app.runs.finalize(baseline_run, "completed", 0)
+
+    better = app.experiments.create("demo/better", "improve")
+    better_run = app.runs.create(better, app.git.head_commit(), "evaluate", {})
+    app.runs.log(better_run, {}, {"score": "0.9"})
+    app.runs.finalize(better_run, "completed", 0)
+    app.experiments.freeze(better, app.git.head_commit())
+    concluded = app.analysis.conclude("demo/better")
+
+    assert concluded.outcome == "improved"
+    assert app.analysis.best("demo")["experiment_id"] == "better"
+
+    worse = app.experiments.create("demo/worse", "regress")
+    worse_run = app.runs.create(worse, app.git.head_commit(), "evaluate", {})
+    app.runs.log(worse_run, {}, {"score": "0.7"})
+    app.runs.finalize(worse_run, "completed", 0)
+    app.experiments.freeze(worse, app.git.head_commit())
+    assert app.analysis.conclude("demo/worse").outcome == "regressed"
+
+
 def test_stable_numeric_sort_and_unranked(project):
     _, app = project
     experiment = app.experiments.create("demo/sort", "sort")

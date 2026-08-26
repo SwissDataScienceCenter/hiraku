@@ -58,7 +58,14 @@ class AutoService:
         pending = self.app.proposals.list(goal_id, status="pending")
         proposal = pending[0] if pending else self.discover(goal_id)
         reference = f"{goal_id}/{proposal['experiment_id']}"
-        parent = f"{goal_id}/{proposal['parent_experiment_id']}" if proposal["parent_experiment_id"] else None
+        parent_id = proposal["parent_experiment_id"]
+        if parent_id is None:
+            best = self.app.analysis.best(goal_id)
+            if best:
+                best_experiment = self.app.experiments.get(f"{goal_id}/{best['experiment_id']}")
+                if best_experiment.kind != "baseline":
+                    parent_id = best_experiment.id
+        parent = f"{goal_id}/{parent_id}" if parent_id else None
         try:
             experiment = self.app.experiments.create(
                 reference,

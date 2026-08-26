@@ -25,7 +25,10 @@ Launcher, RunService, and lineage queries as guided mode. The loop is serial in 
 It stops before changing Goal scope, metric, direction, protocol, constraints, manifest permissions,
 budgets, or policy. Agent, implementation, launch, and research-result failures are recorded as
 events. A missing or non-numeric metric yields `inconclusive`; a numeric result is compared to the
-best recorded baseline value and yields `supports` or `refutes`.
+best recorded baseline value and yields `supports` or `refutes`. Autonomous iteration also records
+an outcome relative to the best completed metric so far: `improved`, `regressed`, `invalid`, or
+`inconclusive`. `hiraku best <goal>` reports that current best Experiment. This is an internal
+keep/revert signal; it is not a promotion or merge operation.
 
 ## Why parent links beat Git ancestry
 

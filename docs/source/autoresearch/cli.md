@@ -78,6 +78,7 @@ hiraku runs heart-disease --sort roc_auc_mean --descending
 hiraku runs heart-disease/random-forest --json
 hiraku report generate heart-disease
 hiraku experiment tree heart-disease
+hiraku best heart-disease
 hiraku tui
 ```
 

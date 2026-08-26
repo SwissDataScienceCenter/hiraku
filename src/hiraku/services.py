@@ -191,8 +191,8 @@ class ExperimentService:
                         raise HirakuError(f"Goal '{goal_id}' already has a baseline Experiment.")
                 connection.execute(
                     "INSERT INTO experiments(id,goal_id,parent_id,kind,hypothesis,branch,parent_commit,"
-                    "evaluated_commit,status,verdict,origin,created_at,updated_at) "
-                    "VALUES (?,?,?,?,?,?,?,NULL,'implementing',NULL,?,?,?)",
+                    "evaluated_commit,status,verdict,outcome,origin,created_at,updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,NULL,'implementing',NULL,NULL,?,?,?)",
                     (
                         experiment_id,
                         goal_id,
@@ -264,7 +264,7 @@ class ExperimentService:
                 )
         return self.get(f"{experiment.goal_id}/{experiment.id}")
 
-    def conclude(self, reference: str, verdict: str) -> Experiment:
+    def conclude(self, reference: str, verdict: str, outcome: str | None = None) -> Experiment:
         if verdict not in {"supports", "refutes", "inconclusive"}:
             raise HirakuError("Verdict must be supports, refutes, or inconclusive.")
         experiment = self.get(reference)
@@ -274,10 +274,10 @@ class ExperimentService:
             raise HirakuError("An Experiment must be evaluated before it can be concluded.")
         with self.db.transaction() as connection:
             connection.execute(
-                "UPDATE experiments SET status='concluded',verdict=?,updated_at=? WHERE goal_id=? AND id=?",
-                (verdict, utc_now(), experiment.goal_id, experiment.id),
+                "UPDATE experiments SET status='concluded',verdict=?,outcome=?,updated_at=? WHERE goal_id=? AND id=?",
+                (verdict, outcome, utc_now(), experiment.goal_id, experiment.id),
             )
-            record_event(connection, "experiment", reference, "concluded", {"verdict": verdict})
+            record_event(connection, "experiment", reference, "concluded", {"verdict": verdict, "outcome": outcome})
         return self.get(reference)
 
     def abandon(self, reference: str) -> Experiment:
@@ -532,11 +532,64 @@ class AnalysisService:
             return "supports" if max(candidate) > max(baseline) else "refutes"
         return "supports" if min(candidate) < min(baseline) else "refutes"
 
+    def best(self, goal_id: str, exclude_experiment: str | None = None) -> dict[str, Any] | None:
+        """Return the best completed metric value and its Experiment."""
+        goal = self.goals.get(goal_id)
+        candidates: list[tuple[float, Experiment, int]] = []
+        for experiment in self.experiments.list(goal_id):
+            if experiment.id == exclude_experiment or experiment.status == "abandoned":
+                continue
+            values = self._values(
+                [row for row in self.runs.rows(goal_id, experiment.id) if row.get("status") == "completed"],
+                goal.metric,
+            )
+            if values:
+                value = max(values) if goal.direction == "max" else min(values)
+                candidates.append((value, experiment, len(values)))
+        if not candidates:
+            return None
+        value, experiment, count = (
+            max(candidates, key=lambda item: item[0])
+            if goal.direction == "max"
+            else min(candidates, key=lambda item: item[0])
+        )
+        return {
+            "goal_id": goal_id,
+            "experiment_id": experiment.id,
+            "metric": goal.metric,
+            "value": value,
+            "run_count": count,
+            "commit": experiment.evaluated_commit,
+        }
+
+    def outcome(self, reference: str) -> str:
+        goal_id, experiment_id = split_experiment_ref(reference)
+        experiment = self.experiments.get(reference)
+        if experiment.kind == "baseline":
+            return "baseline"
+        goal = self.goals.get(goal_id)
+        values = self._values(
+            [row for row in self.runs.rows(goal_id, experiment_id) if row.get("status") == "completed"],
+            goal.metric,
+        )
+        if not values:
+            return "invalid"
+        best = self.best(goal_id, exclude_experiment=experiment_id)
+        if best is None:
+            return "improved"
+        candidate = max(values) if goal.direction == "max" else min(values)
+        return (
+            "improved"
+            if (candidate > best["value"] if goal.direction == "max" else candidate < best["value"])
+            else "regressed"
+        )
+
     def conclude(self, reference: str) -> Experiment:
         goal_id, _ = split_experiment_ref(reference)
         goal = self.goals.get(goal_id)
         verdict = self.verdict(reference)
-        experiment = self.experiments.conclude(reference, verdict)
+        outcome = self.outcome(reference)
+        experiment = self.experiments.conclude(reference, verdict, outcome)
         if verdict != "supports" and self.events:
             self.events.record(
                 "experiment",

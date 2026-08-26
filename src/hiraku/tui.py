@@ -39,6 +39,7 @@ def run_tui(core: HirakuApp) -> None:
                         label = (
                             f"{experiment['id']} ({experiment['kind']}, {experiment['status']}, "
                             f"{experiment['origin']}"
+                            + (f", {experiment['outcome']}" if experiment.get("outcome") else "")
                             + (f", {experiment['verdict']}" if experiment["verdict"] else "")
                             + ")"
                         )

@@ -182,13 +182,14 @@ def experiment_list(
     if json_output:
         output(values, True)
         return
-    table = Table("Goal/Experiment", "Kind", "Parent", "Status", "Verdict", "Origin")
+    table = Table("Goal/Experiment", "Kind", "Parent", "Status", "Outcome", "Verdict", "Origin")
     for item in values:
         table.add_row(
             f"{item['goal_id']}/{item['id']}",
             item["kind"],
             item["parent_id"] or "—",
             item["status"],
+            item["outcome"] or "—",
             item["verdict"] or "—",
             item["origin"],
         )
@@ -215,6 +216,7 @@ def experiment_tree(goal_id: str, json_output: Annotated[bool, typer.Option("--j
                 escape(
                     f"{prefix}{'└──' if last else '├──'} {node['id']} "
                     f"[{node['kind']}, {node['status']}"
+                    f"{', ' + node['outcome'] if node.get('outcome') else ''}"
                     f"{', ' + node['verdict'] if node['verdict'] else ''}]"
                 )
             )
@@ -329,6 +331,21 @@ def runs_command(
     for row in rows:
         table.add_row(*(str(row.get(field, "—")) if row.get(field) is not None else "—" for field in shown))
     console.print(table)
+
+
+@app.command("best")
+def best_command(goal_id: str, json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
+    """Show the current best completed metric for a Goal."""
+    value = execute(lambda: core().analysis.best(goal_id))
+    if json_output:
+        output(value or {}, True)
+    elif value is None:
+        console.print("No completed Run with a valid Goal metric.")
+    else:
+        console.print(
+            f"{value['experiment_id']}: {value['metric']}={value['value']} "
+            f"({value['run_count']} Run(s), commit {value['commit'][:12] if value['commit'] else '—'})"
+        )
 
 
 @proposal_app.command("discover")

@@ -10,7 +10,7 @@ from typing import Any
 
 from .errors import HirakuError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS experiments (
     evaluated_commit TEXT,
     status TEXT NOT NULL CHECK(status IN ('implementing', 'evaluated', 'concluded', 'abandoned')),
     verdict TEXT CHECK(verdict IN ('supports', 'refutes', 'inconclusive')),
+    outcome TEXT CHECK(outcome IN ('baseline', 'improved', 'regressed', 'invalid', 'inconclusive')),
     origin TEXT NOT NULL CHECK(origin IN ('guided', 'auto')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -123,6 +124,9 @@ class Database:
             row = connection.execute("SELECT version FROM schema_version").fetchone()
             if row is None:
                 connection.execute("INSERT INTO schema_version(version) VALUES (?)", (SCHEMA_VERSION,))
+            elif row["version"] == 1:
+                connection.execute("ALTER TABLE experiments ADD COLUMN outcome TEXT")
+                connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))
             elif row["version"] != SCHEMA_VERSION:
                 raise HirakuError(f"Unsupported state schema {row['version']}; expected {SCHEMA_VERSION}.")
 

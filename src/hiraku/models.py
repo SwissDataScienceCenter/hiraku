@@ -45,6 +45,7 @@ class Experiment:
     evaluated_commit: str | None
     status: str
     verdict: str | None
+    outcome: str | None
     origin: str
     created_at: str
     updated_at: str
