@@ -186,15 +186,25 @@ GITIGNORE_ENTRIES = (
     ".venv-*",
     "experiments/*/.venv",
     "experiments/*/.venv-*",
+    "__pycache__/",
+    "*.py[cod]",
+    "*.egg-info/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    ".mypy_cache/",
+    ".ipynb_checkpoints/",
+    ".DS_Store",
 )
 
 
 def _ensure_gitignore(root: Path) -> bool:
-    """Append the entries that keep environments and worktrees out of the repository.
+    """Append the entries that keep environments, caches and build output out of the repository.
 
     A virtual environment has absolute paths baked in, so committing one produces a copy that is
-    broken at any other path — including the temporary worktree a `--commit` run uses. Appends
-    only what is missing, and never rewrites existing lines.
+    broken at any other path — including the temporary worktree a `--commit` run uses. Bytecode
+    caches are worse than useless in history: they are regenerated on every import, so they turn
+    every commit into a diff of binary files that nobody reads and that conflict on every merge.
+    Appends only what is missing, and never rewrites existing lines.
     """
     path = root / ".gitignore"
     existing = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []

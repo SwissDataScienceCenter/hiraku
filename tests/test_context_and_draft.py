@@ -453,3 +453,10 @@ def test_a_reply_larger_than_the_pipe_buffer_does_not_deadlock(project, tmp_path
     big = json.dumps({"experiments": [], "notes": "x" * 200_000})
     result = agent_mod.run_design(project, "vo-backend", command=fake_agent(tmp_path, big))
     assert len(result.raw) > 200_000
+
+
+def test_init_gitignores_bytecode_and_caches(bare_project):
+    """A .pyc in history is a binary diff nobody reads that conflicts on every merge."""
+    text = (bare_project.root / ".gitignore").read_text(encoding="utf-8")
+    for entry in ("__pycache__/", "*.py[cod]", ".pytest_cache/", ".ruff_cache/", ".DS_Store"):
+        assert entry in text
