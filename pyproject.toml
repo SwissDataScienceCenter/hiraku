@@ -30,7 +30,6 @@ dependencies = [
 tui = ["textual>=1.0"]
 dev = ["pytest>=8.3", "pytest-cov>=6.0", "ruff>=0.9"]
 heart-demo = ["numpy>=2.0", "scikit-learn>=1.6"]
-all = ["hiraku[tui, dev, heart-demo]"]
 
 [project.urls]
 Homepage = "https://github.com/SwissDataScienceCenter/hiraku"

@@ -1,0 +1,11 @@
+entrypoints:
+  evaluate:
+    command: [uv, run, --extra, heart-demo, python, examples/iris/evaluate.py]
+    cwd: .
+
+auto:
+  allowed_entrypoints: [evaluate]
+  implement:
+    command: [uv, run, --extra, heart-demo, python, examples/iris/implement.py]
+    cwd: .
+

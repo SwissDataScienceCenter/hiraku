@@ -334,10 +334,12 @@ ownership.
 The PoC includes:
 
 1. one small, fast deterministic toy experiment; and
-2. one larger deterministic classification experiment.
+2. one larger deterministic classification experiment; and
+3. one generic built-in-dataset classification experiment using scikit-learn Iris.
 
 Both cases exercise guided and bounded-auto modes. See [examples/smoke/README.md](examples/smoke/README.md)
 and [examples/heart-disease/README.md](examples/heart-disease/README.md) for every command.
+The minimal library-backed case is [examples/iris/README.md](examples/iris/README.md).
 
 ## Out of scope for the proof of concept
 
