@@ -11,7 +11,15 @@ from hiraku.git import repository_root
 from hiraku.util import safe_relative
 
 CONFIG_NAME = ".hiraku.yml"
-CONFIG_FIELDS = {"tasks_dir", "templates_dir", "default_template", "tracking_backend"}
+CONFIG_FIELDS = {
+    "tasks_dir",
+    "templates_dir",
+    "default_template",
+    "tracking_backend",
+    "mlflow_tracking_db",
+    "review_provider",
+    "review_remote",
+}
 
 
 @dataclass(frozen=True)
@@ -21,6 +29,9 @@ class Project:
     templates_dir: Path
     default_template: str
     tracking_backend: str
+    mlflow_tracking_db: Path
+    review_provider: str | None
+    review_remote: str | None
 
     @property
     def config_path(self) -> Path:
@@ -31,6 +42,10 @@ class Project:
 
     def runs_path(self, task_id: str) -> Path:
         return self.task_dir(task_id) / "runs.csv"
+
+    @property
+    def mlflow_tracking_uri(self) -> str:
+        return f"sqlite:///{self.mlflow_tracking_db.as_posix()}"
 
 
 def find_root(start: Path | None = None) -> Path:
@@ -56,15 +71,29 @@ def load_project(start: Path | None = None) -> Project:
         "templates_dir": raw.get("templates_dir", ".hiraku/templates"),
         "default_template": raw.get("default_template", "guided"),
         "tracking_backend": raw.get("tracking_backend", "table"),
+        "mlflow_tracking_db": raw.get("mlflow_tracking_db", "mlflow.db"),
     }
     if not all(isinstance(values[key], str) for key in values):
         raise ValidationError(f"All {CONFIG_NAME} values must be strings.")
-    if values["tracking_backend"] != "table":
-        raise ValidationError("Stage 1 supports only 'tracking_backend: table'.")
+    if values["tracking_backend"] not in {"table", "mlflow"}:
+        raise ValidationError("tracking_backend must be 'table' or 'mlflow'.")
+    if "mlflow_tracking_db" in raw and values["tracking_backend"] != "mlflow":
+        raise ValidationError("mlflow_tracking_db is valid only with tracking_backend: mlflow.")
+    review_provider = raw.get("review_provider")
+    review_remote = raw.get("review_remote")
+    if review_provider is not None and review_provider not in {"github", "gitlab"}:
+        raise ValidationError("review_provider must be 'github' or 'gitlab'.")
+    if review_remote is not None and (
+        not isinstance(review_remote, str) or not review_remote.strip()
+    ):
+        raise ValidationError("review_remote must be a non-empty string.")
     return Project(
         root=root,
         tasks_dir=safe_relative(root, values["tasks_dir"], "tasks_dir"),
         templates_dir=safe_relative(root, values["templates_dir"], "templates_dir"),
         default_template=values["default_template"],
         tracking_backend=values["tracking_backend"],
+        mlflow_tracking_db=safe_relative(root, values["mlflow_tracking_db"], "mlflow_tracking_db"),
+        review_provider=review_provider,
+        review_remote=review_remote,
     )

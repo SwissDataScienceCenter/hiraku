@@ -70,6 +70,11 @@ The task-level `task.md` is the canonical review document. It synthesizes task d
 id: logreg-baseline
 summary: Logistic regression baseline for heart-disease prediction
 goal: Implement and tune a logistic regression baseline for the Cleveland Heart Disease dataset. The deciding metric is validation cross-entropy on the validation split.
+metrics:
+  - name: val/log_loss
+    direction: minimize
+  - name: val/accuracy
+    direction: maximize
 branch: hiraku/task/logreg-baseline
 pr_id:
 ---
@@ -355,13 +360,19 @@ hiraku runs
 hiraku runs logreg-baseline
 hiraku runs logreg-baseline --sort test/mse --ascending
 hiraku runs logreg-baseline --sort accuracy --descending
+hiraku runs logreg-baseline --metrics val/log_loss,val/accuracy
+hiraku runs logreg-baseline --verbose
 hiraku runs logreg-baseline --json
 hiraku runs logreg-baseline --all  # MLflow only
 ```
 
-Experiment and run listings are always scoped to one task, supplied explicitly or inferred from the current task branch. Cross-task listing is not part of the PoC. Experiment listings read the local YAML and Markdown registry and enrich each record with derived launches, runs, metrics, and Git parents. Without sorting, a run listing preserves table order. With `--sort`, it renders the selected runs and can group them by experiment. Exactly one of `--ascending` or `--descending` is required whenever `--sort` is used.
+Experiment and run listings are always scoped to one task, supplied explicitly or inferred from the current task branch. Cross-task listing is not part of the PoC. Experiment listings read the local YAML and Markdown registry and enrich each record with derived launches, runs, metrics, and Git parents.
 
-Rows with missing or non-numeric sort values remain visible after ranked rows. Human output is a table. JSON output contains the same flattened run collection so the agent skill can consume it without scraping terminal formatting.
+The default human run table is a compact review view. It shows abbreviated run and commit IDs, experiment, timestamp, status when available, useful MLflow parameters, and selected metrics. It omits the redundant task ID, nested backend objects, MLflow system tags, and a false commit-mismatch field. `--verbose` shows complete flattened metadata without duplicating the nested `params`, `metrics`, and `tags` objects. Human-readable commit hashes use ten characters throughout the CLI; stored records and JSON retain exact hashes.
+
+Metric columns come from the union of metric keys in the displayed runs. MLflow uses only native MLflow metrics; numeric parameters and tags are never inferred as metrics. For table tracking, non-provenance columns are result columns because the format does not distinguish parameters from metrics. `--metrics name,other` explicitly selects and orders human table columns. When task front matter declares `metrics`, those metrics are the default columns in declaration order and the first is the primary ranking metric. Its `minimize` or `maximize` direction supplies the default ranking direction. An explicit `--sort` may omit `--ascending` or `--descending` only when that metric has a declared direction; explicit direction flags override the declaration. Without declared or explicitly selected metrics, keys are alphabetical and the compact view shows at most six, with a warning directing the user to `--metrics` or `--verbose`.
+
+Rows with missing or non-numeric sort values remain visible after ranked rows. JSON remains complete and lossless regardless of compact human column selection so the agent skill can consume it without scraping terminal formatting.
 
 CSV/TSV source columns and string values are preserved. Sorted JSON rows receive an ordinal
 `_rank`; rows with missing or non-numeric metrics have no rank.
@@ -386,9 +397,18 @@ Hiraku never pushes implicitly. If an unpublished task branch is reviewed withou
 
 ### MLflow tracking backend
 
-Stage 2 supports `tracking_backend: mlflow` as an optional installation extra and uses a local file-backed MLflow store only. The store defaults to `<project-root>/mlruns/`; an optional safe project-relative `mlflow_tracking_dir` overrides it. Each task specifies `mlflow_experiment` in `task.md` front matter. Remote tracking servers, registry URIs, and authentication are outside the PoC.
+Stage 2 supports `tracking_backend: mlflow` as an optional installation extra and uses a local SQLite MLflow store only. The database defaults to `<project-root>/mlflow.db`; an optional safe project-relative `mlflow_tracking_db` overrides it. Each task specifies `mlflow_experiment` in `task.md` front matter. Remote tracking servers, registry URIs, and authentication are outside the PoC.
+
+```yaml
+tracking_backend: mlflow
+mlflow_tracking_db: mlflow.db  # optional
+```
+
+Hiraku constructs an absolute `sqlite:///` tracking URI for the database under the original project root. Committed launches therefore write to the same database even though their source executes from a detached temporary worktree.
 
 Hiraku uses MLflow's native run ID and start time as `run_id` and `created_at`. User code records `task_id`, semantic `experiment_id`, and `commit` as MLflow parameters. JSON keeps `params`, `metrics`, and `tags` namespaced. For a metric logged several times, run inspection uses MLflow's returned latest-timestamp value; metric history is not part of Stage 2. By default, listings show only runs with all required provenance and a matching task ID, while warning about omitted runs. The MLflow-only `--all` option reveals invalid, wrong-task, or unassociated runs with explicit warnings and leaves runs without numeric sort values unranked.
+
+MLflow launches receive `HIRAKU_MLFLOW_TRACKING_URI`, `HIRAKU_MLFLOW_EXPERIMENT`, `MLFLOW_TRACKING_URI`, and `MLFLOW_EXPERIMENT_NAME` instead of `HIRAKU_TABLE_PATH`. Both backends continue to receive the common task, experiment, commit, and backend variables.
 
 ## Agent skill
 
@@ -473,6 +493,13 @@ Entrypoints and paths in an example are relative to the copied repository root. 
 declares its own dependencies and its README continues the task-specific workflow. Automated
 tests follow the same copy-and-`git init` process in temporary repositories.
 
+The smoke and heart-disease examples select their run writer from
+`HIRAKU_TRACKING_BACKEND`. Their launch wrapper uses the table dependencies by default and adds
+the optional MLflow dependency automatically for an MLflow launch, while the writer uses only
+the backend-specific tracking location injected by Hiraku.
+
+Stage 2 also includes [`examples/autoresearch`](examples/autoresearch), pinned to upstream commit `228791fb499afffb54b46200aca536f79142f117`. It vendors the upstream GPU training and preparation code with MIT attribution, adapts the research program to Hiraku, and provides a CPU-only contract entrypoint for automated workflow validation.
+
 
 
 ## Proof of concept
@@ -553,15 +580,21 @@ Stage 1 provides the minimal vertical slice: project initialization, task creati
 
 - **MLflow tracking backend**
   - Support `.hiraku.yml` configuration with `tracking_backend: mlflow`.
-  - Store MLflow data at project-root `mlruns/` by default, with a safe project-relative `mlflow_tracking_dir` override.
+  - Store MLflow data in project-root `mlflow.db` by default, with a safe project-relative `mlflow_tracking_db` override.
   - Support task-level configuration for `mlflow_experiment: <experiment-name>`.
-  - Support only a local file-backed MLflow store in Stage 2 and package MLflow as an optional extra.
+  - Support only a local SQLite MLflow store in Stage 2 and package MLflow as an optional extra.
   - Use MLflow's native run ID and start time; require user code to log `task_id`, semantic `experiment_id`, and `commit` as parameters.
   - Keep parameters, metrics, and tags namespaced, and use MLflow's latest-timestamp value for each metric key.
   - Show only provenance-complete matching-task runs by default; provide MLflow-only `--all` to reveal invalid or unassociated runs with warnings.
 
+- **Run presentation and metric declarations**
+  - Allow ordered task-level `metrics` with `minimize` or `maximize` direction.
+  - Use declarations for default columns, primary ranking, and direction; otherwise derive metric columns deterministically from returned runs.
+  - Provide compact default tables, `--metrics` selection, and `--verbose` flattened metadata while keeping JSON complete.
+  - Abbreviate commit hashes consistently in human output while preserving exact hashes in records and JSON.
+
 - **Autoresearch example**
-  - Copy and adapt the latest [Karpathy autoresearch](https://github.com/karpathy/autoresearch) revision at implementation time, pin its exact SHA, preserve its MIT license/attribution, and adopt its `program.md` into Hiraku.
+  - Include [`examples/autoresearch`](examples/autoresearch), adapted from [Karpathy autoresearch](https://github.com/karpathy/autoresearch) commit `228791fb499afffb54b46200aca536f79142f117`, with its exact provenance and MIT attribution.
   - Use table tracking by default, support and test a local MLflow mode, and validate orchestration in CI through a separate behaviorally equivalent CPU mock. GPU testing remains manual.
 
 ### Stage 3: Skill refinement, documentation and additional features
@@ -583,6 +616,19 @@ This stage focusing on refining the hiraku skill, optimizing it for different re
 
 - **MLFLOW Tracking backend**
   - add support for remote tracking uri
+
+### Stage 4: Dashboard
+
+- **Dashboard**
+  - add an experiment dashboard to visualize and review experiments.
+  - start with `hiraku dashboard [task]`
+  - it shows: 
+    - task.md
+    - list of experiments and their status, decision, and summary
+    - list of runs and their metrics, sorted by a selected metric
+    - in branching mode, show the lineage of experiments and their relationships
+    - a plot of a selected metric over time for all experiments, with the ability to filter by experiment or status. the plot should show the performance "frontier" as in the autoresearch example.
+    - the plot is interactive, hovering over a run, shows run details, experiment details. 
 
 ### Open Questions
 - is cross task listing of experiments and runs needed and feasible? E.g. the records may live in different branches, have inconsistent metrics, etc.

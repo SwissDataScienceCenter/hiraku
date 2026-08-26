@@ -7,7 +7,7 @@ import yaml
 
 from hiraku.config import Project
 from hiraku.errors import HirakuError
-from hiraku.git import resolve_commit
+from hiraku.git import create_branch, resolve_commit, switch_branch
 from hiraku.records import (
     ExperimentRecord,
     default_experiment,
@@ -74,3 +74,18 @@ def delete_experiment(project: Project, task_id: str, experiment_id: str) -> Pat
     record = read_experiment(project, task_id, experiment_id)
     record.path.unlink()
     return record.path
+
+
+def create_experiment_branch(
+    project: Project, task_id: str, experiment_id: str, from_ref: str | None
+) -> tuple[str, str, bool, str | None]:
+    branch = f"hiraku/experiment/{task_id}/{experiment_id}"
+    requested_source = resolve_commit(project.root, from_ref or f"hiraku/task/{task_id}")
+    created = create_branch(project.root, branch, requested_source)
+    source = requested_source if created else resolve_commit(project.root, branch)
+    warning: str | None = None
+    try:
+        switch_branch(project.root, branch)
+    except HirakuError as exc:
+        warning = f"{exc} Switch manually with: git switch {branch}"
+    return branch, source, created, warning

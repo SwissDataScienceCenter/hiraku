@@ -1,6 +1,10 @@
 ---
 id: "{{id}}"
+summary: "Verify the Hiraku lifecycle"
 goal: "Verify the complete Hiraku lifecycle with deterministic synthetic scores."
+metrics:
+  - name: score
+    direction: maximize
 branch: "{{branch}}"
 ---
 
@@ -19,3 +23,5 @@ The `score` supplied to the deterministic entrypoint is the deciding metric; hig
 ## Conclusions
 
 ## Decisions and next steps
+
+## Changelog

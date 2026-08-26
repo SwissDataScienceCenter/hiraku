@@ -1,6 +1,8 @@
 ---
 id: "{{id}}"
+summary: ""
 goal: ""
+metrics: []
 branch: "{{branch}}"
 ---
 
@@ -19,3 +21,5 @@ branch: "{{branch}}"
 ## Conclusions
 
 ## Decisions and next steps
+
+## Changelog

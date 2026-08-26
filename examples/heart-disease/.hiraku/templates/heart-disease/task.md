@@ -1,6 +1,12 @@
 ---
 id: "{{id}}"
+summary: "Compare heart-disease model families"
 goal: "Compare logistic regression and random forest on validation cross-entropy for the checksum-pinned UCI Cleveland cohort."
+metrics:
+  - name: val/log_loss
+    direction: minimize
+  - name: val/accuracy
+    direction: maximize
 branch: "{{branch}}"
 ---
 
@@ -27,3 +33,5 @@ Compare a logistic regression baseline and a random forest through one shared pr
 ## Conclusions
 
 ## Decisions and next steps
+
+## Changelog

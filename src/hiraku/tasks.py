@@ -66,7 +66,6 @@ def create_task(
     project: Project,
     task_id: str,
     template: str | None = None,
-    branch: str | None = None,
 ) -> tuple[Path, str, bool]:
     validate_id(task_id, "task")
     task_dir = project.task_dir(task_id)
@@ -81,9 +80,7 @@ def create_task(
         raise HirakuError(
             f"Template {template_name!r} is incomplete; missing {', '.join(sorted(missing))}."
         )
-    branch_name = branch or f"hiraku/task/{task_id}"
-    if not branch_name.strip() or any(character.isspace() for character in branch_name):
-        raise ValidationError(f"Invalid branch name {branch_name!r}.")
+    branch_name = f"hiraku/task/{task_id}"
     task_dir.mkdir(parents=True)
     try:
         for name in ("task.md", "program.md", "launch.yml"):

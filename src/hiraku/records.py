@@ -12,7 +12,16 @@ from hiraku.errors import HirakuError, ValidationError
 from hiraku.git import current_branch
 from hiraku.util import parse_invocation, utc_now, validate_id, validate_utc_timestamp
 
-TASK_FIELDS = {"id", "goal", "branch"}
+TASK_FIELDS = {
+    "id",
+    "summary",
+    "goal",
+    "branch",
+    "pr_id",
+    "mr_id",
+    "mlflow_experiment",
+    "metrics",
+}
 EXPERIMENT_FIELDS = {
     "id",
     "task_id",
@@ -21,6 +30,7 @@ EXPERIMENT_FIELDS = {
     "status",
     "decision",
     "commit",
+    "branch",
     "entrypoints",
     "conclusion",
     "description",
@@ -35,6 +45,7 @@ EXPERIMENT_REQUIRED_ORDER = [
     "status",
     "decision",
     "commit",
+    "branch",
     "entrypoints",
     "conclusion",
     "created_at",
@@ -47,13 +58,31 @@ DECISIONS = {"", "pending", "accepted", "rejected", "inconclusive"}
 @dataclass
 class TaskRecord:
     id: str
+    summary: str
     goal: str
     branch: str
+    pr_id: str
+    mr_id: str
+    mlflow_experiment: str
+    metrics: list[dict[str, str]]
     body: str
     path: Path
 
     def as_dict(self, verbose: bool = False) -> dict[str, Any]:
-        value = {"id": self.id, "goal": self.goal, "branch": self.branch}
+        value = {
+            "id": self.id,
+            "summary": self.summary,
+            "goal": self.goal,
+            "branch": self.branch,
+        }
+        if self.pr_id:
+            value["pr_id"] = self.pr_id
+        if self.mr_id:
+            value["mr_id"] = self.mr_id
+        if self.mlflow_experiment:
+            value["mlflow_experiment"] = self.mlflow_experiment
+        if self.metrics:
+            value["metrics"] = self.metrics
         if verbose:
             value["body"] = self.body
         return value
@@ -116,11 +145,77 @@ def read_task(project: Project, task_id: str) -> TaskRecord:
         raise ValidationError(f"Unknown task fields in {path}: {', '.join(sorted(unknown))}.")
     if data.get("id") != task_id:
         raise ValidationError(f"Task ID in {path} must be {task_id!r}.")
+    if "summary" not in data:
+        raise ValidationError(f"Task {path} is missing required field 'summary'.")
+    summary = data.get("summary", "")
     goal = data.get("goal", "")
     branch = data.get("branch", "")
-    if not isinstance(goal, str) or not isinstance(branch, str):
-        raise ValidationError(f"Task goal and branch in {path} must be strings.")
-    return TaskRecord(task_id, goal, branch, body, path)
+    pr_id = data.get("pr_id", "") or ""
+    mr_id = data.get("mr_id", "") or ""
+    mlflow_experiment = data.get("mlflow_experiment", "") or ""
+    values = (summary, goal, branch, pr_id, mr_id, mlflow_experiment)
+    if not all(isinstance(value, str) for value in values):
+        raise ValidationError(f"Task metadata in {path} must contain string values.")
+    raw_metrics = data.get("metrics", []) or []
+    if not isinstance(raw_metrics, list):
+        raise ValidationError(f"Task metrics in {path} must be a list.")
+    metrics: list[dict[str, str]] = []
+    metric_names: set[str] = set()
+    for index, metric in enumerate(raw_metrics, start=1):
+        if not isinstance(metric, dict) or set(metric) != {"name", "direction"}:
+            raise ValidationError(
+                f"Task metric {index} in {path} must contain only name and direction."
+            )
+        name = metric["name"]
+        direction = metric["direction"]
+        if not isinstance(name, str) or not name.strip():
+            raise ValidationError(f"Task metric {index} name in {path} must be non-empty.")
+        if direction not in {"minimize", "maximize"}:
+            raise ValidationError(
+                f"Task metric {name!r} direction in {path} must be minimize or maximize."
+            )
+        if name in metric_names:
+            raise ValidationError(f"Task metric {name!r} is duplicated in {path}.")
+        metric_names.add(name)
+        metrics.append({"name": name, "direction": direction})
+    canonical = f"hiraku/task/{task_id}"
+    if branch != canonical:
+        raise ValidationError(
+            f"Task branch in {path} must be the canonical branch {canonical!r}; "
+            "migrate the task record explicitly."
+        )
+    if "\n" in summary or "\r" in summary:
+        raise ValidationError(f"Task summary in {path} must be one line.")
+    return TaskRecord(
+        task_id,
+        summary,
+        goal,
+        branch,
+        pr_id,
+        mr_id,
+        mlflow_experiment,
+        metrics,
+        body,
+        path,
+    )
+
+
+def write_task(record: TaskRecord) -> None:
+    data: dict[str, Any] = {
+        "id": record.id,
+        "summary": record.summary,
+        "goal": record.goal,
+        "branch": record.branch,
+    }
+    if record.pr_id:
+        data["pr_id"] = record.pr_id
+    if record.mr_id:
+        data["mr_id"] = record.mr_id
+    if record.mlflow_experiment:
+        data["mlflow_experiment"] = record.mlflow_experiment
+    if record.metrics:
+        data["metrics"] = record.metrics
+    record.path.write_text(dump_frontmatter(data, record.body), encoding="utf-8")
 
 
 def task_ids(project: Project) -> list[str]:
@@ -129,13 +224,27 @@ def task_ids(project: Project) -> list[str]:
     return sorted(path.name for path in project.tasks_dir.iterdir() if (path / "task.md").is_file())
 
 
+def branch_identity(project: Project) -> tuple[str | None, str | None]:
+    branch = current_branch(project.root)
+    task_prefix = "hiraku/task/"
+    experiment_prefix = "hiraku/experiment/"
+    if branch and branch.startswith(task_prefix):
+        task_id = branch[len(task_prefix) :]
+        return (task_id, None) if "/" not in task_id else (None, None)
+    if branch and branch.startswith(experiment_prefix):
+        parts = branch[len(experiment_prefix) :].split("/")
+        if len(parts) == 2:
+            return parts[0], parts[1]
+    return None, None
+
+
 def infer_task(project: Project) -> str:
     branch = current_branch(project.root)
-    prefix = "hiraku/task/"
-    if branch and branch.startswith(prefix):
-        task_id = branch[len(prefix) :]
-        if "/" not in task_id and (project.task_dir(task_id) / "task.md").is_file():
-            return task_id
+    task_id, experiment_id = branch_identity(project)
+    if task_id and (project.task_dir(task_id) / "task.md").is_file():
+        if experiment_id:
+            read_experiment(project, task_id, experiment_id)
+        return task_id
     matches = [
         task_id for task_id in task_ids(project) if read_task(project, task_id).branch == branch
     ]
@@ -147,7 +256,14 @@ def infer_task(project: Project) -> str:
 def resolve_task(project: Project, explicit: str | None, option: str | None = None) -> str:
     if explicit and option and explicit != option:
         raise ValidationError(f"Conflicting task selectors: {explicit!r} and {option!r}.")
-    return explicit or option or infer_task(project)
+    selected = explicit or option
+    branch_task, _ = branch_identity(project)
+    if selected and branch_task and selected != branch_task:
+        raise ValidationError(
+            f"Task selector {selected!r} conflicts with current Hiraku branch for "
+            f"task {branch_task!r}."
+        )
+    return selected or infer_task(project)
 
 
 def split_object(value: str) -> tuple[str | None, str]:
@@ -194,7 +310,15 @@ def validate_experiment(data: dict[str, Any], path: Path, task_id: str) -> dict[
         )
     normalized = default_experiment(experiment_id, task_id)
     normalized.update(data)
-    for field in ("summary", "hypothesis", "status", "decision", "commit", "conclusion"):
+    for field in (
+        "summary",
+        "hypothesis",
+        "status",
+        "decision",
+        "commit",
+        "branch",
+        "conclusion",
+    ):
         if not isinstance(normalized[field], str):
             raise ValidationError(f"Experiment field {field!r} in {path} must be a string.")
     if normalized.get("description") is not None and not isinstance(normalized["description"], str):
@@ -233,6 +357,7 @@ def default_experiment(
         "status": "",
         "decision": "",
         "commit": "",
+        "branch": "",
         "entrypoints": [],
         "conclusion": "",
         "created_at": timestamp,

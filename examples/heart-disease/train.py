@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
-import os
 import urllib.request
-import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
+from example_tracking import record_run
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
@@ -86,27 +83,6 @@ def build_model(model_name: str, seed: int) -> Pipeline:
     return Pipeline([("preprocess", preprocessing), ("classifier", classifier)])
 
 
-def append_run(path: Path, values: dict[str, object]) -> None:
-    fields = [
-        "run_id",
-        "task_id",
-        "experiment_id",
-        "commit",
-        "created_at",
-        "model",
-        "seed",
-        "validation_fraction",
-        "val/log_loss",
-        "val/accuracy",
-    ]
-    write_header = not path.exists() or path.stat().st_size == 0
-    with path.open("a", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields)
-        if write_header:
-            writer.writeheader()
-        writer.writerow(values)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=["logistic", "random_forest"], required=True)
@@ -131,22 +107,18 @@ def main() -> None:
     probabilities = model.predict_proba(validation_x)[:, 1]
     predictions = (probabilities >= 0.5).astype(int)
 
-    table_path = Path(os.environ["HIRAKU_TABLE_PATH"])
-    table_path.parent.mkdir(parents=True, exist_ok=True)
-    append_run(
-        table_path,
+    metrics = {
+        "val/log_loss": log_loss(validation_y, probabilities),
+        "val/accuracy": accuracy_score(validation_y, predictions),
+    }
+    record_run(
         {
-            "run_id": uuid.uuid4().hex,
-            "task_id": os.environ["HIRAKU_TASK_ID"],
-            "experiment_id": os.environ["HIRAKU_EXPERIMENT_ID"],
-            "commit": os.environ["HIRAKU_SOURCE_COMMIT"],
-            "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "model": args.model,
             "seed": args.seed,
             "validation_fraction": args.validation_fraction,
-            "val/log_loss": f"{log_loss(validation_y, probabilities):.8f}",
-            "val/accuracy": f"{accuracy_score(validation_y, predictions):.8f}",
         },
+        metrics,
+        table_metrics={key: f"{value:.8f}" for key, value in metrics.items()},
     )
 
 

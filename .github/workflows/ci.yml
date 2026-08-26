@@ -31,3 +31,14 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv build
+
+  mlflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --all-groups --extra mlflow --locked
+      - run: uv run --extra mlflow pytest -q tests/test_mlflow.py

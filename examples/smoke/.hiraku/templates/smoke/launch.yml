@@ -1,6 +1,6 @@
 entrypoints:
   train:
-    command: ["uv", "run", "python", "train.py"]
+    command: ["python", "run_example.py", "train.py"]
     args:
       seed: 1
     cwd: "."

@@ -137,6 +137,14 @@ def test_rejects_duplicate_extensions(repository: Path) -> None:
 
 def test_launch_and_rank_runs_from_bound_commit(repository: Path) -> None:
     hiraku(repository, "task", "create", "baseline")
+    task_path = repository / "tasks/baseline/task.md"
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace(
+            "metrics: []",
+            "metrics:\n  - name: score\n    direction: maximize",
+        ),
+        encoding="utf-8",
+    )
     run(repository, "git", "switch", "hiraku/task/baseline")
     script = repository / "train.py"
     script.write_text(
@@ -154,7 +162,7 @@ args = parser.parse_args()
 path = Path(os.environ["HIRAKU_TABLE_PATH"])
 write_header = not path.exists()
 with path.open("a", encoding="utf-8", newline="") as stream:
-    fields = ["run_id", "task_id", "experiment_id", "commit", "created_at", "score"]
+    fields = ["run_id", "task_id", "experiment_id", "commit", "created_at", "score", "loss"]
     writer = csv.DictWriter(stream, fieldnames=fields)
     if write_header:
         writer.writeheader()
@@ -165,6 +173,7 @@ with path.open("a", encoding="utf-8", newline="") as stream:
         "commit": os.environ["HIRAKU_SOURCE_COMMIT"],
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "score": "0.9" if args.reg == "0.1" else "0.5",
+        "loss": "0.2",
     })
 """,
         encoding="utf-8",
@@ -220,6 +229,30 @@ with path.open("a", encoding="utf-8", newline="") as stream:
     assert rows[0]["experiment_id"] == "regularized"
     assert rows[0]["created_at"].endswith("Z")
 
+    compact = hiraku(repository, "runs", "baseline").stdout
+    header = compact.splitlines()[0]
+    assert "rank" in header
+    assert "score" in header
+    assert "loss" not in header
+    assert "task_id" not in header
+    assert commit[:10] in compact
+    assert commit not in compact
+
+    selected = hiraku(repository, "runs", "baseline", "--metrics", "loss,score").stdout
+    selected_header = selected.splitlines()[0]
+    assert selected_header.index("loss") < selected_header.index("score")
+
+    missing_direction = hiraku(
+        repository,
+        "runs",
+        "baseline",
+        "--sort",
+        "loss",
+        check=False,
+    )
+    assert missing_direction.returncode == 2
+    assert "has no declared direction" in missing_direction.stderr
+
     ranked = json.loads(
         hiraku(
             repository,
@@ -241,11 +274,44 @@ with path.open("a", encoding="utf-8", newline="") as stream:
     assert shown["run_count"] == 1
     assert shown["commit_mismatches"] == []
 
+    human_list = hiraku(repository, "experiment", "list", "baseline").stdout
+    human_show = hiraku(repository, "experiment", "show", "baseline:regularized").stdout
+    assert commit[:10] in human_list
+    assert commit not in human_list
+    assert commit[:10] in human_show
+    assert commit not in human_show
+
     table_path = repository / "tasks/baseline/runs.csv"
     table = table_path.read_text(encoding="utf-8").replace(commit, "0" * 40)
     table_path.write_text(table, encoding="utf-8")
     mismatched = json.loads(hiraku(repository, "runs", "baseline", "--json").stdout)
     assert mismatched[0]["_commit_mismatch"] is True
+
+
+def test_task_metric_declarations_are_validated(repository: Path) -> None:
+    hiraku(repository, "task", "create", "metrics")
+    task_path = repository / "tasks/metrics/task.md"
+    original = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        original.replace(
+            "metrics: []",
+            "metrics:\n  - name: score\n    direction: maximize",
+        ),
+        encoding="utf-8",
+    )
+    task = json.loads(hiraku(repository, "task", "show", "metrics", "--json").stdout)
+    assert task["metrics"] == [{"name": "score", "direction": "maximize"}]
+
+    task_path.write_text(
+        original.replace(
+            "metrics: []",
+            "metrics:\n  - name: score\n    direction: sideways",
+        ),
+        encoding="utf-8",
+    )
+    invalid = hiraku(repository, "task", "show", "metrics", check=False)
+    assert invalid.returncode == 2
+    assert "must be minimize or maximize" in invalid.stderr
 
 
 def test_experiment_launch_must_match_declared_invocation(repository: Path) -> None:

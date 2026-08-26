@@ -49,6 +49,7 @@ def test_smoke_example_executes_complete_loop(tmp_path: Path) -> None:
     assert len(rows) == 1
     assert rows[0]["score"] == "0.500000"
     assert rows[0]["commit"]
+    assert (destination / "example_tracking.py").is_file()
 
 
 def test_heart_disease_example_is_checksum_pinned_and_structurally_valid(
@@ -70,7 +71,56 @@ def test_heart_disease_example_is_checksum_pinned_and_structurally_valid(
     assert "a74b7efa387bc9d108d7d0115d831fe9b414b29ae7124f331b622b4efa0427c8" in script
     assert "LogisticRegression" in script
     assert "RandomForestClassifier" in script
+    assert "from example_tracking import record_run" in script
+    assert (destination / "example_tracking.py").is_file()
     launch = yaml.safe_load(
         (destination / "tasks/heart-disease/launch.yml").read_text(encoding="utf-8")
     )
     assert set(launch["entrypoints"]) == {"logistic", "random-forest"}
+    assert all(
+        entrypoint["command"][:2] == ["python", "run_example.py"]
+        for entrypoint in launch["entrypoints"].values()
+    )
+
+
+def test_autoresearch_example_is_pinned_and_cpu_mock_runs(tmp_path: Path) -> None:
+    destination = tmp_path / "autoresearch"
+    initialize_copy(PROJECT_ROOT / "examples/autoresearch", destination)
+    provenance = (destination / "UPSTREAM.md").read_text(encoding="utf-8")
+    assert "228791fb499afffb54b46200aca536f79142f117" in provenance
+    assert (destination / "LICENSE").is_file()
+    hiraku(destination, "task", "create", "autoresearch", "--template", "autoresearch")
+    run(destination, "git", "switch", "hiraku/task/autoresearch")
+    run(destination, "git", "add", ".")
+    run(destination, "git", "commit", "-m", "create autoresearch task")
+    hiraku(
+        destination,
+        "exp",
+        "create",
+        "autoresearch:contract",
+        "--entrypoint",
+        "cpu-mock --val-bpb 0.9",
+    )
+    hiraku(destination, "exp", "set", "autoresearch:contract", "--commit", "HEAD")
+    hiraku(
+        destination,
+        "launch",
+        "--experiment",
+        "contract",
+        "autoresearch:cpu-mock",
+        "--val-bpb",
+        "0.9",
+    )
+    rows = json.loads(
+        hiraku(
+            destination,
+            "runs",
+            "autoresearch",
+            "--sort",
+            "val_bpb",
+            "--ascending",
+            "--json",
+        ).stdout
+    )
+    assert rows[0]["val_bpb"] == "0.9"
+    assert rows[0]["_rank"] == 1

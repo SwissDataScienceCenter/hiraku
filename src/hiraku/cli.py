@@ -16,12 +16,12 @@ from hiraku.records import (
     split_object,
 )
 from hiraku.tasks import create_task, init_project
-from hiraku.util import json_dump, render_table
+from hiraku.util import json_dump, render_table, short_commit
 
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="hiraku", description="AI-assisted research workflows")
-    root.add_argument("--version", action="version", version="hiraku 0.1.0")
+    root.add_argument("--version", action="version", version="hiraku 0.2.0")
     commands = root.add_subparsers(dest="command", required=True)
 
     commands.add_parser("init", help="Initialize Hiraku in the current Git repository")
@@ -33,7 +33,6 @@ def parser() -> argparse.ArgumentParser:
     task_create = task_commands.add_parser("create", help="Create a task")
     task_create.add_argument("task_id")
     task_create.add_argument("--template")
-    task_create.add_argument("--branch")
     task_show = task_commands.add_parser("show", help="Show a task")
     task_show.add_argument("task_id")
     task_show.add_argument("--json", action="store_true")
@@ -50,6 +49,8 @@ def parser() -> argparse.ArgumentParser:
     experiment_create.add_argument("experiment")
     experiment_create.add_argument("--task")
     experiment_create.add_argument("--format", choices=["yaml", "markdown"], default="yaml")
+    experiment_create.add_argument("--branch", action="store_true")
+    experiment_create.add_argument("--from", dest="from_ref")
     add_experiment_fields(experiment_create)
     experiment_list = experiment_commands.add_parser("list", help="List experiments")
     experiment_list.add_argument("task_id", nargs="?")
@@ -73,6 +74,9 @@ def parser() -> argparse.ArgumentParser:
 
     add_launch_parser(commands)
     add_runs_parser(commands)
+    from hiraku.reviews import add_review_parser
+
+    add_review_parser(commands)
     return root
 
 
@@ -126,9 +130,7 @@ def dispatch(args: argparse.Namespace) -> int:
     project = load_project()
     if args.command == "task":
         if args.task_command == "create":
-            directory, branch, branch_created = create_task(
-                project, args.task_id, args.template, args.branch
-            )
+            directory, branch, branch_created = create_task(project, args.task_id, args.template)
             print(f"Created task {args.task_id} at {directory}")
             state = "created" if branch_created else "already exists"
             print(f"Task branch {branch!r} {state}. Switch with: git switch {branch}")
@@ -154,13 +156,23 @@ def dispatch(args: argparse.Namespace) -> int:
                 ]
                 print(render_table(display, ["name", "command", "cwd", "args"]))
             return 0
-        task_id = args.task_id if args.task_command == "show" else resolve_task(project, None)
+        task_id = (
+            resolve_task(project, args.task_id)
+            if args.task_command == "show"
+            else resolve_task(project, None)
+        )
         record = read_task(project, task_id)
         verbose = args.verbose
         if args.json:
             print(json_dump(record.as_dict(verbose=verbose)))
         else:
-            print(f"Task: {record.id}\nBranch: {record.branch}\nGoal: {record.goal}")
+            metrics = ", ".join(
+                f"{metric['name']} ({metric['direction']})" for metric in record.metrics
+            )
+            print(
+                f"Task: {record.id}\nSummary: {record.summary}\n"
+                f"Branch: {record.branch}\nGoal: {record.goal}\nMetrics: {metrics or '-'}"
+            )
             if verbose and record.body.strip():
                 print(f"\n{record.body.rstrip()}")
         return 0
@@ -174,6 +186,9 @@ def dispatch(args: argparse.Namespace) -> int:
             if args.json:
                 print(json_dump(rows))
             else:
+                display_rows = [
+                    {**row, "commit": short_commit(row.get("commit", ""))} for row in rows
+                ]
                 columns = [
                     "id",
                     "summary",
@@ -183,14 +198,27 @@ def dispatch(args: argparse.Namespace) -> int:
                     "commit",
                     "run_count",
                 ]
-                print(render_table(rows, columns))
+                print(render_table(display_rows, columns))
             return 0
         task_id, experiment_id = selected_object(project, args.experiment, args.task)
         if args.experiment_command == "create":
-            record = create_experiment(
-                project, task_id, experiment_id, args.format, experiment_updates(args)
-            )
+            if args.from_ref and not args.branch:
+                raise HirakuError("--from requires --branch.")
+            updates = experiment_updates(args)
+            if args.branch:
+                updates["branch"] = f"hiraku/experiment/{task_id}/{experiment_id}"
+            record = create_experiment(project, task_id, experiment_id, args.format, updates)
             print(f"Created experiment {task_id}:{experiment_id} at {record.path}")
+            if args.branch:
+                from hiraku.experiments import create_experiment_branch
+
+                branch, source, created, warning = create_experiment_branch(
+                    project, task_id, experiment_id, args.from_ref
+                )
+                state = "created" if created else "already existed and was not reset"
+                print(f"Experiment branch {branch!r} {state} at {short_commit(source)}.")
+                if warning:
+                    print(f"Warning: {warning}", file=sys.stderr)
         elif args.experiment_command == "show":
             record = read_experiment(project, task_id, experiment_id)
             from hiraku.tracking import enrich_experiments
@@ -213,6 +241,10 @@ def dispatch(args: argparse.Namespace) -> int:
         from hiraku.tracking import show_runs
 
         return show_runs(project, args)
+    if args.command == "review":
+        from hiraku.reviews import review_create
+
+        return review_create(project, args)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 
@@ -225,6 +257,7 @@ def render_experiment(value: dict[str, Any], body: str) -> str:
         "status",
         "decision",
         "commit",
+        "branch",
         "entrypoints",
         "conclusion",
         "created_at",
@@ -233,7 +266,10 @@ def render_experiment(value: dict[str, Any], body: str) -> str:
         "git_parents",
         "commit_mismatches",
     ]
-    lines = [f"{field}: {value.get(field, '')}" for field in fields]
+    display = dict(value)
+    display["commit"] = short_commit(display.get("commit", ""))
+    display["git_parents"] = [short_commit(parent) for parent in display.get("git_parents", [])]
+    lines = [f"{field}: {display.get(field, '')}" for field in fields]
     if body.strip():
         lines.extend(["", body.rstrip()])
     return "\n".join(lines)

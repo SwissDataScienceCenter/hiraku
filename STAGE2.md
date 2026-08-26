@@ -348,7 +348,7 @@ Extend project configuration for review integration and MLflow:
 
 ```yaml
 tracking_backend: mlflow
-mlflow_tracking_dir: mlruns  # optional; defaults to this project-root path
+mlflow_tracking_db: mlflow.db  # optional; defaults to this project-root path
 review_provider: github  # or gitlab
 review_remote: origin    # optional
 ```
@@ -359,14 +359,16 @@ Extend task front matter with:
 mlflow_experiment: <experiment-name>
 ```
 
-For the PoC, MLflow uses a local file-backed store at `<project-root>/mlruns/` by default. The optional `mlflow_tracking_dir` setting overrides it with another safe project-relative directory. Resolve the path against the original project root so committed launches from temporary worktrees still write to the active project's store. Remote tracking servers, registry URIs, and authentication configuration remain out of scope. Validate the project/backend combination and require the task's MLflow experiment name when MLflow is selected.
+For the PoC, MLflow uses a local SQLite store at `<project-root>/mlflow.db` by default. The optional `mlflow_tracking_db` setting overrides it with another safe project-relative database path. Resolve the path against the original project root and construct an absolute `sqlite:///` URI so committed launches from temporary worktrees still write to the active project's store. Remote tracking servers, registry URIs, and authentication configuration remain out of scope. Validate the project/backend combination and require the task's MLflow experiment name when MLflow is selected.
+
+SQLite replaces MLflow's maintenance-mode filesystem tracking backend, so Hiraku does not set `MLFLOW_ALLOW_FILE_STORE`. Production tracking-server guidance remains out of scope.
 
 Acceptance criteria:
 
 - unknown backends remain invalid;
 - review provider is explicitly `github` or `gitlab` when review commands are used;
 - the configured review remote is optional and may be overridden by CLI `--remote`;
-- `mlflow_tracking_dir` defaults to `mlruns`, must remain within the project root, and is valid only for the MLflow backend;
+- `mlflow_tracking_db` defaults to `mlflow.db`, must remain within the project root, and is valid only for the MLflow backend;
 - table tasks reject or ignore MLflow-only fields according to a documented policy;
 - MLflow tasks fail early when required configuration is absent; and
 - configuration errors identify the exact project or task field involved.
@@ -382,6 +384,22 @@ commit
 ```
 
 Map MLflow parameters, metrics, tags, status, and timestamps into the normalized run representation without flattening collisions silently. Namespace them as `params`, `metrics`, and `tags` in JSON. Human output may flatten qualified names such as `metrics.val/loss`. For each metric key, use the value returned by MLflow run search: MLflow defines this as the value with the latest logged timestamp. Metric history is not part of Stage 2.
+
+Task front matter may declare ordered evaluation metrics:
+
+```yaml
+metrics:
+  - name: val/log_loss
+    direction: minimize
+  - name: val/accuracy
+    direction: maximize
+```
+
+Names must be unique and directions must be `minimize` or `maximize`. The declaration is backend-neutral. It determines the default human metric columns, makes the first metric the default ranking metric, and supplies ranking direction. An explicit `--sort` without a direction is valid only for a declared metric; `--ascending` or `--descending` overrides its declaration.
+
+The default human `hiraku runs` output is compact: abbreviated run and commit IDs, experiment, time, optional backend status, useful MLflow parameters, and selected metric columns. Do not print both nested and flattened backend data. Hide the redundant task ID, MLflow system tags, and false commit-mismatch values; emit a warning when mismatches exist. `--verbose` exposes complete flattened metadata. Human commit hashes use ten characters consistently across run and experiment views, while records and JSON preserve exact hashes.
+
+Determine available metrics from the union across returned runs. MLflow metrics come only from MLflow's metric mapping. Since table files do not distinguish parameters from metrics, treat all non-provenance columns as result metrics. `--metrics <comma-separated-names>` selects and orders human metric columns. Otherwise use declared metrics, or alphabetical discovered metrics when none are declared. Limit an inferred undeclared default to six columns and tell the user to use `--metrics` or `--verbose` when more are available. Put an explicitly sorted metric first and leave missing metric cells blank.
 
 Integrate with:
 
@@ -401,8 +419,10 @@ Acceptance criteria:
 - default listings exclude provenance-incomplete or wrong-task runs with a summary warning, while `--all` reveals them with precise warnings;
 - missing local stores and empty MLflow experiments fail clearly;
 - sorting and ranking match table-backend semantics;
+- compact and verbose human tables avoid duplicated backend data, metric selection is deterministic, and JSON remains lossless;
+- declared metrics drive default columns and direction while undeclared metric unions remain usable;
 - MLflow is packaged as an optional Python extra and is imported only for MLflow projects; and
-- integration tests use a temporary local file-backed MLflow store without external services.
+- integration tests use a temporary local SQLite MLflow store without external services.
 
 ### 14. Update launch provenance for backend neutrality
 
@@ -482,7 +502,7 @@ Extend the test suite with:
 - Git integration tests for branched experiment creation, arbitrary `--from` refs, backtracking, siblings, dirty worktrees, existing branches, and ref preservation on failure;
 - CLI integration tests for `experiment create --branch`, task inference from experiment branches, review preview/`--push`, and review JSON output;
 - fake-`gh` and fake-`glab` contract tests for create/update by ID, `pr_id`/`mr_id` persistence, first-time creation from an experiment branch, head/base discovery without mutation, closed and multiple matches, authentication failures, unpublished branches, and duplicate prevention;
-- local file-backed MLflow integration tests for default and overridden store paths, path safety, runs, metrics, default/`--all` filtering, warnings, ranking, enrichment, and mismatches;
+- local SQLite MLflow integration tests for default and overridden database paths, path safety, runs, metrics, default/`--all` filtering, warnings, ranking, enrichment, and mismatches;
 - end-to-end table and MLflow task workflows;
 - structural and dry-run autoresearch tests;
 - packaging tests proving GitHub, GitLab, MLflow, and GPU integrations remain optional where intended; and

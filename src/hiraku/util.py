@@ -64,6 +64,10 @@ def json_dump(value: Any) -> str:
     return json.dumps(value, indent=2, ensure_ascii=False)
 
 
+def short_commit(value: Any, length: int = 10) -> Any:
+    return value[:length] if isinstance(value, str) and value else value
+
+
 def render_table(rows: list[dict[str, Any]], columns: list[str] | None = None) -> str:
     if not rows:
         return "No results."

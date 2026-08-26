@@ -1,0 +1,7 @@
+entrypoints:
+  gpu:
+    command: ["uv", "run", "python", "run_gpu.py"]
+    cwd: "."
+  cpu-mock:
+    command: ["python", "cpu_mock.py"]
+    cwd: "."

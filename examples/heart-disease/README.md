@@ -34,3 +34,11 @@ hiraku runs heart-disease --sort val/log_loss --ascending
 ```
 
 Both models use the same checksum-verified cohort, preprocessing rules, stratified validation split, seed, and metrics. The downloaded file is ignored by Git; provenance is established by the URL, checksum, split protocol, source commit, and tracked run configuration.
+
+The training script selects its destination from `HIRAKU_TRACKING_BACKEND`. Table mode writes to `HIRAKU_TABLE_PATH`; MLflow mode logs the same parameters and metrics to Hiraku's injected tracking URI and experiment.
+
+For MLflow, configure `.hiraku.yml` with `tracking_backend: mlflow` and optional `mlflow_tracking_db: mlflow.db`, and add `mlflow_experiment: heart-disease-runs` to `task.md` front matter. The launch commands do not change: the example launch wrapper adds its optional MLflow dependency when `HIRAKU_TRACKING_BACKEND=mlflow`. MLflow metrics are qualified when sorting, for example:
+
+```bash
+hiraku runs heart-disease --sort metrics.val/log_loss --ascending
+```

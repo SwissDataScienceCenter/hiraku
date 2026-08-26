@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+run.log
+mlflow.db
+tasks/*/runs.csv

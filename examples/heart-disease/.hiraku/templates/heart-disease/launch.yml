@@ -1,13 +1,13 @@
 entrypoints:
   logistic:
-    command: ["uv", "run", "python", "train.py"]
+    command: ["python", "run_example.py", "train.py"]
     args:
       model: logistic
       seed: 42
       validation-fraction: 0.25
     cwd: "."
   random-forest:
-    command: ["uv", "run", "python", "train.py"]
+    command: ["python", "run_example.py", "train.py"]
     args:
       model: random_forest
       seed: 42

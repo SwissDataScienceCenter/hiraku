@@ -13,8 +13,8 @@ import yaml
 from hiraku.config import Project
 from hiraku.errors import HirakuError, ValidationError
 from hiraku.git import resolve_commit, run_git
-from hiraku.records import read_experiment, read_task, resolve_task, split_object
-from hiraku.util import parse_invocation, safe_relative
+from hiraku.records import branch_identity, read_experiment, read_task, resolve_task, split_object
+from hiraku.util import parse_invocation, safe_relative, short_commit
 
 
 @dataclass(frozen=True)
@@ -125,13 +125,24 @@ def _select_task_and_entrypoint(project: Project, value: str) -> tuple[str, str]
 def _select_experiment(
     project: Project, task_id: str, value: str | None
 ) -> tuple[Any | None, str | None]:
+    branch_task, branch_experiment = branch_identity(project)
     if not value:
+        if branch_task == task_id and branch_experiment:
+            return (
+                read_experiment(project, task_id, branch_experiment),
+                branch_experiment,
+            )
         return None, None
     explicit_task, experiment_id = split_object(value)
     if explicit_task and explicit_task != task_id:
         raise ValidationError(
             f"Conflicting task selectors: entrypoint uses {task_id!r}, "
             f"experiment uses {explicit_task!r}."
+        )
+    if branch_task == task_id and branch_experiment and branch_experiment != experiment_id:
+        raise ValidationError(
+            f"Experiment selector {experiment_id!r} conflicts with current experiment "
+            f"branch for {branch_experiment!r}."
         )
     return read_experiment(project, task_id, experiment_id), experiment_id
 
@@ -168,7 +179,8 @@ def launch(project: Project, args: argparse.Namespace) -> int:
         bound = resolve_commit(project.root, experiment.data["commit"])
         if source_commit != bound:
             raise ValidationError(
-                f"Explicit commit {source_commit} does not match experiment commit {bound}."
+                f"Explicit commit {short_commit(source_commit)} does not match experiment "
+                f"commit {short_commit(bound)}."
             )
 
     if source_commit:
@@ -245,9 +257,28 @@ def _execute(
             "HIRAKU_EXPERIMENT_ID": experiment_id,
             "HIRAKU_SOURCE_COMMIT": source_commit,
             "HIRAKU_TRACKING_BACKEND": project.tracking_backend,
-            "HIRAKU_TABLE_PATH": str(project.runs_path(task_id)),
         }
     )
+    if project.tracking_backend == "table":
+        environment.pop("HIRAKU_MLFLOW_TRACKING_URI", None)
+        environment.pop("HIRAKU_MLFLOW_EXPERIMENT", None)
+        environment["HIRAKU_TABLE_PATH"] = str(project.runs_path(task_id))
+    else:
+        environment.pop("HIRAKU_TABLE_PATH", None)
+        project.mlflow_tracking_db.parent.mkdir(parents=True, exist_ok=True)
+        task = read_task(project, task_id)
+        if not task.mlflow_experiment:
+            raise ValidationError(
+                f"Task {task_id!r} requires mlflow_experiment with tracking_backend: mlflow."
+            )
+        environment.update(
+            {
+                "HIRAKU_MLFLOW_TRACKING_URI": project.mlflow_tracking_uri,
+                "HIRAKU_MLFLOW_EXPERIMENT": task.mlflow_experiment,
+                "MLFLOW_TRACKING_URI": project.mlflow_tracking_uri,
+                "MLFLOW_EXPERIMENT_NAME": task.mlflow_experiment,
+            }
+        )
     try:
         result = subprocess.run(argv, cwd=cwd, env=environment, check=False)
     except FileNotFoundError as exc:

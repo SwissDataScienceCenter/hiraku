@@ -7,3 +7,6 @@ dependencies = [
   "pandas>=2.2",
   "scikit-learn>=1.6",
 ]
+
+[project.optional-dependencies]
+mlflow = ["mlflow>=3.0"]
