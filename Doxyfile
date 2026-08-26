@@ -1,0 +1,20 @@
+PROJECT_NAME           = "hiraku"
+PROJECT_BRIEF          = "Goal-oriented guided and bounded-autonomous research workflows"
+OUTPUT_DIRECTORY       = docs/_doxygen
+INPUT                  = src
+RECURSIVE              = YES
+FILE_PATTERNS          = *.py
+
+GENERATE_HTML          = NO
+GENERATE_XML           = YES
+GENERATE_LATEX         = NO
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+WARN_IF_UNDOCUMENTED   = YES
+QUIET                  = YES
+
+# Keep generated documentation out of the source tree's tracked files.
+XML_OUTPUT             = xml
+
+FULL_PATH_NAMES        = NO
+STRIP_FROM_PATH        = src
