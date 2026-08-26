@@ -89,7 +89,32 @@ def test_autoresearch_example_is_pinned_and_cpu_mock_runs(tmp_path: Path) -> Non
     provenance = (destination / "UPSTREAM.md").read_text(encoding="utf-8")
     assert "228791fb499afffb54b46200aca536f79142f117" in provenance
     assert (destination / "LICENSE").is_file()
+    program = (destination / ".hiraku/templates/autoresearch/program.md").read_text(
+        encoding="utf-8"
+    )
+    assert program.startswith("# autoresearch\n\nThis is an experiment")
+    for heading in (
+        "## Setup",
+        "## Experimentation",
+        "## Output format",
+        "## Logging results",
+        "## The experiment loop",
+    ):
+        assert heading in program
+    assert "LOOP FOREVER:" in program
+    assert "**NEVER STOP**" in program
+    assert "git revert --no-edit <implementation-commit>" in program
+    assert "git reset --hard <iteration-starting-commit>" in program
+    assert "hiraku exp create <tag>:<experiment-id> --branch" in program
+    assert "git merge --ff-only hiraku/experiment/<tag>/<experiment-id>" in program
+    assert "Keep the rejected experiment branch" in program
+    assert "Do not create a separate `results.tsv`" in program
     hiraku(destination, "task", "create", "autoresearch", "--template", "autoresearch")
+    copied_program = (destination / "tasks/autoresearch/program.md").read_text(encoding="utf-8")
+    assert copied_program == program
+    task_text = (destination / "tasks/autoresearch/task.md").read_text(encoding="utf-8")
+    assert "## History mode" in task_text
+    assert "Selected mode:" in task_text
     run(destination, "git", "switch", "hiraku/task/autoresearch")
     run(destination, "git", "add", ".")
     run(destination, "git", "commit", "-m", "create autoresearch task")

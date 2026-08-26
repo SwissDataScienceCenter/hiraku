@@ -498,7 +498,7 @@ The smoke and heart-disease examples select their run writer from
 the optional MLflow dependency automatically for an MLflow launch, while the writer uses only
 the backend-specific tracking location injected by Hiraku.
 
-Stage 2 also includes [`examples/autoresearch`](examples/autoresearch), pinned to upstream commit `228791fb499afffb54b46200aca536f79142f117`. It vendors the upstream GPU training and preparation code with MIT attribution, adapts the research program to Hiraku, and provides a CPU-only contract entrypoint for automated workflow validation.
+Stage 2 also includes [`examples/autoresearch`](examples/autoresearch), pinned to upstream commit `228791fb499afffb54b46200aca536f79142f117`. It vendors the upstream GPU training and preparation code with MIT attribution, closely adapts the original autonomous program to Hiraku tasks, experiments, and runs, lets the user choose `revert`, `reset`, or retained-experiment-`branch` history, and provides a CPU-only contract entrypoint for automated workflow validation.
 
 
 
@@ -595,6 +595,8 @@ Stage 1 provides the minimal vertical slice: project initialization, task creati
 
 - **Autoresearch example**
   - Include [`examples/autoresearch`](examples/autoresearch), adapted from [Karpathy autoresearch](https://github.com/karpathy/autoresearch) commit `228791fb499afffb54b46200aca536f79142f117`, with its exact provenance and MIT attribution.
+  - Preserve the upstream program's structure and perpetual autonomous loop while mapping run tags to tasks, candidate commits to experiment records, and result rows to Hiraku runs.
+  - Let setup choose one task-wide history mode: reject with `git revert`, reject with upstream-style `git reset --hard`, or retain per-experiment branches and merge only accepted branches into the task branch.
   - Use table tracking by default, support and test a local MLflow mode, and validate orchestration in CI through a separate behaviorally equivalent CPU mock. GPU testing remains manual.
 
 ### Stage 3: Skill refinement, documentation and additional features
@@ -606,13 +608,16 @@ This stage focusing on refining the hiraku skill, optimizing it for different re
     - review: udpate task.md, push to remote, create or update PR/MR, etc
     - research: check that the task is fully specified, this skill handles one experiment lifecycle from creation to conclusion.
   - these skills will provide a starting point for further manual refinement.
-  - refine the default program.md for auto and guided templates, ensuring they are clear, concise, and effective for guiding the agent's behavior. for auto research, take inspiration from the Karpathy autoresearch program.md. Create three variants: linear with reset, linear with revert, and branching.
+  - refine the default program.md for auto and guided templates, ensuring they are clear, concise, and effective for guiding the agent's behavior.
 
 - **USER DOCUMENTATION**
   - refine the examples used in the readme to be more consistent and illustrative of the intended workflow. E.g. the task level example instructions should not impose the model family, experiments should provide example models like logistic regression and random forest.
   - the heart disease example should additionally have an example auto research flow.
   - add user documentation in docs/
-  - add quickstart.md, tutorial.md and advanced.md
+  - add docs/quickstart.md, docs/tutorial.md and docs/advanced.md
+  - quickstart is a minimal overview of the intended workflow.
+  - tutorial is a more detailed walkthrough of the intended workflow, with examples and explanations of each step. make it consistent with the examples in the readme. only linear workflow
+  - advanced demonstrates the branching workflow, and PR/MR integration.
 
 - **MLFLOW Tracking backend**
   - add support for remote tracking uri

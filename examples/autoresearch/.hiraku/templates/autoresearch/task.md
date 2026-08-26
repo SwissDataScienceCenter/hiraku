@@ -21,9 +21,15 @@ Improve the pinned autoresearch baseline by changing only `train.py` while minim
 - Use one canonical Hiraku experiment branch and record per coherent idea.
 - Treat GPU memory as a soft constraint and prefer simpler changes when results are equivalent.
 
+## History mode
+
+Choose exactly one before starting and keep it for the task: `revert`, `reset`, or `branch`.
+
+Selected mode:
+
 ## Implementation plan
 
-Establish the baseline, iterate through bounded experiments, compare task-scoped runs, and integrate only accepted commits into the task branch using normal Git.
+Establish the baseline, then run the upstream-style autonomous experiment loop indefinitely until manually interrupted. Apply the selected history mode after every accepted, rejected, or crashed experiment.
 
 ## Evaluation protocol
 

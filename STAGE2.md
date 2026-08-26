@@ -479,12 +479,13 @@ Create a standalone GPU-oriented repository template under `examples/` by copyin
 The example should define:
 
 - a task goal and fixed evaluation protocol;
-- an auto program with permitted commands, GPU/time/resource bounds, stopping conditions, and protected-branch restrictions;
+- an auto program adapted as closely as possible from the pinned upstream `program.md`, retaining its setup, experimentation constraints, output interpretation, result logging, perpetual loop, timeout, crash handling, and autonomy language;
+- an explicit setup choice among `revert`, `reset`, and `branch` history modes that remains fixed for the task;
 - deterministic named entrypoints;
 - one experiment record per coherent iteration;
-- experiment branches representing sibling, child, and accepted research directions;
+- direct task-branch iterations for `revert` and `reset`, and retained per-experiment branches for `branch`;
 - exact source-commit binding;
-- table tracking by default, matching the upstream program's lightweight results log, plus an MLflow-compatible mode tested against the local backend;
+- table tracking by default, mapping the upstream `results.tsv` concept onto Hiraku's backend-managed task run table, plus an MLflow-compatible mode tested against the local backend;
 - run comparison and next-iteration selection; and
 - post-hoc task and review artifacts.
 
@@ -493,6 +494,8 @@ Document provenance and licensing for any copied or adapted upstream material. A
 Acceptance criteria:
 
 - the example can be copied and initialized as a standalone Git repository;
+- the run tag maps to the Hiraku task, each upstream candidate commit maps to an experiment record with exact implementation provenance, and each result maps to a Hiraku run;
+- `revert` rejects with `git revert`, `reset` rejects with upstream-style `git reset --hard`, and `branch` accepts by merging into the task branch while retaining every experiment branch and rejects by returning to the task branch without merging;
 - structural tests validate configuration, task templates, programs, entrypoints, experiment conventions, and branch workflow without a GPU;
 - a separate CPU mock entrypoint behaves like the reference workflow at the orchestration and output-contract level, and CI executes it without pretending to validate GPU model quality; and
 - real GPU execution instructions identify dependencies, expected resources, stopping behavior, and artifacts.
