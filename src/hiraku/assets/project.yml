@@ -1,9 +1,0 @@
-experiments_dir: experiments
-experiment_template: experiments/template.md
-policies:
-  guided: .hiraku/policies/guided.md
-  auto: .hiraku/policies/auto.md
-tracking:
-  backend: table
-  path: .hiraku/runs.csv
-

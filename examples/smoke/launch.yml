@@ -1,8 +1,0 @@
-entrypoints:
-  baseline:
-    command: ["python", "train.py", "--variant", "baseline"]
-    cwd: examples/smoke
-  candidate:
-    command: ["python", "train.py", "--variant", "candidate"]
-    cwd: examples/smoke
-
