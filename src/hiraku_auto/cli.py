@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,18 @@ def _agent_hooks() -> agent_mod.Hooks:
 
     def start(info: dict[str, Any]) -> None:
         print(f"agent:   {info['command']}   ({info['workflow']} -> {info['target']})")
+        if info.get("unset_env"):
+            print(f"env:     unset for this call: {', '.join(info['unset_env'])}")
+        elif "ANTHROPIC_API_KEY" in os.environ and info["command"].startswith("claude"):
+            # Which credential is used decides both who is billed and whether the org's
+            # connectors load, so it is worth one line before a call that may cost money.
+            print(_red(
+                "env:     ANTHROPIC_API_KEY is set — claude will use it INSTEAD of your "
+                "claude.ai login.\n"
+                "         That bills the API account and disables your org's connectors. "
+                "Add --unset-env ANTHROPIC_API_KEY\n"
+                "         (or run under `env -u ANTHROPIC_API_KEY`) to use the login instead."
+            ))
         if info.get("context") and info["context"] != "context: none":
             print(f"{info['context']}")
         print(f"prompt:  {info['prompt_chars']:,} characters")
@@ -322,6 +335,7 @@ def cmd_goal_draft(args: argparse.Namespace) -> int:
         use_context=_context_choice(args),
         extra_context=args.context or [],
         context_bytes=args.context_bytes,
+        unset_env=args.unset_env or [],
         hooks=_agent_hooks(),
         timeout=args.timeout,
     )
@@ -744,6 +758,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
         use_context=_context_choice(args),
         extra_context=args.context or [],
         context_bytes=args.context_bytes,
+        unset_env=args.unset_env or [],
         hooks=_agent_hooks(),
         timeout=args.timeout,
     )
@@ -1176,6 +1191,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="raise the per-file cap for this call; see `hiraku-auto context`",
     )
     p.add_argument("--agent-cmd", help=f"default: {agent_mod.DEFAULT_AGENT_CMD!r}")
+    p.add_argument(
+        "--unset-env", action="append", metavar="VAR",
+        help="drop this variable from the agent's environment; repeatable. "
+             "ANTHROPIC_API_KEY is the usual one — it overrides your claude.ai login.",
+    )
     p.add_argument("--dry-run", action="store_true", help="print the prompt, call nothing")
     p.add_argument("--no-apply", action="store_true", help="call the agent but write no files")
     p.add_argument("--timeout", type=int, default=agent_mod.DEFAULT_TIMEOUT, help="seconds")
@@ -1342,6 +1362,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="raise the per-file cap for this call; see `hiraku-auto context`",
     )
     p.add_argument("--agent-cmd", help=f"default: {agent_mod.DEFAULT_AGENT_CMD!r}")
+    p.add_argument(
+        "--unset-env", action="append", metavar="VAR",
+        help="drop this variable from the agent's environment; repeatable. "
+             "ANTHROPIC_API_KEY is the usual one — it overrides your claude.ai login.",
+    )
     p.add_argument("--dry-run", action="store_true", help="print the prompt, call nothing")
     p.add_argument("--no-apply", action="store_true", help="call the agent but write no files")
     p.add_argument("--show-raw", action="store_true", help="also print the raw reply")

@@ -421,6 +421,50 @@ when                 workflow  target       secs   reply   result
 The prompt is kept even when the call fails, so a timeout or a malformed reply leaves you something
 to paste into an interactive `claude` session rather than nothing at all.
 
+### Which credential it uses
+
+`claude` prefers `ANTHROPIC_API_KEY` over your claude.ai login when both are available. That has
+three consequences, and only the third looks like an error:
+
+- the calls bill to the API account, not your subscription;
+- your organisation's connectors do not load;
+- if the key is invalid or out of credit, the call fails — and the message you see is the
+  *connectors* warning, which does not say that.
+
+```
+error: Agent exited 1.
+--- stderr ---
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set
+  and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+
+ANTHROPIC_API_KEY is set in your environment, so `claude` used it instead of your
+claude.ai login — and that key then failed. ...
+  env -u ANTHROPIC_API_KEY hiraku-auto ...     # this one command
+  hiraku-auto agent ... --unset-env ANTHROPIC_API_KEY
+```
+
+Three ways to use the login instead:
+
+```bash
+env -u ANTHROPIC_API_KEY hiraku-auto goal draft <id> --question "..."   # one command
+hiraku-auto agent design <goal> --unset-env ANTHROPIC_API_KEY          # one call, repeatable flag
+grep -rn ANTHROPIC_API_KEY ~/.zshrc ~/.zprofile ~/.bashrc ~/.profile   # find and remove it
+```
+
+PyCharm run configurations and `.env` files set it too, so check those if the shell looks clean.
+
+When the key is set and the agent command starts with `claude`, the pre-flight line says so before
+the call, because it decides who pays:
+
+```
+agent:   claude -p   (design -> dinov3-crossdomain)
+env:     ANTHROPIC_API_KEY is set — claude will use it INSTEAD of your claude.ai login.
+         That bills the API account and disables your org's connectors. Add --unset-env ...
+```
+
+A failed call writes `error.txt` next to `prompt.md` in the log directory, so `hiraku-auto logs
+--show latest` has the whole thing — both streams — rather than only what was still in scrollback.
+
 ### Web access
 
 `claude -p` starts with no tools permitted, so `discover` will search nothing and cite only what the

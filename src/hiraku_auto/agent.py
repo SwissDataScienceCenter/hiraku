@@ -48,6 +48,46 @@ DEFAULT_TIMEOUT = 900
 
 WORKFLOWS = ("draft", "design", "triage", "discover", "analyze")
 
+# Failures whose message names a symptom but not the fix. Matched against the whole output, so a
+# warning on stderr and the real error on stdout both count.
+KNOWN_FAILURES: tuple[tuple[str, str], ...] = (
+    (
+        "connectors are disabled because ANTHROPIC_API_KEY",
+        "ANTHROPIC_API_KEY is set in your environment, so `claude` used it instead of your\n"
+        "claude.ai login — and that key then failed. Two consequences beyond this error: your\n"
+        "organisation's connectors do not load, and the calls bill to the API account rather\n"
+        "than your subscription.\n\n"
+        "  env -u ANTHROPIC_API_KEY hiraku-auto ...     # this one command\n"
+        "  hiraku-auto agent ... --unset-env ANTHROPIC_API_KEY\n"
+        "  # or find where it is exported and remove it:\n"
+        "  grep -rn ANTHROPIC_API_KEY ~/.zshrc ~/.zprofile ~/.bashrc ~/.profile 2>/dev/null\n"
+        "PyCharm run configurations and .env files set it too — check those if the shell is clean.",
+    ),
+    (
+        "Invalid API key",
+        "The API key `claude` used was rejected. If you meant to use your claude.ai login,\n"
+        "unset ANTHROPIC_API_KEY: `env -u ANTHROPIC_API_KEY hiraku-auto ...`",
+    ),
+    (
+        "Please run `claude login`",
+        "`claude` is not logged in. Run `claude` once interactively and sign in, then retry.",
+    ),
+    (
+        "Credit balance is too low",
+        "The API account has no credit. If you meant to use your subscription instead, unset\n"
+        "ANTHROPIC_API_KEY: `env -u ANTHROPIC_API_KEY hiraku-auto ...`",
+    ),
+)
+
+
+def diagnose(output: str) -> str:
+    """The actionable half of an agent failure, when the message alone does not say what to do."""
+    for needle, advice in KNOWN_FAILURES:
+        if needle.lower() in output.lower():
+            return advice
+    return ""
+
+
 # Where reading the project's own files earns its place in the prompt. `draft` and `design` are
 # writing the terms the rest of the loop inherits, and `discover` is judging whether an outside
 # idea applies here — all three are worse without the project's own definitions. `triage` and
@@ -243,6 +283,21 @@ def extract_json(text: str) -> dict[str, Any]:
     )
 
 
+def agent_env(unset: list[str] | None = None) -> dict[str, str] | None:
+    """The environment for the agent, minus any variables the caller asked to drop.
+
+    `ANTHROPIC_API_KEY` is the one that matters: when it is set, `claude` uses it in preference to
+    the claude.ai login, which changes both which account is billed and whether the organisation's
+    connectors load.
+    """
+    if not unset:
+        return None
+    env = dict(os.environ)
+    for name in unset:
+        env.pop(name, None)
+    return env
+
+
 def call_agent(
     prompt: str,
     *,
@@ -250,6 +305,7 @@ def call_agent(
     timeout: int = DEFAULT_TIMEOUT,
     cwd: Path | None = None,
     progress: Callable[[float], None] | None = None,
+    unset_env: list[str] | None = None,
 ) -> str:
     """Run the agent, calling `progress(elapsed_seconds)` while waiting.
 
@@ -270,6 +326,7 @@ def call_agent(
         stderr=subprocess.PIPE,
         text=True,
         cwd=str(cwd) if cwd else None,
+        env=agent_env(unset_env),
     )
     buffers: dict[str, str] = {"out": "", "err": ""}
 
@@ -303,11 +360,24 @@ def call_agent(
         reader.join(timeout=5)
 
     if process.returncode != 0:
-        raise AgentError(
-            f"Agent exited {process.returncode}: {(buffers['err'] or buffers['out'])[:500]}"
-        )
+        # Both streams, labelled. `stderr or stdout` hid the real error whenever stderr carried
+        # only a warning — which is exactly what the API-key precedence notice is.
+        parts = [f"Agent exited {process.returncode}."]
+        for label, key in (("stderr", "err"), ("stdout", "out")):
+            body = buffers[key].strip()
+            if body:
+                parts.append(f"--- {label} ---\n{body[:1200]}")
+        combined = "\n".join(parts)
+        advice = diagnose(buffers["err"] + "\n" + buffers["out"])
+        if advice:
+            combined += f"\n\n{advice}"
+        raise AgentError(combined)
     if not buffers["out"].strip():
-        raise AgentError("Agent produced no output.")
+        message = "Agent produced no output."
+        if buffers["err"].strip():
+            message += f"\n--- stderr ---\n{buffers['err'].strip()[:1200]}"
+        advice = diagnose(buffers["err"])
+        raise AgentError(message + (f"\n\n{advice}" if advice else ""))
     return buffers["out"]
 
 
@@ -367,6 +437,7 @@ def _invoke(
     command: list[str] | None,
     timeout: int,
     hooks: Hooks | None,
+    unset_env: list[str] | None = None,
 ) -> tuple[str, Path, float]:
     """One agent call: announced before it starts, ticking while it waits, logged either way."""
     argv = command or agent_command()
@@ -382,6 +453,7 @@ def _invoke(
         "log": project.rel(directory),
         "started": _dt.datetime.now().isoformat(timespec="seconds"),
         "timeout": timeout,
+        "unset_env": list(unset_env or []),
     }
 
     def write_meta(extra: dict[str, Any]) -> None:
@@ -399,8 +471,12 @@ def _invoke(
             timeout=timeout,
             cwd=project.root,
             progress=hooks.tick if hooks else None,
+            unset_env=unset_env,
         )
     except Exception as exc:
+        # Keep the failure beside the prompt. A run that died on authentication is the one you
+        # most want the exact output for, and scrollback is not a record.
+        (directory / "error.txt").write_text(str(exc), encoding="utf-8")
         write_meta({"seconds": round(time.monotonic() - started, 1), "error": str(exc)})
         if hooks and hooks.done:
             hooks.done({**info, "seconds": round(time.monotonic() - started, 1), "error": str(exc)})
@@ -437,6 +513,7 @@ def run_draft(
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
     context_bytes: int | None = None,
+    unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
@@ -482,7 +559,8 @@ def run_draft(
         return result
 
     result.raw, result.log, result.seconds = _invoke(
-        project, "draft", goal_id, prompt, bundle, command=command, timeout=timeout, hooks=hooks
+        project, "draft", goal_id, prompt, bundle,
+        command=command, timeout=timeout, hooks=hooks, unset_env=unset_env,
     )
     result.data = extract_json(result.raw)
     if not result.data.get("primary_metric"):
@@ -535,6 +613,7 @@ def run_design(
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
     context_bytes: int | None = None,
+    unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
@@ -554,7 +633,8 @@ def run_design(
         return result
 
     result.raw, result.log, result.seconds = _invoke(
-        project, "design", goal_id, prompt, bundle, command=command, timeout=timeout, hooks=hooks
+        project, "design", goal_id, prompt, bundle,
+        command=command, timeout=timeout, hooks=hooks, unset_env=unset_env,
     )
     result.data = extract_json(result.raw)
     proposed = _require(result.data, "experiments", list)
@@ -598,6 +678,7 @@ def run_triage(
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
     context_bytes: int | None = None,
+    unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
@@ -620,7 +701,7 @@ def run_triage(
 
     result.raw, result.log, result.seconds = _invoke(
         project, "triage", experiment_id, prompt, bundle,
-        command=command, timeout=timeout, hooks=hooks,
+        command=command, timeout=timeout, hooks=hooks, unset_env=unset_env,
     )
     result.data = extract_json(result.raw)
     data = result.data
@@ -692,6 +773,7 @@ def run_discover(
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
     context_bytes: int | None = None,
+    unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
@@ -711,7 +793,8 @@ def run_discover(
         return result
 
     result.raw, result.log, result.seconds = _invoke(
-        project, "discover", goal_id, prompt, bundle, command=command, timeout=timeout, hooks=hooks
+        project, "discover", goal_id, prompt, bundle,
+        command=command, timeout=timeout, hooks=hooks, unset_env=unset_env,
     )
     result.data = extract_json(result.raw)
     proposals = _require(result.data, "proposals", list)
@@ -752,6 +835,7 @@ def run_analyze(
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
     context_bytes: int | None = None,
+    unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
@@ -776,7 +860,7 @@ def run_analyze(
 
     result.raw, result.log, result.seconds = _invoke(
         project, "analyze", experiment_id, prompt, bundle,
-        command=command, timeout=timeout, hooks=hooks,
+        command=command, timeout=timeout, hooks=hooks, unset_env=unset_env,
     )
     result.data = extract_json(result.raw)
     if not apply:

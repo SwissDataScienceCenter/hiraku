@@ -9,6 +9,7 @@ its reply into `check`, rather than being quietly smoothed into prose.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -641,3 +642,97 @@ def test_a_trailing_comment_on_a_cap_still_parses_as_a_number():
     assert parsed["max_bytes_per_file"] == 60000
     assert parsed["max_total_bytes"] == 400000
     assert parsed["note"] == "a # inside quotes is kept"
+
+
+# --------------------------------------------------------------------------- agent failures
+
+
+def failing_agent(tmp_path, *, stderr: str = "", stdout: str = "", code: int = 1):
+    """A stub that writes to both streams and exits with a chosen code."""
+    import stat
+    import sys as _sys
+
+    script = tmp_path / "failing-agent.py"
+    script.write_text(
+        "import sys\n"
+        f"sys.stderr.write({stderr!r})\n"
+        f"sys.stdout.write({stdout!r})\n"
+        f"sys.exit({code})\n",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return [_sys.executable, str(script)]
+
+
+API_KEY_WARNING = (
+    "⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source "
+    "is set and takes precedence over your claude.ai login · Unset it to load your "
+    "organization's connectors\n"
+)
+
+
+def test_a_failure_reports_both_streams(project, tmp_path):
+    """`stderr or stdout` hid the real error whenever stderr carried only a warning."""
+    from hiraku_auto.errors import AgentError
+
+    command = failing_agent(
+        tmp_path, stderr=API_KEY_WARNING, stdout="Invalid API key · Please run /login\n"
+    )
+    with pytest.raises(AgentError) as excinfo:
+        agent_mod.call_agent("hi", command=command)
+    message = str(excinfo.value)
+    assert "--- stderr ---" in message and "--- stdout ---" in message
+    assert "connectors are disabled" in message
+    assert "Invalid API key" in message
+
+
+def test_a_known_failure_carries_the_fix_not_just_the_symptom(project, tmp_path):
+    from hiraku_auto.errors import AgentError
+
+    with pytest.raises(AgentError, match="env -u ANTHROPIC_API_KEY"):
+        agent_mod.call_agent("hi", command=failing_agent(tmp_path, stderr=API_KEY_WARNING))
+
+    assert "not logged in" in agent_mod.diagnose("Error: Please run `claude login` first")
+    assert "no credit" in agent_mod.diagnose("Credit balance is too low")
+    assert agent_mod.diagnose("some unrelated crash") == ""
+
+
+def test_an_empty_reply_still_shows_stderr(project, tmp_path):
+    from hiraku_auto.errors import AgentError
+
+    with pytest.raises(AgentError, match="produced no output"):
+        agent_mod.call_agent("hi", command=failing_agent(tmp_path, stderr="warning only\n", code=0))
+
+
+def test_unset_env_removes_the_variable_for_the_call(project, tmp_path, monkeypatch):
+    import stat
+    import sys as _sys
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-be-visible")
+    script = tmp_path / "echo-env.py"
+    script.write_text(
+        "import json, os, sys\n"
+        "sys.stdout.write(json.dumps({'seen': os.environ.get('ANTHROPIC_API_KEY', '')}))\n",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    command = [_sys.executable, str(script)]
+
+    assert "sk-should-not-be-visible" in agent_mod.call_agent("hi", command=command)
+    dropped = agent_mod.call_agent("hi", command=command, unset_env=["ANTHROPIC_API_KEY"])
+    assert json.loads(dropped)["seen"] == ""
+    # the parent process is untouched
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-should-not-be-visible"
+
+
+def test_a_failed_call_keeps_the_prompt_and_the_error_in_the_log(project, tmp_path):
+    from hiraku_auto.errors import AgentError
+
+    with pytest.raises(AgentError):
+        agent_mod.run_design(
+            project, "vo-backend", command=failing_agent(tmp_path, stderr=API_KEY_WARNING)
+        )
+    entry = agent_mod.read_logs(project)[0]
+    assert (entry["path"] / "prompt.md").is_file()
+    assert "env -u ANTHROPIC_API_KEY" in (entry["path"] / "error.txt").read_text()
+    assert "connectors are disabled" in entry["error"]

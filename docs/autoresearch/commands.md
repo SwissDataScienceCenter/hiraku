@@ -140,7 +140,8 @@ usage: hiraku-auto goal draft [-h] [--question QUESTION]
                               [--with-experiments] [--instruction INSTRUCTION]
                               [--context PATH] [--no-context]
                               [--context-bytes N] [--agent-cmd AGENT_CMD]
-                              [--dry-run] [--no-apply] [--timeout TIMEOUT]
+                              [--unset-env VAR] [--dry-run] [--no-apply]
+                              [--timeout TIMEOUT]
                               id
 
 positional arguments:
@@ -162,6 +163,9 @@ options:
                         context`
   --agent-cmd AGENT_CMD
                         default: 'claude -p'
+  --unset-env VAR       drop this variable from the agent's environment;
+                        repeatable. ANTHROPIC_API_KEY is the usual one — it
+                        overrides your claude.ai login.
   --dry-run             print the prompt, call nothing
   --no-apply            call the agent but write no files
   --timeout TIMEOUT     seconds
@@ -413,8 +417,8 @@ options:
 ```
 usage: hiraku-auto agent [-h] [--instruction INSTRUCTION] [--context PATH]
                          [--no-context] [--context-bytes N]
-                         [--agent-cmd AGENT_CMD] [--dry-run] [--no-apply]
-                         [--show-raw] [--timeout TIMEOUT]
+                         [--agent-cmd AGENT_CMD] [--unset-env VAR] [--dry-run]
+                         [--no-apply] [--show-raw] [--timeout TIMEOUT]
                          {draft,design,triage,discover,analyze} target
 
 positional arguments:
@@ -434,6 +438,9 @@ options:
                         context`
   --agent-cmd AGENT_CMD
                         default: 'claude -p'
+  --unset-env VAR       drop this variable from the agent's environment;
+                        repeatable. ANTHROPIC_API_KEY is the usual one — it
+                        overrides your claude.ai login.
   --dry-run             print the prompt, call nothing
   --no-apply            call the agent but write no files
   --show-raw            also print the raw reply
