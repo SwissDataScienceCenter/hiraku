@@ -2,12 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .config import Config, load_config
-from .database import Database
-from .git import GitAdapter
-from .launcher import Launcher
-from .reports import ReportService
-from .services import (
+from .application.services import (
     AnalysisService,
     EventService,
     ExperimentService,
@@ -16,6 +11,11 @@ from .services import (
     ProposalService,
     RunService,
 )
+from .config import Config, load_config
+from .database import Database
+from .git import GitAdapter
+from .interfaces.reports import ReportService
+from .launcher import Launcher
 
 
 @dataclass

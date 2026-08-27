@@ -27,19 +27,12 @@ budgets, or policy. Agent, implementation, launch, and research-result failures 
 events. A missing or non-numeric metric yields `inconclusive`; a numeric result is compared to the
 best recorded baseline value and yields `supports` or `refutes`. Autonomous iteration also records
 an outcome relative to the best completed metric so far: `improved`, `regressed`, `invalid`, or
-`inconclusive`. `hiraku best <goal>` reports that current best Experiment. This is an internal
-keep/revert signal; it is not a promotion or merge operation.
+`inconclusive`. `hiraku best <goal>` reports the current best Experiment.
 
-## Why parent links beat Git ancestry
+## Lineage
 
 Git answers “what source was this built from?” Research lineage answers “which question did this
 attempt respond to?” A diagnostic can add instrumentation on the same source commit; a refinement
 can be rebuilt from a baseline; rebases and cherry-picks rewrite Git ancestry without changing the
 research question. Declared `parent_id` survives those operations and the Run still records the
 exact commit for reproducibility.
-
-## Why there is no promotion gate in v0.1
-
-An Experiment conclusion records the evidence-backed interpretation. This PoC does not make an
-accepted/current-best pointer, merge branches, or decide statistical significance. A later release
-can add a promotion policy without changing the Goal/Experiment/Run lineage model.

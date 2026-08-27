@@ -96,3 +96,26 @@ evidence and decides whether another bounded iteration is useful:
 
 The adapter cannot override Hiraku's computed verdict. Every request and response is recorded as an
 event without storing private model reasoning.
+
+### `draft_goal`
+
+Use the same adapter contract to draft a Goal from bounded repository context. The draft is advisory
+and is not written to SQLite unless the human explicitly passes `--apply`:
+
+```bash
+hiraku goal draft heart-disease \
+  --question "Define a measurable objective for improving the classifier." \
+  --adapter ./agent-adapter
+```
+
+The payload contains `title`, `objective`, `metric`, `direction`, `target`, `evaluation_protocol`,
+`constraints`, `unset`, and `rationale`. Applying a reviewed draft requires a launch manifest:
+
+```bash
+hiraku goal draft heart-disease \
+  --question "Define a measurable objective for improving the classifier." \
+  --adapter ./agent-adapter --launch launch.yml --apply
+```
+
+Context contains an allowlisted file inventory and truncated text, with secrets, local state, virtual
+environments, and Git internals excluded. Use `--max-files` and `--max-bytes` to tune the bounds.

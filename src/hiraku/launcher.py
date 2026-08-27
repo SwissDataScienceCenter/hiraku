@@ -10,11 +10,11 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
+from .application.ports import SourceControl, StateStore
+from .application.services import ExperimentService, GoalService, RunService, split_experiment_ref
 from .config import Config
-from .database import Database, record_event
+from .database import record_event
 from .errors import HirakuError
-from .git import GitAdapter
-from .services import ExperimentService, GoalService, RunService, split_experiment_ref
 
 
 def _digest_lockfile(root: Path) -> str | None:
@@ -41,8 +41,8 @@ class Launcher:
     def __init__(
         self,
         config: Config,
-        db: Database,
-        git: GitAdapter,
+        db: StateStore,
+        git: SourceControl,
         goals: GoalService,
         experiments: ExperimentService,
         runs: RunService,

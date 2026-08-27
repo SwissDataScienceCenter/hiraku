@@ -25,6 +25,23 @@ hiraku goal create heart-disease \
 hiraku goal show heart-disease --json
 ```
 
+An adapter can draft a Goal from the repository context. Drafting is review-only by default:
+
+```bash
+hiraku goal draft heart-disease \
+  --question "Maximize ROC AUC for the heart-disease classifier." \
+  --adapter ./agent-adapter
+```
+
+Apply the reviewed draft explicitly:
+
+```bash
+hiraku goal draft heart-disease \
+  --question "Maximize ROC AUC for the heart-disease classifier." \
+  --adapter ./agent-adapter \
+  --launch examples/heart-disease/launch.yml --apply
+```
+
 Create a baseline or hypothesis Experiment. Creation checks out `hiraku/<goal>/<experiment>`:
 
 ```bash

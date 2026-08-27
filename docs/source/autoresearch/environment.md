@@ -23,7 +23,6 @@ two Runs used the same dependency input; containers and external environments re
 
 ## Worktrees
 
-Durable per-Experiment worktrees were valuable in the earlier prototype for concurrent conflicting environments, but
-they are deliberately deferred here. Experiment creation uses one normal Git branch and checks it
-out automatically. `hiraku launch --commit` creates and removes a temporary detached worktree only
-when reproducible execution must be isolated from the active checkout.
+Experiment creation uses one normal Git branch and checks it out automatically. `hiraku launch
+--commit` creates and removes a temporary detached worktree when reproducible execution must be
+isolated from the active checkout.

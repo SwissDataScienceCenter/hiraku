@@ -26,8 +26,9 @@ and autonomous workflows.
    :maxdepth: 2
    :caption: Reference
 
-   api
    autoresearch/README
+   architecture
+   testing
    autoresearch/cli
    autoresearch/data-model
    autoresearch/environment
@@ -36,7 +37,6 @@ and autonomous workflows.
    autoresearch/agent-workflows
    autoresearch/hypothesis-discovery
    autoresearch/dashboard
-   autoresearch/relation-to-other-branches
 
 .. toctree::
    :maxdepth: 2
@@ -46,6 +46,12 @@ and autonomous workflows.
    autoresearch/agent-workflows/create-child
    autoresearch/agent-workflows/discover-hypotheses
    autoresearch/agent-workflows/triage-failure
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API
+
+   api
 
 Autoresearch guide
 ------------------

@@ -1,6 +1,6 @@
 # TUI and reports
 
-The current viewer is a read-only Textual TUI:
+The current viewer is a Textual TUI backed by the shared application services:
 
 ```bash
 uv sync --extra tui
@@ -9,8 +9,9 @@ hiraku tui
 
 It renders one computed tree from the shared query services: Goal metric/direction, baseline and
 hypothesis Experiments, parent/child relationships, statuses, verdicts, commits, Run metrics,
-parameters, provenance, and auto-origin proposals. It has no launch, edit, approve, conclude, or
-abandon controls.
+parameters, provenance, and auto-origin proposals. Explicit key bindings can conclude, abandon,
+retry, or delete eligible lifecycle records; these actions still go through the core services and
+never edit SQLite directly.
 
 Reports are generated projections:
 
@@ -22,6 +23,4 @@ This writes Markdown, JSON, and CSV below ignored `.hiraku/reports/`. The Markdo
 projection warning; the JSON includes lineage, Runs, proposals, and lifecycle events. The TUI and
 reports consume the same core queries, so a viewer cannot become a second source of truth.
 
-The static projections are the v0.1 endpoint. A live browser dashboard, server, charts, artifact
-browser, and mutation controls are intentionally deferred.
-
+Reports and the compact TUI provide the current review interface.

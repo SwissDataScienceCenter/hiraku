@@ -55,8 +55,11 @@ science research. It supports two distinct working modes:
 The proof of concept establishes a minimal working version of Hiraku. The proof of concept is complete
 when two demo cases can execute this loop in both working modes and expose enough evidence for a human
 to review what happened. Metric improvement is measured, but it is not a condition for success. The
-initial version includes a first implementation of the command-line interface, the agent skill, a
-read-only TUI, and generated reports.
+initial version includes a first implementation of the command-line interface, the agent skill, an
+interactive TUI, and generated reports.
+
+Contributor-facing package boundaries, adapter contracts, and testing guidance are documented in the
+[architecture guide](docs/source/architecture.md) and [testing guide](docs/source/testing.md).
 
 ## Core workflow: Tracking the experiment life-cycle
 
@@ -175,6 +178,19 @@ hiraku goal show heart-disease --json
 hiraku goal update heart-disease --objective "Improve validation ROC AUC."
 ```
 
+When starting from an unfamiliar project, a generic agent adapter can draft a Goal from bounded
+repository context. Drafts are review-only until `--apply` is explicitly provided:
+
+```bash
+hiraku goal draft heart-disease \
+  --question "Maximize ROC AUC for the classifier." \
+  --adapter ./agent-adapter
+hiraku goal draft heart-disease \
+  --question "Maximize ROC AUC for the classifier." \
+  --adapter ./agent-adapter \
+  --launch examples/heart-disease/launch.yml --apply
+```
+
 Goal creation requires a clean committed checkout and captures `HEAD` as the immutable source
 baseline. Metric, direction, protocol, constraints, and launch permissions cannot change after Runs
 exist.
@@ -195,8 +211,7 @@ hiraku experiment abandon heart-disease/failed-attempt
 ```
 
 Experiment creation creates and checks out `hiraku/<goal>/<experiment>`. Root Experiments branch from
-the Goal baseline; children branch from a parent's frozen evaluated commit. There is no promotion or
-current-best pointer in this PoC.
+the Goal baseline; children branch from a parent's frozen evaluated commit.
 
 ### Launch project code
 
@@ -303,8 +318,9 @@ hiraku tui
 hiraku report generate heart-disease
 ```
 
-The TUI is read-only. Reports and the TUI consume the same SQLite query model and show lineage,
-statuses, verdicts, commits, metrics, parameters, provenance, and auto proposals.
+Reports and the TUI consume the same SQLite query model and show lineage, statuses, verdicts, commits,
+metrics, parameters, provenance, and auto proposals. The TUI also exposes guarded lifecycle actions
+for eligible Experiments and Runs; it does not bypass the core services.
 
 ## Agent skill
 

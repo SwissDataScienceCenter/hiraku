@@ -1,7 +1,6 @@
 # Hypothesis discovery and proposals
 
-The earlier autoresearch design correctly separates a literature-derived idea from an implementation. Hiraku keeps
-that separation with the `Proposal` table:
+Hiraku separates an idea from an implementation with the `Proposal` table:
 
 ```text
 source or agent reasoning → Proposal → admission → ordinary Experiment → Run

@@ -47,3 +47,10 @@ branch is created from an older source commit.
 
 Generated `.hiraku/reports/*.md`, `*.json`, and `*-runs.csv`, plus `hiraku tui`, are projections. They
 must be regenerated from SQLite and never become competing lifecycle sources of truth.
+
+## Persistence boundary
+
+Application services access state through the repositories in
+`hiraku.infrastructure.sqlite`. Repositories perform SQL row access; services retain validation,
+domain rules, and transaction boundaries. This makes it possible to test lifecycle behavior with a
+fake `StateStore` and to test the SQLite implementation independently.
