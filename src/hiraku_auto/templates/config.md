@@ -9,6 +9,10 @@ bounds:
 promotion:
   reproduction_seeds: 1
   agreement_tolerance: 0.01
+agent:
+  command:                  # empty = HIRAKU_AGENT_CMD, then `claude -p`
+  unset_env: []             # e.g. [ANTHROPIC_API_KEY] to use the claude.ai login instead
+  timeout: 900
 tracking:
   backend: table            # table | table+mlflow
   mlflow:
@@ -51,6 +55,26 @@ How the environment is built, and what a run may assume.
   comparable
 - Determinism: whether runs are expected bit-reproducible at a fixed seed, and if not, the sources
   of variance
+
+## Agent
+
+`agent.command` is what gets spawned for every workflow. Precedence, highest first:
+`--agent-cmd`, then `HIRAKU_AGENT_CMD`, then this, then `claude -p`. Put the flags this project
+always needs here rather than retyping them:
+
+    command: claude -p --allowedTools WebSearch,WebFetch,Read,Glob,Grep --add-dir ../<code-repo>
+
+`agent.unset_env` lists variables dropped from the agent's environment for every call. The one
+that matters is `ANTHROPIC_API_KEY`: while it is set, `claude` uses it in preference to your
+claude.ai login, which bills the API account and stops your organisation's connectors loading. Set
+
+    unset_env: [ANTHROPIC_API_KEY]
+
+and every call here uses the login, while the key stays available to everything else on the
+machine — nothing is written to your shell and the key is not touched. `--unset-env` on a single
+call adds to this list; it never replaces it, because both are saying "drop this".
+
+`agent.timeout` is the per-call ceiling in seconds. `--timeout` overrides it.
 
 ## Tracking
 

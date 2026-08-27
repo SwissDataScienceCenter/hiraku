@@ -369,8 +369,21 @@ hiraku-auto agent triage   rig-camera-vo             # classify a failure, decid
 hiraku-auto agent discover vo-backend-selection      # literature -> proposals
 ```
 
-Default command is `claude -p <prompt>`. Override with `--agent-cmd` or `HIRAKU_AGENT_CMD`
-(`codex exec`, a local model, anything that reads a prompt argument and prints a reply).
+Default command is `claude -p <prompt>`. Precedence, highest first: `--agent-cmd`, then
+`HIRAKU_AGENT_CMD`, then `agent.command` in `research/config.md`, then the default. Anything that
+reads a prompt argument and prints a reply works — `codex exec`, a local model.
+
+Put the flags a project always needs in its config rather than retyping them:
+
+```yaml
+agent:
+  command: claude -p --allowedTools WebSearch,WebFetch,Read,Glob,Grep --add-dir ../mapillary_alignment
+  unset_env: [ANTHROPIC_API_KEY]
+  timeout: 900
+```
+
+The resolved command, timeout and dropped variables are recorded in each call's `meta.json`, so a
+log says which credential and which tools that call actually had.
 
 ### Seeing what it is doing
 
@@ -443,13 +456,26 @@ claude.ai login — and that key then failed. ...
   hiraku-auto agent ... --unset-env ANTHROPIC_API_KEY
 ```
 
-Three ways to use the login instead:
+Four ways to use the login instead, in the order I would reach for them:
+
+```yaml
+# research/config.md front matter — once, for this project
+agent:
+  unset_env: [ANTHROPIC_API_KEY]
+```
 
 ```bash
-env -u ANTHROPIC_API_KEY hiraku-auto goal draft <id> --question "..."   # one command
 hiraku-auto agent design <goal> --unset-env ANTHROPIC_API_KEY          # one call, repeatable flag
+env -u ANTHROPIC_API_KEY hiraku-auto goal draft <id> --question "..."   # one command
 grep -rn ANTHROPIC_API_KEY ~/.zshrc ~/.zprofile ~/.bashrc ~/.profile   # find and remove it
 ```
+
+**None of these touch the key.** A variable is dropped from the copy of the environment handed to
+the `claude` subprocess; the parent process, your shell and the key itself are unchanged, so the key
+stays available to everything else on the machine. Only revoking it in the Console invalidates it.
+
+`--unset-env` on a call **adds to** `agent.unset_env` rather than replacing it — both are saying
+"drop this", so a flag must not silently re-admit what the project decided to drop.
 
 PyCharm run configurations and `.env` files set it too, so check those if the shell looks clean.
 

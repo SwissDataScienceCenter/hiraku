@@ -168,7 +168,7 @@ options:
                         overrides your claude.ai login.
   --dry-run             print the prompt, call nothing
   --no-apply            call the agent but write no files
-  --timeout TIMEOUT     seconds
+  --timeout TIMEOUT     seconds; default agent.timeout, else 900
 ```
 
 ### `hiraku-auto goal list --help`
@@ -444,7 +444,7 @@ options:
   --dry-run             print the prompt, call nothing
   --no-apply            call the agent but write no files
   --show-raw            also print the raw reply
-  --timeout TIMEOUT     seconds
+  --timeout TIMEOUT     seconds; default agent.timeout, else 900
 ```
 
 ### `hiraku-auto next --help`
@@ -484,7 +484,7 @@ options:
   --seed SEED
   --agent-cmd AGENT_CMD
                         default: 'claude -p'
-  --timeout TIMEOUT     seconds
+  --timeout TIMEOUT     seconds; default agent.timeout, else 900
 ```
 
 ### `hiraku-auto promote --help`

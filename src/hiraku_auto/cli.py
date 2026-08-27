@@ -62,7 +62,7 @@ def _agent_hooks() -> agent_mod.Hooks:
     def start(info: dict[str, Any]) -> None:
         print(f"agent:   {info['command']}   ({info['workflow']} -> {info['target']})")
         if info.get("unset_env"):
-            print(f"env:     unset for this call: {', '.join(info['unset_env'])}")
+            print(f"env:     dropped for this call: {', '.join(info['unset_env'])}")
         elif "ANTHROPIC_API_KEY" in os.environ and info["command"].startswith("claude"):
             # Which credential is used decides both who is billed and whether the org's
             # connectors load, so it is worth one line before a call that may cost money.
@@ -1198,7 +1198,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--dry-run", action="store_true", help="print the prompt, call nothing")
     p.add_argument("--no-apply", action="store_true", help="call the agent but write no files")
-    p.add_argument("--timeout", type=int, default=agent_mod.DEFAULT_TIMEOUT, help="seconds")
+    p.add_argument(
+        "--timeout", type=int,
+        help=f"seconds; default agent.timeout, else {agent_mod.DEFAULT_TIMEOUT}",
+    )
     p.set_defaults(func=cmd_goal_draft)
     p = goal.add_parser("list", help="one row per goal, with node and run counts")
     p.add_argument("--json", action="store_true", help="machine-readable output")
@@ -1370,7 +1373,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="print the prompt, call nothing")
     p.add_argument("--no-apply", action="store_true", help="call the agent but write no files")
     p.add_argument("--show-raw", action="store_true", help="also print the raw reply")
-    p.add_argument("--timeout", type=int, default=agent_mod.DEFAULT_TIMEOUT, help="seconds")
+    p.add_argument(
+        "--timeout", type=int,
+        help=f"seconds; default agent.timeout, else {agent_mod.DEFAULT_TIMEOUT}",
+    )
     p.set_defaults(func=cmd_agent)
 
     p = sub.add_parser("next", help="what the loop would do next (no agent call)")
@@ -1403,7 +1409,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--seed")
     p.add_argument("--agent-cmd", help=f"default: {agent_mod.DEFAULT_AGENT_CMD!r}")
-    p.add_argument("--timeout", type=int, default=agent_mod.DEFAULT_TIMEOUT, help="seconds")
+    p.add_argument(
+        "--timeout", type=int,
+        help=f"seconds; default agent.timeout, else {agent_mod.DEFAULT_TIMEOUT}",
+    )
     p.set_defaults(func=cmd_loop)
 
     p = sub.add_parser("promote", help="put a run through the promotion gate")

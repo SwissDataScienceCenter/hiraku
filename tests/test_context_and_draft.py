@@ -736,3 +736,83 @@ def test_a_failed_call_keeps_the_prompt_and_the_error_in_the_log(project, tmp_pa
     assert (entry["path"] / "prompt.md").is_file()
     assert "env -u ANTHROPIC_API_KEY" in (entry["path"] / "error.txt").read_text()
     assert "connectors are disabled" in entry["error"]
+
+
+# --------------------------------------------------------------------------- agent: in config.md
+
+
+def set_agent_config(project, block: str) -> None:
+    record = read_record(project.config_md)
+    record.front["agent"] = yamlio.load(block)["agent"]
+    project.config_md.write_text(record.render(), encoding="utf-8")
+
+
+def test_unset_env_can_be_set_once_in_the_project(project, tmp_path, monkeypatch):
+    """The point of the config block: use the claude.ai login without retyping a flag."""
+    import stat
+    import sys as _sys
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-live")
+    set_agent_config(project, "agent:\n  unset_env: [ANTHROPIC_API_KEY]\n")
+    assert agent_mod.resolve_unset_env(project) == ["ANTHROPIC_API_KEY"]
+
+    script = tmp_path / "echo-env.py"
+    script.write_text(
+        "import json, os, sys\n"
+        "sys.stdout.write(json.dumps({'experiments': [], "
+        "'seen': os.environ.get('ANTHROPIC_API_KEY', '')}))\n",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    result = agent_mod.run_design(project, "vo-backend", command=[_sys.executable, str(script)])
+    assert result.data["seen"] == "", "the configured variable must not reach the agent"
+    # and the key is still there for everything else
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-live"
+
+
+def test_a_cli_flag_adds_to_the_configured_list_rather_than_replacing_it(project):
+    set_agent_config(project, "agent:\n  unset_env: [ANTHROPIC_API_KEY]\n")
+    assert agent_mod.resolve_unset_env(project, ["AWS_PROFILE"]) == [
+        "ANTHROPIC_API_KEY", "AWS_PROFILE",
+    ]
+    # a repeat does not duplicate
+    assert agent_mod.resolve_unset_env(project, ["ANTHROPIC_API_KEY"]) == ["ANTHROPIC_API_KEY"]
+
+
+def test_the_command_precedence_is_flag_then_env_then_config_then_default(project, monkeypatch):
+    monkeypatch.delenv("HIRAKU_AGENT_CMD", raising=False)
+    assert agent_mod.agent_command(project=project) == ["claude", "-p"]
+
+    set_agent_config(project, "agent:\n  command: claude -p --allowedTools Read\n")
+    assert agent_mod.agent_command(project=project) == ["claude", "-p", "--allowedTools", "Read"]
+
+    monkeypatch.setenv("HIRAKU_AGENT_CMD", "codex exec")
+    assert agent_mod.agent_command(project=project) == ["codex", "exec"]
+    assert agent_mod.agent_command("gemini -p", project=project) == ["gemini", "-p"]
+
+
+def test_the_timeout_falls_back_to_the_config(project):
+    assert agent_mod.resolve_timeout(project) == agent_mod.DEFAULT_TIMEOUT
+    set_agent_config(project, "agent:\n  timeout: 120\n")
+    assert agent_mod.resolve_timeout(project) == 120
+    assert agent_mod.resolve_timeout(project, 30) == 30
+
+
+def test_what_was_resolved_is_recorded_in_the_log(project, tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-live")
+    set_agent_config(project, "agent:\n  unset_env: [ANTHROPIC_API_KEY]\n  timeout: 300\n")
+    agent_mod.run_design(
+        project, "vo-backend", command=fake_agent(tmp_path, json.dumps({"experiments": []}))
+    )
+    meta = json.loads((agent_mod.read_logs(project)[0]["path"] / "meta.json").read_text())
+    assert meta["unset_env"] == ["ANTHROPIC_API_KEY"]
+    assert meta["timeout"] == 300
+
+
+def test_the_config_template_ships_the_agent_block(bare_project):
+    front = read_record(bare_project.config_md).front
+    assert "agent" in front
+    assert front["agent"]["timeout"] == 900
+    text = bare_project.config_md.read_text(encoding="utf-8")
+    assert "unset_env: []" in text and "## Agent" in text

@@ -125,12 +125,66 @@ class Hooks:
 # --------------------------------------------------------------------------- prompt assembly
 
 
-def agent_command(override: str | None = None) -> list[str]:
-    raw = override or os.environ.get("HIRAKU_AGENT_CMD") or DEFAULT_AGENT_CMD
+def project_settings(project: Project | None) -> dict[str, Any]:
+    """`agent:` merged from `.hiraku.yml` and `research/config.md`, the latter winning.
+
+    Same split as `tracking:`: `.hiraku.yml` is machine state, `research/config.md` is the contract
+    a researcher edits and the one they will look in.
+    """
+    if project is None:
+        return {}
+    merged: dict[str, Any] = {}
+    raw = project.raw.get("agent")
+    if isinstance(raw, dict):
+        merged.update(raw)
+    if project.config_md.is_file():
+        from .records import read_record
+
+        block = read_record(project.config_md).front.get("agent")
+        if isinstance(block, dict):
+            merged.update(block)
+    return merged
+
+
+def agent_command(override: str | None = None, project: Project | None = None) -> list[str]:
+    """Precedence: --agent-cmd, then HIRAKU_AGENT_CMD, then `agent.command`, then the default."""
+    configured_cmd = str(project_settings(project).get("command") or "")
+    raw = (
+        override
+        or os.environ.get("HIRAKU_AGENT_CMD")
+        or configured_cmd
+        or DEFAULT_AGENT_CMD
+    )
     parts = shlex.split(raw)
     if not parts:
         raise AgentError("Agent command is empty.")
     return parts
+
+
+def resolve_unset_env(project: Project | None, cli: list[str] | None = None) -> list[str]:
+    """The union of `agent.unset_env` and any --unset-env flags.
+
+    A union, not an override: both say "drop this from the agent's environment", so adding one on
+    the command line must not silently re-admit the ones the project decided to drop.
+    """
+    configured_vars = project_settings(project).get("unset_env")
+    if isinstance(configured_vars, str):
+        configured_vars = [configured_vars]
+    elif not isinstance(configured_vars, list):
+        configured_vars = []
+    out: list[str] = []
+    for name in [*(str(v) for v in configured_vars), *(cli or [])]:
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def resolve_timeout(project: Project | None, cli: int | None = None) -> int:
+    """Precedence: --timeout, then `agent.timeout`, then the default."""
+    if cli:
+        return cli
+    value = project_settings(project).get("timeout")
+    return value if isinstance(value, int) and value > 0 else DEFAULT_TIMEOUT
 
 
 def gather_context(
@@ -435,12 +489,19 @@ def _invoke(
     bundle: context_mod.Bundle,
     *,
     command: list[str] | None,
-    timeout: int,
+    timeout: int | None,
     hooks: Hooks | None,
     unset_env: list[str] | None = None,
 ) -> tuple[str, Path, float]:
-    """One agent call: announced before it starts, ticking while it waits, logged either way."""
-    argv = command or agent_command()
+    """One agent call: announced before it starts, ticking while it waits, logged either way.
+
+    Command, timeout and dropped environment variables are resolved here rather than at the call
+    sites, so `--agent-cmd` / `HIRAKU_AGENT_CMD` / `agent.command` have one documented precedence
+    and the resolved values land in `meta.json`.
+    """
+    argv = command or agent_command(project=project)
+    unset_env = resolve_unset_env(project, unset_env)
+    timeout = resolve_timeout(project, timeout)
     directory = _open_log(project, workflow, target)
     (directory / "prompt.md").write_text(prompt, encoding="utf-8")
 
@@ -515,7 +576,7 @@ def run_draft(
     context_bytes: int | None = None,
     unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int | None = None,
 ) -> AgentRun:
     """Turn a question in the researcher's own words into a goal record they can review.
 
@@ -615,7 +676,7 @@ def run_design(
     context_bytes: int | None = None,
     unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int | None = None,
 ) -> AgentRun:
     forest = build(project)
     load_goal(project, goal_id)
@@ -680,7 +741,7 @@ def run_triage(
     context_bytes: int | None = None,
     unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int | None = None,
 ) -> AgentRun:
     forest = build(project)
     if experiment_id not in forest.nodes:
@@ -775,7 +836,7 @@ def run_discover(
     context_bytes: int | None = None,
     unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int | None = None,
 ) -> AgentRun:
     forest = build(project)
     load_goal(project, goal_id)
@@ -837,7 +898,7 @@ def run_analyze(
     context_bytes: int | None = None,
     unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int | None = None,
 ) -> AgentRun:
     forest = build(project)
     if experiment_id not in forest.nodes:
