@@ -20,6 +20,7 @@ from .records import (
     load_experiments,
     load_goals,
     load_proposals,
+    undefined_metrics,
     unset_markers,
 )
 from .runs import RunTable, read_runs
@@ -227,6 +228,13 @@ def check(forest: Forest) -> list[str]:
     for goal_id, record in goals.items():
         for section, needed in unset_markers(record):
             issues.append(f"{goal_id}: unset in '{section}' — {needed}")
+        # A metric used but never defined is the subtler version of the same fault: the sentence
+        # reads as precise and the number it names does not exist as a formula anywhere.
+        for metric, where in undefined_metrics(record):
+            issues.append(
+                f"{goal_id}: metric `{metric}` is used in {where} but never defined in the "
+                f"Evaluation protocol"
+            )
 
     known = set(nodes)
     for row in forest.table.rows:

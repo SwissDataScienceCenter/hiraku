@@ -30,9 +30,16 @@ needing a different protocol is answering a different question and belongs under
 
 - Dataset and version, with checksum
 - Splits, and how they were produced
-- Metrics, with their exact definitions
 - Seeds and how many
 - What is held fixed across all comparisons
+
+### Metrics
+
+Every metric name used anywhere in this record must appear here with its formula — not just the
+primary and gate metrics. A criterion that names a quantity this section never defines reads as
+precise and is not.
+
+{{metric_definitions}}
 
 Changing anything here invalidates every comparison already made under this goal.
 

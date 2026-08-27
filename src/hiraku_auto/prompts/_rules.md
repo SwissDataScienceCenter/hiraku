@@ -69,6 +69,13 @@ from `project_context` as a measurement, never treat a claim there as a settled 
 let it override the records or the run table, which are the source of truth. Where it supplies a
 definition or a path, say which file you took it from.
 
+## Metric names
+
+Use only metric names the goal's evaluation protocol defines. If the comparison you want needs a
+quantity that is not defined there, say so and name it as a gap — do not invent a name and use it
+as though it existed. An undefined name in a findings paragraph is indistinguishable from a
+measured one.
+
 ## Unfilled values
 
 Where a required value cannot be grounded in the state or the project context, do not guess and do

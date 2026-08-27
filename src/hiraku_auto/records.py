@@ -23,6 +23,66 @@ ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 UNSET_PATTERN = re.compile(r"\*\*\[UNSET:\s*([^\]]*?)\s*\]\*\*")
 
 
+# A metric name is lower_snake_case in backticks. Any such name used ANYWHERE in a goal record
+# has to be defined in the Evaluation protocol, or nobody — the researcher included — can say what
+# the number means. This is how `pairs_at_cap_fraction` gets into a success criterion undefined.
+METRIC_TOKEN = re.compile(r"`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`")
+
+# The tool's own vocabulary, and common front-matter keys. Mentioning these is not a metric claim.
+TOOL_VOCABULARY = frozenset({
+    "primary_metric", "gate_metric", "mlflow_experiment", "mlflow_run_id", "run_id",
+    "experiment_id", "run_kind", "launched_at", "exit_code", "duration_s", "python_version",
+    "lockfile_sha256", "container_image", "container_digest", "agreement_tolerance",
+    "reproduction_seeds", "max_runs_per_goal", "max_tree_depth", "max_concurrent_worktrees",
+    "max_wallclock_hours_per_run", "max_files", "max_bytes_per_file", "max_total_bytes",
+    "tracking_uri", "proposed_parent", "decided_on", "proposed_on", "expectation_body",
+    "first_experiments", "how_to_fill", "why_it_matters", "success_criterion",
+    "evaluation_protocol", "out_of_scope", "open_threads", "held_fixed", "failure_class",
+    "class_evidence", "investigation_test", "blocking_condition", "next_steps",
+    "promotable_candidate", "named_cause", "in_scope", "within_budget",
+})
+
+# Where a metric counts as defined. The protocol is the one section every experiment inherits, so
+# a definition anywhere else is not inherited and does not settle anything.
+DEFINING_SECTIONS = ("Evaluation protocol",)
+
+
+def metric_mentions(record: Record) -> dict[str, list[str]]:
+    """Every metric-looking name in a goal record, and which sections mention it."""
+    found: dict[str, list[str]] = {}
+    for name, text in record.sections.items():
+        for match in METRIC_TOKEN.finditer(text):
+            token = match.group(1)
+            if token in TOOL_VOCABULARY:
+                continue
+            found.setdefault(token, [])
+            if name not in found[token]:
+                found[token].append(name)
+    for key in ("primary_metric", "gate_metric"):
+        value = record.front.get(key)
+        if isinstance(value, str) and value and value not in TOOL_VOCABULARY:
+            found.setdefault(value, [])
+            label = f"front matter `{key}`"
+            if label not in found[value]:
+                found[value].insert(0, label)
+    return found
+
+
+def undefined_metrics(record: Record) -> list[tuple[str, str]]:
+    """Metric names the record uses but never defines, as (name, where it was used).
+
+    A name that appears only in the Success criterion is exactly the failure this catches: the
+    criterion reads as precise, and the number it names does not exist anywhere as a formula.
+    """
+    protocol = " ".join(record.section(name) for name in DEFINING_SECTIONS)
+    out: list[tuple[str, str]] = []
+    for token, where in sorted(metric_mentions(record).items()):
+        if token in protocol:
+            continue
+        out.append((token, ", ".join(where)))
+    return out
+
+
 def unset_markers(record: Record) -> list[tuple[str, str]]:
     """Every `**[UNSET: ...]**` in a record, as (section name, what is needed)."""
     found: list[tuple[str, str]] = []

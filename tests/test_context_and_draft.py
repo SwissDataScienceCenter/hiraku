@@ -460,3 +460,81 @@ def test_init_gitignores_bytecode_and_caches(bare_project):
     text = (bare_project.root / ".gitignore").read_text(encoding="utf-8")
     for entry in ("__pycache__/", "*.py[cod]", ".pytest_cache/", ".ruff_cache/", ".DS_Store"):
         assert entry in text
+
+
+# --------------------------------------------------------------------------- undefined metrics
+
+
+UNDEFINED = {
+    **DRAFT,
+    "success_criterion": "`reprojection_error_px_median` falls by 15%, `kept_frame_rate` holds, "
+                         "and `pairs_at_cap_fraction` does not increase.",
+    "evaluation_protocol": {
+        "dataset": "d", "splits": "s",
+        "metrics": "`reprojection_error_px_median` is the median pixel L2. "
+                   "`kept_frame_rate` is kept frames over 2700.",
+        "seeds": "three", "held_fixed": "intrinsics",
+    },
+}
+
+
+def test_a_metric_used_only_in_the_criterion_is_reported(bare_project, tmp_path):
+    """The real failure: a criterion that reads as precise, naming a quantity nothing defines."""
+    from hiraku_auto.records import undefined_metrics
+
+    agent_mod.run_draft(
+        bare_project, "vggt-pose", "q", command=fake_agent(tmp_path, json.dumps(UNDEFINED))
+    )
+    record = load_goal(bare_project, "vggt-pose")
+    undefined = undefined_metrics(record)
+    assert [m for m, _ in undefined] == ["pairs_at_cap_fraction"]
+    assert "Success criterion" in undefined[0][1]
+
+    issues = check(build(bare_project))
+    assert any("pairs_at_cap_fraction" in i and "never defined" in i for i in issues)
+
+
+def test_a_metric_defined_in_the_protocol_is_not_reported(bare_project, tmp_path):
+    from hiraku_auto.records import undefined_metrics
+
+    ok = {**UNDEFINED}
+    ok["evaluation_protocol"] = {
+        **UNDEFINED["evaluation_protocol"],
+        "metrics": UNDEFINED["evaluation_protocol"]["metrics"]
+        + " `pairs_at_cap_fraction` is the share of evaluation pairs whose match count hits the "
+          "per-pair cap of 2048; it rises when the matcher saturates.",
+    }
+    agent_mod.run_draft(
+        bare_project, "vggt-pose", "q", command=fake_agent(tmp_path, json.dumps(ok))
+    )
+    assert undefined_metrics(load_goal(bare_project, "vggt-pose")) == []
+    assert check(build(bare_project)) == []
+
+
+def test_the_front_matter_metrics_must_be_defined_too(bare_project, tmp_path):
+    from hiraku_auto.records import undefined_metrics
+
+    bad = {**DRAFT, "evaluation_protocol": {
+        **DRAFT["evaluation_protocol"], "metrics": "Some numbers are computed."}}
+    agent_mod.run_draft(
+        bare_project, "vggt-pose", "q", command=fake_agent(tmp_path, json.dumps(bad))
+    )
+    names = {m for m, _ in undefined_metrics(load_goal(bare_project, "vggt-pose"))}
+    assert "reprojection_error_px_median" in names
+    assert "kept_frame_rate" in names
+
+
+def test_tool_vocabulary_is_not_mistaken_for_a_metric(project):
+    """`run_kind` and friends are the tool's own words, not measurements."""
+    from hiraku_auto.records import load_goal as _load
+    from hiraku_auto.records import undefined_metrics
+
+    record = _load(project, "vo-backend")
+    record.set_section(
+        "Out of scope",
+        "Runs with `run_kind` worktree. Anything needing a different `agreement_tolerance` "
+        "or a second `primary_metric`.",
+    )
+    record.path.write_text(record.render(), encoding="utf-8")
+    names = {m for m, _ in undefined_metrics(_load(project, "vo-backend"))}
+    assert not names & {"run_kind", "agreement_tolerance", "primary_metric"}

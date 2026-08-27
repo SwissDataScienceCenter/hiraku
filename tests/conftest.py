@@ -40,6 +40,20 @@ def project(bare_project):
         target=3.0,
         gate_metric="completion_rate",
     )
+    # A fixture goal has to be a *usable* goal: its protocol defines the metrics it names, so
+    # `check` is clean for the reasons the tool cares about rather than because nothing looks.
+    from hiraku_auto.records import load_goal, save_goal
+
+    record = load_goal(bare_project, "vo-backend")
+    record.set_section(
+        "Evaluation protocol",
+        "### Metrics\n\n"
+        "- `ate_rmse_m` — RMSE in metres of absolute trajectory error over the whole sequence,\n"
+        "  after Sim(3) alignment to ground truth.\n"
+        "- `completion_rate` — frames with a pose estimate, over 2,700 evaluation frames.\n",
+    )
+    save_goal(record)
+
     create_experiment(
         bare_project,
         "baseline",

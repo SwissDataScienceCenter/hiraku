@@ -238,6 +238,27 @@ def install_skill(root: Path, *, force: bool = False) -> list[Path]:
 # --------------------------------------------------------------------------- records
 
 
+def _unset_formula(name: str) -> str:
+    # Name the metric inside the marker: two identical markers say nothing about which is which.
+    return (
+        f"**[UNSET: the formula for `{name}` — the reduction (mean/median), the unit, and what "
+        f"is excluded. Those three choices change the number by more than most methods do.]**"
+    )
+
+
+def _metric_definitions(primary_metric: str, gate_metric: str | None) -> str:
+    """One bullet per declared metric, each carrying an UNSET for its formula.
+
+    A name with no formula beside it is the quietest way a goal goes wrong: every comparison under
+    it looks rigorous and none of them is checkable. Naming them here turns that into a marker the
+    researcher is told to replace.
+    """
+    lines = [f"- `{primary_metric}` — {_unset_formula(primary_metric)}"]
+    if gate_metric:
+        lines.append(f"- `{gate_metric}` — {_unset_formula(gate_metric)}")
+    return "\n".join(lines)
+
+
 def create_goal(
     project: Project,
     goal_id: str,
@@ -266,6 +287,7 @@ def create_goal(
             "gate_metric": gate_metric,
             "question": question
             or "**[State the open research question — falsifiable, about the world.]**",
+            "metric_definitions": _metric_definitions(primary_metric, gate_metric),
             "created": today(),
         },
     )

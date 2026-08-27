@@ -144,6 +144,36 @@ warning: goal 'vggt-dinov3' has 3 unset value(s) in its record. Gate condition 4
 
 You replace them by editing the record. That is a normal text edit; nothing regenerates it.
 
+## The other half of the same rule: a name with no formula
+
+`**[UNSET: ...]**` catches a value nobody supplied. This catches its quieter twin — a metric name
+used in a sentence that reads as precise, where nothing in the record says what the number is.
+
+```
+$ hiraku-auto check
+cross-domain: metric `pairs_at_cap_fraction` is used in Success criterion but never defined
+              in the Evaluation protocol
+```
+
+It fires on any `lower_snake_case` name in backticks, anywhere in a goal record — the question, the
+success criterion, out of scope, open threads, or the `primary_metric` / `gate_metric` front matter
+— that never appears in `## Evaluation protocol`. The tool's own vocabulary (`run_kind`,
+`agreement_tolerance`, `primary_metric` and the rest) is excluded.
+
+Why the protocol specifically: it is the one section every experiment under the goal inherits. A
+definition written anywhere else is not inherited, so it settles nothing.
+
+`goal add` now writes each declared metric into `### Metrics` with an UNSET beside it, so a fresh
+goal tells you which formulas it is waiting for instead of quietly using names nothing defines:
+
+```markdown
+### Metrics
+
+- `cross_source_reprojection_error_px` — **[UNSET: the formula for
+  `cross_source_reprojection_error_px` — the reduction (mean/median), the unit, and what is
+  excluded. Those three choices change the number by more than most methods do.]**
+```
+
 ## The whole first step, end to end
 
 ```bash

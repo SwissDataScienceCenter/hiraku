@@ -23,6 +23,15 @@ the same number. That is the bar. Concretely:
   triangulated 3D point, at native resolution, dropping frames with fewer than N valid points" is a
   metric. State the reduction (mean/median), the unit, and what is excluded — those three choices
   change the number by more than most methods do.
+- **Every metric name you use anywhere must be defined in `### Metrics`.** Not only
+  `primary_metric` and `gate_metric` — every `lower_snake_case` name you write in the question, the
+  success criterion, out of scope or open threads. If your success criterion says a run must not
+  raise `pairs_at_cap_fraction`, then `### Metrics` has to say what that is: what is being counted,
+  what the cap is, what the denominator is, and why it can be gamed. A criterion that names a
+  quantity the record never defines reads as precise and is not.
+  If you need such a quantity but cannot define it from what you were given, define it as far as
+  you can and put an `**[UNSET: ...]**` inside the definition for the part you cannot supply —
+  never drop the name in undefined.
 - **A split is a procedure.** Which items, produced how, by which script or seed, and the fact that
   it is not regenerated.
 - **A dataset is a version.** A name without a version or checksum cannot be compared against next

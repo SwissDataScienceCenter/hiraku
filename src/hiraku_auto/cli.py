@@ -43,6 +43,7 @@ from .records import (
     load_proposals,
     save_experiment,
     save_proposal,
+    undefined_metrics,
     unset_markers,
 )
 from .runs import rank, read_runs
@@ -191,13 +192,26 @@ def _red(text: str) -> str:
 def _print_unset(project: Any, record: Any, *, prefix: str = "") -> int:
     """Print every value nobody has supplied yet. These are what stop a goal being usable."""
     markers = unset_markers(record)
-    if not markers:
+    undefined = undefined_metrics(record)
+    if not markers and not undefined:
         return 0
-    print(_red(f"\n{prefix}{len(markers)} value(s) still unset — fill these in before running:"))
-    for section, needed in markers:
-        print(_red(f"  [{section}] {needed}"))
+    if markers:
+        print(_red(
+            f"\n{prefix}{len(markers)} value(s) still unset — fill these in before running:"
+        ))
+        for section, needed in markers:
+            print(_red(f"  [{section}] {needed}"))
+    if undefined:
+        print(_red(
+            f"\n{prefix}{len(undefined)} metric(s) used but never defined in the "
+            f"Evaluation protocol:"
+        ))
+        for metric, where in undefined:
+            print(_red(f"  `{metric}`  — used in {where}"))
+        print("  A criterion that names a quantity the record never defines reads as precise")
+        print("  and is not. Define each in ### Metrics, or stop using the name.")
     print(f"\n  edit {project.rel(record.path)}, then: hiraku-auto check")
-    return len(markers)
+    return len(markers) + len(undefined)
 
 
 def _table(rows: list[dict[str, Any]], columns: list[str]) -> str:
@@ -665,7 +679,9 @@ def _warn_unset_goal(project: Any, goal_id: str) -> None:
     record = load_goals(project).get(goal_id)
     if record is None:
         return
-    markers = unset_markers(record)
+    markers = unset_markers(record) + [
+        (f"metric `{m}`", f"used in {w} but never defined") for m, w in undefined_metrics(record)
+    ]
     if not markers:
         return
     print(
