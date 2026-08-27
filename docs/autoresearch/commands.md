@@ -139,8 +139,8 @@ usage: hiraku-auto goal draft [-h] [--question QUESTION]
                               [--question-file PATH] [--revise]
                               [--with-experiments] [--instruction INSTRUCTION]
                               [--context PATH] [--no-context]
-                              [--agent-cmd AGENT_CMD] [--dry-run] [--no-apply]
-                              [--timeout TIMEOUT]
+                              [--context-bytes N] [--agent-cmd AGENT_CMD]
+                              [--dry-run] [--no-apply] [--timeout TIMEOUT]
                               id
 
 positional arguments:
@@ -158,6 +158,8 @@ options:
                         extra context for the agent
   --context PATH        an extra file or glob to send along; repeatable
   --no-context          send no project files at all
+  --context-bytes N     raise the per-file cap for this call; see `hiraku-auto
+                        context`
   --agent-cmd AGENT_CMD
                         default: 'claude -p'
   --dry-run             print the prompt, call nothing
@@ -340,12 +342,14 @@ options:
 
 ### `hiraku-auto context --help`
 ```
-usage: hiraku-auto context [-h] [--add PATH] [--json]
+usage: hiraku-auto context [-h] [--add PATH] [--context-bytes N] [--json]
 
 options:
-  -h, --help  show this help message and exit
-  --add PATH  also resolve this file or glob
-  --json      the bundle exactly as the agent sees it
+  -h, --help         show this help message and exit
+  --add PATH         also resolve this file or glob
+  --context-bytes N  raise the per-file cap for this call (default:
+                     context.max_bytes_per_file)
+  --json             the bundle exactly as the agent sees it
 ```
 
 ### `hiraku-auto tracking --help`
@@ -408,8 +412,9 @@ options:
 ### `hiraku-auto agent --help`
 ```
 usage: hiraku-auto agent [-h] [--instruction INSTRUCTION] [--context PATH]
-                         [--no-context] [--agent-cmd AGENT_CMD] [--dry-run]
-                         [--no-apply] [--show-raw] [--timeout TIMEOUT]
+                         [--no-context] [--context-bytes N]
+                         [--agent-cmd AGENT_CMD] [--dry-run] [--no-apply]
+                         [--show-raw] [--timeout TIMEOUT]
                          {draft,design,triage,discover,analyze} target
 
 positional arguments:
@@ -425,6 +430,8 @@ options:
                         repeatable
   --no-context          send no project files (design and discover send them
                         by default)
+  --context-bytes N     raise the per-file cap for this call; see `hiraku-auto
+                        context`
   --agent-cmd AGENT_CMD
                         default: 'claude -p'
   --dry-run             print the prompt, call nothing

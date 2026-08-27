@@ -53,7 +53,7 @@ def test_environments_and_caches_are_skipped(bare_project):
 
 
 def test_a_large_file_is_truncated_not_dropped(bare_project):
-    (bare_project.root / "CLAUDE.md").write_text("x" * 50_000, "utf-8")
+    (bare_project.root / "CLAUDE.md").write_text("x" * 80_000, "utf-8")
     bundle = context_mod.collect(bare_project)
     entry = next(f for f in bundle.files if f.rel == "CLAUDE.md")
     assert entry.truncated
@@ -538,3 +538,106 @@ def test_tool_vocabulary_is_not_mistaken_for_a_metric(project):
     record.path.write_text(record.render(), encoding="utf-8")
     names = {m for m, _ in undefined_metrics(_load(project, "vo-backend"))}
     assert not names & {"run_kind", "agreement_tolerance", "primary_metric"}
+
+
+# --------------------------------------------------------------------------- truncation
+
+
+def big_memory_file(root: Path, headings: list[str], per_section: int = 4000) -> Path:
+    parts = ["# project\n\nOverview.\n"]
+    for name in headings:
+        parts.append(f"\n## {name}\n\n" + ("x" * per_section) + "\n")
+    path = root / "CLAUDE.md"
+    path.write_text("".join(parts), encoding="utf-8")
+    return path
+
+
+def test_truncation_cuts_on_a_heading_and_names_what_was_dropped(bare_project):
+    """"first 20,000 of 167,131" tells the agent nothing. A list of section titles does."""
+    big_memory_file(bare_project.root, ["Conventions", "Data", "Preprocessing", "Intrinsics"])
+    config = read_record(bare_project.config_md)
+    config.front["context"] = {"sources": ["CLAUDE.md"], "max_bytes_per_file": 9000}
+    config.path.write_text(config.render(), encoding="utf-8")
+
+    entry = context_mod.collect(bare_project).files[0]
+    assert entry.truncated
+    assert entry.dropped, "the dropped headings must be named"
+    assert "Preprocessing" in entry.dropped and "Intrinsics" in entry.dropped
+    # every section that IS included is included whole
+    assert entry.text.count("x" * 4000) == entry.text.count("## ")
+
+    payload = entry.to_dict()
+    assert payload["sections_not_included"] == entry.dropped
+    assert "do not guess" in payload["how_to_handle_the_gap"]
+
+
+def test_a_file_that_fits_is_not_reported_as_truncated(bare_project):
+    """A trailing newline used to make a whole file look cut by one character."""
+    (bare_project.root / "CLAUDE.md").write_text("# p\n\nshort, and ends in a newline\n", "utf-8")
+    entry = next(f for f in context_mod.collect(bare_project).files if f.rel == "CLAUDE.md")
+    assert not entry.truncated and entry.dropped == []
+    assert not context_mod.collect(bare_project).truncated_files
+
+
+def test_a_file_with_no_headings_falls_back_to_a_byte_cut(bare_project):
+    (bare_project.root / "CLAUDE.md").write_text("y" * 30_000, "utf-8")
+    config = read_record(bare_project.config_md)
+    config.front["context"] = {"sources": ["CLAUDE.md"], "max_bytes_per_file": 5000}
+    config.path.write_text(config.render(), encoding="utf-8")
+    entry = context_mod.collect(bare_project).files[0]
+    assert entry.truncated and entry.dropped == []
+    assert len(entry.text) <= 5000
+
+
+def test_the_bundle_reports_the_caps_that_would_fit_everything(bare_project):
+    big_memory_file(bare_project.root, ["A", "B", "C"], per_section=8000)
+    config = read_record(bare_project.config_md)
+    config.front["context"] = {"sources": ["CLAUDE.md"], "max_bytes_per_file": 5000}
+    config.path.write_text(config.render(), encoding="utf-8")
+    bundle = context_mod.collect(bare_project)
+    per_file, total = bundle.needed_limits()
+    assert per_file == bundle.files[0].bytes_total
+    assert total >= per_file
+    assert "truncated" in bundle.summary()
+
+
+def test_max_bytes_raises_the_cap_for_one_call_only(bare_project):
+    big_memory_file(bare_project.root, ["A", "B", "C"], per_section=8000)
+    config = read_record(bare_project.config_md)
+    config.front["context"] = {"sources": ["CLAUDE.md"], "max_bytes_per_file": 5000}
+    config.path.write_text(config.render(), encoding="utf-8")
+
+    assert context_mod.collect(bare_project).files[0].truncated
+    whole = context_mod.collect(bare_project, max_bytes=200_000).files[0]
+    assert not whole.truncated
+    # the total cap rises with it — a per-file cap you cannot use is not a cap
+    assert context_mod.collect(bare_project).files[0].truncated, "the config is unchanged"
+
+
+def test_the_agent_call_can_raise_the_cap(project):
+    big_memory_file(project.root, ["Conventions", "Preprocessing"], per_section=9000)
+    config = read_record(project.config_md)
+    config.front["context"] = {"sources": ["CLAUDE.md"], "max_bytes_per_file": 6000}
+    config.path.write_text(config.render(), encoding="utf-8")
+
+    default = agent_mod.run_design(project, "vo-backend", dry_run=True)
+    assert "sections_not_included" in default.prompt
+
+    whole = agent_mod.run_design(project, "vo-backend", dry_run=True, context_bytes=100_000)
+    assert "sections_not_included" not in whole.prompt
+    assert not whole.context.truncated_files
+
+
+def test_a_trailing_comment_on_a_cap_still_parses_as_a_number():
+    """`max_bytes_per_file: 60000  # why` must be 60000, not a string, without PyYAML."""
+    text = (
+        "context:\n"
+        "  max_files: 40\n"
+        "  max_bytes_per_file: 60000     # a bigger file is cut on a heading boundary\n"
+        "  max_total_bytes: 400000       # names the sections it left out\n"
+        '  note: "a # inside quotes is kept"\n'
+    )
+    parsed = yamlio._fallback_load(text)["context"]
+    assert parsed["max_bytes_per_file"] == 60000
+    assert parsed["max_total_bytes"] == 400000
+    assert parsed["note"] == "a # inside quotes is kept"

@@ -99,6 +99,7 @@ def gather_context(
     *,
     use: bool | None = None,
     extra: list[str] | None = None,
+    max_bytes: int | None = None,
 ) -> context_mod.Bundle:
     """The project's own files, for the workflows that are better for having read them.
 
@@ -108,7 +109,9 @@ def gather_context(
     enabled = (workflow in CONTEXT_BY_DEFAULT) if use is None else use
     if extra and use is not False:
         enabled = True
-    return context_mod.collect(project, extra=list(extra or []), enabled=enabled)
+    return context_mod.collect(
+        project, extra=list(extra or []), enabled=enabled, max_bytes=max_bytes
+    )
 
 
 def attach_context(state: dict[str, Any], bundle: context_mod.Bundle) -> dict[str, Any]:
@@ -433,6 +436,7 @@ def run_draft(
     with_experiments: bool = False,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
+    context_bytes: int | None = None,
     hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
@@ -448,7 +452,9 @@ def run_draft(
         raise HirakuError("A question is required: pass --question, or --question-file.")
 
     forest = build(project)
-    bundle = gather_context(project, "draft", use=use_context, extra=extra_context)
+    bundle = gather_context(
+        project, "draft", use=use_context, extra=extra_context, max_bytes=context_bytes
+    )
     existing = forest.goals.get(goal_id)
     state = attach_context(
         {
@@ -528,12 +534,15 @@ def run_design(
     apply: bool = True,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
+    context_bytes: int | None = None,
     hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     forest = build(project)
     load_goal(project, goal_id)
-    bundle = gather_context(project, "design", use=use_context, extra=extra_context)
+    bundle = gather_context(
+        project, "design", use=use_context, extra=extra_context, max_bytes=context_bytes
+    )
     prompt = build_prompt(
         "design",
         attach_context(slim_state(forest, goal=goal_id), bundle),
@@ -588,6 +597,7 @@ def run_triage(
     apply: bool = True,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
+    context_bytes: int | None = None,
     hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
@@ -595,7 +605,9 @@ def run_triage(
     if experiment_id not in forest.nodes:
         raise HirakuError(f"Experiment '{experiment_id}' does not exist.")
     node = forest.nodes[experiment_id]
-    bundle = gather_context(project, "triage", use=use_context, extra=extra_context)
+    bundle = gather_context(
+        project, "triage", use=use_context, extra=extra_context, max_bytes=context_bytes
+    )
     prompt = build_prompt(
         "triage",
         attach_context(slim_state(forest, goal=node.goal, focus=experiment_id), bundle),
@@ -679,12 +691,15 @@ def run_discover(
     apply: bool = True,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
+    context_bytes: int | None = None,
     hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
     forest = build(project)
     load_goal(project, goal_id)
-    bundle = gather_context(project, "discover", use=use_context, extra=extra_context)
+    bundle = gather_context(
+        project, "discover", use=use_context, extra=extra_context, max_bytes=context_bytes
+    )
     prompt = build_prompt(
         "discover",
         attach_context(slim_state(forest, goal=goal_id), bundle),
@@ -736,6 +751,7 @@ def run_analyze(
     apply: bool = True,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
+    context_bytes: int | None = None,
     hooks: Hooks | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> AgentRun:
@@ -745,7 +761,9 @@ def run_analyze(
     node = forest.nodes[experiment_id]
     if not node.runs:
         raise HirakuError(f"'{experiment_id}' has no runs to analyse.")
-    bundle = gather_context(project, "analyze", use=use_context, extra=extra_context)
+    bundle = gather_context(
+        project, "analyze", use=use_context, extra=extra_context, max_bytes=context_bytes
+    )
     prompt = build_prompt(
         "analyze",
         attach_context(slim_state(forest, goal=node.goal, focus=experiment_id), bundle),

@@ -27,8 +27,8 @@ context:
     #   - ../mapillary_alignment/CLAUDE.md
     #   - ../mapillary_alignment/docs/**/*.md
   max_files: 40
-  max_bytes_per_file: 20000
-  max_total_bytes: 200000
+  max_bytes_per_file: 60000     # a bigger file is cut on a heading boundary; the excerpt
+  max_total_bytes: 400000       # names the sections it left out. `hiraku-auto context` shows it.
 ---
 
 # Research configuration

@@ -437,7 +437,13 @@ export HIRAKU_AGENT_CMD='claude -p --allowedTools WebSearch,WebFetch'   # or set
 `draft`, `design` and `discover` also send excerpts of the project's own files — `CLAUDE.md`, the
 README, `docs/**` — so the agent uses your definitions instead of asking for them. Run
 `hiraku-auto context` to see exactly what would be sent before the first call; `--context PATH` adds
-a file, `--no-context` sends none. Full details in [goal-drafting.md](goal-drafting.md).
+a file, `--no-context` sends none.
+
+A file over the per-file cap (60,000 characters by default) is cut on a heading boundary and the
+excerpt names the sections it left out, so the agent can say what it did not see instead of guessing.
+Raise `context.max_bytes_per_file`, pass `--context-bytes N` for one call, or let the agent read the
+file itself with `--agent-cmd 'claude -p --allowedTools Read,Glob,Grep --add-dir ../other-repo'`.
+Full details in [goal-drafting.md](goal-drafting.md).
 
 ### Authentication and cost
 

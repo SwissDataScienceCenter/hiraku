@@ -137,6 +137,21 @@ def cmd_tracking(args: argparse.Namespace) -> int:
     return 0
 
 
+def _warn_truncated(bundle: Any) -> None:
+    """A truncated context file is why an UNSET marker may already be answered somewhere."""
+    cut = getattr(bundle, "truncated_files", [])
+    if not cut:
+        return
+    per_file, _ = bundle.needed_limits()
+    print(_red(f"note: {len(cut)} context file(s) were truncated — the agent did not see all of:"))
+    for entry in cut:
+        print(_red(f"  {entry.rel} ({len(entry.text):,} of {entry.bytes_total:,} chars)"))
+        if entry.dropped:
+            print(f"    not sent: {', '.join(entry.dropped[:6])}"
+                  + (f", +{len(entry.dropped) - 6} more" if len(entry.dropped) > 6 else ""))
+    print(f"  Re-run with --context-bytes {per_file} to send them whole.")
+
+
 def cmd_logs(args: argparse.Namespace) -> int:
     """Every agent call this project has made: the prompt sent, the reply, how long it took."""
     project = _project(args)
@@ -306,12 +321,14 @@ def cmd_goal_draft(args: argparse.Namespace) -> int:
         with_experiments=args.with_experiments,
         use_context=_context_choice(args),
         extra_context=args.context or [],
+        context_bytes=args.context_bytes,
         hooks=_agent_hooks(),
         timeout=args.timeout,
     )
     if args.dry_run:
         print(result.prompt)
         return 0
+    _warn_truncated(result.context)
     for path in result.written:
         print(f"wrote {project.rel(path)}")
     if not result.written:
@@ -343,7 +360,9 @@ def cmd_goal_draft(args: argparse.Namespace) -> int:
 def cmd_context(args: argparse.Namespace) -> int:
     """What would be sent to the agent, before anything is sent. Look before you call."""
     project = _project(args)
-    bundle = context_mod.collect(project, extra=args.add or [], enabled=True)
+    bundle = context_mod.collect(
+        project, extra=args.add or [], enabled=True, max_bytes=args.context_bytes
+    )
     if args.json:
         print(json.dumps(bundle.to_state(), indent=2))
         return 0
@@ -360,6 +379,25 @@ def cmd_context(args: argparse.Namespace) -> int:
     print(_table(rows, ["file", "chars", "of", "where"]))
     for note in bundle.skipped:
         print(f"omitted: {note}")
+
+    if bundle.truncated_files:
+        per_file, total = bundle.needed_limits()
+        print(_red(f"\n{len(bundle.truncated_files)} file(s) truncated:"))
+        for entry in bundle.truncated_files:
+            print(_red(
+                f"  {entry.rel}: kept {len(entry.text):,} of {entry.bytes_total:,} characters"
+            ))
+            if entry.dropped:
+                print("    sections not sent: " + ", ".join(entry.dropped[:8])
+                      + (f", +{len(entry.dropped) - 8} more" if len(entry.dropped) > 8 else ""))
+        print("\n  To send them whole, in research/config.md front matter:")
+        print(f"      max_bytes_per_file: {per_file}")
+        print(f"      max_total_bytes: {max(total, per_file * 2)}")
+        print("  Or for one call only:  --context-bytes " + str(per_file))
+        print("  Or let the agent read the file itself, instead of sending it:")
+        print("      --agent-cmd 'claude -p --allowedTools Read,Glob,Grep "
+              "--add-dir ../<the-other-repo>'")
+
     print(f"\n{bundle.summary()}")
     print(
         "\nThese excerpts are included in the prompt for the draft, design and discover "
@@ -705,6 +743,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
         apply=not args.no_apply,
         use_context=_context_choice(args),
         extra_context=args.context or [],
+        context_bytes=args.context_bytes,
         hooks=_agent_hooks(),
         timeout=args.timeout,
     )
@@ -729,6 +768,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
     if args.dry_run:
         print(result.prompt)
         return 0
+    _warn_truncated(result.context)
     if args.show_raw:
         print(result.raw)
     if result.data.get("blocked"):
@@ -1131,6 +1171,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--no-context", action="store_true", help="send no project files at all"
     )
+    p.add_argument(
+        "--context-bytes", type=int, metavar="N",
+        help="raise the per-file cap for this call; see `hiraku-auto context`",
+    )
     p.add_argument("--agent-cmd", help=f"default: {agent_mod.DEFAULT_AGENT_CMD!r}")
     p.add_argument("--dry-run", action="store_true", help="print the prompt, call nothing")
     p.add_argument("--no-apply", action="store_true", help="call the agent but write no files")
@@ -1233,6 +1277,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--add", action="append", metavar="PATH", help="also resolve this file or glob"
     )
+    p.add_argument(
+        "--context-bytes", type=int, metavar="N",
+        help="raise the per-file cap for this call (default: context.max_bytes_per_file)",
+    )
     p.add_argument("--json", action="store_true", help="the bundle exactly as the agent sees it")
     p.set_defaults(func=cmd_context)
 
@@ -1288,6 +1336,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-context",
         action="store_true",
         help="send no project files (design and discover send them by default)",
+    )
+    p.add_argument(
+        "--context-bytes", type=int, metavar="N",
+        help="raise the per-file cap for this call; see `hiraku-auto context`",
     )
     p.add_argument("--agent-cmd", help=f"default: {agent_mod.DEFAULT_AGENT_CMD!r}")
     p.add_argument("--dry-run", action="store_true", help="print the prompt, call nothing")

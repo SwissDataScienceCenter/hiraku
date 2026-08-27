@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,9 +42,11 @@ DEFAULT_SOURCES: tuple[str, ...] = (
 
 DEFAULT_LIMITS: dict[str, int] = {
     "max_files": 40,
-    "max_bytes_per_file": 20_000,
-    "max_total_bytes": 200_000,
+    "max_bytes_per_file": 60_000,
+    "max_total_bytes": 400_000,
 }
+
+HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.M)
 
 TEXT_SUFFIXES = {
     ".md", ".markdown", ".rst", ".txt", ".yml", ".yaml", ".toml", ".json",
@@ -78,6 +81,7 @@ class ContextFile:
     text: str
     bytes_total: int
     truncated: bool = False
+    dropped: list[str] = field(default_factory=list)
 
     @property
     def outside(self) -> bool:
@@ -88,7 +92,17 @@ class ContextFile:
         if self.outside:
             out["from"] = "another repository, named as a context source"
         if self.truncated:
-            out["truncated"] = f"first {len(self.text)} of {self.bytes_total} characters"
+            out["truncated"] = f"kept {len(self.text)} of {self.bytes_total} characters"
+            if self.dropped:
+                # Naming the dropped headings is the whole point. "first 20,000 of 167,131" tells
+                # the agent nothing; a list of section titles lets it say "the resize convention is
+                # probably under §Preprocessing, which I was not given" instead of guessing.
+                out["sections_not_included"] = self.dropped
+                out["how_to_handle_the_gap"] = (
+                    "If an answer you need is likely under one of these headings, record it as an "
+                    "**[UNSET: ...]** naming the heading — do not guess. The researcher can raise "
+                    "context.max_bytes_per_file or paste that section in."
+                )
         return out
 
 
@@ -120,13 +134,25 @@ class Bundle:
             "omitted": self.skipped,
         }
 
+    @property
+    def truncated_files(self) -> list[ContextFile]:
+        return [f for f in self.files if f.truncated]
+
+    def needed_limits(self) -> tuple[int, int]:
+        """The caps that would include every resolved file whole."""
+        per_file = max([f.bytes_total for f in self.files] or [0])
+        total = sum(f.bytes_total for f in self.files)
+        return per_file, total
+
     def summary(self) -> str:
         if not self.files:
             return "context: none"
         outside = sum(1 for f in self.files if f.outside)
+        cut = len(self.truncated_files)
         return (
             f"context: {len(self.files)} file(s), {self.total_chars:,} characters"
             + (f", {outside} from outside this project" if outside else "")
+            + (f", {cut} truncated" if cut else "")
             + (f", {len(self.skipped)} omitted" if self.skipped else "")
         )
 
@@ -165,6 +191,51 @@ def configured(project: Project) -> tuple[list[str], dict[str, int]]:
         if isinstance(value, int) and value > 0:
             limits[key] = value
     return sources, limits
+
+
+def _blocks(text: str) -> list[tuple[str | None, str]]:
+    """`[(heading or None, block), ...]` — the preamble first, then one entry per heading."""
+    marks = list(HEADING.finditer(text))
+    if not marks:
+        return [(None, text)]
+    out: list[tuple[str | None, str]] = []
+    if marks[0].start() > 0:
+        out.append((None, text[: marks[0].start()]))
+    for index, mark in enumerate(marks):
+        end = marks[index + 1].start() if index + 1 < len(marks) else len(text)
+        out.append((mark.group(2).strip(), text[mark.start() : end]))
+    return out
+
+
+def excerpt(text: str, allowance: int) -> tuple[str, list[str]]:
+    """Cut to `allowance` on a heading boundary. Returns (kept text, dropped heading titles).
+
+    Cutting mid-sentence at a byte count loses the one thing the reader needs to know: WHAT is
+    missing. Cutting between sections keeps every included section whole and lets the excerpt say
+    which sections it does not have, by name.
+    """
+    if len(text) <= allowance:
+        return text, []
+    blocks = _blocks(text)
+    if len(blocks) == 1:
+        return text[:allowance], []
+
+    kept: list[str] = []
+    dropped: list[str] = []
+    used = 0
+    for title, block in blocks:
+        if used + len(block) <= allowance:
+            kept.append(block)
+            used += len(block)
+        elif title:
+            dropped.append(title)
+        elif not kept:
+            # A preamble too large to fit at all: take what there is room for.
+            kept.append(block[:allowance])
+            used = allowance
+    if not kept:
+        return text[:allowance], [t for t, _ in blocks if t]
+    return "".join(kept), dropped
 
 
 # --------------------------------------------------------------------------- collection
@@ -255,12 +326,21 @@ def collect(
     *,
     extra: list[str] | None = None,
     enabled: bool = True,
+    max_bytes: int | None = None,
 ) -> Bundle:
-    """Read the configured sources plus any `extra` paths, under the configured caps."""
+    """Read the configured sources plus any `extra` paths, under the configured caps.
+
+    `max_bytes` raises the per-file cap for this call only — `--context-bytes` on the CLI. The
+    total cap rises with it, because a per-file cap you cannot actually use is not a cap.
+    """
     if not enabled:
         return Bundle()
 
     sources, limits = configured(project)
+    if max_bytes and max_bytes > 0:
+        limits = dict(limits)
+        limits["max_bytes_per_file"] = max_bytes
+        limits["max_total_bytes"] = max(limits["max_total_bytes"], max_bytes * 2)
     sources = sources + [s for s in (extra or []) if s not in sources]
     bundle = Bundle(sources=sources, limits=limits)
     if not sources:
@@ -298,11 +378,17 @@ def collect(
             if allowance <= 0:
                 bundle.skipped.append(f"{rel} (total cap {limits['max_total_bytes']} reached)")
                 continue
+            # Truncation is decided by the allowance, not by the length after rstrip — otherwise
+            # a file ending in a newline reports itself as cut by one character.
             truncated = total > allowance
-            excerpt = text[:allowance].rstrip() if truncated else text.rstrip()
-            budget -= len(excerpt)
+            kept, dropped = excerpt(text, allowance)
+            kept = kept.rstrip()
+            budget -= len(kept)
             bundle.files.append(
-                ContextFile(rel=rel, text=excerpt, bytes_total=total, truncated=truncated)
+                ContextFile(
+                    rel=rel, text=kept, bytes_total=total,
+                    truncated=truncated, dropped=dropped,
+                )
             )
 
     return bundle

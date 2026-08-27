@@ -68,8 +68,19 @@ Points worth knowing:
 - **Records are excluded** even if a glob would match them. `research/goals/`, `research/experiments/`
   and `research/proposals/` are already in the state at full length; sending them twice wastes the
   budget and invites the agent to reason from the stale copy.
-- **Bounded, and truncation is visible.** A file over the per-file cap is cut and labelled, not
-  silently dropped. Environments, caches and `.git` are never walked.
+- **Bounded, and truncation names what it dropped.** A file over the per-file cap is cut **on a
+  heading boundary**, and the excerpt carries the titles of the sections it does not include:
+
+  ```
+  1 file(s) truncated:
+    ../mapillary_alignment/CLAUDE.md: kept 17,142 of 210,803 characters
+      sections not sent: Conventions, Preprocessing and resize convention,
+                         Mapillary intrinsics, VGGT pipeline, Evaluation
+  ```
+
+  "first 20,000 of 167,131 characters" tells the agent nothing. A list of headings lets it say
+  *"the resize convention is probably under §Preprocessing, which I was not given"* and record that
+  as an UNSET instead of guessing. Environments, caches and `.git` are never walked.
 
 Which workflows read it:
 
@@ -143,6 +154,50 @@ warning: goal 'vggt-dinov3' has 3 unset value(s) in its record. Gate condition 4
 ```
 
 You replace them by editing the record. That is a normal text edit; nothing regenerates it.
+
+## When a context file is too big to send whole
+
+Defaults are 60,000 characters per file and 400,000 in total. A large `CLAUDE.md` will exceed the
+per-file cap, and the agent will tell you it only saw part of it. Three ways out, in the order I
+would try them:
+
+**1. Raise the caps** — `hiraku-auto context` prints the exact numbers:
+
+```yaml
+context:
+  max_bytes_per_file: 210803
+  max_total_bytes: 421606
+```
+
+Or for one call only, without touching the project config:
+
+```bash
+hiraku-auto goal draft <id> --question "..." --context-bytes 210803
+```
+
+**2. Let the agent read the file itself, instead of sending it.** `claude -p` starts with no tools
+and can only read inside its working directory, which is the research project — so a sibling
+repository is out of reach even with `Read` allowed. `--add-dir` fixes that:
+
+```bash
+hiraku-auto goal draft <id> --question "..." \
+  --agent-cmd 'claude -p --allowedTools Read,Glob,Grep --add-dir ../mapillary_alignment'
+```
+
+This is the better answer for a big repository: the agent greps for what it needs rather than
+having 200 KB pushed at it, and the prompt stays small. The cost is that what it read is no longer
+visible in the log — `prompt.md` records what you sent, not what it went and found.
+
+**3. Send the sections that matter, not the whole file.** A 167 KB `CLAUDE.md` is worth splitting:
+
+```yaml
+context:
+  sources:
+    - ../mapillary_alignment/docs/metrics.md
+    - ../mapillary_alignment/docs/data.md
+```
+
+Cheapest per call, and it makes the memory file more useful to you as well.
 
 ## The other half of the same rule: a name with no formula
 

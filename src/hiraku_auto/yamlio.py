@@ -19,8 +19,32 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 
+def _strip_comment(raw: str) -> str:
+    """Drop a trailing ` # comment`, respecting quotes.
+
+    A cap written as `max_bytes_per_file: 60000   # why` must parse as 60000, not as a string —
+    otherwise the limit silently stops being a number on an install without PyYAML.
+    """
+    out: list[str] = []
+    quote = ""
+    for index, char in enumerate(raw):
+        if quote:
+            out.append(char)
+            if char == quote:
+                quote = ""
+            continue
+        if char in "\"'":
+            quote = char
+            out.append(char)
+            continue
+        if char == "#" and (index == 0 or raw[index - 1] in " \t"):
+            break
+        out.append(char)
+    return "".join(out)
+
+
 def _scalar(raw: str) -> Any:
-    text = raw.strip()
+    text = _strip_comment(raw).strip()
     if not text:
         return None
     if len(text) > 1 and text[0] in "\"'" and text[-1] == text[0]:
