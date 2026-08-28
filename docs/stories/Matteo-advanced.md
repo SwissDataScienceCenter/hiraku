@@ -1,4 +1,4 @@
-# Matteo: One lifecycle core, multiple research interfaces
+# Matteo: Bounded autonomous research over one lifecycle core
 
 The main goal of the workflow is to give guided and autonomous research the same reliable foundation. A stable Goal defines the scope and success criterion; Experiments represent testable attempts; Runs capture durable execution evidence; and Analysis connects results back to the Goal. Hiraku owns this lifecycle in a local SQLite database, while Git records exact source provenance. Human-facing and agent-facing tools are different interfaces over the same authoritative state.
 
