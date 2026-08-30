@@ -163,12 +163,24 @@ class Record:
                     return value
         return ""
 
-    def set_section(self, name: str, text: str) -> None:
+    def set_section(self, name: str, text: str, *, before: str | None = None) -> None:
+        """Replace a section, or create it. `before` places a new section ahead of that one."""
         for key in self.sections:
             if key.lower().startswith(name.lower()):
                 self.sections[key] = text.rstrip() + "\n"
                 return
-        self.sections[name] = text.rstrip() + "\n"
+        body = text.rstrip() + "\n"
+        if before:
+            for key in self.sections:
+                if key.lower().startswith(before.lower()):
+                    rebuilt: dict[str, str] = {}
+                    for existing, value in self.sections.items():
+                        if existing == key:
+                            rebuilt[name] = body
+                        rebuilt[existing] = value
+                    self.sections = rebuilt
+                    return
+        self.sections[name] = body
 
     def append_section(self, name: str, text: str) -> None:
         existing = self.section(name).strip()

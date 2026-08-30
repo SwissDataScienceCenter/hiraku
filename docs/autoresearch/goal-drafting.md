@@ -112,12 +112,53 @@ evaluation protocol, what is out of scope, and open threads. The tool writes it;
 Useful flags:
 
 - `--question-file PATH`, or pipe the question on stdin.
-- `--revise` — redraft an existing goal's sections, keeping its History. Use it after filling in
-  some unset values, to have the rest rewritten around them.
+- `--revise` — rewrite an existing goal's drafted sections. Use it after filling in some unset
+  values, to have the rest rewritten around them. It replaces those sections, so anything you
+  edited by hand in them is gone; `git diff` before you commit.
+- `--history` — keep a `## History` section in the record. Off by default: see below.
 - `--with-experiments` — also create the suggested first experiments as `proposed` nodes. Off by
   default on purpose: proposing experiments before the protocol is settled produces work that
   cannot be promoted.
 - `--dry-run` — print the prompt and call nothing. Worth doing once, to see what is being sent.
+
+## Grounding, and why there is no History
+
+Two things could record where a record came from, and only one of them is worth having.
+
+`## Grounding` is written on every draft: each claim the agent took from your files, and the file it
+came from. It describes the record **as it stands**, so a redraft replaces it whole. One block, always
+current, always about the text you are reading.
+
+`## History` is off by default. Git already holds the real history of every record — every version,
+every diff, with dates and an author — and a History section can only duplicate that, badly. Worse,
+drafting *appends* to it: three `--revise` calls used to leave three near-identical entries, each
+re-listing almost the same citations, until the section was a quarter of the file and nobody read any
+of it.
+
+If a project wants the section anyway, turn it on:
+
+```yaml
+# research/config.md front matter
+records:
+  history: true
+```
+
+or pass `--history` to a single `goal add` or `goal draft`. With it on, one line is written per
+redraft that actually changed something, naming what moved
+(`- 2026-08-27 — goal redrafted: success criterion, evaluation protocol.`); a second redraft on the
+same date widens that line rather than adding another, and a redraft that changed nothing writes no
+line at all.
+
+For a record that already grew this way:
+
+```bash
+hiraku-auto goal tidy --dry-run     # every goal; say what would go
+hiraku-auto goal tidy vggt-dinov3   # one goal, for real
+```
+
+It removes what the tool wrote and moves the newest grounding block into `## Grounding`. A line **you**
+wrote is never deleted — it stays, and `tidy` says so. With `--history` it collapses the section
+instead of removing it.
 
 ## `**[UNSET: ...]**` — the honest gap
 

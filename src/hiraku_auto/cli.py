@@ -1,7 +1,7 @@
 """Command-line interface.
 
     hiraku-auto init
-    hiraku-auto goal add | draft | list | show | rm
+    hiraku-auto goal add | draft | list | show | tidy | rm
     hiraku-auto exp create | list | show | set | rm | tree
     hiraku-auto launch <experiment>:<entrypoint> [--commit REF]
     hiraku-auto runs [<experiment>] [--sort METRIC --descending]
@@ -35,6 +35,7 @@ from .config import load_project
 from .errors import HirakuError
 from .launcher import launch as do_launch
 from .records import (
+    GOAL_KEYS,
     KINDS,
     MODES,
     STATUSES,
@@ -46,6 +47,7 @@ from .records import (
     save_proposal,
     undefined_metrics,
     unset_markers,
+    write_record,
 )
 from .runs import rank, read_runs
 from .tree import build, render_ascii, to_dict
@@ -293,6 +295,15 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _history_choice(args: argparse.Namespace) -> bool | None:
+    """--history / --no-history, or None to fall through to `records.history` in config.md."""
+    if getattr(args, "history", False):
+        return True
+    if getattr(args, "no_history", False):
+        return False
+    return None
+
+
 def cmd_goal_add(args: argparse.Namespace) -> int:
     project = _project(args)
     path = scaffold.create_goal(
@@ -303,6 +314,7 @@ def cmd_goal_add(args: argparse.Namespace) -> int:
         target=args.target,
         gate_metric=args.gate_metric,
         question=args.question or "",
+        history=_history_choice(args),
     )
     print(f"created {project.rel(path)}")
     return 0
@@ -331,6 +343,7 @@ def cmd_goal_draft(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         apply=not args.no_apply,
         revise=args.revise,
+        history=_history_choice(args),
         with_experiments=args.with_experiments,
         use_context=_context_choice(args),
         extra_context=args.context or [],
@@ -350,6 +363,13 @@ def cmd_goal_draft(args: argparse.Namespace) -> int:
         return 0
 
     record = load_goals(project).get(args.id)
+    if args.revise and record is not None and scaffold.history_enabled(
+        project, _history_choice(args)
+    ):
+        # A redraft that changed nothing gets no History line; say so rather than leaving the
+        # researcher to wonder whether the call did anything.
+        line = scaffold.last_redraft(record, scaffold.today())
+        print(f"\n{line}" if line else "\nno change — the draft matched the record already there.")
     grounding = result.data.get("grounding") or []
     if not grounding:
         print(
@@ -457,6 +477,41 @@ def cmd_goal_show(args: argparse.Namespace) -> int:
     else:
         print(record.path.read_text(encoding="utf-8"))
         _print_unset(project, record)
+    return 0
+
+
+def cmd_goal_tidy(args: argparse.Namespace) -> int:
+    """Take the tool's own leavings out of History — everywhere, or in one goal."""
+    project = _project(args)
+    goals = load_goals(project)
+    if args.id:
+        if args.id not in goals:
+            raise HirakuError(f"Goal '{args.id}' does not exist.")
+        goals = {args.id: goals[args.id]}
+    keep = scaffold.history_enabled(project, _history_choice(args))
+    touched = 0
+    for goal_id, record in sorted(goals.items()):
+        removed = scaffold.consolidate_history(record)
+        kept: list[str] = []
+        if not keep:
+            dropped, kept = scaffold.drop_history(record)
+            removed += dropped
+        if not removed:
+            continue
+        touched += 1
+        print(f"{goal_id}: {removed} History line(s) {'would go' if args.dry_run else 'removed'}")
+        for line in kept:
+            print(f"  kept (you wrote it): {line}")
+        if not args.dry_run:
+            write_record(record, GOAL_KEYS)
+            print(f"  wrote {project.rel(record.path)}")
+    if not touched:
+        print("nothing to remove")
+        return 0
+    if args.dry_run:
+        print("\ndry run — nothing written")
+    else:
+        print("\nthe old text is still in git: `git diff` before you commit.")
     return 0
 
 
@@ -1158,6 +1213,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target", help="the value that would settle the question")
     p.add_argument("--gate-metric", help="a metric that must not degrade (e.g. completion_rate)")
     p.add_argument("--question")
+    p.add_argument(
+        "--history",
+        action="store_true",
+        help="keep a History section in the record (off by default; git already has the history)",
+    )
+    p.add_argument(
+        "--no-history", action="store_true", help="never keep one, whatever config.md says"
+    )
     p.set_defaults(func=cmd_goal_add)
     p = goal.add_parser(
         "draft",
@@ -1169,8 +1232,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--revise",
         action="store_true",
-        help="rewrite an existing goal's drafted sections, keeping its History",
+        help="rewrite an existing goal's drafted sections; anything you edited by hand is lost",
     )
+    p.add_argument(
+        "--history",
+        action="store_true",
+        help="keep a History section in the record (off by default; git already has the history)",
+    )
+    p.add_argument(
+        "--no-history", action="store_true", help="never keep one, whatever config.md says"
+    )
+
     p.add_argument(
         "--with-experiments",
         action="store_true",
@@ -1210,6 +1282,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     p.add_argument("--json", action="store_true", help="front matter and sections as JSON")
     p.set_defaults(func=cmd_goal_show)
+    p = goal.add_parser(
+        "tidy",
+        help="collapse repeated `goal redrafted` entries and stale grounding blocks in History",
+    )
+    p.add_argument("id", nargs="?", help="one goal; omit for every goal")
+    p.add_argument("--dry-run", action="store_true", help="say what would go, write nothing")
+    p.add_argument(
+        "--history",
+        action="store_true",
+        help="keep the section, collapsing repeats to one line per date, instead of removing it",
+    )
+    p.add_argument("--no-history", action="store_true", help="remove it, whatever config.md says")
+    p.set_defaults(func=cmd_goal_tidy)
     p = goal.add_parser(
         "rm", help="delete a goal record; refuses while experiments or runs depend on it"
     )

@@ -17,9 +17,16 @@ from test_agent import fake_agent
 
 from hiraku_auto import agent as agent_mod
 from hiraku_auto import context as context_mod
-from hiraku_auto import yamlio
+from hiraku_auto import scaffold, yamlio
 from hiraku_auto.errors import HirakuError
-from hiraku_auto.records import load_experiment, load_goal, read_record, unset_markers
+from hiraku_auto.records import (
+    GOAL_KEYS,
+    load_experiment,
+    load_goal,
+    read_record,
+    unset_markers,
+    write_record,
+)
 from hiraku_auto.tree import build, check
 
 # --------------------------------------------------------------------------- collection
@@ -235,7 +242,9 @@ def test_draft_writes_a_complete_goal_and_keeps_the_unset_marker(bare_project, t
     for heading in ("Dataset", "Splits", "Metrics", "Seeds", "Held fixed"):
         assert f"### {heading}" in protocol
     assert "0-2699" in protocol
-    assert "the pipeline uses VGGT" in record.section("History")
+    # Grounding is the record's provenance, not an event: its own section, replaced not appended.
+    assert "the pipeline uses VGGT" in record.section("Grounding")
+    assert "the pipeline uses VGGT" not in record.section("History")
 
     markers = unset_markers(record)
     assert len(markers) == 1
@@ -287,8 +296,49 @@ def test_drafting_over_an_existing_goal_needs_revise(bare_project, tmp_path):
         agent_mod.run_draft(bare_project, "vggt-pose", "q", command=reply)
 
     agent_mod.run_draft(bare_project, "vggt-pose", "q", command=reply, revise=True)
+    assert load_goal(bare_project, "vggt-pose").section("History") == ""
+
+
+def test_no_history_is_kept_unless_it_is_asked_for(bare_project, tmp_path):
+    reply = fake_agent(tmp_path, json.dumps(DRAFT))
+    agent_mod.run_draft(bare_project, "vggt-pose", "q", command=reply)
+    record = load_goal(bare_project, "vggt-pose")
+    assert record.section("History") == ""
+    assert "## History" not in record.path.read_text("utf-8")
+    # Grounding is not history: it says where this draft came from, and it stays.
+    assert "the pipeline uses VGGT" in record.section("Grounding")
+
+    scaffold.create_goal(bare_project, "by-hand", primary_metric="m")
+    assert "## History" not in (bare_project.goals_dir / "by-hand.md").read_text("utf-8")
+
+    scaffold.create_goal(bare_project, "with-history", primary_metric="m", history=True)
+    assert "goal opened" in (bare_project.goals_dir / "with-history.md").read_text("utf-8")
+
+
+def test_history_is_kept_and_collapsed_when_asked_for(bare_project, tmp_path):
+    reply = fake_agent(tmp_path, json.dumps(DRAFT))
+    agent_mod.run_draft(bare_project, "vggt-pose", "q", command=reply, history=True)
+    assert "drafted by the agent" in load_goal(bare_project, "vggt-pose").section("History")
+
+    # The same reply again changes nothing, so it earns no line.
+    agent_mod.run_draft(bare_project, "vggt-pose", "q", command=reply, revise=True, history=True)
     history = load_goal(bare_project, "vggt-pose").section("History")
-    assert "goal opened" in history and "redrafted" in history
+    assert "goal opened" in history and "redrafted" not in history
+
+    moved = fake_agent(tmp_path, json.dumps({**DRAFT, "target": 2.0, "question": "a new one"}))
+    agent_mod.run_draft(bare_project, "vggt-pose", "q", command=moved, revise=True, history=True)
+    history = load_goal(bare_project, "vggt-pose").section("History")
+    assert "redrafted: question, front matter." in history
+
+
+def test_config_md_can_turn_history_back_on(bare_project, tmp_path):
+    bare_project.config_md.write_text(
+        "---\nproject: p\nrecords:\n  history: true\n---\n\n# Research configuration\n", "utf-8"
+    )
+    agent_mod.run_draft(
+        bare_project, "vggt-pose", "q", command=fake_agent(tmp_path, json.dumps(DRAFT))
+    )
+    assert "drafted by the agent" in load_goal(bare_project, "vggt-pose").section("History")
 
 
 def test_a_draft_without_a_question_is_refused(bare_project):
@@ -303,6 +353,158 @@ def test_a_reply_without_a_metric_is_refused(bare_project, tmp_path):
         agent_mod.run_draft(
             bare_project, "vggt-pose", "q", command=fake_agent(tmp_path, '{"title": "x"}')
         )
+
+
+# --------------------------------------------------------------------------- history
+
+BLOATED = """- 2026-08-24 — goal opened.
+
+- 2026-08-26 — goal redrafted from the question.
+
+**Drafted from the project's own files.**
+
+- the pipeline uses VGGT — `../mapillary_alignment/CLAUDE.md`
+- poses come from COLMAP — `../mapillary_alignment/CLAUDE.md`
+
+- 2026-08-27 — goal redrafted from the question.
+
+**Drafted from the project's own files.**
+
+- the pipeline uses VGGT — `../mapillary_alignment/CLAUDE.md`
+- poses come from COLMAP — `../mapillary_alignment/CLAUDE.md`
+
+- 2026-08-27 — goal redrafted from the question.
+
+**Drafted from the project's own files.**
+
+- the pipeline uses VGGT — `../mapillary_alignment/CLAUDE.md`
+- poses come from COLMAP — `../mapillary_alignment/CLAUDE.md`
+- the slice is 0-2699 — `notes/slices.md`
+
+- 2026-08-28 — Qianqian: tolerance widened after the seed-7 disagreement.
+"""
+
+
+def test_consolidating_history_keeps_one_line_per_date_and_one_grounding_block(bare_project):
+    from hiraku_auto.scaffold import create_goal
+
+    create_goal(bare_project, "vggt-pose", primary_metric="m", direction="minimize")
+    record = load_goal(bare_project, "vggt-pose")
+    record.set_section("History", BLOATED)
+    removed = scaffold.consolidate_history(record)
+
+    history = record.section("History")
+    assert removed > 0
+    assert history.count("redrafted") == 2, history          # 08-26 and 08-27, not three
+    assert "2026-08-26 — goal redrafted." in history
+    assert "2026-08-27 — goal redrafted." in history
+    assert "goal opened" in history
+    # A line a person wrote is not the tool's to collapse.
+    assert "Qianqian: tolerance widened" in history
+    # The claims leave History entirely, and only the newest block survives.
+    assert "CLAUDE.md" not in history
+    grounding = record.section("Grounding")
+    assert grounding.count("the pipeline uses VGGT") == 1
+    assert "the slice is 0-2699" in grounding
+
+
+def test_consolidating_is_idempotent_and_silent_on_a_clean_record(bare_project):
+    from hiraku_auto.scaffold import create_goal
+
+    create_goal(bare_project, "vggt-pose", primary_metric="m", direction="minimize")
+    record = load_goal(bare_project, "vggt-pose")
+    record.set_section("History", BLOATED)
+    scaffold.consolidate_history(record)
+    first = record.section("History")
+    assert scaffold.consolidate_history(record) == 0
+    assert record.section("History") == first
+
+
+def test_repeated_redrafts_do_not_grow_the_history(bare_project, tmp_path):
+    agent_mod.run_draft(
+        bare_project, "vggt-pose", "q", command=fake_agent(tmp_path, json.dumps(DRAFT)),
+        history=True,
+    )
+    for target in (3.4, 3.3, 3.2):
+        agent_mod.run_draft(
+            bare_project,
+            "vggt-pose",
+            "q",
+            command=fake_agent(tmp_path, json.dumps({**DRAFT, "target": target})),
+            revise=True,
+            history=True,
+        )
+    record = load_goal(bare_project, "vggt-pose")
+    history = record.section("History")
+    # Three redrafts on one day: one line, not three, and no grounding block in sight.
+    assert history.count("redrafted") == 1, history
+    assert "front matter" in history
+    assert record.section("Grounding").count("the pipeline uses VGGT") == 1
+
+
+def test_a_stale_grounding_block_is_replaced_not_stacked(bare_project, tmp_path):
+    agent_mod.run_draft(
+        bare_project, "vggt-pose", "q", command=fake_agent(tmp_path, json.dumps(DRAFT))
+    )
+    newer = {**DRAFT, "grounding": [{"claim": "poses come from COLMAP", "source": "notes/pose.md"}]}
+    agent_mod.run_draft(
+        bare_project, "vggt-pose", "q", command=fake_agent(tmp_path, json.dumps(newer)), revise=True
+    )
+    grounding = load_goal(bare_project, "vggt-pose").section("Grounding")
+    assert "poses come from COLMAP" in grounding
+    assert "the pipeline uses VGGT" not in grounding
+
+
+def test_goal_tidy_removes_the_tool_lines_and_keeps_what_a_person_wrote(bare_project, capsys):
+    from hiraku_auto.cli import main
+    from hiraku_auto.scaffold import create_goal
+
+    create_goal(bare_project, "vggt-pose", primary_metric="m", history=True)
+    record = load_goal(bare_project, "vggt-pose")
+    record.set_section("History", BLOATED)
+    write_record(record, GOAL_KEYS)
+
+    assert main(["--project", str(bare_project.root), "goal", "tidy", "--dry-run"]) == 0
+    assert "would go" in capsys.readouterr().out
+    assert "goal opened" in load_goal(bare_project, "vggt-pose").section("History")
+
+    assert main(["--project", str(bare_project.root), "goal", "tidy"]) == 0
+    out = capsys.readouterr().out
+    assert "kept (you wrote it)" in out and "tolerance widened" in out
+    record = load_goal(bare_project, "vggt-pose")
+    history = record.section("History")
+    assert "redrafted" not in history and "goal opened" not in history
+    assert "tolerance widened" in history          # never deleted
+    assert "the slice is 0-2699" in record.section("Grounding")
+
+    assert main(["--project", str(bare_project.root), "goal", "tidy"]) == 0
+    assert "nothing to remove" in capsys.readouterr().out
+
+
+def test_goal_tidy_with_history_collapses_instead_of_removing(bare_project, capsys):
+    from hiraku_auto.cli import main
+    from hiraku_auto.scaffold import create_goal
+
+    create_goal(bare_project, "vggt-pose", primary_metric="m", history=True)
+    record = load_goal(bare_project, "vggt-pose")
+    record.set_section("History", BLOATED)
+    write_record(record, GOAL_KEYS)
+
+    assert main(["--project", str(bare_project.root), "goal", "tidy", "--history"]) == 0
+    capsys.readouterr()
+    history = load_goal(bare_project, "vggt-pose").section("History")
+    assert history.count("redrafted") == 2 and "goal opened" in history
+    assert "CLAUDE.md" not in history
+
+
+def test_a_history_of_nothing_but_tool_lines_loses_the_whole_section(bare_project):
+    from hiraku_auto.scaffold import create_goal, drop_history
+
+    create_goal(bare_project, "vggt-pose", primary_metric="m", history=True)
+    record = load_goal(bare_project, "vggt-pose")
+    removed, kept = drop_history(record)
+    assert removed == 1 and kept == []
+    assert not any(k.lower().startswith("history") for k in record.sections)
 
 
 # --------------------------------------------------------------------------- removal

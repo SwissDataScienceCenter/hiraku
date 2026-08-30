@@ -96,15 +96,17 @@ options:
 
 ### `hiraku-auto goal --help`
 ```
-usage: hiraku-auto goal [-h] {add,draft,list,show,rm} ...
+usage: hiraku-auto goal [-h] {add,draft,list,show,tidy,rm} ...
 
 positional arguments:
-  {add,draft,list,show,rm}
+  {add,draft,list,show,tidy,rm}
     add                 create a goal
     draft               write the goal record with the agent, from a question
                         and the project's own files
     list                one row per goal, with node and run counts
     show                print a goal record
+    tidy                collapse repeated `goal redrafted` entries and stale
+                        grounding blocks in History
     rm                  delete a goal record; refuses while experiments or
                         runs depend on it
 
@@ -117,7 +119,7 @@ options:
 usage: hiraku-auto goal add [-h] --metric METRIC
                             [--direction {minimize,maximize}]
                             [--target TARGET] [--gate-metric GATE_METRIC]
-                            [--question QUESTION]
+                            [--question QUESTION] [--history] [--no-history]
                             id
 
 positional arguments:
@@ -131,17 +133,20 @@ options:
   --gate-metric GATE_METRIC
                         a metric that must not degrade (e.g. completion_rate)
   --question QUESTION
+  --history             keep a History section in the record (off by default;
+                        git already has the history)
+  --no-history          never keep one, whatever config.md says
 ```
 
 ### `hiraku-auto goal draft --help`
 ```
 usage: hiraku-auto goal draft [-h] [--question QUESTION]
-                              [--question-file PATH] [--revise]
-                              [--with-experiments] [--instruction INSTRUCTION]
-                              [--context PATH] [--no-context]
-                              [--context-bytes N] [--agent-cmd AGENT_CMD]
-                              [--unset-env VAR] [--dry-run] [--no-apply]
-                              [--timeout TIMEOUT]
+                              [--question-file PATH] [--revise] [--history]
+                              [--no-history] [--with-experiments]
+                              [--instruction INSTRUCTION] [--context PATH]
+                              [--no-context] [--context-bytes N]
+                              [--agent-cmd AGENT_CMD] [--unset-env VAR]
+                              [--dry-run] [--no-apply] [--timeout TIMEOUT]
                               id
 
 positional arguments:
@@ -151,8 +156,11 @@ options:
   -h, --help            show this help message and exit
   --question QUESTION   the research question, in your own words
   --question-file PATH  read the question from a file
-  --revise              rewrite an existing goal's drafted sections, keeping
-                        its History
+  --revise              rewrite an existing goal's drafted sections; anything
+                        you edited by hand is lost
+  --history             keep a History section in the record (off by default;
+                        git already has the history)
+  --no-history          never keep one, whatever config.md says
   --with-experiments    also create the agent's suggested first experiments,
                         as proposed nodes
   --instruction INSTRUCTION
@@ -190,6 +198,21 @@ positional arguments:
 options:
   -h, --help  show this help message and exit
   --json      front matter and sections as JSON
+```
+
+### `hiraku-auto goal tidy --help`
+```
+usage: hiraku-auto goal tidy [-h] [--dry-run] [--history] [--no-history] [id]
+
+positional arguments:
+  id            one goal; omit for every goal
+
+options:
+  -h, --help    show this help message and exit
+  --dry-run     say what would go, write nothing
+  --history     keep the section, collapsing repeats to one line per date,
+                instead of removing it
+  --no-history  remove it, whatever config.md says
 ```
 
 ### `hiraku-auto goal rm --help`

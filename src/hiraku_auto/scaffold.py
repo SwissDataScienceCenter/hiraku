@@ -269,6 +269,7 @@ def create_goal(
     gate_metric: str | None = None,
     question: str = "",
     title: str | None = None,
+    history: bool | None = None,
 ) -> Path:
     validate_id(goal_id, "Goal ID")
     if direction not in {"minimize", "maximize"}:
@@ -293,6 +294,10 @@ def create_goal(
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    if not history_enabled(project, history):
+        record = read_record(path)
+        drop_history(record)
+        write_record(record, GOAL_KEYS)
     return path
 
 
@@ -329,12 +334,214 @@ def _protocol_markdown(protocol: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+GROUNDING_MARK = "**Drafted from the project's own files"
+TOOL_HISTORY = re.compile(
+    r"^-\s+\d{4}-\d{2}-\d{2}\s+—\s+"
+    r"(goal opened|drafted by the agent from the researcher's question)\s*\.?\s*$"
+)
+DRAFTED_SECTIONS = (
+    ("question", "Question"),
+    ("why_it_matters", "Why it matters"),
+    ("success_criterion", "Success criterion"),
+    ("out_of_scope", "Out of scope"),
+    ("open_threads", "Open threads"),
+)
+DRAFTED_FRONT = ("primary_metric", "direction", "target", "gate_metric")
+REDRAFT_LINE = re.compile(
+    r"^-\s+(\d{4}-\d{2}-\d{2})\s+—\s+(?:goal\s+)?redrafted"
+    r"(?:\s+from the question)?(?::\s*(?P<what>[^.]*))?\s*\.?\s*$"
+)
+
+
+def _redraft_line(date: str, labels: list[str]) -> str:
+    """One line per redraft, naming what actually moved."""
+    return f"- {date} — goal redrafted" + (f": {', '.join(labels)}." if labels else ".")
+
+
+def history_enabled(project: Project | None, override: bool | None = None) -> bool:
+    """Is a goal record supposed to keep a History section? Off unless asked for.
+
+    A redraft appends, so History is where the tool's own noise collects — and git already holds
+    the real history of every record. Precedence: `--history/--no-history`, then
+    `records.history` in `research/config.md`, then `.hiraku.yml`, then off.
+    """
+    if override is not None:
+        return override
+    if project is None:
+        return False
+    setting: Any = None
+    raw = project.raw.get("records")
+    if isinstance(raw, dict):
+        setting = raw.get("history")
+    if project.config_md.is_file():
+        block = read_record(project.config_md).front.get("records")
+        if isinstance(block, dict) and block.get("history") is not None:
+            setting = block.get("history")
+    return bool(setting)
+
+
+def drop_history(record: Record) -> tuple[int, list[str]]:
+    """Strip the tool's own History entries. Returns (lines removed, lines a person wrote).
+
+    Deleting what the tool generated is tidying; deleting what a researcher typed is data loss, so
+    a human line stays exactly where it is and the section survives for its sake. A History with
+    nothing but tool lines in it goes entirely.
+    """
+    text = record.section("History")
+    if not text.strip():
+        return 0, []
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    human = [
+        line
+        for line in lines
+        if not REDRAFT_LINE.match(line) and not TOOL_HISTORY.match(line)
+    ]
+    if human:
+        record.set_section("History", "\n".join(human))
+    else:
+        for key in list(record.sections):
+            if key.lower().startswith("history"):
+                del record.sections[key]
+    return len(lines) - len(human), human
+
+
+def _looks_like_claims(paragraph: str) -> bool:
+    lines = [line for line in paragraph.splitlines() if line.strip()]
+    return bool(lines) and all(
+        line.lstrip().startswith("- ") and not REDRAFT_LINE.match(line.strip())
+        and not re.match(r"^-\s+\d{4}-\d{2}-\d{2}\s+—", line.strip())
+        for line in lines
+    )
+
+
+def consolidate_history(record: Record) -> int:
+    """Collapse the redraft tool's own leavings in History. Returns lines removed.
+
+    Two things accumulate there because drafting appends rather than replaces: a `goal redrafted`
+    line per call, and a full grounding block per call, each re-listing nearly the same citations.
+    Grounding is a statement about the record as it stands, not an event, so the newest block moves
+    to its own `## Grounding` section and the older ones go; redraft lines collapse to one per date.
+    Anything a person wrote is left exactly as it is.
+    """
+    text = record.section("History")
+    if not text.strip():
+        return 0
+    before = len([line for line in text.splitlines() if line.strip()])
+
+    paragraphs = re.split(r"\n\s*\n", text.strip())
+    grounding: list[str] = []
+    kept_paragraphs: list[str] = []
+    index = 0
+    while index < len(paragraphs):
+        paragraph = paragraphs[index].strip()
+        if paragraph.startswith(GROUNDING_MARK):
+            block = [paragraph]
+            if index + 1 < len(paragraphs) and _looks_like_claims(paragraphs[index + 1]):
+                block.append(paragraphs[index + 1].strip())
+                index += 1
+            grounding.append("\n\n".join(block))
+        elif paragraph:
+            kept_paragraphs.append(paragraph)
+        index += 1
+
+    kept: list[str] = []
+    seen: dict[str, int] = {}
+    for paragraph in kept_paragraphs:
+        for raw in paragraph.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            match = REDRAFT_LINE.match(line)
+            if not match:
+                kept.append(line)
+                continue
+            date = match.group(1)
+            labels = [p.strip() for p in (match.group("what") or "").split(",") if p.strip()]
+            if date in seen:
+                merged = _labels_of(kept[seen[date]]) + [
+                    label for label in labels if label not in _labels_of(kept[seen[date]])
+                ]
+                kept[seen[date]] = _redraft_line(date, merged)
+                continue
+            seen[date] = len(kept)
+            kept.append(_redraft_line(date, labels))
+
+    record.set_section("History", "\n".join(kept))
+    if grounding and not record.section("Grounding").strip():
+        record.set_section("Grounding", grounding[-1], before="History")
+    return before - len(kept)
+
+
+def _labels_of(line: str) -> list[str]:
+    match = REDRAFT_LINE.match(line)
+    what = (match.group("what") or "") if match else ""
+    return [p.strip() for p in what.split(",") if p.strip()]
+
+
+def _note_history(record: Record, line: str) -> None:
+    """Append one History bullet. A list, not a stack of paragraphs."""
+    lines = [existing for existing in record.section("History").splitlines() if existing.strip()]
+    lines.append(line)
+    record.set_section("History", "\n".join(lines))
+
+
+def _note_redraft(record: Record, date: str, labels: list[str]) -> None:
+    """Add today's redraft line, or widen the one already there for today."""
+    lines = [line for line in record.section("History").splitlines() if line.strip()]
+    for position, line in enumerate(lines):
+        match = REDRAFT_LINE.match(line.strip())
+        if match and match.group(1) == date:
+            merged = _labels_of(line) + [
+                label for label in labels if label not in _labels_of(line)
+            ]
+            lines[position] = _redraft_line(date, merged)
+            break
+    else:
+        lines.append(_redraft_line(date, labels))
+    record.set_section("History", "\n".join(lines))
+
+
+def last_redraft(record: Record, date: str) -> str | None:
+    """The History line for that date's redraft, if one was recorded."""
+    for line in record.section("History").splitlines():
+        match = REDRAFT_LINE.match(line.strip())
+        if match and match.group(1) == date:
+            return line.strip()
+    return None
+
+
+def _grounding_markdown(grounding: list[Any]) -> str:
+    lines = [f"{GROUNDING_MARK}** — as of {today()}.", ""]
+    for item in grounding:
+        if isinstance(item, dict) and item.get("claim"):
+            lines.append(f"- {item['claim']} — `{item.get('source', 'unattributed')}`")
+    return "\n".join(lines)
+
+
+def _snapshot(record: Record) -> dict[str, Any]:
+    sections = {label: record.section(label).strip() for _, label in DRAFTED_SECTIONS}
+    sections["Evaluation protocol"] = record.section("Evaluation protocol").strip()
+    sections["Grounding"] = record.section("Grounding").strip()
+    sections["front matter"] = "\n".join(f"{k}={record.front.get(k)!r}" for k in DRAFTED_FRONT)
+    return sections
+
+
+def _changed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    order = [label for _, label in DRAFTED_SECTIONS] + [
+        "Evaluation protocol",
+        "Grounding",
+        "front matter",
+    ]
+    return [key.lower() for key in order if before.get(key) != after.get(key)]
+
+
 def apply_goal_draft(
     project: Project,
     goal_id: str,
     data: dict[str, Any],
     *,
     revise: bool = False,
+    history: bool | None = None,
 ) -> Path:
     """Write a goal record from a `draft` reply.
 
@@ -347,6 +554,7 @@ def apply_goal_draft(
     if direction not in {"minimize", "maximize"}:
         direction = "minimize"
 
+    keep_history = history_enabled(project, history)
     created = not path.exists()
     if not created:
         if not revise:
@@ -355,7 +563,8 @@ def apply_goal_draft(
                 f"its drafted sections, or draft under a different id."
             )
         record = read_record(path)
-        record.append_section("History", f"- {today()} — goal redrafted from the question.")
+        if keep_history:
+            consolidate_history(record)
     else:
         create_goal(
             project,
@@ -365,8 +574,10 @@ def apply_goal_draft(
             target=data.get("target"),
             gate_metric=data.get("gate_metric") or None,
             title=str(data.get("title") or "") or None,
+            history=keep_history,
         )
         record = read_record(path)
+    before = _snapshot(record)
 
     record.front["primary_metric"] = str(data.get("primary_metric") or "metric")
     record.front["direction"] = direction
@@ -375,13 +586,7 @@ def apply_goal_draft(
     if data.get("gate_metric"):
         record.front["gate_metric"] = str(data["gate_metric"])
 
-    for key, section in (
-        ("question", "Question"),
-        ("why_it_matters", "Why it matters"),
-        ("success_criterion", "Success criterion"),
-        ("out_of_scope", "Out of scope"),
-        ("open_threads", "Open threads"),
-    ):
+    for key, section in DRAFTED_SECTIONS:
         value = str(data.get(key) or "").strip()
         if value:
             record.set_section(section, value)
@@ -390,18 +595,22 @@ def apply_goal_draft(
     if isinstance(protocol, dict):
         record.set_section("Evaluation protocol", _protocol_markdown(protocol))
 
-    if created:
-        record.append_section(
-            "History", f"- {today()} — drafted by the agent from the researcher's question."
-        )
-
+    # Grounding is the record's current provenance, not an event: replaced, never appended.
     grounding = data.get("grounding")
     if isinstance(grounding, list) and grounding:
-        lines = ["**Drafted from the project's own files.**", ""]
-        for item in grounding:
-            if isinstance(item, dict) and item.get("claim"):
-                lines.append(f"- {item['claim']} — `{item.get('source', 'unattributed')}`")
-        record.append_section("History", "\n".join(lines))
+        record.set_section("Grounding", _grounding_markdown(grounding), before="History")
+
+    # History is opt-in: git already records what changed and when, and an appending History is
+    # where this tool's own noise collects.
+    if keep_history and created:
+        _note_history(
+            record, f"- {today()} — drafted by the agent from the researcher's question."
+        )
+    elif keep_history:
+        changed = _changed(before, _snapshot(record))
+        # A redraft that moved nothing is not a change worth a line.
+        if changed:
+            _note_redraft(record, today(), changed)
 
     write_record(record, GOAL_KEYS)
     return path

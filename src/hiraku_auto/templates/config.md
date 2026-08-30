@@ -9,6 +9,8 @@ bounds:
 promotion:
   reproduction_seeds: 1
   agreement_tolerance: 0.01
+records:
+  history: false            # true = keep a `## History` section in goal records
 agent:
   command:                  # empty = HIRAKU_AGENT_CMD, then `claude -p`
   unset_env: []             # e.g. [ANTHROPIC_API_KEY] to use the claude.ai login instead
@@ -55,6 +57,19 @@ How the environment is built, and what a run may assume.
   comparable
 - Determinism: whether runs are expected bit-reproducible at a fixed seed, and if not, the sources
   of variance
+
+## Records
+
+`records.history` is off. Git already holds the history of every record — who changed what, when,
+and the whole text before and after — and a `## History` section only duplicates that badly: the
+draft tool appends to it on every `--revise`, so it fills with near-identical entries nobody reads.
+Set it to `true`, or pass `--history` to a single `goal add` / `goal draft`, if this project wants
+the section anyway; `hiraku-auto goal tidy` clears out what earlier runs left behind, and never
+deletes a line a person wrote.
+
+Where a draft came from is a different thing and is always kept: `## Grounding` lists the claims the
+agent took from your files and the file each came from, replaced whole on every redraft rather than
+appended to.
 
 ## Agent
 

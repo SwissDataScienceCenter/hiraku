@@ -570,6 +570,7 @@ def run_draft(
     dry_run: bool = False,
     apply: bool = True,
     revise: bool = False,
+    history: bool | None = None,
     with_experiments: bool = False,
     use_context: bool | None = None,
     extra_context: list[str] | None = None,
@@ -629,7 +630,9 @@ def run_draft(
     if not apply:
         return result
 
-    result.written.append(apply_goal_draft(project, goal_id, result.data, revise=revise))
+    result.written.append(
+        apply_goal_draft(project, goal_id, result.data, revise=revise, history=history)
+    )
 
     if with_experiments:
         for item in result.data.get("first_experiments") or []:
