@@ -71,9 +71,13 @@ def _agent_hooks() -> agent_mod.Hooks:
             print(_red(
                 "env:     ANTHROPIC_API_KEY is set — claude will use it INSTEAD of your "
                 "claude.ai login.\n"
-                "         That bills the API account and disables your org's connectors. "
-                "Add --unset-env ANTHROPIC_API_KEY\n"
-                "         (or run under `env -u ANTHROPIC_API_KEY`) to use the login instead."
+                "         That bills the API account and disables your org's connectors.\n"
+                "         Once, for this call:  --unset-env ANTHROPIC_API_KEY\n"
+                "         For good, in research/config.md front matter (a project created "
+                "before this\n"
+                "         existed has no `agent:` block — add one):\n"
+                "             agent:\n"
+                "               unset_env: [ANTHROPIC_API_KEY]"
             ))
         if info.get("context") and info["context"] != "context: none":
             print(f"{info['context']}")
