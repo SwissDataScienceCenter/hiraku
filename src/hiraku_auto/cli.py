@@ -79,6 +79,20 @@ def _agent_hooks() -> agent_mod.Hooks:
                 "             agent:\n"
                 "               unset_env: [ANTHROPIC_API_KEY]"
             ))
+        if info["workflow"] == "discover" and not info.get("web"):
+            # discover is the literature workflow. Without the web tools it still answers — from
+            # recall — and recalled citations look exactly like read ones.
+            print(_red(
+                "web:     this command cannot search. `claude -p` is non-interactive, so "
+                "WebSearch/WebFetch\n"
+                "         are requested and denied, and the citations you get back will be "
+                "recalled, not read.\n"
+                "         Proposals from this call will be marked UNVERIFIED. To fix it, in "
+                "research/config.md:\n"
+                "             agent:\n"
+                "               command: claude -p --allowedTools "
+                "WebSearch,WebFetch,Read,Glob,Grep"
+            ))
         if info.get("context") and info["context"] != "context: none":
             print(f"{info['context']}")
         print(f"prompt:  {info['prompt_chars']:,} characters")
@@ -843,6 +857,12 @@ def cmd_agent(args: argparse.Namespace) -> int:
         print(result.prompt)
         return 0
     _warn_truncated(result.context)
+    if result.data.get("citations_unverified"):
+        print(_red(
+            "note: this call had no web access, so every citation in the proposals it just wrote "
+            "was\n"
+            "      recalled, not read. Each record carries an UNVERIFIED marker saying so."
+        ))
     if args.show_raw:
         print(result.raw)
     if result.data.get("blocked"):
@@ -1098,6 +1118,13 @@ def cmd_proposal_list(args: argparse.Namespace) -> int:
 
 def cmd_proposal_accept(args: argparse.Namespace) -> int:
     project = _project(args)
+    proposal = load_proposals(project).get(args.id)
+    if proposal is not None and "UNVERIFIED" in proposal.path.read_text(encoding="utf-8"):
+        print(_red(
+            f"note: {args.id} carries an UNVERIFIED marker — its citations were recalled by the "
+            f"agent,\n"
+            f"      not read from a source. Check them before this becomes an experiment."
+        ))
     path = scaffold.accept_proposal(project, args.id, mode=args.mode)
     print(f"created {project.rel(path)}")
     if gitops.is_repo(project.root):

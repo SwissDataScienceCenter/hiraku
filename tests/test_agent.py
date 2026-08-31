@@ -227,6 +227,57 @@ def test_discover_writes_proposals_not_experiments(project, tmp_path):
     assert "against" in body and "origin: agent-literature" in body
 
 
+def test_web_allowed_reads_the_command(tmp_path):
+    allowed = agent_mod.web_allowed
+    assert not allowed(["claude", "-p"])
+    assert not allowed(["claude", "-p", "--allowedTools", "Read,Glob,Grep"])
+    assert allowed(["claude", "-p", "--allowedTools", "WebSearch,WebFetch,Read"])
+    assert allowed(["/usr/local/bin/claude", "-p", "--allowedTools", "webfetch"])
+    assert allowed(["claude", "-p", "--dangerously-skip-permissions"])
+    # Another agent entirely: not ours to second-guess.
+    assert allowed(["codex", "exec"])
+    assert not allowed([])
+
+
+def test_a_discover_call_without_the_web_marks_its_proposals(project, tmp_path):
+    reply = json.dumps(
+        {
+            "proposals": [
+                {
+                    "id": "from-a-paper",
+                    "title": "From a paper",
+                    "hypothesis": "h",
+                    "provenance": "Zhang et al. 2024 report a 12% gain.",
+                    "prediction": "pr",
+                    "investigation_test": "it",
+                }
+            ],
+            "notes": "WebSearch/WebFetch permission was requested and denied this session.",
+        }
+    )
+    result = agent_mod.run_discover(project, "vo-backend", command=fake_agent(tmp_path, reply))
+    assert result.data["citations_unverified"] is True
+    body = (project.proposals_dir / "from-a-paper.md").read_text(encoding="utf-8")
+    assert "UNVERIFIED" in body
+    # The marker sits with the citations it qualifies, not at the top of the file.
+    assert body.index("## Where it came from") < body.index("UNVERIFIED")
+    assert "Zhang et al. 2024" in body
+
+
+def test_a_discover_call_that_could_search_marks_nothing(project, tmp_path):
+    reply = json.dumps(
+        {"proposals": [{"id": "clean", "title": "Clean", "hypothesis": "h", "provenance": "p"}]}
+    )
+    result = agent_mod.run_discover(project, "vo-backend", command=fake_agent(tmp_path, reply))
+    assert not result.data["citations_unverified"]
+    assert "UNVERIFIED" not in (project.proposals_dir / "clean.md").read_text(encoding="utf-8")
+
+
+def test_a_denied_tool_permission_is_diagnosed():
+    advice = agent_mod.diagnose("Claude requested permissions to use WebSearch, but you haven't")
+    assert "--allowedTools" in advice and "config.md" in advice
+
+
 def test_malformed_reply_is_reported(project, tmp_path):
     with pytest.raises(AgentError, match="missing a valid 'experiments'"):
         agent_mod.run_design(project, "vo-backend", command=fake_agent(tmp_path, '{"oops": 1}'))

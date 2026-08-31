@@ -69,6 +69,14 @@ KNOWN_FAILURES: tuple[tuple[str, str], ...] = (
         "unset ANTHROPIC_API_KEY: `env -u ANTHROPIC_API_KEY hiraku-auto ...`",
     ),
     (
+        "requested permissions to use",
+        "`claude -p` runs non-interactively, so a tool it was not given up front is requested\n"
+        "and denied. Name the tools the workflow needs, once, in research/config.md front\n"
+        "matter:\n\n"
+        "  agent:\n"
+        "    command: claude -p --allowedTools WebSearch,WebFetch,Read,Glob,Grep\n",
+    ),
+    (
         "Please run `claude login`",
         "`claude` is not logged in. Run `claude` once interactively and sign in, then retry.",
     ),
@@ -78,6 +86,50 @@ KNOWN_FAILURES: tuple[tuple[str, str], ...] = (
         "ANTHROPIC_API_KEY: `env -u ANTHROPIC_API_KEY hiraku-auto ...`",
     ),
 )
+
+
+WEB_TOOLS = ("websearch", "webfetch")
+WEB_DENIED_MARKERS = (
+    "permission was requested and denied",
+    "permission requested and denied",
+    "permission to use websearch",
+    "permission to use webfetch",
+    "websearch is not permitted",
+    "webfetch is not permitted",
+    "do not have permission to search",
+    "without web access",
+    "no web access",
+)
+UNVERIFIED_NOTE = (
+    "**[UNVERIFIED: the agent had no web access on this call — WebSearch/WebFetch were not "
+    "permitted — so every citation below is recalled from model knowledge and has not been "
+    "checked against a primary source. Verify each one, or re-run `agent discover` with "
+    "`agent.command: claude -p --allowedTools WebSearch,WebFetch,Read,Glob,Grep` in "
+    "research/config.md.]**"
+)
+
+
+def web_allowed(command: list[str]) -> bool:
+    """Can this command actually reach the web, or will `claude` ask and be refused?
+
+    `claude -p` is non-interactive, so a tool it has not been given up front is requested and
+    denied — silently, as far as this tool is concerned: the call succeeds and returns citations
+    that were recalled rather than read. Only a command that names the web tools can check them.
+    """
+    if not command:
+        return False
+    if Path(command[0]).name not in {"claude", "claude.exe"}:
+        return True  # some other agent: it is not ours to second-guess
+    text = " ".join(command).lower()
+    if "--dangerously-skip-permissions" in text or "bypasspermissions" in text:
+        return True
+    return any(tool in text for tool in WEB_TOOLS)
+
+
+def web_was_denied(reply: str) -> bool:
+    """Did the agent say, in its own words, that it could not search?"""
+    low = reply.lower()
+    return any(marker in low for marker in WEB_DENIED_MARKERS)
 
 
 def diagnose(output: str) -> str:
@@ -515,6 +567,7 @@ def _invoke(
         "started": _dt.datetime.now().isoformat(timespec="seconds"),
         "timeout": timeout,
         "unset_env": list(unset_env or []),
+        "web": web_allowed(argv),
     }
 
     def write_meta(extra: dict[str, Any]) -> None:
@@ -826,6 +879,10 @@ def run_triage(
     return result
 
 
+def _provenance(text: str, unverified: bool) -> str:
+    return f"{UNVERIFIED_NOTE}\n\n{text}".strip() if unverified else text
+
+
 def run_discover(
     project: Project,
     goal_id: str,
@@ -865,6 +922,13 @@ def run_discover(
     if not apply:
         return result
 
+    # A proposal whose citations were recalled rather than read says so in the record itself. The
+    # terminal warning scrolls away; the reviewer deciding on this proposal reads the file.
+    unverified = not web_allowed(command or agent_command(project=project)) or web_was_denied(
+        result.raw
+    )
+    result.data["citations_unverified"] = unverified
+
     for item in proposals:
         if not isinstance(item, dict) or not item.get("id"):
             continue
@@ -877,7 +941,7 @@ def run_discover(
             kind=str(item.get("kind") or "hypothesis"),
             title=str(item.get("title") or ""),
             hypothesis=str(item.get("hypothesis") or ""),
-            provenance=str(item.get("provenance") or ""),
+            provenance=_provenance(str(item.get("provenance") or ""), unverified),
             applicability=str(item.get("applicability") or ""),
             prediction=str(item.get("prediction") or ""),
             investigation_test=str(item.get("investigation_test") or ""),

@@ -493,13 +493,32 @@ A failed call writes `error.txt` next to `prompt.md` in the log directory, so `h
 
 ### Web access
 
-`claude -p` starts with no tools permitted, so `discover` will search nothing and cite only what the
-model already believed — it says so in its `notes`, and those citations are unverified. To let it
-actually read:
+`claude -p` starts with no tools permitted, and it is non-interactive, so a tool it was not given up
+front is requested and denied. `discover` then searches nothing and cites what the model already
+believed. That failure is quiet — recalled citations look exactly like read ones — so the tool says
+so three times: before the call,
+
+    web:     this command cannot search. `claude -p` is non-interactive, so WebSearch/WebFetch
+             are requested and denied, and the citations you get back will be recalled, not read.
+
+in each proposal it writes, at the top of **Where it came from**,
+
+    **[UNVERIFIED: the agent had no web access on this call ...]**
+
+and again at `proposal accept`, which is the last moment before a recalled citation becomes an
+experiment. The marker is also written when the reply itself reports the denial, whatever the command
+looked like.
+
+To let it actually read, name the tools once in `research/config.md`:
+
+```yaml
+agent:
+  command: claude -p --allowedTools WebSearch,WebFetch,Read,Glob,Grep
+```
 
 ```bash
 hiraku-auto agent discover <goal> --agent-cmd 'claude -p --allowedTools WebSearch,WebFetch'
-export HIRAKU_AGENT_CMD='claude -p --allowedTools WebSearch,WebFetch'   # or set it once
+export HIRAKU_AGENT_CMD='claude -p --allowedTools WebSearch,WebFetch'   # or for one shell
 ```
 
 ### Project context

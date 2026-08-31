@@ -79,6 +79,11 @@ always needs here rather than retyping them:
 
     command: claude -p --allowedTools WebSearch,WebFetch,Read,Glob,Grep --add-dir ../<code-repo>
 
+`--allowedTools` is not optional for `discover`. `claude -p` is non-interactive, so a tool it was
+not given up front is requested and denied, and the workflow then cites what the model recalled
+instead of what it read. Proposals from such a call are marked `**[UNVERIFIED: ...]**` in *Where it
+came from*, and `proposal accept` says so again — but the fix is to name the tools here.
+
 `agent.unset_env` lists variables dropped from the agent's environment for every call. The one
 that matters is `ANTHROPIC_API_KEY`: while it is set, `claude` uses it in preference to your
 claude.ai login, which bills the API account and stops your organisation's connectors loading. Set
