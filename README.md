@@ -1,17 +1,18 @@
 # Hiraku
 
-**Hiraku** is a toolkit for AI-assisted data science research.
+**Hiraku** is a toolkit for AI-assisted data science.
 
-It defines a workflow, conventions and meta-data tracking around standard data science and machine learning practices, linking task a scope and goals, documentation, experiments, execution runs, and results. A shared metadata record enables both guided, human–AI collaboration and autonomous research, with explicit boundaries and checkpoints for reviewing and verification. The toolkit provides deterministic support functions via a command-line interface (`hiraku`) and agent skills (`/hiraku`).
+The Hiraku core implementation defines conventions and workflows around the model development lifecycle in data science and machine learning projects. A shared metadata record enables both interactive human–AI collaboration and autonomous research, with explicit boundaries and checkpoints for reviewing and verification. 
+
+The toolkit provides deterministic support functions via a command-line interface (`hiraku`) and agent integration with the `/hiraku` skill, harness (tbd), and sandboxing (tbd).
 
 **Why Hiraku?**
-In renku (連句), the traditional Japanese art of collaborative linked poetry, hiraku (平句) are the regular verses where the sequence develops, shifts, and explores new directions — making the name a natural metaphor for iterative, exploratory research within the Renku ecosystem.
+In renku (連句), the traditional Japanese art of collaborative linked poetry, hiraku (平句) are the regular verses where the sequence develops, shifts, and explores new directions — a  metaphor for iterative, exploratory research within the [Renku ecosystem](docs/RENKU.md).
 
-> Treat the name as internal code name; suggestions are welcome :) see also [Renku.md](docs/RENKU.md).
 
-## The problem
+## The Model-Development Lifecycle
 
-In the experimental phase of a data science project, the problem, data, and objective are typically well defined, and the focus shifts to iterative model development (cf. [CRISP-ML](https://ml-ops.org/content/crisp-ml)). Data scientists typically cycle through a sequence of steps:
+In the experimental phase of a data science project, the problem, data, and objective are typically well defined, and the focus shifts to iterative model development (cf. [CRISP-ML](https://ml-ops.org/content/crisp-ml)). For a given task with a defined goal, data scientists typically cycle through a sequence of steps:
 
 1. defining an experiment (e.g., a baseline or hypothesis),
 2. implementation and debugging,
@@ -19,65 +20,75 @@ In the experimental phase of a data science project, the problem, data, and obje
 4. analyzing and comparing results, and
 5. iterating or concluding.
 
+### The Problem: Metadata tracking
+
 While standard tools support individual stages of this cycle (Git for version control, Weights & Biases or MLflow for experiment tracking, and notebooks for analysis, etc), the meta-level information that connects these stages is often only loosely documented.
 
-This fragmentation creates inherent barrier for effective human-AI collaboration: ideas, experiments, hypotheses, implementation, results, and conclusions are not consistently linked or documented as part of a coherent research process. Without a lightweight but explicit protocol for capturing the research process, AI systems cannot reliably inspect prior work, understand why decisions were made, propose meaningful next steps, to effectively support data scientists through iterative experimentation.
+This fragmentation creates an inherent barrier for effective human-AI collaboration: proposals, hypotheses, implementation, experiments, diagnostics, results, and conclusions are not consistently linked or documented as part of a coherent research process. Without a lightweight but explicit protocol for capturing the research process, AI systems cannot reliably inspect prior work, understand why decisions were made, propose meaningful next steps, to effectively support data scientists through iterative experimentation. Similarly, without a metadata trace, the data scientist cannot track, inspect and verify the output of an autonomous research agent.
 
 
 
-## Hiraku core workflow: Tracking the task life-cycle
+## Hiraku core
 
-Hiraku addresses this gap by establishing conventions, workflows, and tools for AI-assisted data science research. A task defines a working scope and goal. Experiments are smaller units that link a task, hypothesis, code, execution entrypoints, and results. Runs record execution traces for a specified experiment and code commit. Hiraku ships complete agent instructions (`program.md`) for two common workflows:
-
-* **Guided template**: A step-by-step program where the data scientist explicitly approves each checkpoint and reviews artifacts before proceeding.
-* **Auto template**: An agentic, closed-loop program with explicit permissions, resource bounds, and stopping conditions under which the agent implements, runs, analyzes, and iterates, exposing all artifacts for post-hoc human verification.
+Hiraku addresses this gap by linking metadata, workflows and agent execution. Hiraku CLI (`hiraku`) and agent skill (`/hiraku`) support task creation, experiment implementation, documentation and analysis.
 
 
-Hiraku connects meta data at three levels:
+### Tasks, experiments, programs and runs
 
-- A **task** is the top-level unit, directly tied to an explicit goal. It corresponds roughly to a feature branch in git, and contains the sequence of experiments conducted toward that goal.
-- An **experiment** is the key record connecting a task's research intent to one exact source commit and the launches and runs that evaluate it. It may be a small ablation or a broader coherent investigation, and remains cheap to create, update, review, or discard.
-- A **run** is one execution trace of an experiment, with its configuration, provenance, and results. Several runs may evaluate the same experiment.
+Hiraku uses four lightweight data structures: tasks, experiments, programs, and runs. Data records are saved in YAML or Markdown with YAML front matter. A *task* defines a working scope and research goal. *Experiments* are smaller units that link a task, hypothesis, code, and results. Tasks and experiments may each define execution entrypoints. A *program* defines an agent workflow and its boundaries. *Runs* record execution traces for a specified task or experiment and code commit.
 
-Tasks and experiments are Hiraku concepts, while branches and commits provide their implementation provenance. Each experiment refers to one exact source commit; relationships between those commits provide experiment lineage. Experiment branches within a task add support for parallel workflows, and tree branching. GitHub pull requests or GitLab merge requests provide a standard reviewing surface before a task is concluded and merged into main. A tracking backend (MLflow, CSV/TSV table, W&B, etc.) tracks runs and metrics.
 
-Hiraku CLI (`hiraku`) and agent skill (`/hiraku`) support task creation, experiment implementation, task documentation, and task-local experiment and run comparison.
+| Term | Data | Summary |
+| --- | ---  | --- |
+| **Task** | `task.md` | A task is the top-level Hiraku abstraction that defines the scope of a research effort. A task defines any of the following: a research question, a goal, metrics and records scientific documentation of the research task, including scope, methodology, and results. |
+| **Proposal / Experiment** | `experiment.[md,yml]` | An *experiment* is a focused investigation within a task that refers to a source commit and may define execution entrypoints. An experiment without a reference commit is called a *proposal*. Its intent is user-defined: it can be a baseline, hypothesis, diagnosis, model run, ablation, or anything else; Hiraku does not impose specific semantics. A typical experiment lifecycle spans proposal, implementation, execution, analysis, and a record of the findings. The experiments associated with a task provide an overview of the research effort. |
+| **Run** | (backend owned execution trace) | A single execution trace of an experiment. The tracking backend and logging is user managed by the user, Hiraku only queries results via compatibility backend. Example backends: CSV, W&B, MLFlow, custom user backend.  |
+| **Program** | `.hiraku/programs/<program-id>/program.md` | A named agent workflow that defines instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 
-### Task record
 
-Each task contains three directly managed files at its top level:
+  > Hiraku is agnostic to git state of meta data as far as possible. The user my commit the metadata files to to git repository or leave it untracked. Hiraku simply lists what is currently visible in the working directory, or tries to detect experiments on the defined task branch.
+  
+
+
+
+### Task record: `task.md`
+
+Each task is defined by a unique id and corresponding markdown file.
 ```text
-tasks/<task-id>/
-  task.md
-  program.md
-  launch.yml
-  experiments/
+tasks/<task-id>/task.md
 ```
-Their roles are:
-- **`task.md`** documents the task's explicit goal, scientific scope, evaluation protocol, findings, conclusions, and decisions across its experiments.
-- **`program.md`** defines the workflow or research algorithm followed by the agent, as well as permissions, approval boundaries, resource limits, and stopping conditions.
-- **`launch.yml`** defines deterministic executable entrypoints.
-- **`experiments/`** contains mutable experiment records.
+It synthesizes task documentation, experiment branches, runs, analysis, open questions, reviewed findings, conclusions, decisions, and a final changelog. The markdown is continuously updated throughout the task lifecycle and provides a primary reviewing surface for the data scientist (for example, task.md my be used as description for a pull/merge request). 
+
+At any time, there is a single **active task**. `hiraku task set <task-id>` records it in the local Hiraku context. Commands that accept `--task` use it as an explicit override; otherwise they resolve the task from `HIRAKU_TASK_ID`, the local context, or the current task branch. Creating a task makes it active unless `--no-set` is supplied.
 
 
-The task-level `task.md` is the canonical review document. It synthesizes task documentation, experiment branches, runs, analysis, open questions, reviewed findings, conclusions, decisions, and a final changelog. Its complete Markdown content is also used verbatim as the pull-request or merge-request description in Stage 2. The local `experiments/` directory contains mutable experiment records during their lifecycle.
+The markdown frontmatter records key-value pairs as machine-readable yaml. Markdown is optional, if the user does not use markdown, the task file can also be saved as yaml (`task.yml`). 
 
+Hiraku differentiates core fields and user fields. Core fields carry semantic meaning and are directly used by the Hiraku framework to manage experiments and tasks. User fields  extend functionality, define defaults, configure agent instructions, or add user managed output when listing tasks or experiments.
+
+- Core fields are: `id`, `branch` (default: `hiraku/task/<task-id>`)
+- Optional core fields are: `metrics`, which defines defaults for listing and sorting runs, `entrypoints`, and `program`
+- Default user fields include: `goal`, `question`, `summary`
 
 **Example:**
+
 ```markdown
 ---
-id: heart-disease
-summary: Improve heart-disease risk prediction
-goal: Minimize validation log loss on the checksum-pinned Cleveland cohort.
-metrics:
+id: heart-disease  
+branch: hiraku/task/heart-disease  
+summary: Improve heart-disease risk prediction  
+goal: Minimize validation log loss on the checksum-pinned Cleveland cohort.   
+question: What is the best way to approach this problem?  
+program: interactive
+metrics: 
   - name: val/log_loss
     direction: minimize
   - name: val/accuracy
     direction: maximize
-branch: hiraku/task/heart-disease
-pr_id:
+entrypoints:
+  evaluate:
+    command: ["uv", "run", "python", "evaluate.py"]
 ---
-
 # Heart-disease risk prediction
 
 ## Goal
@@ -88,39 +99,79 @@ Minimize validation log loss while training only on the fixed training split.
 
 ## Evaluation protocol
 
-## Findings
-
-## Conclusions
-
-## Decisions and next steps
+## Results
 
 ## Changelog
 ```
 
+
+**CLI:**
+```
+hiraku task create <task-id> --branch main
+hiraku task create <task-id>  # default branch is hiraku/tasks/<task-id>
+hiraku task create <task-id> --goal "goal description" --question "research question"
+hiraku task set <task-id>
+hiraku task update <task-id> --summary "summary text"
+```
+
+Task entrypoints support operations that apply to the task as a whole, such as preparing data or running a shared evaluation. Experiment entrypoints support operations specific to one investigation, such as training a particular model. These scopes are complementary: a user may define and launch task entrypoints, experiment entrypoints, or both.
+
 ### Experiment records
 
-The PoC uses a file based experiment database. Experiment records form a local, file-backed database under `tasks/<task-id>/experiments/`. A record may use compact YAML (`<experiment-id>.yml`) or Markdown with YAML front matter (`<experiment-id>.md`). YAML is the default. A task cannot contain both extensions for the same experiment ID. Hiraku does not require the records to be committed; this is a user choice. 
+An experiment is a record that points to a code commit and may define execution entrypoints. The code commit can be initially empty; experiments without a code commit are called proposals. It is stored within the task directory:
+```bash
+tasks/<task-id>/experiments/<experiment-id>.yml
+```
+It is a mutable record that can be updated throughout the experiment lifecycle. 
 
-Both formats share a small core schema understood by Hiraku:
+Experiment records form a local, file-backed database under `tasks/<task-id>/experiments/`. A record may use compact YAML (`<experiment-id>.yml`) or Markdown with YAML front matter (`<experiment-id>.md`). YAML is the default. A task cannot contain both extensions for the same experiment ID. 
+
+
+Hiraku does not require the records to be committed; this is a user choice. When listing experiments, Hiraku will use the following conventions:
+- it lists experiments that are currently visible in the workspace.
+- if the current branch is not the task branch, it will additional list experiments from the branch defined by the current task.
+
+As for tasks, experiments define core fields and user-defined fields.
+- Core fields: `id`, `task_id`, `commit` (can be None), `entrypoints`, `created_at`, `updated_at`
+- Optional core fields: `branch` (experiment branch)
+- default user fields are: `summary`, `hypothesis`, `type`, `status`, `decision`, `conclusion`
+
 
 ```yaml
 id: logistic-baseline
 task_id: heart-disease
+commit:
+branch:
 summary: Logistic regression baseline
 hypothesis: Regularized logistic regression provides a calibrated baseline.
 status: proposed
 decision: pending
-commit:
-branch:
-entrypoints: []
+entrypoints: 
+  train:
+    command: ["uv", "run", "python", "train.py"]
+    args:
+      model: logistic
+      seed: 42
 conclusion:
 created_at: "2026-08-26T10:15:30.123456Z"
 updated_at: "2026-08-26T10:15:30.123456Z"
 ```
 
-Creation requires only `id`. Hiraku copies `task_id` from the containing task, records UTC ISO-8601 `created_at` and `updated_at` timestamps, and initializes the other fields to their empty values when they are not provided. The optional `branch` records the Git branch assigned to a Stage 2 branched experiment; an empty value denotes the linear workflow. The user may provide or update `summary`, `hypothesis`, and the other mutable fields at any time; `hiraku experiment set` refreshes `updated_at` while preserving `created_at`. The stored `task_id` must agree with the containing directory. Before a reproducible launch, the experiment must be bound to one exact `commit` and name at least one entrypoint. Stage 1 validates individual field values but does not enforce cross-field invariants or lifecycle transitions among `status`, `decision`, and `conclusion`.
+Experiment creation requires only `id`. `task_id` defaults to the active task. At creation Hiraku records UTC ISO-8601 `created_at` and `updated_at` timestamps and initializes unspecified fields to empty values. The new experiment and its task become active unless `--no-set` is supplied. The optional `branch` defines an experiment branch used for implementing the experiment. This enables parallel exploration of hypotheses or isolated experiment worktrees. `entrypoints` defines experiment-scoped execution entrypoints.
 
-Larger experiments may use Markdown for narrative documentation, the frontmatter follows the same yaml structure as outlined above
+An optional **active experiment** is selected with `hiraku experiment set <experiment-id>`. Setting an experiment also sets its owning task. Commands that accept `--experiment` use it as an explicit override; otherwise they resolve the experiment from the launch target, `HIRAKU_EXPERIMENT_ID`, or the local context.
+
+Active selections are stored in `.hiraku/context.yml`:
+
+```yaml
+task_id: heart-disease
+experiment_id: logistic-baseline
+program_id: interactive
+```
+
+The context file is local state and must be excluded from Git. Environment variables provide non-persistent overrides for CI, agents, and isolated commands; `set` commands update the context file rather than attempting to modify the parent shell environment.
+
+Experiments may use Markdown for narrative documentation, the frontmatter follows the same yaml structure as outlined above
 
 ```markdown
 ---
@@ -138,6 +189,8 @@ created_at: "2026-08-26T10:15:30.123456Z"
 updated_at: "2026-08-26T10:15:30.123456Z"
 ---
 
+## Proposal 
+
 ## Objective
 
 Identify the strongest model family under the fixed evaluation protocol.
@@ -151,39 +204,218 @@ An experiment is one coherent research question or strategy evaluated from one e
 
 Experiments can be updated throughout their lifecycle and discarded, and specify agent instructions accordingly, the default is that the final experiment record is committed. Reviewed summaries are propagated into `task.md` and, in stage 2, into pull-request or merge-request descriptions.
 
-### Launch entrypoints
+**CLI**
 
-A set of named entrypoints is defined in `launch.yml` at the task level. Each entrypoint uses the full structured specification: a fixed command, working directory, environment, named arguments, and optional positional arguments. The launcher injects the task ID, experiment ID, source commit, launch provenance, tracking backend, and table path into the child environment. Example:
+```bash
+hiraku experiment create <exp-id>
+hiraku experiment create logistic-regression
+hiraku experiment create <exp-id> --commit HEAD
+hiraku experiment set <exp-id>
+hiraku experiment update <exp-id> --entrypoint train
 
-```yaml
-entrypoints:
-  logistic:
-    command: ["uv", "run", "python", "train.py"]
-    args:
-      model: logistic
-      seed: 42
-  random-forest:
-    command: ["uv", "run", "python", "train.py"]
-    args:
-      model: random_forest
-      seed: 42
-    positionals: []
-    cwd: "."
+hiraku launch <entrypoint>                         # current task entrypoint
+hiraku launch <exp-id>:<entrypoint>                # experiment in the current task
+hiraku launch logistic-regression:train --seed 1  # kwargs that come after the entrypoint name are used as overwrites for the script
+hiraku launch <entrypoint> --experiment <exp-id>   # task entrypoint attributed to an experiment
+hiraku launch <entrypoint> --task <task-id>        # task entrypoint in an explicit task
 ```
 
-An experiment records an ordered list of concrete launch invocations. Each string starts with an entrypoint name from `launch.yml`; the remaining tokens are appended to that entrypoint's resolved argv:
+#### Reproducible launches
 
-```yaml
-entrypoints:
-  - logistic
-  - random-forest
+An optional `--commit` flag is used to launch the experiment in an isolated worktree at the defined commit, e.g.
+```bash
+hiraku launch --commit ab15ad41 logistic-regression:train
 ```
 
-Invocation strings use shell-like quoting only to split text into tokens; they are never executed through a shell. Pipes, redirects, substitutions, environment assignments, and other shell syntax have no special behavior. The first token must name an entrypoint and the string must not be empty. List order is preserved and exact duplicates are invalid.
+#### Launch entrypoints
 
-For an experiment-associated launch, the requested entrypoint and trailing CLI arguments must exactly match one declared invocation after tokenization. For example, `hiraku launch --experiment logistic-baseline heart-disease:logistic` matches `logistic`. Experiment arguments are appended after the command, positional arguments, and named arguments resolved from `launch.yml`. Consequently, repeated-option precedence is determined by the child program; an experiment invocation cannot structurally remove a default from `launch.yml`. A project that needs materially different defaults should define another named entrypoint.
+A task or experiment can define a set of named entrypoints. Each entrypoint uses the same structured specification: a fixed command, working directory, environment, named arguments, and optional positional arguments. The two namespaces remain separate: `<entrypoint>` selects a task entrypoint, while `<experiment-id>:<entrypoint>` selects an experiment entrypoint. The same name may therefore exist at both levels without shadowing or merging. The launcher injects the task ID, optional experiment ID, source commit, and tracking backend information.
 
-### Example workflow
+#### Dispatch backends
+The user can define a custom dispatch backend in
+```bash
+.hiraku/dispatch/<dispatch-backend>.sh
+```
+
+Hiraku invokes a selected backend by passing the full launch command after a ` -- `, e.g
+```bash
+hiraku launch --dispatch runai logistic-regression:train
+```
+Translates to
+```bash
+.hiraku/dispatch/runai.sh -- uv run train.py ...
+```
+
+> Launch invocation is not recorded by default. If the user want to record launches they can modify the default launch script in
+```
+.hiraku/dispatch/_default.sh
+```
+
+### Runs
+
+User managed, backend. Hiraku only queries results. the backend returns records in the following format:
+
+```json
+{
+  run_id: <run-id>,  # backend defined unique identifier
+  task_id: <task-id>,
+  experiment_id: <exp-id>,
+  commit: <hash>,
+  timestamp: <timestamp>,  
+  params  # entrypoint, params
+  metrics:
+    train/mse: 1.2
+    val/mse: 1.4
+}
+```
+### Agent integration
+
+Hiraku programs define agent instructions for research workflows. Each `program.md` records explicit boundaries and permissions, resource limits, stopping conditions, and natural-language instructions such as hypothesis generation and user confirmation. In the simplest setting, the program is interpreted by the LLM without system-enforced boundaries. Later integration with a harness or sandbox may enforce these constraints.
+
+Programs are first-class records managed by the Core API and CLI:
+
+```bash
+hiraku program create my-program
+hiraku program list
+hiraku program show interactive
+hiraku program set autoresearch
+hiraku program update my-program --summary "Custom bounded workflow"
+hiraku program delete my-program
+```
+
+`create` makes the new program active unless `--no-set` is supplied. `set` updates `program_id` in `.hiraku/context.yml`; `update` modifies the program record. Direct editing remains supported. Deleting a program that is active or referenced by a task is rejected unless explicitly forced.
+
+Programs take precedence in this order:
+```
+--program <program-id>
+HIRAKU_PROGRAM_ID
+.hiraku/context.yml
+the task record's `program` field
+the repository configuration's `program` field
+interactive
+```
+
+Programs are saved in the Hiraku folder:
+```
+.hiraku/programs/<program-id>/program.md
+```
+
+By default, Hiraku ships with two workflows:
+
+- **interactive:** A step-by-step program where the data scientist explicitly approves each checkpoint and reviews artifacts before proceeding.
+- **autoresearch:** A bounded autonomous loop with explicit permissions, resource limits, and stopping conditions under which the agent implements, runs, analyzes, and iterates, exposing all artifacts for post-hoc human verification.
+
+
+**Example**
+> ToDo: Define agent integration and core fields. Right now, only id is defined, everything else is interpreted as skill. Later we can pass precise instructions to a custom Harness or sandbox.
+
+```markdown
+---
+id: interactive
+summary: A interactive, step-by-step workflow with explicit human approval and review.
+gates:
+  - git commit
+  - git push
+allowed:
+  - hiraku task show
+  - hiraku experiment create
+  - hiraku experiment update
+  - hiraku launch
+  - hiraku runs
+disallowed:
+  - hiraku experiment delete
+  - hiraku experiment sign
+  - hiraku task conclude
+branch-mode: linear  # restricts experiments to the task branch; no branching or merging is allowed.
+limits:
+  time: 5 min
+  memory: 16 GB
+  gpu: 16 GB
+  episodes: 1000
+---
+# Interactive workflow 
+<ToDo: Fill example with agent instructions.>
+
+```
+
+
+#### Agent Skill
+
+The simplest way to use Hiraku is with a Coding harness, e.g. Codex, Claude, Pi, ..., and invoke the `/hiraku` kill with natural language instructions. The instructs the agent to follow Hiraku workflows and read the relevant files.
+
+`hiraku init` installs one repository-local Agent Skill at `.agents/skills/hiraku/`.
+
+The skill acts as a router for focused workflows that are loaded when required:
+
+- creating and refining a task;
+- executing the task's program within its approved boundaries;
+- creating, refining, binding, and reviewing local experiment records;
+- launching and analyzing runs; and
+- performing a bounded autonomous research loop.
+
+
+#### Hiraku Agent
+   > todo: This could be a way to directly invoke an agent
+
+```bash
+hiraku-agent experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic --agent pi --program interactive
+```
+
+```bash
+hiraku-agent experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic --agent pi --program autoresearch
+```
+
+
+
+#### Hiraku Harness
+   > Todo: Create Pi extension that explicitly parses programs and enforces the workflow and boundaries.
+
+### Configuration
+
+`hiraku init` creates `.hiraku.yml`, `.hiraku/context.yml`, the task directory, the bundled `interactive` and `autoresearch` programs, and the repository-local Hiraku skill. It adds the local context file to `.gitignore`.
+
+A table-backed project uses configuration shaped like:
+
+```yaml
+tasks_dir: tasks
+program: interactive
+branch: hiraku/tasks/<task-id>
+tracking_backend: table
+```
+
+  > Todo: it can also make sense to define the tracking backend at the task level. Another idea is to define defaults that can be overwritten at task or experimet level (e.g., branch, program, ...). Then we add `program` as an optional key to task, and experiments.
+
+  > This can also be a place to configure default fields for listing experiments and tasks
+
+All configured paths are repository-relative and must remain inside the project root. The table format is inferred from `.csv` or `.tsv`. 
+
+
+### Installation
+
+Choose the level of detail you need: [Quickstart](docs/quickstart.md),
+[linear tutorial](docs/tutorial.md), or
+[advanced branching, reviews, and remote tracking](docs/advanced.md).
+
+For local development, the intended workflow is:
+
+```bash
+git clone https://github.com/SwissDataScienceCenter/hiraku.git
+cd hiraku
+uv sync
+uv run hiraku --help
+```
+
+Install optional dashboard support with `uv sync --extra dashboard`, or both dashboard and MLflow
+with `uv sync --extra dashboard --extra mlflow`.
+
+To install `hiraku` from a checkout onto `PATH` without activating its virtual environment:
+
+```bash
+uv tool install .
+hiraku --help
+```
+
+## Example workflow
 The following sequence illustrates the intended workflow. It can be run step-by-step or autonomously within the task program's boundaries. The data scientist can review the mutable experiment record at any point; reviewed conclusions are later summarized in `task.md` and, in stage 2, in a pull request or merge request.
 
 ```bash
@@ -191,18 +423,18 @@ The following sequence illustrates the intended workflow. It can be run step-by-
 hiraku init  # creates Hiraku project configuration in `.hiraku.yml`
 
 # 1. create task
-hiraku task create heart-disease --template guided  # creates the task and prints branch-switch instructions
+hiraku task create heart-disease  # creates and sets the active task
 /hiraku "define the fixed heart-disease evaluation protocol"  # agent-assisted workflow
 hiraku task show heart-disease  # task details, --json returns machine-readable output
 
 # 2. create an experiment, then implement and bind it
-hiraku experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic
+hiraku experiment create logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic  # creates and sets the active experiment
 /hiraku "implement the approved logistic baseline"
 git commit -m "implement logistic baseline"
-hiraku experiment set heart-disease:logistic-baseline --commit HEAD
+hiraku experiment update heart-disease:logistic-baseline --commit HEAD
 
 # 3. launch named entrypoints and inspect the tracked table
-hiraku launch --experiment logistic-baseline heart-disease:logistic
+hiraku launch logistic-baseline:train
 hiraku runs heart-disease --sort val/log_loss --ascending
 
 # 4. analyze the runs and update the local experiment record
@@ -219,33 +451,143 @@ hiraku runs heart-disease  # task leaderboard, grouped by experiment where usefu
 The simplest, default workflow is linear: create a local experiment record, implement and commit its source snapshot, bind the record, launch runs, and update the record through evaluation and decision. Rejecting or deleting the local record does not add a Git commit; implementation changes can be reverted or reset using the task's normal Git workflow. The task-level `task.md` synthesizes the reviewed findings that should persist in Git.
 
 #### Advanced branching workflow
-Stage 2 adds Git experiment branches so several ideas can be explored in parallel or a task can backtrack to a prior branch or commit. A branched experiment is created with `hiraku exp create ... --branch [--from <ref>]`. The default branch is `hiraku/experiment/<task-id>/<experiment-id>`, and the selected branch is recorded in the experiment record. `--from` may resolve another branch or commit and defaults to task-branch HEAD. Without `--branch`, the experiment remains on the task branch.
+Experiment branches can be used to explore several ideas in parallel or a task can backtrack to a prior branch or commit. A branched experiment is created with `hiraku experiment create ... --branch [--from <ref>]`. The default branch is `hiraku/experiment/<task-id>/<experiment-id>`, and the selected branch is recorded in the experiment record. `--from` may resolve another branch or commit and defaults to task-branch HEAD. Without `--branch`, the experiment remains on the task branch.
 
 If the branch already exists, Hiraku warns and attempts to switch to it without resetting it. If switching fails, Hiraku prints manual Git instructions. Worktrees, merges, conflict handling, and advancing the task branch after accepting an experiment remain normal Git operations directed by the user or task program. Hiraku does not mutate the task branch as a side effect of setting `decision: accepted`.
 
 Experiment lineage is a DAG derived from Git commit history rather than copied into records. Experiment records retain the file-database limitation: by default they are uncommitted or committed directly to the task branch, even when implementation work occurs on an experiment branch.
 
-### Configuration
 
-`hiraku init` creates `.hiraku.yml`, the task directory, and the repository-local Hiraku skill.
+## Hiraku Core API
 
-A table-backed impl1 project uses configuration shaped like:
+The Hiraku Core API is the authoritative definition of the data model and lifecycle actions for tasks, experiments, entrypoints, programs, and runs. The CLI and other user interfaces, such as dashboards and TUIs, are thin interfaces built on top of this API; they do not define separate lifecycle semantics.
 
-```yaml
-tasks_dir: tasks
-templates_dir: .hiraku/templates
-default_template: guided
-tracking_backend: table
-review_provider: github  # optional; github or gitlab
-review_remote: origin    # optional
+### Records
+
+`Record` is the shared base class for file-backed Hiraku data structures such as `Task`, `Experiment`, and `Program`. It provides YAML and Markdown serialization, validation, and dictionary-like field access. Concrete record types declare three field categories:
+
+- **Required core fields** are required and interpreted by Hiraku.
+- **Optional core fields** are validated and interpreted when present.
+- **User fields** are preserved without framework-defined semantics.
+
+Markdown records store their fields as YAML front matter and expose the remaining document as `record.markdown`. YAML records contain fields only. Loading and saving a record preserves user fields and Markdown content. A registry cannot contain both `<id>.yml` and `<id>.md` for the same record ID.
+
+```python
+class Task(Record):
+    required_fields = {"id", "branch"}
+    optional_fields = {
+        "metrics": list,
+        "entrypoints": dict,
+    }
+
+task = Task.load("tasks/heart-disease/task.md")
+print(task.id, task["goal"], task.get("custom_field"))
+task["custom_field"] = "value"
+task.save()
 ```
 
-All configured paths are repository-relative and must remain inside the project root. The table format is inferred from `.csv` or `.tsv`. 
+The base class is responsible only for field access, validation, and serialization. Lifecycle actions and domain-specific behavior remain on the concrete types.
 
+
+Python API
+
+```python
+from hiraku.core import Record, Task, Experiment, Run, Program, Entrypoint
+from hiraku.tracking import TableBackend, MLflowBackend, WandBBackend
+from hiraku.config import HirakuConfig
+from hiraku.agent import Agent
+
+task_markdown = """# Heart-disease risk prediction
+### Goal
+Minimize validation log loss while training only on the fixed training split.
+### Implementation plan
+### Evaluation protocol
+### Findings
+### Conclusions
+### Decisions and next steps
+### Changelog
+"""
+
+HirakuConfig.init(install_skills=True)
+
+config = HirakuConfig()
+config.tasks_dir
+
+
+task = Task("heart-disease", goal="Minimize validation log loss on the checksum-pinned Cleveland cohort.", question="What is the best way to approach this problem?", summary="This is a summary of the task.", tracking_backend="table", branch="hiraku/task/heart-disease", markdown=markdown)
+
+Task.load("heart-disease")  # creates tasks/heart-disease/task.md
+Task.load("tasks/heart-disease/task.md")  # creates tasks/heart-disease/task.md
+
+print(task["goal"], task.goal)
+print(task["question"], task.question)
+print(task["summary"], task.summary)
+print(task.markdown)
+task.save()  # creates tasks/heart-disease/task.md
+task.check_branch()
+task.switch_branch()
+
+task = Task.load("heart-disease")
+
+tasks = Task.list()
+
+
+for task in tasks:
+    print(task.id, task.goal, task.tracking_backend, task.branch)
+
+
+experiment = Experiment(task, "logistic-baseline", summary="Logistic regression baseline", hypothesis="Regularized logistic regression provides a calibrated baseline.", commit="HEAD", entrypoints=dict(train="uv run python train.py --model logistic --seed 42")) ], markdown=markdown, branch=None)
+
+experiment.save()  # creates tasks/heart-disease/experiments/logistic-baseline.yml or logistic-baseline.md if markdown is provided
+
+
+experiment.branch
+experiment["branch"]
+
+experiment.check_branch()
+experiment.switch_branch()
+
+
+
+experiment.parents()
+experiment.children()
+
+task.launch("evaluate")  # task entrypoint without experiment attribution
+task.launch("evaluate", experiment=experiment)  # task entrypoint for an experiment
+experiment.launch("train", worktree=True, commit=experiment.commit, args={"model": "logistic", "seed": 42})
+experiment.entrypoints()["train"].dispatch("runai.sh")
+
+
+
+experiments = task.experiments()
+
+runs = Run.list(task)
+for run in runs:
+    print(run.id, run.experiment_id, run.metrics, run.commit)
+
+tracking_backend = task.get_tracking_backend()
+runs = task.runs()
+
+
+
+
+
+# write operations are note the point, scripts should directly log to standard backends.
+# however for the table backend, we can have some api support for logging.
+# Maybe in the future, we can have a more unified API. allowing to switch between backends, etc
+tracking_backend.log_run(experiment_id="logistic-baseline", metrics={"val/log_loss": 0.123, "val/accuracy": 0.987}, commit="HEAD", entrypoint="train", args={"model": "logistic", "seed": 42}) 
+
+
+program = Program.load("interactive")
+programs = Program.list()
+program.save()
+agent = Agent(program=program, task=task, experiment=experiment, backend="Codex")
+agent.run() 
+```
 
 ## Command-line interface
 
-> This section defines the intended CLI shape for the proof of concept.
+> This section defines the intended CLI shape. The CLI directly invokes the core Python API.
 
 Tasks are managed explicitly. Experiments are semantic records in the local task registry; each implemented experiment binds to one source commit for provenance and lineage.
 
@@ -255,15 +597,17 @@ Tasks are managed explicitly. Experiments are semantic records in the local task
 hiraku init
 ```
 
-This creates the default configuration, `tasks/`, complete templates under
-`.hiraku/templates/{guided,auto}/`, and the agent skill `.agents/skills/hiraku/`.
+This creates the default configuration, local context, `tasks/`, the bundled programs under
+`.hiraku/programs/{interactive,autoresearch}/`, and the agent skill `.agents/skills/hiraku/`. The local `.hiraku/context.yml` is added to `.gitignore`.
 
 ### Create and inspect tasks
 
 ```bash
 hiraku task create heart-disease
-hiraku task create heart-disease-auto --template auto
-hiraku task create custom-workflow --template my-template
+hiraku task create heart-disease-search --program autoresearch
+hiraku task create custom-workflow --program custom --no-set
+hiraku task set heart-disease
+hiraku task update heart-disease --summary "Improved baseline study"
 hiraku task  # compact metadata for the current task
 hiraku task show heart-disease
 hiraku task show heart-disease --verbose
@@ -272,10 +616,10 @@ hiraku task entrypoints
 hiraku task entrypoints heart-disease --json
 ```
 
-New tasks default to the `guided` template and canonical branch `hiraku/task/<task-id>`. The branch is derived from the task ID, recorded in `task.md`, and cannot be set arbitrarily. Task front matter also contains a required one-line `summary`. Stage 2 uses it as the review title and records the persistent provider identity as optional `pr_id` for GitHub or `mr_id` for GitLab. Task creation does not switch branches; it creates the task files and prints instructions for switching to the task branch. Creation does not require a clean worktree. Each directory under `.hiraku/templates/` is a complete bundle of `task.md`, `program.md`, and `launch.yml`; projects may add their own templates.
-Creation copies the selected bundle and does not record its name in the resulting task. The Hiraku skill checks that implementation work occurs on the task branch. It switches branches only when directed by the user, except that it may switch automatically when the working tree is clean and doing so is consistent with the user's instructions.
+New tasks default to the `interactive` program and canonical branch `hiraku/task/<task-id>`. The selected program is recorded in `task.md`. The branch is derived from the task ID, recorded in `task.md`, and cannot be set arbitrarily. Task front matter also contains a required one-line `summary`. Stage 2 uses it as the review title and records the persistent provider identity as optional `pr_id` for GitHub or `mr_id` for GitLab. Task creation sets the new task as active unless `--no-set` is supplied. It does not switch Git branches; it creates the task files and prints instructions for switching to the task branch. Creation does not require a clean worktree.
+The Hiraku skill checks that implementation work occurs on the task branch. It switches branches only when directed by the user, except that it may switch automatically when the working tree is clean and doing so is consistent with the user's instructions.
 
-`hiraku task` is shorthand for showing the task inferred from the current task branch. Task display is compact by default and includes only front-matter metadata; `--verbose` also renders the Markdown body. JSON follows the same rule and includes `body` only with `--verbose`. `hiraku task entrypoints [task]` lists the named entrypoints defined by the selected task's current `launch.yml`.
+`hiraku task` is shorthand for showing the task inferred from the current task branch. Task display is compact by default and includes only front-matter metadata; `--verbose` also renders the Markdown body. JSON follows the same rule and includes `body` only with `--verbose`. `hiraku task entrypoints [task]` lists the named entrypoints defined in the selected task record.
 
 ### Create and inspect experiments
 
@@ -285,56 +629,81 @@ hiraku experiment create heart-disease:random-forest --summary "Random forest co
 hiraku experiment list
 hiraku experiment list heart-disease
 hiraku experiment show heart-disease:logistic-baseline
-hiraku experiment set heart-disease:logistic-baseline --commit HEAD
+hiraku experiment set heart-disease:logistic-baseline
+hiraku experiment update heart-disease:logistic-baseline --commit HEAD
 hiraku experiment delete heart-disease:logistic-baseline
-hiraku exp list heart-disease
-hiraku exp create heart-disease:stronger-regularization --branch --from HEAD
+hiraku experiment create heart-disease:stronger-regularization --branch --from HEAD --no-set
 ```
 
-`hiraku exp` is an alias for `hiraku experiment`. YAML and Markdown records normalize to the same core fields. Direct editing is supported. `list` without a task resolves to the current task, and its human-readable table includes both the experiment summary and hypothesis.
+`hiraku experiment create` sets the experiment and its task as active unless `--no-set` is supplied. `set` changes the active experiment context; `update` modifies an experiment record. `hiraku exp` is a shorthand for `hiraku experiment`. YAML and Markdown records normalize to the same core fields. Direct editing is supported. `list` without a task resolves to the current task, and its human-readable table includes both the experiment summary and hypothesis.
 
-### Launch named project entrypoints
+### Create and inspect programs
 
-Define fixed commands in the task directory, e.g., `tasks/heart-disease/launch.yml`:
+```bash
+hiraku program create my-program
+hiraku program create review-loop --no-set
+hiraku program list
+hiraku program show interactive
+hiraku program set autoresearch
+hiraku program update my-program --summary "Custom bounded workflow"
+hiraku program delete my-program
+```
+
+Programs are Markdown records under `.hiraku/programs/`. `create` sets the new program as active unless `--no-set` is supplied. `set` changes the active program context; `update` modifies the program record. The bundled `interactive` and `autoresearch` programs follow the same data model as user-defined programs.
+
+### Launch named entrypoints
+
+Tasks and experiments may each define named entrypoints in their records. For example, a task may define a shared evaluation command:
 
 ```yaml
 entrypoints:
-  logistic:
-    command: ["uv", "run", "python", "train.py"]
+  evaluate:
+    command: ["uv", "run", "python", "evaluate.py"]
     args:
-      model: logistic
       seed: 42
     positionals: []
     cwd: "."
 ```
 
+An experiment may independently define a model-specific training command using the same structure. Task and experiment entrypoints are complementary and are not merged. The launch target selects which scope to use:
+
+```bash
+hiraku launch evaluate                                      # task entrypoint
+hiraku launch evaluate --experiment logistic-baseline       # task entrypoint for an experiment
+hiraku launch logistic-baseline:train                        # experiment entrypoint
+hiraku launch evaluate --task heart-disease                  # entrypoint in an explicit task
+```
+
+The task is selected by `--task`, then `HIRAKU_TASK_ID`, the local context, and finally the current task branch. The experiment context is selected by `--experiment`, then by the experiment in an `<experiment-id>:<entrypoint>` target, `HIRAKU_EXPERIMENT_ID`, and finally the local context. Explicit options are always overrides. This means a task entrypoint can run for an experiment, and an experiment entrypoint can be reused in a different experiment context. The selected experiment supplies the bound commit and receives the resulting run attribution. Without an experiment context, a task entrypoint runs without experiment attribution.
+
+The positional target still determines where the entrypoint definition comes from: `<entrypoint>` resolves only task entrypoints, while `<experiment-id>:<entrypoint>` resolves only entrypoints defined by that experiment. Hiraku does not merge the namespaces or fall back between them, and both scopes may use the same name.
+
 Launch the current repository state directly as a non-reproducible debugging execution:
 
 ```bash
-hiraku launch heart-disease:logistic
+hiraku launch logistic-baseline:train
 ```
 
 For a reproducible launch, execute an exact commit in an isolated temporary Git worktree:
 
 ```bash
-hiraku launch --commit HEAD heart-disease:logistic
-hiraku launch --commit <commit-sha> heart-disease:logistic
-hiraku launch --experiment logistic-baseline heart-disease:logistic
+hiraku launch --commit HEAD logistic-baseline:train
+hiraku launch --commit <commit-sha> logistic-baseline:train
 ```
 
 Flags after the entrypoint are appended to the fixed command. E.g.,
 
 ```bash
-hiraku launch heart-disease:logistic --seed 7
+hiraku launch logistic-baseline:train --seed 7
 ```
 
 `hiraku launch`:
 
-1. resolves the task, optional experiment, and tracking configuration;
+1. resolves the task, optional experiment context, and tracking configuration;
 2. runs the current working tree as a non-reproducible source unless `--commit` is supplied;
 3. for `--commit`, resolves the ref and creates a temporary detached worktree containing the exact committed snapshot;
-4. resolves `launch.yml`, the fixed argv, safe project-relative working directory, and environment from the selected source tree;
-5. injects the task ID, semantic experiment ID, source commit, launch provenance, backend type, and fixed destination `tasks/<task-id>/runs.csv` in the original project into the child environment;
+4. resolves the selected task or experiment entrypoint, fixed argv, safe project-relative working directory, and environment from the selected source tree;
+5. injects the task ID, optional experiment ID, source commit, launch provenance, backend type, and fixed destination `tasks/<task-id>/runs.csv` in the original project into the child environment;
 6. executes the command directly without a shell and propagates its exit status; and
 7. removes a temporary worktree without changing the active checkout.
 
@@ -342,13 +711,13 @@ The integration environment includes:
 
 ```text
 HIRAKU_TASK_ID
-HIRAKU_EXPERIMENT_ID
+HIRAKU_EXPERIMENT_ID  # set when the launch has an experiment context
 HIRAKU_SOURCE_COMMIT
 HIRAKU_TRACKING_BACKEND
 HIRAKU_TABLE_PATH
 ```
 
-`HIRAKU_EXPERIMENT_ID` contains the stable experiment slug, while `HIRAKU_SOURCE_COMMIT` contains the resolved implementation SHA. A reproducible experiment launch uses its bound source commit; an explicitly supplied `--commit` must resolve to the same SHA. Working-tree launches remain available for debugging but are non-reproducible and do not establish a bound experiment. Hiraku deliberately does not require a row to appear after a successful child process; the launcher remains a thin local wrapper rather than a scheduler or tracking SDK.
+When an experiment context is selected, `HIRAKU_EXPERIMENT_ID` contains its stable experiment slug. `HIRAKU_SOURCE_COMMIT` contains the resolved implementation SHA. A reproducible experiment launch uses the selected experiment's bound source commit; an explicitly supplied `--commit` must resolve to the same SHA. Working-tree launches remain available for debugging but are non-reproducible and do not establish a bound experiment. Hiraku deliberately does not require a row to appear after a successful child process; the launcher remains a thin local wrapper rather than a scheduler or tracking SDK.
 
 The launcher is a thin, customizable, local command wrapper, not a scheduler or job-dispatch system.
 
@@ -405,21 +774,6 @@ All browser assets are pinned and bundled for offline use. The dashboard never e
 data, Git state, or reviews. Table dashboards require `hiraku[dashboard]`; MLflow dashboards require
 both the `dashboard` and `mlflow` extras.
 
-### Create or update a review
-
-Stage 2 provides:
-
-```bash
-hiraku review create [task] [--base <branch>] [--remote <name>] [--review <id>] [--push]
-```
-
-The provider is configured explicitly as `review_provider: github` or `review_provider: gitlab`; it is not inferred from the remote hostname. The optional project `review_remote` may be overridden by `--remote`. The base defaults to the remote repository's default branch.
-
-Reviews always use the canonical task branch as head. When invoked from an experiment branch, Hiraku infers the task and reviews its task branch without changing the active checkout. The required task `summary` is the review title. `task.md` is the complete review description: the provider description is fully replaced with the file's current Markdown on every update. Each task template ends in `## Changelog`, and reviewed task updates append a concise entry there.
-
-Hiraku resolves an existing review from `--review <id>` or the task's provider-matching `pr_id` or `mr_id`; conflicting values fail without mutation. A GitHub project rejects `mr_id`, and a GitLab project rejects `pr_id`. If no identifier is present, Hiraku searches the resolved head/base pair. Any matches, including closed reviews, are listed with instructions to select one explicitly, and Hiraku makes no provider change. If there are no matches, first-time creation requires the canonical task branch to be checked out; from an experiment branch, Hiraku stops before provider mutation and prints switch-and-rerun instructions. It then creates the review, records the returned `pr_id` or `mr_id` in `task.md`, and synchronizes the full updated file to the new review. Preview and updates using an explicit or recorded identifier remain available from experiment branches.
-
-Hiraku never pushes implicitly. If an unpublished task branch is reviewed without `--push`, it prints `task.md` and exact instructions for publishing and rerunning. `--push` authorizes pushing only the task branch. Hiraku may create or update a pull request or merge request, but never approves or merges it.
 
 ### MLflow tracking backend
 
@@ -450,81 +804,11 @@ Hiraku uses MLflow's native run ID and start time as `run_id` and `created_at`. 
 
 MLflow launches receive `HIRAKU_MLFLOW_TRACKING_URI`, `HIRAKU_MLFLOW_EXPERIMENT`, `MLFLOW_TRACKING_URI`, and `MLFLOW_EXPERIMENT_NAME` instead of `HIRAKU_TABLE_PATH`. Both backends continue to receive the common task, experiment, commit, and backend variables.
 
-## Agent skill
 
-`hiraku init` installs one repository-local Agent Skill at `.agents/skills/hiraku/`.
-
-The skill acts as a router for focused workflows that are loaded when required:
-
-- creating and refining a task;
-- executing the task's program within its approved boundaries;
-- creating, refining, binding, and reviewing local experiment records;
-- launching and analyzing runs; and
-- performing a bounded autonomous research loop.
-
-
-## Agent programs 
-
-Hiraku defines the program and boundaries that define an agent's research workflow in a task-local `program.md`. We provide default programs for `guided` and `auto` modes. Projects may define additional templates without changing the underlying task model.
-
-> `program.md` guides agent behavior; it is not a security boundary. Enforcement remains the responsibility of Git protections, sandboxing, credentials, and execution infrastructure.
-
-### Guided template
-
-`guided` is the default template. It initializes a stepwise program under which the data scientist reviews the relevant artifacts before the agent proceeds through these checkpoints:
-
-1. task scope, goal, and implementation plan;
-2. experiment intent, implementation, and proposed source commit;
-3. launching runs for the proposed experiment; and
-4. updating findings, and conclusion.
-
-> Under the guided program, the agent is instructed not to commit changes or launch runs without explicit human approval.
-
-### Auto template
-
-The `auto` template initializes a closed-loop program with explicit boundaries. The data scientist
-approves the task goal and scope, evaluation protocol, permitted commands, resource bounds, and stopping
-conditions before the loop starts. Within those boundaries, the agent may:
-
-- update the implementation plan;
-- create experiment records and modify and commit their implementations;
-- launch runs;
-- inspect and compare results;
-- update findings and next steps; and
-- accept/reject previous changes and select the next in-scope iteration.
-
-The agent pauses for approval before changing the task goal or scope, evaluation, permitted commands, resource bounds, permissions, or stopping conditions in the program. Merging into a protected branch always requires explicit human approval.
-
-Both templates produce the same data model. Their copied programs may evolve independently afterward.
-
-## Installation
-
-Choose the level of detail you need: [Quickstart](docs/quickstart.md),
-[linear tutorial](docs/tutorial.md), or
-[advanced branching, reviews, and remote tracking](docs/advanced.md).
-
-For local development, the intended workflow is:
-
-```bash
-git clone https://github.com/SwissDataScienceCenter/hiraku.git
-cd hiraku
-uv sync
-uv run hiraku --help
-```
-
-Install optional dashboard support with `uv sync --extra dashboard`, or both dashboard and MLflow
-with `uv sync --extra dashboard --extra mlflow`.
-
-To install `hiraku` from a checkout onto `PATH` without activating its virtual environment:
-
-```bash
-uv tool install .
-hiraku --help
-```
 
 ### Running the examples
 
-Each example is a repository template. Copy it outside the Hiraku checkout before initializing it;
+Each example is a copyable project. Copy it outside the Hiraku checkout before initializing it;
 do not create nested Git repositories inside `examples/`:
 
 ```bash
@@ -545,156 +829,14 @@ The smoke and heart-disease examples select their run writer from
 the optional MLflow dependency automatically for an MLflow launch, while the writer uses only
 the backend-specific tracking location injected by Hiraku.
 
-The guided [`examples/heart-disease`](examples/heart-disease) flow is the main tutorial example; its
-`heart-disease-auto` template runs the same fixed evaluation in a bounded CPU-only autonomous loop.
+The interactive [`examples/heart-disease`](examples/heart-disease) flow is the main tutorial example. The same task can use the `autoresearch` program for a bounded CPU-only autonomous loop.
 [`examples/smoke`](examples/smoke) is only the shortest installation and tracking-contract check.
 
 Stage 2 also includes [`examples/autoresearch`](examples/autoresearch), pinned to upstream commit `228791fb499afffb54b46200aca536f79142f117`. It vendors the upstream GPU training and preparation code with MIT attribution, closely adapts the original autonomous program to Hiraku tasks, experiments, and runs, lets the user choose `revert`, `reset`, or retained-experiment-`branch` history, and provides a CPU-only contract entrypoint for automated workflow validation.
 
 
 
-## Proof of concept
-
-The proof of concept is delivered in stages. The first stage establishes a minimal working version
-of Hiraku, the second adds branching, review integration, and MLflow, the third refines agent
-workflows, documentation, and remote MLflow support, and the fourth adds a task-scoped experiment
-dashboard. Metric improvement is measured, but is not a condition for framework success.
-
-### Stage 1: Minimal Working Version
-
-Stage 1 provides the minimal vertical slice: project initialization, task creation, a local experiment registry, named entrypoint launching, CSV/TSV run tracking, ranked run inspection, and listing of experiments and runs for each task.
-
-- **Installation and project setup**
-  - Package the CLI for installation with `uv`, including its declared dependencies.
-  - Initialize `.hiraku.yml`, the task directory, bundled `guided` and `auto` templates, and the repository-local agent skill.
-  - Create tasks with `task.md`, `program.md`, `launch.yml`, and `experiments/`.
-
-- **Task model and CLI**
-  - Provide `init`, `task`, `experiment`, `launch`, and `runs` commands.
-  - Create and inspect tasks, storing `id`, `branch`, required one-line `summary`, and one-line `goal` in `task.md` front matter, with an optional detailed goal in the body. Stage 2 uses `summary` as the review title and optional provider-matching `pr_id` or `mr_id` as the persistent review identity.
-  - Derive every task branch as `hiraku/task/<task-id>`, record it without allowing arbitrary branch names, do not switch automatically, and print branch-switch instructions.
-  - Resolve the current task from an explicit `[task:]object`, `--task <id>`, or the current task branch; reject conflicting selectors. Experiment-branch resolution is added with experiment branches in Stage 2.
-  - Support `task create`, `task show`, and `task entrypoints`; omit `task list`.
-  - Treat `hiraku task` as compact `task show` for the current task, and include the Markdown body only with `--verbose`.
-
-- **Experiment registry**
-  - Support one experiment record per ID as YAML or Markdown with YAML front matter; reject duplicate extensions and unknown structured fields.
-  - Use the core fields `id`, `task_id`, `summary`, `hypothesis`, `status`, `decision`, `commit`, `branch`, `entrypoints`, `conclusion`, `created_at`, and `updated_at`, with optional `description`.
-  - Create records from an ID, initializing the remaining fields, including an empty summary.
-  - Record UTC creation and update timestamps; preserve `created_at` and refresh `updated_at` on CLI mutations.
-  - Validate statuses as `proposed`, `active`, `evaluated`, or `abandoned`, and decisions as `pending`, `accepted`, `rejected`, or `inconclusive`; defer cross-field and lifecycle-transition validation.
-  - Keep records Git-agnostic: do not automatically ignore or commit them; bundled programs recommend committing finalized records.
-  - Support `experiment create`, `list`, `show`, `set`, and `delete` consistently for both record formats. `set` updates `commit`, `summary`, `hypothesis`, and other mutable fields through explicit options.
-  - Provide `hiraku exp` as an alias for `hiraku experiment`, and include `hypothesis` in human-readable experiment listings.
-  - Treat the bound commit as the intended executable snapshot without making it immutable, and expose run/record commit mismatches.
-
-- **Agent skill and programs**
-  - Install repository-local instructions for guided and bounded-autonomous workflows.
-  - Support task goal and scope setting, experiment implementation, run launching, analysis, and conclusion recording.
-
-- **Launcher and entrypoints**
-  - Define task-level named entrypoints with the full structured `launch.yml` specification. Store experiment entrypoints as ordered concrete invocation strings whose trailing tokens are appended to the resolved task-level command.
-  - Launch named entrypoints from the working tree for debugging or from an exact commit in a temporary detached worktree for reproducible execution.
-  - Permit unassociated or experiment-associated working-tree launches, represented by an empty commit.
-  - Execute commands directly without a shell, resolve safe project-relative paths, propagate the child exit status, and remove temporary worktrees without changing the active checkout.
-  - Inject `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_SOURCE_COMMIT`, `HIRAKU_TRACKING_BACKEND`, and `HIRAKU_TABLE_PATH` into the child environment.
-  - Do not create a separate launch registry; launch and run identifiers are provided by the tracking backend.
-
-- **Table tracking backend**
-  - Store the table implicitly at `tasks/<task-id>/runs.csv`; Stage 1 does not expose a task-level table-path option.
-  - Require `run_id`, `task_id`, `experiment_id`, `commit`, and backend-recorded UTC `created_at` as provenance columns while preserving arbitrary metric columns.
-  - Interpret an empty experiment ID as an unassociated run and an empty commit as a working-tree, non-reproducible run.
-
-- **Inspection and reporting**
-  - List experiments and runs for the current task, including filtering, numeric sorting, ranking, human-readable tables, and JSON output.
-
-- **Examples and verification**
-  - Include standalone repository templates for [`examples/smoke`](examples/smoke), which verifies the lifecycle with deterministic synthetic scores, and [`examples/heart-disease`](examples/heart-disease), which compares distinct logistic-regression and random-forest entrypoints on the checksum-pinned UCI Cleveland Heart Disease cohort.
-  - Include unit, integration, end-to-end, lint, build, and Python 3.14 CI coverage.
-
-### Stage 2: Branching and Reviewing
-
-- **Experiment branching**
-  - Support parallel exploration and backtracking through experiment branches.
-  - Extend `hiraku experiment create` / `hiraku exp create` with the Boolean `--branch` flag and optional `--from <ref>`.
-  - Derive `hiraku/experiment/<task>/<experiment>`, record it in the experiment, and switch to it. `--from` accepts another branch or commit and defaults to task-branch HEAD.
-  - Warn and switch without resetting when the branch already exists; print manual instructions if switching fails.
-  - Leave merging, rejection, conflict handling, and worktree orchestration to normal Git and task programs.
-  - Keep task-branch advancement on acceptance as a standard Git operation outside Hiraku CLI management.
-
-- **Review integration**
-  - Provide `hiraku review create [task] [--base <branch>] [--remote <name>] [--review <id>] [--push]`; infer the task from task or experiment branches and always review the task branch.
-  - Configure GitHub or GitLab explicitly in `.hiraku.yml` and use authenticated `gh` or `glab`; allow an optional configured/default remote and CLI override.
-  - Default the base to the remote repository's default branch.
-  - Never push without explicit `--push`; otherwise preview `task.md` and print manual publication instructions.
-  - Create or update pull requests and merge requests, but never approve or merge them.
-  - Select reviews by CLI or provider-matching `pr_id`/`mr_id`. Without one, list matching head/base reviews without mutation; create a review and record the appropriate identifier only when no match exists and the task branch is checked out.
-  - Use `task.md` verbatim as the complete review description and fully replace the remote description on update.
-  - Require `task.md` to synthesize experiment branches, runs, analysis, open questions, conclusions, and decisions, ending with an appended `## Changelog` section.
-
-- **MLflow tracking backend**
-  - Support `.hiraku.yml` configuration with `tracking_backend: mlflow`.
-  - Store MLflow data in project-root `mlflow.db` by default, with a safe project-relative `mlflow_tracking_db` override.
-  - Support task-level configuration for `mlflow_experiment: <experiment-name>`.
-  - Support only a local SQLite MLflow store in Stage 2 and package MLflow as an optional extra.
-  - Use MLflow's native run ID and start time; require user code to log `task_id`, semantic `experiment_id`, and `commit` as parameters.
-  - Keep parameters, metrics, and tags namespaced, and use MLflow's latest-timestamp value for each metric key.
-  - Show only provenance-complete matching-task runs by default; provide MLflow-only `--all` to reveal invalid or unassociated runs with warnings.
-
-- **Run presentation and metric declarations**
-  - Allow ordered task-level `metrics` with `minimize` or `maximize` direction.
-  - Use declarations for default columns, primary ranking, and direction; otherwise derive metric columns deterministically from returned runs.
-  - Provide compact default tables, `--metrics` selection, and `--verbose` flattened metadata while keeping JSON complete.
-  - Abbreviate commit hashes consistently in human output while preserving exact hashes in records and JSON.
-
-- **Autoresearch example**
-  - Include [`examples/autoresearch`](examples/autoresearch), adapted from [Karpathy autoresearch](https://github.com/karpathy/autoresearch) commit `228791fb499afffb54b46200aca536f79142f117`, with its exact provenance and MIT attribution.
-  - Preserve the upstream program's structure and perpetual autonomous loop while mapping run tags to tasks, candidate commits to experiment records, and result rows to Hiraku runs.
-  - Let setup choose one task-wide history mode: reject with `git revert`, reject with upstream-style `git reset --hard`, or retain per-experiment branches and merge only accepted branches into the task branch.
-  - Use table tracking by default, support and test a local MLflow mode, and validate orchestration in CI through a separate behaviorally equivalent CPU mock. GPU testing remains manual.
-
-### Stage 3: Skill refinement, documentation and additional features
-This stage focusing on refining the hiraku skill, optimizing it for different research tasks, and adding user documentation.
-
-- **SKILL REFINEMENT**
-  - establish the hiraku skill as an entrypoint that with a general Hiraku overview and routes to the appropriate sub-skill based on the current context and user input.
-  - define sub-skills for two main workflows:
-    - review: udpate task.md, push to remote, create or update PR/MR, etc
-    - research: check that the task is fully specified, this skill handles one experiment lifecycle from creation to conclusion.
-  - these skills will provide a starting point for further manual refinement.
-  - refine the default program.md for auto and guided templates, ensuring they are clear, concise, and effective for guiding the agent's behavior.
-
-- **USER DOCUMENTATION**
-  - refine the examples used in the readme to be more consistent and illustrative of the intended workflow. E.g. the task level example instructions should not impose the model family, experiments should provide example models like logistic regression and random forest.
-  - the heart disease example should additionally have an example auto research flow.
-  - add user documentation in docs/
-  - add docs/quickstart.md, docs/tutorial.md and docs/advanced.md
-  - quickstart is a minimal overview of the intended workflow.
-  - tutorial is a more detailed walkthrough of the intended workflow, with examples and explanations of each step. make it consistent with the examples in the readme. only linear workflow
-  - advanced demonstrates the branching workflow, and PR/MR integration.
-
-- **MLFLOW Tracking backend**
-  - Support remote MLflow with `mlflow_tracking_uri: https://mlflow.example.org`, mutually exclusive with the local `mlflow_tracking_db` setting.
-  - Accept remote HTTP(S) tracking URIs, use standard MLflow authentication and TLS environment variables, never store credentials in Hiraku configuration, and never fall back to local SQLite after a remote error.
-
-### Stage 4: Dashboard
-
-- **Dashboard**
-  - Provide `hiraku dashboard [task]` as a strictly read-only task review surface.
-  - Start a loopback server, open the browser by default, support `--no-open`, and refresh manually
-    without watchers or polling.
-  - Show the canonical `task.md`, experiment status/decision/summary, compact runs and metrics,
-    warnings, and Git-derived lineage for branched experiments.
-  - Plot the selected metric over time with Altair/Vega-Lite and overlay a direction-aware cumulative
-    performance frontier.
-  - Filter by experiment and experiment status, applying the same visible set to the run table and
-    recomputed frontier; keep execution status as run metadata.
-  - Expose exact run and experiment provenance through hover and expanded details.
-  - Package dashboard dependencies as `hiraku[dashboard]` and bundle pinned Vega browser assets for
-    offline rendering.
-
 ### Open Questions
-- is cross task listing of experiments and runs needed and feasible? E.g. the records may live in different branches, have inconsistent metrics, etc.
 - `hiraku run list` is missing, inconsistent with `hiraku experiment list` / make the CLI more consistent?
 - use refs instead of branches if user doesn't want to clutter their branch space.
 - tag / ref root nodes?
