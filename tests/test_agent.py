@@ -307,6 +307,49 @@ def test_a_discover_call_that_could_search_marks_nothing(project, tmp_path):
     assert "UNVERIFIED" not in (project.proposals_dir / "clean.md").read_text(encoding="utf-8")
 
 
+def test_a_researchers_own_idea_becomes_a_proposal_marked_as_theirs(project, tmp_path):
+    reply = json.dumps(
+        {
+            "proposals": [
+                {
+                    "id": "dinov3-retrieval-prefilter",
+                    "origin": "researcher",
+                    "title": "Cheap appearance prefilter",
+                    "hypothesis": "h",
+                    "provenance": "The researcher's own note, plus AnyLoc-style evidence.",
+                },
+                {"id": "found-by-search", "origin": "agent-literature", "title": "T",
+                 "hypothesis": "h"},
+                {"id": "unknown-origin", "origin": "nonsense", "title": "T", "hypothesis": "h"},
+            ]
+        }
+    )
+    agent_mod.run_discover(
+        project,
+        "vo-backend",
+        instruction="I have five directions; the first is a DINOv3 retrieval prefilter.",
+        command=fake_agent(tmp_path, reply),
+    )
+    mine = (project.proposals_dir / "dinov3-retrieval-prefilter.md").read_text(encoding="utf-8")
+    assert "origin: researcher" in mine
+    theirs = (project.proposals_dir / "found-by-search.md").read_text(encoding="utf-8")
+    assert "origin: agent-literature" in theirs
+    # An origin outside the vocabulary is not written into a record.
+    unknown = (project.proposals_dir / "unknown-origin.md").read_text(encoding="utf-8")
+    assert "origin: agent-literature" in unknown
+
+
+def test_the_instruction_is_labelled_as_the_researchers(project):
+    prompt = agent_mod.build_prompt(
+        "discover", {"goals": {}}, instruction="try the cheap prefilter first"
+    )
+    assert "## Instruction from the researcher" in prompt
+    assert "try the cheap prefilter first" in prompt
+    assert "## Instruction from the researcher" not in agent_mod.build_prompt(
+        "discover", {"goals": {}}
+    )
+
+
 def test_rerunning_discover_keeps_the_proposals_that_are_already_there(project, tmp_path):
     reply = json.dumps(
         {

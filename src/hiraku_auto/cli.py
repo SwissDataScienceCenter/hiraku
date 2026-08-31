@@ -313,6 +313,18 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _instruction(args: argparse.Namespace) -> str:
+    """--instruction, --instruction-file, or both. A page of notes belongs in a file."""
+    parts = [str(getattr(args, "instruction", "") or "").strip()]
+    path = getattr(args, "instruction_file", None)
+    if path:
+        try:
+            parts.append(Path(path).read_text(encoding="utf-8").strip())
+        except OSError as exc:
+            raise HirakuError(f"Could not read {path}: {exc}") from exc
+    return "\n\n".join(part for part in parts if part)
+
+
 def _history_choice(args: argparse.Namespace) -> bool | None:
     """--history / --no-history, or None to fall through to `records.history` in config.md."""
     if getattr(args, "history", False):
@@ -356,7 +368,7 @@ def cmd_goal_draft(args: argparse.Namespace) -> int:
         project,
         args.id,
         question,
-        instruction=args.instruction or "",
+        instruction=_instruction(args),
         command=agent_mod.agent_command(args.agent_cmd) if args.agent_cmd else None,
         dry_run=args.dry_run,
         apply=not args.no_apply,
@@ -824,7 +836,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
     project = _project(args)
     command = agent_mod.agent_command(args.agent_cmd) if args.agent_cmd else None
     kwargs = dict(
-        instruction=args.instruction or "",
+        instruction=_instruction(args),
         command=command,
         dry_run=args.dry_run,
         apply=not args.no_apply,
@@ -1283,6 +1295,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--instruction", help="extra context for the agent")
     p.add_argument(
+        "--instruction-file",
+        metavar="PATH",
+        help="read it from a file — where your own ideas go, one paragraph each; `discover` works "
+             "them up into proposals with origin `researcher`",
+    )
+    p.add_argument(
         "--context",
         action="append",
         metavar="PATH",
@@ -1467,6 +1485,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("workflow", choices=list(agent_mod.WORKFLOWS))
     p.add_argument("target", help="goal id for design/discover; experiment id for triage/analyze")
     p.add_argument("--instruction", help="extra context for the agent")
+    p.add_argument(
+        "--instruction-file",
+        metavar="PATH",
+        help="read it from a file — where your own ideas go, one paragraph each; `discover` works "
+             "them up into proposals with origin `researcher`",
+    )
     p.add_argument(
         "--context",
         action="append",

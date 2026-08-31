@@ -274,6 +274,12 @@ def attach_context(state: dict[str, Any], bundle: context_mod.Bundle) -> dict[st
     return state
 
 
+def _instruction_block(instruction: str) -> str:
+    """The researcher's own words, marked as theirs so the agent does not read them as state."""
+    text = (instruction or "").strip()
+    return f"## Instruction from the researcher\n\n{text}\n" if text else ""
+
+
 def build_prompt(
     workflow: str,
     state: dict[str, Any],
@@ -301,7 +307,7 @@ def build_prompt(
     return (
         text.replace("{{rules}}", rules)
         .replace("{{state}}", json.dumps(state, indent=2, default=str))
-        .replace("{{instruction}}", instruction or "")
+        .replace("{{instruction}}", _instruction_block(instruction))
     )
 
 
@@ -921,6 +927,14 @@ def run_triage(
     return result
 
 
+def _origin(value: Any) -> str:
+    """Who the idea came from. The agent says; an unknown answer falls back to literature."""
+    from .records import ORIGINS
+
+    text = str(value or "").strip()
+    return text if text in ORIGINS else "agent-literature"
+
+
 def _provenance(text: str, unverified: bool) -> str:
     return f"{UNVERIFIED_NOTE}\n\n{text}".strip() if unverified else text
 
@@ -984,7 +998,7 @@ def run_discover(
             project,
             str(item["id"]),
             goal=goal_id,
-            origin="agent-literature",
+            origin=_origin(item.get("origin")),
             proposed_parent=str(item["proposed_parent"]) if item.get("proposed_parent") else None,
             kind=str(item.get("kind") or "hypothesis"),
             title=str(item.get("title") or ""),

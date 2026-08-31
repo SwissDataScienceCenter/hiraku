@@ -526,6 +526,25 @@ hiraku-auto agent discover <goal> --agent-cmd 'claude -p --allowedTools WebSearc
 export HIRAKU_AGENT_CMD='claude -p --allowedTools WebSearch,WebFetch'   # or for one shell
 ```
 
+### Proposing your own ideas
+
+`discover` is not only for the literature. Put your own directions in a file — one paragraph each,
+in your own words — and hand it over:
+
+```bash
+hiraku-auto agent discover <goal> --instruction-file notes/my-directions.md
+```
+
+Each idea comes back as a proposal held to the same standard as anything the agent found: the bridge
+to this project's data, what would refute it, the six investigation conditions, the cost, and the
+strongest case against it. The agent searches for what supports or undermines each one — an idea the
+literature contradicts becomes a proposal with a real counterargument rather than one quietly
+dropped. Those proposals carry `origin: researcher`; the ones it found itself carry
+`origin: agent-literature`, so `proposal list` shows which is which.
+
+An idea already covered by an existing node or a declined proposal is reported in `notes` instead of
+proposed again — which is why declining beats deleting.
+
 ### Project context
 
 `draft`, `design` and `discover` also send excerpts of the project's own files — `CLAUDE.md`, the

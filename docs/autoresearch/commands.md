@@ -143,7 +143,8 @@ options:
 usage: hiraku-auto goal draft [-h] [--question QUESTION]
                               [--question-file PATH] [--revise] [--history]
                               [--no-history] [--with-experiments]
-                              [--instruction INSTRUCTION] [--context PATH]
+                              [--instruction INSTRUCTION]
+                              [--instruction-file PATH] [--context PATH]
                               [--no-context] [--context-bytes N]
                               [--agent-cmd AGENT_CMD] [--unset-env VAR]
                               [--dry-run] [--no-apply] [--timeout TIMEOUT]
@@ -165,6 +166,10 @@ options:
                         as proposed nodes
   --instruction INSTRUCTION
                         extra context for the agent
+  --instruction-file PATH
+                        read it from a file — where your own ideas go, one
+                        paragraph each; `discover` works them up into
+                        proposals with origin `researcher`
   --context PATH        an extra file or glob to send along; repeatable
   --no-context          send no project files at all
   --context-bytes N     raise the per-file cap for this call; see `hiraku-auto
@@ -438,7 +443,8 @@ options:
 
 ### `hiraku-auto agent --help`
 ```
-usage: hiraku-auto agent [-h] [--instruction INSTRUCTION] [--context PATH]
+usage: hiraku-auto agent [-h] [--instruction INSTRUCTION]
+                         [--instruction-file PATH] [--context PATH]
                          [--no-context] [--context-bytes N]
                          [--agent-cmd AGENT_CMD] [--unset-env VAR] [--dry-run]
                          [--no-apply] [--show-raw] [--timeout TIMEOUT]
@@ -453,6 +459,10 @@ options:
   -h, --help            show this help message and exit
   --instruction INSTRUCTION
                         extra context for the agent
+  --instruction-file PATH
+                        read it from a file — where your own ideas go, one
+                        paragraph each; `discover` works them up into
+                        proposals with origin `researcher`
   --context PATH        an extra project file or glob to send along;
                         repeatable
   --no-context          send no project files (design and discover send them
