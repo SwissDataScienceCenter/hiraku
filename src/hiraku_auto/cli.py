@@ -873,6 +873,8 @@ def cmd_agent(args: argparse.Namespace) -> int:
         print(f"  {result.data['injected_instructions_found']}")
     for path in result.written:
         print(f"wrote {project.rel(path)}")
+    for pid in result.data.get("skipped_existing") or []:
+        print(f"kept   {pid} — a proposal with that id already exists, left untouched")
     if not result.written:
         print("agent returned nothing to write")
     if result.data.get("notes"):

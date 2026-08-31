@@ -307,6 +307,26 @@ def test_a_discover_call_that_could_search_marks_nothing(project, tmp_path):
     assert "UNVERIFIED" not in (project.proposals_dir / "clean.md").read_text(encoding="utf-8")
 
 
+def test_rerunning_discover_keeps_the_proposals_that_are_already_there(project, tmp_path):
+    reply = json.dumps(
+        {
+            "proposals": [
+                {"id": "already-here", "title": "Old", "hypothesis": "h"},
+                {"id": "brand-new", "title": "New", "hypothesis": "h"},
+            ]
+        }
+    )
+    (project.proposals_dir).mkdir(parents=True, exist_ok=True)
+    kept = project.proposals_dir / "already-here.md"
+    kept.write_text("---\nid: already-here\nstatus: declined\n---\n\n# Declined\n", "utf-8")
+
+    result = agent_mod.run_discover(project, "vo-backend", command=fake_agent(tmp_path, reply))
+    # The decision recorded in the declined proposal survives, and the batch still completes.
+    assert kept.read_text(encoding="utf-8").count("status: declined") == 1
+    assert result.data["skipped_existing"] == ["already-here"]
+    assert (project.proposals_dir / "brand-new.md").is_file()
+
+
 def test_a_denied_tool_permission_is_diagnosed():
     advice = agent_mod.diagnose("Claude requested permissions to use WebSearch, but you haven't")
     assert "--allowedTools" in advice and "config.md" in advice

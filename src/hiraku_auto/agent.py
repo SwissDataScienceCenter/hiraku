@@ -36,6 +36,7 @@ from .prompts import PROMPT_DIR
 from .records import (
     load_experiment,
     load_goal,
+    proposal_path,
     save_experiment,
     validate_id,
 )
@@ -970,8 +971,14 @@ def run_discover(
     )
     result.data["citations_unverified"] = unverified
 
+    # A proposal id that is already on disk is left alone: a declined proposal is the record of a
+    # decision, and re-running discover must not overwrite it or die half-way through the batch.
+    skipped: list[str] = []
     for item in proposals:
         if not isinstance(item, dict) or not item.get("id"):
+            continue
+        if proposal_path(project, str(item["id"])).exists():
+            skipped.append(str(item["id"]))
             continue
         path = create_proposal(
             project,
@@ -990,6 +997,7 @@ def run_discover(
             counterargument=str(item.get("counterargument") or ""),
         )
         result.written.append(path)
+    result.data["skipped_existing"] = skipped
     return result
 
 
