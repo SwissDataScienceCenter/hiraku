@@ -545,6 +545,28 @@ dropped. Those proposals carry `origin: researcher`; the ones it found itself ca
 An idea already covered by an existing node or a declined proposal is reported in `notes` instead of
 proposed again — which is why declining beats deleting.
 
+### What the agent may remember
+
+There is no memory between calls: `claude -p` starts a fresh session each time. What looks like
+memory comes through the filesystem, and one path mattered — `.hiraku/agent-logs/` holds the prompt
+and raw reply of every past call, and the agent has `Read`/`Glob` in the project. A proposal you
+deleted could come back, sourced from the reply that first produced it.
+
+Two things prevent that now. The shared rules tell the agent that the state block is the whole
+memory and its own transcripts are not evidence, and `init` writes
+
+```json
+{ "permissions": { "deny": ["Read(./.hiraku/agent-logs/**)"] } }
+```
+
+to `.claude/settings.json`, which Claude Code enforces in `-p` mode too. A project created before
+this — or one that already had a settings file, which `init` never overwrites — needs that deny rule
+added by hand.
+
+The corollary: a decision that should survive has to be a record. Declining a proposal keeps it, with
+its reason, and the next `discover` sees it. Deleting it means the idea can be proposed again, and
+should be — nothing in the project says it was considered.
+
 ### Project context
 
 `draft`, `design` and `discover` also send excerpts of the project's own files — `CLAUDE.md`, the

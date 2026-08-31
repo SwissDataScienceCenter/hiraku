@@ -167,6 +167,8 @@ def init_project(
         project.table_path.write_text(",".join(PROVENANCE_COLUMNS) + "\n", encoding="utf-8")
         written.append(project.table_path)
 
+    write(root / ".claude" / "settings.json", CLAUDE_SETTINGS)
+
     written.extend(install_skill(root, force=force))
     if _ensure_gitignore(root):
         written.append(root / ".gitignore")
@@ -176,6 +178,20 @@ def init_project(
         if not gitops.is_repo(root):
             gitops.run_git(root, "init", "-q")
     return written
+
+
+# The agent runs with Read/Glob/Grep in this directory, and the log of every past call sits in it.
+# Instructing it not to read its own transcripts is not the same as it being unable to: without this
+# rule a deleted proposal can come back, sourced from the reply that first produced it. Written only
+# when the project has no settings file of its own.
+CLAUDE_SETTINGS = """{
+  "permissions": {
+    "deny": [
+      "Read(./.hiraku/agent-logs/**)"
+    ]
+  }
+}
+"""
 
 
 GITIGNORE_ENTRIES = (

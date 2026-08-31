@@ -355,6 +355,27 @@ def test_a_reply_without_a_metric_is_refused(bare_project, tmp_path):
         )
 
 
+def test_init_denies_the_agent_its_own_transcripts(tmp_path):
+    from hiraku_auto.scaffold import init_project
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    init_project(root, name="p", allow_in_tool_repo=True)
+    settings = json.loads((root / ".claude" / "settings.json").read_text("utf-8"))
+    assert settings["permissions"]["deny"] == ["Read(./.hiraku/agent-logs/**)"]
+
+
+def test_init_never_overwrites_an_existing_settings_file(tmp_path):
+    from hiraku_auto.scaffold import init_project
+
+    root = tmp_path / "proj"
+    (root / ".claude").mkdir(parents=True)
+    mine = root / ".claude" / "settings.json"
+    mine.write_text('{"permissions": {"allow": ["Bash(uv run:*)"]}}', "utf-8")
+    init_project(root, name="p", allow_in_tool_repo=True)
+    assert "uv run" in mine.read_text("utf-8")
+
+
 # --------------------------------------------------------------------------- history
 
 BLOATED = """- 2026-08-24 — goal opened.
