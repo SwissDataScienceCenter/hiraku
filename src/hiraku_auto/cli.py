@@ -885,6 +885,19 @@ def cmd_agent(args: argparse.Namespace) -> int:
         print(f"  {result.data['injected_instructions_found']}")
     for path in result.written:
         print(f"wrote {project.rel(path)}")
+    elsewhere = [
+        item
+        for item in (result.data.get("declined") or [])
+        if isinstance(item, dict) and item.get("belongs_under")
+    ]
+    if elsewhere:
+        print(
+            f"\n{len(elsewhere)} idea(s) were declined as out of scope for this goal but are "
+            f"recorded as belonging under another one:"
+        )
+        for item in elsewhere:
+            print(f"  {item.get('id')} — {str(item.get('belongs_under'))[:90]}")
+        print("  hiraku-auto goal draft <new-goal-id> --question \"...\"   # to open one")
     for pid in result.data.get("skipped_existing") or []:
         print(f"kept   {pid} — a proposal with that id already exists, left untouched")
     if not result.written:

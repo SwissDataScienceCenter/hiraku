@@ -376,6 +376,30 @@ def test_init_never_overwrites_an_existing_settings_file(tmp_path):
     assert "uv run" in mine.read_text("utf-8")
 
 
+def test_check_catches_a_record_naming_something_that_does_not_exist(bare_project):
+    from hiraku_auto.scaffold import create_goal
+
+    create_goal(bare_project, "vggt-pose", primary_metric="ate_rmse_m")
+    record = load_goal(bare_project, "vggt-pose")
+    record.set_section(
+        "Why it matters",
+        "Three integration points already sit in `research/proposals/`: "
+        "`dinov3-retrieval-pair-graph`, `dinov3-track-consistency-filter` and "
+        "`dinov3-adapter-vggt-tokenizer`.",
+    )
+    write_record(record, GOAL_KEYS)
+
+    issues = check(build(bare_project))
+    named = [i for i in issues if "which is not a goal" in i]
+    assert len(named) == 3, issues
+    assert any("dinov3-adapter-vggt-tokenizer" in i and "Why it matters" in i for i in named)
+
+    # A metric name or a single word is not mistaken for a record id.
+    record.set_section("Why it matters", "`ate_rmse_m` is the metric; `baseline` is a kind.")
+    write_record(record, GOAL_KEYS)
+    assert not [i for i in check(build(bare_project)) if "which is not a goal" in i]
+
+
 # --------------------------------------------------------------------------- history
 
 BLOATED = """- 2026-08-24 — goal opened.

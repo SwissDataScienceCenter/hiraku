@@ -350,6 +350,38 @@ def test_the_instruction_is_labelled_as_the_researchers(project):
     )
 
 
+def test_a_declined_idea_becomes_a_record_not_a_terminal_note(project, tmp_path):
+    reply = json.dumps(
+        {
+            "proposals": [],
+            "declined": [
+                {
+                    "id": "dinov3-retrieval-pair-graph",
+                    "origin": "researcher",
+                    "kind": "diagnostic",
+                    "title": "Candidate retrieval prefilter",
+                    "hypothesis": "A cheap DINOv3 cosine prefilter removes obviously-wrong "
+                                  "candidates before VGGT runs.",
+                    "failing_condition": "4 — in scope",
+                    "reason": "`### Held fixed` forbids regenerating P, and every cross pair's "
+                              "candidate is fixed at construction time.",
+                    "belongs_under": "A goal whose primary metric is VGGT calls per confirmed "
+                                     "match — an efficiency question, not an accuracy one.",
+                }
+            ],
+        }
+    )
+    result = agent_mod.run_discover(project, "vo-backend", command=fake_agent(tmp_path, reply))
+    assert result.data["declined_written"] == ["dinov3-retrieval-pair-graph"]
+    body = (project.proposals_dir / "dinov3-retrieval-pair-graph.md").read_text(encoding="utf-8")
+    assert "status: declined" in body and "origin: researcher" in body
+    assert "decided_on:" in body
+    # The reasoning is in the record, where an argument with it can happen.
+    assert "4 — in scope" in body and "Held fixed" in body
+    assert "belongs under a different goal" in body and "efficiency question" in body
+    assert "A cheap DINOv3 cosine prefilter" in body
+
+
 def test_rerunning_discover_keeps_the_proposals_that_are_already_there(project, tmp_path):
     reply = json.dumps(
         {

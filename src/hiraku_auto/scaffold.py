@@ -742,6 +742,56 @@ def create_proposal(
     return path
 
 
+def record_declined_proposal(
+    project: Project,
+    proposal_id: str,
+    *,
+    goal: str,
+    origin: str = "agent-literature",
+    kind: str = "hypothesis",
+    title: str | None = None,
+    hypothesis: str = "",
+    failing_condition: str = "",
+    reason: str = "",
+    belongs_under: str = "",
+) -> Path:
+    """Write an idea that was considered and rejected, as a record rather than terminal output.
+
+    A decline is worth more than the proposal it replaces: it is what stops the idea coming back,
+    and it is the thing to argue with when the researcher disagrees. Kept in the same directory as
+    live proposals, with `status: declined`, so `proposal list` shows both.
+    """
+    path = create_proposal(
+        project,
+        proposal_id,
+        goal=goal,
+        origin=origin,
+        kind=kind,
+        title=title,
+        hypothesis=hypothesis,
+        provenance="Considered during `agent discover` and declined before it became a proposal.",
+    )
+    record = read_record(path)
+    record.front["status"] = "declined"
+    record.front["decided_on"] = today()
+    lines = [
+        f"Declined on {today()} by the agent, not by the researcher — reopen it if you disagree."
+    ]
+    if failing_condition:
+        lines.append(f"\n**Failing condition:** {failing_condition}")
+    if reason:
+        lines.append(f"\n{reason.strip()}")
+    if belongs_under:
+        lines.append(
+            f"\n**Not wrong — out of scope here.** It belongs under a different goal:\n\n"
+            f"{belongs_under.strip()}\n\n"
+            f"    hiraku-auto goal draft <new-goal-id> --question \"...\"\n"
+        )
+    record.set_section("Decision", "\n".join(lines))
+    write_record(record, PROPOSAL_KEYS)
+    return path
+
+
 def _quote(text: str) -> str:
     return '"' + str(text).replace('"', "'").replace("\n", " ").strip() + '"'
 

@@ -6,6 +6,7 @@ is what makes reparenting a one-line edit instead of a directory move.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -157,6 +158,22 @@ def build(project: Project) -> Forest:
     return forest
 
 
+# A backticked slug that looks like a record id: `dinov3-adapter-vggt-tokenizer`, with or without a
+# .md suffix. Two or more hyphenated parts, so a metric name or a file path is not mistaken for one.
+REFERENCE = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+){1,})(?:\.md)?`")
+REFERENCE_SECTIONS = ("Why it matters", "Open threads", "Question", "Applicability", "Decision")
+
+
+def _referenced_ids(record: Any) -> list[tuple[str, str]]:
+    """Record ids named in a record's prose, with the section each appeared in."""
+    out: list[tuple[str, str]] = []
+    for name, text in record.sections.items():
+        if not any(name.lower().startswith(s.lower()) for s in REFERENCE_SECTIONS):
+            continue
+        out += [(m.group(1), name) for m in REFERENCE.finditer(text)]
+    return out
+
+
 def check(forest: Forest) -> list[str]:
     """Every consistency problem the records can express. Returns human-readable strings."""
     issues: list[str] = []
@@ -235,6 +252,20 @@ def check(forest: Forest) -> list[str]:
                 f"{goal_id}: metric `{metric}` is used in {where} but never defined in the "
                 f"Evaluation protocol"
             )
+
+    # A record that names a proposal or node which does not exist. The goal record's prose is read
+    # by the agent and by the next researcher as a description of the tree; when it says three
+    # proposals exist and none do, both are misled and neither can tell without checking by hand.
+    named = set(nodes) | set(goals) | set(forest.proposals)
+    for record, label in [(r, f"{gid}") for gid, r in goals.items()] + [
+        (p_rec, f"proposal {pid}") for pid, p_rec in forest.proposals.items()
+    ]:
+        for referenced, section in _referenced_ids(record):
+            if referenced not in named:
+                issues.append(
+                    f"{label}: '{section}' refers to `{referenced}`, which is not a goal, an "
+                    f"experiment or a proposal"
+                )
 
     known = set(nodes)
     for row in forest.table.rows:

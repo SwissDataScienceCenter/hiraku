@@ -41,7 +41,13 @@ from .records import (
     validate_id,
 )
 from .runs import best
-from .scaffold import apply_goal_draft, create_experiment, create_proposal, today
+from .scaffold import (
+    apply_goal_draft,
+    create_experiment,
+    create_proposal,
+    record_declined_proposal,
+    today,
+)
 from .tree import Forest, build, to_dict
 
 DEFAULT_AGENT_CMD = "claude -p"
@@ -1011,6 +1017,31 @@ def run_discover(
             counterargument=str(item.get("counterargument") or ""),
         )
         result.written.append(path)
+    # An idea considered and rejected is a record too — otherwise the reasoning lives in terminal
+    # scrollback, and next month's discover proposes the same thing again.
+    declined: list[str] = []
+    for item in result.data.get("declined") or []:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        if proposal_path(project, str(item["id"])).exists():
+            skipped.append(str(item["id"]))
+            continue
+        result.written.append(
+            record_declined_proposal(
+                project,
+                str(item["id"]),
+                goal=goal_id,
+                origin=_origin(item.get("origin")),
+                kind=str(item.get("kind") or "hypothesis"),
+                title=str(item.get("title") or ""),
+                hypothesis=str(item.get("hypothesis") or ""),
+                failing_condition=str(item.get("failing_condition") or ""),
+                reason=str(item.get("reason") or ""),
+                belongs_under=str(item.get("belongs_under") or ""),
+            )
+        )
+        declined.append(str(item["id"]))
+    result.data["declined_written"] = declined
     result.data["skipped_existing"] = skipped
     return result
 
