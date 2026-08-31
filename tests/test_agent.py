@@ -227,6 +227,40 @@ def test_discover_writes_proposals_not_experiments(project, tmp_path):
     assert "against" in body and "origin: agent-literature" in body
 
 
+def test_the_prompt_goes_on_stdin_for_claude_and_after_the_argv_for_others():
+    deliver = agent_mod.prompt_delivery
+    # A variadic --add-dir would eat a trailing prompt, so claude gets it on stdin.
+    argv, stdin = deliver(["claude", "-p", "--add-dir", "../code"], "QUESTION")
+    assert argv == ["claude", "-p", "--add-dir", "../code"] and stdin == "QUESTION"
+    # Anything else keeps the old contract.
+    argv, stdin = deliver(["codex", "exec"], "QUESTION")
+    assert argv == ["codex", "exec", "QUESTION"] and stdin is None
+    # An explicit placeholder wins over both.
+    argv, stdin = deliver(["claude", "-p", "{prompt}", "--add-dir", "../code"], "QUESTION")
+    assert argv == ["claude", "-p", "QUESTION", "--add-dir", "../code"] and stdin is None
+
+
+def test_a_claude_like_command_is_fed_through_stdin(project, tmp_path):
+    """End to end: a command named `claude` that only reads stdin still gets its prompt."""
+    script = tmp_path / "claude"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "text = sys.stdin.read()\n"
+        "sys.exit('Input must be provided either through stdin') if not text.strip() else None\n"
+        'print(\'{"proposals": [{"id": "via-stdin", "title": "T", "hypothesis": "h"}]}\')\n',
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    agent_mod.run_discover(project, "vo-backend", command=[str(script), "-p", "--add-dir", ".."])
+    assert (project.proposals_dir / "via-stdin.md").is_file()
+
+
+def test_a_swallowed_prompt_is_diagnosed():
+    advice = agent_mod.diagnose("Error: Input must be provided either through stdin or as a prompt")
+    assert "--add-dir" in advice and "{prompt}" in advice
+
+
 def test_web_allowed_reads_the_command(tmp_path):
     allowed = agent_mod.web_allowed
     assert not allowed(["claude", "-p"])

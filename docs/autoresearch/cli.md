@@ -509,6 +509,11 @@ and again at `proposal accept`, which is the last moment before a recalled citat
 experiment. The marker is also written when the reply itself reports the denial, whatever the command
 looked like.
 
+How the prompt reaches the agent: `claude` is fed on **stdin** (a variadic `--add-dir <dirs...>`
+would otherwise swallow a prompt appended after it, and claude would report that it was given no
+input at all); any other command gets the prompt as its last argument. Put `{prompt}` anywhere in
+`agent.command` to place it yourself instead.
+
 To let it actually read, name the tools once in `research/config.md`:
 
 ```yaml

@@ -79,6 +79,10 @@ always needs here rather than retyping them:
 
     command: claude -p --allowedTools WebSearch,WebFetch,Read,Glob,Grep --add-dir ../<code-repo>
 
+The prompt is fed to `claude` on **stdin**, not appended to the command, because `--add-dir` takes
+several directories and would swallow a trailing prompt as one of them. Any other agent gets the
+prompt as its last argument; put `{prompt}` in the command to place it yourself.
+
 `--allowedTools` is not optional for `discover`. `claude -p` is non-interactive, so a tool it was
 not given up front is requested and denied, and the workflow then cites what the model recalled
 instead of what it read. Proposals from such a call are marked `**[UNVERIFIED: ...]**` in *Where it

@@ -77,6 +77,13 @@ KNOWN_FAILURES: tuple[tuple[str, str], ...] = (
         "    command: claude -p --allowedTools WebSearch,WebFetch,Read,Glob,Grep\n",
     ),
     (
+        "Input must be provided either through stdin",
+        "The agent was started with no prompt. A variadic flag in the command swallowed it —\n"
+        "`--add-dir <dirs...>` takes several directories, so a prompt appended after it becomes\n"
+        "another directory. Say where the prompt goes explicitly:\n\n"
+        "  command: claude -p --add-dir ../code-repo {prompt}\n",
+    ),
+    (
         "Please run `claude login`",
         "`claude` is not logged in. Run `claude` once interactively and sign in, then retry.",
     ),
@@ -404,6 +411,26 @@ def agent_env(unset: list[str] | None = None) -> dict[str, str] | None:
     return env
 
 
+PROMPT_PLACEHOLDER = "{prompt}"
+
+
+def prompt_delivery(argv: list[str], prompt: str) -> tuple[list[str], str | None]:
+    """Where the prompt goes: substituted, on stdin, or appended as the last argument.
+
+    Appending was the only rule, and it breaks on a variadic flag. `claude --add-dir <dirs...>`
+    accepts several directories, so `claude -p --add-dir ../code <prompt>` hands the prompt to
+    --add-dir as a second directory and claude then reports it was given no input at all. stdin has
+    no such ambiguity, and `claude -p` reads it — its own error message says so.
+
+    `{prompt}` anywhere in the command wins over both, for an agent that needs it somewhere else.
+    """
+    if any(PROMPT_PLACEHOLDER in arg for arg in argv):
+        return [arg.replace(PROMPT_PLACEHOLDER, prompt) for arg in argv], None
+    if Path(argv[0]).name in {"claude", "claude.exe"}:
+        return list(argv), prompt
+    return [*argv, prompt], None
+
+
 def call_agent(
     prompt: str,
     *,
@@ -426,8 +453,10 @@ def call_agent(
             f"Agent command '{argv[0]}' not found on PATH. Install Claude Code, or pass "
             f"--agent-cmd, or use --dry-run to print the prompt and run it yourself."
         )
+    full_argv, stdin_text = prompt_delivery(argv, prompt)
     process = subprocess.Popen(  # noqa: S603
-        [*argv, prompt],
+        full_argv,
+        stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -439,10 +468,22 @@ def call_agent(
     def drain(stream: Any, key: str) -> None:
         buffers[key] = stream.read() or ""
 
+    def feed(text: str) -> None:
+        # On its own thread for the same reason the pipes are: a prompt larger than the OS buffer
+        # would otherwise block the parent before it ever starts reading the child's output.
+        try:
+            assert process.stdin is not None
+            process.stdin.write(text)
+            process.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+
     readers = [
         threading.Thread(target=drain, args=(process.stdout, "out"), daemon=True),
         threading.Thread(target=drain, args=(process.stderr, "err"), daemon=True),
     ]
+    if stdin_text is not None:
+        readers.append(threading.Thread(target=feed, args=(stdin_text,), daemon=True))
     for reader in readers:
         reader.start()
 
