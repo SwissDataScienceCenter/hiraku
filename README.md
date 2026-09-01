@@ -2,7 +2,7 @@
 
 **Hiraku** is a toolkit for AI-assisted data science.
 
-The Hiraku core implementation defines conventions and workflows around the model development lifecycle in data science and machine learning projects. A shared metadata record enables both interactive human–AI collaboration and autonomous research, with explicit boundaries and checkpoints for reviewing and verification. 
+The Hiraku core implementation defines conventions and customizable workflows around the model development lifecycle of data science and machine learning projects. A shared metadata record enables both interactive human–AI collaboration and autonomous research, with explicit boundaries and checkpoints for reviewing and verification. 
 
 The toolkit provides deterministic support functions via a command-line interface (`hiraku`) and agent integration with the `/hiraku` skill, harness (tbd), and sandboxing (tbd).
 
@@ -33,21 +33,38 @@ This fragmentation creates an inherent barrier for effective human-AI collaborat
 Hiraku addresses this gap by linking metadata, workflows and agent execution. Hiraku CLI (`hiraku`) and agent skill (`/hiraku`) support task creation, experiment implementation, documentation and analysis.
 
 
-### Tasks, experiments, programs and runs
+### Core data structures: Tasks, experiments, runs
 
-Hiraku uses four lightweight data structures: tasks, experiments, programs, and runs. Data records are saved in YAML or Markdown with YAML front matter. A *task* defines a working scope and research goal. *Experiments* are smaller units that link a task, hypothesis, code, and results. Tasks and experiments may each define execution entrypoints. A *program* defines an agent workflow and its boundaries. *Runs* record execution traces for a specified task or experiment and code commit.
+Hiraku uses four lightweight data structures: tasks, experiments, runs, and programs. Data records are saved in YAML or Markdown with YAML front matter. A *task* defines a working scope and research goal. *Experiments* are smaller units that link a task, hypothesis, code, and results. Tasks and experiments may each define execution entrypoints. A *program* defines an agent workflow and its boundaries. *Runs* record execution traces for a specified task or experiment and code commit.
 
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Task** | `task.md` | A task is the top-level Hiraku abstraction that defines the scope of a research effort. A task defines any of the following: a research question, a goal, metrics and records scientific documentation of the research task, including scope, methodology, and results. |
-| **Proposal / Experiment** | `experiment.[md,yml]` | An *experiment* is a focused investigation within a task that refers to a source commit and may define execution entrypoints. An experiment without a reference commit is called a *proposal*. Its intent is user-defined: it can be a baseline, hypothesis, diagnosis, model run, ablation, or anything else; Hiraku does not impose specific semantics. A typical experiment lifecycle spans proposal, implementation, execution, analysis, and a record of the findings. The experiments associated with a task provide an overview of the research effort. |
+| **Task** | `hiraku/tasks/<task-id>/task.md` or `task.yml` | A task is the top-level Hiraku abstraction that defines the scope of a research effort. A task defines any of the following: a research question, a goal, metrics and records scientific documentation of the research task, including scope, methodology, and results. |
+| **Proposal / Experiment** | `hiraku/tasks/<task-id>/experiments/<experiment-id>/experiment.md` or `experiment.yml` | An *experiment* is a focused investigation within a task that refers to a source commit and may define execution entrypoints. An experiment without a reference commit is called a *proposal*. Its intent is user-defined: it can be a baseline, hypothesis, diagnosis, model run, ablation, or anything else; Hiraku does not impose specific semantics. A typical experiment lifecycle spans proposal, implementation, execution, analysis, and a record of the findings. The experiments associated with a task provide an overview of the research effort. |
 | **Run** | (backend owned execution trace) | A single execution trace of an experiment. The tracking backend and logging is user managed by the user, Hiraku only queries results via compatibility backend. Example backends: CSV, W&B, MLFlow, custom user backend.  |
-| **Program** | `.hiraku/programs/<program-id>/program.md` | A named agent workflow that defines instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 
 
-  > Hiraku is agnostic to git state of meta data as far as possible. The user my commit the metadata files to to git repository or leave it untracked. Hiraku simply lists what is currently visible in the working directory, or tries to detect experiments on the defined task branch.
+### Agent integration: Programs, Actions, Contexts
+
+| Term | Data | Summary |
+| --- | ---  | --- |
+| **Program** | `hiraku/programs/<program-id>/program.md` | A named agent workflow that defines instructions, permissions, resource limits, checkpoints, and stopping conditions. |
+| **Action** | `hiraku/actions/<entity>/<action-id>/action.md` | A named action that can be invoked by the hiraku-auto agent. |
+| **Context** | `hiraku/contexts/<context-id>/context.md` | Current context files. |
+
+
+  > Hiraku is agnostic to git state of meta data as far as possible. The user my commit the metadata files to to git repository or leave it untracked. Hiraku simply lists what is currently visible in the working directory, or tries to detect md files on the defined task branch.
   
+
+#### Ideas:
+
+- **Context** can be another first-class entity<br/>
+I.e. hiraku context create literature-search puts the context in hiraku/context/literature-search/context.md
+- **Action** can be another first-class entity, defining "skills" for the hiraku-agent:<br/>
+E.g., hiraku action create experiment/accept "Accept an experiment proposal"
+Creates a "skill" in hiraku/actions/experiment/accept/action.md which is invoked with
+hiraku-auto experiment accept <experiment-id> , we can ship a few default actions. Ideally, actions are just "programs"?
 
 
 

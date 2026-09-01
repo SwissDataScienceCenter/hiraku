@@ -14,17 +14,45 @@ hiraku-auto goal show dinov3-crossdomain
 $EDITOR research/goals/dinov3-crossdomain.md  # Resolve every [UNSET: ...].
 hiraku-auto check
 
+# J: No equivalent for context yet - we can make it a first-class entity
+# hiraku context create literature-search
+# or with agent: hiraku-auto context create literature-search
+# J: Deterministic task creation
+# J: hiraku task create dinov3-crossdomain --question "Would DINOv3 improve reprojection between Mapillary and Natix frames?" --context literature-search
+# J: dinov3-crossdomain becomes the "active" task, or set with
+# J: hiraku task set dinov3-crossdomain
+# J: hiraku task show [dinov3-crossdomain] 
+# J: hiraku-auto task check [dinov3-crossdomain]
+
+
+
 # 2. Optionally discover hypotheses or design an experiment tree.
 # Agent output remains a proposal and cannot be launched.
 hiraku-auto agent discover dinov3-crossdomain
 hiraku-auto agent design dinov3-crossdomain
 hiraku-auto proposal list
+# J: I am assuming that discover is the proposal step (or another context discovery step?). Either way:
+# J: hiraku context create dinov3-crossdomain
+# J: hiraku-auto context discover dinov3-crossdomain
+# J: hiraku-auto experiment propose "Propose 5 experiments for dinov3-crossdomain" --context dinov3-crossdomain --context literature-search
+# J: hiraku experiment list --proposal
+# J: Or, if we want to make "proposal" a first-class action/shorthand
+# J: hiraku proposal list
+# J: At this point we have 5 "experiments" in proposal state, they are not implemented yet
 
 # 3. Accept or decline each proposal. Keep declined ideas and their reasons.
 hiraku-auto proposal accept feature-whitening
 hiraku-auto proposal decline dinov3-layer-choice \
   --reason "Not worth four runs until the backbone swap shows a direction."
 hiraku-auto tree
+
+# J: We could keep the "accept" step as a first-class, semantic action, or we just set a flag
+# J: "accept" action == update + implement?
+# J: hiraku-auto proposal accept feature-whitening
+
+# J: Isolated CLI update, without implementation
+# J: hiraku experiment update feature-whitening --status accepted 
+# J: hiraku proposal update feature-whitening --status accepted  # (proposal == experiment shorthand)
 
 # 4. Run approved, commit-backed experiments in parallel.
 hiraku-auto loop dinov3-crossdomain \
@@ -37,6 +65,10 @@ hiraku-auto loop dinov3-crossdomain \
   --max-parallel 4 \
   --gpus 0,1,2,3 \
   --seed 2
+# J: I am not exactly sure what happens here. Are we just launching? Or are we running an implementation / experiment loop?
+# J: loop could be a program that defines the constraints. We use an agent to launch
+# J: hiraku program create loop --launch reconstruct --max-parallel 4 --gpus 0,1,2,3 --seed 1
+# J: hiraku-auto task launch --program loop  # here invoking a task/launch action?
 
 # 5. Triage the evidence and review any proposed follow-up.
 hiraku-auto agent triage dinov3-swap
@@ -44,16 +76,27 @@ $EDITOR experiments/dinov3-swap/experiment.md
 hiraku-auto proposal list
 hiraku-auto tree
 
+# J: hiraku-auto experiment triage [dinov3-swap]  # invoking task/triage action
+# J: hiraku experiment update dinov3-swap --status triaged  # invoking task/update action
+# J: hiraku experiment tree 
+# J: hiraku experiment list 
+
 # 6. Promote only results that pass every evidence gate and human sign-off.
 hiraku-auto promote dinov3-swap \
   --run <candidate-run-id> \
   --signed-off-by "Qianqian Zou"
+# J: hiraku experiment update dinov3-swap --signed-off-by "Qianqian Zou" --status promoted --run <candidate-run-id>
 
 # 7. Build an evidence-only report and inspect the complete research tree.
 hiraku-auto report dinov3-crossdomain
 hiraku-auto dash -o tree.html
 hiraku-auto ui
 hiraku-auto check
+
+# J: hiraku-auto task report dinov3-crossdomain  # invoking task/report action (updating task.md or another specified file)
+# J: hiraku dashboard dinov3-crossdomain -o tree.html  # invoking task/dashboard action
+# J: hiraku dashboard dinov3-crossdomain  # direct ui invocation
+# J: hiraku-auto task check [dinov3-crossdomain]  # invoking task/check action
 ```
 
 ## Preferred user interfaces
