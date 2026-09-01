@@ -18,7 +18,7 @@ hiraku-auto check
 # hiraku context create literature-search
 # or with agent: hiraku-auto context create literature-search
 
-### Q: In my original version, the 'goal' step can defines the questions, datasets, and evaluation protocol based on optionally with the context of the existing project. 
+### Q: In my original version, the 'goal' step defines the questions, datasets, and evaluation protocol optionally based on the context of the existing project. 
 # that is:
 # hiraku-auto context [-add <path>] # optional, to provide context of the existing project
 # hiraku-auto goal draft <goal-id> --question <question> --context <path (directly, no need to call 'hiraku-auto context' in advance)>
