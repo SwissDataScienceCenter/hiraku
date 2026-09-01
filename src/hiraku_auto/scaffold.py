@@ -632,6 +632,29 @@ def apply_goal_draft(
     return path
 
 
+# Written beside every new experiment record. `launch` fails with "No launch.yml" otherwise, which
+# tells a researcher that a file is missing but not what belongs in it — and the run contract
+# (where metrics go, where the seed comes from) is not guessable.
+LAUNCH_STUB = """# How to run this experiment. `hiraku-auto launch <experiment>:<entrypoint>`
+#
+# The entrypoint is ordinary code in your own repository; hiraku does not write it. What it must do:
+#
+#   * read the seed from $HIRAKU_SEED, and use it for every source of randomness
+#   * write its metrics as one flat JSON object to $HIRAKU_METRICS_PATH — the keys must be the
+#     metric names the goal's evaluation protocol defines, and nothing else is comparable
+#   * exit non-zero on failure. A zero exit with no metrics file is a class A execution defect
+#
+# $HIRAKU_RUN_ID, $HIRAKU_GIT_COMMIT, $HIRAKU_EXPERIMENT_ID and $HIRAKU_PROJECT_ROOT are also set.
+# `hiraku-auto exp brief <experiment>` prints the whole contract with this goal's metrics filled in.
+
+entrypoints:
+  main:
+    command: **[UNSET: the command that runs this experiment, as a list — e.g.
+              ["uv", "run", "python", "-m", "your_package.run", "--variant", "dinov3"]]**
+    cwd: .        # relative to the experiment's checkout; a sibling repo is ../<repo>
+"""
+
+
 def create_experiment(
     project: Project,
     experiment_id: str,
@@ -693,6 +716,9 @@ def create_experiment(
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    launch = path.parent / "launch.yml"
+    if not launch.exists():
+        launch.write_text(LAUNCH_STUB, encoding="utf-8")
     return path
 
 

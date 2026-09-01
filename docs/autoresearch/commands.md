@@ -237,12 +237,14 @@ options:
 
 ### `hiraku-auto exp --help`
 ```
-usage: hiraku-auto exp [-h] {create,list,show,set,rm} ...
+usage: hiraku-auto exp [-h] {create,list,brief,show,set,rm} ...
 
 positional arguments:
-  {create,list,show,set,rm}
+  {create,list,brief,show,set,rm}
     create              create an experiment and its branch
     list                one row per experiment
+    brief               the spec for writing this experiment's code:
+                        expectation, run contract, protocol
     show                print a record and its runs
     set                 edit front matter on an existing record
     rm                  delete an experiment record; refuses while children or
@@ -288,6 +290,18 @@ options:
   -h, --help   show this help message and exit
   --goal GOAL  restrict to one goal
   --json       machine-readable output
+```
+
+### `hiraku-auto exp brief --help`
+```
+usage: hiraku-auto exp brief [-h] [--out PATH] id
+
+positional arguments:
+  id
+
+options:
+  -h, --help  show this help message and exit
+  --out PATH  write it to a file to hand to a coding agent
 ```
 
 ### `hiraku-auto exp show --help`

@@ -429,6 +429,30 @@ def test_accepting_a_proposal_survives_a_repository_with_no_commits(bare_project
     assert load_proposals(bare_project)["dinov3-featuremetric"].front["status"] == "accepted"
 
 
+def test_a_new_experiment_gets_a_launch_stub_naming_the_run_contract(project):
+    stub = (project.experiments_dir / "baseline" / "launch.yml").read_text("utf-8")
+    assert "$HIRAKU_METRICS_PATH" in stub and "$HIRAKU_SEED" in stub
+    assert "UNSET" in stub          # the command is the one thing the tool cannot supply
+
+
+def test_exp_brief_hands_over_what_a_coding_agent_cannot_guess(project, capsys):
+    from hiraku_auto.cli import main
+
+    assert main(["--project", str(project.root), "exp", "brief", "baseline"]) == 0
+    brief = capsys.readouterr().out
+    # the expectation, the metric names, the contract, and the frozen protocol
+    assert "ate_rmse_m" in brief and "completion_rate" in brief
+    assert "$HIRAKU_METRICS_PATH" in brief and "$HIRAKU_SEED" in brief
+    assert "exp/baseline" in brief
+    assert "Evaluation protocol" not in brief.split("frozen protocol")[0]
+    assert "Out of scope" in brief
+
+    out = project.root / "brief.md"
+    argv = ["--project", str(project.root), "exp", "brief", "baseline", "--out", str(out)]
+    assert main(argv) == 0
+    assert out.read_text("utf-8") == brief.rstrip("\n") + "\n"
+
+
 # --------------------------------------------------------------------------- history
 
 BLOATED = """- 2026-08-24 — goal opened.

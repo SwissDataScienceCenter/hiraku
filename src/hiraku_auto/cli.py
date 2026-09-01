@@ -2,7 +2,7 @@
 
     hiraku-auto init
     hiraku-auto goal add | draft | list | show | tidy | rm
-    hiraku-auto exp create | list | show | set | rm | tree
+    hiraku-auto exp create | list | show | brief | set | rm | tree
     hiraku-auto launch <experiment>:<entrypoint> [--commit REF]
     hiraku-auto runs [<experiment>] [--sort METRIC --descending]
     hiraku-auto agent draft|design|triage|discover|analyze
@@ -663,6 +663,114 @@ def cmd_exp_list(args: argparse.Namespace) -> int:
                 ["experiment", "goal", "parent", "kind", "status", "verdict", "origin", "runs"],
             )
         )
+    return 0
+
+
+def cmd_exp_brief(args: argparse.Namespace) -> int:
+    """The spec for writing this experiment's code, in one page a coding agent can consume.
+
+    hiraku does not write the entrypoint. Code belongs in the repository it changes, on a branch,
+    reviewed — not generated into a research project by a workflow whose contract is "return JSON
+    and the tool writes records". But a coding agent cannot guess the run contract or the goal's
+    frozen protocol, and those are exactly what makes a run comparable, so this hands them over.
+    """
+    project = _project(args)
+    forest = build(project)
+    if args.id not in forest.nodes:
+        raise HirakuError(f"Experiment '{args.id}' does not exist.")
+    node = forest.nodes[args.id]
+    goal = forest.goals.get(str(node.goal))
+    if goal is None:
+        raise HirakuError(f"'{args.id}' has no goal, so there is no protocol to implement against.")
+
+    metrics = [str(goal.front.get("primary_metric") or "")]
+    if goal.front.get("gate_metric"):
+        metrics.append(str(goal.front["gate_metric"]))
+    named = ", ".join(f"`{m}`" for m in metrics if m)
+    exp_dir = project.experiments_dir / args.id
+
+    out: list[str] = [
+        f"# Implementation brief — `{args.id}`",
+        "",
+        "You are writing the code for one experiment in a bounded research loop. The records "
+        "quoted below are fixed: do not edit them, and do not adjust the protocol to suit the "
+        "implementation. If the protocol cannot be implemented as written, say so and stop — that "
+        "is a finding, not an obstacle to work around.",
+        "",
+        "## What this experiment claims",
+        "",
+        f"- **id** `{args.id}` · **kind** {node.kind} · **goal** `{node.goal}`",
+        f"- **branch** `{node.front.get('branch')}` — the code belongs here, not on the default "
+        f"branch",
+        "",
+        "**Expectation** — the sentence the run has to be able to refute:",
+        "",
+        f"> {str(node.front.get('expectation') or '**[none recorded]**')}",
+        "",
+        node.record.section("Scope").strip(),
+        "",
+        "## The run contract",
+        "",
+        f"`hiraku-auto launch {args.id}:<entrypoint>` runs your command with these variables set. "
+        f"The row it records is the only evidence the promotion gate ever sees.",
+        "",
+        f"- `$HIRAKU_METRICS_PATH` — write one flat JSON object here. The keys must be metric "
+        f"names "
+        f"this goal defines: {named or '(none declared)'}, plus any diagnostic the protocol below "
+        f"requires. A name the protocol does not define is not comparable to anything.",
+        "- `$HIRAKU_SEED` — use it for every source of randomness. One run, one seed.",
+        "- `$HIRAKU_RUN_ID`, `$HIRAKU_GIT_COMMIT`, `$HIRAKU_EXPERIMENT_ID`, "
+        "`$HIRAKU_PROJECT_ROOT` — available for your own logging; the tool records them itself.",
+        "- Exit non-zero on failure. Exiting zero with no metrics file is an execution defect and "
+        "is recorded as one.",
+        "",
+        f"Declare the command in `{project.rel(exp_dir / 'launch.yml')}`:",
+        "",
+        "```yaml",
+        "entrypoints:",
+        "  main:",
+        '    command: ["uv", "run", "python", "-m", "<your_package>.<module>", "--variant", '
+        f'"{args.id}"]',
+        "    cwd: .        # ../<code-repo> if the code lives in a sibling repository",
+        "```",
+        "",
+        "## The goal's frozen protocol — implement against this exactly",
+        "",
+        f"Primary metric `{goal.front.get('primary_metric')}` ({goal.front.get('direction')}"
+        + (f", target {goal.front['target']}" if goal.front.get("target") is not None else "")
+        + ")"
+        + (
+            f"; gate metric `{goal.front['gate_metric']}` must not degrade."
+            if len(metrics) > 1
+            else "."
+        ),
+        "",
+        goal.section("Evaluation protocol").strip(),
+        "",
+        "## Out of scope for this goal",
+        "",
+        goal.section("Out of scope").strip() or "(nothing recorded)",
+    ]
+    holes = unset_markers(goal) + unset_markers(node.record)
+    if holes:
+        out += [
+            "",
+            "## Unfilled values — ask, never invent",
+            "",
+            "These are marked unset in the records. Do not pick a value to make the code run; "
+            "report which one you need and stop.",
+            "",
+        ]
+        out += [f"- **{section}** — {needed}" for section, needed in holes]
+
+    text = "\n".join(out) + "\n"
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"wrote {args.out}")
+        print("\nhand it to a coding agent in the repository the code belongs in:")
+        print(f'  cd <code-repo> && claude "read {args.out} and implement it"')
+        return 0
+    print(text)
     return 0
 
 
@@ -1407,6 +1515,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--goal", help="restrict to one goal")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=cmd_exp_list)
+    p = exp.add_parser(
+        "brief",
+        help="the spec for writing this experiment's code: expectation, run contract, protocol",
+    )
+    p.add_argument("id")
+    p.add_argument("--out", metavar="PATH", help="write it to a file to hand to a coding agent")
+    p.set_defaults(func=cmd_exp_brief)
     p = exp.add_parser("show", help="print a record and its runs")
     p.add_argument("id")
     p.add_argument("--json", action="store_true", help="record, lineage and runs as JSON")
