@@ -54,6 +54,8 @@ hiraku-auto proposal list
 # J: hiraku proposal list
 # J: At this point we have 5 "experiments" in proposal state, they are not implemented yet
 
+# Q：'hiraku-auto agent discover ... --context ' will generate proposals, maybe no need to run 'hiraku-auto experiment propose' again.
+
 # 3. Accept or decline each proposal. Keep declined ideas and their reasons.
 hiraku-auto proposal accept feature-whitening
 hiraku-auto proposal decline dinov3-layer-choice \
@@ -67,6 +69,10 @@ hiraku-auto tree
 # J: Isolated CLI update, without implementation
 # J: hiraku experiment update feature-whitening --status accepted 
 # J: hiraku proposal update feature-whitening --status accepted  # (proposal == experiment shorthand)
+
+### Q: I have implemented 'agent implement' to generate the code for the certain accepted proposal; but we can also directly run: 
+# hiraku-auto proposal accept feature-whitening --implement (with this flag, the agent will implement the proposal and generate the code for it)
+# if without '--implement', the agent will only accept the proposal and update the status to 'accepted' without generating code for it.
 
 # 4. Run approved, commit-backed experiments in parallel.
 hiraku-auto loop dinov3-crossdomain \
