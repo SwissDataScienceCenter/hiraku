@@ -60,6 +60,24 @@ answering a different question and belongs under a different goal. This is the o
 governance that keeps a tree of comparisons meaningful — `hiraku runs` deliberately does not certify
 that metrics are comparable, so the goal must.
 
+### A goal names nothing below it
+
+References point upwards only: a node declares its `goal` and its `parent`, a proposal declares the
+goal it is for. The goal declares neither, and its prose must not name a proposal or an experiment
+either — not even one that exists.
+
+A goal is written before its nodes and outlives them. Proposals churn: they are accepted, declined,
+redrafted, and `discover` may return a different set of ids next week for the same ideas. A goal
+that says "`research/proposals/` already holds a candidate for each integration point" is asserting
+something about a directory nobody keeps in sync with it, and it goes silently false the first time
+that directory changes — misleading the next reader and the agent equally, since that sentence is in
+the prompt.
+
+`Open threads` therefore holds open **questions** ("which integration point, and at what cost"), and
+`Out of scope` names **subjects** ("anchor selection policy"), never records. Where an argument needs
+a candidate — a cost asymmetry between a training-free approach and one that fits an adapter, say —
+describe the approach. `hiraku-auto check` enforces this.
+
 ## Experiment record
 
 The first three keys are what the CLI requires and validates. Everything below is optional; a

@@ -70,6 +70,13 @@ value will mean once it is supplied.
 - Cite what you grounded. Every entry in `grounding` names a file from `project_context`. If that
   array is empty, say so in `notes` — the researcher should know the draft is unanchored.
 - Do not design experiments here and do not predict results.
+- **Never name a proposal or an experiment in a goal record.** The dependency runs one way: a node
+  declares its goal, a goal knows nothing about its nodes. `Open threads` holds open *questions*
+  ("which integration point, and at what cost" — not "`some-proposal-id` covers this"), and
+  `Out of scope` names *subjects*, not records. A goal that cites proposal ids is stale the next
+  time `discover` runs, and it makes a claim about the directory's contents that nothing keeps
+  true. Where an argument needs a candidate — a cost asymmetry between cheap and expensive
+  approaches, say — describe the approach, never the file.
 
 ## Current state
 

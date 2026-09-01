@@ -313,6 +313,35 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _make_branch(project: Any, branch: str, *, skip: bool = False) -> None:
+    """Create an experiment's branch, reporting rather than raising.
+
+    The record is already on disk by the time this runs, so a git problem must not abort: losing
+    the record because a branch could not be made would be the worse failure. An unborn HEAD is
+    the common case in a project whose records have never been committed — `git branch` there fails
+    with `not a valid object name: 'main'`, which says nothing about what to do.
+    """
+    if skip:
+        print("branch not created (--no-branch)")
+        return
+    if not gitops.is_repo(project.root):
+        print("branch not created (not a git repository)")
+        return
+    if not gitops.has_commits(project.root):
+        print(_red(
+            "branch not created: this repository has no commits yet, so there is nothing for a "
+            "branch to point at."
+        ))
+        print("  git add -A && git commit -m 'research records'   # then:")
+        print(f"  git branch {branch}")
+        return
+    try:
+        gitops.create_branch(project.root, branch)
+        print(f"branch {branch}")
+    except HirakuError as exc:
+        print(f"branch not created: {exc}", file=sys.stderr)
+
+
 def _instruction(args: argparse.Namespace) -> str:
     """--instruction, --instruction-file, or both. A page of notes belongs in a file."""
     parts = [str(getattr(args, "instruction", "") or "").strip()]
@@ -590,23 +619,7 @@ def cmd_exp_create(args: argparse.Namespace) -> int:
 
     record = load_experiment(project, args.id)
     branch = str(record.front.get("branch"))
-    # The record is already written, so a git problem is reported and does not abort: losing the
-    # record because a branch could not be made would be the worse failure.
-    if args.no_branch:
-        print("branch not created (--no-branch)")
-    elif not gitops.is_repo(project.root):
-        print("branch not created (not a git repository)")
-    elif not gitops.has_commits(project.root):
-        print(
-            f"branch not created: this repository has no commits yet. After the first commit, run"
-            f"\n  git branch {branch}"
-        )
-    else:
-        try:
-            gitops.create_branch(project.root, branch)
-            print(f"branch {branch}")
-        except HirakuError as exc:
-            print(f"branch not created: {exc}", file=sys.stderr)
+    _make_branch(project, branch, skip=args.no_branch)
     if args.worktree:
         target = project.root / ".worktrees" / args.id
         try:
@@ -1154,10 +1167,7 @@ def cmd_proposal_accept(args: argparse.Namespace) -> int:
         ))
     path = scaffold.accept_proposal(project, args.id, mode=args.mode)
     print(f"created {project.rel(path)}")
-    if gitops.is_repo(project.root):
-        record = load_experiment(project, args.id)
-        gitops.create_branch(project.root, str(record.front.get("branch")))
-        print(f"branch {record.front.get('branch')}")
+    _make_branch(project, str(load_experiment(project, args.id).front.get("branch")))
     scaffold.sync_children(project)
     return 0
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from hiraku_auto.records import (
     GOAL_KEYS,
     load_experiment,
     load_goal,
+    load_proposals,
     read_record,
     unset_markers,
     write_record,
@@ -376,28 +378,55 @@ def test_init_never_overwrites_an_existing_settings_file(tmp_path):
     assert "uv run" in mine.read_text("utf-8")
 
 
-def test_check_catches_a_record_naming_something_that_does_not_exist(bare_project):
-    from hiraku_auto.scaffold import create_goal
+def test_a_goal_may_not_name_the_nodes_under_it(bare_project):
+    from hiraku_auto.scaffold import create_goal, create_proposal
 
     create_goal(bare_project, "vggt-pose", primary_metric="ate_rmse_m")
+    create_proposal(bare_project, "dinov3-track-filter", goal="vggt-pose")
     record = load_goal(bare_project, "vggt-pose")
     record.set_section(
         "Why it matters",
         "Three integration points already sit in `research/proposals/`: "
-        "`dinov3-retrieval-pair-graph`, `dinov3-track-consistency-filter` and "
+        "`dinov3-retrieval-pair-graph`, `dinov3-track-filter` and "
         "`dinov3-adapter-vggt-tokenizer`.",
     )
     write_record(record, GOAL_KEYS)
 
-    issues = check(build(bare_project))
-    named = [i for i in issues if "which is not a goal" in i]
-    assert len(named) == 3, issues
-    assert any("dinov3-adapter-vggt-tokenizer" in i and "Why it matters" in i for i in named)
+    issues = [i for i in check(build(bare_project)) if "names `" in i]
+    assert len(issues) == 3, issues
+    # The one that exists is still wrong: the dependency runs the other way.
+    assert any("`dinov3-track-filter`, a proposal under it" in i for i in issues)
+    # The two that do not exist are stale names from a round the researcher has since redone.
+    assert sum("is not a record here" in i for i in issues) == 2
 
-    # A metric name or a single word is not mistaken for a record id.
+    # A metric name, a single word, or a host in a protocol section is not a record reference.
     record.set_section("Why it matters", "`ate_rmse_m` is the metric; `baseline` is a kind.")
+    record.set_section("Evaluation protocol", "Access is `ssh cscs-clariden`; see `cscs-clariden`.")
     write_record(record, GOAL_KEYS)
-    assert not [i for i in check(build(bare_project)) if "which is not a goal" in i]
+    assert not [i for i in check(build(bare_project)) if "names `" in i]
+
+
+def test_accepting_a_proposal_survives_a_repository_with_no_commits(bare_project, capsys):
+    """The record is the point; a branch that cannot exist yet must not take the record down."""
+    from hiraku_auto.cli import main
+    from hiraku_auto.scaffold import create_goal, create_proposal
+
+    # A repository whose records have never been committed: HEAD is unborn, so `git branch` fails
+    # with `not a valid object name: 'main'` and says nothing about what to do.
+    root = bare_project.root
+    subprocess.run(["git", "checkout", "-q", "--orphan", "fresh"], cwd=root, check=True)
+    for dead in ("refs/heads/main", "refs/heads/master"):
+        subprocess.run(["git", "update-ref", "-d", dead], cwd=root)
+    create_goal(bare_project, "vggt-pose", primary_metric="m")
+    create_proposal(bare_project, "dinov3-featuremetric", goal="vggt-pose", hypothesis="h")
+
+    argv = ["--project", str(root), "proposal", "accept", "dinov3-featuremetric"]
+    assert main(argv) == 0
+    out = capsys.readouterr().out
+    assert "no commits yet" in out and "git add -A" in out
+    node = load_experiment(bare_project, "dinov3-featuremetric")
+    assert node.front["status"] == "approved"
+    assert load_proposals(bare_project)["dinov3-featuremetric"].front["status"] == "accepted"
 
 
 # --------------------------------------------------------------------------- history

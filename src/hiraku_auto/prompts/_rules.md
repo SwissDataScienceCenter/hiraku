@@ -86,6 +86,14 @@ Where a past decision is meant to survive, it survives as a record — a `declin
 `abandoned` node, a `concluded` node with its verdict — and those are in the state below. Judge
 novelty against that, and nothing else.
 
+## Which record may name which
+
+A node names its `goal` and its `parent`. A proposal names the goal it is for and the node it would
+hang under. **A goal names nothing below it** — not a proposal, not an experiment. It is written
+before them and outlives all of them, so a goal that cites their ids is out of date the next time
+`discover` or `design` runs, and it asserts something about the contents of `research/proposals/`
+that nobody maintains. State the open question, not the file that might answer it.
+
 ## Metric names
 
 Use only metric names the goal's evaluation protocol defines. If the comparison you want needs a

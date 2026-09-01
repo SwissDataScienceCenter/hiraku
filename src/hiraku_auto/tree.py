@@ -164,11 +164,17 @@ REFERENCE = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+){1,})(?:\.md)?`")
 REFERENCE_SECTIONS = ("Why it matters", "Open threads", "Question", "Applicability", "Decision")
 
 
-def _referenced_ids(record: Any) -> list[tuple[str, str]]:
-    """Record ids named in a record's prose, with the section each appeared in."""
+def _referenced_ids(record: Any, *, everywhere: bool = False) -> list[tuple[str, str]]:
+    """Record ids named in a record's prose, with the section each appeared in.
+
+    A goal is scanned whole: it must not name a node anywhere, and the mentions that do real
+    argumentative work tend to sit in the protocol sections, not in Open threads.
+    """
     out: list[tuple[str, str]] = []
     for name, text in record.sections.items():
-        if not any(name.lower().startswith(s.lower()) for s in REFERENCE_SECTIONS):
+        if not everywhere and not any(
+            name.lower().startswith(s.lower()) for s in REFERENCE_SECTIONS
+        ):
             continue
         out += [(m.group(1), name) for m in REFERENCE.finditer(text)]
     return out
@@ -253,18 +259,38 @@ def check(forest: Forest) -> list[str]:
                 f"Evaluation protocol"
             )
 
-    # A record that names a proposal or node which does not exist. The goal record's prose is read
-    # by the agent and by the next researcher as a description of the tree; when it says three
-    # proposals exist and none do, both are misled and neither can tell without checking by hand.
-    named = set(nodes) | set(goals) | set(forest.proposals)
-    for record, label in [(r, f"{gid}") for gid, r in goals.items()] + [
-        (p_rec, f"proposal {pid}") for pid, p_rec in forest.proposals.items()
-    ]:
+    # A goal is written before the nodes under it and outlives all of them, so it must not name
+    # them: the reference is stale the next time `discover` runs, and it asserts something about the
+    # contents of research/proposals/ that nothing keeps true. Open threads hold questions.
+    below = set(nodes) | set(forest.proposals)
+    for goal_id, record in goals.items():
+        # A live node id is unambiguous wherever it appears, so the whole record is scanned for it.
+        for referenced, section in _referenced_ids(record, everywhere=True):
+            if referenced not in below:
+                continue
+            what = "a proposal" if referenced in forest.proposals else "an experiment"
+            issues.append(
+                f"{goal_id}: '{section}' names `{referenced}`, {what} under it — a goal is written "
+                f"before its nodes and outlives them; state the open question instead"
+            )
+        # A slug that matches nothing is only suspicious in the narrative sections: elsewhere a
+        # backticked hyphenated name is as likely to be a host, a branch or a package.
         for referenced, section in _referenced_ids(record):
-            if referenced not in named:
+            if referenced in below or referenced in goals:
+                continue
+            issues.append(
+                f"{goal_id}: '{section}' names `{referenced}`, which is not a record here — if it "
+                f"was a proposal it is gone, and a goal should not have named it anyway"
+            )
+
+    # Elsewhere a cross-reference is legitimate; a dangling one is not.
+    known = set(goals) | below
+    for pid, record in forest.proposals.items():
+        for referenced, section in _referenced_ids(record):
+            if referenced not in known:
                 issues.append(
-                    f"{label}: '{section}' refers to `{referenced}`, which is not a goal, an "
-                    f"experiment or a proposal"
+                    f"proposal {pid}: '{section}' refers to `{referenced}`, which is not a goal, "
+                    f"an experiment or a proposal"
                 )
 
     known = set(nodes)
