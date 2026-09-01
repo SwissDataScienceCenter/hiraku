@@ -33,7 +33,7 @@ This fragmentation creates an inherent barrier for effective human-AI collaborat
 Hiraku addresses this gap by linking metadata, workflows and agent execution. Hiraku CLI (`hiraku`) and agent skill (`/hiraku`) support task creation, experiment implementation, documentation and analysis.
 
 
-### Core data structures: Tasks, experiments, runs
+### Data model: Tasks, experiments, runs
 
 Hiraku uses four lightweight data structures: tasks, experiments, runs, and programs. Data records are saved in YAML or Markdown with YAML front matter. A *task* defines a working scope and research goal. *Experiments* are smaller units that link a task, hypothesis, code, and results. Tasks and experiments may each define execution entrypoints. A *program* defines an agent workflow and its boundaries. *Runs* record execution traces for a specified task or experiment and code commit.
 
@@ -51,7 +51,7 @@ Hiraku uses four lightweight data structures: tasks, experiments, runs, and prog
 | --- | ---  | --- |
 | **Program** | `hiraku/programs/<program-id>/program.md` | A named agent workflow that defines instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 | **Action** | `hiraku/actions/<entity>/<action-id>/action.md` | A named action that can be invoked by the hiraku-auto agent. |
-| **Context** | `hiraku/contexts/<context-id>/context.md` | Current context files. |
+| **Context** | `hiraku/contexts/<context-id>/context.md` or `hiraku/context/<context-id>.md` | Current context files, e.g. literature, cross-task summaries, etc. |
 
 
   > Hiraku is agnostic to git state of meta data as far as possible. The user my commit the metadata files to to git repository or leave it untracked. Hiraku simply lists what is currently visible in the working directory, or tries to detect md files on the defined task branch.
@@ -372,20 +372,23 @@ The skill acts as a router for focused workflows that are loaded when required:
 
 
 #### Hiraku Agent
-   > todo: This could be a way to directly invoke an agent
+
+> ToDo: `hiraku-auto` or `hiraku-agent` ?
+
+The hiraku agent invokes actions that are defined in `hiraku/actions/<entity>/<action-id>.md`. E.g., `hiraku auto experiment create` invokes `hiraku/actions/experiment/create/action.md`. The action defines the agent's instructions, permissions, and boundaries. The user can define custom actions for their own workflows. Action combine deterministic hooks with natural-language instructions.
 
 ```bash
-hiraku-agent experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic --agent pi --program interactive
+hiraku-auto experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic --agent pi --program interactive
 ```
 
 ```bash
-hiraku-agent experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic --agent pi --program autoresearch
+hiraku-auto experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic --agent pi --program autoresearch
 ```
 
 
 
 #### Hiraku Harness
-   > Todo: Create Pi extension that explicitly parses programs and enforces the workflow and boundaries.
+   > ToDo: Create Pi extension that explicitly parses programs and enforces the workflow and boundaries.
 
 ### Configuration
 
@@ -394,9 +397,13 @@ hiraku-agent experiment create heart-disease:logistic-baseline --summary "Logist
 A table-backed project uses configuration shaped like:
 
 ```yaml
-tasks_dir: tasks
-program: interactive
-branch: hiraku/tasks/<task-id>
+task_path: hiraku/tasks/<task-id>/task.[md|yml] 
+experiment_path: hiraku/tasks/<task-id>/experiments/<experiment-id>.[md|yml]
+context_path: hiraku/context/<context-id>.md
+action_path: hiraku/actions/<entity>/<action-id>.md
+program_path: hiraku/programs/<program-id>/program.[md|yml]
+task_branch: hiraku/tasks/<task-id>
+default_program: interactive
 tracking_backend: table
 ```
 
