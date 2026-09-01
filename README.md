@@ -7,7 +7,7 @@ The Hiraku core defines customizable workflows around the model development life
 The toolkit provides deterministic support functions via a command-line interface (`hiraku`) and agent integration with the `/hiraku` skill, hiraku agent (`hiraku-auto`), harness (tbd), and sandboxing (tbd).
 
 **Why Hiraku?**
-In renku (連句), the traditional Japanese art of collaborative linked poetry, hiraku (平句) are the regular verses where the sequence develops, shifts, and explores new directions — a  metaphor for iterative, exploratory research within the [Renku ecosystem](docs/RENKU.md).
+In renku (連句), the traditional Japanese art of collaborative linked poetry, hiraku (平句) are the regular verses where the sequence develops, shifts, and explores new directions — a  metaphor for iterative, exploratory research within the Renku ecosystem.
 
 
 ## The Model-Development Lifecycle
@@ -152,7 +152,7 @@ Experiment branches can be used to explore several ideas in parallel or a task c
 The user is responsible to merge experiment branches into the task branch, and resolving conflicts. In particular, experiment records should be committed to the task branch so that they can be listed by Hiraku.
 
 Experiment lineage is a DAG derived from Git commit history.
-> Tbc: the advantage is that experiments point to a single commit so the experiment tree is always implicit without duplicating the tree structure; the disadvantage is that proposals are not part of the DAG, and commits without a ref may be lost unless ref'ed, the alternative is to add a parent_id to experiment records, either as core field, or user-managed field).
+> Tbc: the advantage is that experiments point to a single commit so the experiment tree is always implicit without duplicating the tree structure; the disadvantage is that proposals are not part of the DAG, and commits without a ref may be lost unless ref'ed, the alternative is to add a parent_id to experiment records, either as core field, or user-managed field.
 
 ## Hiraku Documentation
 
@@ -163,6 +163,7 @@ Experiment lineage is a DAG derived from Git commit history.
 - [Command-Line Interface](docs/cli.md)
 - [Installation and Configuration](docs/install.md)
 - [Examples](docs/examples.md)
+- [Note: Renku Naming Conventions](docs/renku.md)
 
 ### User Stories
 - [Matteo-simple](docs/stories/Matteo-simple.md)
