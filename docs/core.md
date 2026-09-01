@@ -3,9 +3,15 @@
 
 The Hiraku Core API is the authoritative definition of the data model and lifecycle actions for tasks, experiments, entrypoints, programs, and runs. The CLI and other user interfaces, such as dashboards and TUIs, are thin interfaces built on top of this API; they do not define separate lifecycle semantics.
 
-### Records
+## Config
 
-`Record` is the shared base class for file-backed Hiraku data structures such as `Task`, `Experiment`, and `Program`. It provides YAML and Markdown serialization, validation, and dictionary-like field access. Concrete record types declare three field categories:
+> Manage active task and experiment
+
+## Records
+
+> ToDo: Allow defaults
+
+`hiraku.record.Record` is the shared base class for file-backed Hiraku data structures such as `Task`, `Experiment`, and `Program`. It provides YAML and Markdown serialization, validation, and dictionary-like field access. Concrete record types declare three field categories:
 
 - **Required core fields** are required and interpreted by Hiraku.
 - **Optional core fields** are validated and interpreted when present.
@@ -14,6 +20,7 @@ The Hiraku Core API is the authoritative definition of the data model and lifecy
 Markdown records store their fields as YAML front matter and expose the remaining document as `record.markdown`. YAML records contain fields only. Loading and saving a record preserves user fields and Markdown content. A registry cannot contain both `<id>.yml` and `<id>.md` for the same record ID.
 
 ```python
+from hiraka.record import Record
 class Task(Record):
     required_fields = {"id", "branch"}
     optional_fields = {
@@ -30,10 +37,10 @@ task.save()
 The base class is responsible only for field access, validation, and serialization. Lifecycle actions and domain-specific behavior remain on the concrete types.
 
 
-Python API
+## Data model
 
 ```python
-from hiraku.core import Record, Task, Experiment, Run, Program, Entrypoint
+from hiraku.core import Task, Experiment, Run, Program, Entrypoint
 from hiraku.tracking import TableBackend, MLflowBackend, WandBBackend
 from hiraku.config import HirakuConfig
 from hiraku.agent import Agent
