@@ -1,6 +1,6 @@
 # Qianqian: Governed, evidence-driven parallel research
 
-The main goal of the workflow is to turn a research question into an auditable tree of experiments without surrendering scientific control to the agent. The evaluation protocol is fixed up front; agents may discover and design proposals, but only a person can approve them for execution. Approved experiments run reproducibly and in parallel, results are explicitly triaged, and promotion to the leaderboard requires protocol compliance, reproduction, and sign-off. The final report is assembled only from recorded evidence. 
+The main goal of the workflow is to turn a research question/task into an auto iterative loop of experiments without surrendering scientific control to the agent. The evaluation protocol is fixed up front; agents may discover and design proposals of experiments, but only a person can approve them for execution. Approved experiments run reproducibly and in parallel, results are explicitly triaged, and promotion to the leaderboard requires protocol compliance, reproduction, and sign-off. The final report is assembled only from recorded evidence. 
 
 ## Workflow
 
@@ -17,12 +17,26 @@ hiraku-auto check
 # J: No equivalent for context yet - we can make it a first-class entity
 # hiraku context create literature-search
 # or with agent: hiraku-auto context create literature-search
+
+### Q: In my original version, the 'goal' step can defines the questions, datasets, and evaluation protocol based on optionally with the context of the existing project. 
+# that is:
+# hiraku-auto context [-add <path>] # optional, to provide context of the existing project
+# hiraku-auto goal draft <goal-id> --question <question> --context <path (directly, no need to call 'hiraku-auto context' in advance)>
+### all functional commands can be found in 'docs/autoresearch/commands.md'
+
+# currently, the agent won't search for the literature context.
+# Good idea :) I see the point. With the websearched-context, the agent can better draft the overall evaluation protocol.
+
 # J: Deterministic task creation
 # J: hiraku task create dinov3-crossdomain --question "Would DINOv3 improve reprojection between Mapillary and Natix frames?" --context literature-search
 # J: dinov3-crossdomain becomes the "active" task, or set with
 # J: hiraku task set dinov3-crossdomain
 # J: hiraku task show [dinov3-crossdomain] 
 # J: hiraku-auto task check [dinov3-crossdomain]
+
+### Q: is this the alignment of naming? meaning we change 'hiraku-auto goal draft' to 'hiraku task create'? 
+# I'm fine with changing 'hiraku-auto goal' to 'hiraku task'
+# but I prefer 'draft' here, because there is also 'hiraku-auto goal add' to directly write a goal without agent drafting.
 
 
 
