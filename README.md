@@ -35,7 +35,9 @@ Hiraku addresses this gap by linking metadata, workflows and agent execution. Hi
 
 ### Data model: Tasks, experiments, runs
 
-Hiraku uses four lightweight data structures: tasks, experiments, runs, and programs. Data records are saved in YAML or Markdown with YAML front matter. A *task* defines a working scope and research goal. *Experiments* are smaller units that link a task, hypothesis, code, and results. Tasks and experiments may each define execution entrypoints. A *program* defines an agent workflow and its boundaries. *Runs* record execution traces for a specified task or experiment and code commit.
+Hiraku uses three lightweight data structures for tracking workflows: tasks, experiments, runs. From these, only tasks and experiments are managed directly by Hiraku. Runs are owned by a user-managed tracking backend, and are queried via a backend interface.
+
+Data records are saved in YAML or Markdown with YAML front matter. A *task* defines a working scope and research goal. *Experiments* are smaller units that link a task, hypothesis, code, and results. Tasks and experiments may each define execution entrypoints. A *program* defines an agent workflow and its boundaries. *Runs* record execution traces for a specified task or experiment and code commit.
 
 
 | Term | Data | Summary |
@@ -47,6 +49,8 @@ Hiraku uses four lightweight data structures: tasks, experiments, runs, and prog
 
 ### Agent integration: Programs, Actions, Contexts
 
+Hiraku provides agent integration with programs, actions and context. A *program* defines a research workflow executed by the agent, with defined permissions and limits. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to summarize information that is used by the agent.
+
 | Term | Data | Summary |
 | --- | ---  | --- |
 | **Program** | `hiraku/programs/<program-id>/program.md` | A named agent workflow that defines instructions, permissions, resource limits, checkpoints, and stopping conditions. |
@@ -54,18 +58,9 @@ Hiraku uses four lightweight data structures: tasks, experiments, runs, and prog
 | **Context** | `hiraku/contexts/<context-id>/context.md` or `hiraku/context/<context-id>.md` | Current context files, e.g. literature, cross-task summaries, etc. |
 
 
-  > Hiraku is agnostic to git state of meta data as far as possible. The user my commit the metadata files to to git repository or leave it untracked. Hiraku simply lists what is currently visible in the working directory, or tries to detect md files on the defined task branch.
+  > Note: Hiraku is agnostic to git state of meta data as far as possible. The user my commit the metadata files to to git repository or leave `hiraku/*` untracked. Hiraku simply lists what is currently visible in the working directory, or tries to detect md files on the defined task branch. The recommended pattern is to commit `hiraku/*`, however merging and conflict resolution is a user (or agent) responsibility.
   
-
-#### Ideas:
-
-- **Context** can be another first-class entity<br/>
-I.e. hiraku context create literature-search puts the context in hiraku/context/literature-search/context.md
-- **Action** can be another first-class entity, defining "skills" for the hiraku-agent:<br/>
-E.g., hiraku action create experiment/accept "Accept an experiment proposal"
-Creates a "skill" in hiraku/actions/experiment/accept/action.md which is invoked with
-hiraku-auto experiment accept <experiment-id> , we can ship a few default actions. Ideally, actions are just "programs"?
-
+  > Note: All records (tasks.md, experiment.md, program.md, context.md, action.d) share the same underlying data interface: Markdown with yaml frontmatter. Markdown is optional in which case the file can be saved as yaml. Hiraku only validates core fields that carry semantic meaning (e.g. id, referenced ids, etc), and accepts arbitrary user fields, used for summarization or with agent actions.
 
 
 ### Task record: `task.md`
@@ -76,7 +71,7 @@ tasks/<task-id>/task.md
 ```
 It synthesizes task documentation, experiment branches, runs, analysis, open questions, reviewed findings, conclusions, decisions, and a final changelog. The markdown is continuously updated throughout the task lifecycle and provides a primary reviewing surface for the data scientist (for example, task.md my be used as description for a pull/merge request). 
 
-At any time, there is a single **active task**. `hiraku task set <task-id>` records it in the local Hiraku context. Commands that accept `--task` use it as an explicit override; otherwise they resolve the task from `HIRAKU_TASK_ID`, the local context, or the current task branch. Creating a task makes it active unless `--no-set` is supplied.
+At any time, there is a single **active task**. `hiraku task set <task-id>` records it in the local Hiraku context. Commands that accept `--task` use it as an explicit override; otherwise they resolve the task from `HIRAKU_TASK_ID`, the local context, or the current task branch. Creating a task makes it active unless `--no-set` is supplied. 
 
 
 The markdown frontmatter records key-value pairs as machine-readable yaml. Markdown is optional, if the user does not use markdown, the task file can also be saved as yaml (`task.yml`). 
@@ -450,6 +445,8 @@ hiraku init  # creates Hiraku project configuration in `.hiraku.yml`
 hiraku task create heart-disease  # creates and sets the active task
 /hiraku "define the fixed heart-disease evaluation protocol"  # agent-assisted workflow
 hiraku task show heart-disease  # task details, --json returns machine-readable output
+
+hiraku status  # show current active task, experiment, program and other important configurations
 
 # 2. create an experiment, then implement and bind it
 hiraku experiment create logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic  # creates and sets the active experiment
