@@ -60,6 +60,7 @@ hiraku-auto proposal list
 hiraku-auto proposal accept feature-whitening
 hiraku-auto proposal decline dinov3-layer-choice \
   --reason "Not worth four runs until the backbone swap shows a direction."
+hiraku-auto agent implement dinov3-featuremetric-pose-refinement --in ../natix-auto-research --no-commit --and-launch
 hiraku-auto tree
 
 # J: We could keep the "accept" step as a first-class, semantic action, or we just set a flag
@@ -89,6 +90,9 @@ hiraku-auto loop dinov3-crossdomain \
 # J: loop could be a program that defines the constraints. We use an agent to launch
 # J: hiraku program create loop --launch reconstruct --max-parallel 4 --gpus 0,1,2,3 --seed 1
 # J: hiraku-auto task launch --program loop  # here invoking a task/launch action?
+
+### Q: the idea is to have an auto-loop to run iterative experiments. and we can decide if the new experiment is worth running based on the previous results.
+# but I havent tested it yet. 
 
 # 5. Triage the evidence and review any proposed follow-up.
 hiraku-auto agent triage dinov3-swap
@@ -122,3 +126,11 @@ hiraku-auto check
 ## Preferred user interfaces
 
 The command-line interface is the primary surface for defining goals, reviewing proposals, launching parallel work, triaging evidence, and promoting results. Research records remain readable and directly editable Markdown files. A generated tree dashboard and interactive UI provide complementary, clickable views for inspecting experiment lineage, runs, findings, and gaps in the record.
+
+## Comments from the tests
+
+The goal might define a narrow evaluation protocol, where some relevant proposals are seen out of scope and rejected automatically before human review.
+
+It asks the user to define some specific values for the metrics threshold or experimental settings. but this is unknown before the experiments.
+
+There are too many constrains. my current experience is not as convenient as directly using claude code.
