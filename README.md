@@ -38,7 +38,7 @@ A *task* defines a working scope and research goal. *Experiments* are smaller un
 
 ### Active Task and Experiment
 
-At any time, a single task and experiment can be set as "active". By default, "create" actions activate the new task or experiment. The user can switch explicitly with `hiraku task set <task-id>` or `hiraku experiment set <experiment-id>`. The current status can be queried with `hiraku status`.
+At any time, a single task and experiment can be set as "active". By default, "create" actions activate the new task or experiment. The user can switch explicitly with `hiraku task set <task-id>` or `hiraku experiment set <experiment-id>`. Switching a task un-sets the experiment. The current status can be queried with `hiraku status`.
 
 ### Python Core API
 
@@ -85,7 +85,7 @@ The user can define custom dispatch scripts, e.g.
 ```bash
 hiraku launch <exp-id>:<entrypoint> --dispatch runai
 ```
-This invokes the dispatch script `hiraku/dispatch/runai.sh` with the full launch command after a `--` separator. The dispatch script can be used to implement custom launch behavior, e.g., for a specific cluster or job scheduler, launch event logging, etc.
+This invokes the dispatch script `hiraku/dispatch/runai.sh` with the full launch command after a `--` separator. The dispatch script can be used to implement custom launch behavior, e.g., for a specific cluster or job scheduler, launch event logging, etc. By default, Hiraku calls the `hiraku/dispatch/launch.sh` script, which can be easily customized by the user, e.g. to active a custom environment, set environment variables, etc.
 
 ### Tracking Backend
 
