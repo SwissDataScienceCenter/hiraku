@@ -44,27 +44,45 @@ A *task* defines a working scope and research goal. *Experiments* are smaller un
 | **Proposal / Experiment** | `hiraku/tasks/<task-id>/experiments/<experiment-id>.{md,yml}` | An *experiment* is a focused investigation within a task that refers to a source commit and may define execution entrypoints. An experiment without a reference commit is called a *proposal*. Its intent is user-defined: it can be a baseline, hypothesis, diagnosis, model run, ablation, or anything else; Hiraku does not impose specific semantics. A typical experiment lifecycle spans proposal, implementation, execution, analysis, and a record of the findings. The experiments associated with a task provide an overview of the research effort. |
 | **Run** | (backend owned execution trace) | A single execution trace of an experiment. The tracking backend and logging is user managed by the user, Hiraku only queries results via compatibility backend. Example backends: CSV, W&B, MLFlow, custom user backend.  |
 
-Hiraku data records are managed by the Python Core API. A user cli defines a standardized (~RESTful) interface, .e.g
+
+
+Hiraku data records are managed by the Python Core API. 
+```python
+from hiraku.core import Task, Experiment, Run
+```
+
+The CLI provides a standardized (~RESTful) interface, .e.g
 ```bash
 hiraku task create <task-id>
 hiraku task list
+hiraku task list --columns task_id,question,goal  # list user-defined fields
 hiraku task delete <task-id>
 hiraku task show
 
 hiraku exp create <exp-id>
 hiraku exp list
+hiraku exp list --columns exp_id,created_at,hypothesis,commit,status,result --sort created_at --ascending # list user-defined fields
 hiraku exp update <exp-id> --commit <hash>
 hiraku exp delete <exp-id>
+
+hiraku proposal list  # short for "hiraku exp list --filter commit==None --sort created_at --descending"
+
+hiraku run list
+hiraku run list --columns task_id,exp_id,timestamp,commit --params seed,lr --metrics train/accuracy,val/accuracy,train/cross_entropy,val/cross_entropy --sort val/accuracy --ascending  # custom metric fields
+hiraku run list --sort val/accuracy --ascending
 ```
 
 Tasks and experiments may define named **entrypoints** that are used to launch runs. These can be invoked via the CLI:
 ```bash
 hiraku launch <entrypoint>  # task entrypoint
-hiraku launch <entrypoint>  --task <task-id> # task defaults to active task
-hiraku launch <entrypoint> --experiment <exp-id>  # defaults to the active experiment
+hiraku launch --task <task-id> <entrypoint>  # task defaults to active task
+hiraku launch --experiment <exp-id>  <entrypoint>  # defines experiment context, not task selection, defaults to the active experiment. `--no-exp` launches without experiment (tbc, confusing?)
+hiraku launch <entrypoint>  --seed 1  # arguments after the entrypoint are passed to the launch script (tbc, confusing? forces hiraku args to be before the entrypoint...)
 hiraku launch <exp-id>:<entrypoint>
-hiraku launch <exp-id>:<entrypoint>
+hiraku launch  --experiment <other-exp-id>  <exp-id>:<entrypoint> # launches <exp-id> with a forced <other-exp-id context>
 ```
+
+
 The user can also define dispatch scripts, e.g.
 ```bash
 hiraku launch <exp-id>:<entrypoint> --dispatch runai
@@ -81,20 +99,26 @@ Hiraku provides agent integration with programs, actions and context. A *program
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Program** | `hiraku/programs/<program-id>/program.md` | A named agent workflow that defines instructions, permissions, resource limits, checkpoints, and stopping conditions. |
+| **Program** | `hiraku/programs/<program-id>/program.md` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 | **Action** | `hiraku/actions/<entity>/<action-id>/action.md` | A named action that can be invoked by the hiraku-auto agent. |
-| **Context** | `hiraku/contexts/<context-id>/context.md` or `hiraku/context/<context-id>.md` | Current context files, e.g. literature, cross-task summaries, etc. |
+| **Context** | `hiraku/contexts/<context-id>/context.md` or `hiraku/context/<context-id>.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
 Programs, action and context are managed via CLI, e.g.
 ```bash
 hiraku program create <program-id>
+hiraku program list
 hiraku context create <context-id>
+hiraku context list
+hiraku action create <entity>/<action-id>
+hiraku action list
 ```
 
-The `hiraku-auto` provides direct agent invocation for actions and programs, in particular
+The `hiraku-auto` provides direct agent invocation for actions and programs, with a configured provider (e.g., Codex, Pi, Claude, SDSC models, etc), in particular
 ```bash
-hiraku-auto <entity> <action-id>   # invokes hiraku/actions/<entity>/<action-id>/action.md
+hiraku-auto <entity> <action-id>   # invokes hiraku/actions/<entity>/<action-id>/action.md, e.g.
 hiraku-auto experiment accept  # invokes hiraku/actions/experiment/accept/action.md
+hiraku-auto experiment accept --experiment <exp-id> # invokes hiraku/actions/experiment/accept/action.md
+hiraku-auto experiment propose  --num 5 # invokes hiraku/actions/experiment/propose/action.md
 ```
 
 The `\hiraku` skill can be used directly in a coding harness. Later, we might add a custom harness (e.g, Pi extension) that enforces workflow steps and boundaries defined by programs or actions.
