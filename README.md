@@ -205,10 +205,11 @@ hiraku-auto task update "summarize the reviewed experiments in task.md"
 hiraku-auto task create heart-disease --goal "Develop models for heart disease prediction" --context literature
 
 hiraku program show autoresearch
+hiraku program show interactive
 
 # invoke autoresearch program, via agent
 hiraku-auto --program autoresearch --task heart-disease
-hiraku-auto --program autoresearch --task heart-disease --max-experiments 5 --max-runs 20 --time-budget 2h
+hiraku-auto --program interactive --task heart-disease --max-experiments 5 --max-runs 20 --time-budget 2h
 
 # invoke autoresearch program via skill
 /hiraku "run the autoresearch program for heart-disease prediction task"
