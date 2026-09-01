@@ -32,8 +32,8 @@ A *task* defines a working scope and goal, and documents the research progress. 
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Task** | `hiraku/tasks/{task_id}/task.{md,yml}`| A task is the top-level Hiraku abstraction that defines the scope of a research effort.  |
-| **Proposal / Experiment** | `hiraku/tasks/{task_id}/experiments/{experiment_id}.{md,yml}` | An *experiment* is a focused investigation within a task that refers to a source commit and execution entrypoints. An experiment without a reference commit is called a *proposal*. |
+| **Task** | `hiraku/tasks/{task_id}/task.md`| A task is the top-level Hiraku abstraction that defines the scope of a research effort.  |
+| **Proposal / Experiment** | `hiraku/tasks/{task_id}/experiments/{experiment_id}.md` | An *experiment* is a focused investigation within a task that refers to a source commit and execution entrypoints. An experiment without a reference commit is called a *proposal*. |
 | **Run** | backend owned execution trace | A single execution trace with (optional) task, experiment, and commit attribution. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
 ### Active Task and Experiment
@@ -46,7 +46,7 @@ At any time, a single task and experiment can be set as "active". By default, "c
 
 Hiraku data records are managed by the Python Core API. 
 ```python
-from hiraku.core import Task, Experiment, Run
+from hiraku.data import Entrypoint, Experiment, Metric, Run, Task
 ```
 
 ### CLI
@@ -73,7 +73,7 @@ hiraku run list --sort val/accuracy --ascending
 
 ### Entrypoints
 
-Tasks and experiments may define named **entrypoints** that are used to launch runs. Entrypoints are defined in the task or experiment yaml/frontmatter with the `entrypoints` key, e.g.,
+Tasks and experiments may define named **entrypoints** that are used to launch runs. Entrypoints are defined in the task or experiment YAML front matter with the `entrypoints` key, e.g.,
 ```yaml
 entrypoints: 
   train:
@@ -123,8 +123,8 @@ Hiraku provides agent integration with actions, programs, and context. *Actions*
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Program** | `hiraku/programs/{program_id}/program.{md,yml}` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
-| **Action** | `hiraku/actions/{entity}/{action_id}/action.{md,ym}` | A named action that can be invoked by the hiraku-agent agent. |
+| **Program** | `hiraku/programs/{program_id}/program.md` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
+| **Action** | `hiraku/actions/{entity}/{action_id}/action.md` | A named action that can be invoked by the hiraku-agent agent. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
 Programs, action and context are managed via CLI, e.g.
@@ -141,7 +141,7 @@ hiraku action list
 
 The `hiraku-agent` provides direct agent invocation for actions and programs, with a configured provider (e.g., Codex, Pi, Claude, SDSC models, etc), in particular
 ```bash
-hiraku-agent <entity> <action-id>   # invokes hiraku/actions/{entity}/{action_id}/action.{yml,md}, e.g.
+hiraku-agent <entity> <action-id>   # invokes hiraku/actions/{entity}/{action_id}/action.md, e.g.
 hiraku-agent experiment accept  # invokes hiraku/actions/experiment/accept/action.md
 hiraku-agent experiment accept --experiment <exp-id> --implement# invokes hiraku/actions/experiment/accept/action.md
 hiraku-agent experiment implement --experiment <exp-id> # invokes hiraku/actions/experiment/accept/implement.md, experiment defaults to active experiment
@@ -158,7 +158,7 @@ The `\hiraku` skill can be used directly in a coding harness. Later, we might ad
 
   > Note: Hiraku is agnostic to git state of meta data as far as possible. The user my commit the metadata files to to git repository or leave `hiraku/*` untracked. Hiraku simply lists what is currently visible in the working directory, or tries to detect md files on the defined task branch. The recommended pattern is to commit `hiraku/*`, however merging and conflict resolution is a user (or agent) responsibility.
   
-  > Note: All records share the same underlying data interface: Markdown with YAML front matter, or YAML when no Markdown body is present. The `{suffix}` placeholder expands to `md` or `yml`; both representations cannot exist for the same logical record. Hiraku only validates core fields that carry semantic meaning (e.g. id, referenced ids, etc), and accepts arbitrary user fields, used for summarization or with agent actions. Default lookup paths are defined in `hiraku.yml` and can be customized by the user.
+  > Note: All records use Markdown with YAML front matter and a `.md` ending. The Markdown body may be empty. Hiraku only validates core fields that carry semantic meaning (e.g. id, referenced ids, etc), and accepts arbitrary user fields, used for summarization or with agent actions. `hiraku.yml` may relocate the common `hiraku_dir`; record paths follow a fixed layout beneath it.
 
 ### Default Programs and Actions
 

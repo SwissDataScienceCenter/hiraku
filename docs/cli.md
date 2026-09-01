@@ -12,8 +12,9 @@ Tasks are managed explicitly. Experiments are semantic records in the local task
 hiraku init
 ```
 
-This creates the default configuration, local context, `tasks/`, the bundled programs under
-`.hiraku/programs/{interactive,autoresearch}/`, and the agent skill `.agents/skills/hiraku/`. The local `.hiraku/context.yml` is added to `.gitignore`.
+This creates `hiraku.yml`, the metadata directories under `hiraku/`, editable
+bundled programs and actions, the default dispatcher, and the repository-local
+agent skill `.agents/skills/hiraku/`. Active selections initially remain unset.
 
 ### Create and inspect tasks
 
@@ -40,7 +41,7 @@ The Hiraku skill checks that implementation work occurs on the task branch. It s
 
 ```bash
 hiraku experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --entrypoint logistic
-hiraku experiment create heart-disease:random-forest --summary "Random forest comparison" --entrypoint random-forest --format markdown
+hiraku experiment create heart-disease:random-forest --summary "Random forest comparison" --entrypoint random-forest
 hiraku experiment list
 hiraku experiment list heart-disease
 hiraku experiment show heart-disease:logistic-baseline
@@ -50,7 +51,7 @@ hiraku experiment delete heart-disease:logistic-baseline
 hiraku experiment create heart-disease:stronger-regularization --branch --from HEAD --no-set
 ```
 
-`hiraku experiment create` sets the experiment and its task as active unless `--no-set` is supplied. `set` changes the active experiment context; `update` modifies an experiment record. `hiraku exp` is a shorthand for `hiraku experiment`. YAML and Markdown records normalize to the same core fields. Direct editing is supported. `list` without a task resolves to the current task, and its human-readable table includes both the experiment summary and hypothesis.
+`hiraku experiment create` sets the experiment and its task as active unless `--no-set` is supplied. `set` changes the active experiment context; `update` modifies an experiment record. `hiraku exp` is a shorthand for `hiraku experiment`. Every record is Markdown with YAML front matter, and direct editing is supported. `list` without a task resolves to the current task, and its human-readable table includes both the experiment summary and hypothesis.
 
 ### Create and inspect programs
 

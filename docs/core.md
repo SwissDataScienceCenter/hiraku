@@ -9,7 +9,7 @@ own.
 The core API is deliberately small. Hiraku owns task and experiment records,
 resolves and launches named entrypoints, and queries runs through a tracking
 backend. It does not replace Git, execute model-specific training logic, or own
-the run records stored by MLflow, Weights & Biases, CSV, or another backend.
+the run records stored by MLflow, CSV, or another backend.
 
 This document specifies the intended public API. It is normative for new core
 implementations, although Hiraku itself is still a draft and some interfaces
@@ -17,24 +17,37 @@ may change before the first stable release.
 
 ## Installation and imports
 
-The principal data types are available from `hiraku.core`:
+The principal data types are available from `hiraku.data`:
 
 ```python
-from hiraku.core import Experiment, Run, Task
+from hiraku.data import Entrypoint, Experiment, Metric, Run, Task
 ```
 
 Supporting interfaces live in focused modules:
 
 ```python
 from hiraku.config import HirakuConfig
-from hiraku.entrypoints import Entrypoint
+from hiraku.launch import launch, render_arguments
 from hiraku.records import Record
-from hiraku.tracking import MetricSpec, TrackingBackend
+from hiraku.tracking import TrackingBackend
 ```
 
 Applications should import documented public names rather than internal file
 helpers. Filesystem layout, YAML parsing, Git commands, and backend-specific
 normalization are implementation details.
+
+### Implementation baseline
+
+The first core implementation is a greenfield Python 3.11+ package using a
+`src/hiraku/` layout, `pyproject.toml`, `uv`, hatchling, pytest, Ruff, and
+PyYAML. MLflow integration is an optional extra and imports its SDK lazily.
+Prototype wheels produced before this specification are not compatibility
+targets.
+
+The implementation is expected to be clean, idiomatic, fully typed, and
+documented according to Python library best practices. It will receive detailed
+human review; correctness, maintainability, safe filesystem and Git behavior,
+and clear public interfaces take precedence over shortcuts.
 
 ## Design principles
 
@@ -102,38 +115,29 @@ config.actions_dir
 config.contexts_dir
 config.dispatch_dir
 config.tracking_backend
-config.task_pattern
-config.experiment_pattern
-config.program_pattern
-config.action_pattern
-config.context_pattern
 ```
 
 `config.path` is always `<root>/hiraku.yml` and is not configurable.
-`config.hiraku_dir` defaults to `<root>/hiraku`, but record locations may be
-changed through their patterns. All resolved paths are absolute `pathlib.Path`
-objects. Configured relative paths and patterns are resolved against
-`config.root` and must remain within it. Record locations are defined by
-configurable templates rather than hard-coded path assembly. The defaults are:
+`config.hiraku_dir` is the only configurable metadata location and defaults to
+`<root>/hiraku`. The task, program, action, context, and dispatch directories
+are derived from it and are not independent configuration keys. All resolved
+paths are absolute `pathlib.Path` objects. A relative `hiraku_dir` is resolved
+against `config.root` and must remain within it.
+
+Record paths follow a fixed Markdown layout beneath the derived directories:
 
 ```text
-hiraku/tasks/{task_id}/task.{suffix}
-hiraku/tasks/{task_id}/experiments/{experiment_id}.{suffix}
-hiraku/programs/{program_id}/program.{suffix}
-hiraku/actions/{entity}/{action_id}/action.{suffix}
-hiraku/contexts/{context_id}/context.{suffix}
+hiraku/tasks/{task_id}/task.md
+hiraku/tasks/{task_id}/experiments/{experiment_id}.md
+hiraku/programs/{program_id}/program.md
+hiraku/actions/{entity}/{action_id}/action.md
+hiraku/contexts/{context_id}/context.md
 ```
-
-Identifier placeholders are substituted from the record's scope. `{suffix}` is
-a required format placeholder. For lookup, Hiraku expands it over the supported
-suffixes `md` and `yml`. Finding both candidates for one logical record raises
-`DuplicateRecordError`. For a new save, Hiraku selects `md` when `markdown` is a
-string (including an empty string) and `yml` when `markdown is None`.
 
 The remaining PoC defaults are:
 
 ```yaml
-dispatch_dir: hiraku/dispatch
+hiraku_dir: hiraku
 default_dispatch: launch.sh
 task_branch: hiraku/tasks/{task_id}
 experiment_branch: hiraku/experiment/{task_id}/{experiment_id}
@@ -142,8 +146,7 @@ tracking_backend: csv
 ```
 
 CSV is the project tracking default. A task-level `tracking_backend` field
-overrides it for that task; MLflow and Weights & Biases are supported
-alternatives.
+overrides it for that task; MLflow is the supported alternative in the PoC.
 
 The configuration also stores the active task and experiment:
 
@@ -173,13 +176,13 @@ work with more than one project.
 class Record(MutableMapping[str, Any]):
     id: str
     path: Path | None
-    markdown: str | None
+    markdown: str
 
     def __init__(
         self,
         record_id: str,
         *,
-        markdown: str | None = None,
+        markdown: str = "",
         **fields: Any,
     ) -> None: ...
 
@@ -199,17 +202,14 @@ class Record(MutableMapping[str, Any]):
 record separates structured fields from optional prose:
 
 - Markdown files store structured fields in YAML front matter and expose the
-  remaining text through `markdown`.
-- YAML files contain structured fields only and expose `markdown` as `None`.
+  remaining text through `markdown`; the body may be empty.
 - Unknown fields are preserved across a load/edit/save round trip.
 
 Constructing a record creates a detached in-memory object. It neither writes a
-file nor changes active project state. `save()` determines the location
-exclusively from the configured path pattern. It selects `md` when `markdown`
-is a string, including an empty string, and `yml` when `markdown is None`.
-Relocating a record or converting its representation requires changing the
-configuration or creating a separate record; `save()` has no path or format
-override.
+file nor changes active project state. `save()` determines the `.md` location
+exclusively from the configured path pattern and serializes the structured
+fields as YAML front matter followed by `markdown`. Relocating a record requires
+changing the configuration; `save()` has no path or format override.
 
 Core fields may also be accessed as attributes. User fields should normally be
 accessed with mapping methods:
@@ -230,10 +230,6 @@ that results are deterministic. `save()` validates before writing and returns
 the written path. `delete()` removes only the record represented by the object;
 subclasses may reject deletion when dependent records exist.
 
-Within one registry, `{id}.md` and `{id}.yml` are alternative representations
-of the same logical record. More than one representation for the same ID is an
-error. `.yaml` is not an automatically recognized record suffix.
-
 Record IDs are stable, filesystem-safe identifiers. They must be non-empty and
 must not contain path separators, `.` or `..` path components, or control
 characters. Renaming an ID is a separate lifecycle operation because references
@@ -241,16 +237,17 @@ may need updating.
 
 ## Tasks
 
-### `MetricSpec`
+### `Metric`
 
 ```python
-class MetricSpec(TypedDict):
+class Metric(TypedDict):
     name: str
     direction: Literal["minimize", "maximize"]
 ```
 
 Both keys are required. Metric names remain backend-defined; Hiraku interprets
-only the ordering direction.
+only the ordering direction. `Metric` is a declaration; observed values are
+stored separately in `Run.metrics`.
 
 ### `Task`
 
@@ -258,15 +255,15 @@ only the ordering direction.
 class Task(Record):
     id: str
     branch: str | None
-    entrypoints: Mapping[str, EntrypointSpec]
-    metrics: Sequence[MetricSpec]
+    entrypoints: Mapping[str, Entrypoint]
+    metrics: Sequence[Metric]
     tracking_backend: str | Mapping[str, Any] | None
 
     def __init__(
         self,
         task_id: str,
         *,
-        markdown: str | None = None,
+        markdown: str = "",
         **fields: Any,
     ) -> None: ...
 
@@ -275,7 +272,7 @@ class Task(Record):
         cls,
         task_id: str,
         *,
-        markdown: str | None = None,
+        markdown: str = "",
         activate: bool = True,
         config: HirakuConfig | None = None,
         **fields: Any,
@@ -284,13 +281,12 @@ class Task(Record):
     def experiments(self) -> list[Experiment]: ...
     def runs(self, **query) -> list[Run]: ...
     def entrypoint(self, name: str) -> Entrypoint: ...
-    def launch(self, name: str, **options) -> subprocess.CompletedProcess[str]: ...
 ```
 
 A task is the top-level scope of a research effort. Its canonical path is:
 
 ```text
-hiraku/tasks/{task_id}/task.{suffix}
+hiraku/tasks/{task_id}/task.md
 ```
 
 The only required core field is `id`. `branch`, `entrypoints`, `metrics`, and
@@ -314,18 +310,12 @@ replacing an existing task. Neither construction nor plain `save()` activates
 the task.
 
 ```python
-# None selects the configured .yml representation.
-diagnostic = Task("data-diagnostic", markdown=None, owner="research-team")
+# An empty body is still a Markdown record with YAML front matter.
+diagnostic = Task("data-diagnostic", markdown="", owner="research-team")
 diagnostic.save()
 
-# An empty string selects .md with front matter and an empty Markdown body.
 baseline = Task.create("baseline", markdown="", goal="Establish a baseline")
-
 ```
-
-Saving or loading a second representation for an existing logical ID is an
-error. For example, after `task.md` exists, a matching `task.yml` is rejected
-rather than selected by precedence.
 
 `experiments()` lists the task's experiment records. `runs()` delegates to the
 configured tracking backend and restricts results to the task. Neither method
@@ -345,8 +335,8 @@ class Experiment(Record):
     task_id: str
     commit: str | None
     branch: str | None
-    entrypoints: Mapping[str, EntrypointSpec]
-    metrics: Sequence[MetricSpec]
+    entrypoints: Mapping[str, Entrypoint]
+    metrics: Sequence[Metric]
 
     def __init__(
         self,
@@ -354,7 +344,7 @@ class Experiment(Record):
         *,
         task: Task | str | None = None,
         commit: str | None = None,
-        markdown: str | None = None,
+        markdown: str = "",
         **fields: Any,
     ) -> None: ...
 
@@ -368,7 +358,7 @@ class Experiment(Record):
         *,
         task: Task | str | None = None,
         commit: str | None = None,
-        markdown: str | None = None,
+        markdown: str = "",
         activate: bool = True,
         config: HirakuConfig | None = None,
         **fields: Any,
@@ -385,14 +375,13 @@ class Experiment(Record):
 
     def runs(self, **query) -> list[Run]: ...
     def entrypoint(self, name: str) -> Entrypoint: ...
-    def launch(self, name: str, **options) -> subprocess.CompletedProcess[str]: ...
 ```
 
 An experiment is a focused investigation within exactly one task. Its canonical
 path is:
 
 ```text
-hiraku/tasks/{task_id}/experiments/{experiment_id}.{suffix}
+hiraku/tasks/{task_id}/experiments/{experiment_id}.md
 ```
 
 The required core fields are `id` and `task_id`. `commit`, `branch`,
@@ -442,6 +431,12 @@ Experiment ancestry is derived from the Git history of bound commits. It is not
 stored as a required `parent_id` field. Consequently, proposals do not yet have
 Git-derived lineage. APIs may expose lineage helpers, but callers must tolerate
 an empty or incomplete result for unbound experiments and unreachable commits.
+
+Git operations are implemented through a dedicated service. It resolves
+commits, inspects and creates branches, switches branches when explicitly
+requested, derives lineage, and manages temporary worktrees for launches.
+Hiraku does not automatically commit, merge, reset, delete branches, or resolve
+conflicts. Those operations remain the user's or agent's responsibility.
 
 ## Runs
 
@@ -506,19 +501,31 @@ class TrackingBackend(Protocol):
     ) -> list[Run]: ...
 ```
 
-A tracking backend is a compatibility adapter for reading runs. Hiraku ships
-adapters for CSV, MLflow, and Weights & Biases. Each adapter normalizes its
-backend-specific results and returns a list of `Run` objects.
+A tracking backend is a compatibility adapter for reading runs. The PoC ships
+adapters for CSV and MLflow. Each adapter normalizes its backend-specific
+results and returns a list of `Run` objects.
 
 Backend selection is task-scoped. A task-specific setting overrides the project
 default. Credentials and remote-service configuration should remain in the
 backend's conventional environment or configuration; they should not be copied
 into task records.
 
+The read-only adapters use these mappings:
+
+- CSV defaults to `hiraku/tasks/{task_id}/runs.csv`. Standard columns are
+  `id`, `task_id`, `experiment_id`, `commit`, `timestamp`, `entrypoint`, and
+  `url`; `metric.<name>` and `param.<name>` columns populate metrics and
+  parameters, and unknown columns are preserved in `raw`.
+- MLflow maps its run ID to `Run.id`, `hiraku.task_id`,
+  `hiraku.experiment_id`, `hiraku.commit`, and `hiraku.entrypoint` tags to
+  attribution, and native metrics and parameters to their normalized mappings.
+Missing optional attribution remains `None`. The MLflow SDK is imported only
+when its adapter is selected; a missing extra raises `BackendError`.
+
 
 ## Entrypoints and launching
 
-### Entrypoint specification
+### `Entrypoint`
 
 Tasks and experiments may define named entrypoints in front matter:
 
@@ -535,42 +542,60 @@ entrypoints:
 named arguments. Using an argument vector prevents shell-dependent parsing and
 makes the rendered invocation inspectable.
 
+Entrypoints are declarative data stored on their owning record:
+
+```python
+ArgumentScalar: TypeAlias = str | int | float | Path
+ArgumentValue: TypeAlias = ArgumentScalar | bool | None | Sequence[ArgumentScalar]
+
+class Entrypoint(TypedDict):
+    command: Sequence[str]
+    args: NotRequired[Mapping[str, ArgumentValue]]
+```
+
+Argument mappings use GNU-style rendering. Keys become `--key`, with
+underscores converted to hyphens. Scalar values follow the flag, `True` emits
+the flag alone, `False` and `None` are omitted, and sequences repeat the flag
+for each item. Call-time values override stored defaults. Nested mappings and
+unsupported values raise `ValidationError`.
+
 Experiment entrypoints are resolved on the experiment record. Task entrypoints
 are resolved on the task record. Hiraku does not implicitly merge two
 definitions with the same name.
 
-### `Entrypoint`
+### `hiraku.launch`
 
 ```python
-@dataclass(frozen=True)
-class Entrypoint:
-    name: str
-    command: tuple[str, ...]
-    default_args: Mapping[str, Any]
-    task_id: str
-    experiment_id: str | None
+def render_arguments(arguments: Mapping[str, ArgumentValue]) -> tuple[str, ...]: ...
 
-    def launch(
-        self,
-        *,
-        args: Mapping[str, Any] | None = None,
-        commit: str | None = None,
-        dispatch: str | None = None,
-        worktree: bool | None = None,
-        env: Mapping[str, str] | None = None,
-        check: bool = True,
-    ) -> subprocess.CompletedProcess[str]: ...
+def launch(
+    entrypoint: Entrypoint,
+    *,
+    name: str | None = None,
+    args: Mapping[str, ArgumentValue] | None = None,
+    task_id: str | None = None,
+    experiment_id: str | None = None,
+    commit: str | None = None,
+    dispatch: str | None = None,
+    worktree: bool | None = None,
+    env: Mapping[str, str] | None = None,
+    check: bool = True,
+    config: HirakuConfig | None = None,
+) -> subprocess.CompletedProcess[str]: ...
 ```
 
-Call-time arguments override entrypoint defaults. The launcher renders named
-arguments according to the configured argument convention and does not mutate
-the stored record.
+`hiraku.launch` is the sole public execution API. Tasks and experiments expose
+entrypoint declarations but do not implement launch methods. Call-time
+arguments override entrypoint defaults without mutating the declaration.
+`name`, `task_id`, and `experiment_id` are explicit attribution only. `None`
+does not consult active configuration: the corresponding environment variable
+and file variable are omitted. A launch with both IDs absent is unassigned.
+An explicit task must exist. Because experiment IDs are task-scoped,
+`experiment_id` requires `task_id` and must resolve within that task.
 
 When `commit` is supplied, Hiraku resolves it and launches from an isolated Git
-worktree. For an experiment launch, the experiment's bound commit is the
-default. Launching an unbound proposal without an explicit commit uses the
-current working tree only when the caller explicitly permits that behavior;
-autonomous programs should require a bound commit or an isolated snapshot.
+worktree. When it is absent, Hiraku launches from the current working tree.
+Supplying IDs does not implicitly select a commit or change active state.
 
 The launch environment includes at least:
 
@@ -583,9 +608,8 @@ HIRAKU_COMMIT
 HIRAKU_ENTRYPOINT
 ```
 
-Experiment variables are omitted for a task launch without experiment
-attribution. Values supplied via `env` may add variables but must not override
-the `HIRAKU_*` attribution variables.
+Only explicitly supplied attribution variables are injected. Values supplied
+via `env` may add variables but must not override injected `HIRAKU_*` values.
 
 The selected dispatch script receives the complete rendered command after a
 `--` separator. The project default is `hiraku/dispatch/launch.sh`; a named
@@ -608,18 +632,21 @@ run core model:
 from hiraku.agent import Action, Context, Program
 ```
 
-- `Program` records use `hiraku/programs/{program_id}/program.{suffix}` and define
+- `Program` records use `hiraku/programs/{program_id}/program.md` and define
   workflow instructions, permissions, resource limits, checkpoints, and
   stopping conditions.
 - `Action` records use
-  `hiraku/actions/{entity}/{action_id}/action.{suffix}` and define a one-step agent
+  `hiraku/actions/{entity}/{action_id}/action.md` and define a one-step agent
   operation plus deterministic preconditions and hooks.
-- `Context` records use `hiraku/contexts/{context_id}/context.{suffix}` and contain
+- `Context` records use `hiraku/contexts/{context_id}/context.md` and contain
   curated material that can be referenced by tasks, actions, or programs.
 
 The Python core may load and validate these records, but executing LLM
 instructions is the responsibility of `hiraku-agent` or a compatible harness.
 Deterministic lifecycle checks must remain callable independently of an LLM.
+The first core milestone implements `Program`, `Action`, and `Context` only as
+file-backed record types; agent, program, action, and context-composition
+execution is deferred.
 
 ## Validation and errors
 
@@ -629,7 +656,6 @@ All public exceptions derive from `HirakuError`:
 from hiraku.errors import (
     AmbiguousReferenceError,
     BackendError,
-    DuplicateRecordError,
     EntrypointNotFoundError,
     HirakuError,
     LaunchError,
@@ -653,7 +679,7 @@ Validation covers framework semantics, including:
 - required core fields and their types;
 - safe, internally consistent IDs;
 - task references on experiments;
-- unique record representation within a registry;
+- unique record IDs within each registry;
 - valid entrypoint structure;
 - active experiment/task consistency; and
 - resolvable commits when an operation requires a commit.
@@ -667,7 +693,7 @@ turning those fields into universal core fields.
 
 ```python
 from hiraku.config import HirakuConfig
-from hiraku.core import Experiment, Run, Task
+from hiraku.data import Experiment, Run, Task
 
 config = HirakuConfig.init(".")
 
@@ -709,7 +735,16 @@ experiment = Experiment.create(
 experiment.commit = "HEAD"
 experiment.save()  # resolves HEAD and stores its commit hash
 
-completed = experiment.launch("train", args={"seed": 1})
+from hiraku.launch import launch
+
+completed = launch(
+    experiment.entrypoint("train"),
+    name="train",
+    task_id=experiment.task_id,
+    experiment_id=experiment.id,
+    commit=experiment.commit,
+    args={"seed": 1},
+)
 if completed.returncode == 0:
     runs = experiment.runs(sort="val/log_loss", ascending=True)
     best = runs[0] if runs else None
@@ -725,7 +760,6 @@ and returns the resulting runs.
 The following areas remain draft and should not be treated as stable extension
 points yet:
 
-- the exact argument-rendering convention for entrypoints;
 - lifecycle statuses and state transitions for experiments;
 - explicit context references and context composition;
 - program execution and harness enforcement;

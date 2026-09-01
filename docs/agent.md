@@ -14,13 +14,16 @@ hiraku program update my-program --summary "Custom bounded workflow"
 hiraku program delete my-program
 ```
 
-`create` makes the new program active unless `--no-set` is supplied. `set` updates `program_id` in `.hiraku/context.yml`; `update` modifies the program record. Direct editing remains supported. Deleting a program that is active or referenced by a task is rejected unless explicitly forced.
+`create` makes the new program active unless `--no-set` is supplied. `set`
+updates `program_id` in `hiraku.yml`; `update` modifies the Markdown program
+record. Direct editing remains supported. Deleting a program that is active or
+referenced by a task is rejected unless explicitly forced.
 
 Programs take precedence in this order:
 ```
 --program <program-id>
 HIRAKU_PROGRAM_ID
-.hiraku/context.yml
+hiraku.yml
 the task record's `program` field
 the repository configuration's `program` field
 interactive
@@ -28,7 +31,7 @@ interactive
 
 Programs are saved in the Hiraku folder:
 ```
-.hiraku/programs/<program-id>/program.md
+hiraku/programs/{program_id}/program.md
 ```
 
 By default, Hiraku ships with two workflows:
@@ -88,7 +91,13 @@ The skill acts as a router for focused workflows that are loaded when required:
 
 > ToDo: `hiraku-auto` or `hiraku-agent` ?
 
-The hiraku agent invokes actions that are defined in `hiraku/actions/<entity>/<action-id>.md`. E.g., `hiraku auto experiment create` invokes `hiraku/actions/experiment/create/action.md`. The action defines the agent's instructions, permissions, and boundaries. The user can define custom actions for their own workflows. Action combine deterministic hooks with natural-language instructions.
+The hiraku agent invokes actions defined at
+`hiraku/actions/{entity}/{action_id}/action.md`. For example,
+`hiraku auto experiment create` invokes
+`hiraku/actions/experiment/create/action.md`. The action defines the agent's
+instructions, permissions, and boundaries. Users can define custom actions for
+their own workflows. Actions combine deterministic hooks with natural-language
+instructions.
 
 ```bash
 hiraku-auto experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic --agent pi --program interactive
@@ -102,4 +111,3 @@ hiraku-auto experiment create heart-disease:logistic-baseline --summary "Logisti
 
 #### Hiraku Harness
    > ToDo: Create Pi extension that explicitly parses programs and enforces the workflow and boundaries.
-

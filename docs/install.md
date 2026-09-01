@@ -61,20 +61,15 @@ hiraku/
 
 `hiraku.yml` is the fixed, non-configurable project marker. Hiraku starts at the
 current directory, or a supplied path, and searches upward until it finds that
-file. The directory containing it is the project root. The metadata paths
-defined inside the file remain configurable.
+file. The directory containing it is the project root. The `hiraku_dir` value
+inside the file controls the metadata location.
 
 ## Configuration
 
 A default `hiraku.yml` has the following shape:
 
 ```yaml
-task_pattern: hiraku/tasks/{task_id}/task.{suffix}
-experiment_pattern: hiraku/tasks/{task_id}/experiments/{experiment_id}.{suffix}
-program_pattern: hiraku/programs/{program_id}/program.{suffix}
-action_pattern: hiraku/actions/{entity}/{action_id}/action.{suffix}
-context_pattern: hiraku/contexts/{context_id}/context.{suffix}
-dispatch_dir: hiraku/dispatch
+hiraku_dir: hiraku
 default_dispatch: launch.sh
 
 task_branch: hiraku/tasks/{task_id}
@@ -87,16 +82,20 @@ active_task_id: null
 active_experiment_id: null
 ```
 
-`{suffix}` expands only to `md` and `yml`. A record cannot have both
-representations: if both paths exist for one logical ID, Hiraku reports an
-error. Markdown records contain YAML front matter and optional prose; YAML
-records contain structured fields only.
+All metadata records use Markdown with YAML front matter and a `.md` ending.
+The Markdown body may be empty. YAML-only record files are not supported in the
+PoC.
+
+`hiraku_dir` is the only configurable metadata location. Hiraku derives
+`tasks/`, `programs/`, `actions/`, `contexts/`, and `dispatch/` beneath it and
+uses the fixed record layout shown above. These derived directories are not
+separate configuration keys.
 
 The default tracking backend is CSV. MLflow and Weights & Biases are selectable
 alternatives. A task-level `tracking_backend` field overrides the project
 default for that task. Hiraku queries runs through the selected backend; model
 code continues to log through the backend's native interface.
 
-All configured relative paths are resolved against the project root and must
-remain inside it. The `hiraku.yml` marker itself cannot be relocated through
+A relative `hiraku_dir` is resolved against the project root and must remain
+inside it. The `hiraku.yml` marker itself cannot be relocated through
 configuration.

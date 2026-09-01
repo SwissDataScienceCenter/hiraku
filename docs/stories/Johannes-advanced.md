@@ -10,7 +10,6 @@ hiraku task create heart-disease --template guided
 git switch -c hiraku/task/heart-disease
 /hiraku "define the fixed heart-disease evaluation protocol"
 $EDITOR tasks/heart-disease/task.md
-$EDITOR tasks/heart-disease/launch.yml
 
 # 2. Create independent Experiment branches from the task baseline.
 # Hiraku records each derived branch and switches to it when possible.
