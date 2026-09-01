@@ -236,6 +236,7 @@ Experiment lineage is a DAG derived from Git commit history.
 - [Command-Line Interface](docs/cli.md)
 - [Installation and Configuration](docs/install.md)
 - [Examples](docs/examples.md)
+- [Note: Agent System Design](docs/design.md)
 - [Note: Renku Naming Conventions](docs/renku.md)
 
 ### User Stories
