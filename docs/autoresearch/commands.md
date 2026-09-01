@@ -58,8 +58,8 @@ positional arguments:
     logs                every agent call: the prompt sent, the reply, how long
     launch              run an entrypoint and record the run
     runs                list or rank runs
-    agent               call Claude Code to design, triage, discover or
-                        analyse
+    agent               call Claude Code to design, triage, discover, analyse
+                        or implement
     next                what the loop would do next (no agent call)
     loop                bounded loop; stops wherever a human decides
     promote             put a run through the promotion gate
@@ -457,20 +457,32 @@ options:
 
 ### `hiraku-auto agent --help`
 ```
-usage: hiraku-auto agent [-h] [--instruction INSTRUCTION]
+usage: hiraku-auto agent [-h] [--in PATH] [--no-commit] [--allow-dirty]
+                         [--and-launch] [--instruction INSTRUCTION]
                          [--instruction-file PATH] [--context PATH]
                          [--no-context] [--context-bytes N]
                          [--agent-cmd AGENT_CMD] [--unset-env VAR] [--dry-run]
                          [--no-apply] [--show-raw] [--timeout TIMEOUT]
-                         {draft,design,triage,discover,analyze} target
+                         {draft,design,triage,discover,analyze,implement}
+                         target
 
 positional arguments:
-  {draft,design,triage,discover,analyze}
+  {draft,design,triage,discover,analyze,implement}
   target                goal id for design/discover; experiment id for
-                        triage/analyze
+                        triage/analyze/implement
 
 options:
   -h, --help            show this help message and exit
+  --in PATH             implement only: the repository the code belongs in
+                        (default: this project). A research project holds
+                        records; the pipeline usually lives in its own
+                        repository.
+  --no-commit           implement only: leave the changes for review instead
+                        of committing them
+  --allow-dirty         implement only: proceed although the target repository
+                        has uncommitted changes
+  --and-launch          implement only: launch the declared entrypoint once
+                        the code is committed
   --instruction INSTRUCTION
                         extra context for the agent
   --instruction-file PATH

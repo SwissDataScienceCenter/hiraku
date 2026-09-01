@@ -567,6 +567,35 @@ The corollary: a decision that should survive has to be a record. Declining a pr
 its reason, and the next `discover` sees it. Deleting it means the idea can be proposed again, and
 should be — nothing in the project says it was considered.
 
+### Writing the experiment's code
+
+`accept` gives you a record and a branch; the code is still missing. `implement` writes it:
+
+```bash
+hiraku-auto agent implement <experiment> --in ../<code-repo>
+hiraku-auto agent implement <experiment> --in ../<code-repo> --and-launch
+```
+
+What happens, in order:
+
+1. The experiment's branch is created and **checked out in the target repository**, so nothing lands
+   on the default branch. A repository with uncommitted changes is refused — the agent's diff has to
+   be separable from yours (`--allow-dirty` to override).
+2. The agent is given the implementation brief (`exp brief`) as its prompt: the expectation, the
+   `$HIRAKU_*` run contract with this goal's metric names filled in, the frozen protocol verbatim,
+   and every `**[UNSET: ...]**` value it must ask about rather than invent. The write tools are
+   added to your `agent.command` for this call only.
+3. It writes code and `experiments/<id>/launch.yml`. It may not touch a record: editing the
+   expectation to match what was built is the one change that makes the whole loop worthless.
+4. The tool prints the diffstat and commits on the branch (`--no-commit` to review first), so the
+   result is a reviewable commit rather than an edit to go looking for.
+5. With `--and-launch`, the declared entrypoint runs immediately and the run is recorded.
+
+If the agent reports `blocked` — a dataset manifest that does not exist, a protocol line that cannot
+be implemented as written — **nothing is committed and the command exits non-zero**. That is a
+finding about the records, not a failure to code, and inventing a plausible path to get past it is
+exactly what would produce a number that looks like a result.
+
 ### Project context
 
 `draft`, `design` and `discover` also send excerpts of the project's own files — `CLAUDE.md`, the

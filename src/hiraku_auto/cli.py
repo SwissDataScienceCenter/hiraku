@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from . import agent as agent_mod
+from . import brief as brief_mod
 from . import context as context_mod
 from . import dash, gitops, scaffold
 from . import promote as promote_mod
@@ -667,108 +668,14 @@ def cmd_exp_list(args: argparse.Namespace) -> int:
 
 
 def cmd_exp_brief(args: argparse.Namespace) -> int:
-    """The spec for writing this experiment's code, in one page a coding agent can consume.
-
-    hiraku does not write the entrypoint. Code belongs in the repository it changes, on a branch,
-    reviewed — not generated into a research project by a workflow whose contract is "return JSON
-    and the tool writes records". But a coding agent cannot guess the run contract or the goal's
-    frozen protocol, and those are exactly what makes a run comparable, so this hands them over.
-    """
     project = _project(args)
-    forest = build(project)
-    if args.id not in forest.nodes:
-        raise HirakuError(f"Experiment '{args.id}' does not exist.")
-    node = forest.nodes[args.id]
-    goal = forest.goals.get(str(node.goal))
-    if goal is None:
-        raise HirakuError(f"'{args.id}' has no goal, so there is no protocol to implement against.")
-
-    metrics = [str(goal.front.get("primary_metric") or "")]
-    if goal.front.get("gate_metric"):
-        metrics.append(str(goal.front["gate_metric"]))
-    named = ", ".join(f"`{m}`" for m in metrics if m)
-    exp_dir = project.experiments_dir / args.id
-
-    out: list[str] = [
-        f"# Implementation brief — `{args.id}`",
-        "",
-        "You are writing the code for one experiment in a bounded research loop. The records "
-        "quoted below are fixed: do not edit them, and do not adjust the protocol to suit the "
-        "implementation. If the protocol cannot be implemented as written, say so and stop — that "
-        "is a finding, not an obstacle to work around.",
-        "",
-        "## What this experiment claims",
-        "",
-        f"- **id** `{args.id}` · **kind** {node.kind} · **goal** `{node.goal}`",
-        f"- **branch** `{node.front.get('branch')}` — the code belongs here, not on the default "
-        f"branch",
-        "",
-        "**Expectation** — the sentence the run has to be able to refute:",
-        "",
-        f"> {str(node.front.get('expectation') or '**[none recorded]**')}",
-        "",
-        node.record.section("Scope").strip(),
-        "",
-        "## The run contract",
-        "",
-        f"`hiraku-auto launch {args.id}:<entrypoint>` runs your command with these variables set. "
-        f"The row it records is the only evidence the promotion gate ever sees.",
-        "",
-        f"- `$HIRAKU_METRICS_PATH` — write one flat JSON object here. The keys must be metric "
-        f"names "
-        f"this goal defines: {named or '(none declared)'}, plus any diagnostic the protocol below "
-        f"requires. A name the protocol does not define is not comparable to anything.",
-        "- `$HIRAKU_SEED` — use it for every source of randomness. One run, one seed.",
-        "- `$HIRAKU_RUN_ID`, `$HIRAKU_GIT_COMMIT`, `$HIRAKU_EXPERIMENT_ID`, "
-        "`$HIRAKU_PROJECT_ROOT` — available for your own logging; the tool records them itself.",
-        "- Exit non-zero on failure. Exiting zero with no metrics file is an execution defect and "
-        "is recorded as one.",
-        "",
-        f"Declare the command in `{project.rel(exp_dir / 'launch.yml')}`:",
-        "",
-        "```yaml",
-        "entrypoints:",
-        "  main:",
-        '    command: ["uv", "run", "python", "-m", "<your_package>.<module>", "--variant", '
-        f'"{args.id}"]',
-        "    cwd: .        # ../<code-repo> if the code lives in a sibling repository",
-        "```",
-        "",
-        "## The goal's frozen protocol — implement against this exactly",
-        "",
-        f"Primary metric `{goal.front.get('primary_metric')}` ({goal.front.get('direction')}"
-        + (f", target {goal.front['target']}" if goal.front.get("target") is not None else "")
-        + ")"
-        + (
-            f"; gate metric `{goal.front['gate_metric']}` must not degrade."
-            if len(metrics) > 1
-            else "."
-        ),
-        "",
-        goal.section("Evaluation protocol").strip(),
-        "",
-        "## Out of scope for this goal",
-        "",
-        goal.section("Out of scope").strip() or "(nothing recorded)",
-    ]
-    holes = unset_markers(goal) + unset_markers(node.record)
-    if holes:
-        out += [
-            "",
-            "## Unfilled values — ask, never invent",
-            "",
-            "These are marked unset in the records. Do not pick a value to make the code run; "
-            "report which one you need and stop.",
-            "",
-        ]
-        out += [f"- **{section}** — {needed}" for section, needed in holes]
-
-    text = "\n".join(out) + "\n"
+    text = brief_mod.render(project, args.id)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
         print(f"wrote {args.out}")
         print("\nhand it to a coding agent in the repository the code belongs in:")
         print(f'  cd <code-repo> && claude "read {args.out} and implement it"')
+        print(f"\nor let hiraku do it:  hiraku-auto agent implement {args.id} --in <code-repo>")
         return 0
     print(text)
     return 0
@@ -867,6 +774,11 @@ def cmd_launch(args: argparse.Namespace) -> int:
     )
     if args.dry_run:
         return 0
+    return _report_launch(project, result)
+
+
+def _report_launch(project: Any, result: Any) -> int:
+    del project  # kept in the signature so a caller reads as "report this project's run"
     kind = "reproducible" if result.reproducible else "NOT reproducible (working tree)"
     print(f"\nrun {result.run_id} — exit {result.exit_code}, {kind}")
     metrics = {
@@ -953,7 +865,130 @@ def _warn_unset_goal(project: Any, goal_id: str) -> None:
     )
 
 
+def _implement_target(project: Any, args: argparse.Namespace, branch: str) -> Path:
+    """The checkout the agent writes in, with this experiment's branch checked out there.
+
+    The code usually lives in its own repository — the research project holds records, not a
+    pipeline — so `--in` names it. Whichever repository it is, the branch is made and checked out
+    before the agent starts: code for an experiment belongs on that experiment's branch, and an
+    agent asked to remember that afterwards will sometimes not.
+    """
+    target = Path(args.into or project.root).expanduser().resolve()
+    if not target.is_dir():
+        raise HirakuError(f"--in {target} is not a directory.")
+    if not gitops.is_repo(target):
+        print(f"note: {target} is not a git repository — nothing will be branched or committed")
+        return target
+    if not gitops.has_commits(target):
+        raise HirakuError(
+            f"{target} has no commits yet, so there is no branch to write on.\n"
+            f"  cd {target} && git add -A && git commit -m 'baseline'"
+        )
+    dirty = gitops.run_git(target, "status", "--porcelain")
+    if dirty and not args.allow_dirty:
+        raise HirakuError(
+            f"{target} has uncommitted changes. The agent's diff has to be separable from yours:\n"
+            f"{dirty[:400]}\n"
+            f"Commit or stash them, or pass --allow-dirty to accept a mixed diff."
+        )
+    gitops.create_branch(target, branch)
+    gitops.run_git(target, "checkout", "-q", branch)
+    print(f"branch:  {branch} checked out in {target}")
+    return target
+
+
+def cmd_agent_implement(args: argparse.Namespace) -> int:
+    """Write the code for an accepted experiment, then optionally run it.
+
+    The gap this closes: a record says what an experiment claims, `launch` needs an entrypoint, and
+    until now a person had to write everything in between. The agent writes it on the experiment's
+    branch; the tool commits, so what arrives is a reviewable diff rather than an edit to find.
+    """
+    project = _project(args)
+    node = load_experiment(project, args.id)
+    branch = str(node.front.get("branch") or f"exp/{args.id}")
+    _warn_unset_goal(project, str(node.front.get("goal") or ""))
+    target = _implement_target(project, args, branch)
+
+    result = agent_mod.run_implement(
+        project,
+        args.id,
+        target_dir=target,
+        instruction=_instruction(args),
+        command=agent_mod.agent_command(args.agent_cmd) if args.agent_cmd else None,
+        dry_run=args.dry_run,
+        unset_env=args.unset_env or [],
+        hooks=_agent_hooks(),
+        timeout=args.timeout,
+    )
+    if args.dry_run:
+        print(result.prompt)
+        return 0
+
+    if result.data.get("blocked"):
+        print(_red(f"\nblocked: {result.data['blocked']}"))
+        print("Nothing was committed. This is a finding about the records, not a failure to code.")
+        return 1
+
+    for key, label in (
+        ("how_it_meets_the_protocol", "how it meets the protocol"),
+        ("seeded", "seeding"),
+        ("unverified", "NOT verified locally"),
+        ("notes", "notes"),
+    ):
+        if result.data.get(key):
+            print(f"\n{label}:\n{result.data[key]}")
+
+    entrypoint = str(result.data.get("entrypoint") or "")
+    if result.data.get("command"):
+        print(f"\ncommand: {result.data['command']}")
+    if not result.data.get("launch_yml"):
+        print(_red(
+            f"\nno launch.yml at experiments/{args.id}/launch.yml — the experiment cannot be "
+            f"launched until one exists."
+        ))
+    else:
+        print(f"launch:  {result.data['launch_yml']}")
+
+    if gitops.is_repo(target):
+        changed = gitops.run_git(target, "status", "--porcelain")
+        if not changed:
+            print(_red("\nthe agent wrote nothing. Check the reply in the log directory."))
+            return 1
+        print("\nwrote:")
+        print(gitops.run_git(target, "diff", "--stat", "HEAD"))
+        for line in changed.splitlines():
+            if line.startswith("??"):
+                print(f"  new  {line[3:]}")
+        if args.commit:
+            gitops.run_git(target, "add", "-A")
+            gitops.run_git(
+                target, "commit", "-qm",
+                f"{args.id}: implement the experiment\n\n"
+                f"Written by `hiraku-auto agent implement`. Expectation:\n"
+                f"{str(node.front.get('expectation') or '')[:400]}",
+            )
+            sha = gitops.run_git(target, "rev-parse", "--short", "HEAD")
+            print(f"committed on {branch}: {sha}")
+        else:
+            print("\nnot committed (--no-commit). Review, then commit on this branch yourself.")
+
+    print("\nnext:")
+    print(f"  cd {target} && git diff {branch}~1   # read what it wrote")
+    if entrypoint:
+        commit_flag = " --commit HEAD" if args.commit else ""
+        print(f"  hiraku-auto launch {args.id}:{entrypoint}{commit_flag}")
+    if args.and_launch and entrypoint:
+        print(f"\nlaunching {args.id}:{entrypoint} ...")
+        outcome = do_launch(project, args.id, entrypoint, commit="HEAD" if args.commit else None)
+        _report_launch(project, outcome)
+    return 0
+
+
 def cmd_agent(args: argparse.Namespace) -> int:
+    if args.workflow == "implement":
+        args.id = args.target
+        return cmd_agent_implement(args)
     project = _project(args)
     command = agent_mod.agent_command(args.agent_cmd) if args.agent_cmd else None
     kwargs = dict(
@@ -1619,9 +1654,31 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=cmd_runs)
 
-    p = sub.add_parser("agent", help="call Claude Code to design, triage, discover or analyse")
+    p = sub.add_parser(
+        "agent", help="call Claude Code to design, triage, discover, analyse or implement"
+    )
     p.add_argument("workflow", choices=list(agent_mod.WORKFLOWS))
-    p.add_argument("target", help="goal id for design/discover; experiment id for triage/analyze")
+    p.add_argument(
+        "target",
+        help="goal id for design/discover; experiment id for triage/analyze/implement",
+    )
+    p.add_argument(
+        "--in", dest="into", metavar="PATH",
+        help="implement only: the repository the code belongs in (default: this project). A "
+             "research project holds records; the pipeline usually lives in its own repository.",
+    )
+    p.add_argument(
+        "--no-commit", dest="commit", action="store_false",
+        help="implement only: leave the changes for review instead of committing them",
+    )
+    p.add_argument(
+        "--allow-dirty", action="store_true",
+        help="implement only: proceed although the target repository has uncommitted changes",
+    )
+    p.add_argument(
+        "--and-launch", action="store_true",
+        help="implement only: launch the declared entrypoint once the code is committed",
+    )
     p.add_argument("--instruction", help="extra context for the agent")
     p.add_argument(
         "--instruction-file",

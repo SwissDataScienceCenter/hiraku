@@ -13,7 +13,7 @@ import sys
 import pytest
 
 from hiraku_auto import agent as agent_mod
-from hiraku_auto.errors import AgentError
+from hiraku_auto.errors import AgentError, HirakuError
 from hiraku_auto.records import load_experiment
 from hiraku_auto.tree import build
 
@@ -461,7 +461,127 @@ def test_an_empty_goal_is_not_an_exhausted_one(bare_project):
 def test_suggest_next_rejects_an_unknown_goal(project):
     import pytest as _pytest
 
-    from hiraku_auto.errors import HirakuError
-
     with _pytest.raises(HirakuError, match="does not exist"):
         agent_mod.suggest_next(build(project), "no-such-goal")
+
+
+# --------------------------------------------------------------------------- implement
+
+
+def writing_agent(tmp_path, reply: str, files: dict[str, str]):
+    """A stand-in for `claude -p`: writes files into its working directory, then reports JSON."""
+    script = tmp_path / "writing-agent.py"
+    script.write_text(
+        "import json, os, sys, pathlib\n"
+        "spec = json.load(open(sys.argv[0] + '.files'))\n"
+        "for name, body in spec.items():\n"
+        "    path = pathlib.Path(name)\n"
+        "    path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    path.write_text(body)\n"
+        "sys.stdout.write(open(sys.argv[0] + '.reply').read())\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "writing-agent.py.files").write_text(json.dumps(files), encoding="utf-8")
+    (tmp_path / "writing-agent.py.reply").write_text(reply, encoding="utf-8")
+    return [sys.executable, str(script)]
+
+
+def commit_records(project):
+    """Records are committed before code is written; a dirty tree is refused on purpose."""
+    from hiraku_auto import gitops
+
+    gitops.run_git(project.root, "add", "-A")
+    gitops.run_git(
+        project.root, "-c", "user.name=T", "-c", "user.email=t@example.com",
+        "commit", "-qm", "records",
+    )
+
+
+def test_implement_writes_code_on_the_branch_and_commits_it(project, tmp_path, capsys):
+    from hiraku_auto.cli import main
+
+    commit_records(project)
+    exp_dir = project.experiments_dir / "candidate"
+    reply = json.dumps(
+        {
+            "files": ["run_candidate.py", "experiments/candidate/launch.yml"],
+            "entrypoint": "train",
+            "command": "python3 run_candidate.py",
+            "how_it_meets_the_protocol": "ate_rmse_m is RMSE after Sim(3) alignment.",
+            "seeded": "numpy and torch both seeded from $HIRAKU_SEED.",
+            "unverified": None,
+            "blocked": None,
+        }
+    )
+    program = (
+        "import json, os\n"
+        "seed = int(os.environ['HIRAKU_SEED'])\n"
+        "json.dump({'ate_rmse_m': 2.5, 'completion_rate': 0.95},\n"
+        "          open(os.environ['HIRAKU_METRICS_PATH'], 'w'))\n"
+    )
+    command = writing_agent(
+        tmp_path,
+        reply,
+        {
+            "run_candidate.py": program,
+            "experiments/candidate/launch.yml": 'entrypoints:\n  train:\n'
+            '    command: ["python3", "run_candidate.py"]\n    cwd: ../..\n',
+        },
+    )
+    assert main(["--project", str(project.root), "agent", "implement", "candidate",
+                 "--agent-cmd", " ".join(command)]) == 0
+    out = capsys.readouterr().out
+
+    assert "exp/candidate checked out" in out
+    assert (project.root / "run_candidate.py").is_file()
+    assert (exp_dir / "launch.yml").read_text("utf-8").count("entrypoints") == 1
+    assert "committed on exp/candidate" in out
+    assert "hiraku-auto launch candidate:train" in out
+    # the branch, not the default one, carries the code
+    from hiraku_auto import gitops
+
+    assert gitops.run_git(project.root, "rev-parse", "--abbrev-ref", "HEAD") == "exp/candidate"
+    assert "run_candidate.py" in gitops.run_git(project.root, "show", "--name-only", "HEAD")
+
+
+def test_implement_refuses_a_dirty_repository_before_calling_anything(project, tmp_path):
+    from hiraku_auto.cli import main
+
+    commit_records(project)
+    (project.root / "scratch.txt").write_text("mine", encoding="utf-8")
+    argv = ["--project", str(project.root), "agent", "implement", "candidate",
+            "--agent-cmd", "false"]
+    assert main(argv) == 2          # refused, and `false` was never called
+    assert "mine" == (project.root / "scratch.txt").read_text(encoding="utf-8")
+
+
+def test_a_blocked_implementation_commits_nothing(project, tmp_path, capsys):
+    from hiraku_auto.cli import main
+
+    commit_records(project)
+    reply = json.dumps(
+        {
+            "files": [],
+            "entrypoint": None,
+            "blocked": "The frozen pair list `P` named in ### Splits does not exist yet.",
+        }
+    )
+    command = writing_agent(tmp_path, reply, {})
+    code = main(["--project", str(project.root), "agent", "implement", "candidate",
+                 "--agent-cmd", " ".join(command)])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "blocked" in out and "does not exist yet" in out
+    assert "Nothing was committed" in out
+
+
+def test_the_write_tools_are_added_to_a_read_only_command():
+    add = agent_mod.writing_command
+    argv = add(["claude", "-p", "--allowedTools", "WebSearch,Read"])
+    allowed = argv[argv.index("--allowedTools") + 1].split(",")
+    assert "WebSearch" in allowed and "Write" in allowed and "Edit" in allowed
+    assert allowed.count("Read") == 1
+    # a command with no --allowedTools gets one
+    assert "--allowedTools" in add(["claude", "-p"])
+    # and another agent is left alone
+    assert add(["codex", "exec"]) == ["codex", "exec"]

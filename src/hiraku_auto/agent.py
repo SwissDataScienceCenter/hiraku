@@ -53,7 +53,7 @@ from .tree import Forest, build, to_dict
 DEFAULT_AGENT_CMD = "claude -p"
 DEFAULT_TIMEOUT = 900
 
-WORKFLOWS = ("draft", "design", "triage", "discover", "analyze")
+WORKFLOWS = ("draft", "design", "triage", "discover", "analyze", "implement")
 
 # Failures whose message names a symptom but not the fix. Matched against the whole output, so a
 # warning on stderr and the real error on stdout both count.
@@ -227,6 +227,35 @@ def agent_command(override: str | None = None, project: Project | None = None) -
     return parts
 
 
+WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "Read", "Glob", "Grep", "Bash")
+
+
+def writing_command(argv: list[str], extra_dir: Path | None = None) -> list[str]:
+    """The same agent command, but permitted to write. Implementation is the one workflow that must.
+
+    `claude -p` denies a tool it was not given up front, silently as far as this tool can see — the
+    call succeeds and nothing was written. A project's `agent.command` is tuned for the read-only
+    workflows, so rather than making the researcher keep a second command in sync, the write tools
+    are added here, where the reason is visible.
+    """
+    if Path(argv[0]).name not in {"claude", "claude.exe"}:
+        return list(argv)
+    out = list(argv)
+    if "--dangerously-skip-permissions" not in out:
+        try:
+            index = out.index("--allowedTools")
+            allowed = [part for part in out[index + 1].split(",") if part]
+            for tool in WRITE_TOOLS:
+                if not any(a.split("(")[0] == tool for a in allowed):
+                    allowed.append(tool)
+            out[index + 1] = ",".join(allowed)
+        except ValueError:
+            out += ["--allowedTools", ",".join(WRITE_TOOLS)]
+    if extra_dir is not None and "--add-dir" not in out:
+        out += ["--add-dir", str(extra_dir)]
+    return out
+
+
 def resolve_unset_env(project: Project | None, cli: list[str] | None = None) -> list[str]:
     """The union of `agent.unset_env` and any --unset-env flags.
 
@@ -292,6 +321,7 @@ def build_prompt(
     *,
     instruction: str = "",
     project: Project | None = None,
+    brief: str = "",
 ) -> str:
     if workflow not in WORKFLOWS:
         raise HirakuError(f"Unknown workflow '{workflow}'. One of: {', '.join(WORKFLOWS)}")
@@ -314,6 +344,7 @@ def build_prompt(
         text.replace("{{rules}}", rules)
         .replace("{{state}}", json.dumps(state, indent=2, default=str))
         .replace("{{instruction}}", _instruction_block(instruction))
+        .replace("{{brief}}", brief or "")
     )
 
 
@@ -598,6 +629,7 @@ def _invoke(
     timeout: int | None,
     hooks: Hooks | None,
     unset_env: list[str] | None = None,
+    cwd: Path | None = None,
 ) -> tuple[str, Path, float]:
     """One agent call: announced before it starts, ticking while it waits, logged either way.
 
@@ -622,6 +654,7 @@ def _invoke(
         "timeout": timeout,
         "unset_env": list(unset_env or []),
         "web": web_allowed(argv),
+        "cwd": str(cwd or project.root),
     }
 
     def write_meta(extra: dict[str, Any]) -> None:
@@ -637,7 +670,7 @@ def _invoke(
             prompt,
             command=argv,
             timeout=timeout,
-            cwd=project.root,
+            cwd=cwd or project.root,
             progress=hooks.tick if hooks else None,
             unset_env=unset_env,
         )
@@ -1043,6 +1076,53 @@ def run_discover(
         declined.append(str(item["id"]))
     result.data["declined_written"] = declined
     result.data["skipped_existing"] = skipped
+    return result
+
+
+def run_implement(
+    project: Project,
+    experiment_id: str,
+    *,
+    target_dir: Path,
+    instruction: str = "",
+    command: list[str] | None = None,
+    dry_run: bool = False,
+    unset_env: list[str] | None = None,
+    hooks: Hooks | None = None,
+    timeout: int | None = None,
+) -> AgentRun:
+    """Write the experiment's code, in `target_dir`, on this experiment's branch.
+
+    The one workflow that does not return records. It returns a description of what it wrote, and
+    the diff is the artefact — which is why it runs in a checkout of the experiment's branch and
+    why the tool commits afterwards rather than the agent.
+    """
+    from .brief import render
+
+    node = load_experiment(project, experiment_id)
+    text = render(project, experiment_id)
+    prompt = build_prompt(
+        "implement",
+        {},
+        instruction=instruction,
+        project=project,
+        brief=text,
+    )
+    result = AgentRun(workflow="implement", prompt=prompt)
+    if dry_run:
+        return result
+
+    argv = writing_command(command or agent_command(project=project), extra_dir=project.root)
+    result.raw, result.log, result.seconds = _invoke(
+        project, "implement", experiment_id, prompt, result.context,
+        command=argv, timeout=timeout, hooks=hooks, unset_env=unset_env, cwd=target_dir,
+    )
+    result.data = extract_json(result.raw)
+    result.data.setdefault("branch", str(node.front.get("branch") or ""))
+    launch = project.experiments_dir / experiment_id / "launch.yml"
+    result.data["launch_yml"] = str(project.rel(launch)) if launch.is_file() else ""
+    if launch.is_file():
+        result.written.append(launch)
     return result
 
 
