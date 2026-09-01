@@ -38,6 +38,7 @@ Organize the public implementation into these modules:
 
 ```text
 hiraku.config       HirakuConfig and project initialization
+hiraku.io           YAML and atomic file I/O helpers
 hiraku.records      Record and Markdown serialization
 hiraku.data         Task, Experiment, Run, Metric, Entrypoint
 hiraku.launch       Entrypoint validation, argument rendering, launching
@@ -46,6 +47,10 @@ hiraku.tracking     Backend protocol, selection, CSV/MLflow adapters
 hiraku.agent        Program, Action, Context record types only
 hiraku.errors       Public exception hierarchy
 ```
+
+Use descriptive public module names throughout the implementation. Do not add
+underscore-prefixed private modules; keep implementation details private through
+the documented export surface and naming within their owning public module.
 
 Re-export only documented names. Keep path expansion, YAML/front-matter
 parsing, backend normalization, Git commands, and subprocess construction
@@ -358,6 +363,13 @@ Implement immutable `Run` values with:
 
 Never infer missing attribution. Normalize timestamps to timezone-aware UTC
 datetimes when a backend supplies them.
+
+`Run` is a normalized value only and must not resolve task or experiment
+records or expose a registry-style query method. Run queries live on
+`Task.runs()` and `Experiment.runs()`, which pass their own explicit identifiers
+to the selected backend. `TrackingBackend.list_runs()` requires a non-empty
+`task_id`; omitting `experiment_id` applies no experiment filter. Neither query
+path falls back to active task or experiment configuration.
 
 Define `TrackingBackend.list_runs()` to return `list[Run]`. Backend selection
 uses an explicit instance for tests, otherwise the task-level configuration,

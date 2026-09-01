@@ -279,7 +279,12 @@ class Task(Record):
     ) -> Task: ...
 
     def experiments(self) -> list[Experiment]: ...
-    def runs(self, **query) -> list[Run]: ...
+    def runs(
+        self,
+        *,
+        backend: TrackingBackend | None = None,
+        **query: Any,
+    ) -> list[Run]: ...
     def entrypoint(self, name: str) -> Entrypoint: ...
 ```
 
@@ -373,7 +378,12 @@ class Experiment(Record):
         config: HirakuConfig | None = None,
     ) -> Experiment: ...
 
-    def runs(self, **query) -> list[Run]: ...
+    def runs(
+        self,
+        *,
+        backend: TrackingBackend | None = None,
+        **query: Any,
+    ) -> list[Run]: ...
     def entrypoint(self, name: str) -> Entrypoint: ...
 ```
 
@@ -455,17 +465,6 @@ class Run:
     entrypoint: str | None = None
     url: str | None = None
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
-
-    @classmethod
-    def list(
-        cls,
-        *,
-        task: Task | str | None = None,
-        experiment: Experiment | str | None = None,
-        backend: TrackingBackend | None = None,
-        config: HirakuConfig | None = None,
-        **query: Any,
-    ) -> list[Run]: ...
 ```
 
 `Run` is an immutable normalized projection of a backend-owned execution trace.
@@ -477,11 +476,12 @@ timestamp, entrypoint, and URL attribution are optional because a backend may
 not provide them. Missing values remain `None`; Hiraku does not infer
 attribution from temporal proximity or other runs.
 
-`Run.list()` resolves the task, selects its configured backend, queries it, and
-normalizes results. When `experiment` is supplied, results are restricted to
-that experiment. Query options such as metric filters, ordering, and limits may
-be passed through when supported; unsupported options must be reported rather
-than silently changing their meaning.
+`Run` does not resolve tasks or experiments and has no query method. Querying
+belongs to `Task.runs()` and `Experiment.runs()`, which pass their own explicit
+identifiers to the selected backend. At the backend boundary, `task_id` is
+required because backend selection and portable CSV storage are task-scoped.
+An omitted `experiment_id` means that no experiment filter is applied. Neither
+case falls back to active project selections.
 
 Run mutation is absent from the core interface. Model code logs through the
 tracking system's native client; Hiraku only queries normalized runs.
