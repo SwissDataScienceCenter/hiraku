@@ -12,6 +12,8 @@ hiraku goal create heart-disease \
   --launch examples/heart-disease/launch.yml
 hiraku goal show heart-disease --json
 
+# J: hiraku task show heart-disease --json  
+
 # 2. Establish the baseline Experiment. Creation also creates and checks out
 # its Git branch; the first launch freezes the exact evaluated commit.
 hiraku experiment create heart-disease/logistic \
@@ -39,6 +41,9 @@ hiraku experiment conclude heart-disease/random-forest --verdict supports
 hiraku report generate heart-disease
 hiraku tui
 
+# J: No equivalent for report yet, maybe
+# J: hiraku task report heart-disease
+
 # 6. Run the same lifecycle autonomously within an approved policy.
 # The agent may propose, implement, launch, and analyze, but Hiraku remains
 # responsible for state transitions, provenance, and execution records.
@@ -50,6 +55,10 @@ hiraku auto loop heart-disease \
   --max-experiments 5 \
   --max-runs 20 \
   --time-budget 2h
+
+# J: The last line should be a program
+# J: hiraku program create loop --adapter ./agent-adapter --max-experiments 5 --max-runs 20 --time-budget 2h
+# J: hiraku agent heart-disease --program loop
 ```
 
 ## Preferred user interfaces

@@ -23,11 +23,18 @@ hiraku goal create iris-accuracy \
   --direction max \
   --launch launch.yml
 
+
+# J: hiraku task create iris-accuracy --goal "Improve iris accuracy" --launch launch.yml --metric accuracy --direction max
+# J: hiraku task set iris-accuracy  # (define active task, automatic after task create)
+
 # 3. Record and run a simple reference implementation first.
 hiraku experiment create iris-accuracy/baseline \
   --kind baseline \
   --hypothesis "The existing classifier is a useful reference."
 hiraku launch iris-accuracy/baseline:evaluate
+
+# J: hiraku experiment set baseline    # (define active experiment, automatic after create)
+# J: hiraku launch evaluate [--task iris-accuracy]  #  task launcher
 
 # 4. Ask the repository-local /hiraku skill, or make a small change yourself,
 #    and describe the claim being tested. Creating the Experiment also checks
@@ -45,6 +52,8 @@ hiraku runs iris-accuracy --sort accuracy --descending
 hiraku experiment tree iris-accuracy
 hiraku experiment conclude iris-accuracy/scaled-features --verdict supports
 hiraku tui
+
+# J: hiraku experiment update [scaled-features] --verdict supports --status complete
 ```
 
 The beginner only needs to provide the objective, metric, evaluation command,
