@@ -116,24 +116,42 @@ class GitRepository:
         )
 
     def create_task_branch(
-        self, task_id: str, *, start_ref: str = "HEAD", switch: bool = False
+        self,
+        task_id: str,
+        *,
+        branch: str | None = None,
+        start_ref: str = "HEAD",
+        switch: bool = False,
     ) -> str:
-        return self.create_branch(
-            self.task_branch_name(task_id), start_ref=start_ref, switch=switch
-        )
+        selected = self.task_branch_name(task_id) if branch is None else branch
+        if self.branch_exists(selected):
+            if switch:
+                self.switch(selected)
+            return selected
+        return self.create_branch(selected, start_ref=start_ref, switch=switch)
 
     def create_experiment_branch(
         self,
         task_id: str,
         experiment_id: str,
         *,
+        branch: str | None = None,
         start_ref: str | None = None,
         switch: bool = False,
     ) -> str:
+        selected = (
+            self.experiment_branch_name(task_id, experiment_id)
+            if branch is None
+            else branch
+        )
+        if self.branch_exists(selected):
+            if switch:
+                self.switch(selected)
+            return selected
         task_branch = self.task_branch_name(task_id)
         source = start_ref or task_branch
         return self.create_branch(
-            self.experiment_branch_name(task_id, experiment_id),
+            selected,
             start_ref=source,
             switch=switch,
         )

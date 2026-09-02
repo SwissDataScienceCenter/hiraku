@@ -48,6 +48,29 @@ def test_git_resolution_branches_and_worktree_cleanup(tmp_path: Path) -> None:
     assert config.root == tmp_path
 
 
+def test_custom_task_and_reusable_experiment_branches(tmp_path: Path) -> None:
+    _, repository = _repository(tmp_path)
+    current = repository.current_branch
+    assert current is not None
+    assert repository.create_task_branch("demo", branch=current) == current
+    assert repository.create_task_branch("demo", branch="main-copy") == "main-copy"
+    assert repository.branch_exists("main-copy")
+    with pytest.raises(ValidationError):
+        repository.create_task_branch("demo", branch="")
+
+    default = repository.create_experiment_branch("demo", "baseline", start_ref="HEAD")
+    assert default == "hiraku/experiments/demo/baseline"
+    assert repository.create_experiment_branch("demo", "baseline") == default
+
+    repository.create_branch("shared-experiment")
+    assert (
+        repository.create_experiment_branch(
+            "demo", "second", branch="shared-experiment"
+        )
+        == "shared-experiment"
+    )
+
+
 def test_git_errors_outside_repository(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     with pytest.raises(GitError):

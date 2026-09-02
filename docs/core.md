@@ -150,7 +150,7 @@ The remaining PoC defaults are:
 hiraku_dir: hiraku
 default_dispatch: launch.sh
 task_branch: hiraku/tasks/{task_id}
-experiment_branch: hiraku/experiment/{task_id}/{experiment_id}
+experiment_branch: hiraku/experiments/{task_id}/{experiment_id}
 default_program: interactive
 tracking_backend: csv
 ```

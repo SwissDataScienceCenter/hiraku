@@ -26,7 +26,7 @@ This fragmentation creates an inherent barrier for effective Human-AI collaborat
 
 ## Data model: Tasks, experiments, runs
 
-Hiraku uses three lightweight data structures for tracking workflows: tasks, experiments, runs. From these, only tasks and experiments are managed directly by Hiraku. Runs are owned by a user-managed tracking backend  (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
+Hiraku uses three lightweight data structures: tasks, experiments, runs. From these, only tasks and experiments are managed directly by Hiraku. Runs are owned by a user-managed tracking backend  (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
 A *task* defines a working scope and goal, and documents the research progress. *Experiments* are smaller units that link a task, code, execution entrypoints, and runs. Experiments carry no specific semantics beyond this role; the user may create experiments to implement baselines, hypotheses, diagnostics, models runs, ablations, hyperparameter optimization, etc. *Runs* record execution traces for a specified task or experiment and code commit.
 
@@ -83,7 +83,7 @@ entrypoints:
 Entrypoints can be invoked via the CLI:
 ```bash
 hiraku launch <entrypoint>  # task entrypoint
-hiraku launch <exp-id>:<entrypoint>
+hiraku launch <exp-id>:<entrypoint>  # experiment entrypoint
 hiraku launch --task <task-id> <entrypoint>  # task defaults to active task
 hiraku launch --experiment <exp-id>  <entrypoint>  # defines experiment context, not task selection, defaults to the active experiment. `--no-exp` launches without experiment (tbc, confusing?)
 hiraku launch  --experiment <other-exp-id>  <exp-id>:<entrypoint> # launches <exp-id> with a forced <other-exp-id context>
@@ -92,7 +92,7 @@ hiraku launch <entrypoint>  --seed 1  # arguments after the entrypoint are passe
 
 Launches can be run from a specified commit in an isolated work tree using 
 ```bash
-hiraku launch --commit <hash> <entrypoint>  # task entrypoint
+hiraku launch --commit <hash> <entrypoint> 
 ```
 
 Hiraku injects environment variables into the launch, including `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_TASK_FILE`, `HIRAKU_EXPERIMENT_FILE`, ...
@@ -255,7 +255,7 @@ hiraku-agent --program interactive --task heart-disease --max-experiments 5 --ma
 The user creates a task and associated working branch; `main` is a valid branch, the default is `hiraku/tasks/{task_id}`. Experiment implementation is commited to the task branch. Implementation changes can be reverted or reset using the standard git actions. There is no branching or parallel work.
 
 #### Advanced workflows with branching
-Experiment branches can be used to explore several ideas in parallel or a task can backtrack to a prior branch or commit. A branched experiment is created with `hiraku experiment create ... --branch [--from <ref>]`. The default branch is `hiraku/experiment/{task_id}/{experiment_id}`, and the selected branch is recorded in the experiment record. `--from` may resolve another branch or commit and defaults to task-branch HEAD. Without `--branch`, the experiment remains on the task branch.
+Experiment branches can be used to explore several ideas in parallel or a task can backtrack to a prior branch or commit. A branched experiment is created with `hiraku experiment create ... --branch [BRANCH] [--from REF]`. Without a value, `--branch` selects `hiraku/experiments/{task_id}/{experiment_id}`; a value selects any valid new or existing branch. The selected branch is recorded in the experiment. `--from` may resolve another branch or commit, defaults to task-branch HEAD, and is used only when creating a branch. Without `--branch`, the experiment remains on the task branch.
 
 The user is responsible to merge experiment branches into the task branch, and resolving conflicts. In particular, experiment records should be committed to the task branch so that they can be listed by Hiraku.
 

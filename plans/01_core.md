@@ -126,7 +126,7 @@ Support these defaults:
 hiraku_dir: hiraku
 default_dispatch: launch.sh
 task_branch: hiraku/tasks/{task_id}
-experiment_branch: hiraku/experiment/{task_id}/{experiment_id}
+experiment_branch: hiraku/experiments/{task_id}/{experiment_id}
 default_program: interactive
 tracking_backend: csv
 active_task_id: null
@@ -275,7 +275,9 @@ with no shell interpolation. It must:
 - inspect the current branch and HEAD;
 - validate branch names;
 - inspect, create, and explicitly switch task or experiment branches;
-- create experiment branches from an explicit ref or task-branch HEAD;
+- select configured or custom task branches, including existing branches;
+- create missing experiment branches from an explicit ref or task-branch HEAD
+  and reuse selected existing experiment branches;
 - derive parent/child experiment relationships from bound commit ancestry; and
 - create and clean temporary worktrees for committed launches.
 
