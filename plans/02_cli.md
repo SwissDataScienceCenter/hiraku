@@ -190,15 +190,19 @@ validate all inputs before mutating or saving a record.
 
 Implement `edit` for tasks, experiments, programs, actions, and contexts:
 
-1. Resolve and load the record using the same rules as `show`.
-2. Read `$EDITOR`; use `vim` when it is unset or blank.
-3. Split the value with `shlex.split()` and reject an empty or malformed
+1. Resolve the canonical record path using the same identifier and active-state
+   rules as `show`.
+2. Attempt to load the record. If its existing contents fail validation, emit
+   a warning and continue so `edit` remains a recovery path; missing records
+   and reference-resolution failures still fail normally.
+3. Read `$EDITOR`; use `vim` when it is unset or blank.
+4. Split the value with `shlex.split()` and reject an empty or malformed
    command.
-4. Append the absolute record path and invoke an argument vector with
+5. Append the absolute record path and invoke an argument vector with
    `shell=False`.
-5. Wait for the editor to exit.
-6. Return non-zero when the editor fails.
-7. On success, reload the record through its concrete type and validate its
+6. Wait for the editor to exit.
+7. Return non-zero when the editor fails.
+8. On success, reload the record through its concrete type and validate its
    registry identity.
 
 Support editor values such as `code --wait`. The editor owns its in-place file
@@ -514,7 +518,8 @@ logging, mutation, deletion, or cross-task listing command.
 - Unknown options, malformed `KEY=VALUE`, and validation rollback
 - UTF-8 Markdown replacement and read errors
 - Editor selection, `vim` fallback, multi-token `$EDITOR`, exit failure,
-  successful validation, and retained invalid edits
+  pre-existing invalid-record recovery, successful validation, and retained
+  invalid edits
 - Create conflicts, atomic updates, deterministic lists, and deletion scope
 
 ### Tasks

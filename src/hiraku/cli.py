@@ -6,7 +6,7 @@ import json
 import os
 import shlex
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import UTC, datetime
@@ -297,8 +297,18 @@ def _apply_update(
     return record
 
 
-def _edit(record: R, loader: Any) -> R:
-    assert record.path is not None
+def _edit_recoverable(path: Path, loader: Callable[[], R], label: str) -> R:
+    """Open a canonical record path, even when its current contents are invalid."""
+    try:
+        loader()
+    except ValidationError as exc:
+        if not path.is_file():
+            raise
+        click.echo(
+            f"Warning: {label} is currently invalid: {exc}\n"
+            f"Opening {path} for recovery.",
+            err=True,
+        )
     raw_editor = os.environ.get("EDITOR", "").strip() or "vim"
     try:
         editor = shlex.split(raw_editor)
@@ -307,7 +317,7 @@ def _edit(record: R, loader: Any) -> R:
     if not editor:
         raise ValidationError("EDITOR must contain a command")
     try:
-        result = subprocess.run([*editor, str(record.path.absolute())], check=False)
+        result = subprocess.run([*editor, str(path.absolute())], check=False)
     except OSError as exc:
         raise ValidationError(f"Could not run editor {editor[0]!r}: {exc}") from exc
     if result.returncode != 0:
@@ -322,10 +332,49 @@ def _remove_empty_leaf(path: Path, expected: Path) -> None:
 
 
 def _active_task(config: HirakuConfig, supplied: str | None = None) -> Task:
+    identifier, _ = _task_reference(config, supplied)
+    return load_task(identifier, config=config)
+
+
+def _task_reference(
+    config: HirakuConfig, supplied: str | None = None
+) -> tuple[str, Path]:
     identifier = supplied or config.active_task_id
     if identifier is None:
         raise NoActiveTaskError("No active task")
-    return load_task(identifier, config=config)
+    validate_identifier(identifier, label="task ID")
+    return identifier, config.tasks_dir / identifier / "task.md"
+
+
+def _experiment_reference(
+    config: HirakuConfig,
+    reference: str | None,
+    task_id: str | None = None,
+) -> tuple[str, str, Path]:
+    if reference is None:
+        if config.active_experiment_id is None:
+            raise NoActiveExperimentError("No active experiment")
+        if task_id is not None and task_id != config.active_task_id:
+            raise AmbiguousReferenceError(
+                "Explicit task scope does not contain the active experiment"
+            )
+        reference = config.active_experiment_id
+        task_id = task_id or config.active_task_id
+    elif ":" in reference:
+        qualified_task, reference = reference.split(":", 1)
+        if task_id is not None and task_id != qualified_task:
+            raise AmbiguousReferenceError(
+                f"Conflicting task scopes for experiment {qualified_task}:{reference!s}"
+            )
+        task_id = qualified_task
+    if task_id is None:
+        task_id = config.active_task_id
+    if task_id is None:
+        raise NoActiveTaskError(f"No task scope for experiment {reference!r}")
+    validate_identifier(task_id, label="task ID")
+    validate_identifier(reference, label="experiment ID")
+    path = config.tasks_dir / task_id / "experiments" / f"{reference}.md"
+    return task_id, reference, path
 
 
 def _experiment(
@@ -532,9 +581,13 @@ def task_update(
 @click.pass_obj
 def task_edit(state: CLIContext, task_id: str | None) -> None:
     """Edit a task in the default editor."""
-    record = _active_task(state.config, task_id)
-    _edit(record, lambda: load_task(record.id, config=state.config))
-    click.echo(f"Validated task {record.id}")
+    identifier, path = _task_reference(state.config, task_id)
+    _edit_recoverable(
+        path,
+        lambda: load_task(identifier, config=state.config),
+        f"Task {identifier!r}",
+    )
+    click.echo(f"Validated task {identifier}")
 
 
 @task_group.command("delete")
@@ -756,12 +809,15 @@ def experiment_edit(
     state: CLIContext, experiment_id: str | None, task_id: str | None
 ) -> None:
     """Edit an experiment in the default editor."""
-    record = _experiment(state.config, experiment_id, task_id)
-    _edit(
-        record,
-        lambda: load_experiment(record.id, task=record.task_id, config=state.config),
+    selected_task, identifier, path = _experiment_reference(
+        state.config, experiment_id, task_id
     )
-    click.echo(f"Validated experiment {record.task_id}:{record.id}")
+    _edit_recoverable(
+        path,
+        lambda: load_experiment(identifier, task=selected_task, config=state.config),
+        f"Experiment {selected_task}:{identifier}",
+    )
+    click.echo(f"Validated experiment {selected_task}:{identifier}")
 
 
 @experiment_group.command("delete")
@@ -932,8 +988,13 @@ def _install_record_group(
     @click.pass_obj
     def edit_record(state: CLIContext, **arguments: str) -> None:
         identifier = arguments[f"{noun}_id"]
-        record = loader(identifier, config=state.config)
-        _edit(record, lambda: loader(identifier, config=state.config))
+        validate_identifier(identifier, label=f"{noun} ID")
+        path = directory(state.config) / identifier / filename
+        _edit_recoverable(
+            path,
+            lambda: loader(identifier, config=state.config),
+            f"{record_type.__name__} {identifier!r}",
+        )
         click.echo(f"Validated {noun} {identifier}")
 
     @group.command("delete", help=f"Delete a {noun} record.")
@@ -1051,8 +1112,13 @@ def action_update(
 @click.argument("action")
 @click.pass_obj
 def action_edit(state: CLIContext, action: str) -> None:
-    record = _load_action_reference(action, state.config)
-    _edit(record, lambda: _load_action_reference(action, state.config))
+    entity, identifier = _action_reference(action)
+    path = state.config.actions_dir / entity / identifier / "action.md"
+    _edit_recoverable(
+        path,
+        lambda: _load_action_reference(action, state.config),
+        f"Action {action!r}",
+    )
     click.echo(f"Validated action {action}")
 
 

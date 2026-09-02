@@ -42,13 +42,15 @@ Explicit identifiers and options take precedence over active configuration.
 When a documented active-state fallback is unavailable, the command fails
 rather than searching across tasks.
 
-Every record group provides `edit`. It resolves the record exactly like
-`show`, runs `$EDITOR` with the record path, and waits for it to exit. An unset
-or blank `$EDITOR` falls back to `vim`. The editor value is split into an
-argument vector without shell evaluation, so values such as `code --wait` are
-supported. After a successful editor exit, Hiraku reloads and validates the
-record. Invalid edits remain on disk for recovery, but the command reports the
-validation error and exits non-zero.
+Every record group provides `edit`. It resolves the canonical record path using
+the same identifier and active-state rules as `show`, runs `$EDITOR` with that
+path, and waits for it to exit. Pre-existing validation errors produce a
+warning but do not prevent the editor from opening, making `edit` the recovery
+path for malformed records. An unset or blank `$EDITOR` falls back to `vim`.
+The editor value is split into an argument vector without shell evaluation, so
+values such as `code --wait` are supported. After a successful editor exit,
+Hiraku reloads and validates the record. Invalid edits remain on disk for
+recovery, but the command reports the validation error and exits non-zero.
 
 ## Top level
 
