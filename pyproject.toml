@@ -8,7 +8,10 @@ version = "0.1.0"
 description = "Core metadata and launch APIs for AI-assisted data science"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["PyYAML>=6.0"]
+dependencies = ["Click>=8.1", "PyYAML>=6.0"]
+
+[project.scripts]
+hiraku = "hiraku.cli:main"
 
 [project.optional-dependencies]
 mlflow = ["mlflow>=2.0"]
