@@ -20,7 +20,17 @@ may change before the first stable release.
 The principal data types are available from `hiraku.data`:
 
 ```python
-from hiraku.data import Entrypoint, Experiment, Metric, Run, Task
+from hiraku.data import (
+    Entrypoint,
+    Experiment,
+    Metric,
+    Run,
+    Task,
+    list_experiments,
+    list_tasks,
+    load_experiment,
+    load_task,
+)
 ```
 
 Supporting interfaces live in focused modules:
@@ -164,9 +174,10 @@ belongs to the active task. Setting an experiment activates its owning task;
 switching to a different task clears the active experiment. Setting either
 value validates that the referenced record exists.
 
-Public operations use `HirakuConfig.discover()` when `config` is omitted. An
-explicit configuration may be passed for isolated tests or applications that
-work with more than one project.
+Project-aware helpers use `HirakuConfig.discover()` when `config` is omitted.
+An explicit configuration may be passed for isolated tests or applications
+that work with more than one project. Direct record loading, listing, and
+saving use explicit paths and never discover configuration.
 
 ## File-backed records
 
@@ -187,12 +198,17 @@ class Record(MutableMapping[str, Any]):
     ) -> None: ...
 
     @classmethod
-    def load(cls, identifier: str | Path, *, config=None) -> Self: ...
+    def load(cls, path: str | Path) -> Self: ...
 
     @classmethod
-    def list(cls, *, config=None, **scope) -> list[Self]: ...
+    def list(cls, paths: Iterable[Path]) -> list[Self]: ...
 
-    def save(self, *, overwrite: bool = False) -> Path: ...
+    def save(
+        self,
+        path: str | Path | None = None,
+        *,
+        overwrite: bool = False,
+    ) -> Path: ...
     def delete(self) -> None: ...
     def validate(self) -> None: ...
     def to_dict(self) -> dict[str, Any]: ...
@@ -206,10 +222,10 @@ record separates structured fields from optional prose:
 - Unknown fields are preserved across a load/edit/save round trip.
 
 Constructing a record creates a detached in-memory object. It neither writes a
-file nor changes active project state. `save()` determines the `.md` location
-exclusively from the configured path pattern and serializes the structured
-fields as YAML front matter followed by `markdown`. Relocating a record requires
-changing the configuration; `save()` has no path or format override.
+file nor changes active project state. The first `save(path)` establishes its
+explicit `.md` location and serializes the structured fields as YAML front
+matter followed by `markdown`. Later `save()` calls reuse that path. Passing a
+different path after persistence is rejected rather than moving the record.
 
 Core fields may also be accessed as attributes. User fields should normally be
 accessed with mapping methods:
@@ -224,11 +240,13 @@ task["reviewed"] = True
 Attribute assignment is not a substitute for mapping assignment for arbitrary
 user fields.
 
-`load()` accepts either an ID in the record's registry or an explicit path.
-Passing an ID never creates a record. `list()` returns records ordered by ID so
-that results are deterministic. `save()` validates before writing and returns
-the written path. `delete()` removes only the record represented by the object;
-subclasses may reject deletion when dependent records exist.
+`load()` accepts one explicit path. `list()` accepts an iterable of paths, such
+as `directory.glob("*/task.md")`, and returns records ordered by ID so results
+are deterministic. These operations do not discover a project. Project-aware
+helpers such as `load_task()` and `list_tasks()` resolve canonical registry
+paths from configuration. `save()` validates before writing and returns the
+written path. `delete()` removes only the bound record represented by the
+object; subclasses may reject deletion when dependent records exist.
 
 Record IDs are stable, filesystem-safe identifiers. They must be non-empty and
 must not contain path separators, `.` or `..` path components, or control
@@ -278,14 +296,22 @@ class Task(Record):
         **fields: Any,
     ) -> Task: ...
 
-    def experiments(self) -> list[Experiment]: ...
+    def experiments(
+        self,
+        *,
+        config: HirakuConfig | None = None,
+    ) -> list[Experiment]: ...
     def runs(
         self,
         *,
         backend: TrackingBackend | None = None,
+        config: HirakuConfig | None = None,
         **query: Any,
     ) -> list[Run]: ...
     def entrypoint(self, name: str) -> Entrypoint: ...
+
+def load_task(task_id: str, *, config=None) -> Task: ...
+def list_tasks(*, config=None) -> list[Task]: ...
 ```
 
 A task is the top-level scope of a research effort. Its canonical path is:
@@ -317,7 +343,7 @@ the task.
 ```python
 # An empty body is still a Markdown record with YAML front matter.
 diagnostic = Task("data-diagnostic", markdown="", owner="research-team")
-diagnostic.save()
+diagnostic.save(config.tasks_dir / "data-diagnostic" / "task.md")
 
 baseline = Task.create("baseline", markdown="", goal="Establish a baseline")
 ```
@@ -369,22 +395,27 @@ class Experiment(Record):
         **fields: Any,
     ) -> Experiment: ...
 
-    @classmethod
-    def load(
-        cls,
-        identifier: str | Path,
-        *,
-        task: Task | str | None = None,
-        config: HirakuConfig | None = None,
-    ) -> Experiment: ...
-
     def runs(
         self,
         *,
         backend: TrackingBackend | None = None,
+        config: HirakuConfig | None = None,
         **query: Any,
     ) -> list[Run]: ...
     def entrypoint(self, name: str) -> Entrypoint: ...
+
+def load_experiment(
+    reference: str,
+    *,
+    task: Task | str | None = None,
+    config: HirakuConfig | None = None,
+) -> Experiment: ...
+
+def list_experiments(
+    *,
+    task: Task | str | None = None,
+    config: HirakuConfig | None = None,
+) -> list[Experiment]: ...
 ```
 
 An experiment is a focused investigation within exactly one task. Its canonical
@@ -405,10 +436,11 @@ experiment reproducible if a branch later moves. An unresolvable commit causes
 validation to fail.
 
 An experiment ID is unique within its task, not necessarily across the whole
-project. APIs therefore accept either a task scope or a qualified identifier of
-the form `{task_id}:{experiment_id}`. An unqualified ID uses the active task.
-Ambiguous or missing scope raises `AmbiguousReferenceError` or
-`NoActiveTaskError` rather than guessing.
+project. `load_experiment()` therefore accepts either a task scope or a
+qualified identifier of the form `{task_id}:{experiment_id}`. An unqualified
+ID uses the active task. `Experiment.load(path)` remains the configuration-free
+file operation. Ambiguous or missing project scope raises
+`AmbiguousReferenceError` or `NoActiveTaskError` rather than guessing.
 
 To turn a proposal into a bound experiment, callers update `commit` through
 normal attribute or mapping mutation and call `save()`. `runs()` returns
@@ -629,7 +661,17 @@ but they belong to the agent-integration layer rather than the task/experiment/
 run core model:
 
 ```python
-from hiraku.agent import Action, Context, Program
+from hiraku.agent import (
+    Action,
+    Context,
+    Program,
+    list_actions,
+    list_contexts,
+    list_programs,
+    load_action,
+    load_context,
+    load_program,
+)
 ```
 
 - `Program` records use `hiraku/programs/{program_id}/program.md` and define

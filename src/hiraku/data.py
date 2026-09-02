@@ -71,15 +71,6 @@ class Task(Record):
     def __init__(self, task_id: str, *, markdown: str = "", **fields: Any) -> None:
         super().__init__(task_id, markdown=markdown, **fields)
 
-    @classmethod
-    def _path_for(cls, identifier: str, config: HirakuConfig, **scope: Any) -> Path:
-        validate_identifier(identifier, label="task ID")
-        return config.tasks_dir / identifier / "task.md"
-
-    @classmethod
-    def _list_paths(cls, config: HirakuConfig, **scope: Any) -> list[Path]:
-        return sorted(config.tasks_dir.glob("*/task.md"))
-
     @property
     def branch(self) -> str | None:
         return self._data.get("branch")
@@ -139,24 +130,29 @@ class Task(Record):
     ) -> Task:
         selected = config or HirakuConfig.discover()
         record = cls(task_id, markdown=markdown, **fields)
-        object.__setattr__(record, "_config", selected)
-        path = cls._path_for(task_id, selected)
+        path = _task_path(task_id, selected)
         if path.exists():
             raise RecordExistsError(f"Task record already exists: {path}")
-        record.save()
+        record.save(path)
         if activate:
             selected.set_active_task(record)
         return record
 
-    def experiments(self) -> list[Experiment]:
-        return Experiment.list(task=self, config=self._config)
+    def experiments(self, *, config: HirakuConfig | None = None) -> list[Experiment]:
+        return list_experiments(task=self, config=config)
 
     def runs(
-        self, *, backend: TrackingBackend | None = None, **query: Any
+        self,
+        *,
+        backend: TrackingBackend | None = None,
+        config: HirakuConfig | None = None,
+        **query: Any,
     ) -> list[Run]:
         """Query runs filtered to this task."""
-        selected = self._config or HirakuConfig.discover()
-        adapter = backend or select_backend(self, selected)
+        adapter = backend
+        if adapter is None:
+            selected = config or HirakuConfig.discover()
+            adapter = select_backend(self, selected)
         return adapter.list_runs(task_id=self.id, experiment_id=None, **query)
 
     def entrypoint(self, name: str) -> Entrypoint:
@@ -167,8 +163,8 @@ class Task(Record):
                 f"Task {self.id!r} has no entrypoint {name!r}"
             ) from exc
 
-    def delete(self) -> None:
-        if self.experiments():
+    def delete(self, *, config: HirakuConfig | None = None) -> None:
+        if self.experiments(config=config):
             raise ValidationError(
                 f"Cannot delete task {self.id!r} while experiments exist"
             )
@@ -196,7 +192,7 @@ class Experiment(Record):
             fields = {**fields, "commit": commit}
         super().__init__(experiment_id, markdown=markdown, **fields)
         if isinstance(task, Task):
-            object.__setattr__(self, "_config", task._config)
+            object.__setattr__(self, "_task", task)
 
     @property
     def task_id(self) -> str:
@@ -234,7 +230,8 @@ class Experiment(Record):
     def metrics(self) -> Sequence[Metric]:
         if "metrics" in self._data:
             return self._data["metrics"]
-        return Task.load(self.task_id, config=self._config).metrics
+        task = getattr(self, "_task", None)
+        return task.metrics if isinstance(task, Task) else ()
 
     @metrics.setter
     def metrics(self, value: Sequence[Metric]) -> None:
@@ -243,64 +240,6 @@ class Experiment(Record):
     @property
     def is_proposal(self) -> bool:
         return self.commit is None
-
-    def _scope(self) -> dict[str, Any]:
-        return {"task": self.task_id}
-
-    @classmethod
-    def _path_for(cls, identifier: str, config: HirakuConfig, **scope: Any) -> Path:
-        task = scope.get("task")
-        task_id = task.id if isinstance(task, Task) else task
-        if not task_id:
-            raise NoActiveTaskError(
-                f"Task scope required for experiment {identifier!r}"
-            )
-        validate_identifier(task_id, label="task ID")
-        validate_identifier(identifier, label="experiment ID")
-        return config.tasks_dir / task_id / "experiments" / f"{identifier}.md"
-
-    @classmethod
-    def _list_paths(cls, config: HirakuConfig, **scope: Any) -> list[Path]:
-        task = scope.get("task")
-        task_id = task.id if isinstance(task, Task) else task
-        if not task_id:
-            task_id = config.active_task_id
-        if not task_id:
-            raise NoActiveTaskError("No active task for listing experiments")
-        return sorted((config.tasks_dir / task_id / "experiments").glob("*.md"))
-
-    @classmethod
-    def load(
-        cls,
-        identifier: str | Path,
-        *,
-        task: Task | str | None = None,
-        config: HirakuConfig | None = None,
-        **scope: Any,
-    ) -> Experiment:
-        selected = config or HirakuConfig.discover()
-        if isinstance(identifier, Path) or Path(str(identifier)).is_absolute():
-            return super().load(identifier, config=selected, task=task)
-        reference = str(identifier)
-        if ":" in reference:
-            qualified_task, reference = reference.split(":", 1)
-            if task is not None:
-                supplied = task.id if isinstance(task, Task) else task
-                if supplied != qualified_task:
-                    raise AmbiguousReferenceError(
-                        f"Conflicting task scopes for experiment {identifier!r}"
-                    )
-            task = qualified_task
-        if task is None:
-            task = selected.active_task_id
-        if task is None:
-            matches = sorted(selected.tasks_dir.glob(f"*/experiments/{reference}.md"))
-            if len(matches) > 1:
-                raise AmbiguousReferenceError(
-                    f"Ambiguous experiment reference {reference!r}"
-                )
-            raise NoActiveTaskError(f"No task scope for experiment {reference!r}")
-        return super().load(reference, config=selected, task=task)
 
     @classmethod
     def create(
@@ -314,20 +253,16 @@ class Experiment(Record):
         config: HirakuConfig | None = None,
         **fields: Any,
     ) -> Experiment:
-        selected = (
-            config
-            or (task._config if isinstance(task, Task) else None)
-            or HirakuConfig.discover()
-        )
+        selected = config or HirakuConfig.discover()
         if task is None:
             if selected.active_task_id is None:
                 raise NoActiveTaskError(
                     f"No active task for experiment {experiment_id!r}"
                 )
-            task_record = Task.load(selected.active_task_id, config=selected)
+            task_record = load_task(selected.active_task_id, config=selected)
         else:
             task_record = (
-                task if isinstance(task, Task) else Task.load(task, config=selected)
+                task if isinstance(task, Task) else load_task(task, config=selected)
             )
         record = cls(
             experiment_id,
@@ -336,11 +271,10 @@ class Experiment(Record):
             markdown=markdown,
             **fields,
         )
-        object.__setattr__(record, "_config", selected)
-        path = cls._path_for(experiment_id, selected, task=task_record.id)
+        path = _experiment_path(task_record.id, experiment_id, selected)
         if path.exists():
             raise RecordExistsError(f"Experiment record already exists: {path}")
-        record.save()
+        record.save(path)
         if activate:
             selected.set_active_experiment(record)
         return record
@@ -348,14 +282,6 @@ class Experiment(Record):
     def validate(self) -> None:
         super().validate()
         validate_identifier(self.task_id, label="task ID")
-        selected = self._config
-        if (
-            selected is not None
-            and not Task._path_for(self.task_id, selected).is_file()
-        ):
-            raise ValidationError(
-                f"Task {self.task_id!r} for experiment {self.id!r} does not exist"
-            )
         if self.commit is not None and not isinstance(self.commit, str):
             raise ValidationError(
                 f"Commit for experiment {self.id!r} must be a string or null"
@@ -369,22 +295,32 @@ class Experiment(Record):
         if "metrics" in self:
             _validate_metrics(self._data["metrics"], self.id)
 
-    def save(self, *, overwrite: bool = False) -> Path:
+    def save(self, path: Path | str | None = None, *, overwrite: bool = False) -> Path:
         self.validate()
+        if path is None and self.path is None:
+            raise ValidationError(
+                f"Detached Experiment {self.id!r} requires a save path"
+            )
         if self.commit is not None:
             from .git import GitRepository
 
-            selected = self._config or HirakuConfig.discover()
-            self.commit = GitRepository(selected).resolve(self.commit)
-        return super().save(overwrite=overwrite)
+            repository_start = (
+                Path(path).parent if path is not None else self.path.parent
+            )
+            self.commit = GitRepository(repository_start).resolve(self.commit)
+        return super().save(path, overwrite=overwrite)
 
     def runs(
-        self, *, backend: TrackingBackend | None = None, **query: Any
+        self,
+        *,
+        backend: TrackingBackend | None = None,
+        config: HirakuConfig | None = None,
+        **query: Any,
     ) -> list[Run]:
         """Query runs filtered to this task and experiment."""
-        selected = self._config or HirakuConfig.discover()
         if backend is None:
-            task = Task.load(self.task_id, config=selected)
+            selected = config or HirakuConfig.discover()
+            task = load_task(self.task_id, config=selected)
             backend = select_backend(task, selected)
         return backend.list_runs(task_id=self.task_id, experiment_id=self.id, **query)
 
@@ -395,6 +331,102 @@ class Experiment(Record):
             raise EntrypointNotFoundError(
                 f"Experiment {self.task_id}:{self.id} has no entrypoint {name!r}"
             ) from exc
+
+
+def _task_path(task_id: str, config: HirakuConfig) -> Path:
+    validate_identifier(task_id, label="task ID")
+    return config.tasks_dir / task_id / "task.md"
+
+
+def _experiment_path(task_id: str, experiment_id: str, config: HirakuConfig) -> Path:
+    validate_identifier(task_id, label="task ID")
+    validate_identifier(experiment_id, label="experiment ID")
+    return config.tasks_dir / task_id / "experiments" / f"{experiment_id}.md"
+
+
+def load_task(task_id: str, *, config: HirakuConfig | None = None) -> Task:
+    """Resolve and load a task ID in a Hiraku project."""
+    selected = config or HirakuConfig.discover()
+    task = Task.load(_task_path(task_id, selected))
+    if task.id != task_id:
+        raise ValidationError(
+            f"Task ID {task.id!r} does not match registry path for {task_id!r}"
+        )
+    return task
+
+
+def list_tasks(*, config: HirakuConfig | None = None) -> list[Task]:
+    """List tasks from the configured project registry in ID order."""
+    selected = config or HirakuConfig.discover()
+    tasks = Task.list(selected.tasks_dir.glob("*/task.md"))
+    for task in tasks:
+        if task.path != _task_path(task.id, selected):
+            raise ValidationError(f"Task identity does not match its path: {task.path}")
+    return tasks
+
+
+def load_experiment(
+    reference: str,
+    *,
+    task: Task | str | None = None,
+    config: HirakuConfig | None = None,
+) -> Experiment:
+    """Resolve a scoped or qualified experiment reference in a project."""
+    selected = config or HirakuConfig.discover()
+    experiment_id = reference
+    if ":" in reference:
+        qualified_task, experiment_id = reference.split(":", 1)
+        supplied_task = task.id if isinstance(task, Task) else task
+        if supplied_task is not None and supplied_task != qualified_task:
+            raise AmbiguousReferenceError(
+                f"Conflicting task scopes for experiment {reference!r}"
+            )
+        task = qualified_task
+    if task is None:
+        task = selected.active_task_id
+    if task is None:
+        matches = sorted(selected.tasks_dir.glob(f"*/experiments/{experiment_id}.md"))
+        if len(matches) > 1:
+            raise AmbiguousReferenceError(
+                f"Ambiguous experiment reference {experiment_id!r}"
+            )
+        raise NoActiveTaskError(f"No task scope for experiment {experiment_id!r}")
+    task_record = task if isinstance(task, Task) else load_task(task, config=selected)
+    experiment = Experiment.load(
+        _experiment_path(task_record.id, experiment_id, selected)
+    )
+    if experiment.id != experiment_id or experiment.task_id != task_record.id:
+        raise ValidationError(
+            f"Experiment identity does not match its registry path: {experiment.path}"
+        )
+    object.__setattr__(experiment, "_task", task_record)
+    return experiment
+
+
+def list_experiments(
+    *,
+    task: Task | str | None = None,
+    config: HirakuConfig | None = None,
+) -> list[Experiment]:
+    """List experiments for a task from the configured project registry."""
+    selected = config or HirakuConfig.discover()
+    if task is None:
+        task = selected.active_task_id
+    if task is None:
+        raise NoActiveTaskError("No active task for listing experiments")
+    task_record = task if isinstance(task, Task) else load_task(task, config=selected)
+    experiments = Experiment.list(
+        (selected.tasks_dir / task_record.id / "experiments").glob("*.md")
+    )
+    for experiment in experiments:
+        expected = _experiment_path(task_record.id, experiment.id, selected)
+        if experiment.task_id != task_record.id or experiment.path != expected:
+            raise ValidationError(
+                "Experiment identity does not match its registry path: "
+                f"{experiment.path}"
+            )
+        object.__setattr__(experiment, "_task", task_record)
+    return experiments
 
 
 @dataclass(frozen=True)

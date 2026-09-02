@@ -36,11 +36,9 @@ A *task* defines a working scope and goal, and documents the research progress. 
 | **Proposal / Experiment** | `hiraku/tasks/{task_id}/experiments/{experiment_id}.md` | An *experiment* is a focused investigation within a task that refers to a source commit and execution entrypoints. An experiment without a reference commit is called a *proposal*. |
 | **Run** | backend owned execution trace | A single execution trace with (optional) task, experiment, and commit attribution. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
-### Active Task and Experiment
 
 At any time, a single task and experiment can be set as "active". By default, "create" actions activate the new task or experiment. The user can switch explicitly with `hiraku task set <task-id>` or `hiraku experiment set <experiment-id>`. The current status can be queried with `hiraku status`.
 
-> ToDo: Define what happens if the active task differs from the active experiment's task, e.g., switching a task un-sets the experiment? 
 
 ### Python Core API
 

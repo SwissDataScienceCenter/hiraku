@@ -115,16 +115,16 @@ def launch(
     config: HirakuConfig | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Launch an entrypoint through a project dispatcher."""
-    from .data import Experiment, Task
+    from .data import load_experiment, load_task
     from .git import GitRepository
 
     validate_entrypoint(entrypoint)
     selected = config or HirakuConfig.discover()
     if experiment_id is not None and task_id is None:
         raise ValidationError("experiment_id requires an explicit task_id")
-    task = Task.load(task_id, config=selected) if task_id is not None else None
+    task = load_task(task_id, config=selected) if task_id is not None else None
     experiment = (
-        Experiment.load(experiment_id, task=task, config=selected)
+        load_experiment(experiment_id, task=task, config=selected)
         if experiment_id is not None
         else None
     )

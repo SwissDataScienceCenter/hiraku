@@ -240,9 +240,9 @@ class MLflowBackend:
             client = MlflowClient(tracking_uri=self.tracking_uri)
             experiment_name = self.experiment_name
             if experiment_name is None:
-                from .data import Task
+                from .data import load_task
 
-                task = Task.load(task_id, config=self.config)
+                task = load_task(task_id, config=self.config)
                 experiment_name = task.get("mlflow_experiment")
             if experiment_name:
                 experiment = client.get_experiment_by_name(str(experiment_name))

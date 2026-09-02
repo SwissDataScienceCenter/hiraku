@@ -153,7 +153,11 @@ Implement getters plus `set_active_task()`, `set_active_experiment()`, and
 
 Implement `Record` as `MutableMapping[str, Any]` with detached construction and
 the documented `load()`, `list()`, `save()`, `delete()`, `validate()`, and
-`to_dict()` APIs.
+`to_dict()` APIs. Record persistence is configuration-independent:
+`load(path)` reads one explicit path, `list(paths)` consumes an iterable of
+explicit paths, and the first `save(path)` binds a detached record to its file.
+Project-aware free functions such as `load_task()` and `list_tasks()` resolve
+canonical paths from `HirakuConfig`.
 
 ### Identity and fields
 
@@ -166,17 +170,19 @@ the documented `load()`, `list()`, `save()`, `delete()`, `validate()`, and
 
 ### Markdown records
 
-- Every record uses its configured `.md` path.
+- Every record uses an explicit `.md` path.
 - `markdown` is always a string and defaults to `""`.
 - Markdown uses one YAML front-matter mapping followed by the body verbatim.
 - Preserve unknown fields and insertion order across round trips.
 - Reject malformed front matter, non-mapping front matter, and unsupported YAML
   values with typed errors.
-- `save()` accepts no path or format override.
+- The first `save(path)` establishes the record path; later `save()` calls use
+  that path and reject attempts to move the record.
 
 Write through a temporary sibling followed by atomic replacement. With
 `overwrite=False`, reject a conflicting existing file not loaded as the same
-record. Return the final path. `list()` must be deterministic and ID-sorted.
+record. Return the final path. `list(paths)` must be deterministic and
+ID-sorted; glob expansion belongs to callers and project-aware helpers.
 
 ## Metrics and domain records
 

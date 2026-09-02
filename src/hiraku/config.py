@@ -222,10 +222,10 @@ class HirakuConfig:
         return self._data["active_experiment_id"]
 
     def set_active_task(self, task: str | Any) -> None:
-        from .data import Task
+        from .data import Task, load_task
 
         identifier = task.id if isinstance(task, Task) else task
-        record = Task.load(identifier, config=self)
+        record = load_task(identifier, config=self)
         new_data = dict(self._data)
         new_data["active_task_id"] = record.id
         if self.active_task_id != record.id:
@@ -233,14 +233,14 @@ class HirakuConfig:
         self._replace_data(new_data)
 
     def set_active_experiment(self, experiment: str | Any) -> None:
-        from .data import Experiment
+        from .data import Experiment, load_experiment
 
         reference = (
             f"{experiment.task_id}:{experiment.id}"
             if isinstance(experiment, Experiment)
             else experiment
         )
-        record = Experiment.load(reference, config=self)
+        record = load_experiment(reference, config=self)
         new_data = dict(self._data)
         new_data["active_task_id"] = record.task_id
         new_data["active_experiment_id"] = record.id

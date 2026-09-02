@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from hiraku.config import HirakuConfig
-from hiraku.data import Experiment, Run, Task
+from hiraku.data import Experiment, Run, Task, load_experiment
 from hiraku.errors import BackendError, EntrypointNotFoundError, ValidationError
 from hiraku.tracking import CSVBackend
 
@@ -27,7 +27,7 @@ def test_metrics_entrypoints_inheritance_and_guarded_delete(tmp_path: Path) -> N
     with pytest.raises(EntrypointNotFoundError):
         experiment.entrypoint("train")
     with pytest.raises(ValidationError):
-        task.delete()
+        task.delete(config=config)
 
     invalid = Task("invalid", metrics=[{"name": "loss", "direction": "sideways"}])
     with pytest.raises(ValidationError):
@@ -44,25 +44,28 @@ def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
         "earlier,task,exp,,2026-01-01T00:00:00+00:00,,,2.5,1,raw\n"
         "other,task,other,,,,,3.0,3,ignored\n"
     )
-    runs = task.runs()
+    runs = task.runs(config=config)
     assert [run.id for run in runs] == ["earlier", "later", "other"]
     assert runs[0].timestamp is not None and runs[0].timestamp.tzinfo is UTC
     assert runs[0].metrics == {"loss": "2.5"}
     assert runs[0].params == {"seed": "1"}
     assert runs[0].raw == {"note": "raw"}
     assert [
-        run.id for run in Experiment.load("exp", task=task, config=config).runs()
+        run.id
+        for run in load_experiment("exp", task=task, config=config).runs(config=config)
     ] == [
         "earlier",
         "later",
     ]
-    assert task.runs(sort="loss", ascending=True, limit=1)[0].id == "later"
+    assert (
+        task.runs(config=config, sort="loss", ascending=True, limit=1)[0].id == "later"
+    )
 
 
 def test_run_is_immutable_and_missing_csv_is_empty(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     task = Task.create("task", config=config)
-    assert task.runs() == []
+    assert task.runs(config=config) == []
     run = Run(id="one", metrics={}, params={})
     with pytest.raises(FrozenInstanceError):
         run.id = "two"  # type: ignore[misc]
@@ -127,7 +130,7 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
         mlflow.log_metric("loss", 1.0, step=1)
         run_id = active.info.run_id
 
-    runs = task.runs()
+    runs = task.runs(config=config)
     assert len(runs) == 1
     run = runs[0]
     assert run.id == run_id
@@ -139,4 +142,7 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     assert run.metrics["loss"] == 1.0
     assert run.timestamp is not None and run.timestamp.tzinfo is UTC
     assert run.raw["tags"]["unmapped"] == "kept"
-    assert Experiment.load("exp", task=task, config=config).runs()[0].id == run_id
+    assert (
+        load_experiment("exp", task=task, config=config).runs(config=config)[0].id
+        == run_id
+    )

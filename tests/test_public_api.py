@@ -1,4 +1,5 @@
 from hiraku import Entrypoint, Experiment, HirakuConfig, Metric, Run, Task
+from hiraku.data import list_experiments, list_tasks, load_experiment, load_task
 from hiraku.errors import GitError, HirakuError
 from hiraku.io import atomic_write, dump_yaml, load_yaml_mapping
 from hiraku.launch import launch, render_arguments
@@ -21,6 +22,10 @@ def test_documented_imports() -> None:
             Task,
             TrackingBackend,
             launch,
+            list_experiments,
+            list_tasks,
+            load_experiment,
+            load_task,
             atomic_write,
             dump_yaml,
             load_yaml_mapping,

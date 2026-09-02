@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator, Mapping, MutableMapping
+from collections.abc import Iterable, Iterator, Mapping, MutableMapping
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
 import yaml
 
-from .config import HirakuConfig
 from .errors import RecordExistsError, RecordNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml
 
@@ -76,7 +75,6 @@ class Record(MutableMapping[str, Any]):
         object.__setattr__(self, "_data", {"id": record_id, **fields})
         object.__setattr__(self, "markdown", markdown)
         object.__setattr__(self, "path", None)
-        object.__setattr__(self, "_config", None)
         object.__setattr__(self, "_persisted_id", None)
 
     @property
@@ -135,63 +133,48 @@ class Record(MutableMapping[str, Any]):
         _validate_yaml_value(self._data)
 
     @classmethod
-    def _path_for(cls, identifier: str, config: HirakuConfig, **scope: Any) -> Path:
-        raise NotImplementedError(f"{cls.__name__} has no record registry")
-
-    @classmethod
-    def _list_paths(cls, config: HirakuConfig, **scope: Any) -> list[Path]:
-        raise NotImplementedError(f"{cls.__name__} has no record registry")
-
-    @classmethod
-    def _construct_loaded(
-        cls, data: dict[str, Any], markdown: str, config: HirakuConfig, path: Path
-    ) -> Self:
+    def _construct_loaded(cls, data: dict[str, Any], markdown: str, path: Path) -> Self:
         identifier = data.pop("id", None)
         record = cls(identifier, markdown=markdown, **data)
-        object.__setattr__(record, "_config", config)
         object.__setattr__(record, "path", path)
         object.__setattr__(record, "_persisted_id", record.id)
         record.validate()
         return record
 
     @classmethod
-    def load(
-        cls, identifier: str | Path, *, config: HirakuConfig | None = None, **scope: Any
-    ) -> Self:
-        selected = config or HirakuConfig.discover()
-        if isinstance(identifier, Path) or Path(str(identifier)).is_absolute():
-            path = Path(identifier).absolute()
-        else:
-            path = cls._path_for(str(identifier), selected, **scope)
+    def load(cls, path: Path | str) -> Self:
+        """Load one record from an explicit Markdown file path."""
+        path = Path(path).expanduser().absolute()
         if not path.is_file():
             raise RecordNotFoundError(f"{cls.__name__} record not found: {path}")
         data, markdown = _parse_markdown(path)
-        record = cls._construct_loaded(data, markdown, selected, path)
-        if record.path != cls._path_for(record.id, selected, **record._scope()):
-            raise ValidationError(f"Record identity does not match its path: {path}")
-        return record
+        return cls._construct_loaded(data, markdown, path)
 
     @classmethod
-    def list(cls, *, config: HirakuConfig | None = None, **scope: Any) -> list[Self]:
-        selected = config or HirakuConfig.discover()
-        records = [
-            cls.load(path, config=selected, **scope)
-            for path in cls._list_paths(selected, **scope)
-        ]
-        return sorted(records, key=lambda record: record.id)
+    def list(cls, paths: Iterable[Path]) -> list[Self]:
+        """Load records from explicit paths in deterministic ID order."""
+        records = [cls.load(path) for path in sorted(paths, key=lambda item: str(item))]
+        return sorted(records, key=lambda record: (record.id, str(record.path)))
 
-    def _scope(self) -> dict[str, Any]:
-        return {}
-
-    def save(self, *, overwrite: bool = False) -> Path:
+    def save(self, path: Path | str | None = None, *, overwrite: bool = False) -> Path:
+        """Persist the record, accepting a path only for its first save."""
         self.validate()
-        selected = self._config or HirakuConfig.discover()
-        target = self._path_for(self.id, selected, **self._scope())
+        if self.path is None and path is None:
+            raise ValidationError(
+                f"Detached {type(self).__name__} {self.id!r} requires a save path"
+            )
+        target = Path(path).expanduser().absolute() if path is not None else self.path
+        assert target is not None
+        if self.path is not None and target != self.path:
+            raise ValidationError(
+                f"Persisted {type(self).__name__} {self.id!r} cannot move from "
+                f"{self.path} to {target}"
+            )
         if self._persisted_id is not None and self.id != self._persisted_id:
             raise ValidationError(
                 f"Record ID is immutable after persistence: {self._persisted_id}"
             )
-        same_record = self.path is not None and self.path == target
+        same_record = self.path == target
         if target.exists() and not same_record and not overwrite:
             raise RecordExistsError(
                 f"{type(self).__name__} record already exists: {target}"
@@ -201,14 +184,16 @@ class Record(MutableMapping[str, Any]):
             atomic_write(target, content)
         except OSError as exc:
             raise ValidationError(f"Cannot save record at {target}: {exc}") from exc
-        object.__setattr__(self, "_config", selected)
         object.__setattr__(self, "path", target)
         object.__setattr__(self, "_persisted_id", self.id)
         return target
 
     def delete(self) -> None:
-        selected = self._config or HirakuConfig.discover()
-        target = self.path or self._path_for(self.id, selected, **self._scope())
+        if self.path is None:
+            raise ValidationError(
+                f"Detached {type(self).__name__} {self.id!r} has no path to delete"
+            )
+        target = self.path
         if not target.exists():
             raise RecordNotFoundError(
                 f"{type(self).__name__} record not found: {target}"

@@ -5,9 +5,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from hiraku.agent import Action, Context, Program
+from hiraku.agent import (
+    Context,
+    list_programs,
+    load_action,
+    load_context,
+)
 from hiraku.config import HirakuConfig
-from hiraku.data import Experiment, Task
+from hiraku.data import Experiment, Task, list_tasks, load_task
 from hiraku.errors import (
     ProjectExistsError,
     ProjectNotFoundError,
@@ -78,21 +83,28 @@ def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None
 def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     task = Task("sample", markdown="# Body\n\nVerbatim.\n", zeta=1, alpha={"x": True})
-    object.__setattr__(task, "_config", config)
-    path = task.save()
-    loaded = Task.load("sample", config=config)
+    path = task.save(config.tasks_dir / "sample/task.md")
+    loaded = Task.load(path)
 
     assert list(loaded) == ["id", "zeta", "alpha"]
     assert loaded.markdown == "# Body\n\nVerbatim.\n"
     loaded["new"] = [1, 2]
     loaded.save()
-    assert Task.load(path, config=config).to_dict()["new"] == [1, 2]
+    assert Task.load(path).to_dict()["new"] == [1, 2]
+    assert load_task("sample", config=config).id == "sample"
+    assert [record.id for record in list_tasks(config=config)] == ["sample"]
+    assert [record.id for record in Task.list(config.tasks_dir.glob("*/task.md"))] == [
+        "sample"
+    ]
     with pytest.raises(ValidationError):
         loaded.id = "renamed"
     detached = Task("sample")
-    object.__setattr__(detached, "_config", config)
-    with pytest.raises(RecordExistsError):
+    with pytest.raises(ValidationError):
         detached.save()
+    with pytest.raises(RecordExistsError):
+        detached.save(path)
+    with pytest.raises(ValidationError):
+        loaded.save(config.tasks_dir / "moved/task.md")
 
 
 @pytest.mark.parametrize(
@@ -105,18 +117,17 @@ def test_malformed_records_are_rejected(tmp_path: Path, content: str) -> None:
     path.parent.mkdir()
     path.write_text(content)
     with pytest.raises(ValidationError):
-        Task.load("bad", config=config)
+        Task.load(path)
 
 
 def test_agent_record_registries(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
-    assert [record.id for record in Program.list(config=config)] == [
+    assert [record.id for record in list_programs(config=config)] == [
         "autoresearch",
         "interactive",
     ]
     context = Context("literature", markdown="Sources")
-    object.__setattr__(context, "_config", config)
-    context.save()
-    assert Context.load("literature", config=config).markdown == "Sources"
-    action = Action.load("propose", entity="experiment", config=config)
+    context.save(config.contexts_dir / "literature/context.md")
+    assert load_context("literature", config=config).markdown == "Sources"
+    action = load_action("propose", entity="experiment", config=config)
     assert action.entity == "experiment"
