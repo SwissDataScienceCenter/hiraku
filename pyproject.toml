@@ -15,7 +15,14 @@ hiraku = "hiraku.cli:main"
 
 [project.optional-dependencies]
 mlflow = ["mlflow>=2.0"]
-dev = ["pytest>=8", "ruff>=0.8", "build>=1.2"]
+dev = [
+  "pytest>=8",
+  "ruff>=0.8",
+  "build>=1.2",
+  "numpy==2.4.6",
+  "pandas==2.3.3",
+  "scikit-learn==1.9.0",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hiraku"]
@@ -33,3 +40,4 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: end-to-end integration tests"]
