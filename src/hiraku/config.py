@@ -251,6 +251,13 @@ class HirakuConfig:
         new_data["active_experiment_id"] = None
         self._replace_data(new_data)
 
+    def clear_active_task(self) -> None:
+        """Atomically clear the active task and its experiment selection."""
+        new_data = dict(self._data)
+        new_data["active_task_id"] = None
+        new_data["active_experiment_id"] = None
+        self._replace_data(new_data)
+
     def _replace_data(self, data: dict[str, Any]) -> None:
         original = self._data
         self._data = data

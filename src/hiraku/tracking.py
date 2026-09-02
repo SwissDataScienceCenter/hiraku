@@ -68,24 +68,29 @@ def _apply_query(runs: list[Run], query: Mapping[str, Any], backend: str) -> lis
         if not isinstance(sort, str):
             raise BackendError(f"{backend} backend sort must be a string")
 
-        def key(run: Run) -> tuple[bool, Any, str]:
+        def value(run: Run) -> Any:
             value = getattr(run, sort, None)
             if value is None:
                 value = run.metrics.get(sort, run.params.get(sort))
-            return value is None, value, run.id
+            return value
 
-        present = [run for run in result if not key(run)[0]]
-        missing = [run for run in result if key(run)[0]]
-        try:
-            present.sort(
-                key=lambda run: key(run)[1:],
-                reverse=not bool(query.get("ascending", True)),
-            )
-        except TypeError as exc:
-            raise BackendError(
-                f"{backend} backend cannot order mixed values for {sort!r}"
-            ) from exc
-        result = [*present, *sorted(missing, key=lambda run: run.id)]
+        def numeric(run: Run) -> float | None:
+            candidate = value(run)
+            if isinstance(candidate, bool) or candidate is None:
+                return None
+            try:
+                return float(candidate)
+            except (TypeError, ValueError):
+                return None
+
+        ranked = [run for run in result if numeric(run) is not None]
+        unranked = [run for run in result if numeric(run) is None]
+        ranked.sort(key=lambda run: run.id)
+        ranked.sort(
+            key=numeric,
+            reverse=not bool(query.get("ascending", True)),
+        )
+        result = [*ranked, *sorted(unranked, key=lambda run: run.id)]
     else:
         result.sort(
             key=lambda run: (
