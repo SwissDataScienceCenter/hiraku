@@ -248,9 +248,13 @@ active task, saves, and activates by default. Experiment IDs are unique within
 a task. Accept qualified `{task_id}:{experiment_id}` references. Reject missing
 scope and genuine ambiguity instead of guessing.
 
-When saving a non-null commit, resolve it through the Git service and persist
-the full hash. To bind a proposal, callers set `commit` and call `save()`; do
-not add `bind()`.
+Treat `commit` as passive record metadata. Experiment construction, validation,
+loading, creation, and saving never invoke Git or resolve refs. Structurally
+validate a non-null value as a full lowercase Git hash: 40 hexadecimal
+characters for SHA-1 or 64 for SHA-256, without checking repository state.
+Python callers that accept a user-facing ref resolve it explicitly through
+`GitRepository` before assigning it. To bind a proposal, callers set the
+intended stable commit identifier and call `save()`; do not add `bind()`.
 
 Experiment metrics replace task metrics when present and otherwise inherit
 them. Implement `runs()` and `entrypoint()`; callers launch through
@@ -441,7 +445,7 @@ query language is specified.
 - Detached constructors versus activating `create()`
 - Deterministic listings, overwrite conflicts, and guarded deletion
 - Metric validation and experiment inheritance
-- Proposal detection, commit resolution, scoped lookup, and ambiguity
+- Proposal detection, passive commit persistence, scoped lookup, and ambiguity
 - Program, action, and context paths and validation
 
 ### Git and launching

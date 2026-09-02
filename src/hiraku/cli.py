@@ -275,6 +275,13 @@ def _field_changes(
     return changes, removals
 
 
+def _reject_commit_set(set_values: Sequence[str]) -> None:
+    for expression in set_values:
+        key, separator, _ = expression.partition("=")
+        if separator and key == "commit":
+            raise ValidationError("Use --commit REF instead of --set commit=VALUE")
+
+
 def _apply_update(
     record: R,
     *,
@@ -686,6 +693,7 @@ def experiment_create(
     task = _active_task(config, task_id)
     validate_identifier(experiment_id, label="experiment ID")
     body = _markdown(markdown_file) or ""
+    _reject_commit_set(set_values)
     fields, _ = _field_changes(
         set_values,
         (),
@@ -709,10 +717,15 @@ def experiment_create(
         branch_exists = repository.branch_exists(selected_branch)
         if branch_exists and from_ref is not None:
             raise ValidationError("--from cannot be used with an existing branch")
+    resolved_commit = (
+        repository.resolve(commit)
+        if repository is not None and commit is not None
+        else None
+    )
     record = Experiment(
         experiment_id,
         task=task,
-        commit=commit,
+        commit=resolved_commit,
         markdown=body,
         branch=selected_branch,
         **fields,
@@ -721,7 +734,7 @@ def experiment_create(
     created = Experiment.create(
         experiment_id,
         task=task,
-        commit=commit,
+        commit=resolved_commit,
         markdown=body,
         activate=False,
         config=config,
@@ -802,12 +815,21 @@ def experiment_update(
     unset_values: tuple[str, ...],
 ) -> None:
     """Update and validate an experiment."""
-    record = _experiment(state.config, experiment_id, task_id)
+    config = state.config
+    record = _experiment(config, experiment_id, task_id)
+    _reject_commit_set(set_values)
+    resolved_commit = (
+        GitRepository(config).resolve(commit) if commit is not None else None
+    )
     _apply_update(
         record,
         set_values=set_values,
         unset_values=unset_values,
-        dedicated={"summary": summary, "hypothesis": hypothesis, "commit": commit},
+        dedicated={
+            "summary": summary,
+            "hypothesis": hypothesis,
+            "commit": resolved_commit,
+        },
         markdown_file=markdown_file,
         immutable={"id", "task_id"},
     )

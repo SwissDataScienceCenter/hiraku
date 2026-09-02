@@ -21,6 +21,7 @@ from .tracking import TrackingBackend, select_backend
 
 ArgumentScalar: TypeAlias = str | int | float | Path
 ArgumentValue: TypeAlias = ArgumentScalar | bool | None | Sequence[ArgumentScalar]
+_LOWER_HEXADECIMAL = frozenset("0123456789abcdef")
 
 
 class Entrypoint(TypedDict):
@@ -282,9 +283,14 @@ class Experiment(Record):
     def validate(self) -> None:
         super().validate()
         validate_identifier(self.task_id, label="task ID")
-        if self.commit is not None and not isinstance(self.commit, str):
+        if self.commit is not None and (
+            not isinstance(self.commit, str)
+            or len(self.commit) not in {40, 64}
+            or any(character not in _LOWER_HEXADECIMAL for character in self.commit)
+        ):
             raise ValidationError(
-                f"Commit for experiment {self.id!r} must be a string or null"
+                f"Commit for experiment {self.id!r} must be a full lowercase "
+                "Git hash (40 or 64 hexadecimal characters) or null"
             )
         if self.branch is not None and not isinstance(self.branch, str):
             raise ValidationError(
@@ -294,21 +300,6 @@ class Experiment(Record):
             _validate_entrypoints(self.entrypoints, self.id)
         if "metrics" in self:
             _validate_metrics(self._data["metrics"], self.id)
-
-    def save(self, path: Path | str | None = None, *, overwrite: bool = False) -> Path:
-        self.validate()
-        if path is None and self.path is None:
-            raise ValidationError(
-                f"Detached Experiment {self.id!r} requires a save path"
-            )
-        if self.commit is not None:
-            from .git import GitRepository
-
-            repository_start = (
-                Path(path).parent if path is not None else self.path.parent
-            )
-            self.commit = GitRepository(repository_start).resolve(self.commit)
-        return super().save(path, overwrite=overwrite)
 
     def runs(
         self,

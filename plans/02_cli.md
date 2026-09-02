@@ -338,14 +338,18 @@ activate it and its task unless `--no-set` was supplied. On pre-activation
 failure, remove only a record created by this invocation. Never delete a Git
 branch as rollback.
 
-Resolve `--commit REF` to a full commit through the existing experiment save
-behavior. An absent commit produces a proposal.
+Resolve `--commit REF` to a full lowercase hash through
+`GitRepository(config)` before constructing or mutating the experiment. Pass
+only the resolved identifier to the Git-independent record API. An absent
+commit produces a proposal. Reject `--set commit=VALUE` so generic mutation
+cannot bypass ref resolution; `--unset commit` remains valid for returning an
+experiment to proposal state.
 
 ### Mutation, activation, and proposals
 
-`update --commit REF` stores the resolved full hash. Ordinary field mutation
-must not add a special bind operation. `set` activates both the experiment and
-its task; `clear` clears only the active experiment.
+`update --commit REF` resolves before mutation and stores the full hash.
+Ordinary field mutation must not add a special bind operation. `set` activates
+both the experiment and its task; `clear` clears only the active experiment.
 
 `proposal list` calls the normal task-scoped experiment listing and filters
 records whose `commit` is absent. It returns experiment records, not a proposal

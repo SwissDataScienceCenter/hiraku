@@ -394,12 +394,15 @@ scope resolves from `--task`, then active task; no cross-task search occurs.
 Default record location is
 `hiraku/tasks/{task_id}/experiments/{experiment_id}.md`.
 
-An experiment without a commit is a proposal. References are resolved to full
-hashes before storage. Bare `--branch` selects
-`hiraku/experiments/{task_id}/{experiment_id}`; `--branch BRANCH` selects any
-valid branch. Hiraku creates a missing selected branch and reuses an existing
-one. `--from` applies only when creating it. Hiraku does not implicitly switch,
-merge, delete, or resolve conflicts.
+An experiment without a commit is a proposal. The CLI resolves `--commit REF`
+against the Git repository containing the project root and passes the resulting
+full lowercase hash to the Git-independent experiment record API. Setting
+`commit` through `--set` is rejected; use `--commit REF`. `--unset commit` remains
+available to turn a bound experiment back into a proposal. Bare `--branch`
+selects `hiraku/experiments/{task_id}/{experiment_id}`; `--branch BRANCH`
+selects any valid branch. Hiraku creates a missing selected branch and reuses
+an existing one. `--from` applies only when creating it. Hiraku does not
+implicitly switch, merge, delete, or resolve conflicts.
 
 ### Examples
 

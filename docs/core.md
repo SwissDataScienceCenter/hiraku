@@ -430,10 +430,13 @@ The required core fields are `id` and `task_id`. `commit`, `branch`,
 `hypothesis` are conventional user fields. A missing or null `commit` means the
 experiment is a proposal; there is no separate proposal record type.
 
-When `commit` is set, `save()` resolves it to a Git commit and stores the
-resolved hash rather than a symbolic input such as `HEAD`. This makes the
-experiment reproducible if a branch later moves. An unresolvable commit causes
-validation to fail.
+`commit` is passive metadata. Experiment construction, loading, creation, and
+saving never invoke Git or resolve symbolic references. Core validation accepts
+null or a full lowercase Git object ID: 40 hexadecimal characters for SHA-1 or
+64 for SHA-256. It does not check that the commit exists or belongs to a
+repository. Callers that bind an experiment should supply the stable commit
+identifier they intend to persist. In particular, Python callers may explicitly
+use `GitRepository.resolve()` before assigning a user-facing ref such as `HEAD`.
 
 An experiment ID is unique within its task, not necessarily across the whole
 project. `load_experiment()` therefore accepts either a task scope or a
@@ -443,8 +446,9 @@ file operation. Ambiguous or missing project scope raises
 `AmbiguousReferenceError` or `NoActiveTaskError` rather than guessing.
 
 To turn a proposal into a bound experiment, callers update `commit` through
-normal attribute or mapping mutation and call `save()`. `runs()` returns
-backend runs attributed to both its task and experiment.
+normal attribute or mapping mutation and call `save()`. Record persistence does
+not verify that the identifier exists in the current repository. `runs()`
+returns backend runs attributed to both its task and experiment.
 
 `Experiment(...)` creates a detached record and `save()` persists it without
 changing active state. `Experiment.create()` constructs, validates, and saves
@@ -472,7 +476,8 @@ delete a branch unless a branch-specific method is explicitly invoked.
 Experiment ancestry is derived from the Git history of bound commits. It is not
 stored as a required `parent_id` field. Consequently, proposals do not yet have
 Git-derived lineage. APIs may expose lineage helpers, but callers must tolerate
-an empty or incomplete result for unbound experiments and unreachable commits.
+an empty or incomplete result for unbound experiments, identifiers from another
+repository, and unreachable commits.
 
 Git operations are implemented through a dedicated service. It resolves
 commits, inspects and creates branches, switches branches when explicitly
@@ -724,7 +729,9 @@ Validation covers framework semantics, including:
 - unique record IDs within each registry;
 - valid entrypoint structure;
 - active experiment/task consistency; and
-- resolvable commits when an operation requires a commit.
+- resolvable commits when a Git-backed operation, such as ref resolution,
+  lineage inspection, or a committed launch, requires one. Record persistence
+  does not perform this check.
 
 Hiraku does not prescribe or validate user-defined scientific fields such as
 `hypothesis`, `result`, `dataset`, or metric names beyond basic serialization.
@@ -774,8 +781,10 @@ experiment = Experiment.create(
 )
 
 # Implementation and Git commit happen through normal development tools.
-experiment.commit = "HEAD"
-experiment.save()  # resolves HEAD and stores its commit hash
+from hiraku.git import GitRepository
+
+experiment.commit = GitRepository(config).resolve("HEAD")
+experiment.save()  # stores the supplied identifier without invoking Git
 
 from hiraku.launch import launch
 

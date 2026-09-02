@@ -68,7 +68,11 @@ Task entrypoints support operations that apply to the task as a whole, such as p
 
 ### Experiment records
 
-An experiment is a record that points to a code commit and may define execution entrypoints. The code commit can be initially empty; experiments without a code commit are called proposals. It is stored within the task directory:
+An experiment is a record that points to a code commit and may define execution
+entrypoints. The code commit can be initially empty; experiments without a code
+commit are called proposals. A bound `commit` is stored as a full lowercase Git
+hash: 40 hexadecimal characters for SHA-1 or 64 for SHA-256. It is stored within
+the task directory:
 ```bash
 hiraku/tasks/{task_id}/experiments/{experiment_id}.md
 ```

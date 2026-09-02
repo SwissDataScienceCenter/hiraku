@@ -34,6 +34,46 @@ def test_metrics_entrypoints_inheritance_and_guarded_delete(tmp_path: Path) -> N
         invalid.validate()
 
 
+def test_experiment_commit_is_passive_metadata_without_git(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    task = Task.create("task", config=config)
+    first_hash = "a" * 40
+    experiment = Experiment.create("exp", task=task, commit=first_hash, config=config)
+
+    assert experiment.commit == first_hash
+    assert load_experiment("exp", task=task, config=config).commit == first_hash
+
+    second_hash = "b" * 64
+    experiment.commit = second_hash
+    experiment.save()
+    assert load_experiment("exp", task=task, config=config).commit == second_hash
+
+
+@pytest.mark.parametrize(
+    "commit",
+    [
+        "HEAD",
+        "abcdef0",
+        "a" * 39,
+        "a" * 41,
+        "a" * 63,
+        "a" * 65,
+        "A" * 40,
+        "g" * 40,
+        123,
+    ],
+)
+def test_experiment_commit_requires_a_full_lowercase_hash(
+    tmp_path: Path, commit: object
+) -> None:
+    config = HirakuConfig.init(tmp_path)
+    task = Task.create("task", config=config)
+    experiment = Experiment("exp", task=task, commit=commit)  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError, match="full lowercase Git hash"):
+        experiment.save(config.tasks_dir / "task" / "experiments" / "exp.md")
+
+
 def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     task = Task.create("task", config=config)

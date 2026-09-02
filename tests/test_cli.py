@@ -230,6 +230,70 @@ def test_experiment_optional_branch_proposals_and_alias(
     ]
 
 
+def test_experiment_commit_refs_resolve_in_cli_before_persistence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = _project(tmp_path, git=True)
+    task = Task.create("demo", branch="main", config=config)
+    expected = GitRepository(config).head
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    created = runner.invoke(
+        main,
+        ["experiment", "create", "bound", "--commit", "HEAD", "--no-set"],
+    )
+    assert created.exit_code == 0, created.output
+    record = load_experiment("bound", task=task, config=config)
+    assert record.commit == expected
+
+    proposal = Experiment.create("proposal", task=task, config=config)
+    updated = runner.invoke(
+        main,
+        ["experiment", "update", "proposal", "--task", "demo", "--commit", "HEAD"],
+    )
+    assert updated.exit_code == 0, updated.output
+    assert load_experiment("proposal", task=task, config=config).commit == expected
+
+    rejected = runner.invoke(
+        main,
+        [
+            "experiment",
+            "create",
+            "bypass",
+            "--task",
+            "demo",
+            "--set",
+            "commit=HEAD",
+        ],
+    )
+    assert rejected.exit_code != 0
+    assert "Use --commit REF" in rejected.output
+
+    unresolved = runner.invoke(
+        main,
+        [
+            "experiment",
+            "create",
+            "unresolved",
+            "--task",
+            "demo",
+            "--commit",
+            "missing-ref",
+        ],
+    )
+    assert unresolved.exit_code != 0
+    assert not (config.tasks_dir / "demo" / "experiments" / "unresolved.md").exists()
+
+    unbound = runner.invoke(
+        main,
+        ["experiment", "update", "proposal", "--task", "demo", "--unset", "commit"],
+    )
+    assert unbound.exit_code == 0, unbound.output
+    assert proposal.path is not None
+    assert load_experiment("proposal", task=task, config=config).commit is None
+
+
 def test_entrypoints_render_commands_and_preserve_json(
     tmp_path: Path, monkeypatch
 ) -> None:
