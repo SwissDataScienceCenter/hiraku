@@ -246,6 +246,15 @@ def test_experiment_commit_refs_resolve_in_cli_before_persistence(
     assert created.exit_code == 0, created.output
     record = load_experiment("bound", task=task, config=config)
     assert record.commit == expected
+    listed = runner.invoke(main, ["experiment", "list", "--task", "demo"])
+    assert listed.exit_code == 0, listed.output
+    assert expected[:8] in listed.output
+    assert expected not in listed.output
+    listed_json = runner.invoke(
+        main, ["experiment", "list", "--task", "demo", "--json"]
+    )
+    assert listed_json.exit_code == 0, listed_json.output
+    assert json.loads(listed_json.output)[0]["commit"] == expected
 
     proposal = Experiment.create("proposal", task=task, config=config)
     updated = runner.invoke(
@@ -403,10 +412,11 @@ def test_run_json_is_complete_and_human_ids_are_unambiguous(
         metrics=[{"name": "loss", "direction": "minimize"}],
     )
     Experiment.create("trial", task=task, config=config)
+    commit = "a" * 40
     (task.path.parent / "runs.csv").write_text(
-        "id,task_id,experiment_id,timestamp,metric.loss,param.seed,note\n"
-        "abcdefgh111,demo,trial,2026-01-02T00:00:00Z,10,1,a\n"
-        "abcdefgh222,demo,trial,2026-01-01T00:00:00Z,2,2,b\n",
+        "id,task_id,experiment_id,commit,timestamp,metric.loss,param.seed,note\n"
+        f"abcdefgh111,demo,trial,{commit},2026-01-02T00:00:00.123456Z,10,1,a\n"
+        f"abcdefgh222,demo,trial,{commit},2026-01-01T00:00:00Z,2,2,b\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -422,7 +432,13 @@ def test_run_json_is_complete_and_human_ids_are_unambiguous(
     assert runs[0]["params"] == {"seed": "2"}
     assert runs[0]["raw"] == {"note": "b"}
     assert runs[0]["timestamp"].endswith("+00:00")
+    assert runs[0]["commit"] == commit
 
     human = runner.invoke(main, ["run", "list"])
     assert "abcdefgh1" in human.output
     assert "abcdefgh2" in human.output
+    assert "2026-01-01 00:00:00Z" in human.output
+    assert "2026-01-02 00:00:00Z" in human.output
+    assert ".123456Z" not in human.output
+    assert "aaaaaaaa" in human.output
+    assert commit not in human.output
