@@ -30,6 +30,7 @@ from .agent import (
 )
 from .config import HirakuConfig
 from .data import (
+    Entrypoint,
     Experiment,
     Run,
     Task,
@@ -50,6 +51,7 @@ from .errors import (
 from .git import GitRepository
 from .io import dump_yaml
 from .launch import launch as launch_entrypoint
+from .launch import render_arguments
 from .records import Record, validate_identifier
 
 R = TypeVar("R", bound=Record)
@@ -408,6 +410,17 @@ def _record_rows(records: Sequence[Record], columns: Sequence[str]) -> list[list
     return [[record.get(column) for column in columns] for record in records]
 
 
+def _entrypoint_rows(entrypoints: Mapping[str, Entrypoint]) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for name, entrypoint in entrypoints.items():
+        command = [
+            *entrypoint["command"],
+            *render_arguments(entrypoint.get("args", {})),
+        ]
+        rows.append([name, shlex.join(command)])
+    return rows
+
+
 @click.group(name="hiraku", cls=HirakuGroup)
 @click.pass_context
 def main(ctx: click.Context) -> None:
@@ -624,7 +637,7 @@ def task_entrypoints(state: CLIContext, task_id: str | None, json_output: bool) 
     if json_output:
         _emit_json(values)
     else:
-        click.echo(_table(("name", "declaration"), list(values.items())))
+        click.echo(_table(("name", "command"), _entrypoint_rows(values)))
 
 
 @main.group("experiment")
@@ -874,7 +887,7 @@ def experiment_entrypoints(
     if json_output:
         _emit_json(values)
     else:
-        click.echo(_table(("name", "declaration"), list(values.items())))
+        click.echo(_table(("name", "command"), _entrypoint_rows(values)))
 
 
 main.add_command(experiment_group, "exp")
