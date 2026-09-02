@@ -39,6 +39,9 @@ A *task* defines a working scope and goal, and documents the research progress. 
 
 At any time, a single task and experiment can be set as "active". By default, "create" actions activate the new task or experiment. The user can switch explicitly with `hiraku task set <task-id>` or `hiraku experiment set <experiment-id>`. The current status can be queried with `hiraku status`.
 
+  > Note: Hiraku is agnostic to git state of meta data as far as possible. The user my commit the metadata files to to git repository or leave `hiraku/*` untracked. Hiraku simply lists what is currently visible in the working directory, or tries to detect md files on the defined task branch. The recommended pattern is to commit `hiraku/*`, however merging and conflict resolution is a user (or agent) responsibility.
+  
+  > Note: All records use Markdown with YAML front matter and a `.md` ending. The Markdown body may be empty. Hiraku only validates core fields that carry semantic meaning (e.g. id, referenced ids, etc), and accepts arbitrary user fields, used for summarization or with agent actions. `hiraku.yml` may relocate the common `hiraku_dir`; record paths follow a fixed layout beneath it.
 
 ### Python Core API
 
@@ -114,15 +117,15 @@ CSV is the default project backend. A task may set `tracking_backend` to
 override the project default; MLflow and W&B are selectable alternatives.
 
 
-## Agent integration: Programs, Actions, Context
+## Agent integration: Actions, Programs, Context
 
-Hiraku provides agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions.  A *program* defines a research workflow executed by the agent, with defined permissions and limits. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to summarize information that is used by the agent.
+Hiraku provides agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state.  A *program* defines a full research workflow executed by the agent, with defined permissions and limits. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to summarize information that is used by the agent.
 
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Program** | `hiraku/programs/{program_id}/program.md` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 | **Action** | `hiraku/actions/{entity}/{action_id}/action.md` | A named action that can be invoked by the hiraku-agent agent. |
+| **Program** | `hiraku/programs/{program_id}/program.md` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
 Programs, action and context are managed via CLI, e.g.
@@ -150,13 +153,15 @@ The `\hiraku` skill can be used directly in a coding harness. Later, we might ad
 
   > ToDo: Define how programs are invoked.
 
-  > ToDo: Actions should have a deterministic component (e.g. event hooks). E.g., there might be a deterministic check before accept that the experiment is in proposal state, etc.
+
+  > ToDo: Define Loops and Programs:
+  > Programs delegate the research loop to the LLM based on natural language instructions. Loops are a form of harness that enforce a deterministic research loop with explicit boundaries and checkpoints. At this point, the exact design of either is open, possibly they can be the same concept (e.g. an program is executed by a harness that enforces the loop).
+
+  > ToDo: Actions should have a deterministic component (e.g. event hooks). E.g., there might be a deterministic check before accept that the experiment is in proposal state, etc. see [docs/agent.md](docs/agent.md) for more details.
 
   > ToDo: Should we add a status as core field to experiments? Then we can have action enforce a state transition, e.g., from "proposed" to "implemented" etc.
 
-  > Note: Hiraku is agnostic to git state of meta data as far as possible. The user my commit the metadata files to to git repository or leave `hiraku/*` untracked. Hiraku simply lists what is currently visible in the working directory, or tries to detect md files on the defined task branch. The recommended pattern is to commit `hiraku/*`, however merging and conflict resolution is a user (or agent) responsibility.
-  
-  > Note: All records use Markdown with YAML front matter and a `.md` ending. The Markdown body may be empty. Hiraku only validates core fields that carry semantic meaning (e.g. id, referenced ids, etc), and accepts arbitrary user fields, used for summarization or with agent actions. `hiraku.yml` may relocate the common `hiraku_dir`; record paths follow a fixed layout beneath it.
+
 
 ### Default Programs and Actions
 
