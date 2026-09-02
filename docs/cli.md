@@ -403,6 +403,8 @@ selects `hiraku/experiments/{task_id}/{experiment_id}`; `--branch BRANCH`
 selects any valid branch. Hiraku creates a missing selected branch and reuses
 an existing one. `--from` applies only when creating it. Hiraku does not
 implicitly switch, merge, delete, or resolve conflicts.
+Human experiment tables abbreviate commit hashes to an unambiguous prefix among
+the displayed records; JSON retains complete hashes.
 
 ### Examples
 
@@ -817,6 +819,9 @@ Task-level `tracking_backend` overrides the project default. CSV is default and
 MLflow is optional. Both normalize results to `Run` objects. Human tables show
 run ID, optional experiment, timestamp, commit, selected parameters, and
 metrics; human IDs may be abbreviated.
+Timestamps use a compact UTC representation in human output, and commit hashes
+are abbreviated to an unambiguous prefix among the displayed rows. JSON retains
+full ISO-8601 timestamps and complete commit hashes.
 
 Experiment `Metric` declarations replace task declarations; absent experiment
 metrics inherit the task list. Declarations determine default columns and sort

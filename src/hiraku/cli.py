@@ -781,7 +781,18 @@ def experiment_list(
         _emit_json(records)
         return
     selected = _parse_columns(columns, ("id", "summary", "commit", "branch"))
-    click.echo(_table(selected, _record_rows(records, selected)))
+    rows = _record_rows(records, selected)
+    commit_columns = [
+        index for index, column in enumerate(selected) if column == "commit"
+    ]
+    if commit_columns:
+        abbreviations = _abbreviate_values(
+            [record.commit for record in records if record.commit is not None]
+        )
+        for record, row in zip(records, rows, strict=True):
+            for index in commit_columns:
+                row[index] = abbreviations.get(record.commit, "")
+    click.echo(_table(selected, rows))
 
 
 @experiment_group.command("show")
@@ -1304,18 +1315,26 @@ def run_group() -> None:
     """Query tracked runs."""
 
 
-def _abbreviate_ids(runs: Sequence[Run]) -> dict[str, str]:
-    values = [run.id for run in runs]
+def _abbreviate_values(values: Sequence[str]) -> dict[str, str]:
+    distinct = sorted(set(values))
     result: dict[str, str] = {}
-    for value in values:
+    for value in distinct:
         length = min(8, len(value))
         while (
             length < len(value)
-            and sum(other.startswith(value[:length]) for other in values) > 1
+            and sum(other.startswith(value[:length]) for other in distinct) > 1
         ):
             length += 1
         result[value] = value[:length]
     return result
+
+
+def _human_timestamp(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    current = value if value.tzinfo else value.replace(tzinfo=UTC)
+    current = current.astimezone(UTC)
+    return current.isoformat(sep=" ", timespec="seconds").replace("+00:00", "Z")
 
 
 @run_group.command("list")
@@ -1375,7 +1394,10 @@ def run_list(
     if json_output:
         _emit_json(runs)
         return
-    abbreviations = _abbreviate_ids(runs)
+    abbreviations = _abbreviate_values([run.id for run in runs])
+    commit_abbreviations = _abbreviate_values(
+        [run.commit for run in runs if run.commit is not None]
+    )
     include_experiment = any(run.experiment_id is not None for run in runs)
     columns = ["id"]
     if include_experiment:
@@ -1388,7 +1410,12 @@ def run_list(
         row: list[Any] = [abbreviations[run.id]]
         if include_experiment:
             row.append(run.experiment_id)
-        row.extend((run.timestamp, run.commit))
+        row.extend(
+            (
+                _human_timestamp(run.timestamp),
+                commit_abbreviations.get(run.commit, ""),
+            )
+        )
         row.extend(run.params.get(name) for name in param_names)
         row.extend(run.metrics.get(name) for name in metric_names)
         rows.append(row)
