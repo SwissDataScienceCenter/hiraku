@@ -107,6 +107,127 @@ hiraku-auto experiment create heart-disease:logistic-baseline --summary "Logisti
 hiraku-auto experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic --agent pi --program autoresearch
 ```
 
+##### Action hooks
+
+An action may provide deterministic behavior in a Python module stored locally
+with its instructions:
+
+```text
+hiraku/actions/experiment/implement/
+├── action.md
+└── hooks.py
+```
+
+The action record opts into the module explicitly. A `hooks.py` file that is
+not declared must not be loaded or executed.
+
+```markdown
+---
+id: implement
+entity: experiment
+hooks: hooks.py
+---
+# Implement an experiment
+
+Implement the selected proposal and expose the changes for review.
+```
+
+The initial hook contract consists of five optional synchronous functions:
+
+```python
+def precondition(context: ReadonlyActionContext) -> ConditionResult: ...
+def before(context: ActionContext) -> None: ...
+def after(context: ActionContext, result: ActionResult) -> None: ...
+def postcondition(
+    context: ReadonlyActionContext,
+    result: ActionResult,
+) -> ConditionResult: ...
+def cleanup(
+    context: ActionContext,
+    result: ActionResult | None,
+    error: BaseException | None,
+) -> None: ...
+```
+
+Conditions inspect state and return a structured pass or failure result.
+`before` and `after` implement deterministic side effects, while `cleanup` is
+always called for best-effort finalization. The action lifecycle is:
+
+```text
+resolve action, target, arguments, program, and context
+→ load and validate hooks
+→ precondition
+→ before
+→ invoke agent
+→ after
+→ postcondition
+→ cleanup
+```
+
+`after` and `postcondition` run only when agent invocation succeeds. `cleanup`
+runs after every attempt, including precondition, hook, and agent failures. A
+failed condition is expected inapplicability and is reported separately from a
+hook error. A cleanup error is reported without hiding the original failure.
+
+The runtime constructs a single invocation-scoped context rather than
+injecting a changing list of positional objects. It contains the resolved
+action, program, project configuration, task, experiment, referenced context
+records, invocation arguments, and initialized Hiraku services such as Git,
+tracking, event recording, and command execution. Convenience methods such as
+`require_task()` and `require_experiment()` provide clear failures when an
+action requires a particular scope. `ActionResult` separately records the
+agent outcome, summary, changed files, structured output, and provider
+metadata.
+
+For example:
+
+```python
+from hiraku.agent.hooks import (
+    ActionContext,
+    ActionResult,
+    ConditionResult,
+    ReadonlyActionContext,
+)
+
+
+def precondition(context: ReadonlyActionContext) -> ConditionResult:
+    experiment = context.require_experiment()
+    if experiment.commit is not None:
+        return ConditionResult.fail(
+            "Experiment is already implemented.",
+            commit=experiment.commit,
+        )
+    return ConditionResult.pass_()
+
+
+def after(context: ActionContext, result: ActionResult) -> None:
+    context.services.events.record(
+        "implementation-completed",
+        changed_files=result.changed_files,
+    )
+
+
+def postcondition(
+    context: ReadonlyActionContext,
+    result: ActionResult,
+) -> ConditionResult:
+    if not result.changed_files:
+        return ConditionResult.fail("The agent made no file changes.")
+    return ConditionResult.pass_()
+```
+
+The hook module is loaded directly from its declared path under a unique module
+name; its directory is not added to `sys.path`. The runtime validates all hook
+signatures before running any hook. Async hooks, hook classes, decorators, and
+multiple functions per phase are outside the initial contract.
+
+In-process Python hooks are trusted project extension code, not a security
+boundary. Invoking an action authorizes its declared hook module in the same
+sense as running other repository code. Program permissions can restrict
+whether hooks may run, but actual isolation belongs to a future worker process
+or sandbox. Read-only context types communicate and help enforce that
+conditions should not mutate state, but they do not make untrusted Python safe.
+
 
 
 #### Hiraku Harness
