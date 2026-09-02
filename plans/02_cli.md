@@ -266,8 +266,9 @@ Missing user fields display empty. Reject an empty column name. JSON ignores
 human column selection and remains complete.
 
 `show`, `update`, `edit`, and `entrypoints` use an explicit `TASK_ID`, then the
-active task. `entrypoints` lists the task's mapping without resolving or
-launching commands.
+active task. Human `entrypoints` output renders the stored command and default
+arguments without dispatching it; JSON preserves the complete declaration
+mapping.
 
 ### Mutation and deletion
 

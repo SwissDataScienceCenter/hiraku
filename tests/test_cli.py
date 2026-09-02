@@ -230,6 +230,49 @@ def test_experiment_optional_branch_proposals_and_alias(
     ]
 
 
+def test_entrypoints_render_commands_and_preserve_json(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = _project(tmp_path)
+    task_entrypoint = {
+        "command": ["python", "train model.py"],
+        "args": {
+            "learning_rate": 0.1,
+            "tag": ["a", "two words"],
+            "verbose": True,
+        },
+    }
+    task = Task.create("demo", config=config, entrypoints={"train": task_entrypoint})
+    experiment_entrypoint = {
+        "command": ["python", "evaluate.py"],
+        "args": {"checkpoint": "best model.pt"},
+    }
+    Experiment.create(
+        "trial",
+        task=task,
+        config=config,
+        entrypoints={"evaluate": experiment_entrypoint},
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    task_result = runner.invoke(main, ["task", "entrypoints", "demo"])
+    assert task_result.exit_code == 0, task_result.output
+    assert "name   command" in task_result.output
+    assert (
+        "python 'train model.py' --learning-rate 0.1 --tag a "
+        "--tag 'two words' --verbose" in task_result.output
+    )
+
+    experiment_result = runner.invoke(main, ["experiment", "entrypoints"])
+    assert experiment_result.exit_code == 0, experiment_result.output
+    assert "python evaluate.py --checkpoint 'best model.pt'" in experiment_result.output
+
+    json_result = runner.invoke(main, ["task", "entrypoints", "demo", "--json"])
+    assert json_result.exit_code == 0, json_result.output
+    assert json.loads(json_result.output) == {"train": task_entrypoint}
+
+
 def test_agent_record_commands_and_mutation_conflicts(
     tmp_path: Path, monkeypatch
 ) -> None:

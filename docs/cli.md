@@ -141,7 +141,7 @@ Commands:
   edit         Edit a task in the default editor.
   delete       Delete a task that has no experiments.
   set          Set the active task.
-  entrypoints  List a task's entrypoint declarations.
+  entrypoints  List a task's resolved entrypoint commands.
 ```
 
 ```text
@@ -223,7 +223,9 @@ Set the active task and clear an incompatible active experiment.
 ```text
 Usage: hiraku task entrypoints [OPTIONS] [TASK_ID]
 
-List a task's entrypoint declarations; default to the active task.
+List a task's entrypoints; default to the active task. Human output renders each
+stored command with its default arguments. `--json` emits the complete original
+declaration mapping.
 
 Options:
   --json  Emit the entrypoint mapping as JSON.
@@ -264,7 +266,7 @@ Commands:
   delete       Delete an experiment record.
   set          Activate an experiment and its task.
   clear        Clear the active experiment.
-  entrypoints  List an experiment's entrypoint declarations.
+  entrypoints  List an experiment's resolved entrypoint commands.
 ```
 
 `hiraku exp` is an exact alias. Its usage may show the invoked alias.
@@ -375,7 +377,9 @@ Clear the active experiment without changing the active task.
 ```text
 Usage: hiraku experiment entrypoints [OPTIONS] [EXPERIMENT_ID]
 
-List entrypoint declarations; default to the active experiment.
+List experiment entrypoints; default to the active experiment. Human output
+renders each stored command with its default arguments. `--json` emits the
+complete original declaration mapping.
 
 Options:
   --task TASK_ID  Select the task for an unqualified ID.
