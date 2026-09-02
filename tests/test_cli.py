@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -142,6 +144,61 @@ def test_task_crud_branches_and_active_deletion(tmp_path: Path, monkeypatch) -> 
     refreshed = HirakuConfig.discover(tmp_path)
     assert refreshed.active_task_id is None
     assert refreshed.active_experiment_id is None
+
+
+def test_edit_opens_malformed_task_for_recovery(tmp_path: Path, monkeypatch) -> None:
+    config = _project(tmp_path)
+    task = Task.create(
+        "demo",
+        config=config,
+        entrypoints={"train": {"command": ["uv"], "args": {"test": True}}},
+    )
+    malformed = task.path.read_text(encoding="utf-8").replace(
+        "args:\n      test: true", "args: ['--test']"
+    )
+    task.path.write_text(malformed, encoding="utf-8")
+    editor = tmp_path / "repair.py"
+    editor.write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "path = Path(sys.argv[1])\n"
+        "path.write_text(path.read_text().replace(\"args: ['--test']\", "
+        '"args: {}"))\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("EDITOR", shlex.join([sys.executable, str(editor)]))
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    shown = runner.invoke(main, ["task", "show"])
+    assert shown.exit_code != 0
+    assert "Entrypoint args must be a mapping" in shown.output
+
+    edited = runner.invoke(main, ["task", "edit"])
+    assert edited.exit_code == 0, edited.output
+    assert "Warning: Task 'demo' is currently invalid" in edited.stderr
+    assert "Opening" in edited.stderr
+    assert "Validated task demo" in edited.stdout
+    assert load_task("demo", config=config).entrypoints["train"]["args"] == {}
+
+
+def test_edit_retains_malformed_file_when_recovery_is_incomplete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = _project(tmp_path)
+    task = Task.create("demo", config=config)
+    malformed = task.path.read_text(encoding="utf-8").replace("id: demo", "id: wrong")
+    task.path.write_text(malformed, encoding="utf-8")
+    editor = tmp_path / "no_op.py"
+    editor.write_text("# Leave the edited file unchanged.\n", encoding="utf-8")
+    monkeypatch.setenv("EDITOR", shlex.join([sys.executable, str(editor)]))
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["task", "edit", "demo"])
+    assert result.exit_code != 0
+    assert "Warning: Task 'demo' is currently invalid" in result.stderr
+    assert "does not match registry path" in result.stderr
+    assert task.path.read_text(encoding="utf-8") == malformed
 
 
 def test_experiment_optional_branch_proposals_and_alias(
