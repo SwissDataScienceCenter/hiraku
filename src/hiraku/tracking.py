@@ -318,8 +318,9 @@ def _escape_filter(value: str) -> str:
 
 
 def _mlflow_uri(config: HirakuConfig) -> str:
-    remote = config._data.get("mlflow_tracking_uri")
-    database = config._data.get("mlflow_tracking_db")
+    extra = config.model_extra or {}
+    remote = extra.get("mlflow_tracking_uri")
+    database = extra.get("mlflow_tracking_db")
     if remote and database:
         raise BackendError(
             "mlflow backend configuration cannot set both mlflow_tracking_uri "
