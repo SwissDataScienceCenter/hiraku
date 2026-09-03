@@ -179,7 +179,7 @@ def test_edit_opens_malformed_task_for_recovery(tmp_path: Path, monkeypatch) -> 
     assert "Warning: Task 'demo' is currently invalid" in edited.stderr
     assert "Opening" in edited.stderr
     assert "Validated task demo" in edited.stdout
-    assert load_task("demo", config=config).entrypoints["train"]["args"] == {}
+    assert load_task("demo", config=config).entrypoints["train"].args == {}
 
 
 def test_edit_retains_malformed_file_when_recovery_is_incomplete(

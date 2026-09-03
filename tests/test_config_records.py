@@ -70,25 +70,27 @@ def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None
     marker = tmp_path / "hiraku.yml"
     marker.write_text("hiraku_dir: ../outside\n")
     with pytest.raises(ValidationError):
-        HirakuConfig(marker)
+        HirakuConfig.load(marker)
 
     outside = tmp_path.parent / f"{tmp_path.name}-outside"
     outside.mkdir()
     (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
     marker.write_text("hiraku_dir: linked\n")
     with pytest.raises(ValidationError):
-        HirakuConfig(marker)
+        HirakuConfig.load(marker)
 
 
 def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
-    task = Task("sample", markdown="# Body\n\nVerbatim.\n", zeta=1, alpha={"x": True})
+    task = Task(
+        id="sample", markdown="# Body\n\nVerbatim.\n", zeta=1, alpha={"x": True}
+    )
     path = task.save(config.tasks_dir / "sample/task.md")
     loaded = Task.load(path)
 
-    assert list(loaded) == ["id", "zeta", "alpha"]
+    assert list(loaded.to_dict()) == ["id", "zeta", "alpha"]
     assert loaded.markdown == "# Body\n\nVerbatim.\n"
-    loaded["new"] = [1, 2]
+    loaded.new = [1, 2]
     loaded.save()
     assert Task.load(path).to_dict()["new"] == [1, 2]
     assert load_task("sample", config=config).id == "sample"
@@ -98,7 +100,7 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
     ]
     with pytest.raises(ValidationError):
         loaded.id = "renamed"
-    detached = Task("sample")
+    detached = Task(id="sample")
     with pytest.raises(ValidationError):
         detached.save()
     with pytest.raises(RecordExistsError):
@@ -126,7 +128,7 @@ def test_agent_record_registries(tmp_path: Path) -> None:
         "autoresearch",
         "interactive",
     ]
-    context = Context("literature", markdown="Sources")
+    context = Context(id="literature", markdown="Sources")
     context.save(config.contexts_dir / "literature/context.md")
     assert load_context("literature", config=config).markdown == "Sources"
     action = load_action("propose", entity="experiment", config=config)

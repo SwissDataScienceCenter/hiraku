@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
 from datetime import UTC
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.config import HirakuConfig
 from hiraku.data import Experiment, Run, Task, load_experiment
@@ -23,15 +23,14 @@ def test_metrics_entrypoints_inheritance_and_guarded_delete(tmp_path: Path) -> N
     experiment = Experiment.create("exp", task=task, config=config)
     assert experiment.is_proposal
     assert experiment.metrics == task.metrics
-    assert task.entrypoint("train")["command"] == ["python", "train.py"]
+    assert task.entrypoint("train").command == ["python", "train.py"]
     with pytest.raises(EntrypointNotFoundError):
         experiment.entrypoint("train")
     with pytest.raises(ValidationError):
         task.delete(config=config)
 
-    invalid = Task("invalid", metrics=[{"name": "loss", "direction": "sideways"}])
-    with pytest.raises(ValidationError):
-        invalid.validate()
+    with pytest.raises(PydanticValidationError):
+        Task(id="invalid", metrics=[{"name": "loss", "direction": "sideways"}])
 
 
 def test_experiment_commit_is_passive_metadata_without_git(tmp_path: Path) -> None:
@@ -68,10 +67,8 @@ def test_experiment_commit_requires_a_full_lowercase_hash(
 ) -> None:
     config = HirakuConfig.init(tmp_path)
     task = Task.create("task", config=config)
-    experiment = Experiment("exp", task=task, commit=commit)  # type: ignore[arg-type]
-
     with pytest.raises(ValidationError, match="full lowercase Git hash"):
-        experiment.save(config.tasks_dir / "task" / "experiments" / "exp.md")
+        Experiment(id="exp", task_id=task.id, commit=commit)  # type: ignore[arg-type]
 
 
 def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
@@ -107,7 +104,7 @@ def test_run_is_immutable_and_missing_csv_is_empty(tmp_path: Path) -> None:
     task = Task.create("task", config=config)
     assert task.runs(config=config) == []
     run = Run(id="one", metrics={}, params={})
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(PydanticValidationError):
         run.id = "two"  # type: ignore[misc]
 
 

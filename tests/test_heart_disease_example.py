@@ -57,9 +57,12 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
     git(project, "commit", "-m", "initialize Heart Disease example")
     shared_commit = git(project, "rev-parse", "HEAD")
     assert len(shared_commit) == 40
-    assert hashlib.sha256(
-        (project / "data" / "processed.cleveland.data").read_bytes()
-    ).hexdigest() == DATA_SHA256
+    assert (
+        hashlib.sha256(
+            (project / "data" / "processed.cleveland.data").read_bytes()
+        ).hexdigest()
+        == DATA_SHA256
+    )
 
     invoke(
         runner,
