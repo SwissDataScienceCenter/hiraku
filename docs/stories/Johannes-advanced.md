@@ -10,7 +10,6 @@ hiraku task create heart-disease --template guided
 git switch -c hiraku/task/heart-disease
 /hiraku "define the fixed heart-disease evaluation protocol"
 $EDITOR tasks/heart-disease/task.md
-$EDITOR tasks/heart-disease/launch.yml
 
 # 2. Create independent Experiment branches from the task baseline.
 # Hiraku records each derived branch and switches to it when possible.
@@ -29,9 +28,9 @@ hiraku experiment create heart-disease:random-forest \
 # implementations and Runs can progress concurrently without branch switching.
 git switch hiraku/task/heart-disease
 git worktree add ../heart-logistic \
-  hiraku/experiment/heart-disease/logistic-baseline
+  hiraku/experiments/heart-disease/logistic-baseline
 git worktree add ../heart-random-forest \
-  hiraku/experiment/heart-disease/random-forest
+  hiraku/experiments/heart-disease/random-forest
 
 # 4. In each worktree, implement and commit one coherent attempt.
 cd ../heart-logistic
@@ -61,7 +60,7 @@ hiraku experiment list heart-disease
 # Acceptance alone never moves or mutates the task branch.
 cd /path/to/project
 git switch hiraku/task/heart-disease
-git merge --no-ff hiraku/experiment/heart-disease/random-forest
+git merge --no-ff hiraku/experiments/heart-disease/random-forest
 
 # 8. Confirm exact ancestry, synthesize the reviewed findings, and update the
 # pull request or merge request from the canonical task branch.

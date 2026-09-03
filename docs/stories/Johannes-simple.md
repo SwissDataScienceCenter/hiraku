@@ -13,7 +13,6 @@ git switch -c hiraku/task/heart-disease
 # metrics, and permitted entrypoints; review them before implementation.
 /hiraku "define the fixed heart-disease evaluation protocol"
 $EDITOR tasks/heart-disease/task.md
-$EDITOR tasks/heart-disease/launch.yml
 
 # 3. Create one Experiment for a coherent, testable attempt.
 hiraku experiment create heart-disease:logistic-baseline \

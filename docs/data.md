@@ -4,14 +4,15 @@
 
 Each task is defined by a unique id and corresponding markdown file.
 ```text
-tasks/<task-id>/task.md
+hiraku/tasks/{task_id}/task.md
 ```
 It synthesizes task documentation, experiment branches, runs, analysis, open questions, reviewed findings, conclusions, decisions, and a final changelog. The markdown is continuously updated throughout the task lifecycle and provides a primary reviewing surface for the data scientist (for example, task.md my be used as description for a pull/merge request). 
 
 At any time, there is a single **active task**. `hiraku task set <task-id>` records it in the local Hiraku context. Commands that accept `--task` use it as an explicit override; otherwise they resolve the task from `HIRAKU_TASK_ID`, the local context, or the current task branch. Creating a task makes it active unless `--no-set` is supplied. 
 
 
-The markdown frontmatter records key-value pairs as machine-readable yaml. Markdown is optional, if the user does not use markdown, the task file can also be saved as yaml (`task.yml`). 
+The Markdown front matter records key-value pairs as machine-readable YAML. All
+records use Markdown files; the Markdown body may be empty.
 
 Hiraku differentiates core fields and user fields. Core fields carry semantic meaning and are directly used by the Hiraku framework to manage experiments and tasks. User fields  extend functionality, define defaults, configure agent instructions, or add user managed output when listing tasks or experiments.
 
@@ -67,13 +68,19 @@ Task entrypoints support operations that apply to the task as a whole, such as p
 
 ### Experiment records
 
-An experiment is a record that points to a code commit and may define execution entrypoints. The code commit can be initially empty; experiments without a code commit are called proposals. It is stored within the task directory:
+An experiment is a record that points to a code commit and may define execution
+entrypoints. The code commit can be initially empty; experiments without a code
+commit are called proposals. A bound `commit` is stored as a full lowercase Git
+hash: 40 hexadecimal characters for SHA-1 or 64 for SHA-256. It is stored within
+the task directory:
 ```bash
-tasks/<task-id>/experiments/<experiment-id>.yml
+hiraku/tasks/{task_id}/experiments/{experiment_id}.md
 ```
 It is a mutable record that can be updated throughout the experiment lifecycle. 
 
-Experiment records form a local, file-backed database under `tasks/<task-id>/experiments/`. A record may use compact YAML (`<experiment-id>.yml`) or Markdown with YAML front matter (`<experiment-id>.md`). YAML is the default. A task cannot contain both extensions for the same experiment ID. 
+Experiment records form a local, file-backed database under
+`hiraku/tasks/{task_id}/experiments/`. Every record is a Markdown file with YAML
+front matter and an optional Markdown body.
 
 
 Hiraku does not require the records to be committed; this is a user choice. When listing experiments, Hiraku will use the following conventions:
@@ -86,7 +93,8 @@ As for tasks, experiments define core fields and user-defined fields.
 - default user fields are: `summary`, `hypothesis`, `type`, `status`, `decision`, `conclusion`
 
 
-```yaml
+```markdown
+---
 id: logistic-baseline
 task_id: heart-disease
 commit:
@@ -104,13 +112,14 @@ entrypoints:
 conclusion:
 created_at: "2026-08-26T10:15:30.123456Z"
 updated_at: "2026-08-26T10:15:30.123456Z"
+---
 ```
 
 Experiment creation requires only `id`. `task_id` defaults to the active task. At creation Hiraku records UTC ISO-8601 `created_at` and `updated_at` timestamps and initializes unspecified fields to empty values. The new experiment and its task become active unless `--no-set` is supplied. The optional `branch` defines an experiment branch used for implementing the experiment. This enables parallel exploration of hypotheses or isolated experiment worktrees. `entrypoints` defines experiment-scoped execution entrypoints.
 
 An optional **active experiment** is selected with `hiraku experiment set <experiment-id>`. Setting an experiment also sets its owning task. Commands that accept `--experiment` use it as an explicit override; otherwise they resolve the experiment from the launch target, `HIRAKU_EXPERIMENT_ID`, or the local context.
 
-Active selections are stored in `.hiraku/context.yml`:
+Active selections are stored in the project configuration, `hiraku.yml`:
 
 ```yaml
 task_id: heart-disease
@@ -118,9 +127,12 @@ experiment_id: logistic-baseline
 program_id: interactive
 ```
 
-The context file is local state and must be excluded from Git. Environment variables provide non-persistent overrides for CI, agents, and isolated commands; `set` commands update the context file rather than attempting to modify the parent shell environment.
+Environment variables provide non-persistent overrides for CI, agents, and
+isolated commands; `set` commands update `hiraku.yml` rather than attempting to
+modify the parent shell environment.
 
-Experiments may use Markdown for narrative documentation, the frontmatter follows the same yaml structure as outlined above
+Experiment Markdown bodies provide narrative documentation; their YAML front
+matter follows the same structure outlined above.
 
 ```markdown
 ---

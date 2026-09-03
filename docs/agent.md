@@ -14,13 +14,16 @@ hiraku program update my-program --summary "Custom bounded workflow"
 hiraku program delete my-program
 ```
 
-`create` makes the new program active unless `--no-set` is supplied. `set` updates `program_id` in `.hiraku/context.yml`; `update` modifies the program record. Direct editing remains supported. Deleting a program that is active or referenced by a task is rejected unless explicitly forced.
+`create` makes the new program active unless `--no-set` is supplied. `set`
+updates `program_id` in `hiraku.yml`; `update` modifies the Markdown program
+record. Direct editing remains supported. Deleting a program that is active or
+referenced by a task is rejected unless explicitly forced.
 
 Programs take precedence in this order:
 ```
 --program <program-id>
 HIRAKU_PROGRAM_ID
-.hiraku/context.yml
+hiraku.yml
 the task record's `program` field
 the repository configuration's `program` field
 interactive
@@ -28,7 +31,7 @@ interactive
 
 Programs are saved in the Hiraku folder:
 ```
-.hiraku/programs/<program-id>/program.md
+hiraku/programs/{program_id}/program.md
 ```
 
 By default, Hiraku ships with two workflows:
@@ -88,7 +91,13 @@ The skill acts as a router for focused workflows that are loaded when required:
 
 > ToDo: `hiraku-auto` or `hiraku-agent` ?
 
-The hiraku agent invokes actions that are defined in `hiraku/actions/<entity>/<action-id>.md`. E.g., `hiraku auto experiment create` invokes `hiraku/actions/experiment/create/action.md`. The action defines the agent's instructions, permissions, and boundaries. The user can define custom actions for their own workflows. Action combine deterministic hooks with natural-language instructions.
+The hiraku agent invokes actions defined at
+`hiraku/actions/{entity}/{action_id}/action.md`. For example,
+`hiraku auto experiment create` invokes
+`hiraku/actions/experiment/create/action.md`. The action defines the agent's
+instructions, permissions, and boundaries. Users can define custom actions for
+their own workflows. Actions combine deterministic hooks with natural-language
+instructions.
 
 ```bash
 hiraku-auto experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic --agent pi --program interactive
@@ -98,8 +107,128 @@ hiraku-auto experiment create heart-disease:logistic-baseline --summary "Logisti
 hiraku-auto experiment create heart-disease:logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic --agent pi --program autoresearch
 ```
 
+##### Action hooks
+
+An action may provide deterministic behavior in a Python module stored locally
+with its instructions:
+
+```text
+hiraku/actions/experiment/implement/
+├── action.md
+└── hooks.py
+```
+
+The action record opts into the module explicitly. A `hooks.py` file that is
+not declared must not be loaded or executed.
+
+```markdown
+---
+id: implement
+entity: experiment
+hooks: hooks.py
+---
+# Implement an experiment
+
+Implement the selected proposal and expose the changes for review.
+```
+
+The initial hook contract consists of five optional synchronous functions:
+
+```python
+def precondition(context: ReadonlyActionContext) -> ConditionResult: ...
+def before(context: ActionContext) -> None: ...
+def after(context: ActionContext, result: ActionResult) -> None: ...
+def postcondition(
+    context: ReadonlyActionContext,
+    result: ActionResult,
+) -> ConditionResult: ...
+def cleanup(
+    context: ActionContext,
+    result: ActionResult | None,
+    error: BaseException | None,
+) -> None: ...
+```
+
+Conditions inspect state and return a structured pass or failure result.
+`before` and `after` implement deterministic side effects, while `cleanup` is
+always called for best-effort finalization. The action lifecycle is:
+
+```text
+resolve action, target, arguments, program, and context
+→ load and validate hooks
+→ precondition
+→ before
+→ invoke agent
+→ after
+→ postcondition
+→ cleanup
+```
+
+`after` and `postcondition` run only when agent invocation succeeds. `cleanup`
+runs after every attempt, including precondition, hook, and agent failures. A
+failed condition is expected inapplicability and is reported separately from a
+hook error. A cleanup error is reported without hiding the original failure.
+
+The runtime constructs a single invocation-scoped context rather than
+injecting a changing list of positional objects. It contains the resolved
+action, program, project configuration, task, experiment, referenced context
+records, invocation arguments, and initialized Hiraku services such as Git,
+tracking, event recording, and command execution. Convenience methods such as
+`require_task()` and `require_experiment()` provide clear failures when an
+action requires a particular scope. `ActionResult` separately records the
+agent outcome, summary, changed files, structured output, and provider
+metadata.
+
+For example:
+
+```python
+from hiraku.agent.hooks import (
+    ActionContext,
+    ActionResult,
+    ConditionResult,
+    ReadonlyActionContext,
+)
+
+
+def precondition(context: ReadonlyActionContext) -> ConditionResult:
+    experiment = context.require_experiment()
+    if experiment.commit is not None:
+        return ConditionResult.fail(
+            "Experiment is already implemented.",
+            commit=experiment.commit,
+        )
+    return ConditionResult.pass_()
+
+
+def after(context: ActionContext, result: ActionResult) -> None:
+    context.services.events.record(
+        "implementation-completed",
+        changed_files=result.changed_files,
+    )
+
+
+def postcondition(
+    context: ReadonlyActionContext,
+    result: ActionResult,
+) -> ConditionResult:
+    if not result.changed_files:
+        return ConditionResult.fail("The agent made no file changes.")
+    return ConditionResult.pass_()
+```
+
+The hook module is loaded directly from its declared path under a unique module
+name; its directory is not added to `sys.path`. The runtime validates all hook
+signatures before running any hook. Async hooks, hook classes, decorators, and
+multiple functions per phase are outside the initial contract.
+
+In-process Python hooks are trusted project extension code, not a security
+boundary. Invoking an action authorizes its declared hook module in the same
+sense as running other repository code. Program permissions can restrict
+whether hooks may run, but actual isolation belongs to a future worker process
+or sandbox. Read-only context types communicate and help enforce that
+conditions should not mutate state, but they do not make untrusted Python safe.
+
 
 
 #### Hiraku Harness
    > ToDo: Create Pi extension that explicitly parses programs and enforces the workflow and boundaries.
-
