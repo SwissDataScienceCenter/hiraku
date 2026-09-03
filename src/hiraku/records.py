@@ -1,144 +1,130 @@
-"""Mapping-like Markdown metadata records."""
+"""Pydantic-backed Markdown metadata records."""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator, Mapping, MutableMapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, ClassVar, Self
+from typing import Any, Self
 
 import yaml
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from .errors import RecordExistsError, RecordNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml
+from .validation import validate_identifier
 
-_SAFE_ID = re.compile(r'^[^<>:"/\\|?*\x00-\x1f\x7f]+$')
 _FRONT_MATTER = re.compile(
     r"\A---\r?\n(.*?)^---[ \t]*(?:\r?\n|\Z)", re.MULTILINE | re.DOTALL
 )
 
 
-def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
-    if (
-        not isinstance(identifier, str)
-        or not identifier
-        or identifier in {".", ".."}
-        or identifier != identifier.strip()
-        or identifier.endswith(".")
-        or not _SAFE_ID.fullmatch(identifier)
-    ):
-        raise ValidationError(f"Invalid {label}: {identifier!r}")
-
-
-def _validate_yaml_value(value: Any, path: str = "field") -> None:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return
-    if isinstance(value, list | tuple):
-        for index, item in enumerate(value):
-            _validate_yaml_value(item, f"{path}[{index}]")
-        return
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise ValidationError(f"Unsupported non-string YAML key in {path}")
-            _validate_yaml_value(item, f"{path}.{key}")
-        return
-    raise ValidationError(f"Unsupported YAML value in {path}: {type(value).__name__}")
-
-
-def _parse_markdown(path: Path) -> tuple[dict[str, Any], str]:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise ValidationError(f"Cannot read record {path}: {exc}") from exc
-    match = _FRONT_MATTER.match(text)
-    if match is None:
-        raise ValidationError(f"Unterminated YAML front matter in {path}")
-    front_matter = match.group(1)
-    try:
-        value = yaml.safe_load(front_matter)
-    except yaml.YAMLError as exc:
-        raise ValidationError(f"Malformed YAML front matter in {path}: {exc}") from exc
-    if not isinstance(value, Mapping):
-        raise ValidationError(f"YAML front matter must be a mapping in {path}")
-    data = dict(value)
-    _validate_yaml_value(data)
-    return data, text[match.end() :]
-
-
-class Record(MutableMapping[str, Any]):
+class Record(BaseModel):
     """Base class for a detached or persisted Markdown record."""
 
-    _core_fields: ClassVar[set[str]] = {"id"}
+    model_config = ConfigDict(
+        extra="allow",
+        validate_assignment=True,
+        validate_by_name=True,
+    )
 
-    def __init__(self, record_id: str, *, markdown: str = "", **fields: Any) -> None:
-        object.__setattr__(self, "_data", {"id": record_id, **fields})
-        object.__setattr__(self, "markdown", markdown)
-        object.__setattr__(self, "path", None)
-        object.__setattr__(self, "_persisted_id", None)
+    id: str = Field(min_length=1)
+    markdown: str = ""
 
-    @property
-    def id(self) -> str:
-        return self._data["id"]
+    # Persistence metadata (not part of the record's data)
+    path: Path | None = Field(default=None, exclude=True)
+    _persisted_id: str | None = PrivateAttr(default=None)
 
-    @id.setter
-    def id(self, value: str) -> None:
-        if self._persisted_id is not None and value != self._persisted_id:
-            raise ValidationError(
-                f"Record ID is immutable after persistence: {self.id}"
-            )
-        self._data["id"] = value
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            raise TypeError("record ID must be a string")
+        validate_identifier(value, label="record ID")
+        return value
 
-    def __getattr__(self, name: str) -> Any:
-        if name in self._core_fields:
-            return self._data.get(name)
-        raise AttributeError(name)
+    @field_validator("markdown")
+    @classmethod
+    def validate_markdown(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            raise TypeError("Markdown body must be a string")
+        return value
+
+    @model_validator(mode="after")
+    def validate_yaml_fields(self) -> Self:
+        type(self)._validate_yaml_value(self.to_dict())
+        return self
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name in self._core_fields:
-            if name == "id":
-                type(self).id.fset(self, value)  # type: ignore[union-attr]
-            else:
-                self._data[name] = value
-        else:
-            object.__setattr__(self, name, value)
-
-    def __getitem__(self, key: str) -> Any:
-        return self._data[key]
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        if key == "id":
-            self.id = value
-        else:
-            self._data[key] = value
-
-    def __delitem__(self, key: str) -> None:
-        if key == "id":
-            raise ValidationError("A record ID cannot be deleted")
-        del self._data[key]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._data)
-
-    def __len__(self) -> int:
-        return len(self._data)
+        if name == "id":
+            persisted_id = getattr(self, "_persisted_id", None)
+            if persisted_id is not None and value != persisted_id:
+                raise ValidationError(
+                    f"Record ID is immutable after persistence: {persisted_id}"
+                )
+        super().__setattr__(name, value)
 
     def to_dict(self) -> dict[str, Any]:
-        return dict(self._data)
+        """Return the serialized record fields, excluding persistence metadata."""
+        return self.model_dump(
+            exclude={"markdown", "path"},
+            exclude_none=False,
+            exclude_unset=True,
+        )
 
-    def validate(self) -> None:
-        validate_identifier(self.id)
-        if not isinstance(self.markdown, str):
-            raise ValidationError(f"Markdown body for {self.id!r} must be a string")
-        _validate_yaml_value(self._data)
+    @classmethod
+    def _validate_yaml_value(cls, value: Any, path: str = "field") -> None:
+        """Validate that a value can be represented in YAML front matter."""
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return
+        if isinstance(value, list | tuple):
+            for index, item in enumerate(value):
+                cls._validate_yaml_value(item, f"{path}[{index}]")
+            return
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise ValidationError(f"Unsupported non-string YAML key in {path}")
+                cls._validate_yaml_value(item, f"{path}.{key}")
+            return
+        raise ValidationError(
+            f"Unsupported YAML value in {path}: {type(value).__name__}"
+        )
+
+    @classmethod
+    def _parse_markdown(cls, path: Path) -> tuple[dict[str, Any], str]:
+        """Parse front matter and body for a record file."""
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ValidationError(f"Cannot read record {path}: {exc}") from exc
+        match = _FRONT_MATTER.match(text)
+        if match is None:
+            raise ValidationError(f"Unterminated YAML front matter in {path}")
+        try:
+            value = yaml.safe_load(match.group(1))
+        except yaml.YAMLError as exc:
+            raise ValidationError(
+                f"Malformed YAML front matter in {path}: {exc}"
+            ) from exc
+        if not isinstance(value, Mapping):
+            raise ValidationError(f"YAML front matter must be a mapping in {path}")
+        return dict(value), text[match.end() :]
 
     @classmethod
     def _construct_loaded(cls, data: dict[str, Any], markdown: str, path: Path) -> Self:
-        identifier = data.pop("id", None)
-        record = cls(identifier, markdown=markdown, **data)
-        object.__setattr__(record, "path", path)
-        object.__setattr__(record, "_persisted_id", record.id)
-        record.validate()
+        # Validation occurs here through model_validate().
+        record = cls.model_validate({**data, "markdown": markdown})
+
+        record.path = path
+        record._persisted_id = record.id
         return record
 
     @classmethod
@@ -147,7 +133,7 @@ class Record(MutableMapping[str, Any]):
         path = Path(path).expanduser().absolute()
         if not path.is_file():
             raise RecordNotFoundError(f"{cls.__name__} record not found: {path}")
-        data, markdown = _parse_markdown(path)
+        data, markdown = cls._parse_markdown(path)
         return cls._construct_loaded(data, markdown, path)
 
     @classmethod
@@ -158,7 +144,6 @@ class Record(MutableMapping[str, Any]):
 
     def save(self, path: Path | str | None = None, *, overwrite: bool = False) -> Path:
         """Persist the record, accepting a path only for its first save."""
-        self.validate()
         if self.path is None and path is None:
             raise ValidationError(
                 f"Detached {type(self).__name__} {self.id!r} requires a save path"
@@ -170,22 +155,18 @@ class Record(MutableMapping[str, Any]):
                 f"Persisted {type(self).__name__} {self.id!r} cannot move from "
                 f"{self.path} to {target}"
             )
-        if self._persisted_id is not None and self.id != self._persisted_id:
-            raise ValidationError(
-                f"Record ID is immutable after persistence: {self._persisted_id}"
-            )
         same_record = self.path == target
         if target.exists() and not same_record and not overwrite:
             raise RecordExistsError(
                 f"{type(self).__name__} record already exists: {target}"
             )
-        content = f"---\n{dump_yaml(self._data)}---\n{self.markdown}"
+        content = f"---\n{dump_yaml(self.to_dict())}---\n{self.markdown}"
         try:
             atomic_write(target, content)
         except OSError as exc:
             raise ValidationError(f"Cannot save record at {target}: {exc}") from exc
-        object.__setattr__(self, "path", target)
-        object.__setattr__(self, "_persisted_id", self.id)
+        self.path = target
+        self._persisted_id = self.id
         return target
 
     def delete(self) -> None:
@@ -202,4 +183,4 @@ class Record(MutableMapping[str, Any]):
             target.unlink()
         except OSError as exc:
             raise ValidationError(f"Cannot delete record at {target}: {exc}") from exc
-        object.__setattr__(self, "path", None)
+        self.path = None
