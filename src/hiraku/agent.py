@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+
+from pydantic import model_validator
 
 from .config import HirakuConfig
 from .errors import ValidationError
-from .records import Record, validate_identifier
+from .records import Record
+from .validation import validate_identifier
 
 
 class Program(Record):
@@ -21,31 +23,12 @@ class Context(Record):
 class Action(Record):
     """An entity-scoped one-step agent action record."""
 
-    _core_fields = {"id", "entity"}
+    entity: str
 
-    def __init__(
-        self,
-        action_id: str,
-        *,
-        entity: str | None = None,
-        markdown: str = "",
-        **fields: Any,
-    ) -> None:
-        if entity is not None:
-            fields = {"entity": entity, **fields}
-        super().__init__(action_id, markdown=markdown, **fields)
-
-    @property
-    def entity(self) -> str:
-        return self._data.get("entity")
-
-    @entity.setter
-    def entity(self, value: str) -> None:
-        self._data["entity"] = value
-
-    def validate(self) -> None:
-        super().validate()
+    @model_validator(mode="after")
+    def validate_action_fields(self) -> Action:
         validate_identifier(self.entity, label="action entity")
+        return self
 
 
 def load_program(program_id: str, *, config: HirakuConfig | None = None) -> Program:
