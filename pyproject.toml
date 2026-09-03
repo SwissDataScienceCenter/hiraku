@@ -8,7 +8,11 @@ version = "0.1.0"
 description = "Core metadata and launch APIs for AI-assisted data science"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["Click>=8.1", "PyYAML>=6.0"]
+dependencies = [
+    "Click>=8.1",
+    "pydantic>=2.13.5",
+    "PyYAML>=6.0",
+]
 
 [project.scripts]
 hiraku = "hiraku.cli:main"
@@ -17,6 +21,7 @@ hiraku = "hiraku.cli:main"
 mlflow = ["mlflow>=2.0"]
 dev = [
   "pytest>=8",
+  "pytest-xdist>=3.8.0",
   "ruff>=0.8",
   "build>=1.2",
   "numpy==2.4.6",
@@ -41,3 +46,4 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["integration: end-to-end integration tests"]
+addopts = "-n auto --dist loadscope"
