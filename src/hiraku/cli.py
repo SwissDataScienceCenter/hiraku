@@ -52,7 +52,8 @@ from .git import GitRepository
 from .io import dump_yaml
 from .launch import launch as launch_entrypoint
 from .launch import render_arguments
-from .records import Record, validate_identifier
+from .records import Record
+from .validation import validate_identifier
 
 R = TypeVar("R", bound=Record)
 
@@ -301,7 +302,6 @@ def _apply_update(
         record.pop(key, None)
     if body is not None:
         record.markdown = body
-    record.validate()
     record.save()
     return record
 
@@ -414,15 +414,15 @@ def _action_reference(reference: str) -> tuple[str, str]:
 
 
 def _record_rows(records: Sequence[Record], columns: Sequence[str]) -> list[list[Any]]:
-    return [[record.get(column) for column in columns] for record in records]
+    return [[record.to_dict().get(column) for column in columns] for record in records]
 
 
 def _entrypoint_rows(entrypoints: Mapping[str, Entrypoint]) -> list[list[str]]:
     rows: list[list[str]] = []
     for name, entrypoint in entrypoints.items():
         command = [
-            *entrypoint["command"],
-            *render_arguments(entrypoint.get("args", {})),
+            *entrypoint.command,
+            *render_arguments(entrypoint.args),
         ]
         rows.append([name, shlex.join(command)])
     return rows
@@ -519,8 +519,6 @@ def task_create(
     repository = GitRepository(config)
     selected_branch = fields.pop("branch")
     repository.validate_branch(selected_branch)
-    record = Task(task_id, markdown=body, branch=selected_branch, **fields)
-    record.validate()
     created = Task.create(
         task_id,
         markdown=body,
@@ -722,15 +720,6 @@ def experiment_create(
         if repository is not None and commit is not None
         else None
     )
-    record = Experiment(
-        experiment_id,
-        task=task,
-        commit=resolved_commit,
-        markdown=body,
-        branch=selected_branch,
-        **fields,
-    )
-    record.validate()
     created = Experiment.create(
         experiment_id,
         task=task,
@@ -1085,7 +1074,7 @@ def action_create(
     entity, identifier = _action_reference(action)
     body = _markdown(markdown_file) or ""
     fields, _ = _field_changes(set_values, (), {}, immutable={"id", "entity"})
-    record = Action(identifier, entity=entity, markdown=body, **fields)
+    record = Action(id=identifier, entity=entity, markdown=body, **fields)
     path = state.config.actions_dir / entity / identifier / "action.md"
     if path.exists():
         raise RecordExistsError(f"Action record already exists: {path}")
@@ -1350,14 +1339,14 @@ def run_list(
     param_names = _parse_names(params, "parameter")
     declarations = selected_experiment.metrics if selected_experiment else task.metrics
     if metrics is None:
-        metric_names = [item["name"] for item in declarations]
+        metric_names = [item.name for item in declarations]
     query: dict[str, Any] = {}
     if sort_name is not None:
         query["sort"] = sort_name
         if ascending or descending:
             query["ascending"] = ascending
         else:
-            directions = {item["name"]: item["direction"] for item in declarations}
+            directions = {item.name: item.direction for item in declarations}
             query["ascending"] = directions.get(sort_name) != "maximize"
     if limit is not None:
         query["limit"] = limit
