@@ -7,7 +7,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .config import HirakuConfig
 from .errors import LaunchError, ValidationError
@@ -23,26 +23,6 @@ _ATTRIBUTION_KEYS = {
     "HIRAKU_COMMIT",
     "HIRAKU_ENTRYPOINT",
 }
-
-
-def validate_entrypoint(entrypoint: Mapping[str, Any]) -> None:
-    command = entrypoint.get("command")
-    if (
-        not isinstance(command, Sequence)
-        or isinstance(command, str | bytes)
-        or not command
-        or any(not isinstance(item, str) or not item for item in command)
-    ):
-        raise ValidationError(
-            "Entrypoint command must be a non-empty sequence of strings"
-        )
-    arguments = entrypoint.get("args", {})
-    if not isinstance(arguments, Mapping):
-        raise ValidationError("Entrypoint args must be a mapping")
-    render_arguments(arguments)
-    unknown = set(entrypoint) - {"command", "args"}
-    if unknown:
-        raise ValidationError(f"Unknown entrypoint fields: {sorted(unknown)}")
 
 
 def render_arguments(arguments: Mapping[str, ArgumentValue]) -> tuple[str, ...]:
@@ -118,7 +98,6 @@ def launch(
     from .data import load_experiment, load_task
     from .git import GitRepository
 
-    validate_entrypoint(entrypoint)
     selected = config or HirakuConfig.discover()
     if experiment_id is not None and task_id is None:
         raise ValidationError("experiment_id requires an explicit task_id")
@@ -128,12 +107,12 @@ def launch(
         if experiment_id is not None
         else None
     )
-    defaults = dict(entrypoint.get("args", {}))
+    defaults = dict(entrypoint.args)
     if args is not None:
         if not isinstance(args, Mapping):
             raise ValidationError("Call-time args must be a mapping")
         defaults.update(args)
-    command = [*entrypoint["command"], *render_arguments(defaults)]
+    command = [*entrypoint.command, *render_arguments(defaults)]
     dispatcher = _dispatcher(selected, dispatch)
     injected: dict[str, str] = {}
     if name is not None:
