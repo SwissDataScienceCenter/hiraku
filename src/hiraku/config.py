@@ -2,23 +2,16 @@
 
 from __future__ import annotations
 
-import shutil
-from collections.abc import Mapping
-from contextlib import suppress
-from importlib.resources import as_file, files
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
-from .errors import (
-    HirakuError,
-    ProjectExistsError,
-    ProjectNotFoundError,
-    ValidationError,
-)
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+
+from .errors import ProjectNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
 
 
-class HirakuConfig:
+class HirakuConfig(BaseModel):
     """A discovered Hiraku project and its validated configuration."""
 
     DEFAULTS: ClassVar[dict[str, Any]] = {
@@ -31,133 +24,27 @@ class HirakuConfig:
         "active_task_id": None,
         "active_experiment_id": None,
     }
-    _STRING_KEYS: ClassVar[set[str]] = {
-        "hiraku_dir",
-        "default_dispatch",
-        "task_branch",
-        "experiment_branch",
-        "default_program",
-        "tracking_backend",
-    }
+    model_config = ConfigDict(extra="allow", validate_assignment=True, populate_by_name=True)
 
-    def __init__(self, path: Path | str, data: Mapping[str, Any] | None = None) -> None:
-        self.path = Path(path).absolute()
-        self.root = self.path.parent
-        loaded = load_yaml_mapping(self.path) if data is None else dict(data)
-        self._data = {**self.DEFAULTS, **loaded}
-        self._validate()
+    path: Path = Field(exclude=True)
+    root: Path = Field(exclude=True)
+    hiraku_dir_name: str = Field(default=DEFAULTS["hiraku_dir"], alias="hiraku_dir", min_length=1)
+    default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
+    task_branch: str = Field(default=DEFAULTS["task_branch"], min_length=1)
+    experiment_branch: str = Field(
+        default=DEFAULTS["experiment_branch"], min_length=1
+    )
+    default_program: str = Field(default=DEFAULTS["default_program"], min_length=1)
+    tracking_backend: Literal["csv", "mlflow"] = DEFAULTS["tracking_backend"]
+    active_task_id: str | None = DEFAULTS["active_task_id"]
+    active_experiment_id: str | None = DEFAULTS["active_experiment_id"]
+    _hiraku_dir: Path = PrivateAttr()
 
-    @classmethod
-    def discover(cls, start: Path | str | None = None) -> HirakuConfig:
-        candidate = Path.cwd() if start is None else Path(start)
-        candidate = candidate.expanduser().absolute()
-        if candidate.is_file():
-            candidate = candidate.parent
-        for directory in (candidate, *candidate.parents):
-            marker = directory / "hiraku.yml"
-            if marker.is_file():
-                return cls(marker)
-        raise ProjectNotFoundError(f"No hiraku.yml found from {candidate}")
-
-    @classmethod
-    def init(
-        cls, root: Path | str = ".", *, install_skill: bool = True
-    ) -> HirakuConfig:
-        project_root = Path(root).expanduser().absolute()
-        marker = project_root / "hiraku.yml"
-        if marker.exists():
-            raise ProjectExistsError(f"Hiraku project already exists at {marker}")
-        created_files: list[Path] = []
-        created_dirs: list[Path] = []
-        root_existed = project_root.exists()
-        data = dict(cls.DEFAULTS)
-        try:
-            project_root.mkdir(parents=True, exist_ok=True)
-            if not root_existed:
-                created_dirs.append(project_root)
-            atomic_write(marker, dump_yaml(data))
-            created_files.append(marker)
-            config = cls(marker, data)
-            for directory in (
-                config.tasks_dir,
-                config.programs_dir,
-                config.actions_dir,
-                config.contexts_dir,
-                config.dispatch_dir,
-            ):
-                if not directory.exists():
-                    directory.mkdir(parents=True)
-                    created_dirs.append(directory)
-            resource_root = files("hiraku.resources")
-            copies = [
-                (resource_root / "programs", config.programs_dir),
-                (resource_root / "actions", config.actions_dir),
-                (resource_root / "dispatch", config.dispatch_dir),
-            ]
-            if install_skill:
-                copies.append(
-                    (resource_root / "skill", project_root / ".agents/skills/hiraku")
-                )
-            for source, target in copies:
-                with as_file(source) as source_path:
-                    cls._copy_resource_tree(
-                        source_path, target, created_files, created_dirs
-                    )
-            launcher = config.dispatch_dir / "launch.sh"
-            launcher.chmod(launcher.stat().st_mode | 0o111)
-            return config
-        except Exception as exc:
-            for path in reversed(created_files):
-                path.unlink(missing_ok=True)
-            for path in sorted(
-                created_dirs, key=lambda item: len(item.parts), reverse=True
-            ):
-                with suppress(OSError):
-                    path.rmdir()
-            if isinstance(exc, HirakuError):
-                raise
-            raise ValidationError(
-                f"Could not initialize Hiraku project at {project_root}: {exc}"
-            ) from exc
-
-    @staticmethod
-    def _copy_resource_tree(
-        source: Path, target: Path, created_files: list[Path], created_dirs: list[Path]
-    ) -> None:
-        missing: list[Path] = []
-        current = target
-        while not current.exists():
-            missing.append(current)
-            current = current.parent
-        for directory in reversed(missing):
-            directory.mkdir()
-            created_dirs.append(directory)
-        for item in source.rglob("*"):
-            relative = item.relative_to(source)
-            destination = target / relative
-            if item.is_dir():
-                if not destination.exists():
-                    destination.mkdir(parents=True)
-                    created_dirs.append(destination)
-            elif destination.exists():
-                raise ValidationError(
-                    "Initialization resource would overwrite existing file: "
-                    f"{destination}"
-                )
-            else:
-                shutil.copyfile(item, destination)
-                created_files.append(destination)
-
-    def _validate(self) -> None:
-        for key in self._STRING_KEYS:
-            if not isinstance(self._data[key], str) or not self._data[key]:
-                raise ValidationError(f"Configuration key {key!r} must be a string")
-        for key in ("active_task_id", "active_experiment_id"):
-            if self._data[key] is not None and not isinstance(self._data[key], str):
-                raise ValidationError(
-                    f"Configuration key {key!r} must be a string or null"
-                )
-        raw = Path(self._data["hiraku_dir"])
+    @model_validator(mode="after")
+    def validate_config(self) -> HirakuConfig:
+        if not self.hiraku_dir_name:
+            raise ValidationError("Configuration key 'hiraku_dir' must be a string")
+        raw = Path(self.hiraku_dir_name)
         if raw.is_absolute():
             resolved = raw.resolve(strict=False)
         else:
@@ -170,12 +57,38 @@ class HirakuConfig:
             raise ValidationError(
                 f"hiraku_dir resolves outside project root {self.root}: {resolved}"
             ) from exc
-        self._hiraku_dir = resolved
+        object.__setattr__(self, "_hiraku_dir", resolved)
+        return self
+
+    @classmethod
+    def load(cls, path: Path | str) -> HirakuConfig:
+        """Load and validate a project configuration from YAML."""
+        marker = Path(path).expanduser().absolute()
+        return cls(path=marker, root=marker.parent, **load_yaml_mapping(marker))
+
+    @classmethod
+    def discover(cls, start: Path | str | None = None) -> HirakuConfig:
+        candidate = Path.cwd() if start is None else Path(start)
+        candidate = candidate.expanduser().absolute()
+        if candidate.is_file():
+            candidate = candidate.parent
+        for directory in (candidate, *candidate.parents):
+            marker = directory / "hiraku.yml"
+            if marker.is_file():
+                return cls.load(marker)
+        raise ProjectNotFoundError(f"No hiraku.yml found from {candidate}")
+
+    @classmethod
+    def init(
+        cls, root: Path | str = ".", *, install_skill: bool = True
+    ) -> HirakuConfig:
+        from .project import ProjectInitializer
+
+        return ProjectInitializer.create(root, install_skill=install_skill)
 
     def save(self) -> None:
-        self._validate()
         try:
-            atomic_write(self.path, dump_yaml(self._data))
+            atomic_write(self.path, dump_yaml(self.to_dict()))
         except OSError as exc:
             raise ValidationError(
                 f"Cannot save configuration at {self.path}: {exc}"
@@ -184,6 +97,14 @@ class HirakuConfig:
     @property
     def hiraku_dir(self) -> Path:
         return self._hiraku_dir
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return only user-managed configuration fields for YAML persistence."""
+        return self.model_dump(
+            by_alias=True,
+            exclude={"path", "root", "_hiraku_dir"},
+            exclude_none=False,
+        )
 
     @property
     def tasks_dir(self) -> Path:
@@ -205,32 +126,20 @@ class HirakuConfig:
     def dispatch_dir(self) -> Path:
         return self.hiraku_dir / "dispatch"
 
-    def __getattr__(self, name: str) -> Any:
-        if name.startswith("_"):
-            raise AttributeError(name)
-        try:
-            return self._data[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
-
-    @property
-    def active_task_id(self) -> str | None:
-        return self._data["active_task_id"]
-
-    @property
-    def active_experiment_id(self) -> str | None:
-        return self._data["active_experiment_id"]
-
     def set_active_task(self, task: str | Any) -> None:
         from .data import Task, load_task
 
         identifier = task.id if isinstance(task, Task) else task
         record = load_task(identifier, config=self)
-        new_data = dict(self._data)
-        new_data["active_task_id"] = record.id
-        if self.active_task_id != record.id:
-            new_data["active_experiment_id"] = None
-        self._replace_data(new_data)
+        old = (self.active_task_id, self.active_experiment_id)
+        try:
+            self.active_task_id = record.id
+            if old[0] != record.id:
+                self.active_experiment_id = None
+            self.save()
+        except Exception:
+            self.active_task_id, self.active_experiment_id = old
+            raise
 
     def set_active_experiment(self, experiment: str | Any) -> None:
         from .data import Experiment, load_experiment
@@ -241,28 +150,31 @@ class HirakuConfig:
             else experiment
         )
         record = load_experiment(reference, config=self)
-        new_data = dict(self._data)
-        new_data["active_task_id"] = record.task_id
-        new_data["active_experiment_id"] = record.id
-        self._replace_data(new_data)
+        old = (self.active_task_id, self.active_experiment_id)
+        try:
+            self.active_task_id = record.task_id
+            self.active_experiment_id = record.id
+            self.save()
+        except Exception:
+            self.active_task_id, self.active_experiment_id = old
+            raise
 
     def clear_active_experiment(self) -> None:
-        new_data = dict(self._data)
-        new_data["active_experiment_id"] = None
-        self._replace_data(new_data)
+        old = self.active_experiment_id
+        try:
+            self.active_experiment_id = None
+            self.save()
+        except Exception:
+            self.active_experiment_id = old
+            raise
 
     def clear_active_task(self) -> None:
         """Atomically clear the active task and its experiment selection."""
-        new_data = dict(self._data)
-        new_data["active_task_id"] = None
-        new_data["active_experiment_id"] = None
-        self._replace_data(new_data)
-
-    def _replace_data(self, data: dict[str, Any]) -> None:
-        original = self._data
-        self._data = data
+        old = (self.active_task_id, self.active_experiment_id)
         try:
+            self.active_task_id = None
+            self.active_experiment_id = None
             self.save()
         except Exception:
-            self._data = original
+            self.active_task_id, self.active_experiment_id = old
             raise
