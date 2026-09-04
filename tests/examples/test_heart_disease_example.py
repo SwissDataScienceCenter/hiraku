@@ -17,7 +17,7 @@ from hiraku.config import HirakuConfig
 from hiraku.data import load_experiment, load_task
 from hiraku.tracking import CSVBackend
 
-EXAMPLE = Path(__file__).parents[1] / "examples" / "heart-disease"
+EXAMPLE = Path(__file__).parents[2] / "examples" / "heart-disease"
 DATA_SHA256 = "a74b7efa387bc9d108d7d0115d831fe9b414b29ae7124f331b622b4efa0427c8"
 EXPECTED_METRICS = {
     "logistic-baseline": (0.32254890, 0.85526316),
