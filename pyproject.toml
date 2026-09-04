@@ -27,6 +27,8 @@ dev = [
   "numpy==2.4.6",
   "pandas==2.3.3",
   "scikit-learn==1.9.0",
+  "zensical>=0.0.59",
+  "mkdocstrings[python]>=1.0.6",
 ]
 
 [tool.hatch.build.targets.wheel]

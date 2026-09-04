@@ -184,18 +184,10 @@ saving use explicit paths and never discover configuration.
 ### `Record`
 
 ```python
-class Record(MutableMapping[str, Any]):
+class Record(BaseModel):
     id: str
     path: Path | None
     markdown: str
-
-    def __init__(
-        self,
-        record_id: str,
-        *,
-        markdown: str = "",
-        **fields: Any,
-    ) -> None: ...
 
     @classmethod
     def load(cls, path: str | Path) -> Self: ...
@@ -210,11 +202,10 @@ class Record(MutableMapping[str, Any]):
         overwrite: bool = False,
     ) -> Path: ...
     def delete(self) -> None: ...
-    def validate(self) -> None: ...
     def to_dict(self) -> dict[str, Any]: ...
 ```
 
-`Record` is the shared mapping-like base class for Hiraku-owned records. A
+`Record` is the shared Pydantic base class for Hiraku-owned records. A
 record separates structured fields from optional prose:
 
 - Markdown files store structured fields in YAML front matter and expose the
@@ -227,18 +218,17 @@ explicit `.md` location and serializes the structured fields as YAML front
 matter followed by `markdown`. Later `save()` calls reuse that path. Passing a
 different path after persistence is rejected rather than moving the record.
 
-Core fields may also be accessed as attributes. User fields should normally be
-accessed with mapping methods:
+Declared fields are accessed as validated attributes:
 
 ```python
-task["goal"]
-task["dataset_version"]
-task.get("owner")
-task["reviewed"] = True
+task.goal
+task.summary
+task.metrics
 ```
 
-Attribute assignment is not a substitute for mapping assignment for arbitrary
-user fields.
+Unknown extension fields are available through `record.model_extra` and are
+preserved across persistence. Pydantic validates declared fields at model
+construction and assignment time.
 
 `load()` accepts one explicit path. `list()` accepts an iterable of paths, such
 as `directory.glob("*/task.md")`, and returns records ordered by ID so results
@@ -258,7 +248,7 @@ may need updating.
 ### `Metric`
 
 ```python
-class Metric(TypedDict):
+class Metric(BaseModel):
     name: str
     direction: Literal["minimize", "maximize"]
 ```
@@ -273,17 +263,13 @@ stored separately in `Run.metrics`.
 class Task(Record):
     id: str
     branch: str | None
+    goal: str | None
+    question: str | None
+    summary: str | None
     entrypoints: Mapping[str, Entrypoint]
     metrics: Sequence[Metric]
     tracking_backend: str | Mapping[str, Any] | None
-
-    def __init__(
-        self,
-        task_id: str,
-        *,
-        markdown: str = "",
-        **fields: Any,
-    ) -> None: ...
+    mlflow_experiment: str | None
 
     @classmethod
     def create(
@@ -322,8 +308,7 @@ hiraku/tasks/{task_id}/task.md
 
 The only required core field is `id`. `branch`, `entrypoints`, `metrics`, and
 `tracking_backend` are optional semantic fields. `goal`, `question`, and
-`summary` are conventional fields supplied by default templates, but Hiraku
-does not require or interpret them.
+`summary` are explicit optional Task fields and are validated when supplied.
 
 ```yaml
 metrics:
@@ -342,7 +327,11 @@ the task.
 
 ```python
 # An empty body is still a Markdown record with YAML front matter.
-diagnostic = Task("data-diagnostic", markdown="", owner="research-team")
+diagnostic = Task(
+    id="data-diagnostic",
+    markdown="",
+    owner="research-team",  # custom metadata in model_extra
+)
 diagnostic.save(config.tasks_dir / "data-diagnostic" / "task.md")
 
 baseline = Task.create("baseline", markdown="", goal="Establish a baseline")
@@ -364,20 +353,12 @@ delete backend-owned runs or Git branches.
 class Experiment(Record):
     id: str
     task_id: str
+    summary: str | None
+    hypothesis: str | None
     commit: str | None
     branch: str | None
     entrypoints: Mapping[str, Entrypoint]
-    metrics: Sequence[Metric]
-
-    def __init__(
-        self,
-        experiment_id: str,
-        *,
-        task: Task | str | None = None,
-        commit: str | None = None,
-        markdown: str = "",
-        **fields: Any,
-    ) -> None: ...
+    metrics: Sequence[Metric] | None
 
     @property
     def is_proposal(self) -> bool: ...
@@ -446,7 +427,7 @@ file operation. Ambiguous or missing project scope raises
 `AmbiguousReferenceError` or `NoActiveTaskError` rather than guessing.
 
 To turn a proposal into a bound experiment, callers update `commit` through
-normal attribute or mapping mutation and call `save()`. Record persistence does
+normal attribute assignment and call `save()`. Record persistence does
 not verify that the identifier exists in the current repository. `runs()`
 returns backend runs attributed to both its task and experiment.
 
@@ -490,8 +471,7 @@ conflicts. Those operations remain the user's or agent's responsibility.
 ### `Run`
 
 ```python
-@dataclass(frozen=True)
-class Run:
+class Run(BaseModel):
     id: str
     metrics: Mapping[str, Any]
     params: Mapping[str, Any]
@@ -501,7 +481,7 @@ class Run:
     timestamp: datetime | None = None
     entrypoint: str | None = None
     url: str | None = None
-    raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    raw: Mapping[str, Any] = Field(default_factory=dict, repr=False)
 ```
 
 `Run` is an immutable normalized projection of a backend-owned execution trace.
@@ -579,15 +559,15 @@ entrypoints:
 named arguments. Using an argument vector prevents shell-dependent parsing and
 makes the rendered invocation inspectable.
 
-Entrypoints are declarative data stored on their owning record:
+Entrypoints are validated Pydantic models stored on their owning record:
 
 ```python
 ArgumentScalar: TypeAlias = str | int | float | Path
 ArgumentValue: TypeAlias = ArgumentScalar | bool | None | Sequence[ArgumentScalar]
 
-class Entrypoint(TypedDict):
-    command: Sequence[str]
-    args: NotRequired[Mapping[str, ArgumentValue]]
+class Entrypoint(BaseModel):
+    command: list[str]
+    args: dict[str, ArgumentValue] = Field(default_factory=dict)
 ```
 
 Argument mappings use GNU-style rendering. Keys become `--key`, with

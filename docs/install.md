@@ -1,8 +1,7 @@
 # Installation and Configuration
 
 For an introduction to the workflow, see the [examples](examples.md),
-[command-line reference](cli.md), [Python Core API](core.md), and the
-[branching workflows](../README.md#linear-workflow-and-branching).
+[command-line reference](cli.md), [Python API](api/index.md), and [core concepts](core.md).
 
 ## Development installation
 
