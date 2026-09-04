@@ -1,0 +1,9 @@
+[project]
+name = "hiraku-iris-wandb-example"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy==2.4.6",
+  "scikit-learn==1.9.0",
+  "wandb>=0.29.0",
+]

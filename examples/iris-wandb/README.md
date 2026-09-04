@@ -1,0 +1,62 @@
+# Iris with Weights & Biases
+
+This example trains deterministic logistic-regression and random-forest
+classifiers on scikit-learn's built-in Iris dataset and logs the results to
+W&B. Hiraku reads the resulting W&B runs through its tracking adapter.
+
+From a copy of this directory:
+
+```bash
+uv sync
+export WANDB_API_KEY=your-api-key
+export WANDB_ENTITY=your-entity       # optional for a personal project
+export WANDB_PROJECT=hiraku-iris
+export WANDB_GROUP=iris-baselines     # optional grouping label
+export WANDB_TAGS=baseline,sklearn    # optional comma-separated tags
+
+git init -b main
+hiraku init
+git add .
+git commit -m "initialize Iris W&B example"
+```
+
+Create a task configured with the W&B backend:
+
+```bash
+hiraku task create iris \
+  --goal "Maximize Iris test accuracy" \
+  --question "How accurately can model families classify Iris?" \
+  --set 'metrics=[{name: test/accuracy, direction: maximize}, {name: test/f1_macro, direction: maximize}, {name: test/log_loss, direction: minimize}]' \
+  --set 'tracking_backend={type: wandb, project: hiraku-iris}'
+
+hiraku experiment create logistic \
+  --summary "Logistic regression baseline" \
+  --hypothesis "A regularized linear classifier provides a strong Iris baseline." \
+  --commit HEAD \
+  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: logistic, seed: 42, test-size: 0.25}}}'
+
+hiraku experiment create random-forest \
+  --summary "Random forest comparison" \
+  --hypothesis "A random forest improves Iris classification accuracy." \
+  --commit HEAD \
+  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: random_forest, seed: 42, test-size: 0.25}}}'
+
+hiraku experiment list
+```
+
+Launch and inspect the run:
+
+```bash
+hiraku launch logistic:train
+hiraku launch random-forest:train
+hiraku run list --task iris --json
+hiraku run list --task iris \
+  --metrics test/accuracy,test/f1_macro,test/log_loss \
+  --sort test/accuracy --descending
+```
+
+Each run stores Hiraku provenance, model and dataset configuration, seed,
+Python version, runtime, tags, group, notes, and summary metrics. The training
+script creates the remote W&B project on its first successful `wandb.init()`
+call. Hiraku itself queries and normalizes W&B runs; it does not create the
+W&B project or run.
