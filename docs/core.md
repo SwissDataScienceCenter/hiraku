@@ -152,11 +152,13 @@ default_dispatch: launch.sh
 task_branch: hiraku/tasks/{task_id}
 experiment_branch: hiraku/experiments/{task_id}/{experiment_id}
 default_program: interactive
-tracking_backend: csv
+tracking_backend:
+  type: csv
 ```
 
-CSV is the project tracking default. A task-level `tracking_backend` field
-overrides it for that task; MLflow is the supported alternative in the PoC.
+CSV is the project tracking default. MLflow is the supported alternative in the
+PoC. A task-level `tracking_backend` field overrides the project default and
+uses the same mapping shape as the project setting.
 
 The configuration also stores the active task and experiment:
 
@@ -731,7 +733,10 @@ task = Task.create(
     markdown="",
     goal="Develop a well-calibrated heart-disease predictor.",
     question="Which model gives the best validation log loss?",
-    tracking_backend="mlflow",
+    tracking_backend={
+        "type": "mlflow",
+        "database": "mlflow.db",
+    },
     metrics=[
         {"name": "val/log_loss", "direction": "minimize"},
         {"name": "val/accuracy", "direction": "maximize"},

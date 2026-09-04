@@ -1,21 +1,23 @@
 
 ### MLflow tracking backend
 
-MLflow is an optional installation extra. It uses a local SQLite database at
-`<project-root>/mlflow.db` by default; a safe project-relative `mlflow_tracking_db` overrides it.
-Alternatively, `mlflow_tracking_uri` selects a remote HTTP(S) tracking server. The local override and
-remote URI are mutually exclusive. Each task specifies `mlflow_experiment` in `task.md` front matter.
+MLflow is an optional installation extra. Configure it as a backend-specific mapping;
+the MLflow adapter validates its options. It uses a local SQLite database at
+`<project-root>/mlflow.db` by default. Each task may specify `mlflow_experiment`
+in `task.md` front matter.
 
 ```yaml
-tracking_backend: mlflow
-mlflow_tracking_db: mlflow.db  # optional
+tracking_backend:
+  type: mlflow
+  database: mlflow.db  # optional
 ```
 
-For remote tracking, omit `mlflow_tracking_db`:
+For remote tracking, configure `tracking_uri` instead of `database`:
 
 ```yaml
-tracking_backend: mlflow
-mlflow_tracking_uri: https://mlflow.example.org
+tracking_backend:
+  type: mlflow
+  tracking_uri: https://mlflow.example.org
 ```
 
 Hiraku passes a remote URI unchanged to launches and run inspection. Authentication and TLS use

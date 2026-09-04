@@ -75,7 +75,8 @@ task_branch: hiraku/tasks/{task_id}
 experiment_branch: hiraku/experiments/{task_id}/{experiment_id}
 
 default_program: interactive
-tracking_backend: csv
+tracking_backend:
+  type: csv
 
 active_task_id: null
 active_experiment_id: null
@@ -90,8 +91,9 @@ PoC.
 uses the fixed record layout shown above. These derived directories are not
 separate configuration keys.
 
-The default tracking backend is CSV. MLflow and Weights & Biases are selectable
-alternatives. A task-level `tracking_backend` field overrides the project
+The default tracking backend is CSV. MLflow is an optional selectable
+alternative. Additional adapters can be registered through the tracking
+backend registry. A task-level `tracking_backend` field overrides the project
 default for that task. Hiraku queries runs through the selected backend; model
 code continues to log through the backend's native interface.
 

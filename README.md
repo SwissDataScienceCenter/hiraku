@@ -109,12 +109,18 @@ This invokes the dispatch script `hiraku/dispatch/runai.sh` with the full launch
 
 ### Tracking Backend
 
-A **tracking backend** is a compatibility interface that provides a uniform API for querying and listing runs. Hiraku ships with three backends: CSV, MLflow, and W&B. Users can implement their own backends. The backend needs to implement the following functions
+A **tracking backend** is a compatibility interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV and MLflow adapters; additional adapters can be registered by users. The backend needs to implement the following functions
 - List runs associated to a given task
 - Return normalized runs with a required run ID, metrics, and parameters; task ID, experiment ID, commit, timestamp, entrypoint, and URL attribution may be absent.
 
 CSV is the default project backend. A task may set `tracking_backend` to
-override the project default; MLflow and W&B are selectable alternatives.
+override the project default. Backend configuration uses one common mapping
+shape, with `type` identifying the adapter:
+
+```yaml
+tracking_backend:
+  type: csv
+```
 
 
 ## Agent integration: Actions, Programs, Context
@@ -223,7 +229,7 @@ git commit -m "implement logistic baseline"
 hiraku experiment update heart-disease:logistic-baseline --commit HEAD
 
 
-# 3. launch named entrypoints and list runs (from CSV/MLFlow,or W&B backend)
+# 3. launch named entrypoints and list runs (from CSV or MLflow backend)
 hiraku launch logistic-baseline:train
 hiraku runs heart-disease --sort val/log_loss --ascending
 
