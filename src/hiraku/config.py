@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from collections.abc import Mapping
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
@@ -22,19 +23,13 @@ class HirakuConfig(BaseModel):
         task_branch: Task branch template.
         experiment_branch: Experiment branch template.
         default_program: Default program identifier.
-        tracking_backend: Project tracking backend.
-        mlflow_tracking_uri: Optional MLflow tracking URI.
-        mlflow_tracking_db: Optional project-relative MLflow database.
+        tracking_backend: Backend configuration mapping with a required ``type``.
 
     Raises:
         pydantic.ValidationError: If configuration values are invalid or inconsistent.
 
     Note:
         Runtime paths are resolved from ``root`` and excluded from YAML serialization.
-
-    Warning:
-        MLflow URI and database settings are mutually exclusive and cannot be
-        used with the CSV backend.
 
     """
 
@@ -44,9 +39,7 @@ class HirakuConfig(BaseModel):
         "task_branch": "hiraku/tasks/{task_id}",
         "experiment_branch": "hiraku/experiments/{task_id}/{experiment_id}",
         "default_program": "interactive",
-        "tracking_backend": "csv",
-        "mlflow_tracking_uri": None,
-        "mlflow_tracking_db": None,
+        "tracking_backend": {"type": "csv"},
         "active_task_id": None,
         "active_experiment_id": None,
     }
@@ -63,31 +56,41 @@ class HirakuConfig(BaseModel):
     task_branch: str = Field(default=DEFAULTS["task_branch"], min_length=1)
     experiment_branch: str = Field(default=DEFAULTS["experiment_branch"], min_length=1)
     default_program: str = Field(default=DEFAULTS["default_program"], min_length=1)
-    tracking_backend: Literal["csv", "mlflow"] = DEFAULTS["tracking_backend"]
-    mlflow_tracking_uri: str | None = Field(default=None, min_length=1)
-    mlflow_tracking_db: Path | None = None
+    tracking_backend: dict[str, Any] = Field(
+        default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
+    )
     active_task_id: str | None = DEFAULTS["active_task_id"]
     active_experiment_id: str | None = DEFAULTS["active_experiment_id"]
     _hiraku_dir: Path = PrivateAttr()
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_tracking_backend(cls, values: Any) -> Any:
+        """Normalize shorthand backend names to the common mapping syntax."""
+        if not isinstance(values, Mapping):
+            return values
+        raw = dict(values)
+        backend = raw.get("tracking_backend")
+        if isinstance(backend, str):
+            raw["tracking_backend"] = {"type": backend}
+        elif backend is not None and not isinstance(backend, Mapping):
+            raise ValidationError(
+                "tracking_backend must be a backend name or mapping with a type"
+            )
+        elif isinstance(backend, Mapping):
+            backend_mapping = dict(backend)
+            if not isinstance(backend_mapping.get("type"), str) or not backend_mapping[
+                "type"
+            ]:
+                raise ValidationError(
+                    "tracking_backend mapping requires a non-empty string type"
+                )
+            raw["tracking_backend"] = backend_mapping
+        return raw
+
     @model_validator(mode="after")
     def validate_config(self) -> HirakuConfig:
         """Validate backend consistency and resolve the state directory."""
-        has_mlflow_settings = (
-            self.mlflow_tracking_uri is not None or self.mlflow_tracking_db is not None
-        )
-        if self.tracking_backend == "csv" and has_mlflow_settings:
-            raise ValidationError(
-                "MLflow tracking settings require tracking_backend='mlflow'"
-            )
-        if (
-            self.tracking_backend == "mlflow"
-            and self.mlflow_tracking_uri is not None
-            and self.mlflow_tracking_db is not None
-        ):
-            raise ValidationError(
-                "Configure either mlflow_tracking_uri or mlflow_tracking_db, not both"
-            )
         if not self.hiraku_dir_name:
             raise ValidationError("Configuration key 'hiraku_dir' must be a string")
         raw = Path(self.hiraku_dir_name)
