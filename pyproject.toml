@@ -19,6 +19,7 @@ hiraku = "hiraku.cli:main"
 
 [project.optional-dependencies]
 mlflow = ["mlflow>=2.0"]
+wandb = ["wandb>=0.29.0"]
 dev = [
   "pytest>=8",
   "pytest-xdist>=3.8.0",
