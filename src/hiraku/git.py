@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Iterator, Sequence
@@ -16,6 +17,8 @@ class GitRepository:
     """The Git repository containing a Hiraku project."""
 
     def __init__(self, config: HirakuConfig | Path | str | None = None) -> None:
+        if shutil.which("git") is None:
+            raise GitError("Git executable was not found on PATH")
         if isinstance(config, HirakuConfig):
             start = config.root
             self.config = config

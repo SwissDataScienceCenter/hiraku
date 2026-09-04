@@ -99,7 +99,8 @@ def launch(
     check: bool = True,
     config: HirakuConfig | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Launch an entrypoint through a project dispatcher.
+    """
+    Launch an entrypoint through a project dispatcher.
 
     Args:
         entrypoint: Entrypoint model or mapping accepted by ``model_validate``.
@@ -124,6 +125,10 @@ def launch(
 
     Example:
         ``launch({"command": ["python", "evaluate.py"]}, name="evaluate")``
+    Warning:
+        Commands are executed from the selected project context and do not use
+        shell expansion.
+
     """
     from .data import Entrypoint, load_experiment, load_task
     from .git import GitRepository

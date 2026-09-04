@@ -60,14 +60,19 @@ from .validation import validate_identifier
 R = TypeVar("R", bound=Record)
 
 
-@dataclass
+@dataclass(slots=True)
 class CLIContext:
-    """Per-invocation state with lazy project discovery."""
+    """Per-invocation CLI state with lazy project discovery.
+
+    Attributes:
+        _config: Cached project configuration, populated on first access.
+    """
 
     _config: HirakuConfig | None = None
 
     @property
     def config(self) -> HirakuConfig:
+        """Return and cache the discovered project configuration."""
         if self._config is None:
             self._config = HirakuConfig.discover()
         return self._config

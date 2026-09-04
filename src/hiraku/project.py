@@ -6,16 +6,35 @@ import shutil
 from contextlib import suppress
 from importlib.resources import as_file, files
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .errors import HirakuError, ProjectExistsError, ValidationError
 from .io import atomic_write, dump_yaml
+
+if TYPE_CHECKING:
+    from .config import HirakuConfig
 
 
 class ProjectInitializer:
     """Create a new Hiraku project and install its bundled resources."""
 
     @classmethod
-    def create(cls, root: Path | str = ".", *, install_skill: bool = True):
+    def create(
+        cls, root: Path | str = ".", *, install_skill: bool = True
+    ) -> HirakuConfig:
+        """Create and initialize a project directory.
+
+        Args:
+            root: Root directory where the project will be created.
+            install_skill: Whether to install repository-local skill resources.
+
+        Returns:
+            The initialized `hiraku.config.HirakuConfig`.
+
+        Raises:
+            hiraku.errors.ProjectExistsError: If the project marker already exists.
+            hiraku.errors.ValidationError: If provisioning fails.
+        """
         from .config import HirakuConfig
 
         project_root = Path(root).expanduser().absolute()

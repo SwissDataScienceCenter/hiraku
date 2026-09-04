@@ -40,6 +40,15 @@ class Record(BaseModel):
     Raises:
         pydantic.ValidationError: If the identifier or Markdown value is invalid.
         hiraku.errors.ValidationError: If a persisted record is mutated illegally.
+
+    Note:
+        Records are detached until ``save()`` is called; custom fields are
+        preserved in ``model_extra``.
+
+    Warning:
+        A persisted record cannot be moved to a different path or renamed by
+        changing its identifier.
+
     """
 
     model_config = ConfigDict(
@@ -193,7 +202,10 @@ class Record(BaseModel):
                 or cannot be written.
 
         Example:
-            ``record = Record(id="demo"); record.save("demo.md")``
+            ```python
+            record = Record(id="demo")
+            record.save("demo.md")
+            ```
         """
         if self.path is None and path is None:
             raise ValidationError(

@@ -48,6 +48,9 @@ class MLflowBackendConfig(BaseModel):
 
     Example:
         ``MLflowBackendConfig(database="mlflow.db")``
+    Warning:
+        Configure either ``tracking_uri`` or ``database``, never both.
+
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -402,7 +405,9 @@ class MLflowBackend(TrackingBackend):
                 ]
             native_runs = client.search_runs(
                 experiment_ids=experiment_ids,
-                filter_string=f"tags.`hiraku.task_id` = '{self._escape_filter(task_id)}'",
+                filter_string=(
+                    f"tags.`hiraku.task_id` = '{self._escape_filter(task_id)}'"
+                ),
             )
             runs: list[Run] = []
             for native in native_runs:

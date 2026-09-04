@@ -91,6 +91,9 @@ class Task(Record):
         metrics: Metrics displayed for task runs.
         tracking_backend: Task-level backend override.
         mlflow_experiment: Optional MLflow experiment name.
+    Note:
+        Unknown metadata remains available through ``model_extra``.
+
     """
 
     branch: str | None = None
@@ -236,6 +239,10 @@ class Experiment(Record):
         branch: Optional Git branch.
         entrypoints: Experiment-specific command overrides.
         metrics: Optional metric declarations inherited from the task.
+    Note:
+        A proposal has no commit. Assigning a valid commit turns it into a
+        bound experiment.
+
     """
 
     task_id: str
@@ -499,6 +506,9 @@ class Run(BaseModel):
 
     Raises:
         pydantic.ValidationError: If the run identifier or field values are invalid.
+    Note:
+        Metrics and parameters are normalized to immutable mapping proxies.
+
     """
 
     model_config = ConfigDict(frozen=True, extra="allow")

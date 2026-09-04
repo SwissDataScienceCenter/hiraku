@@ -28,6 +28,14 @@ class HirakuConfig(BaseModel):
 
     Raises:
         pydantic.ValidationError: If configuration values are invalid or inconsistent.
+
+    Note:
+        Runtime paths are resolved from ``root`` and excluded from YAML serialization.
+
+    Warning:
+        MLflow URI and database settings are mutually exclusive and cannot be
+        used with the CSV backend.
+
     """
 
     DEFAULTS: ClassVar[dict[str, Any]] = {
@@ -64,6 +72,7 @@ class HirakuConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_config(self) -> HirakuConfig:
+        """Validate backend consistency and resolve the state directory."""
         has_mlflow_settings = (
             self.mlflow_tracking_uri is not None or self.mlflow_tracking_db is not None
         )
@@ -164,7 +173,10 @@ class HirakuConfig(BaseModel):
             hiraku.errors.ValidationError: If the configuration cannot be written.
 
         Example:
-            ``config = HirakuConfig.discover(); config.save()``
+            ```python
+            config = HirakuConfig.discover()
+            config.save()
+            ```
         """
         try:
             atomic_write(self.path, dump_yaml(self.to_dict()))
@@ -175,6 +187,7 @@ class HirakuConfig(BaseModel):
 
     @property
     def hiraku_dir(self) -> Path:
+        """Return the resolved Hiraku state directory."""
         return self._hiraku_dir
 
     def to_dict(self) -> dict[str, Any]:
@@ -194,25 +207,42 @@ class HirakuConfig(BaseModel):
 
     @property
     def tasks_dir(self) -> Path:
+        """Return the directory containing task records."""
         return self.hiraku_dir / "tasks"
 
     @property
     def programs_dir(self) -> Path:
+        """Return the directory containing agent program records."""
         return self.hiraku_dir / "programs"
 
     @property
     def actions_dir(self) -> Path:
+        """Return the directory containing agent action records."""
         return self.hiraku_dir / "actions"
 
     @property
     def contexts_dir(self) -> Path:
+        """Return the directory containing curated context records."""
         return self.hiraku_dir / "contexts"
 
     @property
     def dispatch_dir(self) -> Path:
+        """Return the directory containing launcher dispatch scripts."""
         return self.hiraku_dir / "dispatch"
 
     def set_active_task(self, task: str | Any) -> None:
+        """Set the active task and clear incompatible experiment state.
+
+        Args:
+            task: Task identifier or loaded ``Task`` instance.
+
+        Raises:
+            hiraku.errors.RecordNotFoundError: If the task cannot be loaded.
+            hiraku.errors.ValidationError: If configuration persistence fails.
+
+        Example:
+            ``config.set_active_task("heart-disease")``
+        """
         from .data import Task, load_task
 
         identifier = task.id if isinstance(task, Task) else task
@@ -228,6 +258,18 @@ class HirakuConfig(BaseModel):
             raise
 
     def set_active_experiment(self, experiment: str | Any) -> None:
+        """Set the active experiment and its owning task.
+
+        Args:
+            experiment: Qualified experiment reference or loaded ``Experiment``.
+
+        Raises:
+            hiraku.errors.RecordNotFoundError: If the experiment cannot be loaded.
+            hiraku.errors.ValidationError: If configuration persistence fails.
+
+        Example:
+            ``config.set_active_experiment("heart-disease:random-forest")``
+        """
         from .data import Experiment, load_experiment
 
         reference = (
@@ -246,6 +288,11 @@ class HirakuConfig(BaseModel):
             raise
 
     def clear_active_experiment(self) -> None:
+        """Clear the active experiment while retaining the active task.
+
+        Raises:
+            hiraku.errors.ValidationError: If configuration persistence fails.
+        """
         old = self.active_experiment_id
         try:
             self.active_experiment_id = None
