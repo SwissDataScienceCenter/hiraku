@@ -5,5 +5,3 @@
 ::: hiraku.tracking.CSVBackend
 
 ::: hiraku.tracking.MLflowBackend
-
-All adapters return normalized, immutable `Run` models.

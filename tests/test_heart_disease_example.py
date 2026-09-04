@@ -6,6 +6,7 @@ import json
 import math
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -112,7 +113,7 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
                 "--commit",
                 "HEAD",
                 "--set",
-                "entrypoints={train: {command: [python, train.py], args: "
+                f"entrypoints={{train: {{command: [{sys.executable}, train.py], args: "
                 f"{{model: {expected['model']}, seed: 42, "
                 "validation-fraction: 0.25}}}",
             ],
@@ -124,7 +125,7 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
             for name, entrypoint in experiment.entrypoints.items()
         } == {
             "train": {
-                "command": ["python", "train.py"],
+                "command": [sys.executable, "train.py"],
                 "args": {
                     "model": expected["model"],
                     "seed": 42,
