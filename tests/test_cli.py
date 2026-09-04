@@ -125,8 +125,8 @@ def test_task_crud_branches_and_active_deletion(tmp_path: Path, monkeypatch) -> 
     assert result.exit_code == 0, result.output
     task = load_task("demo", config=config)
     assert task.branch == "hiraku/tasks/demo"
-    assert task["goal"] == "Ship"
-    assert task["priority"] == 2
+    assert task.goal == "Ship"
+    assert task.model_extra["priority"] == 2
     assert GitRepository(config).branch_exists(task.branch)
     assert HirakuConfig.discover(tmp_path).active_task_id == "demo"
 
@@ -358,7 +358,7 @@ def test_agent_record_commands_and_mutation_conflicts(
     )
     assert conflict.exit_code != 0
     assert "supplied more than once" in conflict.output
-    assert load_task("demo", config=config)["goal"] == "original"
+    assert load_task("demo", config=config).goal == "original"
 
     action = runner.invoke(main, ["action", "create", "experiment/review"])
     assert action.exit_code == 0, action.output

@@ -55,14 +55,18 @@ class ProjectInitializer:
                 )
             for source, target in copies:
                 with as_file(source) as source_path:
-                    cls._copy_resource_tree(source_path, target, created_files, created_dirs)
+                    cls._copy_resource_tree(
+                        source_path, target, created_files, created_dirs
+                    )
             launcher = config.dispatch_dir / "launch.sh"
             launcher.chmod(launcher.stat().st_mode | 0o111)
             return config
         except Exception as exc:
             for path in reversed(created_files):
                 path.unlink(missing_ok=True)
-            for path in sorted(created_dirs, key=lambda item: len(item.parts), reverse=True):
+            for path in sorted(
+                created_dirs, key=lambda item: len(item.parts), reverse=True
+            ):
                 with suppress(OSError):
                     path.rmdir()
             if isinstance(exc, HirakuError):

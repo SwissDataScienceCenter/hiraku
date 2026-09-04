@@ -27,7 +27,20 @@ _FRONT_MATTER = re.compile(
 
 
 class Record(BaseModel):
-    """Base class for a detached or persisted Markdown record."""
+    """Base class for detached or persisted Markdown records.
+
+    Attributes:
+        id: Stable identifier used in the record path.
+        markdown: Free-form Markdown body.
+        path: Persistence path, populated after saving or loading.
+
+    Example:
+        ``Record(id="demo", markdown="## Objective\\nMeasure accuracy.")``
+
+    Raises:
+        pydantic.ValidationError: If the identifier or Markdown value is invalid.
+        hiraku.errors.ValidationError: If a persisted record is mutated illegally.
+    """
 
     model_config = ConfigDict(
         extra="allow",
@@ -129,7 +142,21 @@ class Record(BaseModel):
 
     @classmethod
     def load(cls, path: Path | str) -> Self:
-        """Load one record from an explicit Markdown file path."""
+        """Load and validate one record from Markdown.
+
+        Args:
+            path: Markdown record path.
+
+        Returns:
+            A persisted record with its path metadata attached.
+
+        Raises:
+            hiraku.errors.RecordNotFoundError: If ``path`` is not a file.
+            hiraku.errors.ValidationError: If front matter or model fields are invalid.
+
+        Example:
+            ``task = Task.load("hiraku/tasks/demo/task.md")``
+        """
         path = Path(path).expanduser().absolute()
         if not path.is_file():
             raise RecordNotFoundError(f"{cls.__name__} record not found: {path}")
@@ -138,12 +165,36 @@ class Record(BaseModel):
 
     @classmethod
     def list(cls, paths: Iterable[Path]) -> list[Self]:
-        """Load records from explicit paths in deterministic ID order."""
+        """Load records from paths in deterministic identifier order.
+
+        Args:
+            paths: Iterable of Markdown record paths.
+
+        Returns:
+            Validated records sorted by identifier and path.
+        """
         records = [cls.load(path) for path in sorted(paths, key=lambda item: str(item))]
         return sorted(records, key=lambda record: (record.id, str(record.path)))
 
     def save(self, path: Path | str | None = None, *, overwrite: bool = False) -> Path:
-        """Persist the record, accepting a path only for its first save."""
+        """Persist the record as YAML front matter followed by Markdown.
+
+        Args:
+            path: Destination for a detached record. Persisted records reuse their
+                original path.
+            overwrite: Allow a detached record to replace an existing destination.
+
+        Returns:
+            Absolute path of the persisted record.
+
+        Raises:
+            hiraku.errors.RecordExistsError: If the destination exists unexpectedly.
+            hiraku.errors.ValidationError: If the record is detached without a path
+                or cannot be written.
+
+        Example:
+            ``record = Record(id="demo"); record.save("demo.md")``
+        """
         if self.path is None and path is None:
             raise ValidationError(
                 f"Detached {type(self).__name__} {self.id!r} requires a save path"
@@ -170,6 +221,12 @@ class Record(BaseModel):
         return target
 
     def delete(self) -> None:
+        """Delete this persisted record from disk.
+
+        Raises:
+            hiraku.errors.ValidationError: If the record is detached or deletion fails.
+            hiraku.errors.RecordNotFoundError: If the persisted file is missing.
+        """
         if self.path is None:
             raise ValidationError(
                 f"Detached {type(self).__name__} {self.id!r} has no path to delete"

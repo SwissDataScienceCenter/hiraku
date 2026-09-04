@@ -27,12 +27,30 @@ _LOWER_HEXADECIMAL = frozenset("0123456789abcdef")
 
 
 class Entrypoint(BaseModel):
-    """A declarative command and its default named arguments."""
+    """Declarative command and its default named arguments.
+
+    Attributes:
+        command: Executable and fixed positional arguments.
+        args: Optional named arguments rendered by the launcher.
+
+    Example:
+        ``Entrypoint(command=["python", "train.py"], args={"seed": 42})``
+
+    Raises:
+        pydantic.ValidationError: If the command or argument mapping is invalid.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     command: list[str]
     args: dict[str, ArgumentValue] = Field(default_factory=dict)
+
+    @field_validator("args", mode="before")
+    @classmethod
+    def validate_args_mapping(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            raise ValueError("Entrypoint args must be a mapping")
+        return value
 
     @field_validator("command")
     @classmethod
@@ -43,21 +61,48 @@ class Entrypoint(BaseModel):
 
 
 class Metric(BaseModel):
-    """A metric presentation declaration."""
+    """Metric declaration used for validation and leaderboard direction.
+
+    Attributes:
+        name: Metric key emitted by a tracking backend.
+        direction: Whether lower or higher values are preferred.
+
+    Example:
+        ``Metric(name="val/loss", direction="minimize")``
+    """
 
     name: str = Field(min_length=1)
     direction: Literal["minimize", "maximize"]
 
 
 class Task(Record):
-    """A top-level, file-backed research task."""
+    """Top-level, file-backed research task.
+
+    A task owns entrypoints, metric declarations, and tracking configuration.
+
+    Attributes:
+        id: Stable task identifier.
+        markdown: Human-readable task notes.
+        branch: Optional Git branch associated with the task.
+        goal: Research goal or intended outcome.
+        question: Research question investigated by the task.
+        summary: Short task summary.
+        entrypoints: Named launcher commands.
+        metrics: Metrics displayed for task runs.
+        tracking_backend: Task-level backend override.
+        mlflow_experiment: Optional MLflow experiment name.
+    """
 
     branch: str | None = None
+    goal: str | None = Field(default=None, min_length=1)
+    question: str | None = Field(default=None, min_length=1)
+    summary: str | None = Field(default=None, min_length=1)
     # Runtime shape validation is intentionally performed by the model
     # validator below so malformed YAML gets a useful domain error.
     entrypoints: dict[str, Entrypoint] = Field(default_factory=dict)
     metrics: list[Metric] = Field(default_factory=list)
     tracking_backend: str | dict[str, Any] | None = None
+    mlflow_experiment: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def validate_entrypoint_names(self) -> Task:
@@ -75,6 +120,25 @@ class Task(Record):
         config: HirakuConfig | None = None,
         **fields: Any,
     ) -> Task:
+        """Validate and persist a new task.
+
+        Args:
+            task_id: Identifier for the task.
+            markdown: Optional Markdown body.
+            activate: Whether to make the task active.
+            config: Project configuration; discovered when omitted.
+            **fields: Additional validated task fields.
+
+        Returns:
+            The persisted task.
+
+        Raises:
+            hiraku.errors.RecordExistsError: If the task already exists.
+            pydantic.ValidationError: If supplied fields are invalid.
+
+        Example:
+            ``task = Task.create("demo", goal="Improve validation accuracy")``
+        """
         selected = config or HirakuConfig.discover()
         record = cls(id=task_id, markdown=markdown, **fields)
         path = _task_path(task_id, selected)
@@ -86,6 +150,14 @@ class Task(Record):
         return record
 
     def experiments(self, *, config: HirakuConfig | None = None) -> list[Experiment]:
+        """Return experiments belonging to this task.
+
+        Args:
+            config: Project configuration; discovered when omitted.
+
+        Returns:
+            Experiments sorted deterministically by identifier.
+        """
         return list_experiments(task=self, config=config)
 
     def runs(
@@ -95,7 +167,19 @@ class Task(Record):
         config: HirakuConfig | None = None,
         **query: Any,
     ) -> list[Run]:
-        """Query runs filtered to this task."""
+        """Query runs belonging to this task.
+
+        Args:
+            backend: Tracking adapter; selected from configuration when omitted.
+            config: Project configuration used for backend selection.
+            **query: Backend options such as ``sort``, ``ascending``, or ``limit``.
+
+        Returns:
+            Normalized runs matching the task.
+
+        Example:
+            ``runs = task.runs(sort="val/loss", ascending=True)``
+        """
         adapter = backend
         if adapter is None:
             selected = config or HirakuConfig.discover()
@@ -103,6 +187,17 @@ class Task(Record):
         return adapter.list_runs(task_id=self.id, experiment_id=None, **query)
 
     def entrypoint(self, name: str) -> Entrypoint:
+        """Resolve a named task entrypoint.
+
+        Args:
+            name: Entrypoint identifier.
+
+        Returns:
+            The validated entrypoint declaration.
+
+        Raises:
+            hiraku.errors.EntrypointNotFoundError: If ``name`` is undefined.
+        """
         try:
             return self.entrypoints[name]
         except KeyError as exc:
@@ -111,6 +206,14 @@ class Task(Record):
             ) from exc
 
     def delete(self, *, config: HirakuConfig | None = None) -> None:
+        """Delete the task when it has no child experiments.
+
+        Args:
+            config: Project configuration; discovered when omitted.
+
+        Raises:
+            hiraku.errors.ValidationError: If experiments still belong to the task.
+        """
         if self.experiments(config=config):
             raise ValidationError(
                 f"Cannot delete task {self.id!r} while experiments exist"
@@ -119,9 +222,25 @@ class Task(Record):
 
 
 class Experiment(Record):
-    """A task-scoped experiment, or proposal when it has no commit."""
+    """Task-scoped experiment or proposal.
+
+    An experiment is a concrete task attempt. A missing ``commit`` marks it as
+    a proposal; committed experiments can be launched and compared.
+
+    Attributes:
+        id: Stable experiment identifier.
+        task_id: Identifier of the owning task.
+        summary: Short description of the experiment.
+        hypothesis: Claim tested by the experiment.
+        commit: Full source commit, or ``None`` for a proposal.
+        branch: Optional Git branch.
+        entrypoints: Experiment-specific command overrides.
+        metrics: Optional metric declarations inherited from the task.
+    """
 
     task_id: str
+    summary: str | None = Field(default=None, min_length=1)
+    hypothesis: str | None = Field(default=None, min_length=1)
     commit: str | None = None
     branch: str | None = None
     entrypoints: dict[str, Entrypoint] = Field(default_factory=dict)
@@ -129,6 +248,7 @@ class Experiment(Record):
 
     @property
     def is_proposal(self) -> bool:
+        """Whether this experiment has not yet been assigned a commit."""
         return self.commit is None
 
     @field_validator("task_id")
@@ -142,8 +262,7 @@ class Experiment(Record):
     def validate_commit_hash(cls, value: Any) -> str | None:
         if value is not None and (
             not isinstance(value, str)
-            or
-            len(value) not in {40, 64}
+            or len(value) not in {40, 64}
             or any(character not in _LOWER_HEXADECIMAL for character in value)
         ):
             raise ValidationError(
@@ -170,6 +289,28 @@ class Experiment(Record):
         config: HirakuConfig | None = None,
         **fields: Any,
     ) -> Experiment:
+        """Validate and persist a new experiment.
+
+        Args:
+            experiment_id: Identifier for the experiment.
+            task: Owning task object or identifier.
+            commit: Optional full source commit.
+            markdown: Optional Markdown body.
+            activate: Whether to make the experiment active.
+            config: Project configuration; discovered when omitted.
+            **fields: Additional validated experiment fields.
+
+        Returns:
+            The persisted experiment.
+
+        Raises:
+            hiraku.errors.NoActiveTaskError: If no task can be resolved.
+            hiraku.errors.RecordExistsError: If the experiment already exists.
+            pydantic.ValidationError: If supplied fields are invalid.
+
+        Example:
+            ``experiment = Experiment.create("baseline", task=task, commit=sha)``
+        """
         selected = config or HirakuConfig.discover()
         if task is None:
             if selected.active_task_id is None:
@@ -205,7 +346,19 @@ class Experiment(Record):
         config: HirakuConfig | None = None,
         **query: Any,
     ) -> list[Run]:
-        """Query runs filtered to this task and experiment."""
+        """Query runs belonging to this experiment.
+
+        Args:
+            backend: Tracking adapter; selected from configuration when omitted.
+            config: Project configuration used for backend selection.
+            **query: Backend options such as ``sort``, ``ascending``, or ``limit``.
+
+        Returns:
+            Normalized runs matching this experiment.
+
+        Example:
+            ``runs = experiment.runs(limit=10)``
+        """
         if backend is None:
             selected = config or HirakuConfig.discover()
             task = load_task(self.task_id, config=selected)
@@ -213,6 +366,17 @@ class Experiment(Record):
         return backend.list_runs(task_id=self.task_id, experiment_id=self.id, **query)
 
     def entrypoint(self, name: str) -> Entrypoint:
+        """Resolve a named experiment entrypoint.
+
+        Args:
+            name: Entrypoint identifier.
+
+        Returns:
+            The validated entrypoint declaration.
+
+        Raises:
+            hiraku.errors.EntrypointNotFoundError: If ``name`` is undefined.
+        """
         try:
             return self.entrypoints[name]
         except KeyError as exc:
@@ -316,7 +480,26 @@ def list_experiments(
 
 
 class Run(BaseModel):
-    """An immutable normalized tracking-backend run."""
+    """Immutable normalized run returned by a tracking backend.
+
+    Attributes:
+        id: Backend run identifier.
+        metrics: Observed metric values.
+        params: Run parameters and configuration values.
+        task_id: Owning task identifier, when available.
+        experiment_id: Owning experiment identifier, when available.
+        commit: Source commit evaluated by the run.
+        timestamp: Run creation timestamp.
+        entrypoint: Logical entrypoint name.
+        url: Optional backend URL.
+        raw: Original backend payload.
+
+    Example:
+        ``Run(id="r-001", metrics={"accuracy": 0.91})``
+
+    Raises:
+        pydantic.ValidationError: If the run identifier or field values are invalid.
+    """
 
     model_config = ConfigDict(frozen=True, extra="allow")
 

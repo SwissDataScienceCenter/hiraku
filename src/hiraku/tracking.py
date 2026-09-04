@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import csv
+from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .config import HirakuConfig
 from .errors import BackendError, ValidationError
@@ -15,102 +18,211 @@ if TYPE_CHECKING:
     from .data import Run, Task
 
 
-def _validate_filters(task_id: str, experiment_id: str | None) -> None:
-    if not isinstance(task_id, str) or not task_id:
-        raise BackendError("Tracking queries require a non-empty task_id")
-    if experiment_id is not None and (
-        not isinstance(experiment_id, str) or not experiment_id
-    ):
-        raise BackendError("experiment_id must be a non-empty string or null")
+class CSVBackendConfig(BaseModel):
+    """Validated options for the CSV tracking backend.
+
+    Attributes:
+        type: Backend discriminator; must be ``"csv"``.
+        path: Optional CSV path override.
+
+    Example:
+        ``CSVBackendConfig(path="results/runs.csv")``
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["csv"] = "csv"
+    path: Path | None = None
 
 
-class TrackingBackend(Protocol):
-    """Portable read-only tracking backend interface."""
+class MLflowBackendConfig(BaseModel):
+    """Validated options for the MLflow tracking backend.
+
+    Attributes:
+        type: Backend discriminator; must be ``"mlflow"``.
+        tracking_uri: Optional remote or configured MLflow URI.
+        experiment_name: Optional MLflow experiment name.
+        database: Optional project-relative SQLite database path.
+
+    Raises:
+        pydantic.ValidationError: If both URI and database are configured.
+
+    Example:
+        ``MLflowBackendConfig(database="mlflow.db")``
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["mlflow"] = "mlflow"
+    tracking_uri: str | None = Field(default=None, min_length=1)
+    experiment_name: str | None = Field(default=None, min_length=1)
+    database: Path | None = None
+
+    @model_validator(mode="after")
+    def validate_sources(self) -> MLflowBackendConfig:
+        if self.tracking_uri and self.database:
+            raise BackendError(
+                "mlflow backend cannot set both tracking_uri and database"
+            )
+        return self
+
+
+BackendConfig = CSVBackendConfig | MLflowBackendConfig
+
+
+def _parse_backend_config(specification: str | Mapping[str, Any]) -> BackendConfig:
+    if isinstance(specification, str):
+        raw: dict[str, Any] = {"type": specification}
+    elif isinstance(specification, Mapping):
+        raw = dict(specification)
+        if "type" not in raw and "name" in raw:
+            raw["type"] = raw.pop("name")
+    else:
+        raise BackendError("Tracking backend must be a name or mapping")
+    name = raw.get("type")
+    try:
+        if name == "csv":
+            return CSVBackendConfig.model_validate(raw)
+        if name == "mlflow":
+            return MLflowBackendConfig.model_validate(raw)
+    except Exception as exc:
+        raise BackendError(
+            f"Invalid {name!r} tracking backend configuration: {exc}"
+        ) from exc
+    raise BackendError(f"Unknown tracking backend: {name!r}")
+
+
+class TrackingBackend(ABC):
+    """Abstract contract implemented by every run-tracking adapter."""
+
+    @staticmethod
+    def _validate_filters(task_id: str, experiment_id: str | None) -> None:
+        if not isinstance(task_id, str) or not task_id:
+            raise BackendError("Tracking queries require a non-empty task_id")
+        if experiment_id is not None and (
+            not isinstance(experiment_id, str) or not experiment_id
+        ):
+            raise BackendError("experiment_id must be a non-empty string or null")
+
+    @staticmethod
+    def _timestamp(value: Any, *, backend: str, context: str) -> datetime | None:
+        if value is None or value == "":
+            return None
+        try:
+            if isinstance(value, datetime):
+                parsed = value
+            elif isinstance(value, int | float):
+                parsed = datetime.fromtimestamp(value / 1000, tz=UTC)
+            elif isinstance(value, str):
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            else:
+                raise TypeError(type(value).__name__)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
+        except (ValueError, TypeError, OSError) as exc:
+            raise BackendError(
+                f"{backend} backend returned invalid timestamp for {context}: {value!r}"
+            ) from exc
+
+    @staticmethod
+    def _apply_query(
+        runs: list[Run], query: Mapping[str, Any], backend: str
+    ) -> list[Run]:
+        allowed = {"sort", "ascending", "limit"}
+        unknown = set(query) - allowed
+        if unknown:
+            raise BackendError(
+                f"{backend} backend does not support query options: {sorted(unknown)}"
+            )
+        result = list(runs)
+        sort = query.get("sort")
+        if sort is None and "ascending" in query:
+            raise BackendError(f"{backend} backend ascending requires a sort field")
+        if sort is not None:
+            if not isinstance(sort, str):
+                raise BackendError(f"{backend} backend sort must be a string")
+
+            def value(run: Run) -> Any:
+                value = getattr(run, sort, None)
+                if value is None:
+                    value = run.metrics.get(sort, run.params.get(sort))
+                return value
+
+            def numeric(run: Run) -> float | None:
+                candidate = value(run)
+                if isinstance(candidate, bool) or candidate is None:
+                    return None
+                try:
+                    return float(candidate)
+                except (TypeError, ValueError):
+                    return None
+
+            ranked = [run for run in result if numeric(run) is not None]
+            unranked = [run for run in result if numeric(run) is None]
+            ranked.sort(key=lambda run: run.id)
+            ranked.sort(
+                key=numeric,
+                reverse=not bool(query.get("ascending", True)),
+            )
+            result = [*ranked, *sorted(unranked, key=lambda run: run.id)]
+        else:
+            result.sort(
+                key=lambda run: (
+                    run.timestamp is None,
+                    run.timestamp or datetime.max.replace(tzinfo=UTC),
+                    run.id,
+                )
+            )
+        limit = query.get("limit")
+        if limit is not None:
+            if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+                raise BackendError(
+                    f"{backend} backend limit must be a non-negative integer"
+                )
+            result = result[:limit]
+        return result
 
     def list_runs(
         self, *, task_id: str, experiment_id: str | None = None, **query: Any
-    ) -> list[Run]: ...
+    ) -> list[Run]:
+        """Return normalized runs for a task and optional experiment.
+
+        Args:
+            task_id: The task ID to filter runs by.
+            experiment_id: An optional experiment ID to filter runs by.
+            query: Optional query parameters to sort, limit, or filter the results.
+
+        Returns:
+            A list of normalized Run objects matching the specified filters and query.
+        """
+
+        self._validate_filters(task_id, experiment_id)
+        runs = self._read_runs(task_id=task_id, experiment_id=experiment_id)
+        runs = [
+            run
+            for run in runs
+            if run.task_id in {None, task_id}
+            and (experiment_id is None or run.experiment_id == experiment_id)
+        ]
+        return self._apply_query(runs, query, self.backend_name)
+
+    @property
+    def backend_name(self) -> str:
+        return type(self).__name__.removesuffix("Backend").lower()
+
+    @abstractmethod
+    def _read_runs(
+        self, *, task_id: str, experiment_id: str | None = None
+    ) -> list[Run]:
+        raise NotImplementedError
 
 
-def _timestamp(value: Any, *, backend: str, context: str) -> datetime | None:
-    if value is None or value == "":
-        return None
-    try:
-        if isinstance(value, datetime):
-            parsed = value
-        elif isinstance(value, int | float):
-            parsed = datetime.fromtimestamp(value / 1000, tz=UTC)
-        elif isinstance(value, str):
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        else:
-            raise TypeError(type(value).__name__)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=UTC)
-        return parsed.astimezone(UTC)
-    except (ValueError, TypeError, OSError) as exc:
-        raise BackendError(
-            f"{backend} backend returned invalid timestamp for {context}: {value!r}"
-        ) from exc
+class CSVBackend(TrackingBackend):
+    """Normalize runs from a task-local CSV file.
 
-
-def _apply_query(runs: list[Run], query: Mapping[str, Any], backend: str) -> list[Run]:
-    allowed = {"sort", "ascending", "limit"}
-    unknown = set(query) - allowed
-    if unknown:
-        raise BackendError(
-            f"{backend} backend does not support query options: {sorted(unknown)}"
-        )
-    result = list(runs)
-    sort = query.get("sort")
-    if sort is None and "ascending" in query:
-        raise BackendError(f"{backend} backend ascending requires a sort field")
-    if sort is not None:
-        if not isinstance(sort, str):
-            raise BackendError(f"{backend} backend sort must be a string")
-
-        def value(run: Run) -> Any:
-            value = getattr(run, sort, None)
-            if value is None:
-                value = run.metrics.get(sort, run.params.get(sort))
-            return value
-
-        def numeric(run: Run) -> float | None:
-            candidate = value(run)
-            if isinstance(candidate, bool) or candidate is None:
-                return None
-            try:
-                return float(candidate)
-            except (TypeError, ValueError):
-                return None
-
-        ranked = [run for run in result if numeric(run) is not None]
-        unranked = [run for run in result if numeric(run) is None]
-        ranked.sort(key=lambda run: run.id)
-        ranked.sort(
-            key=numeric,
-            reverse=not bool(query.get("ascending", True)),
-        )
-        result = [*ranked, *sorted(unranked, key=lambda run: run.id)]
-    else:
-        result.sort(
-            key=lambda run: (
-                run.timestamp is None,
-                run.timestamp or datetime.max.replace(tzinfo=UTC),
-                run.id,
-            )
-        )
-    limit = query.get("limit")
-    if limit is not None:
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
-            raise BackendError(
-                f"{backend} backend limit must be a non-negative integer"
-            )
-        result = result[:limit]
-    return result
-
-
-class CSVBackend:
-    """Normalize runs from a task-local CSV file."""
+    Args:
+        config: Project configuration used to resolve the default CSV path.
+        path: Optional explicit CSV path.
+    """
 
     STANDARD = {
         "id",
@@ -123,15 +235,20 @@ class CSVBackend:
     }
 
     def __init__(self, config: HirakuConfig, path: Path | str | None = None) -> None:
+        """Create a CSV adapter.
+
+        Args:
+            config: Project configuration.
+            path: Optional CSV path override.
+        """
         self.config = config
         self.path = Path(path).absolute() if path is not None else None
 
-    def list_runs(
-        self, *, task_id: str, experiment_id: str | None = None, **query: Any
+    def _read_runs(
+        self, *, task_id: str, experiment_id: str | None = None
     ) -> list[Run]:
         from .data import Run
 
-        _validate_filters(task_id, experiment_id)
         path = self.path or self.config.tasks_dir / task_id / "runs.csv"
         if not path.exists():
             return []
@@ -180,7 +297,7 @@ class CSVBackend:
                             task_id=normalized.get("task_id"),
                             experiment_id=normalized.get("experiment_id"),
                             commit=normalized.get("commit"),
-                            timestamp=_timestamp(
+                            timestamp=self._timestamp(
                                 normalized.get("timestamp"),
                                 backend="csv",
                                 context=f"{path} row {row_number}",
@@ -203,20 +320,23 @@ class CSVBackend:
                             f"csv backend malformed row in {path} "
                             f"at row {row_number}: {exc}"
                         ) from exc
-                    if run.task_id not in {None, task_id}:
-                        continue
-                    if experiment_id is not None and run.experiment_id != experiment_id:
-                        continue
                     runs.append(run)
         except BackendError:
             raise
         except (OSError, csv.Error, UnicodeError) as exc:
             raise BackendError(f"csv backend could not read {path}: {exc}") from exc
-        return _apply_query(runs, query, "csv")
+        return runs
 
 
-class MLflowBackend:
-    """Normalize native MLflow runs without importing MLflow at core import time."""
+class MLflowBackend(TrackingBackend):
+    """Normalize native MLflow runs without importing MLflow eagerly.
+
+    Args:
+        config: Project configuration.
+        tracking_uri: Optional MLflow tracking URI.
+        experiment_name: Optional MLflow experiment name.
+        database: Optional project-relative SQLite database path.
+    """
 
     def __init__(
         self,
@@ -224,17 +344,39 @@ class MLflowBackend:
         *,
         tracking_uri: str | None = None,
         experiment_name: str | None = None,
+        database: Path | None = None,
     ) -> None:
-        self.config = config
-        self.tracking_uri = tracking_uri or _mlflow_uri(config)
-        self.experiment_name = experiment_name
+        """Create an MLflow adapter from validated settings.
 
-    def list_runs(
-        self, *, task_id: str, experiment_id: str | None = None, **query: Any
+        Args:
+            config: Project configuration.
+            tracking_uri: Optional remote tracking URI.
+            experiment_name: Optional experiment name.
+            database: Optional local database path.
+
+        Raises:
+            hiraku.errors.BackendError: If URI and database settings conflict.
+        """
+        self.config = config
+        settings = MLflowBackendConfig(
+            tracking_uri=tracking_uri,
+            experiment_name=experiment_name,
+            database=database,
+        )
+        self.tracking_uri = settings.tracking_uri or _mlflow_uri(
+            config, settings.database
+        )
+        self.experiment_name = settings.experiment_name
+
+    @staticmethod
+    def _escape_filter(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("'", "\\'")
+
+    def _read_runs(
+        self, *, task_id: str, experiment_id: str | None = None
     ) -> list[Run]:
         from .data import Run
 
-        _validate_filters(task_id, experiment_id)
         try:
             from mlflow.tracking import MlflowClient
         except ImportError as exc:
@@ -248,7 +390,7 @@ class MLflowBackend:
                 from .data import load_task
 
                 task = load_task(task_id, config=self.config)
-                experiment_name = task.get("mlflow_experiment")
+                experiment_name = task.mlflow_experiment
             if experiment_name:
                 experiment = client.get_experiment_by_name(str(experiment_name))
                 if experiment is None:
@@ -260,7 +402,7 @@ class MLflowBackend:
                 ]
             native_runs = client.search_runs(
                 experiment_ids=experiment_ids,
-                filter_string=f"tags.`hiraku.task_id` = '{_escape_filter(task_id)}'",
+                filter_string=f"tags.`hiraku.task_id` = '{self._escape_filter(task_id)}'",
             )
             runs: list[Run] = []
             for native in native_runs:
@@ -268,10 +410,6 @@ class MLflowBackend:
                 tags = dict(data.tags)
                 native_task = tags.get("hiraku.task_id")
                 native_experiment = tags.get("hiraku.experiment_id")
-                if native_task != task_id:
-                    continue
-                if experiment_id is not None and native_experiment != experiment_id:
-                    continue
                 known_tags = {
                     "hiraku.task_id",
                     "hiraku.experiment_id",
@@ -295,7 +433,7 @@ class MLflowBackend:
                         experiment_id=native_experiment,
                         commit=tags.get("hiraku.commit"),
                         entrypoint=tags.get("hiraku.entrypoint"),
-                        timestamp=_timestamp(
+                        timestamp=self._timestamp(
                             info.start_time,
                             backend="mlflow",
                             context=f"run {info.run_id}",
@@ -310,17 +448,12 @@ class MLflowBackend:
             raise
         except Exception as exc:
             raise BackendError(f"mlflow backend query failed: {exc}") from exc
-        return _apply_query(runs, query, "mlflow")
+        return runs
 
 
-def _escape_filter(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("'", "\\'")
-
-
-def _mlflow_uri(config: HirakuConfig) -> str:
-    extra = config.model_extra or {}
-    remote = extra.get("mlflow_tracking_uri")
-    database = extra.get("mlflow_tracking_db")
+def _mlflow_uri(config: HirakuConfig, database: Path | None = None) -> str:
+    remote = config.mlflow_tracking_uri
+    database = database or config.mlflow_tracking_db
     if remote and database:
         raise BackendError(
             "mlflow backend configuration cannot set both mlflow_tracking_uri "
@@ -348,24 +481,23 @@ def _mlflow_uri(config: HirakuConfig) -> str:
 def select_backend(task: Task, config: HirakuConfig) -> TrackingBackend:
     """Select a task override or the project's configured tracking backend."""
     specification = task.tracking_backend or config.tracking_backend
-    options: dict[str, Any] = {}
-    if isinstance(specification, Mapping):
-        options = dict(specification)
-        name = options.pop("name", options.pop("type", None))
-    else:
-        name = specification
-    if name == "csv":
-        path = options.pop("path", None)
-        if options:
-            raise BackendError(f"csv backend has unknown options: {sorted(options)}")
-        return CSVBackend(config, path=path)
-    if name == "mlflow":
-        allowed = {"tracking_uri", "experiment_name"}
-        unknown = set(options) - allowed
-        if unknown:
-            raise BackendError(f"mlflow backend has unknown options: {sorted(unknown)}")
-        return MLflowBackend(config, **options)
-    raise BackendError(f"Unknown tracking backend: {name!r}")
+    parsed = _parse_backend_config(specification)
+    if isinstance(parsed, CSVBackendConfig):
+        return CSVBackend(config, path=parsed.path)
+    return MLflowBackend(
+        config,
+        tracking_uri=parsed.tracking_uri,
+        experiment_name=parsed.experiment_name,
+        database=parsed.database,
+    )
 
 
-__all__ = ["CSVBackend", "MLflowBackend", "TrackingBackend", "select_backend"]
+__all__ = [
+    "BackendConfig",
+    "CSVBackend",
+    "CSVBackendConfig",
+    "MLflowBackend",
+    "MLflowBackendConfig",
+    "TrackingBackend",
+    "select_backend",
+]

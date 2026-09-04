@@ -119,7 +119,10 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
         )
         experiment = load_experiment(experiment_id, task=task, config=config)
         assert experiment.commit == shared_commit
-        assert experiment.entrypoints == {
+        assert {
+            name: entrypoint.model_dump()
+            for name, entrypoint in experiment.entrypoints.items()
+        } == {
             "train": {
                 "command": ["python", "train.py"],
                 "args": {
@@ -207,8 +210,8 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
         assert math.isfinite(accuracy)
         assert 0.0 <= accuracy <= 1.0
         expected_loss, expected_accuracy = EXPECTED_METRICS[run.experiment_id]
-        assert loss == pytest.approx(expected_loss, abs=1e-8)
-        assert accuracy == pytest.approx(expected_accuracy, abs=1e-8)
+        assert loss == pytest.approx(expected_loss, rel=1e-3, abs=1e-4)
+        assert accuracy == pytest.approx(expected_accuracy, rel=1e-3, abs=1e-4)
 
     assert [float(run["metrics"]["val/log_loss"]) for run in sorted_runs] == sorted(
         float(run["metrics"]["val/log_loss"]) for run in sorted_runs

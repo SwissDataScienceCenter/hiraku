@@ -16,6 +16,8 @@ from typing import Any, TypeVar
 
 import click
 import yaml
+from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 
 from .agent import (
     Action,
@@ -77,6 +79,8 @@ class HirakuGroup(click.Group):
     def invoke(self, ctx: click.Context) -> Any:
         try:
             return super().invoke(ctx)
+        except PydanticValidationError as exc:
+            raise click.ClickException(str(exc)) from exc
         except HirakuError as exc:
             raise click.ClickException(str(exc)) from exc
 
@@ -134,7 +138,7 @@ class OptionalBranchCommand(click.Command):
 def _json_value(value: Any) -> Any:
     if isinstance(value, Record):
         return {
-            **{key: _json_value(item) for key, item in value.items()},
+            **{key: _json_value(item) for key, item in value.to_dict().items()},
             "markdown": value.markdown,
         }
     if isinstance(value, Run):
@@ -150,6 +154,8 @@ def _json_value(value: Any) -> Any:
             "url": value.url,
             "raw": _json_value(value.raw),
         }
+    if isinstance(value, BaseModel):
+        return _json_value(value.model_dump())
     if is_dataclass(value) and not isinstance(value, type):
         return _json_value(asdict(value))
     if isinstance(value, datetime):
@@ -297,9 +303,15 @@ def _apply_update(
         set_values, unset_values, dedicated, immutable=immutable
     )
     for key, value in changes.items():
-        record[key] = value
+        setattr(record, key, value)
     for key in removals:
-        record.pop(key, None)
+        field = type(record).model_fields.get(key)
+        if field is not None:
+            if field.is_required():
+                raise ValidationError(f"Cannot unset required field: {key}")
+            setattr(record, key, None)
+        elif record.__pydantic_extra__ is not None:
+            record.__pydantic_extra__.pop(key, None)
     if body is not None:
         record.markdown = body
     record.save()
@@ -310,7 +322,7 @@ def _edit_recoverable(path: Path, loader: Callable[[], R], label: str) -> R:
     """Open a canonical record path, even when its current contents are invalid."""
     try:
         loader()
-    except ValidationError as exc:
+    except (ValidationError, PydanticValidationError) as exc:
         if not path.is_file():
             raise
         click.echo(
@@ -956,7 +968,7 @@ def _install_record_group(
         validate_identifier(identifier, label=f"{noun} ID")
         body = _markdown(markdown_file) or ""
         fields, _ = _field_changes(set_values, (), {}, immutable={"id"})
-        record = record_type(identifier, markdown=body, **fields)
+        record = record_type(id=identifier, markdown=body, **fields)
         path = directory(state.config) / identifier / filename
         if path.exists():
             raise RecordExistsError(

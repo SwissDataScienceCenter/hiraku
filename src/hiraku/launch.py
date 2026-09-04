@@ -7,7 +7,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .config import HirakuConfig
 from .errors import LaunchError, ValidationError
@@ -26,7 +26,12 @@ _ATTRIBUTION_KEYS = {
 
 
 def render_arguments(arguments: Mapping[str, ArgumentValue]) -> tuple[str, ...]:
-    """Render a named argument mapping as deterministic GNU-style flags."""
+    """Render named arguments as deterministic GNU-style flags.
+
+    Example:
+        ``render_arguments({"learning_rate": 0.1, "verbose": True})``
+        returns ``("--learning-rate", "0.1", "--verbose")``.
+    """
     if not isinstance(arguments, Mapping):
         raise ValidationError("Arguments must be a mapping")
     rendered: list[str] = []
@@ -81,7 +86,7 @@ def _dispatcher(config: HirakuConfig, dispatch: str | None) -> Path:
 
 
 def launch(
-    entrypoint: Entrypoint,
+    entrypoint: Entrypoint | Mapping[str, Any],
     *,
     name: str | None = None,
     args: Mapping[str, ArgumentValue] | None = None,
@@ -94,10 +99,36 @@ def launch(
     check: bool = True,
     config: HirakuConfig | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Launch an entrypoint through a project dispatcher."""
-    from .data import load_experiment, load_task
+    """Launch an entrypoint through a project dispatcher.
+
+    Args:
+        entrypoint: Entrypoint model or mapping accepted by ``model_validate``.
+        name: Logical entrypoint name for attribution.
+        args: Call-time arguments overriding entrypoint defaults.
+        task_id: Optional task attribution.
+        experiment_id: Optional experiment attribution.
+        commit: Optional commit to execute in a temporary worktree.
+        dispatch: Optional dispatcher script override.
+        worktree: Whether to execute in an isolated temporary worktree.
+        env: Additional environment variables.
+        check: Raise on non-zero child exit when true.
+        config: Project configuration; discovered when omitted.
+
+    Returns:
+        The completed subprocess result.
+
+    Raises:
+        hiraku.errors.ValidationError: If the entrypoint, arguments, or attribution
+            is invalid.
+        hiraku.errors.LaunchError: If the command cannot be started.
+
+    Example:
+        ``launch({"command": ["python", "evaluate.py"]}, name="evaluate")``
+    """
+    from .data import Entrypoint, load_experiment, load_task
     from .git import GitRepository
 
+    entrypoint = Entrypoint.model_validate(entrypoint)
     selected = config or HirakuConfig.discover()
     if experiment_id is not None and task_id is None:
         raise ValidationError("experiment_id requires an explicit task_id")

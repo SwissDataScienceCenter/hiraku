@@ -12,7 +12,23 @@ from .io import atomic_write, dump_yaml, load_yaml_mapping
 
 
 class HirakuConfig(BaseModel):
-    """A discovered Hiraku project and its validated configuration."""
+    """Discovered Hiraku project and validated configuration.
+
+    Attributes:
+        path: Path to the project configuration file.
+        root: Project root directory.
+        hiraku_dir_name: Relative state directory name.
+        default_dispatch: Default launcher script.
+        task_branch: Task branch template.
+        experiment_branch: Experiment branch template.
+        default_program: Default program identifier.
+        tracking_backend: Project tracking backend.
+        mlflow_tracking_uri: Optional MLflow tracking URI.
+        mlflow_tracking_db: Optional project-relative MLflow database.
+
+    Raises:
+        pydantic.ValidationError: If configuration values are invalid or inconsistent.
+    """
 
     DEFAULTS: ClassVar[dict[str, Any]] = {
         "hiraku_dir": "hiraku",
@@ -21,27 +37,48 @@ class HirakuConfig(BaseModel):
         "experiment_branch": "hiraku/experiments/{task_id}/{experiment_id}",
         "default_program": "interactive",
         "tracking_backend": "csv",
+        "mlflow_tracking_uri": None,
+        "mlflow_tracking_db": None,
         "active_task_id": None,
         "active_experiment_id": None,
     }
-    model_config = ConfigDict(extra="allow", validate_assignment=True, populate_by_name=True)
+    model_config = ConfigDict(
+        extra="allow", validate_assignment=True, populate_by_name=True
+    )
 
     path: Path = Field(exclude=True)
     root: Path = Field(exclude=True)
-    hiraku_dir_name: str = Field(default=DEFAULTS["hiraku_dir"], alias="hiraku_dir", min_length=1)
+    hiraku_dir_name: str = Field(
+        default=DEFAULTS["hiraku_dir"], alias="hiraku_dir", min_length=1
+    )
     default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
     task_branch: str = Field(default=DEFAULTS["task_branch"], min_length=1)
-    experiment_branch: str = Field(
-        default=DEFAULTS["experiment_branch"], min_length=1
-    )
+    experiment_branch: str = Field(default=DEFAULTS["experiment_branch"], min_length=1)
     default_program: str = Field(default=DEFAULTS["default_program"], min_length=1)
     tracking_backend: Literal["csv", "mlflow"] = DEFAULTS["tracking_backend"]
+    mlflow_tracking_uri: str | None = Field(default=None, min_length=1)
+    mlflow_tracking_db: Path | None = None
     active_task_id: str | None = DEFAULTS["active_task_id"]
     active_experiment_id: str | None = DEFAULTS["active_experiment_id"]
     _hiraku_dir: Path = PrivateAttr()
 
     @model_validator(mode="after")
     def validate_config(self) -> HirakuConfig:
+        has_mlflow_settings = (
+            self.mlflow_tracking_uri is not None or self.mlflow_tracking_db is not None
+        )
+        if self.tracking_backend == "csv" and has_mlflow_settings:
+            raise ValidationError(
+                "MLflow tracking settings require tracking_backend='mlflow'"
+            )
+        if (
+            self.tracking_backend == "mlflow"
+            and self.mlflow_tracking_uri is not None
+            and self.mlflow_tracking_db is not None
+        ):
+            raise ValidationError(
+                "Configure either mlflow_tracking_uri or mlflow_tracking_db, not both"
+            )
         if not self.hiraku_dir_name:
             raise ValidationError("Configuration key 'hiraku_dir' must be a string")
         raw = Path(self.hiraku_dir_name)
@@ -62,12 +99,34 @@ class HirakuConfig(BaseModel):
 
     @classmethod
     def load(cls, path: Path | str) -> HirakuConfig:
-        """Load and validate a project configuration from YAML."""
+        """Load and validate a project configuration from YAML.
+
+        Args:
+            path: Configuration file path.
+
+        Returns:
+            A validated project configuration.
+
+        Raises:
+            hiraku.errors.ValidationError: If the file is unreadable or invalid.
+        """
         marker = Path(path).expanduser().absolute()
         return cls(path=marker, root=marker.parent, **load_yaml_mapping(marker))
 
     @classmethod
     def discover(cls, start: Path | str | None = None) -> HirakuConfig:
+        """Discover the nearest project configuration.
+
+        Args:
+            start: Directory or file from which to search upward. Defaults to the
+                current working directory.
+
+        Returns:
+            The nearest validated configuration.
+
+        Raises:
+            hiraku.errors.ProjectNotFoundError: If no configuration is found.
+        """
         candidate = Path.cwd() if start is None else Path(start)
         candidate = candidate.expanduser().absolute()
         if candidate.is_file():
@@ -82,11 +141,31 @@ class HirakuConfig(BaseModel):
     def init(
         cls, root: Path | str = ".", *, install_skill: bool = True
     ) -> HirakuConfig:
+        """Initialize a new Hiraku project.
+
+        Args:
+            root: Directory to initialize.
+            install_skill: Whether to install the repository-local agent skill.
+
+        Returns:
+            The initialized configuration.
+
+        Raises:
+            hiraku.errors.ProjectExistsError: If the project is already initialized.
+        """
         from .project import ProjectInitializer
 
         return ProjectInitializer.create(root, install_skill=install_skill)
 
     def save(self) -> None:
+        """Persist validated configuration to its YAML file.
+
+        Raises:
+            hiraku.errors.ValidationError: If the configuration cannot be written.
+
+        Example:
+            ``config = HirakuConfig.discover(); config.save()``
+        """
         try:
             atomic_write(self.path, dump_yaml(self.to_dict()))
         except OSError as exc:
@@ -99,7 +178,14 @@ class HirakuConfig(BaseModel):
         return self._hiraku_dir
 
     def to_dict(self) -> dict[str, Any]:
-        """Return only user-managed configuration fields for YAML persistence."""
+        """Return user-managed fields suitable for YAML persistence.
+
+        Returns:
+            A serializable mapping excluding runtime paths and private state.
+
+        Example:
+            ``yaml.safe_dump(config.to_dict())``
+        """
         return self.model_dump(
             by_alias=True,
             exclude={"path", "root", "_hiraku_dir"},
