@@ -60,7 +60,7 @@ The beginner only needs to provide the objective, metric, evaluation command,
 and source change. Every launch is recorded before execution, including failed
 runs, and each completed run is tied to the exact committed source. A second
 attempt can be created as another sibling Experiment; parent Experiments,
-reports, and the bounded `hiraku auto` workflow can be introduced later.
+reports, and the `hiraku auto` workflow can be introduced later.
 
 ## Preferred user interfaces
 

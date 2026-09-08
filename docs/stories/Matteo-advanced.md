@@ -63,4 +63,4 @@ hiraku auto loop heart-disease \
 
 ## Preferred user interfaces
 
-The root command-line interface and repository-local skill provide the guided workflow, with explicit approval and review of source changes and evidence. `hiraku auto` and a generic JSON adapter expose the same lifecycle to bounded autonomous agents. The TUI and generated reports are review surfaces over the shared query model; SQLite remains the single source of truth rather than an editable user interface.
+The root command-line interface and repository-local skill provide the guided workflow, with explicit approval and review of source changes and evidence. `hiraku auto` and a generic JSON adapter expose the same lifecycle to autonomous agents. The TUI and generated reports are review surfaces over the shared query model; SQLite remains the single source of truth rather than an editable user interface.

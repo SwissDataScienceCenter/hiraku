@@ -96,7 +96,7 @@ The Memory and Context patterns suggest always keeping a research context with:
 - open questions; and
 - resource usage.
 
-Before proposing a new Experiment, the agent should receive or have access to this context. This gives it a bounded, concise summary of the overall research context.
+Before proposing a new Experiment, the agent should receive or have access to this context. This gives it a concise summary of the overall research context.
 
 ### 10. Prefer structured agent outputs
 

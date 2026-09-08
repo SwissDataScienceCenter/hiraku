@@ -1,6 +1,6 @@
 # Johannes: Simple, linear research on one branch
 
-The main goal of the simple workflow is to add explicit research metadata without changing an ordinary sequential Git workflow. A Task defines the goal and review surface, each Experiment links a hypothesis to one exact commit and its Runs, and the tracking backend stores execution evidence. All implementation work happens on one branch—either the task branch or, by project convention, `main`—with no parallel attempts or experiment branches.
+The main goal of the simple workflow is to add explicit research metadata without changing an ordinary sequential Git workflow. A Task defines the goal and review surface, each Experiment links a hypothesis to one exact commit and its Runs, and the tracking backend stores execution evidence. All implementation work happens on one branch—either the task branch or `main`—with no parallel attempts or experiment branches.
 
 ## Workflow
 

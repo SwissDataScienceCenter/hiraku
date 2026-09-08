@@ -10,7 +10,7 @@ hiraku program create my-program
 hiraku program list
 hiraku program show interactive
 hiraku program set autoresearch
-hiraku program update my-program --summary "Custom bounded workflow"
+hiraku program update my-program --summary "Custom workflow"
 hiraku program delete my-program
 ```
 
@@ -37,7 +37,7 @@ hiraku/programs/{program_id}/program.md
 By default, Hiraku ships with two workflows:
 
 - **interactive:** A step-by-step program where the data scientist explicitly approves each checkpoint and reviews artifacts before proceeding.
-- **autoresearch:** A bounded autonomous loop with explicit permissions, resource limits, and stopping conditions under which the agent implements, runs, analyzes, and iterates, exposing all artifacts for post-hoc human verification.
+- **autoresearch:** An autonomous loop with explicit permissions, resource limits, and stopping conditions under which the agent implements, runs, analyzes, and iterates, exposing all artifacts for post-hoc human verification.
 
 
 **Example**
