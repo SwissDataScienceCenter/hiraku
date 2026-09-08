@@ -3,6 +3,8 @@
 Issues and feature requests can be submitted through the [GitHub issue tracker](https://github.com/SwissDataScienceCenter/hiraku/issues).
 For bugs, include the command, a minimal reproduction, Python version, and operating system.
 
+User stories can be also submitted by creating an [issue with the label "user story"](https://github.com/SwissDataScienceCenter/hiraku/issues/new?labels=%22user%20story%22). A user story describes a feature or workflow from the perspective of a user. It should include a description of the problem, the intended workflow and user inteface, the desired outcome, and any relevant context.
+
 ## Development setup
 
 Hiraku uses Python 3.11+.
@@ -10,7 +12,7 @@ Hiraku uses Python 3.11+.
 ```bash
 git clone https://github.com/SwissDataScienceCenter/hiraku.git
 cd hiraku
-uv sync --extra dev
+uv sync --all-extras dev
 uv run hiraku --help
 ```
 
@@ -19,6 +21,9 @@ Install an optional tracking integration when working on it:
 ```bash
 uv sync --extra mlflow
 uv sync --extra wandb
+
+# all extras
+uv sync --all-extras
 ```
 
 ## Run checks

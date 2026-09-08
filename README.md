@@ -37,6 +37,8 @@ Check the examples for a more complete walkthrough:
 
 ## Contributing
 
-Contributions are welcome. Pick a feature to add, create a feature branch and pull request. Share and discuss :)
+Contributions are welcome. Pick a feature to add, create a feature branch and pull request. 
 
-We track planned features and ideas using [GitHub issues](https://github.com/SwissDataScienceCenter/hiraku/issues). Read [Contributing](https://swissdatasciencecenter.github.io/hiraku/contributing/) to get started.
+We track planned features and ideas using [GitHub issues](https://github.com/SwissDataScienceCenter/hiraku/issues). Read the [contribution guide](CONTRIBUTING.md) to get started.
+
+**Unsure where to start but you know what you want to do?** Write a [*User Story*](https://github.com/SwissDataScienceCenter/hiraku/issues/new?labels=%22user%20story%22) to describe your idea and get feedback.

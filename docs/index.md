@@ -47,4 +47,3 @@ For more details, see [Essential concepts](concepts.md).
 - [Examples](examples/)
 - [CLI reference](api/cli.md)
 - [Python API](api/index.md)
-- [Contributing](contributing.md)
