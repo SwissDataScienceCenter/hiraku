@@ -43,5 +43,3 @@ Command options come from `hiraku.cli:main` through mkdocs-click.
 Python API pages come from docstrings through mkdocstrings. Keep guides focused
 on complete workflows; avoid duplicating option lists or method signatures.
 Example READMEs retain their runnable commands.
-
-For contributor proposals, see [Research stories](stories/index.md).
