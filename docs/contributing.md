@@ -45,5 +45,3 @@ on complete workflows; avoid duplicating option lists or method signatures.
 Example READMEs retain their runnable commands.
 
 For contributor proposals, see [Research stories](stories/index.md).
-
-See [Architecture](core.md) for core responsibilities.

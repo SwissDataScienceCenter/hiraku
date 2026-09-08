@@ -59,7 +59,6 @@ nav = [
   ] },
   { "Contributing" = [
       { "Overview" = "contributing.md" },
-      { "Architecture" = "core.md" },
       { "Agentic design patterns" = "design.md" },
       { "User stories" = [
           { "Matteo — simple" = "stories/Matteo-simple.md" },

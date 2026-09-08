@@ -17,7 +17,7 @@ This fragmentation creates an inherent barrier for effective Human-AI collaborat
 
 ## Tasks, experiments, runs
 
-Hiraku uses three lightweight data structures to track the model-development lifecycle: tasks, experiments, runs. 
+Hiraku uses three lightweight data structures to track the model-development lifecycle: tasks, experiments, runs.
 
 Only tasks and experiments are managed directly by Hiraku. Runs are owned by a user-managed tracking backend  (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
@@ -66,7 +66,7 @@ hiraku run list --sort val/accuracy --ascending
 
 ### Python API
 
-Hiraku data records are managed by the [Python Core API](core.md). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible. 
+Hiraku data records are managed by the [Python API](api/index.md). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible.
 ```python
 from hirak.records import Record
 from hiraku.data import Entrypoint, Experiment, Metric, Run, Task
@@ -94,7 +94,7 @@ Tasks and experiments can define named **entrypoints** for launching runs. Entry
 
 Entrypoints are defined in the task or experiment YAML front matter with the `entrypoints` key, e.g.,
 ```yaml
-entrypoints: 
+entrypoints:
   train:
     command: ["uv", "run", "python", "train.py"]
     args:
@@ -113,9 +113,9 @@ hiraku launch <entrypoint>  --seed 1  # arguments after the entrypoint are passe
 > [!IMPORTANT]
 > Arguments that come after the entrypoint name are passed to the launch script. Hiraku options must come before the entrypoint name (tbd if practical)
 
-Launches can be run from a specified commit in an isolated work tree using 
+Launches can be run from a specified commit in an isolated work tree using
 ```bash
-hiraku launch --commit <hash> <entrypoint> 
+hiraku launch --commit <hash> <entrypoint>
 ```
 
 Hiraku injects environment variables into the launch, including `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_TASK_FILE`, `HIRAKU_EXPERIMENT_FILE`, ...
@@ -130,7 +130,7 @@ This invokes the dispatch script `hiraku/dispatch/runai.sh` with the full launch
 
 ## Agent Skill
 
-The `\hiraku` skill can be used directly in any coding harness. 
+The `\hiraku` skill can be used directly in any coding harness.
 
 ## Actions, Programs, Context
 
@@ -165,12 +165,12 @@ The following sequence illustrates the intended workflow.
 ### Interactive workflow
 ```bash
 # Setup and status
-hiraku init 
-hiraku status 
+hiraku init
+hiraku status
 
 # 1. optionally, initialize context (not implement yet)
-hiraku context create literature 
-hiraku-agent context update literature "Create a curated literature review for heart-disease prediction" 
+hiraku context create literature
+hiraku-agent context update literature "Create a curated literature review for heart-disease prediction"
 
 # add literature to the active context
 hiraku context set literature
@@ -184,11 +184,11 @@ hiraku task create heart-disease  --goal "Develop models for heart disease predi
 hiraku-agent task create heart-disease --goal "Develop models for heart disease prediction" --context literature # creates and sets the active task
 
 # 2. c) create task with agent skill inside coding harness (e.g, Claude, Codex, ...)
-/hiraku "create a new task for heart-disease prediction"  
+/hiraku "create a new task for heart-disease prediction"
 
 # query task record and Hiraku status
 hiraku task show [heart-disease]
-hiraku task show heart-disease --json  
+hiraku task show heart-disease --json
 hiraku status  # show current active task
 
 # 2. create an experiment, then implement and bind it
