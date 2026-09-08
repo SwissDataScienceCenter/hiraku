@@ -28,8 +28,7 @@ nav = [
       { "Essential concepts" = "concepts.md" },
   ] },
   { "Guides" = [
-      { "Use your own project" = "guides/own-project.md" },
-      { "Work with an AI agent" = "guides/agent.md" },
+      { "Use your own project" = "examples/minimal/README.md" },
       { "Advanced topics" = [
           { "Experiment branches" = "guides/experiment-branches.md" },
       ] },

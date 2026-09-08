@@ -18,17 +18,14 @@ uv run hiraku --help
 
 ## Start here
 
-Follow [Your first experiment](first-experiment.md) for a complete workflow
+Follow the [heart disease example](examples/heart-disease/README.md) for a complete workflow
 using the bundled Heart Disease example. It uses the CSV backend and does not
 require an external account.
-
-If you already have a project, continue with [Use your own project](guides/own-project.md).
-If an AI agent is doing the implementation, read [Work with an AI agent](guides/agent.md).
 
 ## Documentation
 
 - [Essential concepts](concepts.md)
-- [Guides](guides/own-project.md)
+- [Guides](examples/minimal/README.md)
 - [CLI reference](api/cli.md)
 - [Python API](api/index.md)
 - [Contributing](contributing.md)
