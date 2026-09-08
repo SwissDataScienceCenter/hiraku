@@ -124,7 +124,7 @@ Hiraku injects environment variables into the launch, including `HIRAKU_TASK_ID`
 
 The user can define custom dispatch scripts, e.g.
 ```bash
-hiraku launch <exp-id>:<entrypoint> --dispatch runai
+hiraku launch --dispatch runai <exp-id>:<entrypoint>
 ```
 This invokes the dispatch script `hiraku/dispatch/runai.sh` with the full launch command after a `--` separator. The dispatch script can be used to implement custom launch behavior, e.g., for a specific cluster or job scheduler, launch event logging, etc. By default, Hiraku calls the `hiraku/dispatch/launch.sh` script, which can be easily customized by the user, e.g. to active a custom environment, set environment variables, etc.
 
