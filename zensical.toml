@@ -36,6 +36,7 @@ nav = [
         { "CSV" = "guides/tracking-csv.md" },
         { "W&B" = "guides/tracking-wandb.md" },
         { "MLflow" = "guides/tracking-mlflow.md" },
+        { "Custom" = "guides/tracking-custom.md" },
       ] },
   ] },
   { "Reference" = [
