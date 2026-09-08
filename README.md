@@ -43,7 +43,8 @@ Tasks and experiments are stored as markdown with yaml frontmatter. This allows 
 
 At any time, a single task and experiment can be set as "active". By default, "create" actions activate the new task or experiment. The user can switch explicitly with `hiraku task set <task-id>` or `hiraku experiment set <experiment-id>`. The current status can be queried with `hiraku status`.
 
-> [!NOTE] Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata record in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
+> [!NOTE] 
+> Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
 
 ### CLI
 
@@ -90,7 +91,10 @@ tracking_backend:
 
 ### Entrypoints
 
-Optionally, tasks and experiments  define named **entrypoints** that are used to launch runs. Entrypoints are defined in the task or experiment YAML front matter with the `entrypoints` key, e.g.,
+Tasks and experiments can define named **entrypoints** for launching runs. Entrypoints document reproducible code invocations, including default hyperparameters or command-line arguments, and provide convenient functions for users and agents to run or dispatch code.
+
+
+Entrypoints are defined in the task or experiment YAML front matter with the `entrypoints` key, e.g.,
 ```yaml
 entrypoints: 
   train:
@@ -104,10 +108,12 @@ Entrypoints can be invoked via the CLI:
 hiraku launch <entrypoint>  # task entrypoint
 hiraku launch <exp-id>:<entrypoint>  # experiment entrypoint
 hiraku launch --task <task-id> <entrypoint>  # task defaults to active task
-hiraku launch --experiment <exp-id>  <entrypoint>  # defines experiment context, not task selection, defaults to the active experiment. `--no-exp` launches without experiment (tbc, confusing?)
-hiraku launch  --experiment <other-exp-id>  <exp-id>:<entrypoint> # launches <exp-id> with a forced <other-exp-id context>
-hiraku launch <entrypoint>  --seed 1  # arguments after the entrypoint are passed to the launch script (tbc, confusing? forces hiraku args to be before the entrypoint...)
+hiraku launch --experiment <exp-id>  <entrypoint>  # defines experiment context for a task-level entrypoint
+hiraku launch <entrypoint>  --seed 1  # arguments after the entrypoint are passed to the launch script
 ```
+
+> [!IMPORTANT]
+> Arguments that come after the entrypoint name are passed to the launch script. Hiraku options must come before the entrypoint name (tbd if practical)
 
 Launches can be run from a specified commit in an isolated work tree using 
 ```bash
@@ -144,7 +150,7 @@ The `\hiraku` skill can be used directly in any coding harness. See [SKILL.md](s
 ### Actions, Programs, Context
 
 > [!IMPORTANT]
-> Version 0.1.0 only implements the data model and not yet the agent integration. 
+> Version 0.1.0 only implements the data model and not yet the agent integration. Below we outline a possible API/UI/implementation. Feedback is welcome.
 
 Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state.  A *program* defines complex research workflows and loops end-to-end, with defined permissions and limits. Actions and programs are executed by the `hiraku-agent`. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to provide project-relevant information to the agent.
 
@@ -169,7 +175,7 @@ hiraku action list
 #### Actions
 
 > [!IMPORTANT]
-> Actions are not yet implemented. Below is a proposed user interface and workflow. See [docs/agent.md](docs/agent.md) for more details
+> Actions invokation is not yet implemented. See also [docs/agent.md](docs/agent.md).
 
 Actions are "atomic" operations with a defined start and end state that combine prompts with deterministic conditions or hooks. Actions are executed by the `hiraku-agent`. 
 
@@ -178,7 +184,7 @@ Use `hiraku-agent` to invoke actions with a configured model provider (e.g., Cod
 # Example
 # hiraku/actions/experiment/implement/{action.md,action.py}
 hiraku-agent experiment implement 
-hiraku-agent experiment implement --agent-backend [pi|codex|claude|api...]
+hiraku-agent experiment implement --provider [pi|codex|claude|api...]
 
 # actions can define custom flags
 hiraku-agent experiment implement --commit  
@@ -202,7 +208,7 @@ hiraku-agent <entity> <action-id>
 > [!IMPORTANT]
 > Program integration is not yet implemented. 
 
-Programs are inspired by Kaparthy's autoresearch program.md. The `program.md` markdown file defines agent instructions for (autonomous) research loops. We add yaml frontmatter to define permissions, resource limits, and stopping conditions, and a `program.py` for custom execution loops.
+Programs are inspired by Kaparthy's autoresearch program.md. The `program.md` markdown file defines agent instructions for (autonomous) research loops. We add YAML frontmatter to define permissions, resource limits, and stopping conditions, and a `program.py` for custom execution loops.
 
 In the simplest case, the program is interpreted by the LLM without explicit enforcement of any condition. 
 
@@ -243,7 +249,8 @@ hiraku-agent context create literature-search "Curate a literature review for he
 
 Attach context to an action invocation:
 ```bash
-hiraku-agent experiment propose --context literature-search --context project-overview # proposes new experiments using the context file
+# proposes new experiments using the context file
+hiraku-agent experiment propose --context literature-search --context project-overview  
 ```
 
 
@@ -329,7 +336,7 @@ hiraku-agent --program interactive --task heart-disease --max-experiments 5 --ma
 
 In the simplest case, the user creates a task and associated working branch (e.g., `main` or `hiraku/tasks/{task_id}`). Agents are instructed to commit experiment code to the task branch, a harness might enforce this as a hard constraint. To reject an experiment, the user (or agent) can choose to revert or reset code changes using the standard git commands.
 
-Experiment branches allow advanced workflows for creating a DAG over experiments. Users or agents can explore several ideas in parallel and backtrack or branch from any experiment. To associate an experiment with a branch use
+Experiment branches allow advanced workflows for creating a DAG over experiments. Users or agents can explore several ideas in parallel using git worktrees, and backtrack or branch from any experiment. To associate an experiment with a branch use
 ```bash
 hiraku experiment create ... --branch [BRANCH] [--from REF]
 ```
@@ -337,7 +344,8 @@ Without a value, `--branch` selects `hiraku/experiments/{task_id}/{experiment_id
 
 The user (or agent) is responsible to merge experiment branches into the task branch, and resolving conflicts. In particular, experiment records should be committed to the task branch so that they can be listed by Hiraku.
 
-Experiment lineage is a DAG derived from Git commit history.
+> [!INFO]
+> We do not explicitly record experiment lineage. Since experiments refer to a unique commit, experiment lineage is a DAG derived from Git commit history. To be tested, subject to change.
 
 
 ## Hiraku Documentation
@@ -364,11 +372,12 @@ Experiment lineage is a DAG derived from Git commit history.
 
 ## Roadmap
 
+*In approximate order of priority*
  - Define and add experiment status/state model
+ - Add `hiraku-agent`
  - Implement agent actions with hooks
     - add default actions: implement, propose, ...
- - Add benchmark problems for autoresearch
-
+ - Add benchmark / test cases
  - Terminal user interface
  - Context management
  - Agent programs
@@ -379,10 +388,7 @@ Experiment lineage is a DAG derived from Git commit history.
  - Pi Extension / Harness
  - VSCode extensions
  - Sandboxing integration based on action / program permissions
-
-
-
-PoC V3 / Continuous Integration
+ - ...
 
 
 ### Contributing
