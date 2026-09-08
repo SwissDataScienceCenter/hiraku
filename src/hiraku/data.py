@@ -404,7 +404,28 @@ def _experiment_path(task_id: str, experiment_id: str, config: HirakuConfig) -> 
 
 
 def load_task(task_id: str, *, config: HirakuConfig | None = None) -> Task:
-    """Resolve and load a task ID in a Hiraku project."""
+    """Load a task from the configured project registry.
+
+    The task is loaded from its canonical
+    ``hiraku/tasks/{task_id}/task.md`` path. This is a project-aware helper;
+    use the inherited [`Record.load`][hiraku.records.Record.load] method to
+    load an explicit path without discovering a project.
+
+    Args:
+        task_id: Identifier of the task to load.
+        config: Project configuration. The nearest project is discovered when
+            omitted.
+
+    Returns:
+        The validated task record.
+
+    Raises:
+        hiraku.errors.ProjectNotFoundError: If ``config`` is omitted and no
+            project can be discovered.
+        hiraku.errors.RecordNotFoundError: If the task does not exist.
+        hiraku.errors.ValidationError: If the identifier is invalid or the
+            record identity does not match its registry path.
+    """
     selected = config or HirakuConfig.discover()
     task = Task.load(_task_path(task_id, selected))
     if task.id != task_id:
@@ -415,7 +436,25 @@ def load_task(task_id: str, *, config: HirakuConfig | None = None) -> Task:
 
 
 def list_tasks(*, config: HirakuConfig | None = None) -> list[Task]:
-    """List tasks from the configured project registry in ID order."""
+    """List tasks from the configured project registry in ID order.
+
+    Only canonical ``hiraku/tasks/{task_id}/task.md`` records are included.
+    This project-aware helper discovers the nearest project when ``config`` is
+    omitted.
+
+    Args:
+        config: Project configuration. The nearest project is discovered when
+            omitted.
+
+    Returns:
+        Validated task records sorted deterministically by identifier.
+
+    Raises:
+        hiraku.errors.ProjectNotFoundError: If ``config`` is omitted and no
+            project can be discovered.
+        hiraku.errors.ValidationError: If a record identity does not match its
+            registry path.
+    """
     selected = config or HirakuConfig.discover()
     tasks = Task.list(selected.tasks_dir.glob("*/task.md"))
     for task in tasks:
@@ -430,7 +469,43 @@ def load_experiment(
     task: Task | str | None = None,
     config: HirakuConfig | None = None,
 ) -> Experiment:
-    """Resolve a scoped or qualified experiment reference in a project."""
+    """Resolve and load a task-scoped experiment reference.
+
+    Experiment IDs are unique only within a task. Pass ``task`` explicitly,
+    use a qualified ``"{task_id}:{experiment_id}"`` reference, or rely on the
+    active task. A qualified reference and an explicit ``task`` must identify
+    the same task. An unqualified reference without either an explicit or
+    active task is rejected rather than resolved by guessing from matching
+    files; multiple matches are reported as ambiguous.
+
+    The experiment is loaded from its canonical
+    ``hiraku/tasks/{task_id}/experiments/{experiment_id}.md`` path. Use the
+    inherited [`Record.load`][hiraku.records.Record.load] method for a direct,
+    configuration-free file operation.
+
+    Args:
+        reference: An experiment ID or a qualified
+            ``"{task_id}:{experiment_id}"`` reference.
+        task: Owning task or task ID. May be omitted for a qualified reference
+            or when the project has an active task.
+        config: Project configuration. The nearest project is discovered when
+            omitted.
+
+    Returns:
+        The validated experiment record.
+
+    Raises:
+        hiraku.errors.AmbiguousReferenceError: If explicit and qualified task
+            scopes conflict, or an unscoped ID matches multiple tasks.
+        hiraku.errors.NoActiveTaskError: If an unqualified reference has no
+            explicit or active task scope.
+        hiraku.errors.RecordNotFoundError: If the task or experiment does not
+            exist.
+        hiraku.errors.ProjectNotFoundError: If ``config`` is omitted and no
+            project can be discovered.
+        hiraku.errors.ValidationError: If an identifier is invalid or record
+            identity does not match its registry path.
+    """
     selected = config or HirakuConfig.discover()
     experiment_id = reference
     if ":" in reference:
@@ -466,7 +541,29 @@ def list_experiments(
     task: Task | str | None = None,
     config: HirakuConfig | None = None,
 ) -> list[Experiment]:
-    """List experiments for a task from the configured project registry."""
+    """List experiments belonging to one task in ID order.
+
+    Experiment IDs are task-scoped. Pass ``task`` explicitly or rely on the
+    project's active task; this function never combines experiments from all
+    tasks or guesses a task from the files present.
+
+    Args:
+        task: Owning task or task ID. The active task is used when omitted.
+        config: Project configuration. The nearest project is discovered when
+            omitted.
+
+    Returns:
+        Validated experiment records sorted deterministically by identifier.
+
+    Raises:
+        hiraku.errors.NoActiveTaskError: If ``task`` is omitted and there is no
+            active task.
+        hiraku.errors.RecordNotFoundError: If the selected task does not exist.
+        hiraku.errors.ProjectNotFoundError: If ``config`` is omitted and no
+            project can be discovered.
+        hiraku.errors.ValidationError: If a record identity does not match its
+            registry path.
+    """
     selected = config or HirakuConfig.discover()
     if task is None:
         task = selected.active_task_id

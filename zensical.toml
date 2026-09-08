@@ -7,7 +7,7 @@ repo_url = "https://github.com/SwissDataScienceCenter/hiraku"
 repo_name = "SwissDataScienceCenter/hiraku"
 plugins = [
   "search",
-  { "mkdocstrings" = { "handlers" = { "python" = { "options" = {
+  { "mkdocstrings" = { "handlers" = { "python" = { "paths" = ["src"], "options" = {
     "docstring_style" = "google",
     "members_order" = "alphabetical",
     "show_source" = false,
