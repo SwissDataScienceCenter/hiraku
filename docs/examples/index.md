@@ -16,4 +16,3 @@ An interactive example using scikit-learn's built-in Iris dataset and W&B
 metadata, tags, groups, and metrics:
 
 - [Iris W&B project README](iris-wandb/README.md)
-- [Interactive Python notebook](https://github.com/SwissDataScienceCenter/hiraku/blob/main/examples/iris-wandb/interactive.ipynb)
