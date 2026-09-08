@@ -31,6 +31,7 @@ nav = [
       { "Essential Concepts" = "concepts.md" },
   ] },
   { "Guides" = [
+     { "Overview" = "guides/index.md" },
       { "Use your own project" = "examples/minimal/README.md" },
       { "Tracking Backends" = [
         { "CSV" = "guides/tracking-csv.md" },
