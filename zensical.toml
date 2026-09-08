@@ -25,6 +25,8 @@ nav = [
          { "Overview" = "examples/index.md" },
           { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
           { "Iris (W&B)" = "examples/iris-wandb/README.md" },
+          { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
+          { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
       ] },
       { "Concepts" = "concepts.md" },
   ] },
