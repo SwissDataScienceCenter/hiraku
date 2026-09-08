@@ -344,7 +344,7 @@ Without a value, `--branch` selects `hiraku/experiments/{task_id}/{experiment_id
 
 The user (or agent) is responsible to merge experiment branches into the task branch, and resolving conflicts. In particular, experiment records should be committed to the task branch so that they can be listed by Hiraku.
 
-> [!INFO]
+> [!NOTE]
 > We do not explicitly record experiment lineage. Since experiments refer to a unique commit, experiment lineage is a DAG derived from Git commit history. To be tested, subject to change.
 
 
