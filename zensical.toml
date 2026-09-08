@@ -30,14 +30,14 @@ nav = [
   ] },
   { "Guides" = [
       { "Use your own project" = "examples/minimal/README.md" },
-      { "Advanced topics" = [
-          { "Experiment branches" = "guides/experiment-branches.md" },
-      ] },
       { "Tracking Backends" = [
         { "CSV" = "guides/tracking-csv.md" },
         { "W&B" = "guides/tracking-wandb.md" },
         { "MLflow" = "guides/tracking-mlflow.md" },
         { "Custom Backend" = "guides/tracking-custom.md"}
+      ] },
+      { "Advanced topics" = [
+          { "Experiment branches" = "guides/experiment-branches.md" },
       ] },
   ] },
   { "Reference" = [
