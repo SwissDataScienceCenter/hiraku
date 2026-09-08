@@ -13,7 +13,7 @@ from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.data import load_experiment, load_task
 
-EXAMPLE = Path(__file__).parents[2] / "examples" / "iris-wandb"
+EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "iris-wandb"
 
 FAKE_WANDB = r'''
 import json
