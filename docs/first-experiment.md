@@ -94,7 +94,6 @@ launch that never logs a row will not appear as a run.
 
 - [Use your own project](guides/own-project.md)
 - [Work with an AI agent](guides/agent.md)
-- [Use the Python API and notebook](guides/python.md)
 - [Track runs with W&B](guides/tracking-wandb.md)
 
 The copied example's `README.md` includes additional inspection commands.

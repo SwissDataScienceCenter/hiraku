@@ -30,7 +30,6 @@ nav = [
   { "Guides" = [
       { "Use your own project" = "guides/own-project.md" },
       { "Work with an AI agent" = "guides/agent.md" },
-      { "Python API and notebooks" = "guides/python.md" },
       { "Track with CSV" = "guides/tracking-csv.md" },
       { "Track with W&B" = "guides/tracking-wandb.md" },
       { "Track with MLflow" = "guides/tracking-mlflow.md" },
