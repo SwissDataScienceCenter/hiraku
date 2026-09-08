@@ -21,6 +21,7 @@ dev_addr = "localhost:8000"
 nav = [
   { "Get started" = [
       { "Overview" = "index.md" },
+      { "Examples" = "examples/index.md" },
       { "Essential Concepts" = "concepts.md" },
   ] },
   { "Examples" = [
