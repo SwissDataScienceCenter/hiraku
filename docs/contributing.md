@@ -7,9 +7,6 @@ We track planned features and ideas using [GitHub issues](https://github.com/Swi
 
 ## Development setup
 
-For your first use of Hiraku, start with [Your first experiment](first-experiment.md).
-This page is for contributors working on the package.
-
 ### Install from source
 
 ```bash

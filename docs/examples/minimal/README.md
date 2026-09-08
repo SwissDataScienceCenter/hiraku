@@ -49,8 +49,8 @@ The entrypoint runs `uv run python evaluate.py --seed 0`. The script writes its
 score and launch attribution to `hiraku/tasks/my-task/runs.csv`, so the final
 command lists the baseline result. Metric declarations describe how to compare
 results; the evaluation script is responsible for calculating and logging. 
-For other tracking backends, see [W&B](tracking-wandb.md) or
-[MLflow](tracking-mlflow.md).
+For other tracking backends, see [W&B](../../guides/tracking-wandb.md) or
+[MLflow](../../guides/tracking-mlflow.md).
 
 For the next experiment, implement and commit the source changes, then create a
 new experiment bound to that commit.

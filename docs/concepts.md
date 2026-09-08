@@ -66,7 +66,7 @@ hiraku run list --sort val/accuracy --ascending
 
 ### Python API
 
-Hiraku data records are managed by the [Python Core API](docs/core.md). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible. 
+Hiraku data records are managed by the [Python Core API](core.md). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible. 
 ```python
 from hirak.records import Record
 from hiraku.data import Entrypoint, Experiment, Metric, Run, Task
@@ -130,7 +130,7 @@ This invokes the dispatch script `hiraku/dispatch/runai.sh` with the full launch
 
 ## Agent Skill
 
-The `\hiraku` skill can be used directly in any coding harness. See [SKILL.md](src/hiraku/resources/skill/SKILL.md).
+The `\hiraku` skill can be used directly in any coding harness. 
 
 ## Actions, Programs, Context
 
