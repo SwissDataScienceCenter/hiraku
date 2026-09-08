@@ -2,26 +2,23 @@
 
 ## Summary
 
-Please include a brief description of the purpose of this pull request.
+<!-- Briefly describe the purpose of this pull request. -->
 
 ## Motivation & Context
 
+<!--
 - Why is this change necessary?
 - What problem does it solve?
-- Reference any relevant GitHub issues (e.g., fixes #123).
+- Reference relevant GitHub issues (for example, fixes #123).
+-->
 
 ## Changes Introduced
 
-Provide a clear description of the changes made, including:
-
-- Major features added
-- Bugs fixed
-- Refactoring and improvements
-- Other relevant updates
+<!-- Summarize the relevant features, fixes, refactoring, or documentation changes. -->
 
 ## Checklist
 
-Please review and check the following items before submitting your pull request:
+<!-- Review and check the following items before submitting your pull request. -->
 
 - [ ] I have tested my changes thoroughly.
 - [ ] My code follows the project's coding style guidelines.
@@ -35,8 +32,8 @@ Please review and check the following items before submitting your pull request:
 
 ## Screenshots (if applicable)
 
-If your pull request includes changes to the user interface, please provide screenshots to visually demonstrate the changes.
+<!-- Provide screenshots when the pull request changes the user interface. -->
 
 ## Additional Notes
 
-Include any additional information or notes about your pull request that may be helpful for reviewers.
+<!-- Add any additional information that may help reviewers. -->

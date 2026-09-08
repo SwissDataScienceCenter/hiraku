@@ -3,34 +3,40 @@ name: Bug Report
 about: Create a report to help us improve Hiraku
 title: "[BUG]"
 labels: bug, help wanted
-assignees: kirschnj, MatteoFasulo
+assignees: ''
 
 ---
 
 ## Summary
-[Summarize the problem concisely.]
+<!-- Summarize the problem concisely. -->
 
 ## Steps to Reproduce
-1. [First Step]
-2. [Second Step]
-3. [More Steps...]
+<!--
+1. First step
+2. Second step
+3. More steps...
+-->
 
 ## Expected Behavior
-[Describe what you expected to happen.]
+<!-- Describe what you expected to happen. -->
 
 ## Actual Behavior
-[Describe what actually happened.]
+<!-- Describe what actually happened. -->
 
 ## Reproducibility
-[Always/Intermittently/Happened Once]
+<!-- Always, intermittently, or happened once? -->
 
 ## Screenshots/GIFs
-[If applicable, add screenshots or GIFs to help explain your problem.]
+<!-- If applicable, add screenshots or GIFs to help explain your problem. -->
 
 ## Additional Information
-- **Version**: [Version number where the bug was found]
-- **Environment**: [Operating system, browser, etc.]
-- **Related Issues**: [Link to related issues or pull requests]
+- **Hiraku version or commit**:
+- **Python version**:
+- **Operating system**:
+- **Installation method**:
+- **Tracking backend**:
+- **Command executed**:
+- **Related issues**:
 
 ## Possible Solution
-[If you have any ideas on how to fix the bug, suggest them here.]
+<!-- If you have ideas on how to fix the bug, suggest them here. -->
