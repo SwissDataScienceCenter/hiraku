@@ -30,9 +30,14 @@ nav = [
   { "Guides" = [
       { "Use your own project" = "guides/own-project.md" },
       { "Work with an AI agent" = "guides/agent.md" },
-      { "Track with CSV" = "guides/tracking-csv.md" },
-      { "Track with W&B" = "guides/tracking-wandb.md" },
-      { "Track with MLflow" = "guides/tracking-mlflow.md" },
+      { "Advanced topics" = [
+          { "Experiment branches" = "guides/experiment-branches.md" },
+      ] },
+      { "Tracking Backends" = [
+        { "CSV" = "guides/tracking-csv.md" },
+        { "W&B" = "guides/tracking-wandb.md" },
+        { "MLflow" = "guides/tracking-mlflow.md" },
+      ] },
   ] },
   { "Reference" = [
       { "CLI" = "api/cli.md" },
