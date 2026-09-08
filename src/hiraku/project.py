@@ -20,13 +20,18 @@ class ProjectInitializer:
 
     @classmethod
     def create(
-        cls, root: Path | str = ".", *, install_skill: bool = True
+        cls,
+        root: Path | str = ".",
+        *,
+        install_skill: bool = True,
+        tracking_backend: str | None = None,
     ) -> HirakuConfig:
         """Create and initialize a project directory.
 
         Args:
             root: Root directory where the project will be created.
             install_skill: Whether to install repository-local skill resources.
+            tracking_backend: Optional default tracking backend name.
 
         Returns:
             The initialized `hiraku.config.HirakuConfig`.
@@ -45,6 +50,8 @@ class ProjectInitializer:
         created_dirs: list[Path] = []
         root_existed = project_root.exists()
         data = dict(HirakuConfig.DEFAULTS)
+        if tracking_backend is not None:
+            data["tracking_backend"] = {"type": tracking_backend}
         try:
             project_root.mkdir(parents=True, exist_ok=True)
             if not root_existed:

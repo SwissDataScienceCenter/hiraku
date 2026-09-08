@@ -453,9 +453,13 @@ def main(ctx: click.Context) -> None:
 
 
 @main.command("init")
-def init_command() -> None:
+@click.option(
+    "--tracking-backend",
+    help="Set the default tracking backend.",
+)
+def init_command(tracking_backend: str | None) -> None:
     """Initialize a Hiraku project."""
-    config = HirakuConfig.init(Path.cwd())
+    config = HirakuConfig.init(Path.cwd(), tracking_backend=tracking_backend)
     click.echo(f"Initialized Hiraku project at {config.path}")
 
 

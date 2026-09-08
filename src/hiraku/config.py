@@ -151,13 +151,18 @@ class HirakuConfig(BaseModel):
 
     @classmethod
     def init(
-        cls, root: Path | str = ".", *, install_skill: bool = True
+        cls,
+        root: Path | str = ".",
+        *,
+        install_skill: bool = True,
+        tracking_backend: str | None = None,
     ) -> HirakuConfig:
         """Initialize a new Hiraku project.
 
         Args:
             root: Directory to initialize.
             install_skill: Whether to install the repository-local agent skill.
+            tracking_backend: Optional default tracking backend name.
 
         Returns:
             The initialized configuration.
@@ -167,7 +172,11 @@ class HirakuConfig(BaseModel):
         """
         from .project import ProjectInitializer
 
-        return ProjectInitializer.create(root, install_skill=install_skill)
+        return ProjectInitializer.create(
+            root,
+            install_skill=install_skill,
+            tracking_backend=tracking_backend,
+        )
 
     def save(self) -> None:
         """Persist validated configuration to its YAML file.

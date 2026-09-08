@@ -113,6 +113,15 @@ def test_help_is_lazy_and_init_and_status_work(tmp_path: Path, monkeypatch) -> N
     assert status["git_branch"] is None
 
 
+def test_init_accepts_tracking_backend(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(main, ["init", "--tracking-backend", "mlflow"])
+
+    assert result.exit_code == 0, result.output
+    assert HirakuConfig.discover(tmp_path).tracking_backend == {"type": "mlflow"}
+
+
 def test_task_crud_branches_and_active_deletion(tmp_path: Path, monkeypatch) -> None:
     config = _project(tmp_path, git=True)
     monkeypatch.chdir(tmp_path)

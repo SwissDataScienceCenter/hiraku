@@ -41,6 +41,15 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
         HirakuConfig.discover(tmp_path / "missing")
 
 
+def test_init_sets_tracking_backend(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, tracking_backend="mlflow")
+
+    assert config.tracking_backend == {"type": "mlflow"}
+    assert yaml.safe_load(config.path.read_text())["tracking_backend"] == {
+        "type": "mlflow"
+    }
+
+
 def test_config_preserves_unknown_keys_and_active_invariants(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     raw = yaml.safe_load(config.path.read_text())
