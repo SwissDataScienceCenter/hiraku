@@ -22,7 +22,6 @@ nav = [
   { "CLI reference" = "cli.md" },
   { "Tracking" = "tracking.md" },
   { "Examples" = "examples.md" },
-  { "Agent skill" = "agent.md" },
   { "Design" = "design.md" },
   { "Python API" = [
       { "Overview" = "api/index.md" },

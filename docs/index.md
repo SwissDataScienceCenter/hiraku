@@ -19,7 +19,6 @@ data model, and [Examples](examples.md) for complete workflows.
 
 - [CLI reference](cli.md)
 - [Tracking backends](tracking.md)
-- [Agent skill](agent.md)
 - [Design notes](design.md)
 
 ## Python API
