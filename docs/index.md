@@ -1,8 +1,20 @@
 # Hiraku
 
-Hiraku helps you run small, reproducible data-science investigations. Define
-what you want to improve, describe an experiment, launch the code you already
-have, and inspect the resulting metrics.
+Hiraku provides a small, scriptable workflow for AI-assisted data-science
+research. Define a task, record experiments, launch reproducible entrypoints,
+and inspect tracked runs.
+
+
+## Installation
+
+```bash
+uv tool install ".[mlflow,wandb]"
+hiraku --help
+
+# development setup
+uv sync --all-extras
+uv run hiraku --help
+```
 
 ## Start here
 
@@ -19,5 +31,4 @@ If an AI agent is doing the implementation, read [Work with an AI agent](guides/
 - [Guides](guides/own-project.md)
 - [CLI reference](api/cli.md)
 - [Python API](api/index.md)
-- [Reference](reference/configuration.md)
 - [Contributing](contributing.md)

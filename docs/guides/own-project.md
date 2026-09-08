@@ -46,6 +46,6 @@ using [CSV](tracking-csv.md), [W&B](tracking-wandb.md), or
 
 For the next approach, implement and commit the source changes, then create a
 new experiment bound to that commit. Branches are optional; see
-[Git and execution](../reference/git.md).
+[Git and execution](../guides/branching.md).
 
 See the [CLI reference](../api/cli.md) for update, inspection, and branch options.

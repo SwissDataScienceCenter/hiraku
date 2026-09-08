@@ -21,7 +21,10 @@ dev_addr = "localhost:8000"
 nav = [
   { "Get started" = [
       { "Overview" = "index.md" },
-      { "Your first experiment" = "first-experiment.md" },
+      { "Examples" = [
+          { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
+          { "Iris (W&B)" = "examples/iris-wandb/README.md" },
+      ] },
       { "Essential concepts" = "concepts.md" },
   ] },
   { "Guides" = [
@@ -31,12 +34,9 @@ nav = [
       { "Track with CSV" = "guides/tracking-csv.md" },
       { "Track with W&B" = "guides/tracking-wandb.md" },
       { "Track with MLflow" = "guides/tracking-mlflow.md" },
-      { "Troubleshooting" = "guides/troubleshooting.md" },
   ] },
   { "Reference" = [
       { "CLI" = "api/cli.md" },
-      { "Configuration" = "reference/configuration.md" },
-      { "Git and execution" = "reference/git.md" },
       { "Python API" = [
       { "Overview" = "api/index.md" },
       { "Configuration" = "api/config.md" },
@@ -54,7 +54,6 @@ nav = [
   ] },
   { "Contributing" = [
       { "Overview" = "contributing.md" },
-      { "Development setup" = "install.md" },
       { "Architecture" = "core.md" },
       { "Design proposals" = "design.md" },
       { "Research stories" = [
@@ -86,13 +85,14 @@ features = [
   "content.tabs.link",
   "content.tooltips",
   "navigation.footer",
-  "navigation.indexes",
+  "navigation.expand",
+  # "navigation.indexes",
   "navigation.instant",
   "navigation.instant.prefetch",
   "navigation.instant.progress",
   "navigation.path",
-  "navigation.prune",
-  "navigation.sections",
+  # "navigation.prune",
+  # "navigation.sections",
   "navigation.tabs",
   "navigation.tabs.sticky",
   "navigation.top",
