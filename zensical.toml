@@ -1,6 +1,6 @@
 [project]
 site_url = "https://swissdatasciencecenter.github.io/hiraku/"
-site_name = "Hiraku"
+site_name = "Hiraku documentation"
 site_description = "Core metadata and launch APIs for AI-assisted data science"
 site_author = "Hiraku contributors"
 repo_url = "https://github.com/SwissDataScienceCenter/hiraku"
@@ -14,17 +14,30 @@ plugins = [
     "filters" = ["!^_"],
   } } } } },
 ]
+docs_dir = "docs"
+site_dir = "site"
+dev_addr = "localhost:8000"
 
 nav = [
-  { "Get started" = "index.md" },
-  { "Installation" = "install.md" },
-  { "Core concepts" = "core.md" },
-  { "Tracking" = "tracking.md" },
-  { "Examples" = "examples.md" },
-  { "Design" = "design.md" },
-  { "CLI" = "cli.md" },
-  { "CLI reference" = "api/cli.md" },
-  { "Python API" = [
+  { "Get started" = [
+      { "Overview" = "index.md" },
+      { "Your first experiment" = "first-experiment.md" },
+      { "Essential concepts" = "concepts.md" },
+  ] },
+  { "Guides" = [
+      { "Use your own project" = "guides/own-project.md" },
+      { "Work with an AI agent" = "guides/agent.md" },
+      { "Python API and notebooks" = "guides/python.md" },
+      { "Track with CSV" = "guides/tracking-csv.md" },
+      { "Track with W&B" = "guides/tracking-wandb.md" },
+      { "Track with MLflow" = "guides/tracking-mlflow.md" },
+      { "Troubleshooting" = "guides/troubleshooting.md" },
+  ] },
+  { "Reference" = [
+      { "CLI" = "api/cli.md" },
+      { "Configuration" = "reference/configuration.md" },
+      { "Git and execution" = "reference/git.md" },
+      { "Python API" = [
       { "Overview" = "api/index.md" },
       { "Configuration" = "api/config.md" },
       { "Records" = "api/records.md" },
@@ -37,6 +50,21 @@ nav = [
       ] },
       { "Tracking" = "api/tracking.md" },
       { "Launching" = "api/launch.md" },
+      ] },
+  ] },
+  { "Contributing" = [
+      { "Overview" = "contributing.md" },
+      { "Development setup" = "install.md" },
+      { "Architecture" = "core.md" },
+      { "Design proposals" = "design.md" },
+      { "Research stories" = [
+          { "Overview" = "stories/index.md" },
+          { "Johannes — simple" = "stories/Johannes-simple.md" },
+          { "Johannes — advanced" = "stories/Johannes-advanced.md" },
+          { "Matteo — simple" = "stories/Matteo-simple.md" },
+          { "Matteo — advanced" = "stories/Matteo-advanced.md" },
+          { "Qianqian" = "stories/Qianqian.md" },
+      ] },
   ] },
 ]
 
@@ -47,6 +75,7 @@ nav = [
 variant = "modern"
 language = "en"
 features = [
+  "header.autohide",
   "announce.dismiss",
   #"content.action.edit",
   #"content.action.view",
@@ -56,8 +85,6 @@ features = [
   "content.footnote.tooltips",
   "content.tabs.link",
   "content.tooltips",
-  "header.autohide",
-  "navigation.expand",
   "navigation.footer",
   "navigation.indexes",
   "navigation.instant",
@@ -75,7 +102,7 @@ features = [
   "toc.integrate",
 ]
 
-# [project.theme.font]
+[project.theme.font]
 text = "Inter"
 code = "Jetbrains Mono"
 
@@ -96,9 +123,12 @@ scheme = "slate"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to system preference"
 
-# [[project.extra.social]]
-# icon = "fontawesome/brands/github"
-# link = "https://github.com/user/repo"
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/SwissDataScienceCenter/hiraku"
 
 # [[project.extra.social]]
 # icon = "fontawesome/brands/mastodon"

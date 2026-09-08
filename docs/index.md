@@ -1,25 +1,23 @@
 # Hiraku
 
-Hiraku provides a small, scriptable workflow for AI-assisted data-science
-research. Define a task, record experiments, launch reproducible entrypoints,
-and inspect tracked runs.
+Hiraku helps you run small, reproducible data-science investigations. Define
+what you want to improve, describe an experiment, launch the code you already
+have, and inspect the resulting metrics.
 
 ## Start here
 
-```bash
-uv sync --extra dev
-hiraku init
-hiraku --help
-```
+Follow [Your first experiment](first-experiment.md) for a complete workflow
+using the bundled Heart Disease example. It uses the CSV backend and does not
+require an external account.
 
-Read [Installation](install.md) for setup, [Core concepts](core.md) for the
-data model, and [Examples](examples.md) for complete workflows.
+If you already have a project, continue with [Use your own project](guides/own-project.md).
+If an AI agent is doing the implementation, read [Work with an AI agent](guides/agent.md).
 
 ## Documentation
 
-- [CLI reference](cli.md)
-- [Tracking backends](tracking.md)
-- [Design notes](design.md)
-
-## Python API
+- [Essential concepts](concepts.md)
+- [Guides](guides/own-project.md)
+- [CLI reference](api/cli.md)
 - [Python API](api/index.md)
+- [Reference](reference/configuration.md)
+- [Contributing](contributing.md)
