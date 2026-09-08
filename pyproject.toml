@@ -5,6 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "hiraku"
 version = "0.1.0"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Johannes Kirschner", email = "johannes.kirschner@sdsc.ethz.ch"},
+    {name = "Matteo Fasulo", email = "matteo.fasulo@sdsc.ethz.ch"},
+    {name = "Qianqian Zou", email = "qianqian.zou@epfl.ch"},
+]
 description = "Core metadata and launch APIs for AI-assisted data science"
 readme = "README.md"
 requires-python = ">=3.11"
