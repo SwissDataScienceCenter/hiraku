@@ -28,7 +28,7 @@ nav = [
           { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
           { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
       ] },
-      { "Concepts" = "concepts.md" },
+      { "Essential Concepts" = "concepts.md" },
   ] },
   { "Guides" = [
       { "Use your own project" = "examples/minimal/README.md" },
