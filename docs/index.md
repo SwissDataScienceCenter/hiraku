@@ -30,31 +30,21 @@ Hiraku aims to record a small research loop with the following three concepts:
 Task → Experiment → Run
 ```
 
-* A `Task` defines the research goal, question, metrics, entrypoints, and
-tracking backend. It is stored as a Markdown record under `hiraku/tasks/`.
-* An `Experiment` describes one implementation attempt and its hypothesis. It
-belongs to a task and may refer to a committed Git source state. An experiment
-without a commit is a proposal.
-* A `Run` is one execution of an experiment entrypoint. It contains the source
-commit when available, parameters, metrics, timestamps, and backend metadata.
-Runs are read through the selected tracking backend.
-* An entrypoint is an existing executable command. Hiraku constructs its argument
-vector and invokes it through the project dispatcher. It does not create the
-training or evaluation script.
+* A `Task` defines the research task. It includes user-defined fields (e.g., a goal, question and metrics), documents the research progress, and specifies shared entrypoints and a tracking backend. Tasks are stored as  Markdown records under `hiraku/tasks/{task-id}/task.md`. 
+* An `Experiment` describes one small, reproducible unit within a task. It links a code commit, experiment entrypoints, and runs. Experiments are stored as Markdown records under `hiraku/tasks/{task-id}/experiments/{experiment-id}.md`.
+* A `Run` records an execution of an experiment. Runs are user managed and directly logged to CSV, MLflow, W&B, or any other backend. They are stored in the backend's own format and queried by Hiraku. 
+* An `Entrypoint` is an existing executable command associated to task or an experiment with documented arguments. Hiraku provides launch helpers and customizable dispatch scripts.
 
-> Git remains responsible for commits, branches, and source history. Hiraku can
-bind an experiment to a commit and execute that commit in a temporary worktree.
+> Git remains responsible for commits, branches, and source history. 
 Branches are optional for the core workflow.
 
-> A proposal becomes runnable when it is bound to a commit. Later code changes
-should be committed and represented by a new or updated experiment according
-to the project workflow.
 
 For more details, see [Essential concepts](concepts.md).
 
 ## Documentation
 
-- [Guides](examples/minimal/README.md)
+- [Guides](examples/guides/)
+- [Examples](examples/)
 - [CLI reference](api/cli.md)
 - [Python API](api/index.md)
 - [Contributing](contributing.md)
