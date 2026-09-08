@@ -21,14 +21,14 @@ dev_addr = "localhost:8000"
 nav = [
   { "Get started" = [
       { "Overview" = "index.md" },
-      { "Examples" = [
-         { "Overview" = "examples/index.md" },
-          { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
-          { "Iris (W&B)" = "examples/iris-wandb/README.md" },
-          { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
-          { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
-      ] },
       { "Essential Concepts" = "concepts.md" },
+  ] },
+  { "Examples" = [
+     { "Overview" = "examples/index.md" },
+      { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
+      { "Iris (W&B)" = "examples/iris-wandb/README.md" },
+      { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
+      { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
   ] },
   { "Guides" = [
      { "Overview" = "guides/index.md" },
@@ -60,17 +60,17 @@ nav = [
       { "Launching" = "api/launch.md" },
       ] },
   ] },
-  { "Contributing" = [
-      { "Overview" = "contributing.md" },
-      { "Agentic design patterns" = "design.md" },
-      { "User stories" = [
-          { "Matteo — simple" = "stories/Matteo-simple.md" },
-          { "Matteo — advanced" = "stories/Matteo-advanced.md" },
-          { "Qianqian" = "stories/Qianqian.md" },
-          { "Johannes — simple" = "stories/Johannes-simple.md" },
-          { "Johannes — advanced" = "stories/Johannes-advanced.md" },
-      ] },
-  ] },
+  # { "Contributing" = [
+  #     { "Overview" = "contributing.md" },
+  #     { "Agentic design patterns" = "design.md" },
+  #     { "User stories" = [
+  #         { "Matteo — simple" = "stories/Matteo-simple.md" },
+  #         { "Matteo — advanced" = "stories/Matteo-advanced.md" },
+  #         { "Qianqian" = "stories/Qianqian.md" },
+  #         { "Johannes — simple" = "stories/Johannes-simple.md" },
+  #         { "Johannes — advanced" = "stories/Johannes-advanced.md" },
+  #     ] },
+  # ] },
 ]
 
 # extra_css = ["stylesheets/extra.css"]
