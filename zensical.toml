@@ -22,10 +22,11 @@ nav = [
   { "Get started" = [
       { "Overview" = "index.md" },
       { "Examples" = [
+         { "Overview" = "examples/index.md" },
           { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
           { "Iris (W&B)" = "examples/iris-wandb/README.md" },
       ] },
-      { "Essential concepts" = "concepts.md" },
+      { "Concepts" = "concepts.md" },
   ] },
   { "Guides" = [
       { "Use your own project" = "examples/minimal/README.md" },
@@ -36,7 +37,7 @@ nav = [
         { "CSV" = "guides/tracking-csv.md" },
         { "W&B" = "guides/tracking-wandb.md" },
         { "MLflow" = "guides/tracking-mlflow.md" },
-        { "Custom" = "guides/tracking-custom.md" },
+        { "Custom Backend" = "guides/tracking-custom.md"}
       ] },
   ] },
   { "Reference" = [
@@ -59,14 +60,13 @@ nav = [
   { "Contributing" = [
       { "Overview" = "contributing.md" },
       { "Architecture" = "core.md" },
-      { "Design proposals" = "design.md" },
-      { "Research stories" = [
-          { "Overview" = "stories/index.md" },
-          { "Johannes — simple" = "stories/Johannes-simple.md" },
-          { "Johannes — advanced" = "stories/Johannes-advanced.md" },
+      { "Agentic design patterns" = "design.md" },
+      { "User stories" = [
           { "Matteo — simple" = "stories/Matteo-simple.md" },
           { "Matteo — advanced" = "stories/Matteo-advanced.md" },
           { "Qianqian" = "stories/Qianqian.md" },
+          { "Johannes — simple" = "stories/Johannes-simple.md" },
+          { "Johannes — advanced" = "stories/Johannes-advanced.md" },
       ] },
   ] },
 ]

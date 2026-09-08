@@ -2,14 +2,12 @@
 
 Based on what I liked from [*Agentic Design Patterns*](https://doi.org/10.1007/978-3-032-01402-3)
 
-> [!NOTE]
-> I have not finished reading every chapter, but there is already enough material to present several interesting points for discussion.
+> I have not finished reading every chapter, but there is already enough material to present several interesting points for discussion. (Matteo)
 
 ## Design principles
 
 ### 1. Define a clear goal
 
-> [!IMPORTANT]
 > Any kind of agentic workflow should be bounded by a clear goal definition, and the system should not allow the agent to change it without explicit human approval.
 
 A tool such as Hiraku should define a clear **Goal** with:

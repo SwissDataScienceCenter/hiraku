@@ -1,5 +1,9 @@
 # Contributing
 
+Contributions are welcome. Pick a feature to add, create a feature branch and pull request. Share and discuss :)
+
+We track planned features and ideas using [GitHub issues](https://github.com/SwissDataScienceCenter/hiraku/issues).
+
 
 ## Development setup
 
@@ -46,11 +50,3 @@ Example READMEs retain their runnable commands.
 For contributor proposals, see [Research stories](stories/index.md).
 
 See [Architecture](core.md) for core responsibilities.
-
-## Design discussions
-
-- [Design proposals](design.md)
-- [Research stories from Johannes, Matteo, and Qianqian](stories/index.md)
-
-These discussions may describe future behavior. The implementation and generated
-API/CLI references describe the interfaces available in this branch.
