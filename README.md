@@ -129,9 +129,6 @@ hiraku launch --dispatch runai <exp-id>:<entrypoint>
 This invokes the dispatch script `hiraku/dispatch/runai.sh` with the full launch command after a `--` separator. The dispatch script can be used to implement custom launch behavior, e.g., for a specific cluster or job scheduler, launch event logging, etc. By default, Hiraku calls the `hiraku/dispatch/launch.sh` script, which can be easily customized by the user, e.g. to active a custom environment, set environment variables, etc.
 
 
-
-
-
 ### Python Core API
 
 Hiraku data records are managed by the [Python Core API](docs/core.md). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible. 
@@ -175,7 +172,7 @@ hiraku action list
 #### Actions
 
 > [!IMPORTANT]
-> Actions invokation is not yet implemented. See also [docs/agent.md](docs/agent.md).
+> Actions invokation is not yet implemented.
 
 Actions are "atomic" operations with a defined start and end state that combine prompts with deterministic conditions or hooks. Actions are executed by the `hiraku-agent`. 
 
@@ -356,7 +353,6 @@ The user (or agent) is responsible to merge experiment branches into the task br
 - [Data Model](docs/data.md)
 - [Tracking Backends](docs/tracking.md)
 - [Python Core API](docs/core.md)
-- *Preview:* [Agent Integration](docs/agent.md)
 - *Notes:* 
   - [Agent System Design](docs/design.md)
   - [Renku Naming Conventions](docs/renku.md)
