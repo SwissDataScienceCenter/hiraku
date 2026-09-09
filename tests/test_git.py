@@ -28,7 +28,7 @@ def _repository(tmp_path: Path) -> tuple[HirakuConfig, GitRepository]:
     return config, GitRepository(config)
 
 
-def test_git_resolution_branches_and_worktree_cleanup(tmp_path: Path) -> None:
+def test_git_resolution_and_branches(tmp_path: Path) -> None:
     config, repository = _repository(tmp_path)
     assert len(repository.resolve("HEAD")) == 40
     assert repository.current_branch is not None
@@ -38,11 +38,6 @@ def test_git_resolution_branches_and_worktree_cleanup(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         repository.validate_branch("bad..branch")
 
-    before = _git(tmp_path, "worktree", "list", "--porcelain")
-    with repository.temporary_worktree("HEAD") as worktree:
-        assert (worktree / "tracked.txt").read_text() == "committed"
-        assert not (worktree / "hiraku.yml").exists()
-    assert _git(tmp_path, "worktree", "list", "--porcelain") == before
     assert config.root == tmp_path
 
 

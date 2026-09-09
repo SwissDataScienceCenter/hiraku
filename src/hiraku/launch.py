@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Mapping, Sequence
-from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -90,12 +89,12 @@ def launch(
     *,
     name: str | None = None,
     args: Mapping[str, ArgumentValue] | None = None,
-    task_id: str | None = None,
+    task_id: str,
     experiment_id: str | None = None,
     commit: str | None = None,
     dispatch: str | None = None,
-    worktree: bool | None = None,
     env: Mapping[str, str] | None = None,
+    capture_output: bool = False,
     check: bool = True,
     config: HirakuConfig | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -106,12 +105,12 @@ def launch(
         entrypoint: Entrypoint model or mapping accepted by ``model_validate``.
         name: Logical entrypoint name for attribution.
         args: Call-time arguments overriding entrypoint defaults.
-        task_id: Optional task attribution.
+        task_id: Required task attribution.
         experiment_id: Optional experiment attribution.
-        commit: Optional commit to execute in a temporary worktree.
+        commit: Optional Git ref supplied to the dispatcher.
         dispatch: Optional dispatcher script override.
-        worktree: Whether to execute in an isolated temporary worktree.
         env: Additional environment variables.
+        capture_output: Capture child output in the result instead of streaming it.
         check: Raise on non-zero child exit when true.
         config: Project configuration; discovered when omitted.
 
@@ -124,25 +123,24 @@ def launch(
         hiraku.errors.LaunchError: If the command cannot be started.
 
     Example:
-        ``launch({"command": ["python", "evaluate.py"]}, name="evaluate")``
+        ``launch({"command": ["python", "evaluate.py"]}, task_id="demo")``
     Warning:
         Commands are executed from the selected project context and do not use
         shell expansion.
 
     """
     from .data import Entrypoint, load_experiment, load_task
-    from .git import GitRepository
-
     entrypoint = Entrypoint.model_validate(entrypoint)
     selected = config or HirakuConfig.discover()
-    if experiment_id is not None and task_id is None:
-        raise ValidationError("experiment_id requires an explicit task_id")
-    task = load_task(task_id, config=selected) if task_id is not None else None
+    task = load_task(task_id, config=selected)
     experiment = (
         load_experiment(experiment_id, task=task, config=selected)
         if experiment_id is not None
         else None
     )
+    selected_commit = commit
+    if selected_commit is None and experiment is not None:
+        selected_commit = experiment.commit
     defaults = dict(entrypoint.args)
     if args is not None:
         if not isinstance(args, Mapping):
@@ -150,56 +148,46 @@ def launch(
         defaults.update(args)
     command = [*entrypoint.command, *render_arguments(defaults)]
     dispatcher = _dispatcher(selected, dispatch)
-    injected: dict[str, str] = {}
-    if name is not None:
-        injected["HIRAKU_ENTRYPOINT"] = name
-    if task is not None:
-        injected.update(HIRAKU_TASK_ID=task.id, HIRAKU_TASK_FILE=str(task.path))
-    if experiment is not None:
-        injected.update(
-            HIRAKU_EXPERIMENT_ID=experiment.id,
-            HIRAKU_EXPERIMENT_FILE=str(experiment.path),
-        )
-    repository = GitRepository(selected) if commit is not None or worktree else None
-    resolved_commit = (
-        repository.resolve(commit) if repository is not None and commit else None
+    dispatcher_arguments: list[str] = [str(dispatcher)]
+    if selected_commit is not None:
+        dispatcher_arguments.extend(("--commit", selected_commit))
+    dispatcher_arguments.extend(
+        ("--task-id", task.id, "--task-file", str(task.path.resolve()))
     )
-    if worktree and resolved_commit is None:
-        raise ValidationError("worktree=True requires an explicit commit")
-    if resolved_commit is not None:
-        injected["HIRAKU_COMMIT"] = resolved_commit
+    if experiment is not None:
+        dispatcher_arguments.extend(
+            (
+                "--experiment-id",
+                experiment.id,
+                "--experiment-file",
+                str(experiment.path.resolve()),
+            )
+        )
+    if name is not None:
+        dispatcher_arguments.extend(("--entrypoint", name))
+    dispatcher_arguments.extend(("--", *command))
     additions = dict(env or {})
     if any(
         not isinstance(key, str) or not isinstance(value, str)
         for key, value in additions.items()
     ):
         raise ValidationError("Environment additions must map strings to strings")
-    conflicts = _ATTRIBUTION_KEYS.intersection(additions).intersection(injected)
+    conflicts = _ATTRIBUTION_KEYS.intersection(additions)
     if conflicts:
         raise ValidationError(
-            f"Environment cannot override injected attribution: {sorted(conflicts)}"
+            f"Environment cannot override reserved launch context: {sorted(conflicts)}"
         )
     process_env = os.environ.copy()
     process_env.update(additions)
-    process_env.update(injected)
-    context = (
-        repository.temporary_worktree(resolved_commit)
-        if resolved_commit
-        else nullcontext(selected.root)
-    )
     try:
-        with context as working_directory:
-            if resolved_commit is not None and repository is not None:
-                project_relative = selected.root.resolve().relative_to(repository.root)
-                working_directory = working_directory / project_relative
-            result = subprocess.run(
-                [str(dispatcher), "--", *command],
-                cwd=working_directory,
-                env=process_env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+        result = subprocess.run(
+            dispatcher_arguments,
+            cwd=selected.root,
+            env=process_env,
+            text=True,
+            capture_output=capture_output,
+            check=False,
+        )
     except Exception as exc:
         if isinstance(exc, LaunchError | ValidationError):
             raise
@@ -207,11 +195,12 @@ def launch(
             f"Launch through dispatcher {dispatcher} failed: {exc}"
         ) from exc
     if check and result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip()
+        detail = (result.stderr or "").strip() or (result.stdout or "").strip()
         error = subprocess.CalledProcessError(
             result.returncode, result.args, output=result.stdout, stderr=result.stderr
         )
-        raise LaunchError(
-            f"Dispatcher {dispatcher} exited with status {result.returncode}: {detail}"
-        ) from error
+        message = f"Dispatcher {dispatcher} exited with status {result.returncode}"
+        if detail:
+            message += f": {detail}"
+        raise LaunchError(message) from error
     return result

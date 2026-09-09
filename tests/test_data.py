@@ -16,14 +16,23 @@ def test_metrics_entrypoints_inheritance_and_guarded_delete(tmp_path: Path) -> N
         "task",
         config=config,
         metrics=[{"name": "loss", "direction": "minimize"}],
-        entrypoints={"train": {"command": ["python", "train.py"]}},
+        entrypoints={
+            "train": {"command": ["python", "train.py"]},
+            "evaluate": {"command": ["python", "evaluate.py"]},
+        },
     )
-    experiment = Experiment.create("exp", task=task, config=config)
+    experiment = Experiment.create(
+        "exp",
+        task=task,
+        config=config,
+        entrypoints={"train": {"command": ["python", "special.py"]}},
+    )
     assert experiment.is_proposal
     assert experiment.metrics == task.metrics
     assert task.entrypoint("train").command == ["python", "train.py"]
+    assert experiment.entrypoint("train").command == ["python", "special.py"]
     with pytest.raises(EntrypointNotFoundError):
-        experiment.entrypoint("train")
+        experiment.entrypoint("evaluate")
     with pytest.raises(ValidationError):
         task.delete(config=config)
 

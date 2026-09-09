@@ -25,7 +25,9 @@ def _repository(tmp_path: Path) -> HirakuConfig:
     (tmp_path / "tracked.txt").write_text("committed")
     _git(tmp_path, "add", "tracked.txt")
     _git(tmp_path, "commit", "-qm", "initial")
-    return HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path)
+    Task.create("task", config=config)
+    return config
 
 
 def test_argument_rendering_and_rejections() -> None:
@@ -73,10 +75,11 @@ def test_launch_injects_explicit_attribution_and_overrides(tmp_path: Path) -> No
         task_id=task.id,
         experiment_id=experiment.id,
         args={"seed": 2},
+        capture_output=True,
         config=config,
     )
     assert result.stdout == "task|exp|train|--seed|2"
-    with pytest.raises(ValidationError):
+    with pytest.raises(TypeError):
         launch(entrypoint, experiment_id="exp", config=config)
     with pytest.raises(ValidationError):
         launch(
@@ -87,17 +90,33 @@ def test_launch_injects_explicit_attribution_and_overrides(tmp_path: Path) -> No
         )
 
 
-def test_launch_failure_and_commit_isolation(tmp_path: Path) -> None:
+def test_launch_failure_and_explicit_worktree_isolation(tmp_path: Path) -> None:
     config = _repository(tmp_path)
     (tmp_path / "dirty.txt").write_text("dirty")
     result = launch(
-        {"command": ["/bin/sh", "-c", "test ! -e dirty.txt"]},
+        {"command": ["/bin/sh", "-c", "test -e dirty.txt"]},
+        task_id="task",
         commit="HEAD",
+        capture_output=True,
         config=config,
     )
     assert result.returncode == 0
+    assert result.stderr == ""
+    isolated = launch(
+        {"command": ["/bin/sh", "-c", "test ! -e dirty.txt"]},
+        task_id="task",
+        commit="HEAD",
+        dispatch="worktree",
+        capture_output=True,
+        config=config,
+    )
+    assert isolated.returncode == 0
     with pytest.raises(LaunchError):
-        launch({"command": ["/bin/sh", "-c", "exit 7"]}, config=config)
+        launch(
+            {"command": ["/bin/sh", "-c", "exit 7"]},
+            task_id="task",
+            config=config,
+        )
 
 
 def test_commit_launch_uses_project_subdirectory_inside_repository(
@@ -112,9 +131,63 @@ def test_commit_launch_uses_project_subdirectory_inside_repository(
     _git(tmp_path, "add", "project/marker.txt")
     _git(tmp_path, "commit", "-qm", "initial")
     config = HirakuConfig.init(project)
+    Task.create("task", config=config)
     result = launch(
         {"command": ["/bin/sh", "-c", "test -f marker.txt && pwd"]},
+        task_id="task",
         commit="HEAD",
+        dispatch="worktree",
+        capture_output=True,
         config=config,
     )
     assert result.stdout.strip().endswith("/project")
+
+
+def test_dispatcher_receives_context_and_experiment_commit(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    task = Task.create("task", config=config)
+    experiment = Experiment.create("exp", task=task, commit="a" * 40, config=config)
+    dispatcher = config.dispatch_dir / "inspect.sh"
+    dispatcher.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\"\n",
+        encoding="utf-8",
+    )
+    dispatcher.chmod(0o755)
+    config.default_dispatch = "inspect.sh"
+
+    result = launch(
+        {"command": ["python", "train.py"]},
+        name="train",
+        task_id=task.id,
+        experiment_id=experiment.id,
+        capture_output=True,
+        config=config,
+    )
+
+    assert result.stdout.splitlines() == [
+        "--commit",
+        "a" * 40,
+        "--task-id",
+        "task",
+        "--task-file",
+        str(task.path.resolve()),
+        "--experiment-id",
+        "exp",
+        "--experiment-file",
+        str(experiment.path.resolve()),
+        "--entrypoint",
+        "train",
+        "--",
+        "python",
+        "train.py",
+    ]
+
+    overridden = launch(
+        {"command": ["python", "train.py"]},
+        task_id=task.id,
+        experiment_id=experiment.id,
+        commit="HEAD",
+        capture_output=True,
+        config=config,
+    )
+    assert overridden.stdout.splitlines()[:2] == ["--commit", "HEAD"]

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import shutil
 import subprocess
-import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 from .config import HirakuConfig
@@ -215,22 +213,3 @@ class GitRepository:
                 for other in candidates
             )
         ]
-
-    @contextlib.contextmanager
-    def temporary_worktree(self, ref: str) -> Iterator[Path]:
-        commit = self.resolve(ref)
-        parent = Path(tempfile.mkdtemp(prefix="hiraku-worktree-"))
-        worktree = parent / "checkout"
-        added = False
-        try:
-            self._git("worktree", "add", "--detach", str(worktree), commit)
-            added = True
-            yield worktree
-        finally:
-            if added:
-                self._git("worktree", "remove", "--force", str(worktree), check=False)
-            self._git("worktree", "prune", check=False)
-            with contextlib.suppress(OSError):
-                worktree.rmdir()
-            with contextlib.suppress(OSError):
-                parent.rmdir()

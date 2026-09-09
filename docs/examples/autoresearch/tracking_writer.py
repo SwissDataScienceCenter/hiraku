@@ -10,7 +10,7 @@ METRICS = ("val_bpb", "training_seconds", "peak_vram_mb", "mfu_percent")
 
 
 def _provenance() -> dict[str, str]:
-    required = ("HIRAKU_TASK_ID", "HIRAKU_EXPERIMENT_ID", "HIRAKU_COMMIT")
+    required = ("HIRAKU_TASK_ID", "HIRAKU_EXPERIMENT_ID")
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
         raise RuntimeError(
@@ -19,7 +19,7 @@ def _provenance() -> dict[str, str]:
     return {
         "task_id": os.environ["HIRAKU_TASK_ID"],
         "experiment_id": os.environ["HIRAKU_EXPERIMENT_ID"],
-        "commit": os.environ["HIRAKU_COMMIT"],
+        "commit": os.environ.get("HIRAKU_COMMIT", ""),
         "entrypoint": os.environ.get("HIRAKU_ENTRYPOINT", ""),
     }
 

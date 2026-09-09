@@ -73,28 +73,31 @@ entrypoints:
 
 ```bash
 hiraku experiment entrypoints <experiment-id>
-hiraku launch <experiment-id>:train --seed 7
-hiraku launch --task <task-id> --no-experiment train
-hiraku launch --commit <hash> --no-experiment train
+hiraku launch <experiment-id>:train -- --seed 7
+hiraku launch --task <task-id> train
+hiraku launch --dispatch worktree --commit <ref> train
 ```
 
-Put Hiraku options before the target; options after it override entrypoint
-arguments. A bare target selects a task entrypoint and normally uses the active
-experiment for attribution. `--experiment <id>` selects attribution for a task
-entrypoint; `<experiment-id>:train` selects that experiment's entrypoint and
-attribution directly.
+Hiraku options may appear around the target before `--`; everything after
+`--` overrides entrypoint arguments. Undeclared arguments are accepted with a
+warning. A bare target selects a task entrypoint with task-only attribution. An
+`<experiment-id>:train` selector checks the experiment first, inherits the task
+definition when absent, and always attributes the run to that experiment. Active
+experiment state never affects launch.
 
-A commit-bound experiment launches from its referenced commit in a temporary
-worktree, excluding uncommitted changes. Without a selected commit, execution
-uses the current project directory. Bind a commit when it represents the source
-being investigated. Optional experiment branches (`experiment create --branch
+The project owns its dispatch scripts. `launch.sh` runs the current state
+without commit attribution; `worktree.sh` runs and attributes the exact commit
+in a temporary worktree. An experiment selector supplies its bound commit unless
+`--commit REF` overrides it. Optional experiment branches (`experiment create --branch
 [BRANCH] --from REF`) support separate lines of investigation; ordinary Git
 operations manage commits and merges.
 
-Launches inject available `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`,
-`HIRAKU_COMMIT`, `HIRAKU_ENTRYPOINT`, and task/experiment file paths. Commands are
-argument lists, not shell expressions. `--dispatch NAME` selects
-`hiraku/dispatch/NAME.sh`; the default is `launch.sh`.
+Dispatchers inject available `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`,
+`HIRAKU_ENTRYPOINT`, and task/experiment file paths. `HIRAKU_COMMIT` is present
+only when the dispatcher guarantees exact commit provenance, as `worktree.sh`
+does. Commands are argument lists, not shell expressions. `--dispatch NAME`
+selects `hiraku/dispatch/NAME.sh` (the `.sh` suffix is optional); the configured
+default is `launch.sh`. Child stdout and stderr stream live to the terminal.
 
 ## Logging and comparing runs
 

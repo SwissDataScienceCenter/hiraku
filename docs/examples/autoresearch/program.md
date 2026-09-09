@@ -21,7 +21,7 @@ Once you get confirmation, kick off the experimentation.
 
 ## Experimentation
 
-Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 minutes** (wall clock training time, excluding startup/compilation). You launch it as: `hiraku launch --experiment <experiment-id> gpu`.
+Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 minutes** (wall clock training time, excluding startup/compilation). You launch it as: `hiraku launch <experiment-id>:gpu`.
 
 **What you CAN do:**
 - Modify `train.py` — this is the only file you edit. Everything is fair game: model architecture, optimizer, hyperparameters, training loop, batch size, model size, etc.
@@ -79,7 +79,7 @@ LOOP FOREVER:
 2. Choose an experiment ID and create the experiment record. In `revert` or `reset` mode, use `hiraku experiment create <experiment-id> --task <task>`. In `branch` mode, use `hiraku experiment create <experiment-id> --task <task> --branch`.
 3. Tune `train.py` with an experimental idea by directly hacking the code.
 4. git commit, then bind the experiment with `hiraku experiment update <experiment-id> --task <task> --commit HEAD`
-5. Run the experiment: `hiraku launch --experiment <experiment-id> gpu > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
+5. Run the experiment: `hiraku launch <experiment-id>:gpu > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
 6. Read out the results: `grep "^val_bpb:\|^peak_vram_mb:" run.log`
 7. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
 8. Inspect the run with `hiraku run list --task <task>` and update the experiment record. Do not edit the run table.

@@ -26,7 +26,8 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert (config.programs_dir / "interactive/program.md").is_file()
     assert (config.programs_dir / "autoresearch/program.md").is_file()
     assert (config.actions_dir / "experiment/propose/action.md").is_file()
-    assert (config.dispatch_dir / "launch.sh").stat().st_mode & 0o111
+    for name in ("launch.sh", "worktree.sh"):
+        assert (config.dispatch_dir / name).stat().st_mode & 0o111
     assert (root / ".agents/skills/hiraku/SKILL.md").is_file()
     assert config.active_task_id is None
     assert config.active_experiment_id is None

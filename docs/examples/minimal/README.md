@@ -37,7 +37,7 @@ hiraku experiment create baseline \
   --set 'entrypoints={evaluate: {command: [uv, run, python, evaluate.py], args: {seed: 0}}}'
 
 hiraku launch baseline:evaluate
-hiraku launch baseline:evaluate --seed 1
+hiraku launch baseline:evaluate -- --seed 1
 
 
 hiraku task list

@@ -392,7 +392,9 @@ def test_agent_record_commands_and_mutation_conflicts(
     assert "review" in listing.output
 
 
-def test_launch_boundary_output_and_exit_status(tmp_path: Path, monkeypatch) -> None:
+def test_launch_boundary_output_and_exit_status(
+    tmp_path: Path, monkeypatch, capfd
+) -> None:
     config = _project(tmp_path)
     Task.create(
         "demo",
@@ -404,7 +406,8 @@ def test_launch_boundary_output_and_exit_status(tmp_path: Path, monkeypatch) -> 
                     "-c",
                     'printf "%s|%s|%s" "$1" "$2" "$3"',
                     "shell",
-                ]
+                ],
+                "args": {"seed": 1},
             },
             "fail": {"command": ["/bin/sh", "-c", "exit 7"]},
         },
@@ -412,11 +415,91 @@ def test_launch_boundary_output_and_exit_status(tmp_path: Path, monkeypatch) -> 
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
-    result = runner.invoke(main, ["launch", "show", "--seed", "3", "--commit", "HEAD"])
+    result = runner.invoke(
+        main, ["launch", "show", "--dispatch", "launch", "--", "--seed", "3"]
+    )
     assert result.exit_code == 0, result.output
-    assert result.output == "--seed|3|--commit"
+    assert capfd.readouterr().out == "--seed|3|"
+    unknown = runner.invoke(main, ["launch", "show", "--", "--lr", "2"])
+    assert unknown.exit_code == 0
+    assert "Warning: argument --lr is not declared" in unknown.output
     failed = runner.invoke(main, ["launch", "fail"])
     assert failed.exit_code == 7
+
+
+def test_launch_selector_controls_inheritance_and_attribution(
+    tmp_path: Path, monkeypatch, capfd
+) -> None:
+    config = _project(tmp_path)
+    task = Task.create(
+        "demo",
+        config=config,
+        entrypoints={
+            "shared": {
+                "command": [
+                    "/bin/sh",
+                    "-c",
+                    'printf "%s|task" "${HIRAKU_EXPERIMENT_ID:-}"',
+                ]
+            },
+            "overridden": {"command": ["/bin/sh", "-c", "printf task"]},
+        },
+    )
+    Experiment.create(
+        "a",
+        task=task,
+        config=config,
+        entrypoints={
+            "overridden": {"command": ["/bin/sh", "-c", "printf experiment"]}
+        },
+    )
+    Experiment.create("active-but-ignored", task=task, config=config)
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    bare = runner.invoke(main, ["launch", "shared"])
+    bare_output = capfd.readouterr().out
+    inherited = runner.invoke(main, ["launch", "a:shared"])
+    inherited_output = capfd.readouterr().out
+    overridden = runner.invoke(main, ["launch", "a:overridden"])
+    overridden_output = capfd.readouterr().out
+    listed = runner.invoke(main, ["experiment", "entrypoints", "a", "--json"])
+
+    assert bare.exit_code == 0 and bare_output == "|task"
+    assert inherited.exit_code == 0 and inherited_output == "a|task"
+    assert overridden.exit_code == 0 and overridden_output == "experiment"
+    effective = json.loads(listed.output)
+    assert effective["shared"]["source"] == "task"
+    assert effective["overridden"]["source"] == "experiment"
+
+
+def test_launch_override_matches_hyphens_and_underscores(
+    tmp_path: Path, monkeypatch, capfd
+) -> None:
+    config = _project(tmp_path)
+    Task.create(
+        "demo",
+        config=config,
+        entrypoints={
+            "score": {
+                "command": [
+                    "/bin/sh",
+                    "-c",
+                    'printf "%s|%s" "$1" "$2"',
+                    "shell",
+                ],
+                "args": {"val-bpb": 1.0},
+            }
+        },
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        main, ["launch", "score", "--", "--val-bpb", "0.9"]
+    )
+
+    assert result.exit_code == 0
+    assert capfd.readouterr().out == "--val-bpb|0.9"
 
 
 def test_run_json_is_complete_and_human_ids_are_unambiguous(

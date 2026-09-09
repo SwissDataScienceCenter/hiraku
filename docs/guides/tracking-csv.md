@@ -18,7 +18,7 @@ Choose a unique run ID for each execution. Prefix metric columns with
 uncommitted execution; do not invent a source hash.
 
 During an attributed launch, `HIRAKU_TASK_FILE` points to the original
-task record. Resolve the output beside it so committed launches write to the
+task record. Resolve the output beside it so worktree dispatches write to the
 same table:
 
 ```python

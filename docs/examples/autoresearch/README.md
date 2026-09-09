@@ -45,7 +45,7 @@ hiraku experiment create baseline \
   --commit HEAD \
   --branch
 
-hiraku launch --experiment baseline gpu > run.log 2>&1
+hiraku launch baseline:gpu > run.log 2>&1
 hiraku run list --task autoresearch --sort val_bpb --ascending
 ```
 
@@ -54,8 +54,8 @@ its evaluation function, dependencies, and the time budget fixed.
 
 ## CPU contract check
 
-The CPU mock exercises launch attribution, commit-isolated execution, tracking,
-and ranking without making claims about GPU training or model quality:
+The CPU mock exercises explicit launch attribution, tracking, and ranking
+without making claims about GPU training or model quality:
 
 ```bash
 hiraku experiment create contract \
@@ -63,7 +63,7 @@ hiraku experiment create contract \
   --hypothesis "The Hiraku workflow records an attributed mock result" \
   --commit HEAD
 
-hiraku launch --experiment contract cpu-mock --val-bpb 1.0
+hiraku launch contract:cpu-mock -- --val-bpb 1.0
 hiraku run list --task autoresearch --experiment contract --json
 ```
 

@@ -51,7 +51,6 @@ RUN_FIELDS = [
 PROVENANCE_VARIABLES = [
     "HIRAKU_TASK_ID",
     "HIRAKU_EXPERIMENT_ID",
-    "HIRAKU_COMMIT",
     "HIRAKU_ENTRYPOINT",
     "HIRAKU_TASK_FILE",
 ]
@@ -94,7 +93,10 @@ def provenance() -> dict[str, str]:
     missing = [name for name in PROVENANCE_VARIABLES if not os.environ.get(name)]
     if missing:
         raise RuntimeError(f"Missing Hiraku provenance variables: {', '.join(missing)}")
-    return {name: os.environ[name] for name in PROVENANCE_VARIABLES}
+    return {
+        **{name: os.environ[name] for name in PROVENANCE_VARIABLES},
+        "HIRAKU_COMMIT": os.environ.get("HIRAKU_COMMIT", ""),
+    }
 
 
 def append_run(path: Path, row: dict[str, str]) -> None:

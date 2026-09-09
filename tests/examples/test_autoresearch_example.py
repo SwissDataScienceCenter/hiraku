@@ -29,7 +29,7 @@ def invoke(runner: CliRunner, arguments: list[str]):
     return result
 
 
-def test_autoresearch_cpu_mock_tracks_committed_launch(tmp_path, monkeypatch):
+def test_autoresearch_cpu_mock_tracks_local_launch(tmp_path, monkeypatch, capfd):
     assert "mlflow" not in (EXAMPLE / "pyproject.toml").read_text().lower()
     assert "mlflow" not in (EXAMPLE / "tracking_writer.py").read_text().lower()
     project = tmp_path / "autoresearch"
@@ -42,7 +42,6 @@ def test_autoresearch_cpu_mock_tracks_committed_launch(tmp_path, monkeypatch):
     invoke(runner, ["init"])
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize autoresearch example")
-    commit = git(project, "rev-parse", "HEAD")
     invoke(
         runner,
         [
@@ -68,21 +67,17 @@ def test_autoresearch_cpu_mock_tracks_committed_launch(tmp_path, monkeypatch):
             "HEAD",
         ],
     )
-    (project / "cpu_mock.py").write_text(
-        "raise RuntimeError('working tree used')\n", encoding="utf-8"
-    )
-    launched = invoke(
+    invoke(
         runner,
         [
             "launch",
-            "--experiment",
-            "contract",
-            "cpu-mock",
+            "contract:cpu-mock",
+            "--",
             "--val-bpb",
             "0.9",
         ],
     )
-    assert "val_bpb: 0.900000" in launched.output
+    assert "val_bpb: 0.900000" in capfd.readouterr().out
     rows = json.loads(
         invoke(
             runner,
@@ -101,7 +96,7 @@ def test_autoresearch_cpu_mock_tracks_committed_launch(tmp_path, monkeypatch):
     row = rows[0]
     assert row["task_id"] == "autoresearch"
     assert row["experiment_id"] == "contract"
-    assert row["commit"] == commit
+    assert row["commit"] is None
     assert row["entrypoint"] == "cpu-mock"
     assert float(row["metrics"]["val_bpb"]) == 0.9
     assert row["raw"]["status"] == "finished"

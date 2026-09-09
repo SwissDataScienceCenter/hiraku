@@ -117,7 +117,8 @@ updated_at: "2026-08-26T10:15:30.123456Z"
 
 Experiment creation requires only `id`. `task_id` defaults to the active task. At creation Hiraku records UTC ISO-8601 `created_at` and `updated_at` timestamps and initializes unspecified fields to empty values. The new experiment and its task become active unless `--no-set` is supplied. The optional `branch` defines an experiment branch used for implementing the experiment. This enables parallel exploration of hypotheses or isolated experiment worktrees. `entrypoints` defines experiment-scoped execution entrypoints.
 
-An optional **active experiment** is selected with `hiraku experiment set <experiment-id>`. Setting an experiment also sets its owning task. Commands that accept `--experiment` use it as an explicit override; otherwise they resolve the experiment from the launch target, `HIRAKU_EXPERIMENT_ID`, or the local context.
+An optional **active experiment** is selected with `hiraku experiment set
+<experiment-id>`.
 
 Active selections are stored in the project configuration, `hiraku.yml`:
 
@@ -161,7 +162,12 @@ Identify the strongest model family under the fixed evaluation protocol.
 Implement a shared preprocessing pipeline and fixed model configurations.
 ```
 
-An experiment is one coherent research question or strategy evaluated from one exact source snapshot. That snapshot may be produced by several preparatory commits and may expose multiple entrypoints. All reproducible runs for an experiment use the same bound `commit`. Launches, run IDs, metrics, and parent experiments are derived from tracking records and the Git graph rather than copied into the experiment file.
+An experiment is one coherent research question or strategy with an optional
+bound source snapshot. The local dispatcher runs the current state without
+commit attribution; the worktree dispatcher checks out and attributes the
+selected commit exactly. Launches, run IDs, metrics, and parent experiments are
+derived from tracking records and the Git graph rather than copied into the
+experiment file.
 
 Experiments can be updated throughout their lifecycle and discarded, and specify agent instructions accordingly, the default is that the final experiment record is committed. Reviewed summaries are propagated into `task.md` and, in stage 2, into pull-request or merge-request descriptions.
 
@@ -176,21 +182,27 @@ hiraku experiment update <exp-id> --entrypoint train
 
 hiraku launch <entrypoint>                         # current task entrypoint
 hiraku launch <exp-id>:<entrypoint>                # experiment in the current task
-hiraku launch logistic-regression:train --seed 1  # kwargs that come after the entrypoint name are used as overwrites for the script
-hiraku launch <entrypoint> --experiment <exp-id>   # task entrypoint attributed to an experiment
+hiraku launch logistic-regression:train -- --seed 1  # arguments after -- override entrypoint defaults
 hiraku launch <entrypoint> --task <task-id>        # task entrypoint in an explicit task
 ```
 
 #### Reproducible launches
 
-An optional `--commit` flag is used to launch the experiment in an isolated worktree at the defined commit, e.g.
+Dispatchers control Git behavior. The default `launch.sh` runs the current
+working state without commit attribution. Use `worktree` to run and attribute
+an exact commit in an isolated worktree:
 ```bash
-hiraku launch --commit ab15ad41 logistic-regression:train
+hiraku launch --dispatch worktree logistic-regression:train
+hiraku launch --dispatch worktree --commit ab15ad41 logistic-regression:train
 ```
 
 #### Launch entrypoints
 
-A task or experiment can define a set of named entrypoints. Each entrypoint uses the same structured specification: a fixed command, working directory, environment, named arguments, and optional positional arguments. The two namespaces remain separate: `<entrypoint>` selects a task entrypoint, while `<experiment-id>:<entrypoint>` selects an experiment entrypoint. The same name may therefore exist at both levels without shadowing or merging. The launcher injects the task ID, optional experiment ID, source commit, and tracking backend information.
+A task or experiment can define named entrypoints. `<entrypoint>` resolves only
+at task level and carries no experiment attribution.
+`<experiment-id>:<entrypoint>` first checks the experiment and then inherits the
+task definition; an experiment definition replaces the complete task definition.
+The selector always supplies experiment attribution.
 
 #### Dispatch backends
 The user can define a custom dispatch backend in
@@ -198,19 +210,20 @@ The user can define a custom dispatch backend in
 .hiraku/dispatch/<dispatch-backend>.sh
 ```
 
-Hiraku invokes a selected backend by passing the full launch command after a ` -- `, e.g
+Hiraku invokes a selected backend with context options followed by the full
+launch command after `--`, e.g.
 ```bash
 hiraku launch --dispatch runai logistic-regression:train
 ```
 Translates to
 ```bash
-.hiraku/dispatch/runai.sh -- uv run train.py ...
+hiraku/dispatch/runai.sh --task-id my-task --experiment-id logistic-regression --entrypoint train -- uv run train.py ...
 ```
 
-> Launch invocation is not recorded by default. If the user want to record launches they can modify the default launch script in
-```
-.hiraku/dispatch/_default.sh
-```
+The project owns its dispatch scripts. New projects receive local `launch.sh`
+and isolated `worktree.sh` defaults that can be customized. Their child output
+streams directly, and `--dispatch worktree` resolves `worktree.sh` without
+requiring the extension.
 
 ### Runs
 

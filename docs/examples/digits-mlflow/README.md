@@ -27,10 +27,10 @@ git add .
 git commit -m "initialize Digits MLflow example"
 ```
 
-MLflow creates its local database on the first launch. The absolute URI
-is essential: committed launches run in temporary worktrees, but must write to
-the original project's database. The training script explicitly requires these
-MLflow variables as well as Hiraku's injected provenance.
+MLflow creates its local database on the first launch. The absolute URI keeps
+the tracking location stable for local and worktree dispatchers. The training
+script explicitly requires these MLflow variables as well as Hiraku's launch
+attribution.
 
 ## Create the task and experiments
 

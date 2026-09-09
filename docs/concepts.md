@@ -109,23 +109,21 @@ Entrypoints can be invoked via the CLI:
 
 ```bash
 hiraku launch <entrypoint>  # task entrypoint
-hiraku launch <exp-id>:<entrypoint>  # experiment entrypoint
+hiraku launch <exp-id>:<entrypoint>  # experiment entrypoint, falling back to task
 hiraku launch --task <task-id> <entrypoint>  # task defaults to active task
-hiraku launch --experiment <exp-id>  <entrypoint>  # defines experiment context for a task-level entrypoint
-hiraku launch <entrypoint>  --seed 1  # arguments after the entrypoint are passed to the launch script
+hiraku launch <exp-id>:<entrypoint> -- --seed 1  # override entrypoint arguments
 ```
 
-!!! important
-    Arguments after the entrypoint name are passed to the launch script.
-    Hiraku options must come before the entrypoint name.
-
-Launches can be run from a specified commit in an isolated work tree using
-
+The project-owned dispatcher controls Git behavior:
 ```bash
-hiraku launch --commit <hash> <entrypoint>
+hiraku launch <entrypoint>                              # current working state
+hiraku launch --dispatch worktree <exp-id>:<entrypoint> # exact commit
 ```
 
-Hiraku injects environment variables into the launch, including `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_TASK_FILE`, `HIRAKU_EXPERIMENT_FILE`, ...
+The dispatcher injects
+`HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_TASK_FILE`,
+`HIRAKU_EXPERIMENT_FILE`, and `HIRAKU_ENTRYPOINT`. The local dispatcher never
+sets `HIRAKU_COMMIT`; `worktree.sh` sets it to the exact checked-out commit.
 
 The user can define custom dispatch scripts, e.g.
 
@@ -133,9 +131,12 @@ The user can define custom dispatch scripts, e.g.
 hiraku launch --dispatch runai <exp-id>:<entrypoint>
 ```
 
-This invokes the dispatch script `hiraku/dispatch/runai.sh` with the full launch command after a `--` separator. The dispatch script can be used to implement custom launch behavior, e.g., for a specific cluster or job scheduler, launch event logging, etc. By default, Hiraku calls the `hiraku/dispatch/launch.sh` script, which can be easily customized by the user, e.g. to active a custom environment, set environment variables, etc.
-
-
+This invokes the project-owned `hiraku/dispatch/runai.sh` with context options
+and the full command after `--`. The default `launch.sh` runs the current state
+without commit attribution, while `worktree.sh` creates an isolated checkout
+with exact commit attribution. Child stdout and stderr stream directly to the
+terminal. Dispatcher names may omit `.sh`, so `--dispatch worktree` selects
+`worktree.sh`.
 
 ## Agent Skill
 

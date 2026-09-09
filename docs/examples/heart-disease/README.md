@@ -45,7 +45,8 @@ hiraku task create heart-disease \
 hiraku status
 
 hiraku task show heart-disease
-hiraku task show  # omit task name since it's the current active task
+# omit task name since it's the current active task
+hiraku task show  
 
 ```
 
@@ -71,9 +72,9 @@ hiraku run list --task heart-disease
 hiraku run list  
 ```
 
-Expect one run with `val/log_loss` and `val/accuracy`. Hiraku executes the
-bound commit in a temporary worktree. The training program writes the CSV row
-back to the original task directory.
+Expect one run with `val/log_loss` and `val/accuracy`. The default dispatcher
+runs the current working state without commit attribution. The training program
+writes the CSV row to the task directory.
 
 ## 5. Compare another model
 

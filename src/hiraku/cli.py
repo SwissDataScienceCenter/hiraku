@@ -45,6 +45,7 @@ from .data import (
 )
 from .errors import (
     AmbiguousReferenceError,
+    EntrypointNotFoundError,
     GitError,
     HirakuError,
     NoActiveExperimentError,
@@ -450,6 +451,25 @@ def _entrypoint_rows(entrypoints: Mapping[str, Entrypoint]) -> list[list[str]]:
         ]
         rows.append([name, shlex.join(command)])
     return rows
+
+
+def _resolve_launch_entrypoint(
+    task: Task,
+    experiment: Experiment | None,
+    name: str,
+) -> Entrypoint:
+    """Resolve the nearest entrypoint for a launch selector."""
+    if experiment is not None and name in experiment.entrypoints:
+        return experiment.entrypoints[name]
+    try:
+        return task.entrypoint(name)
+    except EntrypointNotFoundError as exc:
+        if experiment is None:
+            raise
+        raise EntrypointNotFoundError(
+            f"Neither experiment {task.id}:{experiment.id} nor task "
+            f"{task.id!r} has entrypoint {name!r}"
+        ) from exc
 
 
 @click.group(name="hiraku", cls=HirakuGroup)
@@ -933,12 +953,24 @@ def experiment_entrypoints(
     task_id: str | None,
     json_output: bool,
 ) -> None:
-    """List an experiment's entrypoint declarations."""
-    values = _experiment(state.config, experiment_id, task_id).entrypoints
+    """List an experiment's effective inherited entrypoints."""
+    experiment = _experiment(state.config, experiment_id, task_id)
+    task = load_task(experiment.task_id, config=state.config)
+    values = {**task.entrypoints, **experiment.entrypoints}
+    sources = {
+        name: "experiment" if name in experiment.entrypoints else "task"
+        for name in values
+    }
     if json_output:
-        _emit_json(values)
+        _emit_json(
+            {
+                name: {**entrypoint.model_dump(mode="json"), "source": sources[name]}
+                for name, entrypoint in values.items()
+            }
+        )
     else:
-        click.echo(_table(("name", "command"), _entrypoint_rows(values)))
+        rows = [[*row, sources[row[0]]] for row in _entrypoint_rows(values)]
+        click.echo(_table(("name", "command", "source"), rows))
 
 
 main.add_command(experiment_group, "exp")
@@ -1231,93 +1263,64 @@ def _parse_overrides(tokens: Sequence[str]) -> dict[str, Any]:
     return result
 
 
-@main.command(
-    "launch",
-    context_settings={
-        "ignore_unknown_options": True,
-        "allow_extra_args": True,
-        "allow_interspersed_args": False,
-    },
-)
+@main.command("launch")
 @click.argument("target")
 @click.argument("entrypoint_overrides", nargs=-1, type=click.UNPROCESSED)
 @click.option("task_id", "--task")
-@click.option("experiment_id", "--experiment")
-@click.option("no_experiment", "--no-experiment", is_flag=True)
-@click.option("--unassigned", is_flag=True)
 @click.option("--commit")
-@click.option("--dispatch", default="launch", show_default=True)
+@click.option("--dispatch")
 @click.pass_obj
 def launch_command(
     state: CLIContext,
     target: str,
     entrypoint_overrides: tuple[str, ...],
     task_id: str | None,
-    experiment_id: str | None,
-    no_experiment: bool,
-    unassigned: bool,
     commit: str | None,
-    dispatch: str,
+    dispatch: str | None,
 ) -> None:
     """Resolve and launch an entrypoint."""
-    if unassigned and (experiment_id is not None or no_experiment):
-        raise ValidationError("--unassigned conflicts with experiment options")
-    if experiment_id is not None and no_experiment:
-        raise ValidationError("--experiment conflicts with --no-experiment")
     config = state.config
     task = _active_task(config, task_id)
-    declared_experiment: Experiment | None = None
+    attributed: Experiment | None = None
     if ":" in target:
         declared_id, entrypoint_name = target.split(":", 1)
-        declared_experiment = load_experiment(declared_id, task=task, config=config)
-        entrypoint = declared_experiment.entrypoint(entrypoint_name)
-        if experiment_id is not None:
-            raise ValidationError(
-                "--experiment is valid only for a task entrypoint target"
-            )
-        attributed = None if no_experiment or unassigned else declared_experiment
+        attributed = load_experiment(declared_id, task=task, config=config)
+        entrypoint = _resolve_launch_entrypoint(task, attributed, entrypoint_name)
     else:
         entrypoint_name = target
         entrypoint = task.entrypoint(entrypoint_name)
-        attributed = None
-        if experiment_id is not None:
-            attributed = load_experiment(experiment_id, task=task, config=config)
-        elif (
-            not no_experiment
-            and config.active_task_id == task.id
-            and config.active_experiment_id
-        ):
-            attributed = load_experiment(
-                config.active_experiment_id, task=task, config=config
+    parsed_overrides = _parse_overrides(entrypoint_overrides)
+    overrides: dict[str, Any] = {}
+    for key, value in parsed_overrides.items():
+        matches = [
+            declared
+            for declared in entrypoint.args
+            if declared.replace("-", "_") == key
+        ]
+        if len(matches) > 1:
+            raise ValidationError(
+                f"Entrypoint {target} declares ambiguous argument names for "
+                f"--{key.replace('_', '-')}"
             )
-    resolved_commit = commit
-    if unassigned:
-        attributed = None
-    if attributed is not None and attributed.commit is not None:
-        if commit is None:
-            resolved_commit = attributed.commit
-        else:
-            explicit = GitRepository(config).resolve(commit)
-            if explicit != attributed.commit:
-                raise ValidationError(
-                    "Explicit commit does not match attributed experiment"
-                )
-            resolved_commit = explicit
+        resolved_key = matches[0] if matches else key
+        overrides[resolved_key] = value
+        if not matches:
+            click.echo(
+                f"Warning: argument --{key.replace('_', '-')} is not declared by "
+                f"entrypoint {target}",
+                err=True,
+            )
     result = launch_entrypoint(
         entrypoint,
         name=entrypoint_name,
-        args=_parse_overrides(entrypoint_overrides),
-        task_id=None if unassigned else task.id,
-        experiment_id=None if unassigned or attributed is None else attributed.id,
-        commit=resolved_commit,
+        args=overrides,
+        task_id=task.id,
+        experiment_id=None if attributed is None else attributed.id,
+        commit=commit,
         dispatch=dispatch,
         check=False,
         config=config,
     )
-    if result.stdout:
-        click.echo(result.stdout, nl=False)
-    if result.stderr:
-        click.echo(result.stderr, nl=False, err=True)
     if result.returncode:
         raise click.exceptions.Exit(result.returncode)
 

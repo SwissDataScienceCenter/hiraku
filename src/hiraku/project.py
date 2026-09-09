@@ -84,8 +84,9 @@ class ProjectInitializer:
                     cls._copy_resource_tree(
                         source_path, target, created_files, created_dirs
                     )
-            launcher = config.dispatch_dir / "launch.sh"
-            launcher.chmod(launcher.stat().st_mode | 0o111)
+            for name in ("launch.sh", "worktree.sh"):
+                dispatcher = config.dispatch_dir / name
+                dispatcher.chmod(dispatcher.stat().st_mode | 0o111)
             return config
         except Exception as exc:
             for path in reversed(created_files):

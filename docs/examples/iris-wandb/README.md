@@ -70,3 +70,4 @@ W&B project or run.
     | `logistic` | `iris-logistic-42` | Logistic regression | 0.9474 | 0.9468 | finished |
     | `random-forest` | `iris-rf-42` | Random forest | 0.9737 | 0.9735 | finished |
     | `random-forest` | `iris-rf-7` | Random forest | 0.9474 | 0.9469 | finished |
+

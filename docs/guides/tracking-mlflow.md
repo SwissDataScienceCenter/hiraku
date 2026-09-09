@@ -50,7 +50,7 @@ with mlflow.start_run():
 
 The launcher inherits the environment; it does not derive the training
 process's MLflow URI from the task's backend settings. An absolute URI keeps
-committed worktree launches writing to the original database.
+worktree dispatches writing to the original database.
 
 ## Inspect
 

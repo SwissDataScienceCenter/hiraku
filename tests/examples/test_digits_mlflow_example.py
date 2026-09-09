@@ -47,7 +47,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     invoke(runner, ["init"])
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize Digits MLflow example")
-    commit = git(project, "rev-parse", "HEAD")
     invoke(
         runner,
         [
@@ -76,8 +75,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
                 "validation-fraction: 0.25}}}",
             ],
         )
-    # An uncommitted edit must not affect either commit-isolated launch.
-    (project / "train.py").write_text("raise RuntimeError('working tree used')\n")
     for experiment in ("weak-l2", "strong-l2"):
         invoke(runner, ["launch", f"{experiment}:train"])
     rows = json.loads(
@@ -104,7 +101,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     client = MlflowClient(tracking_uri=uri)
     for row in rows:
         assert row["task_id"] == "digits"
-        assert row["commit"] == commit
+        assert row["commit"] is None
         assert row["entrypoint"] == "train"
         assert row["raw"]["status"] == "FINISHED"
         assert row["params"]["epochs"] == "8"

@@ -199,7 +199,7 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
         assert run.task_id == "heart-disease"
         assert run.experiment_id in experiments
         assert run.entrypoint == "train"
-        assert run.commit == shared_commit
+        assert run.commit is None
         assert run.params == {
             "model": experiments[run.experiment_id]["model"],
             "seed": "42",
