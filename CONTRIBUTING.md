@@ -26,6 +26,12 @@ uv sync --extra wandb
 uv sync --all-extras
 ```
 
+If you use the tool installation, make sure the reinstall after changes:
+
+```bash
+uv tool install ".[mlflow,wandb]" --force --reinstall
+```
+
 ## Run checks
 
 Run the focused checks before opening a pull request:
