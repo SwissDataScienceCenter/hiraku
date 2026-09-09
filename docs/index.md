@@ -1,8 +1,34 @@
-# Hiraku
+<div class="sdsc-hero">
+<p class="sdsc-kicker">Swiss Data Science Center · Hiraku</p>
 
-Hiraku provides a small, scriptable workflow for AI-assisted data-science
-research. Define a task, record experiments, launch reproducible entrypoints,
-and inspect tracked runs.
+<h1>Research, made traceable</h1>
+
+Hiraku gives data-science teams a small, scriptable loop for defining a goal,
+testing an idea, and keeping the evidence.
+
+<a class="md-button" href="examples/heart-disease/">Run your first experiment</a>
+</div>
+
+<div class="sdsc-flow">
+<div class="sdsc-flow-step">
+
+<h3>Define</h3>
+
+Create a task with a clear question, metric, and evaluation protocol.
+</div>
+<div class="sdsc-flow-step">
+
+<h3>Experiment</h3>
+
+Bind an implementation to a commit and record the hypothesis it tests.
+</div>
+<div class="sdsc-flow-step">
+
+<h3>Learn</h3>
+
+Launch entrypoints, compare runs, and keep the research history visible.
+</div>
+</div>
 
 
 ## Installation
@@ -41,7 +67,29 @@ For more details, see [Essential concepts](concepts.md).
 
 ## Documentation
 
-- [Examples](examples/)
-- [Guides](guides/)
-- [CLI reference](api/cli.md)
-- [Python API](api/index.md)
+<div class="sdsc-card-grid">
+<div class="sdsc-card">
+
+<h3>Examples</h3>
+
+Run complete workflows with CSV, W&B, and MLflow.
+
+<a href="examples/">Browse examples</a>
+</div>
+<div class="sdsc-card">
+
+<h3>Guides</h3>
+
+Set up a project, choose a tracking backend, or connect an AI agent.
+
+<a href="guides/">Read the guides</a>
+</div>
+<div class="sdsc-card">
+
+<h3>API</h3>
+
+Look up CLI commands and the Python API when you need exact details.
+
+<a href="api/cli/">CLI</a> · <a href="api/">Python API</a>
+</div>
+</div>

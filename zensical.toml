@@ -52,9 +52,8 @@ nav = [
           { "Experiment branches" = "guides/experiment-branches.md" },
       ] },
   ] },
-  { "Reference" = [
-      { "CLI" = "api/cli.md" },
-      { "Python API" = [
+  { "CLI" = "api/cli.md" },
+  { "Python API" = [
       { "Overview" = "api/index.md" },
       { "Configuration" = "api/config.md" },
       { "Records" = "api/records.md" },
@@ -68,7 +67,6 @@ nav = [
       { "Tracking" = "api/tracking.md" },
       { "Launching" = "api/launch.md" },
       ] },
-  ] },
 ]
 
 extra_css = ["stylesheets/extra.css"]
