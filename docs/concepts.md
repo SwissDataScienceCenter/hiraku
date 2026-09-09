@@ -33,13 +33,14 @@ Tasks and experiments are stored as markdown with yaml frontmatter. This allows 
 
 At any time, a single task and experiment can be set as "active". By default, "create" actions activate the new task or experiment. The user can switch explicitly with `hiraku task set <task-id>` or `hiraku experiment set <experiment-id>`. The current status can be queried with `hiraku status`.
 
-!!! Note
+!!! note
     Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
 
 
 ### CLI
 
 The CLI provides a standardized interface for managing data records, .e.g
+
 ```bash
 hiraku init  # initialize a Hiraku project and configuration
 
@@ -67,6 +68,7 @@ hiraku run list --sort val/accuracy --ascending
 ### Python API
 
 Hiraku data records are managed by the [Python API](api/python/). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible.
+
 ```python
 from hirak.records import Record
 from hiraku.data import Entrypoint, Experiment, Metric, Run, Task
@@ -93,6 +95,7 @@ tracking_backend:
 Tasks and experiments can define named **entrypoints** for launching runs. Entrypoints document reproducible code invocations, including default hyperparameters or command-line arguments, and provide convenient functions for users and agents to run or dispatch code.
 
 Entrypoints are defined in the task or experiment YAML front matter with the `entrypoints` key, e.g.,
+
 ```yaml
 entrypoints:
   train:
@@ -101,7 +104,9 @@ entrypoints:
       model: logistic
       seed: 42
 ```
+
 Entrypoints can be invoked via the CLI:
+
 ```bash
 hiraku launch <entrypoint>  # task entrypoint
 hiraku launch <exp-id>:<entrypoint>  # experiment entrypoint
@@ -110,10 +115,12 @@ hiraku launch --experiment <exp-id>  <entrypoint>  # defines experiment context 
 hiraku launch <entrypoint>  --seed 1  # arguments after the entrypoint are passed to the launch script
 ```
 
-> [!IMPORTANT]
-> Arguments that come after the entrypoint name are passed to the launch script. Hiraku options must come before the entrypoint name (tbd if practical)
+!!! important
+    Arguments after the entrypoint name are passed to the launch script.
+    Hiraku options must come before the entrypoint name.
 
 Launches can be run from a specified commit in an isolated work tree using
+
 ```bash
 hiraku launch --commit <hash> <entrypoint>
 ```
@@ -121,9 +128,11 @@ hiraku launch --commit <hash> <entrypoint>
 Hiraku injects environment variables into the launch, including `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_TASK_FILE`, `HIRAKU_EXPERIMENT_FILE`, ...
 
 The user can define custom dispatch scripts, e.g.
+
 ```bash
 hiraku launch --dispatch runai <exp-id>:<entrypoint>
 ```
+
 This invokes the dispatch script `hiraku/dispatch/runai.sh` with the full launch command after a `--` separator. The dispatch script can be used to implement custom launch behavior, e.g., for a specific cluster or job scheduler, launch event logging, etc. By default, Hiraku calls the `hiraku/dispatch/launch.sh` script, which can be easily customized by the user, e.g. to active a custom environment, set environment variables, etc.
 
 
@@ -134,7 +143,7 @@ The `\hiraku` skill can be used directly in any coding harness.
 
 ## Actions, Programs, Context
 
-!!! Info
+!!! info
     Version 0.1.0 only implements the data model and not yet the agent integration. See github issues for the planned features.
 
 Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state.  A *program* defines complex research workflows and loops end-to-end, with defined permissions and limits. Actions and programs are executed by the `hiraku-agent`. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to provide project-relevant information to the agent.
@@ -147,6 +156,7 @@ Hiraku manages agent integration with actions, programs, and context. *Actions* 
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
 Programs, action and context records are managed via CLI, e.g.
+
 ```bash
 hiraku program create <program-id>
 hiraku program list
@@ -163,6 +173,7 @@ hiraku action list
 The following sequence illustrates the intended workflow.
 
 ### Interactive workflow
+
 ```bash
 # Setup and status
 hiraku init

@@ -66,13 +66,15 @@ Suppose a discover agent drafts several directions to solve a problem (**proposa
 - run cost; and
 - information gain.
 
-> [!TIP]
-> A very simple heuristic here will likely be sufficient.
+!!! tip
+    A very simple heuristic here will likely be sufficient.
 
 ### 8. Use dynamic planning only where necessary
 
-> [!IMPORTANT]
-> Fixed workflows are more predictable and less likely to fail. Guided mode should therefore remain deterministic. Launching, logging, and lifecycle transitions should never be LLM-planned.
+!!! important
+    Fixed workflows are more predictable and less likely to fail. Guided mode
+    should therefore remain deterministic. Launching, logging, and lifecycle
+    transitions should never be LLM-planned.
 
 The dynamic planning steps should be limited to:
 

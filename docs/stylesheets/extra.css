@@ -76,10 +76,6 @@ body,
 }
 
 .md-typeset h1,
-.md-typeset h2,
-.md-typeset h3,
-.md-typeset h4,
-.md-typeset h5,
 .md-typeset h6,
 .md-nav__title {
   color: var(--sdsc-text);
@@ -88,13 +84,25 @@ body,
   letter-spacing: -0.02em;
 }
 
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5 {
+  color: var(--sdsc-text);
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
 .md-typeset {
-  line-height: 1.6;
+  line-height: 1.5;
+  min-width: 0;
 }
 
 .md-typeset p,
 .md-typeset li {
-  max-width: 75ch;
+  max-width: none;
+  overflow-wrap: anywhere;
 }
 
 /* Navigation and links */
@@ -116,6 +124,18 @@ body,
 .md-tabs__link,
 .md-tabs .md-icon {
   color: #ffffff;
+}
+
+.md-tabs__link {
+  font-family: "Switzer", system-ui, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.md-header__button.md-icon:not(.md-logo) {
+  border: 1px solid rgb(255 255 255 / 28%);
+  border-radius: 9999px;
 }
 
 .md-tabs__link--active,
@@ -158,7 +178,9 @@ body,
   background: var(--sdsc-button-bg);
   font-family: "Switzer", system-ui, sans-serif;
   font-size: 0.875rem;
+  font-weight: 400;
   text-transform: uppercase;
+  transition: background-color 200ms ease;
 }
 
 .md-button:hover,
@@ -179,7 +201,8 @@ body,
 
 .md-typeset .admonition-title,
 .md-typeset summary {
-  background: var(--sdsc-highlight);
+  border-bottom: 1px solid var(--sdsc-border);
+  background: transparent;
 }
 
 .md-typeset table th,
@@ -193,9 +216,34 @@ body,
 }
 
 .md-typeset pre {
+  max-width: 100%;
   border: 1px solid var(--sdsc-border);
   background: var(--sdsc-code);
   box-shadow: var(--sdsc-shadow);
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.md-content,
+.md-content__inner,
+.md-typeset .highlight,
+.md-typeset .highlighttable,
+.md-typeset .tabbed-set,
+.md-typeset .md-typeset__scrollwrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.md-typeset pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.md-typeset :not(pre) > code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Markdown authoring primitives use the same restrained SDSC accents. */
@@ -209,6 +257,14 @@ body,
 .md-typeset details {
   border-radius: 0.25rem;
   box-shadow: none;
+}
+
+.md-typeset .admonition.important {
+  border-left-color: var(--sdsc-primary);
+}
+
+.md-typeset .admonition.important > .admonition-title::before {
+  background-color: var(--sdsc-primary);
 }
 
 .md-typeset .admonition-title,
@@ -254,15 +310,16 @@ body,
 
 .md-typeset .grid.cards > :is(ul, ol) > li,
 .md-typeset .grid.cards > li {
-  border: 1px solid var(--sdsc-border);
   border-radius: 0.25rem;
   background: var(--sdsc-surface);
   box-shadow: var(--sdsc-shadow);
+  transition: background-color 200ms ease, box-shadow 200ms ease;
 }
 
 .md-typeset .grid.cards > :is(ul, ol) > li:hover,
 .md-typeset .grid.cards > li:hover {
-  border-color: var(--sdsc-primary);
+  background: var(--sdsc-page);
+  box-shadow: 0 0.5rem 1.5rem rgb(38 35 92 / 14%);
 }
 
 .md-typeset table tr:nth-child(even) {
@@ -454,7 +511,6 @@ body,
 
 .sdsc-flow-step,
 .sdsc-card {
-  border: 1px solid var(--sdsc-border);
   border-radius: 0.25rem;
   background: var(--sdsc-surface);
 }
@@ -490,11 +546,12 @@ body,
 
 .sdsc-card {
   padding: 1.5rem;
-  transition: border-color 160ms ease, transform 160ms ease;
+  transition: background-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
 }
 
 .sdsc-card:hover {
-  border-color: var(--sdsc-primary);
+  background: var(--sdsc-page);
+  box-shadow: var(--sdsc-shadow);
   transform: translateY(-2px);
 }
 
