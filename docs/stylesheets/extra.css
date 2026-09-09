@@ -1,0 +1,197 @@
+/* SDSC UI Kit tokens and Zensical theme overrides.
+ * Brand values follow the downloaded sdsc-ui-kit token sheet.
+ */
+
+/* SDSC typography: Space Grotesk for headings, Switzer for body/UI. */
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap");
+@import url("https://api.fontshare.com/v2/css?f[]=switzer@400,500,600&display=swap");
+
+:root,
+[data-md-color-scheme="default"] {
+  color-scheme: light;
+  --sdsc-primary: #5561a6;
+  --sdsc-primary-hover: #26235c;
+  --sdsc-secondary: #26235c;
+  --sdsc-accent: #90ca42;
+  --sdsc-page: #ffffff;
+  --sdsc-surface: #f4f3f8;
+  --sdsc-highlight: #dddeec;
+  --sdsc-text: #000000;
+  --sdsc-muted: #848484;
+  --sdsc-border: #c9c9c9;
+  --sdsc-code: #f5f5f5;
+  --sdsc-button-bg: #5561a6;
+
+  --md-default-bg-color: var(--sdsc-page);
+  --md-default-fg-color: var(--sdsc-text);
+  --md-default-fg-color--light: var(--sdsc-muted);
+  --md-default-fg-color--lighter: #a3a3a3;
+  --md-primary-fg-color: var(--sdsc-secondary);
+  --md-primary-bg-color: var(--sdsc-page);
+  --md-accent-fg-color: var(--sdsc-primary);
+  --md-typeset-a-color: var(--sdsc-primary);
+  --md-code-bg-color: var(--sdsc-code);
+  --md-code-fg-color: var(--sdsc-text);
+}
+
+/* Zensical's dark palette uses the Material "slate" scheme. */
+[data-md-color-scheme="slate"],
+.dark {
+  color-scheme: dark;
+  --sdsc-primary: #93c5fd;
+  --sdsc-primary-hover: #ffffff;
+  --sdsc-secondary: #26235c;
+  --sdsc-accent: #90ca42;
+  --sdsc-page: #1a1a1a;
+  --sdsc-surface: #2d2d2d;
+  --sdsc-highlight: #383673;
+  --sdsc-text: #ffffff;
+  --sdsc-muted: #d4d4d4;
+  --sdsc-border: #404040;
+  --sdsc-code: #262626;
+  --sdsc-button-bg: #5561a6;
+
+  --md-default-bg-color: var(--sdsc-page);
+  --md-default-fg-color: var(--sdsc-text);
+  --md-default-fg-color--light: var(--sdsc-muted);
+  --md-default-fg-color--lighter: #a3a3a3;
+  --md-primary-fg-color: var(--sdsc-secondary);
+  --md-primary-bg-color: var(--sdsc-text);
+  --md-accent-fg-color: var(--sdsc-primary);
+  --md-typeset-a-color: var(--sdsc-primary);
+  --md-code-bg-color: var(--sdsc-code);
+  --md-code-fg-color: var(--sdsc-text);
+}
+
+/* Typography */
+body,
+.md-typeset,
+.md-nav,
+.md-header,
+.md-tabs,
+.md-footer {
+  font-family: "Switzer", system-ui, sans-serif;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6,
+.md-nav__title {
+  color: var(--sdsc-text);
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.md-typeset {
+  line-height: 1.6;
+}
+
+.md-typeset p,
+.md-typeset li {
+  max-width: 75ch;
+}
+
+/* Navigation and links */
+.md-header,
+.md-tabs {
+  background: var(--sdsc-secondary);
+}
+
+/* Header and tab surfaces are dark blue in both schemes: keep all foreground
+ * content light enough to remain readable against that background. */
+.md-header,
+.md-header a,
+.md-header button,
+.md-header .md-icon,
+.md-header__title,
+.md-header__topic,
+.md-tabs,
+.md-tabs a,
+.md-tabs__link,
+.md-tabs .md-icon {
+  color: #ffffff;
+}
+
+.md-tabs__link--active,
+.md-tabs__link:hover,
+.md-tabs__link:focus {
+  color: #ffffff;
+  border-bottom-color: var(--sdsc-accent);
+}
+
+.md-search__input,
+.md-search__input::placeholder {
+  color: #ffffff;
+}
+
+.md-typeset a,
+.md-nav__link:is(:hover, :focus),
+.md-tabs__link:is(:hover, :focus) {
+  color: var(--sdsc-primary);
+}
+
+/* Buttons follow the 4px SDSC radius. */
+.md-button,
+.md-typeset .md-button {
+  border: 1px solid var(--sdsc-primary);
+  border-radius: 0.25rem;
+  color: #ffffff;
+  background: var(--sdsc-button-bg);
+  font-family: "Switzer", system-ui, sans-serif;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+}
+
+.md-button:hover,
+.md-button:focus,
+.md-typeset .md-button:hover,
+.md-typeset .md-button:focus {
+  border-color: var(--sdsc-primary-hover);
+  color: #ffffff;
+  background: var(--sdsc-primary-hover);
+}
+
+/* Content surfaces */
+.md-typeset .admonition,
+.md-typeset details {
+  border-left-color: var(--sdsc-accent);
+  background: var(--sdsc-surface);
+}
+
+.md-typeset .admonition-title,
+.md-typeset summary {
+  background: var(--sdsc-highlight);
+}
+
+.md-typeset table th,
+.md-typeset table td {
+  border-color: var(--sdsc-border);
+}
+
+.md-typeset pre,
+.md-typeset code {
+  border-radius: 0.25rem;
+}
+
+.md-typeset pre {
+  border: 1px solid var(--sdsc-border);
+  background: var(--sdsc-code);
+}
+
+/* Keyboard focus follows the UI kit's 2px primary outline. */
+:focus-visible {
+  outline: 2px solid var(--sdsc-primary);
+  outline-offset: 2px;
+}
+
+.md-footer {
+  background: #000000;
+}
+
+.md-grid {
+  max-width: 76rem;
+}
