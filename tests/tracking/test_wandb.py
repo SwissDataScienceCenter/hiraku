@@ -44,13 +44,9 @@ def test_wandb_config_accepts_common_mapping() -> None:
     assert config.project == "iris"
 
 
-def test_wandb_backend_normalizes_and_filters_runs(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "wandb", types.SimpleNamespace(Api=FakeApi))
-    backend = WandbBackend(
-        HirakuConfig.init(tmp_path), entity="team", project="iris"
-    )
+    backend = WandbBackend(HirakuConfig.init(tmp_path), entity="team", project="iris")
     runs = backend.list_runs(task_id="iris", experiment_id="logistic")
     assert len(runs) == 1
     run = runs[0]

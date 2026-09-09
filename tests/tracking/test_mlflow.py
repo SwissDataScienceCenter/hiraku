@@ -13,6 +13,4 @@ def test_mlflow_backend_config_accepts_uri_or_database() -> None:
 
 def test_mlflow_backend_config_rejects_uri_and_database() -> None:
     with pytest.raises(BackendError, match="both"):
-        MLflowBackendConfig(
-            tracking_uri="http://localhost:5000", database="mlflow.db"
-        )
+        MLflowBackendConfig(tracking_uri="http://localhost:5000", database="mlflow.db")

@@ -165,4 +165,3 @@ def test_digits_requires_provenance_before_creating_runs(tmp_path):
     assert result.returncode != 0
     assert "Missing launch environment variables: HIRAKU_TASK_ID" in result.stderr
     assert not (tmp_path / "mlflow.db").exists()
-

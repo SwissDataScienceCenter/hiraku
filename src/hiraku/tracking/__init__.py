@@ -66,6 +66,7 @@ def select_backend(task, config):
     specification = task.tracking_backend or config.tracking_backend
     return backend_for(specification, config)
 
+
 __all__ = [
     "BackendConfig",
     "CSVBackend",

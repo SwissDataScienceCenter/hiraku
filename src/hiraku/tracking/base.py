@@ -12,6 +12,7 @@ from ..errors import BackendError
 if TYPE_CHECKING:
     from ..data import Run
 
+
 class TrackingBackend(ABC):
     """Abstract tracking backend implemented by every run-tracking adapter."""
 
@@ -136,7 +137,3 @@ class TrackingBackend(ABC):
         self, *, task_id: str, experiment_id: str | None = None
     ) -> list[Run]:
         raise NotImplementedError
-
-
-
-

@@ -10,6 +10,8 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, TypeVar
@@ -58,6 +60,11 @@ from .records import Record
 from .validation import validate_identifier
 
 R = TypeVar("R", bound=Record)
+
+try:
+    _VERSION = package_version("hiraku")
+except PackageNotFoundError:
+    _VERSION = "0+unknown"
 
 
 @dataclass(slots=True)
@@ -446,6 +453,7 @@ def _entrypoint_rows(entrypoints: Mapping[str, Entrypoint]) -> list[list[str]]:
 
 
 @click.group(name="hiraku", cls=HirakuGroup)
+@click.version_option(version=f"v{_VERSION}", message="%(version)s")
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """Manage Hiraku projects, records, launches, and tracked runs."""

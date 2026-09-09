@@ -15,7 +15,7 @@ from hiraku.data import load_experiment, load_task
 
 EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "iris-wandb"
 
-FAKE_WANDB = r'''
+FAKE_WANDB = r"""
 import json
 import os
 from pathlib import Path
@@ -78,7 +78,7 @@ class Api:
             run.summary = options.get("summary", {})
             result.append(run)
         return result
-'''
+"""
 
 
 def git(path: Path, *arguments: str) -> str:

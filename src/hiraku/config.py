@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
@@ -79,9 +79,10 @@ class HirakuConfig(BaseModel):
             )
         elif isinstance(backend, Mapping):
             backend_mapping = dict(backend)
-            if not isinstance(backend_mapping.get("type"), str) or not backend_mapping[
-                "type"
-            ]:
+            if (
+                not isinstance(backend_mapping.get("type"), str)
+                or not backend_mapping["type"]
+            ):
                 raise ValidationError(
                     "tracking_backend mapping requires a non-empty string type"
                 )

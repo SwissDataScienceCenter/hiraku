@@ -139,6 +139,3 @@ class CSVBackend(TrackingBackend):
         except (OSError, csv.Error, UnicodeError) as exc:
             raise BackendError(f"csv backend could not read {path}: {exc}") from exc
         return runs
-
-
-

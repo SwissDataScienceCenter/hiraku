@@ -4,6 +4,7 @@ import json
 import shlex
 import subprocess
 import sys
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,13 @@ def test_help_is_lazy_and_init_and_status_work(tmp_path: Path, monkeypatch) -> N
     status = json.loads(result.output)
     assert status["active_task_id"] is None
     assert status["git_branch"] is None
+
+
+def test_version_reports_package_metadata() -> None:
+    result = CliRunner().invoke(main, ["--version"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == f"v{package_version('hiraku')}"
 
 
 def test_init_accepts_tracking_backend(tmp_path: Path, monkeypatch) -> None:

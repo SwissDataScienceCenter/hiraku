@@ -34,7 +34,9 @@ class MLflowBackendConfig(BaseModel):
     @model_validator(mode="after")
     def validate_sources(self) -> MLflowBackendConfig:
         if self.tracking_uri and self.database:
-            raise BackendError("mlflow backend cannot set both tracking_uri and database")
+            raise BackendError(
+                "mlflow backend cannot set both tracking_uri and database"
+            )
         return self
 
 
@@ -163,8 +165,6 @@ class MLflowBackend(TrackingBackend):
         return runs
 
 
-
-
 def _mlflow_uri(config: HirakuConfig, database: Path | None = None) -> str:
     relative = Path(database or "mlflow.db")
     if relative.is_absolute() or ".." in relative.parts:
@@ -179,4 +179,3 @@ def _mlflow_uri(config: HirakuConfig, database: Path | None = None) -> str:
             "mlflow backend database resolves outside project root"
         ) from exc
     return f"sqlite:///{resolved}"
-

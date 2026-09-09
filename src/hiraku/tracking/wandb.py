@@ -43,9 +43,7 @@ class WandbBackendConfig(BaseModel):
     group: str | None = None
     job_type: str | None = None
     mode: Literal["online", "offline"] = "online"
-    api_key: str | None = Field(
-        default_factory=lambda: os.environ.get("WANDB_API_KEY")
-    )
+    api_key: str | None = Field(default_factory=lambda: os.environ.get("WANDB_API_KEY"))
 
 
 class WandbBackend(TrackingBackend):
@@ -163,8 +161,7 @@ class WandbBackend(TrackingBackend):
         if config.get("hiraku.task_id") != task_id:
             return False
         return (
-            experiment_id is None
-            or config.get("hiraku.experiment_id") == experiment_id
+            experiment_id is None or config.get("hiraku.experiment_id") == experiment_id
         )
 
     @classmethod

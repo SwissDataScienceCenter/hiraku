@@ -66,7 +66,9 @@ def available_backends() -> tuple[str, ...]:
     return tuple(sorted(_BACKENDS))
 
 
-def backend_for(specification: str | Mapping[str, Any], config: HirakuConfig) -> TrackingBackend:
+def backend_for(
+    specification: str | Mapping[str, Any], config: HirakuConfig
+) -> TrackingBackend:
     """Construct a backend from a name or validated configuration mapping."""
     if isinstance(specification, str):
         raw: dict[str, Any] = {"type": specification}

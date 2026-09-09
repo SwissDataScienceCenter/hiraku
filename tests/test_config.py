@@ -80,4 +80,3 @@ def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None
     marker.write_text("hiraku_dir: linked\n")
     with pytest.raises(ValidationError):
         HirakuConfig.load(marker)
-
