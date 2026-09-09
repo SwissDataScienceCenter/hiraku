@@ -205,9 +205,45 @@ body,
   background: transparent;
 }
 
+.md-typeset .admonition-title {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.md-typeset details > summary {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
 .md-typeset table th,
 .md-typeset table td {
   border-color: var(--sdsc-border);
+}
+
+/* Tablesort adds aria-sort to the clicked heading; make the affordance clear. */
+.md-typeset table thead th {
+  cursor: pointer;
+  transition: color 200ms ease, background-color 200ms ease;
+}
+
+.md-typeset table thead th:hover {
+  color: var(--sdsc-primary);
+  background: var(--sdsc-surface);
+}
+
+.md-typeset table thead th[aria-sort]::after {
+  margin-left: 0.35rem;
+  color: var(--sdsc-primary);
+  content: "↕";
+  font-size: 0.8em;
+}
+
+.md-typeset table thead th[aria-sort="ascending"]::after {
+  content: "↑";
+}
+
+.md-typeset table thead th[aria-sort="descending"]::after {
+  content: "↓";
 }
 
 .md-typeset pre,
@@ -358,6 +394,14 @@ body,
 .md-copyright,
 .md-copyright a {
   color: #ffffff;
+}
+
+.md-copyright__highlight {
+  display: block;
+  color: #ffffff;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  opacity: 1;
 }
 
 .md-footer a:hover,

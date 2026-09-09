@@ -30,6 +30,19 @@ Launch entrypoints, compare runs, and keep the research history visible.
 </div>
 </div>
 
+## Research loop
+
+Hiraku keeps the intent, implementation, and evidence connected:
+
+```mermaid
+flowchart LR
+    T[Task<br/>research goal] --> B[Baseline<br/>reference]
+    T --> H[Hypothesis<br/>proposed idea]
+    H --> E[Experiment<br/>implementation]
+    B --> R1[Run<br/>reference metrics]
+    E --> R2[Run<br/>observed metrics]
+```
+
 
 ## Installation
 

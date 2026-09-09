@@ -60,3 +60,13 @@ Python version, runtime, tags, group, notes, and summary metrics. The training
 script creates the remote W&B project on its first successful `wandb.init()`
 call. Hiraku itself queries and normalizes W&B runs; it does not create the
 W&B project or run.
+
+??? info "Example run results"
+    This small table mirrors the fields shown by the example’s W&B runs. Click
+    a column heading to sort it; the values are illustrative.
+
+    | Experiment | Run | Model | test/accuracy | test/f1_macro | Status |
+    | --- | --- | --- | ---: | ---: | --- |
+    | `logistic` | `iris-logistic-42` | Logistic regression | 0.9474 | 0.9468 | finished |
+    | `random-forest` | `iris-rf-42` | Random forest | 0.9737 | 0.9735 | finished |
+    | `random-forest` | `iris-rf-7` | Random forest | 0.9474 | 0.9469 | finished |

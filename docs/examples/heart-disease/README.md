@@ -94,3 +94,13 @@ values depend on the dependency versions.
 
 Each listing reflects records written by the training program. A failed
 launch that never logs a row will not appear as a run.
+
+??? info "Example run results"
+    The table below is illustrative documentation data. Click a column heading
+    to sort it; real values are produced by the commands above.
+
+    | Experiment | Run | Model | val/log_loss | val/accuracy | Status |
+    | --- | --- | --- | ---: | ---: | --- |
+    | `logistic-baseline` | `run-001` | Logistic regression | 0.3523 | 0.8421 | completed |
+    | `random-forest` | `run-002` | Random forest | 0.3187 | 0.8684 | completed |
+    | `random-forest` | `run-003` | Random forest | 0.3211 | 0.8553 | completed |
