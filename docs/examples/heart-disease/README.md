@@ -43,11 +43,16 @@ hiraku task create heart-disease \
   --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]'
 
 hiraku status
+
+hiraku task show heart-disease
+hiraku task show  # omit task name since it's the current active task
+
 ```
 
-Expect `active_task_id` to be `heart-disease` and the tracking backend to be
-CSV. The task holds the question and metric declarations; no service account
-is required.
+You should see `active_task_id` to be `heart-disease` and the tracking backend to be
+CSV. 
+
+Note that hiraku by default assigns the branch `/hiraku/tasks/heart-disease` to the task. You can explicitly assign `--branch main`. 
 
 ## 4. Run the baseline and inspect its result
 
@@ -59,8 +64,11 @@ hiraku experiment create logistic-baseline \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: logistic, seed: 42, validation-fraction: 0.25}}}'
 
 hiraku launch logistic-baseline:train
-hiraku run list --task heart-disease --experiment logistic-baseline \
-  --metrics val/log_loss,val/accuracy
+
+# query runs
+hiraku run list --task heart-disease
+# omitted task defaults to active task
+hiraku run list  
 ```
 
 Expect one run with `val/log_loss` and `val/accuracy`. Hiraku executes the
@@ -77,9 +85,7 @@ hiraku experiment create random-forest \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: random_forest, seed: 42, validation-fraction: 0.25}}}'
 
 hiraku launch random-forest:train
-hiraku run list --task heart-disease \
-  --metrics val/log_loss,val/accuracy \
-  --sort val/log_loss --ascending
+hiraku run list
 ```
 
 Expect two runs, with lower log loss first. Both use the same committed
@@ -88,4 +94,3 @@ values depend on the dependency versions.
 
 Each listing reflects records written by the training program. A failed
 launch that never logs a row will not appear as a run.
-
