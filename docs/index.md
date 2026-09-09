@@ -90,6 +90,6 @@ Set up a project, choose a tracking backend, or connect an AI agent.
 
 Look up CLI commands and the Python API when you need exact details.
 
-<a href="api/cli/">CLI</a> · <a href="api/">Python API</a>
+<a href="api/cli/">CLI</a> · <a href="api/python/">Python API</a>
 </div>
 </div>

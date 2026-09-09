@@ -11,5 +11,5 @@ Choose the backend that matches the stage of your project:
 - [Custom](guides/tracking-custom.md) for a backend of your choice.
 
 The task-level `tracking_backend` setting overrides the project default. The
-[tracking API reference](api/tracking.md) documents the shared backend
+[tracking API reference](api/python/tracking.md) documents the shared backend
 contract and normalized run model.

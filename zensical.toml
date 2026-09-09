@@ -1,6 +1,6 @@
 [project]
 site_url = "https://swissdatasciencecenter.github.io/hiraku/"
-site_name = "Hiraku documentation"
+site_name = "Hiraku"
 site_description = "Core metadata and launch APIs for AI-assisted data science"
 site_author = "Hiraku contributors"
 copyright = "Hiraku · Swiss Data Science Center (SDSC)"
@@ -54,18 +54,18 @@ nav = [
   ] },
   { "CLI" = "api/cli.md" },
   { "Python API" = [
-      { "Overview" = "api/index.md" },
-      { "Configuration" = "api/config.md" },
-      { "Records" = "api/records.md" },
+      { "Overview" = "api/python/index.md" },
+      { "Configuration" = "api/python/config.md" },
+      { "Records" = "api/python/records.md" },
       { "Data models" = [
-          { "Task" = "api/task.md" },
-          { "Experiment" = "api/experiment.md" },
-          { "Run" = "api/run.md" },
-          { "Metric" = "api/metric.md" },
-          { "Entrypoint" = "api/entrypoint.md" },
+          { "Task" = "api/python/task.md" },
+          { "Experiment" = "api/python/experiment.md" },
+          { "Run" = "api/python/run.md" },
+          { "Metric" = "api/python/metric.md" },
+          { "Entrypoint" = "api/python/entrypoint.md" },
       ] },
-      { "Tracking" = "api/tracking.md" },
-      { "Launching" = "api/launch.md" },
+      { "Tracking" = "api/python/tracking.md" },
+      { "Launching" = "api/python/launch.md" },
       ] },
 ]
 

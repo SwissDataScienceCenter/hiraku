@@ -66,7 +66,7 @@ hiraku run list --sort val/accuracy --ascending
 
 ### Python API
 
-Hiraku data records are managed by the [Python API](api/index.md). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible.
+Hiraku data records are managed by the [Python API](api/python/). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible.
 ```python
 from hirak.records import Record
 from hiraku.data import Entrypoint, Experiment, Metric, Run, Task
