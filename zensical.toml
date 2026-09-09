@@ -21,18 +21,25 @@ dev_addr = "localhost:8000"
 nav = [
   { "Get started" = [
       { "Overview" = "index.md" },
-      { "Examples" = "examples/index.md" },
+      # { "Examples" = "examples/" },
+      # { "Examples" = [
+      #   { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
+      #   { "Iris (W&B)" = "examples/iris-wandb/README.md" },
+      #   { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
+      #   { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
+      # ]},
       { "Essential Concepts" = "concepts.md" },
+      # { "Examples" = "examples/#examples" },  # Reference link
   ] },
   { "Examples" = [
-     { "Overview" = "examples/index.md" },
+      { "Overview" = "examples/index.md" },
       { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
       { "Iris (W&B)" = "examples/iris-wandb/README.md" },
       { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
       { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
   ] },
   { "Guides" = [
-     { "Overview" = "guides/index.md" },
+      { "Overview" = "guides/index.md" },
       { "Use your own project" = "examples/minimal/README.md" },
       { "Tracking Backends" = [
         { "CSV" = "guides/tracking-csv.md" },
