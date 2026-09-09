@@ -18,8 +18,7 @@ uv run hiraku --help
 
 ## Start here
 
-Follow the [heart disease example](examples/heart-disease/README.md) for a complete workflow
-using the bundled Heart Disease example. It uses the CSV backend and does not
+Follow the [heart disease example](examples/heart-disease/README.md) for a complete workflow. It uses the CSV backend and does not
 require an external account.
 
 ## High-level overview
@@ -38,12 +37,11 @@ Task → Experiment → Run
 > Git remains responsible for commits, branches, and source history. 
 Branches are optional for the core workflow.
 
-
 For more details, see [Essential concepts](concepts.md).
 
 ## Documentation
 
-- [Guides](examples/guides/)
 - [Examples](examples/)
+- [Guides](guides/)
 - [CLI reference](api/cli.md)
 - [Python API](api/index.md)

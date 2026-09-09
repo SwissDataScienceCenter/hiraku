@@ -1,16 +1,13 @@
 # Digits classification with MLflow logging
 
 Train a small neural network on scikit-learn's bundled Digits dataset (1,797
-8×8 images), logging training and validation cross-entropy and accuracy after
-every epoch. This CPU-only example compares weak and strong L2 regularization:
-**Does stronger regularization reduce overfitting?** The outcome is a research
-question, not a guaranteed improvement.
+8×8 images) and log training and validation cross-entropy and accuracy after
+every epoch to MLFlow. The example runs on CPU and compares weak and strong L2 regularization.
 
 The network has one hidden layer of 64 neurons. Each `partial_fit` call performs
 one epoch while preserving optimizer state. Both experiments use the same
 stratified split, initialization seed, and 40-epoch budget. Pixels are divided
-by their known maximum of 16; validation data is never used to fit preprocessing.
-BLAS uses one thread to keep this small workload inexpensive.
+by their known maximum of 16.
 
 ## Setup
 
@@ -30,8 +27,7 @@ git add .
 git commit -m "initialize Digits MLflow example"
 ```
 
-After dependencies are installed, training needs no network, account, server,
-or GPU. MLflow creates its local database on the first launch. The absolute URI
+MLflow creates its local database on the first launch. The absolute URI
 is essential: committed launches run in temporary worktrees, but must write to
 the original project's database. The training script explicitly requires these
 MLflow variables as well as Hiraku's injected provenance.
@@ -57,6 +53,8 @@ hiraku experiment create strong-l2 \
   --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {alpha: 1.0, epochs: 40, hidden-units: 64, seed: 42, validation-fraction: 0.25}}}'
 
+hiraku experiment list
+
 hiraku launch weak-l2:train
 hiraku launch strong-l2:train
 ```
@@ -64,7 +62,10 @@ hiraku launch strong-l2:train
 ## Compare final metrics and inspect curves
 
 ```bash
-hiraku run list --task digits \
+hiraku run list 
+
+# list with additional details
+hiraku run list \
   --params alpha,epochs,seed \
   --metrics train/log_loss,val/log_loss,train/accuracy,val/accuracy \
   --sort val/log_loss --ascending
@@ -74,12 +75,7 @@ hiraku run list --task digits --experiment strong-l2 --json
 uv run mlflow ui --backend-store-uri "$MLFLOW_TRACKING_URI" --host 127.0.0.1 --port 5000
 ```
 
-Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs.
-Plot the loss and accuracy metrics against **Step** (epochs 1–40). Examine the
-training-validation gap, whether validation loss levels off or rises, and the
-tradeoff between underfitting and overfitting. Repeat with additional seeds
-before drawing a general conclusion; this validation split is not a final test
-set.
+Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs in the native MLFLow interface
 
 One MLflow experiment contains both Hiraku experiments. Native MLflow tags
 `hiraku.task_id`, `hiraku.experiment_id`, `hiraku.commit`, and `hiraku.entrypoint`

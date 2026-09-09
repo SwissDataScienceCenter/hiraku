@@ -13,6 +13,7 @@ from sklearn.metrics import accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 from threadpoolctl import threadpool_limits
+from tqdm import tqdm
 
 
 def parse_args() -> argparse.Namespace:
@@ -85,7 +86,7 @@ def main() -> None:
         started = time.perf_counter()
         # Limit BLAS threads to avoid overhead on this small CPU workload.
         with threadpool_limits(limits=1):
-            for epoch in range(1, args.epochs + 1):
+            for epoch in tqdm(range(1, args.epochs + 1)):
                 # partial_fit performs one epoch and preserves optimizer state.
                 model.partial_fit(train_x, train_y, classes=np.arange(10))
                 metrics = {}
@@ -110,4 +111,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
