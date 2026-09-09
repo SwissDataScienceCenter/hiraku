@@ -51,6 +51,7 @@ RUN_FIELDS = [
 PROVENANCE_VARIABLES = [
     "HIRAKU_TASK_ID",
     "HIRAKU_EXPERIMENT_ID",
+    "HIRAKU_COMMIT",
     "HIRAKU_ENTRYPOINT",
     "HIRAKU_TASK_FILE",
 ]
@@ -90,13 +91,10 @@ def build_model(model_name: str, seed: int) -> Pipeline:
 
 
 def provenance() -> dict[str, str]:
-    missing = [name for name in PROVENANCE_VARIABLES if not os.environ.get(name)]
+    missing = [name for name in PROVENANCE_VARIABLES if name not in os.environ]
     if missing:
         raise RuntimeError(f"Missing Hiraku provenance variables: {', '.join(missing)}")
-    return {
-        **{name: os.environ[name] for name in PROVENANCE_VARIABLES},
-        "HIRAKU_COMMIT": os.environ.get("HIRAKU_COMMIT", ""),
-    }
+    return {name: os.environ[name] for name in PROVENANCE_VARIABLES}
 
 
 def append_run(path: Path, row: dict[str, str]) -> None:

@@ -38,21 +38,20 @@ def main() -> None:
     required = (
         "HIRAKU_TASK_ID",
         "HIRAKU_EXPERIMENT_ID",
+        "HIRAKU_COMMIT",
         "HIRAKU_ENTRYPOINT",
         "MLFLOW_TRACKING_URI",
         "MLFLOW_EXPERIMENT_NAME",
     )
-    missing = [name for name in required if not os.environ.get(name)]
+    missing = [name for name in required if name not in os.environ]
     if missing:
         raise RuntimeError(
             f"Missing launch environment variables: {', '.join(missing)}"
         )
     tags = {
         f"hiraku.{key}": os.environ[f"HIRAKU_{key.upper()}"]
-        for key in ("task_id", "experiment_id", "entrypoint")
+        for key in ("task_id", "experiment_id", "commit", "entrypoint")
     }
-    if os.environ.get("HIRAKU_COMMIT"):
-        tags["hiraku.commit"] = os.environ["HIRAKU_COMMIT"]
     mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
     mlflow.set_experiment(os.environ["MLFLOW_EXPERIMENT_NAME"])
     data = load_digits()

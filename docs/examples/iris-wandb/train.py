@@ -17,21 +17,19 @@ from sklearn.model_selection import train_test_split
 HIRAKU_VARIABLES = (
     "HIRAKU_TASK_ID",
     "HIRAKU_EXPERIMENT_ID",
+    "HIRAKU_COMMIT",
     "HIRAKU_ENTRYPOINT",
 )
 
 
 def provenance() -> dict[str, str]:
     """Read the provenance injected by ``hiraku launch``."""
-    missing = [name for name in HIRAKU_VARIABLES if not os.environ.get(name)]
+    missing = [name for name in HIRAKU_VARIABLES if name not in os.environ]
     if missing:
         raise RuntimeError(
             f"Missing Hiraku provenance variables: {', '.join(missing)}"
         )
-    return {
-        **{name: os.environ[name] for name in HIRAKU_VARIABLES},
-        "HIRAKU_COMMIT": os.environ.get("HIRAKU_COMMIT", ""),
-    }
+    return {name: os.environ[name] for name in HIRAKU_VARIABLES}
 
 
 def parse_args() -> argparse.Namespace:

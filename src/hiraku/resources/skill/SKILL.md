@@ -93,9 +93,9 @@ in a temporary worktree. An experiment selector supplies its bound commit unless
 operations manage commits and merges.
 
 Dispatchers inject available `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`,
-`HIRAKU_ENTRYPOINT`, and task/experiment file paths. `HIRAKU_COMMIT` is present
-only when the dispatcher guarantees exact commit provenance, as `worktree.sh`
-does. Commands are argument lists, not shell expressions. `--dispatch NAME`
+`HIRAKU_ENTRYPOINT`, `HIRAKU_COMMIT`, and task/experiment file paths.
+`HIRAKU_COMMIT` is empty unless the dispatcher guarantees exact commit
+provenance, as `worktree.sh` does. Commands are argument lists, not shell expressions. `--dispatch NAME`
 selects `hiraku/dispatch/NAME.sh` (the `.sh` suffix is optional); the configured
 default is `launch.sh`. Child stdout and stderr stream live to the terminal.
 

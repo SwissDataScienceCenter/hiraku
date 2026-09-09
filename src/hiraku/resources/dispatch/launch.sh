@@ -38,6 +38,7 @@ done
 
 unset HIRAKU_TASK_ID HIRAKU_TASK_FILE HIRAKU_EXPERIMENT_ID
 unset HIRAKU_EXPERIMENT_FILE HIRAKU_COMMIT HIRAKU_ENTRYPOINT
+export HIRAKU_COMMIT=
 [ -n "$task_id" ] && export HIRAKU_TASK_ID=$task_id
 [ -n "$task_file" ] && export HIRAKU_TASK_FILE=$task_file
 [ -n "$experiment_id" ] && export HIRAKU_EXPERIMENT_ID=$experiment_id

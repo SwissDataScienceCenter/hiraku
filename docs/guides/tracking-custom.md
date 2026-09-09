@@ -92,8 +92,8 @@ The custom service must store records that can be converted to `Run`:
 ```
 
 Use `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, and `HIRAKU_ENTRYPOINT` when
-writing attribution. Record `HIRAKU_COMMIT` only when it is present; the local
-dispatcher intentionally leaves it unset. Keep credentials outside `hiraku.yml`.
+writing attribution. `HIRAKU_COMMIT` is always present but empty for local
+launches without exact commit provenance. Keep credentials outside `hiraku.yml`.
 
 ## Inspect
 

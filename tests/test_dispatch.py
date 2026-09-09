@@ -94,12 +94,12 @@ def test_dispatchers_clear_inherited_attribution(tmp_path: Path) -> None:
         "--",
         "/bin/sh",
         "-c",
-        'printf "%s|%s|%s" "${HIRAKU_TASK_ID-}" '
-        '"${HIRAKU_EXPERIMENT_ID-}" "${HIRAKU_COMMIT-}"',
+        'printf "%s|%s|%s|%s" "${HIRAKU_TASK_ID-}" '
+        '"${HIRAKU_EXPERIMENT_ID-}" "$HIRAKU_COMMIT" "${HIRAKU_COMMIT+x}"',
         env=inherited,
     )
     assert result.returncode == 0
-    assert result.stdout == "||"
+    assert result.stdout == "|||x"
 
 
 def test_worktree_dispatcher_isolates_and_cleans_up(tmp_path: Path) -> None:

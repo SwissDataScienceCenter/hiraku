@@ -122,8 +122,9 @@ hiraku launch --dispatch worktree <exp-id>:<entrypoint> # exact commit
 
 The dispatcher injects
 `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_TASK_FILE`,
-`HIRAKU_EXPERIMENT_FILE`, and `HIRAKU_ENTRYPOINT`. The local dispatcher never
-sets `HIRAKU_COMMIT`; `worktree.sh` sets it to the exact checked-out commit.
+`HIRAKU_EXPERIMENT_FILE`, `HIRAKU_ENTRYPOINT`, and `HIRAKU_COMMIT`. The local
+dispatcher sets `HIRAKU_COMMIT` to an empty string; `worktree.sh` sets it to the
+exact checked-out commit.
 
 The user can define custom dispatch scripts, e.g.
 
