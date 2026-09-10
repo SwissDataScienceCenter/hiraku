@@ -39,6 +39,8 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     project = tmp_path / "digits-mlflow"
     project.mkdir()
     monkeypatch.chdir(project)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.delenv("MLFLOW_EXPERIMENT_NAME", raising=False)
     uri = f"sqlite:///{project / 'mlflow.db'}"
     monkeypatch.setenv("MLFLOW_ENABLE_ASYNC_LOGGING", "false")
     git(project, "init", "-b", "main")
