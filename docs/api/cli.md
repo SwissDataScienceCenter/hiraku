@@ -17,6 +17,27 @@ hiraku run list
 location. Python initialization is permissive by default; callers can request
 the CLI policy with `ignore_git=False`.
 
+Initialize from an arbitrary local project overlay with `--template`:
+
+```bash
+hiraku init --template ./path/to/template
+```
+
+Packaged examples use `--example NAME`. Each example copies only its bundled
+`src/` subtree; sibling documentation and metadata are not part of the project:
+
+```text
+resources/examples/<name>/
+├── README.md
+├── example.yml
+└── src/                 # copied into the project root
+```
+
+The two options are mutually exclusive. Templates may replace files installed
+by the same initialization, but initialization refuses to overwrite files that
+already existed in the target. Explicit options such as `--tracking-backend`
+take precedence over values from a template-provided `hiraku.yml`.
+
 Use `hiraku --help` or the generated command sections below for all options.
 The command reference is generated from Hiraku's Click command tree.
 

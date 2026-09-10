@@ -491,19 +491,42 @@ def main(ctx: click.Context) -> None:
     help="Set the default tracking backend.",
 )
 @click.option(
+    "--template",
+    type=click.Path(
+        path_type=Path,
+        exists=True,
+        file_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    help="Copy a local template directory over the initialized project.",
+)
+@click.option(
+    "--example",
+    help="Initialize from a packaged example.",
+)
+@click.option(
     "--ignore-git",
     is_flag=True,
     help="Initialize without requiring the target to be a Git repository root.",
 )
 def init_command(
-    path: Path | None, tracking_backend: str | None, ignore_git: bool
+    path: Path | None,
+    tracking_backend: str | None,
+    template: Path | None,
+    example: str | None,
+    ignore_git: bool,
 ) -> None:
     """Initialize a Hiraku project."""
+    if template is not None and example is not None:
+        raise click.UsageError("--template and --example are mutually exclusive")
     target = (path or Path.cwd()).expanduser().resolve()
     config = HirakuConfig.init(
         target,
         tracking_backend=tracking_backend,
         ignore_git=ignore_git,
+        template=template,
+        example=example,
     )
     click.echo(f"Initialized Hiraku project at {config.path}")
 

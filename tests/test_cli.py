@@ -132,6 +132,63 @@ def test_init_accepts_tracking_backend(tmp_path: Path, monkeypatch) -> None:
     assert HirakuConfig.discover(tmp_path).tracking_backend == {"type": "mlflow"}
 
 
+def test_init_accepts_relative_template_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    template = tmp_path / "template"
+    template.mkdir()
+    (template / "template.txt").write_text("copied")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        main, ["init", str(repository), "--template", "template"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (repository / "template.txt").read_text() == "copied"
+
+
+def test_init_rejects_conflicting_or_invalid_sources(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    template = tmp_path / "template"
+    template.mkdir()
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    conflict = runner.invoke(
+        main,
+        [
+            "init",
+            str(repository),
+            "--template",
+            str(template),
+            "--example",
+            "demo",
+        ],
+    )
+    assert conflict.exit_code != 0
+    assert "--template and --example are mutually exclusive" in conflict.output
+    assert not (repository / "hiraku.yml").exists()
+
+    missing = runner.invoke(
+        main, ["init", str(repository), "--template", "missing-template"]
+    )
+    assert missing.exit_code != 0
+    assert "Directory" in missing.output
+
+    unknown = runner.invoke(main, ["init", str(repository), "--example", "missing"])
+    assert unknown.exit_code != 0
+    assert "Unknown example 'missing'" in unknown.output
+    assert not (repository / "hiraku.yml").exists()
+
+
 def test_bare_init_requires_current_directory_to_be_git_root(
     tmp_path: Path, monkeypatch
 ) -> None:
