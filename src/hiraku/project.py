@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 from contextlib import ExitStack, suppress
+from dataclasses import dataclass
 from importlib.resources import as_file, files
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,6 +16,13 @@ from .validation import validate_identifier
 
 if TYPE_CHECKING:
     from .config import HirakuConfig
+
+
+@dataclass(frozen=True, slots=True)
+class _InitializationResult:
+    config: HirakuConfig
+    created_files: tuple[Path, ...]
+    created_dirs: tuple[Path, ...]
 
 
 class ProjectInitializer:
@@ -49,6 +57,27 @@ class ProjectInitializer:
             hiraku.errors.ProjectExistsError: If the project marker already exists.
             hiraku.errors.ValidationError: If provisioning fails.
         """
+        return cls.create_with_report(
+            root,
+            install_skill=install_skill,
+            tracking_backend=tracking_backend,
+            ignore_git=ignore_git,
+            template=template,
+            example=example,
+        ).config
+
+    @classmethod
+    def create_with_report(
+        cls,
+        root: Path | str = ".",
+        *,
+        install_skill: bool = True,
+        tracking_backend: str | None = None,
+        ignore_git: bool = True,
+        template: Path | str | None = None,
+        example: str | None = None,
+    ) -> _InitializationResult:
+        """Initialize a project and report paths created by the operation."""
         from .config import HirakuConfig
         from .git import GitRepository
 
@@ -121,7 +150,11 @@ class ProjectInitializer:
                     dispatcher = config.dispatch_dir / name
                     if dispatcher.is_file():
                         dispatcher.chmod(dispatcher.stat().st_mode | 0o111)
-                return config
+                return _InitializationResult(
+                    config=config,
+                    created_files=tuple(dict.fromkeys(created_files)),
+                    created_dirs=tuple(dict.fromkeys(created_dirs)),
+                )
             except Exception as exc:
                 for path in reversed(created_files):
                     path.unlink(missing_ok=True)

@@ -518,16 +518,23 @@ def init_command(
     ignore_git: bool,
 ) -> None:
     """Initialize a Hiraku project."""
+    from .project import ProjectInitializer
+
     if template is not None and example is not None:
         raise click.UsageError("--template and --example are mutually exclusive")
     target = (path or Path.cwd()).expanduser().resolve()
-    config = HirakuConfig.init(
+    result = ProjectInitializer.create_with_report(
         target,
         tracking_backend=tracking_backend,
         ignore_git=ignore_git,
         template=template,
         example=example,
     )
+    for directory in result.created_dirs:
+        click.echo(f"Created directory: {directory}")
+    for created_file in result.created_files:
+        click.echo(f"Created file: {created_file}")
+    config = result.config
     click.echo(f"Initialized Hiraku project at {config.path}")
 
 

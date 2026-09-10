@@ -141,6 +141,7 @@ def test_init_accepts_relative_template_directory(
     template = tmp_path / "template"
     template.mkdir()
     (template / "template.txt").write_text("copied")
+    (template / "empty").mkdir()
     monkeypatch.chdir(tmp_path)
 
     result = CliRunner().invoke(
@@ -149,6 +150,22 @@ def test_init_accepts_relative_template_directory(
 
     assert result.exit_code == 0, result.output
     assert (repository / "template.txt").read_text() == "copied"
+    assert f"Created file: {repository / 'template.txt'}" in result.output
+    assert f"Created file: {repository / 'hiraku.yml'}" in result.output
+    assert f"Created directory: {repository / 'empty'}" in result.output
+    assert f"Created directory: {repository / 'hiraku'}" in result.output
+
+
+def test_init_reports_a_new_project_root(tmp_path: Path) -> None:
+    project = tmp_path / "new-project"
+
+    result = CliRunner().invoke(main, ["init", str(project), "--ignore-git"])
+
+    assert result.exit_code == 0, result.output
+    assert f"Created directory: {project}" in result.output
+    assert result.output.rstrip().endswith(
+        f"Initialized Hiraku project at {project / 'hiraku.yml'}"
+    )
 
 
 def test_init_rejects_conflicting_or_invalid_sources(
@@ -186,6 +203,19 @@ def test_init_rejects_conflicting_or_invalid_sources(
     unknown = runner.invoke(main, ["init", str(repository), "--example", "missing"])
     assert unknown.exit_code != 0
     assert "Unknown example 'missing'" in unknown.output
+    assert not (repository / "hiraku.yml").exists()
+
+    protected = repository / "protected.txt"
+    protected.write_text("original")
+    (template / "protected.txt").write_text("replacement")
+    collision = runner.invoke(
+        main, ["init", str(repository), "--template", str(template)]
+    )
+    assert collision.exit_code != 0
+    assert "overwrite existing path" in collision.output
+    assert "Created file:" not in collision.output
+    assert "Created directory:" not in collision.output
+    assert protected.read_text() == "original"
     assert not (repository / "hiraku.yml").exists()
 
 

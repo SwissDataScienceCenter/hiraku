@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -10,8 +9,6 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.data import load_task
-
-EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "minimal"
 
 
 def git(path: Path, *arguments: str) -> str:
@@ -32,14 +29,18 @@ def invoke(runner: CliRunner, arguments: list[str]):
 
 def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) -> None:
     project = tmp_path / "minimal"
-    shutil.copytree(EXAMPLE, project)
+    project.mkdir()
     monkeypatch.chdir(project)
     git(project, "init", "-b", "main")
     git(project, "config", "user.email", "test@example.invalid")
     git(project, "config", "user.name", "Test")
     runner = CliRunner()
 
-    invoke(runner, ["init"])
+    initialized = invoke(runner, ["init", "--example", "minimal"])
+    assert f"Created file: {project / 'evaluate.py'}" in initialized.output
+    assert f"Created file: {project / 'hiraku.yml'}" in initialized.output
+    assert not (project / "README.md").exists()
+    assert not (project / "example.yml").exists()
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize minimal example")
     commit = git(project, "rev-parse", "HEAD")
