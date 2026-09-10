@@ -132,6 +132,93 @@ def test_init_accepts_tracking_backend(tmp_path: Path, monkeypatch) -> None:
     assert HirakuConfig.discover(tmp_path).tracking_backend == {"type": "mlflow"}
 
 
+def test_init_accepts_relative_template_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    template = tmp_path / "template"
+    template.mkdir()
+    (template / "template.txt").write_text("copied")
+    (template / "empty").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        main, ["init", str(repository), "--template", "template"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (repository / "template.txt").read_text() == "copied"
+    assert "Created file: template.txt" in result.output
+    assert "Created file: hiraku.yml" in result.output
+    assert "Created directory: empty" in result.output
+    assert "Created directory: hiraku" in result.output
+
+
+def test_init_reports_a_new_project_root(tmp_path: Path) -> None:
+    project = tmp_path / "new-project"
+
+    result = CliRunner().invoke(main, ["init", str(project), "--ignore-git"])
+
+    assert result.exit_code == 0, result.output
+    assert "Created directory: ." in result.output
+    assert result.output.rstrip().endswith(
+        f"Initialized Hiraku project at {project / 'hiraku.yml'}"
+    )
+
+
+def test_init_rejects_conflicting_or_invalid_sources(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    template = tmp_path / "template"
+    template.mkdir()
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    conflict = runner.invoke(
+        main,
+        [
+            "init",
+            str(repository),
+            "--template",
+            str(template),
+            "--example",
+            "demo",
+        ],
+    )
+    assert conflict.exit_code != 0
+    assert "--template and --example are mutually exclusive" in conflict.output
+    assert not (repository / "hiraku.yml").exists()
+
+    missing = runner.invoke(
+        main, ["init", str(repository), "--template", "missing-template"]
+    )
+    assert missing.exit_code != 0
+    assert "Directory" in missing.output
+
+    unknown = runner.invoke(main, ["init", str(repository), "--example", "missing"])
+    assert unknown.exit_code != 0
+    assert "Unknown example 'missing'" in unknown.output
+    assert not (repository / "hiraku.yml").exists()
+
+    protected = repository / "protected.txt"
+    protected.write_text("original")
+    (template / "protected.txt").write_text("replacement")
+    collision = runner.invoke(
+        main, ["init", str(repository), "--template", str(template)]
+    )
+    assert collision.exit_code != 0
+    assert "overwrite existing path" in collision.output
+    assert "Created file:" not in collision.output
+    assert "Created directory:" not in collision.output
+    assert protected.read_text() == "original"
+    assert not (repository / "hiraku.yml").exists()
+
+
 def test_bare_init_requires_current_directory_to_be_git_root(
     tmp_path: Path, monkeypatch
 ) -> None:

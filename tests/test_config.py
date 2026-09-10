@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import hiraku.project
 from hiraku.config import HirakuConfig
 from hiraku.data import Experiment, Task
 from hiraku.errors import (
@@ -73,6 +74,139 @@ def test_init_sets_tracking_backend(tmp_path: Path) -> None:
     assert yaml.safe_load(config.path.read_text())["tracking_backend"] == {
         "type": "mlflow"
     }
+
+
+def test_init_from_template_applies_arbitrary_overlay(tmp_path: Path) -> None:
+    template = tmp_path / "template"
+    (template / "custom/dispatch").mkdir(parents=True)
+    (template / "empty").mkdir()
+    (template / "hiraku.yml").write_text(
+        "hiraku_dir: custom\n"
+        "tracking_backend: wandb\n"
+        "extension:\n"
+        "  enabled: true\n"
+    )
+    launcher = template / "custom/dispatch/launch.sh"
+    launcher.write_text("#!/bin/sh\necho template\n")
+    launcher.chmod(0o744)
+    (template / ".example-dotfile").write_text("included\n")
+    (template / "payload.bin").write_bytes(b"\x00\xfftemplate")
+
+    root = tmp_path / "project"
+    config = HirakuConfig.init(
+        root,
+        template=template,
+        tracking_backend="mlflow",
+        install_skill=False,
+    )
+
+    assert config.hiraku_dir == root / "custom"
+    assert config.tracking_backend == {"type": "mlflow"}
+    assert config.to_dict()["extension"] == {"enabled": True}
+    assert launcher.read_text() == (root / "custom/dispatch/launch.sh").read_text()
+    assert (root / "custom/dispatch/launch.sh").stat().st_mode & 0o111
+    assert (root / "custom/dispatch/worktree.sh").is_file()
+    assert (root / ".example-dotfile").read_text() == "included\n"
+    assert (root / "payload.bin").read_bytes() == b"\x00\xfftemplate"
+    assert (root / "empty").is_dir()
+
+
+def test_template_rejects_existing_files_before_initialization(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    existing = root / "existing.txt"
+    existing.write_text("original")
+    template = tmp_path / "template"
+    template.mkdir()
+    (template / "existing.txt").write_text("replacement")
+
+    with pytest.raises(ValidationError, match="overwrite existing path"):
+        HirakuConfig.init(root, template=template)
+
+    assert existing.read_text() == "original"
+    assert not (root / "hiraku.yml").exists()
+    assert not (root / "hiraku").exists()
+
+
+def test_template_rejects_symlinks_and_invalid_config(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("target")
+    linked_template = tmp_path / "linked-template"
+    linked_template.mkdir()
+    (linked_template / "link").symlink_to(target)
+    linked_root = tmp_path / "linked-root"
+
+    with pytest.raises(ValidationError, match="symbolic link"):
+        HirakuConfig.init(linked_root, template=linked_template)
+    assert not linked_root.exists()
+
+    template_link = tmp_path / "template-link"
+    template_link.symlink_to(linked_template, target_is_directory=True)
+    with pytest.raises(ValidationError, match="cannot be a symbolic link"):
+        HirakuConfig.init(linked_root, template=template_link)
+    assert not linked_root.exists()
+
+    invalid_template = tmp_path / "invalid-template"
+    invalid_template.mkdir()
+    (invalid_template / "hiraku.yml").write_text("hiraku_dir: ../outside\n")
+    invalid_root = tmp_path / "invalid-root"
+
+    with pytest.raises(ValidationError, match="parent traversal"):
+        HirakuConfig.init(invalid_root, template=invalid_template)
+    assert not invalid_root.exists()
+
+
+def test_template_failure_rolls_back_created_paths(
+    tmp_path: Path, monkeypatch
+) -> None:
+    template = tmp_path / "template"
+    template.mkdir()
+    (template / "first.txt").write_text("first")
+    (template / "second.txt").write_text("second")
+    root = tmp_path / "project"
+    original_copy = hiraku.project.shutil.copy2
+
+    def fail_on_second(source: Path, destination: Path) -> None:
+        if Path(source).parent == template and Path(source).name == "second.txt":
+            raise OSError("simulated copy failure")
+        original_copy(source, destination)
+
+    monkeypatch.setattr(hiraku.project.shutil, "copy2", fail_on_second)
+
+    with pytest.raises(ValidationError, match="simulated copy failure"):
+        HirakuConfig.init(root, template=template)
+    assert not root.exists()
+
+
+def test_init_from_packaged_example_copies_only_src(
+    tmp_path: Path, monkeypatch
+) -> None:
+    resources = tmp_path / "resources"
+    for name in ("programs", "actions", "dispatch"):
+        (resources / name).mkdir(parents=True)
+    example = resources / "examples/demo"
+    (example / "src").mkdir(parents=True)
+    (example / "README.md").write_text("do not copy")
+    (example / "example.yml").write_text("description: Demo\n")
+    (example / "src/copied.txt").write_text("copied")
+    monkeypatch.setattr(hiraku.project, "files", lambda package: resources)
+
+    root = tmp_path / "project"
+    HirakuConfig.init(root, example="demo", install_skill=False)
+
+    assert (root / "copied.txt").read_text() == "copied"
+    assert not (root / "README.md").exists()
+    assert not (root / "example.yml").exists()
+    with pytest.raises(ValidationError, match="available examples: demo"):
+        HirakuConfig.init(tmp_path / "unknown", example="missing")
+
+
+def test_init_rejects_conflicting_template_sources(tmp_path: Path) -> None:
+    template = tmp_path / "template"
+    template.mkdir()
+
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        HirakuConfig.init(tmp_path / "project", template=template, example="demo")
 
 
 def test_config_preserves_unknown_keys_and_active_invariants(tmp_path: Path) -> None:

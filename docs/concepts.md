@@ -44,6 +44,8 @@ The CLI provides a standardized interface for managing data records, .e.g
 ```bash
 hiraku init  # initialize at the current Git repository root
 hiraku init PATH --ignore-git  # explicitly skip Git-root validation
+hiraku init --template ./path/to/template  # apply a local project overlay
+hiraku init --example <name>  # apply the src/ tree of a packaged example
 
 hiraku task create <task-id>
 hiraku task list
