@@ -12,4 +12,18 @@ repos:
         types_or: [ python, pyproject ]
         args: [--fix]
       - id: ruff-format
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE uv run pytest
+        language: system
+        pass_filenames: false
+        always_run: true
         types_or: [ python, markdown ]
+      - id: zensical-build
+        name: docs build
+        entry: uv run zensical build --clean
+        language: system
+        pass_filenames: false
+        always_run: true
