@@ -202,6 +202,7 @@ hiraku-agent task create heart-disease --goal "Develop models for heart disease 
 # query task record and Hiraku status
 hiraku task show [heart-disease]
 hiraku task show heart-disease --json
+hiraku task show heart-disease --field goal
 hiraku status  # show current active task
 
 # 2. create an experiment, then implement and bind it

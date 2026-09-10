@@ -219,7 +219,21 @@ def _table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
     return "\n".join(lines)
 
 
-def _show_record(record: Record, json_output: bool) -> None:
+def _show_record(
+    record: Record, json_output: bool, field: str | None = None
+) -> None:
+    if field is not None:
+        fields = record.to_dict()
+        if field not in fields:
+            raise ValidationError(
+                f"Field {field!r} not found in {type(record).__name__} {record.id!r}"
+            )
+        value = fields[field]
+        if json_output:
+            _emit_json(value)
+        else:
+            click.echo(_plain(value))
+        return
     if json_output:
         _emit_json(record)
     else:
@@ -621,11 +635,17 @@ def task_list(state: CLIContext, columns: str | None, json_output: bool) -> None
 
 @task_group.command("show")
 @click.argument("task_id", required=False)
+@click.option("--field", help="Show one top-level front matter field.")
 @click.option("json_output", "--json", is_flag=True)
 @click.pass_obj
-def task_show(state: CLIContext, task_id: str | None, json_output: bool) -> None:
+def task_show(
+    state: CLIContext,
+    task_id: str | None,
+    field: str | None,
+    json_output: bool,
+) -> None:
     """Show a task."""
-    _show_record(_active_task(state.config, task_id), json_output)
+    _show_record(_active_task(state.config, task_id), json_output, field)
 
 
 @task_group.command("update")
@@ -847,16 +867,18 @@ def experiment_list(
 @experiment_group.command("show")
 @click.argument("experiment_id", required=False)
 @click.option("task_id", "--task")
+@click.option("--field", help="Show one top-level front matter field.")
 @click.option("json_output", "--json", is_flag=True)
 @click.pass_obj
 def experiment_show(
     state: CLIContext,
     experiment_id: str | None,
     task_id: str | None,
+    field: str | None,
     json_output: bool,
 ) -> None:
     """Show an experiment."""
-    _show_record(_experiment(state.config, experiment_id, task_id), json_output)
+    _show_record(_experiment(state.config, experiment_id, task_id), json_output, field)
 
 
 @experiment_group.command("update")
@@ -1066,11 +1088,17 @@ def _install_record_group(
 
     @group.command("show", help=f"Show a {noun}.")
     @click.argument(f"{noun}_id")
+    @click.option("--field", help="Show one top-level front matter field.")
     @click.option("json_output", "--json", is_flag=True)
     @click.pass_obj
-    def show_record(state: CLIContext, json_output: bool, **arguments: str) -> None:
+    def show_record(
+        state: CLIContext,
+        field: str | None,
+        json_output: bool,
+        **arguments: str,
+    ) -> None:
         record = loader(arguments[f"{noun}_id"], config=state.config)
-        _show_record(record, json_output)
+        _show_record(record, json_output, field)
 
     @group.command("update", help=f"Update and validate a {noun}.")
     @click.argument(f"{noun}_id")
@@ -1190,10 +1218,13 @@ def _load_action_reference(reference: str, config: HirakuConfig) -> Action:
 
 @action_group.command("show", help="Show an action.")
 @click.argument("action")
+@click.option("--field", help="Show one top-level front matter field.")
 @click.option("json_output", "--json", is_flag=True)
 @click.pass_obj
-def action_show(state: CLIContext, action: str, json_output: bool) -> None:
-    _show_record(_load_action_reference(action, state.config), json_output)
+def action_show(
+    state: CLIContext, action: str, field: str | None, json_output: bool
+) -> None:
+    _show_record(_load_action_reference(action, state.config), json_output, field)
 
 
 @action_group.command("update", help="Update and validate an action.")

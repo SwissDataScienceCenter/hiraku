@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from hiraku.agent import Action, Context, Program
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.data import Experiment, Task, load_experiment, load_task
@@ -438,6 +439,92 @@ def test_agent_record_commands_and_mutation_conflicts(
     assert action.exit_code == 0, action.output
     listing = runner.invoke(main, ["action", "list", "--entity", "experiment"])
     assert "review" in listing.output
+
+
+def test_show_one_front_matter_field_from_every_record_type(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = _project(tmp_path)
+    task = Task.create("demo", config=config, priority=2)
+    Experiment.create("baseline", task=task, config=config, score=0.9)
+    Program(
+        id="budgeted",
+        time_budget=300,
+        enabled=True,
+        optional=None,
+        tags=["fast", "repeatable"],
+        resources={"gpu": 1},
+    ).save(config.programs_dir / "budgeted/program.md")
+    Context(id="literature", reviewed=True).save(
+        config.contexts_dir / "literature/context.md"
+    )
+    Action(id="review", entity="experiment", status="ready").save(
+        config.actions_dir / "experiment/review/action.md"
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    cases = [
+        (["task", "show", "demo", "--field", "priority"], "2\n"),
+        (
+            [
+                "experiment",
+                "show",
+                "baseline",
+                "--task",
+                "demo",
+                "--field",
+                "score",
+            ],
+            "0.9\n",
+        ),
+        (
+            ["program", "show", "budgeted", "--field", "time_budget"],
+            "300\n",
+        ),
+        (["context", "show", "literature", "--field", "reviewed"], "true\n"),
+        (
+            ["action", "show", "experiment/review", "--field", "status"],
+            "ready\n",
+        ),
+    ]
+    for arguments, expected in cases:
+        result = runner.invoke(main, arguments)
+        assert result.exit_code == 0, result.output
+        assert result.output == expected
+
+    assert runner.invoke(
+        main, ["program", "show", "budgeted", "--field", "optional"]
+    ).output == "\n"
+    assert runner.invoke(
+        main, ["program", "show", "budgeted", "--field", "tags"]
+    ).output == '["fast","repeatable"]\n'
+    assert runner.invoke(
+        main, ["program", "show", "budgeted", "--field", "resources"]
+    ).output == '{"gpu":1}\n'
+
+    json_result = runner.invoke(
+        main,
+        ["program", "show", "budgeted", "--field", "time_budget", "--json"],
+    )
+    assert json_result.exit_code == 0, json_result.output
+    assert json.loads(json_result.output) == 300
+
+    missing = runner.invoke(
+        main, ["program", "show", "budgeted", "--field", "missing"]
+    )
+    assert missing.exit_code != 0
+    assert "Field 'missing' not found in Program 'budgeted'" in missing.output
+
+    body = runner.invoke(
+        main, ["program", "show", "budgeted", "--field", "markdown"]
+    )
+    assert body.exit_code != 0
+    assert "Field 'markdown' not found" in body.output
+
+    full_record = runner.invoke(main, ["program", "show", "budgeted"])
+    assert full_record.exit_code == 0, full_record.output
+    assert full_record.output.startswith("---\n")
 
 
 def test_launch_boundary_output_and_exit_status(
