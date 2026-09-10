@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  repository-checks:
+    name: repository checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate required repository files
+        run: |
+          test -f README.md
+          test -f .gitignore
+          test -f .github/settings.yml
+
+      - name: Validate YAML configuration
+        run: |
+          ruby -e 'require "yaml"; [".github/settings.yml", ".github/workflows/ci.yml"].each { |path| YAML.safe_load(File.read(path), aliases: true) }'
