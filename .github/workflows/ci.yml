@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  REQUIRED_STATUS_CHECK_CONTEXT: CI / repository checks
+
 jobs:
   repository-checks:
     name: repository checks
@@ -32,7 +35,6 @@ jobs:
           require "yaml"
 
           settings = YAML.safe_load(File.read(".github/settings.yml"), aliases: true)
-          workflow = YAML.safe_load(File.read(".github/workflows/ci.yml"), aliases: true)
           rulesets = settings.fetch("rulesets")
           ruleset = rulesets.find { |entry| entry["name"] == "Protect main" }
           abort("missing Protect main ruleset") unless ruleset
@@ -54,7 +56,7 @@ jobs:
 
           status_checks_rule = rules.find { |rule| rule["type"] == "required_status_checks" }.fetch("parameters")
           abort("status checks must be strict") unless status_checks_rule["strict_required_status_checks_policy"] == true
-          expected_context = "#{workflow.fetch("name")} / #{workflow.fetch("jobs").fetch("repository-checks").fetch("name")}"
+          expected_context = ENV.fetch("REQUIRED_STATUS_CHECK_CONTEXT")
           required_status_checks = status_checks_rule.fetch("required_status_checks")
           required_contexts = required_status_checks.map { |check| check.fetch("context") }.sort
           abort("required checks must match the workflow job name") unless required_contexts == [expected_context]
