@@ -119,6 +119,47 @@ hiraku task show sep10 --json
 hiraku program show autoresearch
 ```
 
+### Run autoresearch in a nono sandbox
+
+As an alternative, run the same prompt with the repository read-only except for
+`train.py`, Git and Hiraku metadata, and the run outputs. The output files must
+exist before nono can grant access to them. The `codex` base profile supplies
+Codex's runtime, authentication, and network permissions; replace it with the
+corresponding installed profile when using another agent.
+
+```bash
+touch runs.csv run.log
+mkdir -p hiraku/tmp
+nono run \
+  --workdir "$PWD" \
+  --profile ./nono-autoresearch.json \
+  --extends codex \
+  --allow-cwd \
+  --allow-gpu \
+  -- codex exec \
+    --dangerously-bypass-approvals-and-sandbox \
+    --model gpt-5.6-luna \
+    -c 'model_reasoning_effort="low"' \
+    - <<'PROMPT'
+Use the $hiraku skill and start the autoresearch program.
+
+To read the current task and program, run:
+hiraku task show sep10 --json
+hiraku program show autoresearch
+
+The sandbox intentionally cannot update hiraku.yml. Always pass --task sep10,
+and pass --no-set when creating experiments. Do not use git reset --hard,
+because replacing arbitrary worktree files is denied. To discard a candidate,
+reset the Git metadata with git reset --mixed HEAD^ and then restore the only
+writable source file with git show HEAD:train.py > train.py. Prefix every
+hiraku launch command with TMPDIR="$PWD/hiraku/tmp".
+PROMPT
+```
+
+The repository profile is the final permission layer and also enables GPU
+access. Agent-specific network and authentication access remains controlled by
+the profile supplied with `--extends`.
+
 Track the agent's progress with:
 
 ```bash

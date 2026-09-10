@@ -64,7 +64,7 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
     monkeypatch.chdir(project)
     runner = CliRunner()
     invoke(runner, ["init", "--example", "autoresearch"])
-    git(project, "add", ".gitignore", "cpu_mock.py")
+    git(project, "add", ".gitignore", "cpu_mock.py", "nono-autoresearch.json")
     git(project, "commit", "-m", "add Hiraku autoresearch workflow")
 
     invoke(
@@ -99,6 +99,7 @@ def test_autoresearch_is_an_overlay() -> None:
         "README.md",
         "example.yml",
         "src/hiraku.yml",
+        "src/nono-autoresearch.json",
         "src/task.md",
         "src/cpu_mock.py",
         "src/hiraku/dispatch/autoresearch.sh",
@@ -123,6 +124,13 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "hiraku program show autoresearch" in readme
     assert "hiraku experiment update cpu-test" in readme
     assert "--set decision=discard" in readme
+    assert "--profile ./nono-autoresearch.json" in readme
+    assert "mkdir -p hiraku/tmp" in readme
+    assert "--extends codex" in readme
+    assert "--allow-cwd" in readme
+    assert "--allow-gpu" in readme
+    assert "--no-set when creating experiments" in readme
+    assert "git reset --mixed HEAD^" in readme
 
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
     assert "fixed\ntime budget of 5 minutes" in task_template
