@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hiraku"
+version = "0.1.0"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Johannes Kirschner", email = "johannes.kirschner@sdsc.ethz.ch"},
+    {name = "Matteo Fasulo", email = "matteo.fasulo@sdsc.ethz.ch"},
+    {name = "Qianqian Zou", email = "qianqian.zou@epfl.ch"},
+]
+description = "Core metadata and launch APIs for AI-assisted data science"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "Click>=8.1",
+    "pydantic>=2.13.5",
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+hiraku = "hiraku.cli:main"
+
+[project.optional-dependencies]
+mlflow = ["mlflow>=2.0"]
+wandb = ["wandb>=0.29.0"]
+
+[dependency-groups]
+dev = [
+  "tqdm>=4.70.0",
+  "pytest>=8",
+  "pytest-xdist>=3.8.0",
+  "ruff>=0.8",
+  "build>=1.2",
+  "numpy==2.4.6",
+  "pandas==2.3.3",
+  "scikit-learn==1.9.0",
+  "zensical>=0.0.59",
+  "mkdocstrings[python]>=1.0.6",
+  "mkdocs-click>=0.9.0",
+  "ty>=0.0.79",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hiraku"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/hiraku", "tests", "README.md", "docs", "pyproject.toml"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+extend-exclude = ["docs", "plans"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: end-to-end integration tests"]
+addopts = "-n auto --dist loadscope"

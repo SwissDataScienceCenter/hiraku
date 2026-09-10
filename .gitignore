@@ -1,4 +1,41 @@
 .DS_Store
 __MACOSX/
 
+# Python bytecode and interpreter caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments and local environment files
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Build and packaging output
+build/
+dist/
+site/
+*.egg-info/
+.eggs/
+
+# Test, lint, type-check, and coverage caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytype/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local tooling and editor files
+.hypothesis/
+.ipynb_checkpoints/
+.idea/
+.vscode/
+
 scratch/
+worktrees/
