@@ -475,6 +475,46 @@ def test_launch_boundary_output_and_exit_status(
     assert failed.exit_code == 7
 
 
+def test_launch_dry_run_resolves_commands_without_execution(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = _project(tmp_path)
+    marker = tmp_path / "executed"
+    task = Task.create(
+        "demo",
+        config=config,
+        entrypoints={
+            "show": {
+                "command": ["/bin/sh", "-c", f"touch {shlex.quote(str(marker))}"],
+                "args": {"seed": 1},
+            }
+        },
+    )
+    Experiment.create("trial", task=task, commit="a" * 40, config=config)
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    inherited = runner.invoke(
+        main, ["launch", "--dry-run", "trial:show", "--", "--seed", "3"]
+    )
+
+    assert inherited.exit_code == 0, inherited.output
+    assert inherited.output.splitlines() == [
+        f"Dispatcher: {config.dispatch_dir / 'launch.sh'} --commit {'a' * 40}",
+        f"Command: /bin/sh -c 'touch {marker}' --seed 3",
+    ]
+    assert not marker.exists()
+
+    explicit = runner.invoke(
+        main, ["launch", "--dry-run", "--commit", "HEAD", "trial:show"]
+    )
+    assert explicit.exit_code == 0, explicit.output
+    assert explicit.output.splitlines()[0] == (
+        f"Dispatcher: {config.dispatch_dir / 'launch.sh'} --commit HEAD"
+    )
+    assert not marker.exists()
+
+
 def test_launch_selector_controls_inheritance_and_attribution(
     tmp_path: Path, monkeypatch, capfd
 ) -> None:

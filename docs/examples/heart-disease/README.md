@@ -72,6 +72,9 @@ hiraku experiment create logistic-baseline \
 # show entrypoint definitions
 hiraku experiment entrypoints
 
+# preview the command
+hiraku launch logistic-baseline:train --dry-run
+
 hiraku launch logistic-baseline:train
 
 # query runs

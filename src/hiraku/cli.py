@@ -55,8 +55,8 @@ from .errors import (
 )
 from .git import GitRepository
 from .io import dump_yaml
+from .launch import _dispatcher, render_arguments
 from .launch import launch as launch_entrypoint
-from .launch import render_arguments
 from .records import Record
 from .validation import validate_identifier
 
@@ -1286,6 +1286,7 @@ def _parse_overrides(tokens: Sequence[str]) -> dict[str, Any]:
 @click.option("task_id", "--task")
 @click.option("--commit")
 @click.option("--dispatch")
+@click.option("--dry-run", is_flag=True)
 @click.pass_obj
 def launch_command(
     state: CLIContext,
@@ -1294,6 +1295,7 @@ def launch_command(
     task_id: str | None,
     commit: str | None,
     dispatch: str | None,
+    dry_run: bool,
 ) -> None:
     """Resolve and launch an entrypoint."""
     config = state.config
@@ -1327,6 +1329,19 @@ def launch_command(
                 f"entrypoint {target}",
                 err=True,
             )
+    if dry_run:
+        effective_args = dict(entrypoint.args)
+        effective_args.update(overrides)
+        command = [*entrypoint.command, *render_arguments(effective_args)]
+        dispatcher_command = [str(_dispatcher(config, dispatch))]
+        effective_commit = commit
+        if effective_commit is None and attributed is not None:
+            effective_commit = attributed.commit
+        if effective_commit is not None:
+            dispatcher_command.extend(("--commit", effective_commit))
+        click.echo(f"Dispatcher: {shlex.join(dispatcher_command)}")
+        click.echo(f"Command: {shlex.join(command)}")
+        return
     result = launch_entrypoint(
         entrypoint,
         name=entrypoint_name,
