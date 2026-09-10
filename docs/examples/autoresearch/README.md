@@ -7,9 +7,10 @@ It does not vendor or modify the upstream training implementation.
 
 The overlay contains:
 
-- `program.md` — the upstream research loop adapted to Hiraku records and runs.
 - `task.md` — the Markdown body used to create the Hiraku task.
-- `cpu_mock.py` — a fast contract check with the same summary format as training.
+- `cpu_mock.py` — a fast CPU-only check with the same summary format as training.
+- `hiraku/programs/autoresearch/program.md` — the upstream research loop adapted
+  to Hiraku records and runs.
 - `hiraku/dispatch/autoresearch.sh` — timeout, output parsing, and CSV tracking.
 
 ## Setup
@@ -28,76 +29,99 @@ uv run prepare.py
 uv run train.py
 ```
 
-## Hiraku overlay
+## Initialize the Hiraku project
 
-From the root of the initialized upstream checkout, point `example_dir` at this
-example in a local Hiraku source checkout:
-
-```bash
-example_dir=/path/to/hiraku/docs/examples/autoresearch
-
-hiraku init
-cp "$example_dir"/{program.md,task.md,cpu_mock.py} .
-install -m 755 "$example_dir/hiraku/dispatch/autoresearch.sh" \
-  hiraku/dispatch/autoresearch.sh
-```
-
-In the generated `hiraku.yml`, set:
-
-```yaml
-default_dispatch: autoresearch.sh
-```
-
-Commit the initialized Hiraku project and overlay before creating the task:
+From the root of the autoresearch repository, install the example. Initialization copies root `task.md` as a bootstrap template and installs the
+separate program at `hiraku/programs/autoresearch/program.md`. 
 
 ```bash
-git add hiraku.yml hiraku .agents program.md task.md cpu_mock.py
+hiraku init --example autoresearch
+```
+
+Keep the local Hiraku installation and run artifacts out of
+Git, and commit the new files.
+```bash
+cat >> .gitignore <<'EOF'
+
+# Hiraku local files and run artifacts
+/.agents/
+/hiraku/*
+/hiraku.yml
+/task.md
+/runs.csv
+/run.log
+EOF
+
+git add .
 git commit -m "add Hiraku autoresearch workflow"
-
-hiraku task create autoresearch \
-  --goal "Minimize val_bpb under a fixed five-minute single-GPU budget" \
-  --question "Which model and optimizer changes improve validation bits per byte?" \
-  --markdown-file task.md \
-  --set 'metrics=[{name: val_bpb, direction: minimize}]' \
-  --set 'entrypoints={gpu: {command: [uv, run, python, train.py]}, cpu-mock: {command: [uv, run, python, cpu_mock.py], args: {val-bpb: 1.0}}}'
-
-git switch hiraku/tasks/autoresearch
-git add hiraku.yml hiraku/tasks/autoresearch/task.md
-git commit -m "create autoresearch task"
 ```
 
-No ignore rules are added in this first version. Hiraku experiment records,
-`runs.csv`, and `run.log` will therefore appear in Git status unless you manage
-them locally. The dispatcher records the actual clean or dirty state.
+As in the upstream
+example, choose a tag and branch for the autoresearch, e.g., `sep10` and `autoresearch/sep10`. The task tag must be new.
+```bash
+hiraku task create sep10 \
+  --branch autoresearch/sep10 \
+  --goal "Find the best architecture, optimizer, and hyperparameters to minimize `val_bpb` within the fixed 5-minute training budget." \
+  --markdown-file task.md \
+  --set 'program=autoresearch' \
+  --set 'metrics=[{name: val_bpb, direction: minimize}]' \
+  --set 'entrypoints={train: {command: [uv, run, python, train.py]}, mock: {command: [uv, run, python, cpu_mock.py], args: {val-bpb: 1.0}}}'
 
-## Record the baseline with Hiraku
+git switch autoresearch/sep10
+```
 
+## Test the CPU workflow with Hiraku
 
 ```bash
-hiraku experiment create contract \
-  --summary "CPU-only workflow contract" \
+hiraku experiment create cpu-test \
+  --summary "CPU-only mock run" \
   --hypothesis "The Hiraku dispatcher records an attributed mock result" \
   --commit HEAD
 
-hiraku launch contract:cpu-mock -- --val-bpb 1.0
-hiraku run list --task autoresearch --experiment contract --json
+hiraku launch cpu-test:mock -- --val-bpb 1.0
+hiraku run list
+
+hiraku experiment update cpu-test \
+  --set decision=discard \
+  --set 'conclusion="CPU-only workflow test; not a training result."'
+```
+
+## Create the baseline experiment
+
+Here we manually create and run the baseline experiment. Alternatively, ask your agent to invoke the Hiraku skill to create and run the baseline experiment for you.
+
+```bash
+hiraku experiment create baseline \
+  --summary "Establish the baseline" \
+  --hypothesis "Provide a reasonable starting point for comparison" \
+  --commit HEAD
+
+hiraku launch baseline:train
+hiraku run list
+
+hiraku experiment update baseline \
+  --set decision=keep --set 'conclusion="Baseline run completed."'
 ```
 
 ## Start autoresearch
 
-Read `task.md` and `program.md`, then follow the setup in the program. The first
-GPU run establishes the unmodified upstream baseline:
+Start your favourite coding agent (Codex, Claude, ...) and a (reasonably) powerful model to invoke the Hiraku skill.
+
+Currently, Hiraku records the program association but does not automatically inject its Markdown into an agent prompt. Start an agent in the repository and ask it to
+load the canonical task and installed program with:
+
 
 ```bash
-hiraku experiment create baseline \
-  --summary "Unmodified upstream baseline" \
-  --hypothesis "The upstream implementation establishes the reference val_bpb" \
-  --commit HEAD
+Use the $hiraku skill and start the autoresearch program.
 
-hiraku launch baseline:gpu > run.log 2>&1
-hiraku run list --task autoresearch --sort val_bpb --ascending
+To read the current task and program, run:
+hiraku task show sep10 --json
+hiraku program show autoresearch
 ```
 
-The dispatcher writes execution status and parsed metrics to project-root
-`runs.csv`. Record the research decision to keep, discard, or abandon an
-experiment, together with the supporting evidence, in its experiment record.
+Track the agent's progress with:
+
+```bash
+hiraku experiment list --columns id,commit,summary,hypothesis,conclusion,decision
+hiraku run list --sort metric:val_bpb --ascending
+```

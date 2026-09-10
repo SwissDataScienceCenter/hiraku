@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -14,7 +13,12 @@ from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.data import load_task
 
-EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "autoresearch"
+REPOSITORY = Path(__file__).parents[2]
+DOCS_EXAMPLE = REPOSITORY / "docs" / "examples" / "autoresearch"
+EXAMPLE = REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "autoresearch"
+OVERLAY = EXAMPLE / "src"
+PROGRAM = OVERLAY / "hiraku" / "programs" / "autoresearch" / "program.md"
+DISPATCHER = OVERLAY / "hiraku" / "dispatch" / "autoresearch.sh"
 UPSTREAM_FILES = {
     "README.md": "# upstream autoresearch\n",
     "prepare.py": "# upstream preparation\n",
@@ -50,20 +54,17 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
     git(project, "config", "user.name", "Test")
     git(project, "add", ".")
     git(project, "commit", "-m", "upstream")
+    gitignore = project / ".gitignore"
+    gitignore.write_text(
+        gitignore.read_text(encoding="utf-8")
+        + "\n# Hiraku local files and run artifacts\n"
+        + "/.agents/\n/hiraku/*\n/hiraku.yml\n/task.md\n/runs.csv\n/run.log\n",
+        encoding="utf-8",
+    )
     monkeypatch.chdir(project)
     runner = CliRunner()
-    invoke(runner, ["init"])
-
-    shutil.copy2(EXAMPLE / "program.md", project / "program.md")
-    shutil.copy2(EXAMPLE / "task.md", project / "task.md")
-    shutil.copy2(EXAMPLE / "cpu_mock.py", project / "cpu_mock.py")
-    dispatcher = project / "hiraku/dispatch/autoresearch.sh"
-    shutil.copy2(EXAMPLE / "hiraku/dispatch/autoresearch.sh", dispatcher)
-    dispatcher.chmod(dispatcher.stat().st_mode | 0o111)
-    config = HirakuConfig.discover(project)
-    config.default_dispatch = "autoresearch.sh"
-    config.save()
-    git(project, "add", ".")
+    invoke(runner, ["init", "--example", "autoresearch"])
+    git(project, "add", ".gitignore", "cpu_mock.py")
     git(project, "commit", "-m", "add Hiraku autoresearch workflow")
 
     invoke(
@@ -71,32 +72,37 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
         [
             "task",
             "create",
-            "autoresearch",
+            "sep10",
+            "--branch",
+            "autoresearch/sep10",
             "--goal",
-            "Minimize val_bpb",
+            "Find the best architecture, optimizer, and hyperparameters to "
+            "minimize `val_bpb` within the fixed 5-minute training budget.",
             "--markdown-file",
             "task.md",
             "--set",
+            "program=autoresearch",
+            "--set",
             "metrics=[{name: val_bpb, direction: minimize}]",
             "--set",
-            f"entrypoints={{gpu: {{command: [uv, run, python, train.py]}}, "
-            f"cpu-mock: {{command: [{sys.executable}, cpu_mock.py], "
+            f"entrypoints={{train: {{command: [uv, run, python, train.py]}}, "
+            f"mock: {{command: [{sys.executable}, cpu_mock.py], "
             "args: {val-bpb: 1.0}}}",
         ],
     )
-    git(project, "switch", "hiraku/tasks/autoresearch")
-    git(project, "add", "hiraku.yml", "hiraku/tasks/autoresearch/task.md")
-    git(project, "commit", "-m", "create autoresearch task")
+    git(project, "switch", "autoresearch/sep10")
     return project, runner
 
 
 def test_autoresearch_is_an_overlay() -> None:
     expected = {
         "README.md",
-        "program.md",
-        "task.md",
-        "cpu_mock.py",
-        "hiraku/dispatch/autoresearch.sh",
+        "example.yml",
+        "src/hiraku.yml",
+        "src/task.md",
+        "src/cpu_mock.py",
+        "src/hiraku/dispatch/autoresearch.sh",
+        "src/hiraku/programs/autoresearch/program.md",
     }
     actual = {
         str(path.relative_to(EXAMPLE))
@@ -104,18 +110,57 @@ def test_autoresearch_is_an_overlay() -> None:
         if path.is_file() and "__pycache__" not in path.parts
     }
     assert actual == expected
-    readme = (EXAMPLE / "README.md").read_text(encoding="utf-8")
+    readme = (DOCS_EXAMPLE / "README.md").read_text(encoding="utf-8")
     assert "git clone https://github.com/karpathy/autoresearch.git" in readme
     assert "git checkout" not in readme
+    assert "hiraku init --example autoresearch" in readme
+    assert "example_dir=" not in readme
+    assert "/hiraku/*" in readme
     assert "--markdown-file task.md" in readme
-    program = (EXAMPLE / "program.md").read_text(encoding="utf-8")
-    assert "git reset --hard <reset-point>" in program
+    assert "hiraku task create sep10" in readme
+    assert "--branch autoresearch/sep10" in readme
+    assert "hiraku task show sep10 --json" in readme
+    assert "hiraku program show autoresearch" in readme
+    assert "hiraku experiment update cpu-test" in readme
+    assert "--set decision=discard" in readme
+
+    task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
+    assert "fixed\ntime budget of 5 minutes" in task_template
+    assert "The goal is simple: get the lowest val_bpb." in task_template
+    assert "Modify `train.py`" in task_template
+    assert "Simplicity criterion" in task_template
+    assert "hiraku launch" not in task_template
+    assert "git reset" not in task_template
+    assert "run.log" not in task_template
+    assert "Changelog" not in task_template
+
+    program = PROGRAM.read_text(encoding="utf-8")
+    assert "hiraku status --json" in program
+    assert "hiraku task show --json" in program
+    assert "hiraku experiment list --task <task> --json" in program
+    assert (
+        "hiraku run list --task <task> --experiment <experiment-id> --json"
+        in program
+    )
+    assert "--commit HEAD" in program
+    assert "Never rebind an experiment" in program
+    assert "git reset --soft <experiment-commit>^" in program
+    assert "git reset --hard <experiment-commit>^" in program
+    assert "tail -n 50 run.log" in program
+    assert "fixed\ntime budget of 5 minutes" in program
+    assert "results.tsv" not in program
+    assert "grep " not in program
     assert "Choose the history mode" not in program
+    assert (
+        "hiraku experiment update <experiment-id> --task <task> --commit"
+        not in program
+    )
+    assert "Changelog" not in program
 
 
 def test_autoresearch_overlay_initializes_task(tmp_path, monkeypatch):
     project, _ = create_overlay_project(tmp_path, monkeypatch)
-    task = load_task("autoresearch", config=HirakuConfig.discover(project))
+    task = load_task("sep10", config=HirakuConfig.discover(project))
 
     assert (project / "README.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "README.md"
@@ -126,16 +171,36 @@ def test_autoresearch_overlay_initializes_task(tmp_path, monkeypatch):
     assert (project / "train.py").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "train.py"
     ]
-    assert (project / ".gitignore").read_text(encoding="utf-8") == UPSTREAM_FILES[
-        ".gitignore"
+    gitignore = (project / ".gitignore").read_text(encoding="utf-8")
+    assert gitignore.startswith(UPSTREAM_FILES[".gitignore"])
+    assert "/hiraku/*" in gitignore
+    assert "/runs.csv" in gitignore
+    assert (project / "program.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
+        "program.md"
     ]
-    assert (project / "program.md").read_text(encoding="utf-8") == (
-        EXAMPLE / "program.md"
+    installed_program = (
+        project / "hiraku/programs/autoresearch/program.md"
     ).read_text(encoding="utf-8")
-    assert task.markdown == (EXAMPLE / "task.md").read_text(encoding="utf-8")
-    assert task.entrypoints["gpu"].command == ["uv", "run", "python", "train.py"]
-    assert task.entrypoints["cpu-mock"].command[-1] == "cpu_mock.py"
-    assert HirakuConfig.discover(project).default_dispatch == "autoresearch.sh"
+    task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
+    assert installed_program == PROGRAM.read_text(encoding="utf-8")
+    assert (project / "task.md").read_text(encoding="utf-8") == task_template
+    assert task.markdown == task_template
+    assert task.path == project / "hiraku/tasks/sep10/task.md"
+    assert task.markdown not in installed_program
+    assert installed_program not in task.markdown
+    assert task.branch == "autoresearch/sep10"
+    assert task.goal == (
+        "Find the best architecture, optimizer, and hyperparameters to minimize "
+        "`val_bpb` within the fixed 5-minute training budget."
+    )
+    assert task.question is None
+    assert task.summary is None
+    assert task.program == "autoresearch"
+    assert task.entrypoints["train"].command == ["uv", "run", "python", "train.py"]
+    assert task.entrypoints["mock"].command[-1] == "cpu_mock.py"
+    config = HirakuConfig.discover(project)
+    assert config.default_dispatch == "autoresearch.sh"
+    assert config.default_program == "autoresearch"
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111
     assert git(project, "status", "--porcelain") == ""
 
@@ -143,11 +208,11 @@ def test_autoresearch_overlay_initializes_task(tmp_path, monkeypatch):
 def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     project, runner = create_overlay_project(tmp_path, monkeypatch)
     commit = git(project, "rev-parse", "HEAD")
-    invoke(runner, ["experiment", "create", "contract", "--commit", "HEAD"])
+    invoke(runner, ["experiment", "create", "cpu-test", "--commit", "HEAD"])
 
     invoke(
         runner,
-        ["launch", "contract:cpu-mock", "--", "--val-bpb", "0.9"],
+        ["launch", "cpu-test:mock", "--", "--val-bpb", "0.9"],
     )
 
     assert "val_bpb: 0.900000" in capfd.readouterr().out
@@ -158,20 +223,20 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
                 "run",
                 "list",
                 "--task",
-                "autoresearch",
+                "sep10",
                 "--experiment",
-                "contract",
+                "cpu-test",
                 "--json",
             ],
         ).output
     )
     assert len(rows) == 1
     row = rows[0]
-    assert row["task_id"] == "autoresearch"
-    assert row["experiment_id"] == "contract"
+    assert row["task_id"] == "sep10"
+    assert row["experiment_id"] == "cpu-test"
     assert row["commit"] == commit
-    assert row["entrypoint"] == "cpu-mock"
-    assert row["raw"]["git_state"] == "dirty"
+    assert row["entrypoint"] == "mock"
+    assert row["raw"]["git_state"] == "clean"
     assert row["raw"]["status"] == "finished"
     assert float(row["metrics"]["val_bpb"]) == 0.9
 
@@ -180,7 +245,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
     _, runner = create_overlay_project(tmp_path, monkeypatch)
     invoke(runner, ["experiment", "create", "failure", "--commit", "HEAD"])
 
-    failed = runner.invoke(main, ["launch", "failure:cpu-mock", "--", "--fail"])
+    failed = runner.invoke(main, ["launch", "failure:mock", "--", "--fail"])
 
     assert failed.exit_code != 0
     assert "val_bpb: 0.000000" in capfd.readouterr().out
@@ -191,7 +256,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
                 "run",
                 "list",
                 "--task",
-                "autoresearch",
+                "sep10",
                 "--experiment",
                 "failure",
                 "--json",
@@ -207,14 +272,14 @@ def dispatcher_environment(root: Path) -> dict[str, str]:
     return {
         **os.environ,
         "HIRAKU_ROOT": str(root),
-        "HIRAKU_TASK_ID": "autoresearch",
-        "HIRAKU_EXPERIMENT_ID": "contract",
+        "HIRAKU_TASK_ID": "sep10",
+        "HIRAKU_EXPERIMENT_ID": "cpu-test",
         "HIRAKU_ENTRYPOINT": "test",
     }
 
 
 def test_autoresearch_dispatcher_records_timeout_and_invalid_output(tmp_path):
-    dispatcher = EXAMPLE / "hiraku/dispatch/autoresearch.sh"
+    dispatcher = DISPATCHER
     environment = dispatcher_environment(tmp_path)
     environment["HIRAKU_AUTORESEARCH_TIMEOUT_SECONDS"] = "0.05"
     timed_out = subprocess.run(
@@ -252,7 +317,7 @@ def test_autoresearch_dispatcher_records_timeout_and_invalid_output(tmp_path):
 
 
 def test_autoresearch_dispatcher_rejects_incompatible_csv(tmp_path):
-    dispatcher = EXAMPLE / "hiraku/dispatch/autoresearch.sh"
+    dispatcher = DISPATCHER
     csv_path = tmp_path / "runs.csv"
     csv_path.write_text("id,metric.other\nexisting,1\n", encoding="utf-8")
 
@@ -271,7 +336,7 @@ def test_autoresearch_dispatcher_rejects_incompatible_csv(tmp_path):
 
 def test_autoresearch_mock_is_tracking_independent(tmp_path):
     result = subprocess.run(
-        [sys.executable, str(EXAMPLE / "cpu_mock.py")],
+        [sys.executable, str(OVERLAY / "cpu_mock.py")],
         cwd=tmp_path,
         text=True,
         capture_output=True,
