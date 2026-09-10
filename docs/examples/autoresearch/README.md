@@ -1,4 +1,4 @@
-# Hiraku autoresearch overlay
+# Karpathy's LLM autoresearch example with Hiraku
 
 This example adds Hiraku task and experiment records, attributed CSV runs, and
 an autonomous research program to Andrej Karpathy's original
