@@ -153,9 +153,7 @@ def test_bare_init_requires_current_directory_to_be_git_root(
     assert not (nested / "hiraku.yml").exists()
 
 
-def test_ignore_git_bypasses_git_root_requirement(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_ignore_git_bypasses_git_root_requirement(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -537,9 +535,7 @@ def test_launch_selector_controls_inheritance_and_attribution(
         "a",
         task=task,
         config=config,
-        entrypoints={
-            "overridden": {"command": ["/bin/sh", "-c", "printf experiment"]}
-        },
+        entrypoints={"overridden": {"command": ["/bin/sh", "-c", "printf experiment"]}},
     )
     Experiment.create("active-but-ignored", task=task, config=config)
     monkeypatch.chdir(tmp_path)
@@ -582,9 +578,7 @@ def test_launch_override_matches_hyphens_and_underscores(
     )
     monkeypatch.chdir(tmp_path)
 
-    result = CliRunner().invoke(
-        main, ["launch", "score", "--", "--val-bpb", "0.9"]
-    )
+    result = CliRunner().invoke(main, ["launch", "score", "--", "--val-bpb", "0.9"])
 
     assert result.exit_code == 0
     assert capfd.readouterr().out == "--val-bpb|0.9"

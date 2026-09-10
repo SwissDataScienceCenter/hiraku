@@ -16,6 +16,19 @@ uv sync --all-extras dev
 uv run hiraku --help
 ```
 
+Install the pre-commit hooks after setting up the development environment:
+
+```bash
+uv run pre-commit install
+```
+
+The hooks run Ruff's lint fixer and formatter on every commit. Run them manually
+across the repository with:
+
+```bash
+uv run pre-commit run --all-files
+```
+
 Install an optional tracking integration when working on it:
 
 ```bash
