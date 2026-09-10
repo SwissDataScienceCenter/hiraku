@@ -26,6 +26,35 @@ jobs:
       - name: Validate GitHub Actions workflows
         uses: rhysd/actionlint@v1
 
-      - name: Validate YAML configuration
+      - name: Validate branch protection settings
         run: |
-          ruby -e 'require "yaml"; [".github/settings.yml", ".github/workflows/ci.yml"].each { |path| YAML.safe_load(File.read(path), aliases: true) }'
+          ruby <<'RUBY'
+          require "yaml"
+
+          settings = YAML.safe_load(File.read(".github/settings.yml"), aliases: true)
+          rulesets = settings.fetch("rulesets")
+          ruleset = rulesets.find { |entry| entry["name"] == "Protect main" }
+          abort("missing Protect main ruleset") unless ruleset
+
+          abort("default branch must be main") unless settings.dig("repository", "default_branch") == "main"
+          abort("ruleset must target branches") unless ruleset["target"] == "branch"
+          abort("ruleset must be active") unless ruleset["enforcement"] == "active"
+          abort("ruleset must match the default branch") unless ruleset.dig("conditions", "ref_name", "include") == ["~DEFAULT_BRANCH"]
+
+          rules = ruleset.fetch("rules")
+          rule_types = rules.map { |rule| rule.fetch("type") }
+          %w[deletion non_fast_forward pull_request required_status_checks].each do |type|
+            abort("missing #{type} rule") unless rule_types.include?(type)
+          end
+
+          pull_request_rule = rules.find { |rule| rule["type"] == "pull_request" }.fetch("parameters")
+          abort("expected one approving review") unless pull_request_rule["required_approving_review_count"] == 1
+          abort("review threads must be resolved") unless pull_request_rule["required_review_thread_resolution"] == true
+
+          status_checks_rule = rules.find { |rule| rule["type"] == "required_status_checks" }.fetch("parameters")
+          abort("status checks must be strict") unless status_checks_rule["strict_required_status_checks_policy"] == true
+          abort("required check must match the workflow job name") unless status_checks_rule["required_status_checks"] == [{"context" => "repository checks"}]
+
+          bypass_actors = ruleset.fetch("bypass_actors")
+          abort("admin-only PR bypass must be configured") unless bypass_actors == [{"actor_id" => 5, "actor_type" => "RepositoryRole", "bypass_mode" => "pull_request"}]
+          RUBY
