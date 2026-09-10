@@ -158,6 +158,8 @@ class HirakuConfig(BaseModel):
         install_skill: bool = True,
         tracking_backend: str | None = None,
         ignore_git: bool = True,
+        template: Path | str | None = None,
+        example: str | None = None,
     ) -> HirakuConfig:
         """Initialize a new Hiraku project.
 
@@ -167,6 +169,8 @@ class HirakuConfig(BaseModel):
             tracking_backend: Optional default tracking backend name.
             ignore_git: Skip validation that root is a Git repository root.
                 Defaults to true for programmatic initialization.
+            template: Optional local directory copied over the initialized project.
+            example: Optional packaged example name whose ``src`` tree is copied.
 
         Returns:
             The initialized configuration.
@@ -183,6 +187,8 @@ class HirakuConfig(BaseModel):
             install_skill=install_skill,
             tracking_backend=tracking_backend,
             ignore_git=ignore_git,
+            template=template,
+            example=example,
         )
 
     def save(self) -> None:

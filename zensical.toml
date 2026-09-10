@@ -41,7 +41,7 @@ nav = [
   ] },
   { "Guides" = [
       { "Overview" = "guides/index.md" },
-      { "Use your own project" = "examples/minimal/README.md" },
+      { "Start from scratch" = "examples/minimal/README.md" },
       { "Tracking Backends" = [
         { "CSV" = "guides/tracking-csv.md" },
         { "W&B" = "guides/tracking-wandb.md" },

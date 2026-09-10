@@ -1,4 +1,4 @@
-# Use your own project
+# Start from scratch
 
 ## Install Hiraku
 
@@ -13,17 +13,29 @@ uv tool install ".[mlflow,wandb]"
 
 ## Initialize
 
-If the project is new, initialize Git first. Inside your project directory, run:
+If the project is new, initialize Git first. 
 
 ```bash
-hiraku init
+mkdir my-project
+cd my-project
+git init
+```
+
+Then initialize Hiraku in the project root. The `--example` option copies the `src/` tree of a packaged example into the project.
+
+```bash
+hiraku init --example minimal
+git add .
+git commit -m "initial commit"
 ```
 
 Review `hiraku status` to confirm that the project is correctly initialized.
 
 ## Create a task, experiment, and log a run
 
-For the example below, we assume that you have an evaluation script that launches with `uv run python evaluate.py --seed 0`. For a mock example, copy and commit [`docs/examples/minimal/evaluate.py`](evaluate.py).
+The `minimal` example installs a small `evaluate.py` script that launches with
+`uv run python evaluate.py --seed 0`. Replace it with your own evaluation when
+you are ready.
 
 Create a task and an experiment.
 ```bash

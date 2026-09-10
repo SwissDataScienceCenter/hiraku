@@ -25,7 +25,7 @@ Check the examples for a more complete walkthrough:
 - [Heart-disease prediction using CSV logging](docs/examples/heart-disease/README.md)
 - [Iris dataset using Weights & Biases](docs/examples/iris-wandb/README.md)
 - [Digits dataset using MLFlow](docs/examples/digits-mlflow/README.md)
-- [Kaparthy's LLM autoresearch example](docs/examples/kaparthy/README.md)
+- [Karpathy's LLM autoresearch example](docs/examples/autoresearch/README.md)
 
 ## Documentation
 
