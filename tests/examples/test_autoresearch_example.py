@@ -42,6 +42,7 @@ def test_autoresearch_cpu_mock_tracks_local_launch(tmp_path, monkeypatch, capfd)
     invoke(runner, ["init"])
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize autoresearch example")
+    commit = git(project, "rev-parse", "HEAD")
     invoke(
         runner,
         [
@@ -57,6 +58,7 @@ def test_autoresearch_cpu_mock_tracks_local_launch(tmp_path, monkeypatch, capfd)
             "args: {val-bpb: 1.0}}}",
         ],
     )
+    assert git(project, "status", "--porcelain") == ""
     invoke(
         runner,
         [
@@ -96,10 +98,12 @@ def test_autoresearch_cpu_mock_tracks_local_launch(tmp_path, monkeypatch, capfd)
     row = rows[0]
     assert row["task_id"] == "autoresearch"
     assert row["experiment_id"] == "contract"
-    assert row["commit"] is None
+    assert row["commit"] == commit
     assert row["entrypoint"] == "cpu-mock"
+    assert row["raw"]["git_state"] == "clean"
     assert float(row["metrics"]["val_bpb"]) == 0.9
     assert row["raw"]["status"] == "finished"
+    assert git(project, "status", "--porcelain") == ""
 
 
 def test_autoresearch_mock_requires_launch_provenance(tmp_path):

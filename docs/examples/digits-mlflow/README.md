@@ -82,12 +82,16 @@ One MLflow experiment contains both Hiraku experiments. Native MLflow tags
 link each run back to Hiraku. The script owns logging; Hiraku queries the latest
 value of each metric. Full epoch histories remain in MLflow and its UI.
 
+You can list the same runs using Hiraku:
+```
+hiraku run list
+```
+
 ??? info "Example run results"
     The table is a compact, illustrative view of final MLflow values. Click a
     column heading to sort it; full epoch histories remain available in MLflow.
 
-    | Experiment | Run | Alpha | val/log_loss | val/accuracy | Status |
-    | --- | --- | ---: | ---: | ---: | --- |
-    | `weak-l2` | `digits-weak-42` | 0.0001 | 0.2914 | 0.9083 | finished |
-    | `strong-l2` | `digits-strong-42` | 1.0 | 0.2478 | 0.9250 | finished |
-    | `strong-l2` | `digits-strong-7` | 1.0 | 0.2512 | 0.9222 | finished |
+    | id | experiment | timestamp | commit | metric:val/log_loss | metric:val/accuracy |
+    | --- | --- | --- | --- | ---: | ---: |
+    | `15895756` | `weak-l2` | `2026-09-10 06:35:05Z` | `17f59bac` | 0.12493475669652965 | 0.9688888888888889 |
+    | `f6f6de2f` | `strong-l2` | `2026-09-10 06:35:10Z` | `17f59bac` | 0.4801207515207299 | 0.9266666666666666 |

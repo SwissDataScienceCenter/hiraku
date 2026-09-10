@@ -157,6 +157,7 @@ class HirakuConfig(BaseModel):
         *,
         install_skill: bool = True,
         tracking_backend: str | None = None,
+        ignore_git: bool = True,
     ) -> HirakuConfig:
         """Initialize a new Hiraku project.
 
@@ -164,12 +165,16 @@ class HirakuConfig(BaseModel):
             root: Directory to initialize.
             install_skill: Whether to install the repository-local agent skill.
             tracking_backend: Optional default tracking backend name.
+            ignore_git: Skip validation that root is a Git repository root.
+                Defaults to true for programmatic initialization.
 
         Returns:
             The initialized configuration.
 
         Raises:
             hiraku.errors.ProjectExistsError: If the project is already initialized.
+            hiraku.errors.ValidationError: If root is not a Git repository root
+                and ignore_git is false.
         """
         from .project import ProjectInitializer
 
@@ -177,6 +182,7 @@ class HirakuConfig(BaseModel):
             root,
             install_skill=install_skill,
             tracking_backend=tracking_backend,
+            ignore_git=ignore_git,
         )
 
     def save(self) -> None:

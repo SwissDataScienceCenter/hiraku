@@ -481,13 +481,30 @@ def main(ctx: click.Context) -> None:
 
 
 @main.command("init")
+@click.argument(
+    "path",
+    required=False,
+    type=click.Path(path_type=Path, file_okay=False),
+)
 @click.option(
     "--tracking-backend",
     help="Set the default tracking backend.",
 )
-def init_command(tracking_backend: str | None) -> None:
+@click.option(
+    "--ignore-git",
+    is_flag=True,
+    help="Initialize without requiring the target to be a Git repository root.",
+)
+def init_command(
+    path: Path | None, tracking_backend: str | None, ignore_git: bool
+) -> None:
     """Initialize a Hiraku project."""
-    config = HirakuConfig.init(Path.cwd(), tracking_backend=tracking_backend)
+    target = (path or Path.cwd()).expanduser().resolve()
+    config = HirakuConfig.init(
+        target,
+        tracking_backend=tracking_backend,
+        ignore_git=ignore_git,
+    )
     click.echo(f"Initialized Hiraku project at {config.path}")
 
 

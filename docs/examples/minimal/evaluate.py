@@ -11,6 +11,7 @@ FIELDS = [
     "task_id",
     "experiment_id",
     "commit",
+    "git_state",
     "timestamp",
     "entrypoint",
     "param.seed",
@@ -27,8 +28,7 @@ expected = [0, 1, 1, 0]
 predicted = [int(value >= 0.5) for value in [0.1, 0.8, 0.7, 0.2]]
 accuracy = sum(a == b for a, b in zip(expected, predicted)) / len(expected)
 
-task_file = Path(os.environ["HIRAKU_TASK_FILE"])
-runs_file = task_file.with_name("runs.csv")
+runs_file = Path(os.environ["HIRAKU_ROOT"]) / "runs.csv"
 write_header = not runs_file.exists() or runs_file.stat().st_size == 0
 
 with runs_file.open("a", encoding="utf-8", newline="") as stream:
@@ -41,6 +41,7 @@ with runs_file.open("a", encoding="utf-8", newline="") as stream:
             "task_id": os.environ["HIRAKU_TASK_ID"],
             "experiment_id": os.environ.get("HIRAKU_EXPERIMENT_ID", ""),
             "commit": os.environ.get("HIRAKU_COMMIT", ""),
+            "git_state": os.environ["HIRAKU_GIT_STATE"],
             "timestamp": datetime.now(UTC).isoformat(),
             "entrypoint": os.environ.get("HIRAKU_ENTRYPOINT", ""),
             "param.seed": args.seed,

@@ -10,7 +10,13 @@ METRICS = ("val_bpb", "training_seconds", "peak_vram_mb", "mfu_percent")
 
 
 def _provenance() -> dict[str, str]:
-    required = ("HIRAKU_TASK_ID", "HIRAKU_EXPERIMENT_ID", "HIRAKU_COMMIT")
+    required = (
+        "HIRAKU_TASK_ID",
+        "HIRAKU_EXPERIMENT_ID",
+        "HIRAKU_COMMIT",
+        "HIRAKU_GIT_STATE",
+        "HIRAKU_ROOT",
+    )
     missing = [name for name in required if name not in os.environ]
     if missing:
         raise RuntimeError(
@@ -20,6 +26,7 @@ def _provenance() -> dict[str, str]:
         "task_id": os.environ["HIRAKU_TASK_ID"],
         "experiment_id": os.environ["HIRAKU_EXPERIMENT_ID"],
         "commit": os.environ["HIRAKU_COMMIT"],
+        "git_state": os.environ["HIRAKU_GIT_STATE"],
         "entrypoint": os.environ.get("HIRAKU_ENTRYPOINT", ""),
     }
 
@@ -27,12 +34,13 @@ def _provenance() -> dict[str, str]:
 def record_run(metrics: dict[str, float], status: str) -> str:
     provenance = _provenance()
     run_id = uuid.uuid4().hex
-    path = Path(os.environ["HIRAKU_TASK_FILE"]).with_name("runs.csv")
+    path = Path(os.environ["HIRAKU_ROOT"]) / "runs.csv"
     fields = [
         "id",
         "task_id",
         "experiment_id",
         "commit",
+        "git_state",
         "timestamp",
         "entrypoint",
         "status",

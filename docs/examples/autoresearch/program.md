@@ -14,7 +14,7 @@ To set up a new experiment, work with the user to:
    - `prepare.py` — fixed constants, data prep, tokenizer, dataloader, evaluation. Do not modify.
    - `train.py` — the file you modify. Model architecture, optimizer, training loop.
 5. **Verify data exists**: Check that `~/.cache/autoresearch/` contains data shards and a tokenizer. If not, tell the human to run `uv run prepare.py`.
-6. **Verify run logging**: The training script prints its summary and writes each run directly to `hiraku/tasks/<task>/runs.csv`. Do not edit the run table.
+6. **Verify run logging**: The training script prints its summary and writes each run directly to project-root `runs.csv`. Do not edit the run table.
 7. **Confirm and go**: Confirm setup looks good.
 
 Once you get confirmation, kick off the experimentation.
@@ -30,7 +30,7 @@ Each experiment runs on a single GPU. The training script runs for a **fixed tim
 - Modify `prepare.py`. It is read-only. It contains the fixed evaluation, data loading, tokenizer, and training constants (time budget, sequence length, etc).
 - Install new packages or add dependencies. You can only use what's already in `pyproject.toml`.
 - Modify the evaluation harness. The `evaluate_bpb` function in `prepare.py` is the ground truth metric.
-- Modify `hiraku/tasks/<task>/runs.csv`. The training script owns the run table.
+- Modify `runs.csv`. The training script owns the run table.
 
 **The goal is simple: get the lowest val_bpb.** Since the time budget is fixed, you don't need to worry about training time — it's always 5 minutes. Everything is fair game: change the architecture, the optimizer, the hyperparameters, the batch size, the model size. The only constraint is that the code runs without crashing and finishes within the time budget.
 
@@ -65,7 +65,7 @@ grep "^val_bpb:" run.log
 
 ## Logging results
 
-When an experiment is done, the training script writes the run directly to `hiraku/tasks/<task>/runs.csv`. Do not edit the run table.
+When an experiment is done, the training script writes the run directly to project-root `runs.csv`. Do not edit the run table.
 
 Use `hiraku run list --task <task>` to inspect the results. Record whether the experiment was kept, discarded, or crashed in its Markdown body with `hiraku experiment edit <experiment-id> --task <task>`.
 

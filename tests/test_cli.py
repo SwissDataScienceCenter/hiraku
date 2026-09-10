@@ -103,6 +103,7 @@ def test_help_is_lazy_and_init_and_status_work(tmp_path: Path, monkeypatch) -> N
     assert not (tmp_path / "hiraku.yml").exists()
 
     monkeypatch.chdir(tmp_path)
+    _git(tmp_path, "init", "-q")
     result = runner.invoke(main, ["init"])
     assert result.exit_code == 0
     marker = tmp_path / "hiraku.yml"
@@ -111,7 +112,7 @@ def test_help_is_lazy_and_init_and_status_work(tmp_path: Path, monkeypatch) -> N
     assert result.exit_code == 0
     status = json.loads(result.output)
     assert status["active_task_id"] is None
-    assert status["git_branch"] is None
+    assert status["git_branch"] is not None
 
 
 def test_version_reports_package_metadata() -> None:
@@ -123,11 +124,58 @@ def test_version_reports_package_metadata() -> None:
 
 def test_init_accepts_tracking_backend(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    _git(tmp_path, "init", "-q")
 
     result = CliRunner().invoke(main, ["init", "--tracking-backend", "mlflow"])
 
     assert result.exit_code == 0, result.output
     assert HirakuConfig.discover(tmp_path).tracking_backend == {"type": "mlflow"}
+
+
+def test_bare_init_requires_current_directory_to_be_git_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    outside = runner.invoke(main, ["init"])
+    assert outside.exit_code != 0
+    assert "must be initialized at a Git repository root" in outside.output
+    assert not (tmp_path / "hiraku.yml").exists()
+
+    _git(tmp_path, "init", "-q")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+    result = runner.invoke(main, ["init"])
+    assert result.exit_code != 0
+    assert str(tmp_path) in result.output
+    assert not (nested / "hiraku.yml").exists()
+
+
+def test_ignore_git_bypasses_git_root_requirement(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runner = CliRunner()
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    nested = repository / "nested"
+
+    result = runner.invoke(main, ["init", str(nested)])
+
+    assert result.exit_code != 0
+    assert not (nested / "hiraku.yml").exists()
+
+    result = runner.invoke(main, ["init", str(nested), "--ignore-git"])
+
+    assert result.exit_code == 0, result.output
+    assert (nested / "hiraku.yml").is_file()
+
+    outside = tmp_path / "outside"
+    result = runner.invoke(main, ["init", str(outside), "--ignore-git"])
+    assert result.exit_code == 0, result.output
+    assert (outside / "hiraku.yml").is_file()
 
 
 def test_task_crud_branches_and_active_deletion(tmp_path: Path, monkeypatch) -> None:
@@ -513,7 +561,7 @@ def test_run_json_is_complete_and_human_ids_are_unambiguous(
     )
     Experiment.create("trial", task=task, config=config)
     commit = "a" * 40
-    (task.path.parent / "runs.csv").write_text(
+    (config.root / "runs.csv").write_text(
         "id,task_id,experiment_id,commit,timestamp,metric.loss,param.seed,note\n"
         f"abcdefgh111,demo,trial,{commit},2026-01-02T00:00:00.123456Z,10,1,a\n"
         f"abcdefgh222,demo,trial,{commit},2026-01-01T00:00:00Z,2,2,b\n",

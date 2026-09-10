@@ -20,6 +20,8 @@ _ATTRIBUTION_KEYS = {
     "HIRAKU_EXPERIMENT_ID",
     "HIRAKU_EXPERIMENT_FILE",
     "HIRAKU_COMMIT",
+    "HIRAKU_GIT_STATE",
+    "HIRAKU_ROOT",
     "HIRAKU_ENTRYPOINT",
 }
 
@@ -151,20 +153,6 @@ def launch(
     dispatcher_arguments: list[str] = [str(dispatcher)]
     if selected_commit is not None:
         dispatcher_arguments.extend(("--commit", selected_commit))
-    dispatcher_arguments.extend(
-        ("--task-id", task.id, "--task-file", str(task.path.resolve()))
-    )
-    if experiment is not None:
-        dispatcher_arguments.extend(
-            (
-                "--experiment-id",
-                experiment.id,
-                "--experiment-file",
-                str(experiment.path.resolve()),
-            )
-        )
-    if name is not None:
-        dispatcher_arguments.extend(("--entrypoint", name))
     dispatcher_arguments.extend(("--", *command))
     additions = dict(env or {})
     if any(
@@ -179,6 +167,20 @@ def launch(
         )
     process_env = os.environ.copy()
     process_env.update(additions)
+    process_env.update(
+        {
+            "HIRAKU_TASK_ID": task.id,
+            "HIRAKU_TASK_FILE": str(task.path.resolve()),
+            "HIRAKU_EXPERIMENT_ID": experiment.id if experiment is not None else "",
+            "HIRAKU_EXPERIMENT_FILE": (
+                str(experiment.path.resolve()) if experiment is not None else ""
+            ),
+            "HIRAKU_COMMIT": "",
+            "HIRAKU_GIT_STATE": "unavailable",
+            "HIRAKU_ROOT": str(selected.root.resolve()),
+            "HIRAKU_ENTRYPOINT": name or "",
+        }
+    )
     try:
         result = subprocess.run(
             dispatcher_arguments,

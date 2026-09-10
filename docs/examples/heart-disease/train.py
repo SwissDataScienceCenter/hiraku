@@ -40,6 +40,7 @@ RUN_FIELDS = [
     "task_id",
     "experiment_id",
     "commit",
+    "git_state",
     "timestamp",
     "entrypoint",
     "param.model",
@@ -52,8 +53,9 @@ PROVENANCE_VARIABLES = [
     "HIRAKU_TASK_ID",
     "HIRAKU_EXPERIMENT_ID",
     "HIRAKU_COMMIT",
+    "HIRAKU_GIT_STATE",
     "HIRAKU_ENTRYPOINT",
-    "HIRAKU_TASK_FILE",
+    "HIRAKU_ROOT",
 ]
 
 
@@ -143,7 +145,7 @@ def main() -> None:
         "log_loss": log_loss(validation_y, probabilities),
         "accuracy": accuracy_score(validation_y, predictions),
     }
-    runs_path = Path(attribution["HIRAKU_TASK_FILE"]).with_name("runs.csv")
+    runs_path = Path(attribution["HIRAKU_ROOT"]) / "runs.csv"
     append_run(
         runs_path,
         {
@@ -151,6 +153,7 @@ def main() -> None:
             "task_id": attribution["HIRAKU_TASK_ID"],
             "experiment_id": attribution["HIRAKU_EXPERIMENT_ID"],
             "commit": attribution["HIRAKU_COMMIT"],
+            "git_state": attribution["HIRAKU_GIT_STATE"],
             "timestamp": datetime.now(UTC).isoformat(),
             "entrypoint": attribution["HIRAKU_ENTRYPOINT"],
             "param.model": args.model,

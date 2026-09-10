@@ -134,8 +134,10 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
             }
         }
 
+    assert git(project, "status", "--porcelain") == ""
     invoke(runner, ["launch", "logistic-baseline:train"])
     invoke(runner, ["launch", "random-forest:train"])
+    assert git(project, "status", "--porcelain") == ""
 
     all_runs = json.loads(invoke(runner, ["run", "list", "--json"]).output)
     selected = json.loads(
@@ -190,7 +192,7 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
     assert filtered[0]["experiment_id"] == "logistic-baseline"
     assert len(sorted_runs) == 2
 
-    csv_path = project / "hiraku" / "tasks" / "heart-disease" / "runs.csv"
+    csv_path = project / "runs.csv"
     with csv_path.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     normalized = CSVBackend(config).list_runs(task_id="heart-disease")
@@ -199,7 +201,8 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
         assert run.task_id == "heart-disease"
         assert run.experiment_id in experiments
         assert run.entrypoint == "train"
-        assert run.commit is None
+        assert run.commit == shared_commit
+        assert run.raw["git_state"] == "clean"
         assert run.params == {
             "model": experiments[run.experiment_id]["model"],
             "seed": "42",

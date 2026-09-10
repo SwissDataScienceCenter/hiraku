@@ -30,7 +30,7 @@ class CSVBackendConfig(BaseModel):
 
 
 class CSVBackend(TrackingBackend):
-    """Normalize runs from a task-local CSV file.
+    """Normalize runs from a project CSV file.
 
     Args:
         config: Project configuration used to resolve the default CSV path.
@@ -55,14 +55,22 @@ class CSVBackend(TrackingBackend):
             path: Optional CSV path override.
         """
         self.config = config
-        self.path = Path(path).absolute() if path is not None else None
+        if path is None:
+            self.path = None
+        else:
+            candidate = Path(path).expanduser()
+            self.path = (
+                candidate.resolve()
+                if candidate.is_absolute()
+                else (config.root / candidate).resolve()
+            )
 
     def _read_runs(
         self, *, task_id: str, experiment_id: str | None = None
     ) -> list[Run]:
         from ..data import Run
 
-        path = self.path or self.config.tasks_dir / task_id / "runs.csv"
+        path = self.path or self.config.root / "runs.csv"
         if not path.exists():
             return []
         runs: list[Run] = []

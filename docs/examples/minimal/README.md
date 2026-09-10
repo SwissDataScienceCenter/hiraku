@@ -46,7 +46,7 @@ hiraku run list
 ```
 
 The entrypoint runs `uv run python evaluate.py --seed 0`. The script writes its
-score and launch attribution to `hiraku/tasks/my-task/runs.csv`, so the final
+score and launch attribution to the project-root `runs.csv`, so the final
 command lists the baseline result. Metric declarations describe how to compare
 results; the evaluation script is responsible for calculating and logging. 
 For other tracking backends, see [W&B](../../guides/tracking-wandb.md) or

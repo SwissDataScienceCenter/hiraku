@@ -168,7 +168,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     row = rows[0]
     assert row["task_id"] == "iris"
     assert row["experiment_id"] == "logistic"
-    assert row["commit"] in (None, "")
+    assert row["commit"] == source_commit
     assert row["entrypoint"] == "train"
     assert row["params"]["model"] == "logistic"
     assert row["params"]["seed"] == 42

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,29 @@ from hiraku.errors import (
     ProjectNotFoundError,
     ValidationError,
 )
+
+
+def _git(path: Path, *arguments: str) -> None:
+    subprocess.run(
+        ["git", *arguments], cwd=path, text=True, capture_output=True, check=True
+    )
+
+
+def test_init_can_require_git_root(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="not in a Git repository"):
+        HirakuConfig.init(tmp_path, ignore_git=False)
+    assert not (tmp_path / "hiraku.yml").exists()
+
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    nested = repository / "nested"
+    nested.mkdir()
+    with pytest.raises(ValidationError, match="Git repository root"):
+        HirakuConfig.init(nested, ignore_git=False)
+
+    config = HirakuConfig.init(nested)
+    assert config.root == nested
 
 
 def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:

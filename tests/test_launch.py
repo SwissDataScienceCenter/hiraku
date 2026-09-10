@@ -149,7 +149,12 @@ def test_dispatcher_receives_context_and_experiment_commit(tmp_path: Path) -> No
     experiment = Experiment.create("exp", task=task, commit="a" * 40, config=config)
     dispatcher = config.dispatch_dir / "inspect.sh"
     dispatcher.write_text(
-        "#!/bin/sh\nprintf '%s\\n' \"$@\"\n",
+        "#!/bin/sh\n"
+        "printf '%s|%s|%s|%s|%s|%s|%s|%s\\n' \"$HIRAKU_TASK_ID\" "
+        "\"$HIRAKU_EXPERIMENT_ID\" \"$HIRAKU_TASK_FILE\" "
+        "\"$HIRAKU_EXPERIMENT_FILE\" \"$HIRAKU_ENTRYPOINT\" "
+        "\"$HIRAKU_COMMIT\" \"$HIRAKU_GIT_STATE\" \"$HIRAKU_ROOT\"\n"
+        "printf '%s\\n' \"$@\"\n",
         encoding="utf-8",
     )
     dispatcher.chmod(0o755)
@@ -165,18 +170,20 @@ def test_dispatcher_receives_context_and_experiment_commit(tmp_path: Path) -> No
     )
 
     assert result.stdout.splitlines() == [
+        "|".join(
+            (
+                "task",
+                "exp",
+                str(task.path.resolve()),
+                str(experiment.path.resolve()),
+                "train",
+                "",
+                "unavailable",
+                str(config.root.resolve()),
+            )
+        ),
         "--commit",
         "a" * 40,
-        "--task-id",
-        "task",
-        "--task-file",
-        str(task.path.resolve()),
-        "--experiment-id",
-        "exp",
-        "--experiment-file",
-        str(experiment.path.resolve()),
-        "--entrypoint",
-        "train",
         "--",
         "python",
         "train.py",
@@ -190,4 +197,4 @@ def test_dispatcher_receives_context_and_experiment_commit(tmp_path: Path) -> No
         capture_output=True,
         config=config,
     )
-    assert overridden.stdout.splitlines()[:2] == ["--commit", "HEAD"]
+    assert overridden.stdout.splitlines()[1:3] == ["--commit", "HEAD"]

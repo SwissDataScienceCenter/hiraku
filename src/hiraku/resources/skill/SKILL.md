@@ -85,17 +85,16 @@ warning. A bare target selects a task entrypoint with task-only attribution. An
 definition when absent, and always attributes the run to that experiment. Active
 experiment state never affects launch.
 
-The project owns its dispatch scripts. `launch.sh` runs the current state
-without commit attribution; `worktree.sh` runs and attributes the exact commit
-in a temporary worktree. An experiment selector supplies its bound commit unless
+The project owns its dispatch scripts. `launch.sh` reports the current commit
+and whether the working tree is clean or dirty; `worktree.sh` runs and
+attributes the exact commit in a temporary worktree. An experiment selector supplies its bound commit unless
 `--commit REF` overrides it. Optional experiment branches (`experiment create --branch
 [BRANCH] --from REF`) support separate lines of investigation; ordinary Git
 operations manage commits and merges.
 
-Dispatchers inject available `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`,
-`HIRAKU_ENTRYPOINT`, `HIRAKU_COMMIT`, and task/experiment file paths.
-`HIRAKU_COMMIT` is empty unless the dispatcher guarantees exact commit
-provenance, as `worktree.sh` does. Commands are argument lists, not shell expressions. `--dispatch NAME`
+Hiraku injects `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_ROOT`,
+`HIRAKU_ENTRYPOINT`, and task/experiment file paths. Dispatchers report
+`HIRAKU_COMMIT` and `HIRAKU_GIT_STATE`. Commands are argument lists, not shell expressions. `--dispatch NAME`
 selects `hiraku/dispatch/NAME.sh` (the `.sh` suffix is optional); the configured
 default is `launch.sh`. Child stdout and stderr stream live to the terminal.
 
@@ -104,10 +103,10 @@ default is `launch.sh`. Child stdout and stderr stream live to the terminal.
 Select a backend through the project's `tracking_backend` mapping or a task
 override, for example `--set 'tracking_backend={type: mlflow}'`.
 
-- **CSV (default):** write task-local `runs.csv`, with `id`, attribution columns
-  (`task_id`, `experiment_id`, `commit`, `timestamp`, `entrypoint`), and
-  `param.<name>` / `metric.<name>` columns. The injected task file path can locate
-  the original task directory even from a worktree.
+- **CSV (default):** write project-root `runs.csv`, with `id`, attribution columns
+  (`task_id`, `experiment_id`, `commit`, `git_state`, `timestamp`, `entrypoint`),
+  and `param.<name>` / `metric.<name>` columns. `HIRAKU_ROOT` locates the
+  persistent project root even from a worktree.
 - **MLflow:** log provenance as `hiraku.task_id`, `hiraku.experiment_id`,
   `hiraku.commit`, and `hiraku.entrypoint` tags, plus native parameters and
   metrics. Use `step` for learning curves. Configure the logging script and

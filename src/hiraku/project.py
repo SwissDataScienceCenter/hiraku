@@ -8,7 +8,7 @@ from importlib.resources import as_file, files
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .errors import HirakuError, ProjectExistsError, ValidationError
+from .errors import GitError, HirakuError, ProjectExistsError, ValidationError
 from .io import atomic_write, dump_yaml
 
 if TYPE_CHECKING:
@@ -25,6 +25,7 @@ class ProjectInitializer:
         *,
         install_skill: bool = True,
         tracking_backend: str | None = None,
+        ignore_git: bool = True,
     ) -> HirakuConfig:
         """Create and initialize a project directory.
 
@@ -32,6 +33,8 @@ class ProjectInitializer:
             root: Root directory where the project will be created.
             install_skill: Whether to install repository-local skill resources.
             tracking_backend: Optional default tracking backend name.
+            ignore_git: Skip validation that root is a Git repository root.
+                Defaults to true for programmatic initialization.
 
         Returns:
             The initialized `hiraku.config.HirakuConfig`.
@@ -41,8 +44,22 @@ class ProjectInitializer:
             hiraku.errors.ValidationError: If provisioning fails.
         """
         from .config import HirakuConfig
+        from .git import GitRepository
 
         project_root = Path(root).expanduser().absolute()
+        if not ignore_git:
+            try:
+                repository = GitRepository(project_root)
+            except GitError as exc:
+                raise ValidationError(
+                    f"Hiraku must be initialized at a Git repository root: "
+                    f"{project_root} is not in a Git repository"
+                ) from exc
+            if repository.root != project_root.resolve():
+                raise ValidationError(
+                    f"Hiraku must be initialized at the Git repository root "
+                    f"{repository.root}, not {project_root}"
+                )
         marker = project_root / "hiraku.yml"
         if marker.exists():
             raise ProjectExistsError(f"Hiraku project already exists at {marker}")

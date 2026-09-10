@@ -188,9 +188,9 @@ hiraku launch <entrypoint> --task <task-id>        # task entrypoint in an expli
 
 #### Reproducible launches
 
-Dispatchers control Git behavior. The default `launch.sh` runs the current
-working state without commit attribution. Use `worktree` to run and attribute
-an exact commit in an isolated worktree:
+Dispatchers control Git behavior. The default `launch.sh` reports the current
+commit and whether the working tree is clean or dirty. Use `worktree` to run an
+exact commit in an isolated worktree:
 ```bash
 hiraku launch --dispatch worktree logistic-regression:train
 hiraku launch --dispatch worktree --commit ab15ad41 logistic-regression:train
@@ -210,14 +210,14 @@ The user can define a custom dispatch backend in
 .hiraku/dispatch/<dispatch-backend>.sh
 ```
 
-Hiraku invokes a selected backend with context options followed by the full
-launch command after `--`, e.g.
+Hiraku supplies launch context through environment variables and invokes the
+selected backend with the full launch command after `--`, e.g.
 ```bash
 hiraku launch --dispatch runai logistic-regression:train
 ```
 Translates to
 ```bash
-hiraku/dispatch/runai.sh --task-id my-task --experiment-id logistic-regression --entrypoint train -- uv run train.py ...
+HIRAKU_TASK_ID=my-task HIRAKU_EXPERIMENT_ID=logistic-regression hiraku/dispatch/runai.sh -- uv run train.py ...
 ```
 
 The project owns its dispatch scripts. New projects receive local `launch.sh`

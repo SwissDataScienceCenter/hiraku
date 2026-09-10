@@ -15,7 +15,7 @@ def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     task = Task.create("task", config=config)
     Experiment.create("exp", task=task, config=config)
-    (task.path.parent / "runs.csv").write_text(
+    (config.root / "runs.csv").write_text(
         "id,task_id,experiment_id,commit,timestamp,entrypoint,url,metric.loss,param.seed,note\n"
         "later,task,exp,abc,2026-01-02T00:00:00Z,train,,1.5,2,kept\n"
         "earlier,task,exp,,2026-01-01T00:00:00+00:00,,,2.5,1,raw\n"

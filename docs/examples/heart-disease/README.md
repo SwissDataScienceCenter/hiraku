@@ -34,6 +34,12 @@ Initialization creates `hiraku.yml`, metadata directories, and the agent
 skill. The commit records the training code and bundled dataset that both
 experiments will evaluate.
 
+??? note "Tracking Hiraku metadata in git"
+    In this example, `.gitignore` excludes hiraku metadata (`hiraku.yml`, `hiraku/*`) and the `runs.csv` file.
+
+    Hiraku is (mostly) agnostic to get state: You can commit metadata, and Hiraku shows what is currently visible in the working tree.
+    Merging task and experiment records is a user (or agent) responsibility.
+
 ## 3. Define the task
 
 ```bash
@@ -47,7 +53,6 @@ hiraku status
 hiraku task show heart-disease
 # omit task name since it's the current active task
 hiraku task show  
-
 ```
 
 You should see `active_task_id` to be `heart-disease` and the tracking backend to be
@@ -64,6 +69,9 @@ hiraku experiment create logistic-baseline \
   --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: logistic, seed: 42, validation-fraction: 0.25}}}'
 
+# show entrypoint definitions
+hiraku experiment entrypoints
+
 hiraku launch logistic-baseline:train
 
 # query runs
@@ -73,8 +81,18 @@ hiraku run list
 ```
 
 Expect one run with `val/log_loss` and `val/accuracy`. The default dispatcher
-runs the current working state without commit attribution. The training program
-writes the CSV row to the task directory.
+runs the current working state and reports its commit and clean/dirty state. The
+training program writes the CSV row to project-root `runs.csv`.
+
+??? note "Launch dispatchers and isolated execution"
+    By default `hiraku launch logistic-baseline:train` passes the entrypoint command to a bash script in `hiraku/dispatch/launch.sh`, which executes the command. Launch scripts are project data that can be modified to support custom launch dispatch behaviour, e.g. submitting a job to a compute platform.
+
+    Hiraku ships a second default `worktree` dispatcher, which runs the entrypoint in a separate worktree at the commit specified by the experiment. Try the following:
+    ```bash
+    hiraku launch --dispatch worktree logistic-baseline:train
+    hiraku launch --dispatch worktree --commit <sha> logistic-baseline:train
+    ```
+
 
 ## 5. Compare another model
 
@@ -97,11 +115,10 @@ Each listing reflects records written by the training program. A failed
 launch that never logs a row will not appear as a run.
 
 ??? info "Example run results"
-    The table below is illustrative documentation data. Click a column heading
-    to sort it; real values are produced by the commands above.
+    The table below shows results produced by the commands above. Click a column
+    heading to sort it.
 
-    | Experiment | Run | Model | val/log_loss | val/accuracy | Status |
-    | --- | --- | --- | ---: | ---: | --- |
-    | `logistic-baseline` | `run-001` | Logistic regression | 0.3523 | 0.8421 | completed |
-    | `random-forest` | `run-002` | Random forest | 0.3187 | 0.8684 | completed |
-    | `random-forest` | `run-003` | Random forest | 0.3211 | 0.8553 | completed |
+    | Experiment | Run | Model | val/log_loss | val/accuracy |
+    | --- | --- | --- | ---: | ---: |
+    | `logistic-baseline` | `23b1c42c` | Logistic regression | 0.32254890 | 0.85526316 |
+    | `random-forest` | `880d2cd3` | Random forest | 0.35226763 | 0.86842105 |

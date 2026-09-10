@@ -15,8 +15,8 @@ def test_csv_backend_config_is_validated() -> None:
 
 def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
-    task = Task.create("iris", config=config)
-    path = task.path.parent / "runs.csv"
+    Task.create("iris", config=config)
+    path = config.root / "runs.csv"
     path.write_text(
         "id,task_id,experiment_id,timestamp,metric.accuracy,param.seed,note\n"
         "a,iris,exp,2026-01-02T00:00:00Z,0.8,1,kept\n"
@@ -32,3 +32,30 @@ def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
     assert runs[0].metrics == {"accuracy": "0.9"}
     assert runs[0].params == {"seed": "2"}
     assert runs[0].raw == {"note": "raw"}
+
+
+def test_csv_backend_resolves_task_path_from_project_root(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    task = Task.create(
+        "iris",
+        config=config,
+        tracking_backend={"type": "csv", "path": "results/iris.csv"},
+    )
+    path = tmp_path / "results" / "iris.csv"
+    path.parent.mkdir()
+    path.write_text("id,task_id\na,iris\n", encoding="utf-8")
+
+    runs = task.runs(config=config)
+
+    assert [run.id for run in runs] == ["a"]
+
+
+def test_csv_backend_preserves_absolute_path_override(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    config = HirakuConfig.init(project)
+    path = tmp_path / "external.csv"
+    path.write_text("id,task_id\na,iris\n", encoding="utf-8")
+
+    runs = CSVBackend(config, path=path).list_runs(task_id="iris")
+
+    assert [run.id for run in runs] == ["a"]

@@ -12,6 +12,11 @@ hiraku launch <experiment-id>:<entrypoint>
 hiraku run list
 ```
 
+`hiraku init` requires its target to be a Git repository root. Use
+`hiraku init PATH --ignore-git` to intentionally initialize a nested or non-Git
+location. Python initialization is permissive by default; callers can request
+the CLI policy with `ignore_git=False`.
+
 Use `hiraku --help` or the generated command sections below for all options.
 The command reference is generated from Hiraku's Click command tree.
 

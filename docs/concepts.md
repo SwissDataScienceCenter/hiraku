@@ -42,7 +42,8 @@ At any time, a single task and experiment can be set as "active". By default, "c
 The CLI provides a standardized interface for managing data records, .e.g
 
 ```bash
-hiraku init  # initialize a Hiraku project and configuration
+hiraku init  # initialize at the current Git repository root
+hiraku init PATH --ignore-git  # explicitly skip Git-root validation
 
 hiraku task create <task-id>
 hiraku task list
@@ -120,11 +121,11 @@ hiraku launch <entrypoint>                              # current working state
 hiraku launch --dispatch worktree <exp-id>:<entrypoint> # exact commit
 ```
 
-The dispatcher injects
-`HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_TASK_FILE`,
-`HIRAKU_EXPERIMENT_FILE`, `HIRAKU_ENTRYPOINT`, and `HIRAKU_COMMIT`. The local
-dispatcher sets `HIRAKU_COMMIT` to an empty string; `worktree.sh` sets it to the
-exact checked-out commit.
+Hiraku injects `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_ROOT`,
+`HIRAKU_TASK_FILE`, `HIRAKU_EXPERIMENT_FILE`, and `HIRAKU_ENTRYPOINT`. The
+dispatcher reports `HIRAKU_COMMIT` and `HIRAKU_GIT_STATE`: `launch.sh` reports
+the current HEAD and whether the tree is clean or dirty, while `worktree.sh`
+reports the exact checked-out commit and a clean state.
 
 The user can define custom dispatch scripts, e.g.
 
@@ -132,12 +133,11 @@ The user can define custom dispatch scripts, e.g.
 hiraku launch --dispatch runai <exp-id>:<entrypoint>
 ```
 
-This invokes the project-owned `hiraku/dispatch/runai.sh` with context options
-and the full command after `--`. The default `launch.sh` runs the current state
-without commit attribution, while `worktree.sh` creates an isolated checkout
-with exact commit attribution. Child stdout and stderr stream directly to the
-terminal. Dispatcher names may omit `.sh`, so `--dispatch worktree` selects
-`worktree.sh`.
+This invokes the project-owned `hiraku/dispatch/runai.sh`, which inherits the
+launch context in its environment and receives the full command after `--`.
+The default `launch.sh` runs the current state, while `worktree.sh` creates an
+isolated checkout. Child stdout and stderr stream directly to the terminal.
+Dispatcher names may omit `.sh`, so `--dispatch worktree` selects `worktree.sh`.
 
 ## Agent Skill
 

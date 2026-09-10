@@ -67,5 +67,5 @@ hiraku launch contract:cpu-mock -- --val-bpb 1.0
 hiraku run list --task autoresearch --experiment contract --json
 ```
 
-CSV tracking is used by default and writes
-`hiraku/tasks/autoresearch/runs.csv`. Do not edit that file manually.
+CSV tracking is used by default and writes project-root `runs.csv`. Do not edit
+that file manually.

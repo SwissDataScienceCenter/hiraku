@@ -2,26 +2,12 @@
 set -eu
 
 commit_ref=
-task_id=
-task_file=
-experiment_id=
-experiment_file=
-entrypoint=
-
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --commit|--task-id|--task-file|--experiment-id|--experiment-file|--entrypoint)
+    --commit)
       option=$1
       [ "$#" -ge 2 ] || { echo "worktree.sh: $option requires a value" >&2; exit 2; }
-      value=$2
-      case "$option" in
-        --commit) commit_ref=$value ;;
-        --task-id) task_id=$value ;;
-        --task-file) task_file=$value ;;
-        --experiment-id) experiment_id=$value ;;
-        --experiment-file) experiment_file=$value ;;
-        --entrypoint) entrypoint=$value ;;
-      esac
+      commit_ref=$2
       shift 2
       ;;
     --)
@@ -71,19 +57,15 @@ trap 'exit 143' TERM
 
 git -C "$repository_root" worktree add --detach "$worktree" "$commit" >/dev/null
 added=true
+echo "worktree.sh: created temporary worktree at $worktree ($commit)" >&2
 working_directory=$worktree
 [ -z "$project_relative" ] || working_directory=$worktree/$project_relative
 [ -d "$working_directory" ] ||
   { echo "worktree.sh: project directory is absent at commit $commit" >&2; exit 1; }
+echo "worktree.sh: running from $working_directory" >&2
 
-unset HIRAKU_TASK_ID HIRAKU_TASK_FILE HIRAKU_EXPERIMENT_ID
-unset HIRAKU_EXPERIMENT_FILE HIRAKU_COMMIT HIRAKU_ENTRYPOINT
-[ -n "$task_id" ] && export HIRAKU_TASK_ID=$task_id
-[ -n "$task_file" ] && export HIRAKU_TASK_FILE=$task_file
-[ -n "$experiment_id" ] && export HIRAKU_EXPERIMENT_ID=$experiment_id
-[ -n "$experiment_file" ] && export HIRAKU_EXPERIMENT_FILE=$experiment_file
-[ -n "$entrypoint" ] && export HIRAKU_ENTRYPOINT=$entrypoint
 export HIRAKU_COMMIT=$commit
+export HIRAKU_GIT_STATE=clean
 
 cd "$working_directory"
 "$@"

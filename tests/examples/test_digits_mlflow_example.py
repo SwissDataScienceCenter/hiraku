@@ -47,6 +47,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     invoke(runner, ["init"])
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize Digits MLflow example")
+    source_commit = git(project, "rev-parse", "HEAD")
     invoke(
         runner,
         [
@@ -101,7 +102,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     client = MlflowClient(tracking_uri=uri)
     for row in rows:
         assert row["task_id"] == "digits"
-        assert row["commit"] is None
+        assert row["commit"] == source_commit
         assert row["entrypoint"] == "train"
         assert row["raw"]["status"] == "FINISHED"
         assert row["params"]["epochs"] == "8"

@@ -1,7 +1,9 @@
 # Track with CSV
 
-CSV is the default backend. Each task normally reads
-`hiraku/tasks/<task-id>/runs.csv`.
+CSV is the default backend. Tasks normally read `runs.csv` from the Hiraku
+project root. Override this per task with
+`tracking_backend: {type: csv, path: results/runs.csv}`; relative paths resolve
+from the project root.
 
 ## Log from your script
 
@@ -9,27 +11,27 @@ The CSV adapter reads records; it does not write them. Your evaluation script
 can append a row using this schema:
 
 ```csv
-id,task_id,experiment_id,commit,timestamp,entrypoint,metric.val/accuracy,param.seed
-run-001,my-task,baseline,,2026-01-01T12:00:00Z,evaluate,0.84,42
+id,task_id,experiment_id,commit,git_state,timestamp,entrypoint,metric.val/accuracy,param.seed
+run-001,my-task,baseline,abc123,dirty,2026-01-01T12:00:00Z,evaluate,0.84,42
 ```
 
 Choose a unique run ID for each execution. Prefix metric columns with
-`metric.` and parameter columns with `param.`. Leave commit empty for an
-uncommitted execution; do not invent a source hash.
+`metric.` and parameter columns with `param.`. Use `HIRAKU_GIT_STATE` to
+distinguish a clean commit from a dirty working tree based on that commit.
 
-During an attributed launch, `HIRAKU_TASK_FILE` points to the original
-task record. Resolve the output beside it so worktree dispatches write to the
-same table:
+During a launch, `HIRAKU_ROOT` points to the original project root. Use it so
+worktree dispatches write to the persistent table rather than the temporary
+checkout:
 
 ```python
 import os
 from pathlib import Path
 
-runs_path = Path(os.environ["HIRAKU_TASK_FILE"]).with_name("runs.csv")
+runs_path = Path(os.environ["HIRAKU_ROOT"]) / "runs.csv"
 ```
 
 Use `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_ENTRYPOINT`,
-and `HIRAKU_COMMIT` when available to populate attribution. See
+`HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE` to populate attribution. See
 `examples/heart-disease/train.py` for a complete writer.
 
 ## Inspect
