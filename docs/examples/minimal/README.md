@@ -13,10 +13,20 @@ uv tool install ".[mlflow,wandb]"
 
 ## Initialize
 
-If the project is new, initialize Git first. Inside your project directory, run:
+If the project is new, initialize Git first. 
+
+```bash
+mkdir my-project
+cd my-project
+git init
+```
+
+Then initialize Hiraku in the project root. The `--example` option copies the `src/` tree of a packaged example into the project.
 
 ```bash
 hiraku init --example minimal
+git add .
+git commit -m "initial commit"
 ```
 
 Review `hiraku status` to confirm that the project is correctly initialized.

@@ -531,9 +531,9 @@ def init_command(
         example=example,
     )
     for directory in result.created_dirs:
-        click.echo(f"Created directory: {directory}")
+        click.echo(f"Created directory: {directory.relative_to(target)}")
     for created_file in result.created_files:
-        click.echo(f"Created file: {created_file}")
+        click.echo(f"Created file: {created_file.relative_to(target)}")
     config = result.config
     click.echo(f"Initialized Hiraku project at {config.path}")
 

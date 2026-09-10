@@ -37,8 +37,8 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     runner = CliRunner()
 
     initialized = invoke(runner, ["init", "--example", "minimal"])
-    assert f"Created file: {project / 'evaluate.py'}" in initialized.output
-    assert f"Created file: {project / 'hiraku.yml'}" in initialized.output
+    assert "Created file: evaluate.py" in initialized.output
+    assert "Created file: hiraku.yml" in initialized.output
     assert not (project / "README.md").exists()
     assert not (project / "example.yml").exists()
     git(project, "add", ".")

@@ -150,10 +150,10 @@ def test_init_accepts_relative_template_directory(
 
     assert result.exit_code == 0, result.output
     assert (repository / "template.txt").read_text() == "copied"
-    assert f"Created file: {repository / 'template.txt'}" in result.output
-    assert f"Created file: {repository / 'hiraku.yml'}" in result.output
-    assert f"Created directory: {repository / 'empty'}" in result.output
-    assert f"Created directory: {repository / 'hiraku'}" in result.output
+    assert "Created file: template.txt" in result.output
+    assert "Created file: hiraku.yml" in result.output
+    assert "Created directory: empty" in result.output
+    assert "Created directory: hiraku" in result.output
 
 
 def test_init_reports_a_new_project_root(tmp_path: Path) -> None:
@@ -162,7 +162,7 @@ def test_init_reports_a_new_project_root(tmp_path: Path) -> None:
     result = CliRunner().invoke(main, ["init", str(project), "--ignore-git"])
 
     assert result.exit_code == 0, result.output
-    assert f"Created directory: {project}" in result.output
+    assert "Created directory: ." in result.output
     assert result.output.rstrip().endswith(
         f"Initialized Hiraku project at {project / 'hiraku.yml'}"
     )
