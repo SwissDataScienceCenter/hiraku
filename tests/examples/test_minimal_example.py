@@ -63,8 +63,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
             "--commit",
             "HEAD",
             "--set",
-            "entrypoints={evaluate: {command: ["
-            f"{sys.executable}, evaluate.py]}}}}",
+            f"entrypoints={{evaluate: {{command: [{sys.executable}, evaluate.py]}}}}",
         ],
     )
 
