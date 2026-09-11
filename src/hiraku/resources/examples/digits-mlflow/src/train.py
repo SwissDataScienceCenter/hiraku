@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from pathlib import Path
 
 import mlflow
 import numpy as np
@@ -40,8 +41,7 @@ def main() -> None:
         "HIRAKU_EXPERIMENT_ID",
         "HIRAKU_COMMIT",
         "HIRAKU_ENTRYPOINT",
-        "MLFLOW_TRACKING_URI",
-        "MLFLOW_EXPERIMENT_NAME",
+        "HIRAKU_ROOT",
     )
     missing = [name for name in required if name not in os.environ]
     if missing:
@@ -52,8 +52,12 @@ def main() -> None:
         f"hiraku.{key}": os.environ[f"HIRAKU_{key.upper()}"]
         for key in ("task_id", "experiment_id", "commit", "entrypoint")
     }
-    mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
-    mlflow.set_experiment(os.environ["MLFLOW_EXPERIMENT_NAME"])
+    database = Path(os.environ["HIRAKU_ROOT"]) / "mlflow.db"
+    default_tracking_uri = f"sqlite:///{database}"
+    mlflow.set_tracking_uri(
+        os.environ.get("MLFLOW_TRACKING_URI", default_tracking_uri)
+    )
+    mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT_NAME", "hiraku-digits"))
     data = load_digits()
     # Pixels have a known range of 0..16; no statistics are fit on validation data.
     train_x, val_x, train_y, val_y = train_test_split(
