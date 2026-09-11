@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `hiraku init`.
 - Add pre-commit hooks for Ruff formatting and linting ([issue #18](https://github.com/SwissDataScienceCenter/hiraku/issues/18), [PR #23](https://github.com/SwissDataScienceCenter/hiraku/pull/23)).
 - Add semantic-versioning release configuration with `bump-my-version` ([issue #17](https://github.com/SwissDataScienceCenter/hiraku/issues/17)).
+- Add CI runs for pull requests and pushes to `main`, plus a manual GitHub
+  Actions release workflow ([issue #42](https://github.com/SwissDataScienceCenter/hiraku/issues/42)).
 
 ### Changed
 
@@ -24,6 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Update the autoresearch example to use an upstream project with a Hiraku
   dispatcher wrapper ([PR #25](https://github.com/SwissDataScienceCenter/hiraku/pull/25)),
   and validate required system utilities ([issue #37](https://github.com/SwissDataScienceCenter/hiraku/issues/37), [PR #38](https://github.com/SwissDataScienceCenter/hiraku/pull/38)).
+- Update version bumps so the release commit and tag are created only after the
+  release commit passes CI ([issue #42](https://github.com/SwissDataScienceCenter/hiraku/issues/42)).
+- Keep the editable package version in `uv.lock` synchronized during release
+  preparation ([issue #42](https://github.com/SwissDataScienceCenter/hiraku/issues/42)).
+- Make releases manual GitHub Actions workflows that validate the exact release
+  contents before committing, tagging, and creating a GitHub Release ([issue #42](https://github.com/SwissDataScienceCenter/hiraku/issues/42)).
 
 ### Removed
 

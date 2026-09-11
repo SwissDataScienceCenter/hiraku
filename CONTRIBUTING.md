@@ -71,51 +71,19 @@ Use a feature branch and focused commits. [Conventional Commit](https://www.conv
 
 ## Release a new version
 
-Releases use `bump-my-version` and must be created from `main`.
+Releases are created through GitHub Actions. After the release notes are added
+under `## [Unreleased]` in `CHANGELOG.md` and merged to a green `main`, use:
 
-1. Add release notes under `## [Unreleased]` in `CHANGELOG.md`, including issue
-   or pull request links. Run the checks above, commit the changelog, and merge
-   it to `main`. Do not add the final version heading manually.
-2. Update `main` and confirm that the working tree is clean:
+```text
+Actions → Release → Run workflow → choose patch, minor, or major
+```
 
-   ```bash
-   git switch main
-   git pull --ff-only origin main
-   git status --short
-   ```
+The workflow checks out the current `main`, updates `pyproject.toml`,
+`CHANGELOG.md`, and `uv.lock`, runs the tests, lint, documentation build, and
+package build, then commits and pushes the release. Only after validation does
+it create the matching annotated tag and GitHub Release with the wheel and
+source distribution.
 
-3. Choose `patch` for fixes, `minor` for compatible features, or `major` for
-   breaking changes. Preview the bump first:
-
-   ```bash
-   uv run bump-my-version bump patch --dry-run
-   ```
-
-4. If the preview is correct, create the release commit and tag:
-
-   ```bash
-   uv run bump-my-version bump patch
-   ```
-
-   This updates `pyproject.toml`, regenerates `uv.lock`, updates `CHANGELOG.md`,
-   and creates a tag such as `v0.1.1`. The lockfile hook runs before the release
-   commit and tag are created.
-5. Verify and build the package:
-
-   ```bash
-   git show --stat --oneline HEAD
-   git status --short
-   git tag --points-at HEAD
-   uv run hiraku --version
-   uv lock --check
-   uv build
-   ```
-
-6. Push the release commit and tag:
-
-   ```bash
-   git push origin main --follow-tags
-   ```
-
-When PyPI publication is enabled, publish the verified artifacts with
-`uv publish`.
+Do not normally create release commits or tags manually. If a workflow fails,
+inspect the run before retrying; it should not create a release tag after a
+failed validation.
