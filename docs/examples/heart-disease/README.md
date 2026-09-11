@@ -16,9 +16,9 @@ Then create a project and let Hiraku install the training script, processed
 dataset, and dependencies for this example:
 
 ```bash
-mkdir hiraku-heart-disease
-cd hiraku-heart-disease
-git init -b main
+mkdir heart-disease
+cd heart-disease
+git init
 hiraku init --example heart-disease
 uv sync
 git add .
@@ -82,7 +82,7 @@ hiraku launch logistic-baseline:train
 # query runs
 hiraku run list --task heart-disease
 # omitted task defaults to active task
-hiraku run list  
+hiraku run list
 ```
 
 Expect one run with `val/log_loss` and `val/accuracy`. The default dispatcher
