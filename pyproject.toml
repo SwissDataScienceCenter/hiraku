@@ -25,7 +25,7 @@ dependencies = [
 hiraku = "hiraku.cli:main"
 
 [project.optional-dependencies]
-mlflow = ["mlflow>=2.0"]
+mlflow = ["mlflow==3.16.0"]
 wandb = ["wandb>=0.29.0"]
 
 [dependency-groups]
@@ -43,6 +43,7 @@ dev = [
   "mkdocstrings[python]>=1.0.6",
   "mkdocs-click>=0.9.0",
   "ty>=0.0.79",
+  "bump-my-version>=1.5.1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -63,3 +64,43 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 testpaths = ["tests"]
 markers = ["integration: end-to-end integration tests"]
 addopts = "-n auto --dist loadscope"
+
+[tool.bumpversion]
+current_version = "0.1.0"
+parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
+serialize = ["{major}.{minor}.{patch}"]
+search = "{current_version}"
+replace = "{new_version}"
+regex = false
+ignore_missing_version = false
+
+tag = true
+sign_tags = false
+tag_name = "v{new_version}"
+tag_message = "Release v{new_version}"
+
+allow_dirty = false
+commit = true
+message = "chore(release): bump version {current_version} → {new_version}"
+commit_args = ""
+
+allow_shell_hooks = true
+
+setup_hooks = [
+    "awk '/^## \\[Unreleased\\]/{flag=1; next} /^## \\[[^]]+\\]/{flag=0} flag && /^- /{found=1} END{exit !found}' CHANGELOG.md || (echo 'Error: Add entries under [Unreleased] before bumping!' && exit 1)"
+]
+
+pre_commit_hooks = [
+    "uv lock",
+]
+post_commit_hooks = []
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "CHANGELOG.md"
+search = "## [Unreleased]"
+replace = "## [Unreleased]\n\n## [{new_version}] - {now:%Y-%m-%d}"

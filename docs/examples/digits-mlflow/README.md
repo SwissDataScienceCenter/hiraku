@@ -2,7 +2,8 @@
 
 Train a small neural network on scikit-learn's bundled Digits dataset (1,797
 8×8 images) and log training and validation cross-entropy and accuracy after
-every epoch to MLFlow. The example runs on CPU and compares weak and strong L2 regularization.
+every epoch to MLflow. The example runs on CPU and compares weak and strong L2
+regularization.
 
 The network has one hidden layer of 64 neurons. Each `partial_fit` call performs
 one epoch while preserving optimizer state. Both experiments use the same
@@ -12,32 +13,32 @@ by their known maximum of 16.
 ## Setup
 
 Install Hiraku with its MLflow extra in your CLI environment first (from the
-Hiraku checkout: `uv pip install -e '.[mlflow]'`). Copy this example directory
-outside the checkout, then run these commands from the copy:
+Hiraku checkout: `uv tool install --force '.[mlflow]'`). Then create and
+initialize a new project:
 
 ```bash
+mkdir digits-mlflow
+cd digits-mlflow
+git init
+hiraku init --example digits-mlflow
 uv sync
-# Keep these exports in the shell used for both launches.
-export MLFLOW_TRACKING_URI="sqlite:///$(pwd)/mlflow.db"
-export MLFLOW_EXPERIMENT_NAME=hiraku-digits
-
-git init -b main
-hiraku init
 git add .
 git commit -m "initialize Digits MLflow example"
 ```
 
-MLflow creates its local database on the first launch. The absolute URI keeps
-the tracking location stable for local and worktree dispatchers. The training
-script explicitly requires these MLflow variables as well as Hiraku's launch
-attribution.
+MLflow creates `mlflow.db` in the project root on the first launch. The training
+script uses the Hiraku project root to keep that location stable for local and
+worktree dispatchers. Set `MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
+when you want to override the local defaults. These variables affect the
+training process only, so update the task's `tracking_backend` with the matching
+`tracking_uri` and `experiment_name` before using `hiraku run list`.
 
 ## Create the task and experiments
 
 ```bash
 hiraku task create digits \
   --goal "Understand how L2 regularization affects Digits learning curves" \
-  --question "Does stronger regularization reduce overfitting?" \
+  --question "Does stronger regularization reduce overfitting on the Digits dataset?" \
   --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]' \
   --set 'tracking_backend={type: mlflow, database: mlflow.db, experiment_name: hiraku-digits}'
 
@@ -72,10 +73,11 @@ hiraku run list \
 
 hiraku run list --task digits --experiment strong-l2 --json
 
-uv run mlflow ui --backend-store-uri "$MLFLOW_TRACKING_URI" --host 127.0.0.1 --port 5000
+uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
 ```
 
-Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs in the native MLFLow interface
+Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs
+in the native MLflow interface.
 
 One MLflow experiment contains both Hiraku experiments. Native MLflow tags
 `hiraku.task_id`, `hiraku.experiment_id`, `hiraku.commit`, and `hiraku.entrypoint`

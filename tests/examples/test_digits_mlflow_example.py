@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -13,7 +12,11 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 
-EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "digits-mlflow"
+REPOSITORY = Path(__file__).parents[2]
+EXAMPLE = (
+    REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "digits-mlflow"
+)
+OVERLAY = EXAMPLE / "src"
 
 
 def git(path: Path, *arguments: str) -> str:
@@ -34,17 +37,22 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     from mlflow.tracking import MlflowClient
 
     project = tmp_path / "digits-mlflow"
-    shutil.copytree(EXAMPLE, project)
+    project.mkdir()
     monkeypatch.chdir(project)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.delenv("MLFLOW_EXPERIMENT_NAME", raising=False)
     uri = f"sqlite:///{project / 'mlflow.db'}"
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
-    monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "hiraku-digits")
     monkeypatch.setenv("MLFLOW_ENABLE_ASYNC_LOGGING", "false")
     git(project, "init", "-b", "main")
     git(project, "config", "user.email", "test@example.invalid")
     git(project, "config", "user.name", "Test")
     runner = CliRunner()
-    invoke(runner, ["init"])
+    initialized = invoke(runner, ["init", "--example", "digits-mlflow"])
+    assert "Created file: train.py" in initialized.output
+    assert "Created file: pyproject.toml" in initialized.output
+    assert "Created file: hiraku.yml" in initialized.output
+    assert not (project / "README.md").exists()
+    assert not (project / "example.yml").exists()
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize Digits MLflow example")
     source_commit = git(project, "rev-parse", "HEAD")
@@ -154,7 +162,7 @@ def test_digits_requires_provenance_before_creating_runs(tmp_path):
     env["MLFLOW_TRACKING_URI"] = f"sqlite:///{tmp_path / 'mlflow.db'}"
     env["MLFLOW_EXPERIMENT_NAME"] = "hiraku-digits"
     result = subprocess.run(
-        [sys.executable, str(EXAMPLE / "train.py"), "--epochs", "1"],
+        [sys.executable, str(OVERLAY / "train.py"), "--epochs", "1"],
         cwd=tmp_path,
         env=env,
         text=True,
@@ -162,4 +170,29 @@ def test_digits_requires_provenance_before_creating_runs(tmp_path):
     )
     assert result.returncode != 0
     assert "Missing launch environment variables: HIRAKU_TASK_ID" in result.stderr
+    assert not (tmp_path / "mlflow.db").exists()
+
+
+def test_digits_requires_root_for_default_tracking(tmp_path):
+    pytest.importorskip("mlflow")
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("HIRAKU_")
+    }
+    env.update(
+        {
+            "HIRAKU_TASK_ID": "digits",
+            "HIRAKU_EXPERIMENT_ID": "baseline",
+            "HIRAKU_COMMIT": "a" * 40,
+            "HIRAKU_ENTRYPOINT": "train",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(OVERLAY / "train.py"), "--epochs", "1"],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "Missing launch environment variables: HIRAKU_ROOT" in result.stderr
     assert not (tmp_path / "mlflow.db").exists()
