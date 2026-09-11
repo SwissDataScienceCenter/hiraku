@@ -1,9 +1,10 @@
 # Contributing to Hiraku
 
-Issues and feature requests can be submitted through the [GitHub issue tracker](https://github.com/SwissDataScienceCenter/hiraku/issues).
-For bugs, include the command, a minimal reproduction, Python version, and operating system.
+## Issues and user stories
 
-User stories can be also submitted by creating an [issue with the label "user story"](https://github.com/SwissDataScienceCenter/hiraku/issues/new?labels=%22user%20story%22). A user story describes a feature or workflow from the perspective of a user. It should include a description of the problem, the intended workflow and user inteface, the desired outcome, and any relevant context.
+Submit issues and feature requests through the [GitHub issue tracker](https://github.com/SwissDataScienceCenter/hiraku/issues). Bug reports should include the command, a minimal reproduction, Python version, and operating system.
+
+Submit user stories through the [issue tracker](https://github.com/SwissDataScienceCenter/hiraku/issues/new?labels=%22user%20story%22). Describe the problem, intended workflow, desired outcome, and relevant context.
 
 ## Development setup
 
@@ -12,42 +13,35 @@ Hiraku uses Python 3.11+.
 ```bash
 git clone https://github.com/SwissDataScienceCenter/hiraku.git
 cd hiraku
-uv sync --all-extras dev
+uv sync --all-extras
 uv run hiraku --help
 ```
 
-Install the pre-commit hooks after setting up the development environment:
+Install the pre-commit hooks:
 
 ```bash
 uv run pre-commit install
 ```
 
-The hooks run Ruff's lint fixer and formatter on every commit. Run them manually
-across the repository with:
+Run the hooks manually across the repository with:
 
 ```bash
 uv run pre-commit run --all-files
 ```
 
-Install an optional tracking integration when working on it:
+Install optional tracking integrations when needed:
 
 ```bash
 uv sync --extra mlflow
 uv sync --extra wandb
 
-# all extras
+# or install everything
 uv sync --all-extras
 ```
 
-If you use the tool installation, make sure the reinstall after changes:
+## Development workflow
 
-```bash
-uv tool install ".[mlflow,wandb]" --force --reinstall
-```
-
-## Run checks
-
-Run the focused checks before opening a pull request:
+Run these checks before opening a pull request:
 
 ```bash
 uv run pytest
@@ -55,16 +49,12 @@ uv run ruff check src tests
 uv run zensical build --clean
 ```
 
-Tests create temporary Hiraku projects and Git repositories. Live W&B and
-MLflow tests should be optional or use fakes so the default test suite does not
-require credentials or network access.
+Tests should not require network access or W&B/MLflow credentials.
 
-## Make changes
+Keep public models and CLI behavior explicit. Add tests for new behavior and
+update the relevant documentation when a public interface changes.
 
-Keep the public model and CLI behavior explicit.
-Pydantic models validate data at construction time; backend adapters should implement the shared tracking interface and preserve normalized `Run` fields. Add tests for new behavior and update the relevant guide or API doc when a public interface changes.
-
-## Documentation and examples
+### Documentation and examples
 
 Preview the documentation locally:
 
@@ -72,12 +62,60 @@ Preview the documentation locally:
 uv run zensical serve
 ```
 
-Keep onboarding instructions short and put exact option lists in generated reference pages.
-Example projects must have simple commands and should have an end-to-end test under `tests/examples/`.
+Keep onboarding instructions short. Examples should have simple commands and
+an end-to-end test under `tests/examples/`.
 
-## Commits and pull requests
+### Commits and pull requests
 
-Use a feature branch and keep commits focused.
-[Conventional Commit](https://www.conventionalcommits.org/) prefixes such as `feat:`, `fix:`, `docs:`, `test:`, and `refactor:` are preferred.
+Use a feature branch and focused commits. [Conventional Commit](https://www.conventionalcommits.org/) prefixes such as `feat:`, `fix:`, `docs:`, `test:`, and `refactor:` are preferred. Pull requests should describe the user-visible change, tests run, and compatibility or configuration changes.
 
-A pull request should explain the user-visible change, list relevant tests, and call out configuration or compatibility changes.
+## Release a new version
+
+Releases use `bump-my-version` and must be created from `main`.
+
+1. Add release notes under `## [Unreleased]` in `CHANGELOG.md`, including issue
+   or pull request links. Run the checks above, commit the changelog, and merge
+   it to `main`. Do not add the final version heading manually.
+2. Update `main` and confirm that the working tree is clean:
+
+   ```bash
+   git switch main
+   git pull --ff-only origin main
+   git status --short
+   ```
+
+3. Choose `patch` for fixes, `minor` for compatible features, or `major` for
+   breaking changes. Preview the bump first:
+
+   ```bash
+   uv run bump-my-version bump patch --dry-run
+   ```
+
+4. If the preview is correct, create the release commit and tag:
+
+   ```bash
+   uv run bump-my-version bump patch
+   ```
+
+   This updates `pyproject.toml`, regenerates `uv.lock`, updates `CHANGELOG.md`,
+   and creates a tag such as `v0.1.1`. The lockfile hook runs before the release
+   commit and tag are created.
+5. Verify and build the package:
+
+   ```bash
+   git show --stat --oneline HEAD
+   git status --short
+   git tag --points-at HEAD
+   uv run hiraku --version
+   uv lock --check
+   uv build
+   ```
+
+6. Push the release commit and tag:
+
+   ```bash
+   git push origin main --follow-tags
+   ```
+
+When PyPI publication is enabled, publish the verified artifacts with
+`uv publish`.
