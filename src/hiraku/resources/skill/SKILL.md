@@ -12,6 +12,32 @@ the user's research intent into the appropriate combination of records, source
 work, launches, evidence, and findings, including requests that enter midway
 through an existing task or experiment lifecycle.
 
+## Development version and feedback
+
+Hiraku is under active development. Be transparent when its behavior,
+instructions, or records do not support the requested workflow cleanly:
+
+- Flag apparent bugs, inconsistencies, missing capabilities, and unclear or
+  incomplete documentation to the user. Describe the expected behavior, the
+  observed behavior, and the evidence that distinguishes a Hiraku problem from
+  an experiment or repository failure.
+- If continuing requires a workaround that affects scope, provenance, records,
+  reproducibility, or results, explain its tradeoffs and agree on it with the
+  user before applying it. Do not silently edit records or bypass attribution to
+  conceal a limitation.
+- Encourage the user to report reproducible problems at the
+  [Hiraku issue tracker](https://github.com/SwissDataScienceCenter/hiraku/issues),
+  and offer to prepare a concise reproduction and expected behavior. Open or
+  update an issue only with the user's authorization.
+- When a missing Hiraku feature would significantly simplify or strengthen the
+  requested work, suggest the capability and discuss it with the user. With
+  their authorization, create a feature request that explains the research use
+  case and desired outcome rather than prescribing an unnecessarily narrow
+  implementation.
+- Treat missing, misleading, or opaque Hiraku instructions and documentation,
+  including this skill, as feedback worth surfacing. Suggest a concrete
+  documentation or skill improvement when it would prevent the same problem.
+
 ## Follow the user's scope
 
 Classify the request before acting:
