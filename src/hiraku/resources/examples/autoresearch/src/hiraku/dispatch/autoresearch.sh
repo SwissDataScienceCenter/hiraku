@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+if [[ $(uname -s) != Linux ]]; then
+  echo "autoresearch.sh: this dispatcher requires Linux" >&2
+  exit 1
+fi
+for dependency in timeout flock; do
+  if ! command -v "$dependency" >/dev/null 2>&1; then
+    echo "autoresearch.sh: required Linux utility is unavailable: $dependency" >&2
+    exit 1
+  fi
+done
+if [[ ! -r /proc/sys/kernel/random/uuid ]]; then
+  echo "autoresearch.sh: required Linux UUID source is unavailable: /proc/sys/kernel/random/uuid" >&2
+  exit 1
+fi
+
 usage() {
   echo "usage: autoresearch.sh [--commit REF] -- COMMAND..." >&2
   exit 2
@@ -103,10 +118,6 @@ else
   fi
 fi
 
-if [[ ! -r /proc/sys/kernel/random/uuid ]]; then
-  echo "autoresearch.sh: Linux UUID source is unavailable" >&2
-  exit 1
-fi
 read -r run_uuid </proc/sys/kernel/random/uuid
 run_id=${run_uuid//-/}
 timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
