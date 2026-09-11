@@ -43,7 +43,8 @@ class ProjectInitializer:
 
         Args:
             root: Root directory where the project will be created.
-            install_skill: Whether to install repository-local skill resources.
+            install_skill: Whether to install repository-local skill resources for
+                supported coding agents.
             tracking_backend: Optional default tracking backend name.
             ignore_git: Skip validation that root is a Git repository root.
                 Defaults to true for programmatic initialization.
@@ -134,10 +135,11 @@ class ProjectInitializer:
                     (resource_root / "dispatch", config.dispatch_dir),
                 ]
                 if install_skill:
-                    copies.append(
-                        (
-                            resource_root / "skill",
+                    copies.extend(
+                        (resource_root / "skill", target)
+                        for target in (
                             project_root / ".agents/skills/hiraku",
+                            project_root / ".claude/skills/hiraku",
                         )
                     )
                 for source, target in copies:

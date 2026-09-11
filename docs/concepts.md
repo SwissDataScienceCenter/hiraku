@@ -143,7 +143,11 @@ Dispatcher names may omit `.sh`, so `--dispatch worktree` selects `worktree.sh`.
 
 ## Agent Skill
 
-The `\hiraku` skill can be used directly in any coding harness.
+`hiraku init` installs the project-local skill for Codex at
+`.agents/skills/hiraku/` and for Claude Code at `.claude/skills/hiraku/`.
+Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code. Other coding
+harnesses can use the same `SKILL.md` when they support compatible project-local
+skills.
 
 ## Actions, Programs, Context
 

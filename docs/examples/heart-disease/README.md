@@ -130,10 +130,15 @@ launch that never logs a row will not appear as a run.
 
 ## Run the example with an agent
 
-`hiraku init` installs the project-local `$hiraku` skill in
-`.agents/skills/hiraku/`. After completing the setup in section 1, start your
-coding agent from the initialized `heart-disease` repository so it can discover
-the skill, training code, data, and project state.
+`hiraku init` installs the same project-local Hiraku skill for Codex at
+`.agents/skills/hiraku/` and for Claude Code at `.claude/skills/hiraku/`. After
+completing the setup in section 1, start your coding agent from the initialized
+`heart-disease` repository so it can discover the skill, training code, data,
+and project state.
+
+Invoke the skill as `$hiraku` in Codex or `/hiraku` in Claude Code. The shared
+prompts below use the agent-neutral phrase "Use the Hiraku skill"; use your
+agent's explicit invocation syntax when you want to force skill selection.
 
 ### Complete workflow from one prompt
 
@@ -141,7 +146,7 @@ The following prompt asks the agent to carry out the same comparison as the
 manual workflow:
 
 ```text
-Use the $hiraku skill to compare logistic regression with a random forest on
+Use the Hiraku skill to compare logistic regression with a random forest on
 the bundled Cleveland heart-disease data. Create a task named heart-disease
 that minimizes validation log loss and maximizes validation accuracy. Create
 and run a logistic-baseline experiment and a random-forest experiment using
@@ -161,7 +166,7 @@ research intent rather than Hiraku CLI syntax:
 1. Create the task:
 
     ```text
-    Use the $hiraku skill to create a task named heart-disease. Its goal is to
+    Use the Hiraku skill to create a task named heart-disease. Its goal is to
     compare logistic regression and random forest on the fixed Cleveland
     cohort. Ask whether the nonlinear model improves on the calibrated linear
     baseline. Track validation log loss to minimize and validation accuracy to
@@ -171,7 +176,7 @@ research intent rather than Hiraku CLI syntax:
 2. Create the baseline experiment:
 
     ```text
-    Use the $hiraku skill to create an experiment named logistic-baseline for
+    Use the Hiraku skill to create an experiment named logistic-baseline for
     the active task. Use the summary "Logistic regression baseline" and the
     hypothesis "Regularized logistic regression provides a calibrated
     baseline". It should run train.py with the logistic model, seed 42, and a
@@ -182,14 +187,14 @@ research intent rather than Hiraku CLI syntax:
 3. Run the baseline:
 
     ```text
-    Use the $hiraku skill to run the logistic-baseline experiment and report
+    Use the Hiraku skill to run the logistic-baseline experiment and report
     its tracked validation metrics. Do not create or update other records.
     ```
 
 4. Create and run the comparison:
 
     ```text
-    Use the $hiraku skill to create and run a random-forest experiment for the
+    Use the Hiraku skill to create and run a random-forest experiment for the
     active task. Use train.py with the random_forest model, seed 42, and a
     validation fraction of 0.25, bound to the current commit. Report its
     tracked validation metrics.
@@ -198,7 +203,7 @@ research intent rather than Hiraku CLI syntax:
 5. Compare the evidence:
 
     ```text
-    Use the $hiraku skill to compare the tracked logistic-baseline and
+    Use the Hiraku skill to compare the tracked logistic-baseline and
     random-forest runs. Explain which has lower validation log loss and which
     has higher validation accuracy, citing the run IDs and source commits.
     Do not launch another run.
