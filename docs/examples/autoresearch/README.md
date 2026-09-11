@@ -5,6 +5,9 @@ an autonomous research program to Andrej Karpathy's original
 [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch) repository.
 It does not vendor or modify the upstream training implementation.
 
+The dispatcher currently supports Linux only. It requires GNU `timeout`,
+`flock`, and the Linux UUID source at `/proc/sys/kernel/random/uuid`.
+
 The overlay contains:
 
 - `task.md` — the Markdown body used to create the Hiraku task.

@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
@@ -19,6 +20,10 @@ EXAMPLE = REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "autoresear
 OVERLAY = EXAMPLE / "src"
 PROGRAM = OVERLAY / "hiraku" / "programs" / "autoresearch" / "program.md"
 DISPATCHER = OVERLAY / "hiraku" / "dispatch" / "autoresearch.sh"
+LINUX_ONLY = pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="the autoresearch dispatcher requires Linux utilities and /proc",
+)
 UPSTREAM_FILES = {
     "README.md": "# upstream autoresearch\n",
     "prepare.py": "# upstream preparation\n",
@@ -205,6 +210,7 @@ def test_autoresearch_overlay_initializes_task(tmp_path, monkeypatch):
     assert git(project, "status", "--porcelain") == ""
 
 
+@LINUX_ONLY
 def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     project, runner = create_overlay_project(tmp_path, monkeypatch)
     commit = git(project, "rev-parse", "HEAD")
@@ -241,6 +247,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     assert float(row["metrics"]["val_bpb"]) == 0.9
 
 
+@LINUX_ONLY
 def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
     _, runner = create_overlay_project(tmp_path, monkeypatch)
     invoke(runner, ["experiment", "create", "failure", "--commit", "HEAD"])
@@ -278,6 +285,7 @@ def dispatcher_environment(root: Path) -> dict[str, str]:
     }
 
 
+@LINUX_ONLY
 def test_autoresearch_dispatcher_records_timeout_and_invalid_output(tmp_path):
     dispatcher = DISPATCHER
     environment = dispatcher_environment(tmp_path)
@@ -316,6 +324,7 @@ def test_autoresearch_dispatcher_records_timeout_and_invalid_output(tmp_path):
     assert len({row["id"] for row in rows}) == 2
 
 
+@LINUX_ONLY
 def test_autoresearch_dispatcher_rejects_incompatible_csv(tmp_path):
     dispatcher = DISPATCHER
     csv_path = tmp_path / "runs.csv"
