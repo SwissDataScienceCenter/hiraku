@@ -80,10 +80,11 @@ Actions → Release → Run workflow → choose patch, minor, or major
 
 The workflow checks out the current `main`, updates `pyproject.toml`,
 `CHANGELOG.md`, and `uv.lock`, runs the tests, lint, documentation build, and
-package build, then commits and pushes the release. Only after validation does
-it create the matching annotated tag and GitHub Release with the wheel and
-source distribution.
+package build, then commits and pushes the release. It explicitly dispatches
+CI for the release commit and waits for it to pass before creating the matching
+annotated tag and GitHub Release with the wheel and source distribution.
 
 Do not normally create release commits or tags manually. If a workflow fails,
-inspect the run before retrying; it should not create a release tag after a
-failed validation.
+inspect the run before retrying. The workflow detects an existing release
+commit and resumes the tag or GitHub Release steps instead of bumping the
+version again.

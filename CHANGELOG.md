@@ -32,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   preparation ([issue #42](https://github.com/SwissDataScienceCenter/hiraku/issues/42)).
 - Make releases manual GitHub Actions workflows that validate the exact release
   contents before committing, tagging, and creating a GitHub Release ([issue #42](https://github.com/SwissDataScienceCenter/hiraku/issues/42)).
+- Make release retries resumable when the release commit exists but tagging or
+  GitHub Release creation has not completed ([issue #42](https://github.com/SwissDataScienceCenter/hiraku/issues/42)).
 
 ### Removed
 

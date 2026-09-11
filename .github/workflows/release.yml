@@ -42,15 +42,34 @@ jobs:
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
           test -z "$(git status --porcelain)"
 
+      - name: Detect an existing release
+        id: state
+        run: |
+          SUBJECT=$(git log -1 --format=%s)
+          if [[ "$SUBJECT" == "chore(release): bump version "* ]]; then
+            echo "existing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "existing=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install dependencies
         run: uv sync --all-extras
 
       - name: Prepare release files
+        if: steps.state.outputs.existing != 'true'
         env:
           BUMP: ${{ inputs.bump }}
         run: |
           uv run bump-my-version bump "$BUMP" --no-commit --no-tag
           uv lock
+
+      - name: Determine release version
+        id: version
+        run: |
+          VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          TAG="v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Validate release
         run: |
@@ -59,16 +78,15 @@ jobs:
           uv run zensical build --clean
           uv build
 
-      - name: Verify version and tag
-        id: version
+      - name: Verify release tag is unused
+        if: steps.state.outputs.existing != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-          TAG="v${VERSION}"
           test -z "$(git tag --list "$TAG")"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Commit release files
+        if: steps.state.outputs.existing != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -79,20 +97,56 @@ jobs:
           git commit -m "chore(release): bump version ${VERSION}"
           git push origin HEAD:main
 
+      - name: Set release commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Run CI on release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          gh workflow run CI.yml --ref main
+          for _ in {1..30}; do
+            RUN_ID=$(gh run list \
+              --workflow CI.yml \
+              --branch main \
+              --event workflow_dispatch \
+              --commit "$RELEASE_SHA" \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')
+            if [[ -n "$RUN_ID" ]]; then
+              gh run watch "$RUN_ID" --exit-status
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for CI on $RELEASE_SHA" >&2
+          exit 1
+
       - name: Tag release commit
         env:
           TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_SHA: ${{ steps.commit.outputs.sha }}
         run: |
-          git tag -a "$TAG" -m "Release $TAG"
-          test "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")"
-          git push origin "$TAG"
+          if git rev-parse "$TAG^{commit}" >/dev/null 2>&1; then
+            test "$RELEASE_SHA" = "$(git rev-parse "$TAG^{commit}")"
+          else
+            git tag -a "$TAG" -m "Release $TAG" "$RELEASE_SHA"
+            git push origin "$TAG"
+          fi
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh release create "$TAG" \
-            dist/* \
-            --title "$TAG" \
-            --generate-notes
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" \
+              dist/* \
+              --title "$TAG" \
+              --generate-notes
+          fi
