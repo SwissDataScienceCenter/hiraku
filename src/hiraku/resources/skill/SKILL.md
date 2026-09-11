@@ -4,13 +4,18 @@ description: Use Hiraku to structure and carry out data-science and machine-lear
 ---
 # Hiraku
 
+Hiraku provides a toolkit for agentic data science.
+
 Hiraku connects research goals, experiments, source code, execution, and findings.
-Use it at the scope the user requested: a single record operation, a bounded
-sequence of research steps, or an explicitly requested autonomous workflow.
 Treat Hiraku as a research workspace rather than a closed command menu. Translate
 the user's research intent into the appropriate combination of records, source
 work, launches, evidence, and findings, including requests that enter midway
 through an existing task or experiment lifecycle.
+
+## Operating scope
+
+Use Hiraku at the scope the user requested: a single record operation, a bounded
+sequence of research steps, or an explicitly requested autonomous workflow.
 
 ## Development version and feedback
 
@@ -42,6 +47,9 @@ instructions, or records do not support the requested workflow cleanly:
 
 Classify the request before acting:
 
+- **Brainstorming:** Support the user with grounded suggestions, but do not create
+  or modify any records, source code, or runs until the user explicitly requests
+  it. Ask questions if the user intent is unclear.
 - **One action:** Do only the requested operation, verify it, report the result,
   and stop. For example, "create an experiment" does not also implement or run
   it, and "run this experiment" does not create another experiment or rewrite
@@ -57,8 +65,10 @@ Classify the request before acting:
 Infer routine identifiers, summaries, hypotheses, metrics, and entrypoint
 arguments from the user's request and the repository. Ask a question only when
 the missing choice would materially change the research outcome or authorized
-scope. Never treat a broad research goal as permission for unrelated external
-actions, destructive Git operations, or unlimited resource use.
+scope. If a question can be answered by exploring the codebase or surrounding
+project context, explore the codebase instead. Never treat a broad research
+goal as permission for unrelated external actions, destructive Git operations,
+or unlimited resource use.
 
 ## Ground every action
 
@@ -78,7 +88,7 @@ hiraku experiment show <experiment-id> --task <task-id> --json
 hiraku run list --task <task-id> --json
 ```
 
-Also inspect the repository files needed to understand available code,
+When needed, inspect the repository files required to understand available code,
 entrypoints, metrics, data, and project conventions. Resume existing relevant
 work instead of duplicating it. If command syntax or supported options are
 uncertain, run `hiraku <command> --help`; do not guess flags.
@@ -87,6 +97,38 @@ Tasks and experiments are Markdown records with YAML front matter. Preserve
 existing fields and prose when updating them. Core fields are validated;
 additional fields such as `hypothesis`, `result`, `conclusion`, `decision`, and
 `status` are user metadata rather than an enforced state machine.
+
+## Protect user work and use the intended branches
+
+Before implementing or committing an experiment, or switching branches, inspect
+the Git state and the task and experiment records:
+
+```bash
+git status --short --branch
+hiraku task show <task-id> --json
+hiraku experiment show <experiment-id> --task <task-id> --json
+```
+
+- Put experiment implementation commits on the experiment's `branch` when that
+  field is set. Otherwise put them on the task's `branch`. Do not implement on a
+  different branch merely because it is currently checked out.
+- Switch branches only from a clean Git worktree. Never discard, reset, stash,
+  commit, or modify user work to make a switch possible. If reaching the
+  intended branch would affect existing work, stop and ask the user how to
+  proceed.
+- Hiraku records may be committed or ignored; this is a project and user choice.
+  Inspect tracked files, ignore rules, and nearby history, then follow the
+  existing convention. Do not begin tracking ignored records or ignore tracked
+  records unless the user requests that change.
+- When committed Hiraku records are combined across experiments, ensure every
+  experiment record is committed to the task branch, even when its implementation
+  commit lives on an experiment branch. Do not leave the only committed copy of
+  an experiment record on its experiment branch.
+- Hiraku reads only records visible in the current worktree. Do not infer that a
+  record is absent merely because the current branch does not expose it. Before
+  listing or comparing committed records across a task, switch safely to the
+  task branch and verify that its experiment records are present. If a clean
+  switch is not possible, stop and ask the user how to proceed.
 
 ## Create and maintain tasks
 
@@ -158,9 +200,10 @@ hiraku experiment entrypoints <experiment-id> --task <task-id> --json
 ```
 
 Creating an experiment activates it by default. Several experiments may share a
-commit and differ by entrypoint arguments. Create or switch Git branches only
-when the user or selected program asks for that workflow. Ordinary Git
-operations remain responsible for commits and merges.
+commit and differ by entrypoint arguments. Follow the task or experiment branch
+recorded for implementation; create or change that branch assignment only when
+the user or selected program asks for it. Ordinary Git operations remain
+responsible for commits and merges.
 
 Use repeatable `--set 'key=<YAML value>'` for custom metadata and `--unset key`
 to remove it. `--markdown-file path` replaces the Markdown body, so retain any
