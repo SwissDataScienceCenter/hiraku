@@ -90,7 +90,9 @@ setup_hooks = [
     "awk '/^## \\[Unreleased\\]/{flag=1; next} /^## \\[[^]]+\\]/{flag=0} flag && /^- /{found=1} END{exit !found}' CHANGELOG.md || (echo 'Error: Add entries under [Unreleased] before bumping!' && exit 1)"
 ]
 
-pre_commit_hooks = []
+pre_commit_hooks = [
+    "uv lock",
+]
 post_commit_hooks = []
 
 [[tool.bumpversion.files]]

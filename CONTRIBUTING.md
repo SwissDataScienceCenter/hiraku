@@ -97,8 +97,9 @@ Releases use `bump-my-version` and must be created from `main`.
    uv run bump-my-version bump patch
    ```
 
-   This updates `pyproject.toml` and `CHANGELOG.md`, and creates a tag such as
-   `v0.1.1`.
+   This updates `pyproject.toml`, regenerates `uv.lock`, updates `CHANGELOG.md`,
+   and creates a tag such as `v0.1.1`. The lockfile hook runs before the release
+   commit and tag are created.
 5. Verify and build the package:
 
    ```bash
@@ -106,6 +107,7 @@ Releases use `bump-my-version` and must be created from `main`.
    git status --short
    git tag --points-at HEAD
    uv run hiraku --version
+   uv lock --check
    uv build
    ```
 
