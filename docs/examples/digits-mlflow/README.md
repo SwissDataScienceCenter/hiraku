@@ -29,7 +29,9 @@ git commit -m "initialize Digits MLflow example"
 MLflow creates `mlflow.db` in the project root on the first launch. The training
 script uses the Hiraku project root to keep that location stable for local and
 worktree dispatchers. Set `MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
-when you want to override the local defaults.
+when you want to override the local defaults. These variables affect the
+training process only, so update the task's `tracking_backend` with the matching
+`tracking_uri` and `experiment_name` before using `hiraku run list`.
 
 ## Create the task and experiments
 

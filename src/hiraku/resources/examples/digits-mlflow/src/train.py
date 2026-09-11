@@ -41,6 +41,7 @@ def main() -> None:
         "HIRAKU_EXPERIMENT_ID",
         "HIRAKU_COMMIT",
         "HIRAKU_ENTRYPOINT",
+        "HIRAKU_ROOT",
     )
     missing = [name for name in required if name not in os.environ]
     if missing:

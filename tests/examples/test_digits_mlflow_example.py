@@ -171,3 +171,28 @@ def test_digits_requires_provenance_before_creating_runs(tmp_path):
     assert result.returncode != 0
     assert "Missing launch environment variables: HIRAKU_TASK_ID" in result.stderr
     assert not (tmp_path / "mlflow.db").exists()
+
+
+def test_digits_requires_root_for_default_tracking(tmp_path):
+    pytest.importorskip("mlflow")
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("HIRAKU_")
+    }
+    env.update(
+        {
+            "HIRAKU_TASK_ID": "digits",
+            "HIRAKU_EXPERIMENT_ID": "baseline",
+            "HIRAKU_COMMIT": "a" * 40,
+            "HIRAKU_ENTRYPOINT": "train",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(OVERLAY / "train.py"), "--epochs", "1"],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "Missing launch environment variables: HIRAKU_ROOT" in result.stderr
+    assert not (tmp_path / "mlflow.db").exists()
