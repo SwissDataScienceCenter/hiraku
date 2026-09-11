@@ -1,0 +1,15 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+    -   id: check-yaml
+    -   id: check-ast
+    -   id: detect-private-key
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff-check
+        types_or: [ python, pyproject ]
+        args: [--fix]
+      - id: ruff-format
+# Local hooks (pytest/docs build) are intentionally not run on every commit; use `uv run pytest` and `uv run zensical build --clean` (or CI) instead.
