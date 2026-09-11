@@ -19,7 +19,7 @@ initialize a new project:
 ```bash
 mkdir digits-mlflow
 cd digits-mlflow
-git init -b main
+git init
 hiraku init --example digits-mlflow
 uv sync
 git add .
@@ -36,7 +36,7 @@ when you want to override the local defaults.
 ```bash
 hiraku task create digits \
   --goal "Understand how L2 regularization affects Digits learning curves" \
-  --question "Does stronger regularization reduce overfitting?" \
+  --question "Does stronger regularization reduce overfitting on the Digits dataset?" \
   --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]' \
   --set 'tracking_backend={type: mlflow, database: mlflow.db, experiment_name: hiraku-digits}'
 
