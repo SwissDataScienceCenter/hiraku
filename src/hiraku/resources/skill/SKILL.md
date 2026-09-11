@@ -12,6 +12,54 @@ the user's research intent into the appropriate combination of records, source
 work, launches, evidence, and findings, including requests that enter midway
 through an existing task or experiment lifecycle.
 
+## Core concepts
+
+- **Task:** The top-level research scope. It records the goal, question, metrics,
+  task branch, shared entrypoints, and evolving findings, and owns its
+  experiments.
+- **Experiment:** One focused investigation within a task. It can begin as an
+  unbound proposal, optionally name an implementation branch, bind the source
+  commit being evaluated, and override task entrypoints or arguments. Hiraku
+  does not prescribe its semantic type: an experiment may be a model run,
+  diagnostic, ablation, or any other focused unit that advances the task goal.
+- **Run:** An execution trace returned by the configured tracking backend. A run
+  may include task, experiment, commit, and entrypoint attribution together with
+  parameters, metrics, timestamps, and an external URL.
+- **Entrypoint:** A named executable definition consisting of a command argument
+  list and default arguments. Task entrypoints are shared; experiment entrypoints
+  can override or extend them. Select an experiment-qualified entrypoint to
+  provide explicit experiment attribution to the launched process.
+- **Dispatch script:** A project-owned script under `hiraku/dispatch/` that
+  decides where and how an entrypoint runs. The default `launch.sh` uses the
+  current checkout; `worktree.sh` runs an exact commit in an isolated worktree.
+  Projects may provide additional local or remote dispatchers.
+
+The usual relationship is: a task contains experiments; an experiment can bind
+source and expose one or more effective entrypoints; a dispatch script launches
+an entrypoint; instrumented code independently writes the resulting run to the tracking backend.
+
+## Main CLI entry points
+
+Prefer `--json` for state that will be inspected or verified programmatically.
+
+| Purpose | Main commands |
+| --- | --- |
+| Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
+| Manage tasks | `hiraku task ...`: `list`, `show`, `create`, `update`, `set`, `entrypoints` |
+| Manage experiments | `hiraku experiment ...`: `list`, `show`, `create`, `update`, `set`, `entrypoints`; `hiraku exp` is an alias |
+| Inspect unbound proposals | `hiraku proposal list` |
+| Launch an entrypoint | `hiraku launch [--task TASK] [--commit REF] [--dispatch NAME] TARGET` |
+| Inspect tracked evidence | `hiraku run list` |
+| Manage program records | `hiraku program list`, `hiraku program show PROGRAM` |
+| Manage action records | `hiraku action ...` |
+| Manage context records | `hiraku context ...` |
+| Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
+
+Use `task show`, `experiment show`, and the corresponding `entrypoints` helpers
+to resolve canonical records and effective executable definitions before making
+changes or launching work. Use `launch --dry-run` when execution resolution
+needs verification without starting the command.
+
 ## Operating scope
 
 Use Hiraku at the scope the user requested: a single record operation, a bounded

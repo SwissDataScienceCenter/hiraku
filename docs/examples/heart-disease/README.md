@@ -209,27 +209,30 @@ research intent rather than Hiraku CLI syntax:
     Do not launch another run.
     ```
 
-The first three prompts are covered by the opt-in Codex integration tests. The
-remaining prompts provide additional user testing for the full example.
-
 ### Verify the agent's work
 
 The finished workflow should contain one task, two experiments, and two
 attributed runs:
 
 ```bash
-hiraku task show heart-disease --json
-hiraku experiment list --task heart-disease --json
+hiraku task show heart-disease
+hiraku experiment list --task heart-disease
 hiraku run list --task heart-disease \
   --params model,seed,validation_fraction \
   --metrics val/log_loss,val/accuracy \
-  --sort val/log_loss --ascending --json
+  --sort val/log_loss --ascending
 ```
 
 Check that both experiments are bound to the initialization commit, use the
 same seed and validation split, and differ only in the model argument. The
 logistic baseline should have lower validation log loss, while the random
 forest should have slightly higher validation accuracy.
+
+### Developer note
+
+The first three stepwise prompts are covered by the opt-in Codex integration
+tests. The remaining prompts provide additional user testing for the full
+example.
 
 Hiraku developers can run the three fresh-repository agent checks explicitly:
 
