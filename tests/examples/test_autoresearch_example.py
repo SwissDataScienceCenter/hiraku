@@ -144,8 +144,7 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "hiraku task show --json" in program
     assert "hiraku experiment list --task <task> --json" in program
     assert (
-        "hiraku run list --task <task> --experiment <experiment-id> --json"
-        in program
+        "hiraku run list --task <task> --experiment <experiment-id> --json" in program
     )
     assert "--commit HEAD" in program
     assert "Never rebind an experiment" in program
@@ -157,8 +156,7 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "grep " not in program
     assert "Choose the history mode" not in program
     assert (
-        "hiraku experiment update <experiment-id> --task <task> --commit"
-        not in program
+        "hiraku experiment update <experiment-id> --task <task> --commit" not in program
     )
     assert "Changelog" not in program
 
@@ -183,9 +181,9 @@ def test_autoresearch_overlay_initializes_task(tmp_path, monkeypatch):
     assert (project / "program.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "program.md"
     ]
-    installed_program = (
-        project / "hiraku/programs/autoresearch/program.md"
-    ).read_text(encoding="utf-8")
+    installed_program = (project / "hiraku/programs/autoresearch/program.md").read_text(
+        encoding="utf-8"
+    )
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
     assert installed_program == PROGRAM.read_text(encoding="utf-8")
     assert (project / "task.md").read_text(encoding="utf-8") == task_template
@@ -289,7 +287,7 @@ def dispatcher_environment(root: Path) -> dict[str, str]:
 def test_autoresearch_dispatcher_records_timeout_and_invalid_output(tmp_path):
     dispatcher = DISPATCHER
     environment = dispatcher_environment(tmp_path)
-    environment["HIRAKU_AUTORESEARCH_TIMEOUT_SECONDS"] = "0.05"
+    environment["HIRAKU_AUTORESEARCH_TIMEOUT_SECONDS"] = "1"
     timed_out = subprocess.run(
         [
             dispatcher,
