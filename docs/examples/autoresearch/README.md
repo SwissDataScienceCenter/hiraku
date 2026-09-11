@@ -48,6 +48,7 @@ cat >> .gitignore <<'EOF'
 
 # Hiraku local files and run artifacts
 /.agents/
+/.claude/
 /hiraku/*
 /hiraku.yml
 /task.md
@@ -108,14 +109,17 @@ hiraku experiment update baseline \
 
 ## Start autoresearch
 
-Start your favourite coding agent (Codex, Claude, ...) and a (reasonably) powerful model to invoke the Hiraku skill.
+Start your favourite coding agent and a reasonably powerful model in the
+initialized repository. Hiraku installs the skill for Codex at
+`.agents/skills/hiraku/` and for Claude Code at `.claude/skills/hiraku/`.
+Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code.
 
 Currently, Hiraku records the program association but does not automatically inject its Markdown into an agent prompt. Start an agent in the repository and ask it to
 load the canonical task and installed program with:
 
 
 ```bash
-Use the $hiraku skill and start the autoresearch program.
+Use the Hiraku skill and start the autoresearch program.
 
 To read the current task and program, run:
 hiraku task show sep10 --json

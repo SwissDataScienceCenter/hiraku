@@ -81,9 +81,11 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
             "create",
             "heart-disease",
             "--goal",
-            "Compare two model families on a fixed Cleveland cohort",
+            "Develop and evaluate predictive models for heart disease on a fixed "
+            "Cleveland cohort",
             "--question",
-            "Does a nonlinear random forest improve on a calibrated linear baseline?",
+            "Which modeling approaches achieve the best validation log loss and "
+            "accuracy on this cohort?",
             "--set",
             "metrics=[{name: val/log_loss, direction: minimize}, "
             "{name: val/accuracy, direction: maximize}]",
