@@ -84,7 +84,7 @@ message = "chore(release): bump version {current_version} → {new_version}"
 commit_args = ""
 setup_hooks = []
 pre_commit_hooks = [
-    "awk '/^## \\[Unreleased\\]/{flag=1; next} /^## \\[/{flag=0} flag && NF{found=1} END{exit !found}' CHANGELOG.md || (echo 'Error: Add entries under [Unreleased] before bumping!' && exit 1)"
+    "awk '/^## \\[Unreleased\\]/{flag=1; next} /^## \\[[^]]+\\]/{flag=0} flag && /^- /{found=1} END{exit !found}' CHANGELOG.md || (echo 'Error: Add entries under [Unreleased] before bumping!' && exit 1)"
 ]
 post_commit_hooks = []
 [[tool.bumpversion.files]]
