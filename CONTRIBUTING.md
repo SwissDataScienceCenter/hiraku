@@ -71,20 +71,41 @@ Use a feature branch and focused commits. [Conventional Commit](https://www.conv
 
 ## Release a new version
 
-Releases are created through GitHub Actions. After the release notes are added
-under `## [Unreleased]` in `CHANGELOG.md` and merged to a green `main`, use:
+Make sure the release notes are current under `## [Unreleased]` in
+`CHANGELOG.md` and the working tree is clean. From an up-to-date `main`, choose
+the version increment and prepare a release branch:
 
-```text
-Actions → Release → Run workflow → choose patch, minor, or major
+```bash
+git switch main
+git pull --ff-only
+
+BUMP=minor  # patch, minor, or major
+VERSION=$(uv run bump-my-version show new_version --increment "$BUMP")
+git switch -c "release/v${VERSION}"
+uv run bump-my-version bump "$BUMP" --commit --no-tag
+git push -u origin "release/v${VERSION}"
 ```
 
-The workflow checks out the current `main`, updates `pyproject.toml`,
-`CHANGELOG.md`, and `uv.lock`, runs the tests, lint, documentation build, and
-package build, then commits and pushes the release. It explicitly dispatches
-CI for the release commit and waits for it to pass before creating the matching
-annotated tag and GitHub Release with the wheel and source distribution.
+The bump command updates `pyproject.toml` and `CHANGELOG.md`, regenerates
+`uv.lock`, and commits all three files. Open a PR from the release branch and
+merge it through the normal protected path. Do not tag the release branch.
 
-Do not normally create release commits or tags manually. If a workflow fails,
-inspect the run before retrying. The workflow detects an existing release
-commit and resumes the tag or GitHub Release steps instead of bumping the
-version again.
+After CI passes on the merged `main` commit, update your local branch and tag
+that exact commit:
+
+```bash
+git switch main
+git pull --ff-only
+git show --stat --oneline HEAD  # confirm this is the merged release commit
+
+VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+git tag -a "v${VERSION}" -m "Release v${VERSION}"
+git push origin "v${VERSION}"
+```
+
+Pushing the tag starts the release workflow. It verifies that the tag identifies
+the release version commit on `main` and matches the package and lockfile
+versions. It then reruns the tests, lint, and documentation build before
+building the wheel and source distribution from the tagged commit. If
+validation succeeds, it verifies the artifact checksums and creates the GitHub
+Release.

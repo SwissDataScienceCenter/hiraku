@@ -80,7 +80,7 @@ tag_name = "v{new_version}"
 tag_message = "Release v{new_version}"
 
 allow_dirty = false
-commit = false
+commit = true
 message = "chore(release): bump version {current_version} → {new_version}"
 commit_args = ""
 
@@ -90,9 +90,7 @@ setup_hooks = [
     "awk '/^## \\[Unreleased\\]/{flag=1; next} /^## \\[[^]]+\\]/{flag=0} flag && /^- /{found=1} END{exit !found}' CHANGELOG.md || (echo 'Error: Add entries under [Unreleased] before bumping!' && exit 1)"
 ]
 
-pre_commit_hooks = [
-    "uv lock",
-]
+pre_commit_hooks = ["uv lock"]
 post_commit_hooks = []
 
 [[tool.bumpversion.files]]
@@ -104,3 +102,10 @@ replace = 'version = "{new_version}"'
 filename = "CHANGELOG.md"
 search = "## [Unreleased]"
 replace = "## [Unreleased]\n\n## [{new_version}] - {now:%Y-%m-%d}"
+
+[[tool.bumpversion.files]]
+filename = "uv.lock"
+search = '''name = "hiraku"
+version = "{current_version}"'''
+replace = '''name = "hiraku"
+version = "{new_version}"'''

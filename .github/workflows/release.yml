@@ -1,153 +1,120 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        description: Version increment
-        required: true
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
+  push:
+    tags:
+      - "v*"
 
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  actions: write
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main
           fetch-depth: 0
 
+      - name: Verify release tag
+        run: |
+          git fetch origin main --force
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          PREVIOUS_VERSION=$(git show HEAD^:pyproject.toml | python -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["version"])')
+          LOCK_VERSION=$(python -c 'import tomllib; data=tomllib.load(open("uv.lock", "rb")); print(next(package["version"] for package in data["package"] if package["name"] == "hiraku"))')
+          CHANGED=$(git diff --name-only HEAD^ HEAD | sort)
+          EXPECTED=$(printf '%s\n' CHANGELOG.md pyproject.toml uv.lock)
+          test "v${VERSION}" = "$GITHUB_REF_NAME"
+          test "$VERSION" != "$PREVIOUS_VERSION"
+          test "$LOCK_VERSION" = "$VERSION"
+          test "$CHANGED" = "$EXPECTED"
+          grep -q "^## \[${VERSION}\] - " CHANGELOG.md
+
+  test:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
-
+          python-version: ${{ matrix.python-version }}
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run pytest
 
-      - name: Verify current main
+  quality:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run zensical build --clean
+
+  build:
+    needs: [verify, test, quality]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Build wheel and sdist
         run: |
-          git fetch origin main --tags --force
-          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-          test -z "$(git status --porcelain)"
-
-      - name: Detect an existing release
-        id: state
-        run: |
-          SUBJECT=$(git log -1 --format=%s)
-          if [[ "$SUBJECT" == "chore(release): bump version "* ]]; then
-            echo "existing=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "existing=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Prepare release files
-        if: steps.state.outputs.existing != 'true'
-        env:
-          BUMP: ${{ inputs.bump }}
-        run: |
-          uv run bump-my-version bump "$BUMP" --no-commit --no-tag
-          uv lock
-
-      - name: Determine release version
-        id: version
-        run: |
-          VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-          TAG="v${VERSION}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Validate release
-        run: |
-          uv run pytest
-          uv run ruff check .
-          uv run zensical build --clean
           uv build
+          sha256sum dist/* > dist/SHA256SUMS
 
-      - name: Verify release tag is unused
-        if: steps.state.outputs.existing != 'true'
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions-${{ github.ref_name }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions-${{ github.ref_name }}
+          path: dist/
+
+      - name: Verify distributions
         run: |
-          test -z "$(git tag --list "$TAG")"
-
-      - name: Commit release files
-        if: steps.state.outputs.existing != 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml CHANGELOG.md uv.lock
-          git diff --cached --check
-          git commit -m "chore(release): bump version ${VERSION}"
-          git push origin HEAD:main
-
-      - name: Set release commit
-        id: commit
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Run CI on release commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ steps.commit.outputs.sha }}
-        run: |
-          gh workflow run CI.yml --ref main
-          for _ in {1..30}; do
-            RUN_ID=$(gh run list \
-              --workflow CI.yml \
-              --branch main \
-              --event workflow_dispatch \
-              --commit "$RELEASE_SHA" \
-              --limit 1 \
-              --json databaseId \
-              --jq '.[0].databaseId')
-            if [[ -n "$RUN_ID" ]]; then
-              gh run watch "$RUN_ID" --exit-status
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "Timed out waiting for CI on $RELEASE_SHA" >&2
-          exit 1
-
-      - name: Tag release commit
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-          RELEASE_SHA: ${{ steps.commit.outputs.sha }}
-        run: |
-          if git rev-parse "$TAG^{commit}" >/dev/null 2>&1; then
-            test "$RELEASE_SHA" = "$(git rev-parse "$TAG^{commit}")"
-          else
-            git tag -a "$TAG" -m "Release $TAG" "$RELEASE_SHA"
-            git push origin "$TAG"
-          fi
+          cd dist
+          sha256sum --check SHA256SUMS
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           else
-            gh release create "$TAG" \
+            gh release create "$GITHUB_REF_NAME" \
               dist/* \
-              --title "$TAG" \
+              --title "$GITHUB_REF_NAME" \
               --generate-notes
           fi
