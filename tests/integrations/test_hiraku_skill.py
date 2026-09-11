@@ -111,9 +111,13 @@ def _create_task(config: HirakuConfig) -> Task:
         "heart-disease",
         config=config,
         branch="main",
-        goal="Compare two model families on a fixed Cleveland cohort",
+        goal=(
+            "Develop and evaluate predictive models for heart disease on a fixed "
+            "Cleveland cohort"
+        ),
         question=(
-            "Does a nonlinear random forest improve on a calibrated linear baseline?"
+            "Which modeling approaches achieve the best validation log loss and "
+            "accuracy on this cohort?"
         ),
         metrics=[
             {"name": "val/log_loss", "direction": "minimize"},
@@ -153,10 +157,11 @@ def test_agent_creates_task_from_high_level_request(tmp_path: Path) -> None:
     agent_output = _run_codex(
         project,
         """Use the $hiraku skill to create a task named heart-disease. Its goal is
-to compare logistic regression and random forest on the fixed Cleveland cohort.
-Ask whether the nonlinear model improves on the calibrated linear baseline.
-Track validation log loss to minimize and validation accuracy to maximize. Only
-create and verify the task.""",
+to develop and evaluate predictive models for heart disease on the fixed
+Cleveland cohort without restricting the task to particular model families. Ask
+which modeling approaches achieve the best validation log loss and accuracy.
+Track val/log_loss to minimize and val/accuracy to maximize. Only create and
+verify the task.""",
     )
 
     tasks = list_tasks(config=config)
@@ -165,14 +170,14 @@ create and verify the task.""",
     assert task.id == "heart-disease"
     assert task.goal is not None
     goal = task.goal.lower()
-    assert "logistic regression" in goal
-    assert "random forest" in goal
+    assert "predictive" in goal
+    assert "heart disease" in goal
     assert "cleveland" in goal
     assert task.question is not None
     question = task.question.lower()
-    assert "nonlinear" in question
-    assert "calibrated" in question
-    assert "baseline" in question
+    assert "model" in question
+    assert "log loss" in question
+    assert "accuracy" in question
     assert [metric.model_dump() for metric in task.metrics] == [
         {"name": "val/log_loss", "direction": "minimize"},
         {"name": "val/accuracy", "direction": "maximize"},
@@ -191,9 +196,9 @@ def test_agent_creates_experiment_from_high_level_request(tmp_path: Path) -> Non
         """Use the $hiraku skill to create an experiment named logistic-baseline
 for the active task. Use the summary 'Logistic regression baseline' and the
 hypothesis 'Regularized logistic regression provides a calibrated baseline'. It
-should run train.py with the logistic model, seed 42, and a validation fraction
-of 0.25. Bind it to the current commit. Only create and verify the experiment;
-do not run it.""",
+should use uv run to invoke train.py with the logistic model, seed 42, and a
+validation fraction of 0.25. Bind it to the current commit. Only create and
+verify the experiment; do not run it.""",
     )
 
     experiments = list_experiments(task=task, config=config)
@@ -207,7 +212,7 @@ do not run it.""",
     assert experiment.commit == commit
     assert list(experiment.entrypoints) == ["train"]
     entrypoint = experiment.entrypoints["train"]
-    assert entrypoint.command[-1] == "train.py"
+    assert entrypoint.command == ["uv", "run", "python", "train.py"]
     normalized_args = {
         key.replace("_", "-"): value for key, value in entrypoint.args.items()
     }

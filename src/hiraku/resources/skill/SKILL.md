@@ -103,7 +103,7 @@ Classify the request before acting:
   it, and "run this experiment" does not create another experiment or rewrite
   its record.
 - **Bounded workflow:** Complete every requested stage in order, such as creating
-  a task, defining two experiments, running them, and comparing their results.
+  a task, defining experiments, running them, and comparing their results.
   Do not add stages the user did not request.
 - **Autonomous or program workflow:** Start or continue a research loop only when
   the user explicitly requests it. Read the selected program with
@@ -188,7 +188,9 @@ For a high-level task-creation request:
 1. Check for an existing task that already represents the request.
 2. Choose a concise slug when the user did not supply an ID.
 3. Translate the request into a concrete goal, research question, and declared
-   metrics with their optimization directions when these are known.
+   metrics with their optimization directions when these are known. Preserve
+   the user's actual research objective; do not narrow the task to the methods
+   chosen for initial examples or baselines unless the user requests that scope.
 4. Create the task and verify the canonical record.
 
 ```bash
