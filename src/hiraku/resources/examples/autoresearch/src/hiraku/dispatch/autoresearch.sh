@@ -11,6 +11,11 @@ for dependency in timeout flock; do
     exit 1
   fi
 done
+timeout_version=$(timeout --version 2>&1 || true)
+if [[ $timeout_version != *"GNU coreutils"* ]]; then
+  echo "autoresearch.sh: required Linux utility is unavailable: GNU coreutils timeout" >&2
+  exit 1
+fi
 if [[ ! -r /proc/sys/kernel/random/uuid ]]; then
   echo "autoresearch.sh: required Linux UUID source is unavailable: /proc/sys/kernel/random/uuid" >&2
   exit 1
