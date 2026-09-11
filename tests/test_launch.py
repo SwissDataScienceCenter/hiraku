@@ -151,9 +151,9 @@ def test_dispatcher_receives_context_and_experiment_commit(tmp_path: Path) -> No
     dispatcher.write_text(
         "#!/bin/sh\n"
         "printf '%s|%s|%s|%s|%s|%s|%s|%s\\n' \"$HIRAKU_TASK_ID\" "
-        "\"$HIRAKU_EXPERIMENT_ID\" \"$HIRAKU_TASK_FILE\" "
-        "\"$HIRAKU_EXPERIMENT_FILE\" \"$HIRAKU_ENTRYPOINT\" "
-        "\"$HIRAKU_COMMIT\" \"$HIRAKU_GIT_STATE\" \"$HIRAKU_ROOT\"\n"
+        '"$HIRAKU_EXPERIMENT_ID" "$HIRAKU_TASK_FILE" '
+        '"$HIRAKU_EXPERIMENT_FILE" "$HIRAKU_ENTRYPOINT" '
+        '"$HIRAKU_COMMIT" "$HIRAKU_GIT_STATE" "$HIRAKU_ROOT"\n'
         "printf '%s\\n' \"$@\"\n",
         encoding="utf-8",
     )
