@@ -132,6 +132,7 @@ def launch(
 
     """
     from .data import Entrypoint, load_experiment, load_task
+
     entrypoint = Entrypoint.model_validate(entrypoint)
     selected = config or HirakuConfig.discover()
     task = load_task(task_id, config=selected)
