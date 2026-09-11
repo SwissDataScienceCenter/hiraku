@@ -32,7 +32,8 @@ runs_path = Path(os.environ["HIRAKU_ROOT"]) / "runs.csv"
 
 Use `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_ENTRYPOINT`,
 `HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE` to populate attribution. See
-`examples/heart-disease/train.py` for a complete writer.
+Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
+`hiraku init --example heart-disease` to get a complete writer in `train.py`.
 
 ## Inspect
 

@@ -1,46 +1,46 @@
 # Cleveland Heart Disease example
 
 This bundled example compares logistic regression and a random forest on the
-processed Cleveland cohort from the [UCI Heart Disease dataset](https://archive.ics.uci.edu/dataset/45/heart+disease)/
+processed Cleveland cohort from the
+[UCI Heart Disease dataset](https://archive.ics.uci.edu/dataset/45/heart+disease/).
 
-## 1. Install Hiraku and copy the example
+## 1. Install Hiraku and initialize the example
 
-Start from a directory where you keep projects. If you already cloned Hiraku,
-start with `cd hiraku`.
+From a local Hiraku source checkout, install the CLI:
 
 ```bash
-git clone https://github.com/SwissDataScienceCenter/hiraku.git
-cd hiraku
 uv tool install .
-cp -R examples/heart-disease ../hiraku-heart-disease
-cd ../hiraku-heart-disease
+```
+
+Then create a project and let Hiraku install the training script, processed
+dataset, and dependencies for this example:
+
+```bash
+mkdir hiraku-heart-disease
+cd hiraku-heart-disease
+git init -b main
+hiraku init --example heart-disease
 uv sync
+git add .
+git commit -m "initialize Heart Disease example"
 ```
 
 `uv tool install .` installs the checked-out Hiraku CLI on your PATH.
 `uv sync` installs the example's training dependencies. If your shell cannot
 find `hiraku`, run `uv tool update-shell` and open a new shell.
 
-## 2. Initialize and save the source
-
-```bash
-git init -b main
-hiraku init
-git add .
-git commit -m "initialize Heart Disease example"
-```
-
 Initialization creates `hiraku.yml`, metadata directories, and the agent
-skill. The commit records the training code and bundled dataset that both
-experiments will evaluate.
+skill. The `heart-disease` example also copies `train.py`, `pyproject.toml`, and
+`data/processed.cleveland.data` into the project. The commit records the exact
+training code and dataset that both experiments will evaluate.
 
 ??? note "Tracking Hiraku metadata in git"
     In this example, `.gitignore` excludes hiraku metadata (`hiraku.yml`, `hiraku/*`) and the `runs.csv` file.
 
-    Hiraku is (mostly) agnostic to get state: You can commit metadata, and Hiraku shows what is currently visible in the working tree.
+    Hiraku is (mostly) agnostic to Git state: You can commit metadata, and Hiraku shows what is currently visible in the working tree.
     Merging task and experiment records is a user (or agent) responsibility.
 
-## 3. Define the task
+## 2. Define the task
 
 ```bash
 hiraku task create heart-disease \
@@ -58,9 +58,11 @@ hiraku task show
 You should see `active_task_id` to be `heart-disease` and the tracking backend to be
 CSV. 
 
-Note that hiraku by default assigns the branch `/hiraku/tasks/heart-disease` to the task. You can explicitly assign `--branch main`. 
+Hiraku records a suggested task branch in the task metadata. Pass
+`--branch main` to `hiraku task create` if you want the task record to point to
+the current branch instead.
 
-## 4. Run the baseline and inspect its result
+## 3. Run the baseline and inspect its result
 
 ```bash
 hiraku experiment create logistic-baseline \
@@ -97,7 +99,7 @@ training program writes the CSV row to project-root `runs.csv`.
     ```
 
 
-## 5. Compare another model
+## 4. Compare another model
 
 ```bash
 hiraku experiment create random-forest \
