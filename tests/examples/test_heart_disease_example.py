@@ -4,7 +4,6 @@ import csv
 import hashlib
 import json
 import math
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +16,11 @@ from hiraku.config import HirakuConfig
 from hiraku.data import load_experiment, load_task
 from hiraku.tracking import CSVBackend
 
-EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "heart-disease"
+REPOSITORY = Path(__file__).parents[2]
+EXAMPLE = (
+    REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "heart-disease"
+)
+OVERLAY = EXAMPLE / "src"
 DATA_SHA256 = "a74b7efa387bc9d108d7d0115d831fe9b414b29ae7124f331b622b4efa0427c8"
 EXPECTED_METRICS = {
     "logistic-baseline": (0.32254890, 0.85526316),
@@ -41,19 +44,25 @@ def invoke(runner: CliRunner, arguments: list[str]):
 @pytest.mark.integration
 def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
     source_files = {
-        path.relative_to(EXAMPLE): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in EXAMPLE.rglob("*")
+        path.relative_to(OVERLAY): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in OVERLAY.rglob("*")
         if path.is_file()
     }
     project = tmp_path / "heart-disease"
-    shutil.copytree(EXAMPLE, project)
+    project.mkdir()
     git(project, "init", "-b", "main")
     git(project, "config", "user.email", "test@example.invalid")
     git(project, "config", "user.name", "Test")
     monkeypatch.chdir(project)
     runner = CliRunner()
 
-    invoke(runner, ["init"])
+    initialized = invoke(runner, ["init", "--example", "heart-disease"])
+    assert "Created file: train.py" in initialized.output
+    assert "Created file: pyproject.toml" in initialized.output
+    assert "Created file: data/processed.cleveland.data" in initialized.output
+    assert "Created file: hiraku.yml" in initialized.output
+    assert not (project / "README.md").exists()
+    assert not (project / "example.yml").exists()
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize Heart Disease example")
     shared_commit = git(project, "rev-parse", "HEAD")
@@ -225,7 +234,7 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
         "random-forest",
     ]
     assert source_files == {
-        path.relative_to(EXAMPLE): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in EXAMPLE.rglob("*")
+        path.relative_to(OVERLAY): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in OVERLAY.rglob("*")
         if path.is_file()
     }
