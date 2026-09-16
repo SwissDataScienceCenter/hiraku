@@ -8,7 +8,7 @@ This example illustrates the Hiraku workflow for developing predictive models on
 From a local Hiraku source checkout, install the Hiraku CLI:
 
 ```bash
-git clone git@github.com:SwissDataScienceCenter/hiraku.git
+git clone https://github.com/SwissDataScienceCenter/hiraku.git
 cd hiraku
 uv tool install .
 ```
