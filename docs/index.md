@@ -56,7 +56,7 @@ flowchart LR
 * A `Task` defines the research task. It includes user-defined fields (e.g., a goal, question and metrics), documents the research progress, and specifies shared entrypoints and a tracking backend. Tasks are stored as  Markdown records under `hiraku/tasks/{task-id}/task.md`. 
 * An `Experiment` describes one small, reproducible unit within a task. It links a code commit, experiment entrypoints, and runs. Experiments are stored as Markdown records under `hiraku/tasks/{task-id}/experiments/{experiment-id}.md`.
 * A `Run` records an execution of an experiment. Runs are user managed and directly logged to CSV, MLflow, W&B, or any other backend. They are stored in the backend's own format and queried by Hiraku. 
-* Additionally, an `Entrypoint` defines executable command associated with documented arguments. Hiraku provides launch helpers and customizable dispatch scripts.
+* Additionally, an `Entrypoint` defines an executable command associated with documented arguments. Hiraku provides launch helpers and customizable dispatch scripts.
 
 ??? tip "Branching and experiment lineage"
     Git remains responsible for commits, branches, and source history. 
