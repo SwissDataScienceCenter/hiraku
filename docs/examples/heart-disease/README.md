@@ -1,38 +1,45 @@
 # Cleveland Heart Disease example
 
-This bundled example develops and evaluates predictive models on the processed
-Cleveland cohort from the
-[UCI Heart Disease dataset](https://archive.ics.uci.edu/dataset/45/heart+disease/).
-Logistic regression and a random forest are included as initial baselines.
+This example illustrates the Hiraku workflow for developing predictive models on the
+[Cleveland cohort heart disease dataset](https://archive.ics.uci.edu/dataset/45/heart+disease/).
 
 ## 1. Install Hiraku and initialize the example
 
-From a local Hiraku source checkout, install the CLI:
+From a local Hiraku source checkout, install the Hiraku CLI:
 
 ```bash
+git clone git@github.com:SwissDataScienceCenter/hiraku.git
+cd hiraku
 uv tool install .
 ```
 
 Then create a project and let Hiraku install the training script, processed
-dataset, and dependencies for this example:
-
+dataset, and dependencies for this example. 
 ```bash
 mkdir heart-disease
 cd heart-disease
 git init
 hiraku init --example heart-disease
+```
+Initialization creates `hiraku.yml`, metadata directories, and the agent
+skill. The `heart-disease` example also copies `train.py`, `pyproject.toml`, and
+`data/processed.cleveland.data` into the project. 
+Logistic regression and a random forest are included as initial baselines.
+
+
+If your shell cannot
+find `hiraku`, run `uv tool update-shell` and open a new shell.
+
+Install the example's training dependencies and commit the code.
+```bash
 uv sync
 git add .
 git commit -m "initialize Heart Disease example"
 ```
 
-`uv tool install .` installs the checked-out Hiraku CLI on your PATH.
-`uv sync` installs the example's training dependencies. If your shell cannot
-find `hiraku`, run `uv tool update-shell` and open a new shell.
 
-Initialization creates `hiraku.yml`, metadata directories, and the agent
-skill. The `heart-disease` example also copies `train.py`, `pyproject.toml`, and
-`data/processed.cleveland.data` into the project. The commit records the exact
+
+The commit records the exact
 training code and dataset that the initial baseline experiments will evaluate.
 
 ??? note "Tracking Hiraku metadata in git"
@@ -41,12 +48,13 @@ training code and dataset that the initial baseline experiments will evaluate.
     Hiraku is (mostly) agnostic to Git state: You can commit metadata, and Hiraku shows what is currently visible in the working tree.
     Merging task and experiment records is a user (or agent) responsibility.
 
-??? note "Agent workflow using skill"
-    Jump to [Run the example with an agent](#run-the-example-with-an-agent) to
-    see how a coding agent can use the project-local Hiraku skill to perform the
-    same workflow.
 
 ## 2. Define the task
+
+??? tip "Agent workflow using skill"
+    Jump to [Run the example with an agent](#using-the-hiraku-skill) to
+    see how a coding agent can use the project-local Hiraku skill to perform the
+    same workflow.
 
 ```bash
 hiraku task create heart-disease \
@@ -64,11 +72,11 @@ hiraku task show
 You should see `active_task_id` to be `heart-disease` and the tracking backend to be
 CSV. 
 
-Hiraku records a suggested task branch in the task metadata. Pass
-`--branch main` to `hiraku task create` if you want the task record to point to
-the current branch instead.
+??? tip "Defining a task branch"
+    Hiraku records a task branch in the task metadata. Use `hiraku task create --branch main` if you want the task record to point to
+    the current branch instead.
 
-## 3. Run the baseline and inspect its result
+## 3. Create a baseline experiment
 
 ```bash
 hiraku experiment create logistic-baseline \
@@ -76,6 +84,8 @@ hiraku experiment create logistic-baseline \
   --hypothesis "Regularized logistic regression provides a calibrated baseline" \
   --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: logistic, seed: 42, validation-fraction: 0.25}}}'
+
+hiraku experiment show logistic-baseline
 
 # show entrypoint definitions
 hiraku experiment entrypoints
@@ -95,6 +105,15 @@ Expect one run with `val/log_loss` and `val/accuracy`. The default dispatcher
 runs the current working state and reports its commit and clean/dirty state. The
 training program writes the CSV row to project-root `runs.csv`.
 
+??? tip "Tracking backends: CSV, Weights & Biases, MLflow and custom backends"
+    Hiraku does **not** handle, control or own metric logging. Training scripts log metrics directly to a user-managed tracking backend, independently of Hiraku.
+
+
+    In this example, results are written to `runs.csv`, but more advanced projects can use [Weights & Biases](http://localhost:8000/hiraku/guides/tracking-wandb/), [MLflow](http://localhost:8000/hiraku/guides/tracking-mlflow/), or [custom backends](http://localhost:8000/hiraku/guides/tracking-custom/).
+
+    Hiraku only **queries the tracking backend for existing runs and metrics**. This means the same training and logging setup can be used with or without Hiraku.
+
+
 ??? note "Launch dispatchers and isolated execution"
     By default `hiraku launch logistic-baseline:train` passes the entrypoint command to a bash script in `hiraku/dispatch/launch.sh`, which executes the command. Launch scripts are project data that can be modified to support custom launch dispatch behaviour, e.g. submitting a job to a compute platform.
 
@@ -105,7 +124,7 @@ training program writes the CSV row to project-root `runs.csv`.
     ```
 
 
-## 4. Run a second baseline
+## 4. Run a second experiment
 
 ```bash
 hiraku experiment create random-forest \
@@ -134,7 +153,7 @@ launch that never logs a row will not appear as a run.
     | `logistic-baseline` | `23b1c42c` | Logistic regression | 0.32254890 | 0.85526316 |
     | `random-forest` | `880d2cd3` | Random forest | 0.35226763 | 0.86842105 |
 
-## Run the example with an agent
+## Using the Hiraku skill
 
 `hiraku init` installs the same project-local Hiraku skill for Codex at
 `.agents/skills/hiraku/` and for Claude Code at `.claude/skills/hiraku/`. After
@@ -250,18 +269,18 @@ baseline should have lower validation log loss, while the random forest should
 have slightly higher validation accuracy. The extension experiment should bind
 the new implementation commit and use the same evaluation settings.
 
-### Developer note
+??? note "Codex integration tests"
 
-The first three stepwise prompts are covered by the opt-in Codex integration
-tests. The remaining prompts provide additional user testing for the full
-example.
+    The first three stepwise prompts are covered by the opt-in Codex integration
+    tests. The remaining prompts provide additional user testing for the full
+    example.
 
-Hiraku developers can run the three fresh-repository agent checks explicitly:
+    Hiraku developers can run the three fresh-repository agent checks explicitly:
 
-```bash
-HIRAKU_RUN_CODEX_SKILL_TESTS=1 \
-  uv run pytest -n 0 tests/integrations/test_hiraku_skill.py
-```
+    ```bash
+    HIRAKU_RUN_CODEX_SKILL_TESTS=1 \
+    uv run pytest -n 0 tests/integrations/test_hiraku_skill.py
+    ```
 
-These tests invoke `codex exec` with GPT-5.6 Luna and require local Codex
-authentication. They are skipped during the normal test suite and CI.
+    These tests invoke `codex exec` with GPT-5.6 Luna and require local Codex
+    authentication. They are skipped during the normal test suite and CI.
