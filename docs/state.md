@@ -153,10 +153,6 @@ Two things about this table are worth being explicit about:
   but neither was chosen deliberately — it is the order the checks happen to run in. Whether
   research should actually be paced this way (versus, say, finishing analysis before starting new
   runs) has not been discussed on its own terms.
-- **Does `design` belong in the same priority list as the rest, or is it categorically different?**
-  Right now it can only fire when the tree is completely empty, so a goal that already has some
-  structure can never be offered "propose more nodes" as a scheduled action — only as something a
-  person invokes directly. Is that the intended boundary between design and the rest of the loop?
 - **Do `analyze` and `triage` need to exclude `abandoned` nodes explicitly?** Both conditions check
   `runs`/`verdict`/`children` but not `status`. A node someone has explicitly abandoned, if it still
   has unanalyzed runs or a stale untriaged verdict from before it was abandoned, would still match
