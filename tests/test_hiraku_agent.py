@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import pytest
@@ -287,13 +288,73 @@ def test_node_with_results_and_no_verdict_asks_to_analyze(
     node.commit = COMMIT_A
     node.save()
 
-    # No tracking backend is configured in this test project — stub `runs()`
-    # rather than pull in a real backend just to produce one row of evidence
-    # for the scheduler to react to.
+    # HirakuConfig defaults to a real CSV backend reading <root>/runs.csv
+    # (HirakuConfig.DEFAULTS["tracking_backend"]) — no runs.csv file exists
+    # in this fresh tmp_path project, so the real backend legitimately
+    # returns []. Stubbing `runs()` here is only to avoid writing a CSV file
+    # by hand for a test about scheduling priority, not because no backend
+    # is configured — see test_a_real_csv_backend_row_moves_the_scheduler
+    # below for the same transition through the unmocked backend.
     def fake_runs(self: Node, **_: object) -> list[object]:
         return [object()] if self.id == "baseline" else []
 
     monkeypatch.setattr(Node, "runs", fake_runs)
+
+    suggestion = suggest_next(task, config=config)
+    assert suggestion == {
+        "action": "analyze",
+        "node": "baseline",
+        "why": "has results, no verdict yet",
+    }
+
+
+def test_a_real_csv_backend_row_moves_the_scheduler(
+    config: HirakuConfig, task: Task
+) -> None:
+    """No monkeypatching: a real runs.csv row, read by hiraku's own CSVBackend.
+
+    Confirms `Node.runs()` (inherited, unmodified, from `Experiment.runs()`)
+    actually reaches a real tracking backend — the same one `hiraku run list`
+    itself uses — not just a shape this module's tests assume.
+    """
+    node = create_node("baseline", task=task, config=config)
+    approve(node, by="qianqian")
+    node.commit = COMMIT_A
+    node.save()
+    assert suggest_next(task, config=config)["action"] == "launch"
+
+    runs_csv = config.root / "runs.csv"
+    with runs_csv.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=[
+                "id",
+                "task_id",
+                "experiment_id",
+                "commit",
+                "timestamp",
+                "entrypoint",
+                "url",
+                "metric.val_accuracy",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "id": "run-001",
+                "task_id": "vo-backend",
+                "experiment_id": "baseline",
+                "commit": COMMIT_A,
+                "timestamp": "2026-09-18T12:00:00Z",
+                "entrypoint": "train",
+                "url": "",
+                "metric.val_accuracy": "0.87",
+            }
+        )
+
+    runs = node.runs(config=config)
+    assert len(runs) == 1
+    assert runs[0].metrics["val_accuracy"] == "0.87"
 
     suggestion = suggest_next(task, config=config)
     assert suggestion == {
