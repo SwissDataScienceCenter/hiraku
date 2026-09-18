@@ -7,18 +7,16 @@ manages. `hiraku experiment show`/`list` see the same files; they just don't
 know the shape of the extra fields (`Record`'s `extra="allow"` is what makes
 that safe).
 
-**Scope of this version.** This module answers "what's the single next
-thing to do," and the `approve`/`implement`/`launch` actions it names are
-real: `gates.approve` records approval, `hiraku experiment update <id>
---commit <hash>` is what "implement" resolves to, and
-`hiraku launch <id>:<entrypoint>` is what "launch" resolves to. What it does
-*not* yet do is decide the *content* of `design`, `discover`, `triage`, or
-`analyze` — proposing what a new node should say, or judging what a result
-means, both need an LLM in the loop the way `hiraku_agent`'s previous
-implementation used `--agent-cmd`, and that subprocess-calling,
-prompt-templated machinery has not been ported yet. Where those actions are
-named below, `suggest_next` is only saying *that* one of them is next, not
-producing their output.
+**Scope of this module.** It answers "what's the single next thing to do,"
+never *how* to do it. `approve`/`implement`/`launch` are real, mechanical
+actions: `gates.approve` records approval, `hiraku experiment update <id>
+--commit <hash>` is what "implement" resolves to, and `hiraku launch
+<id>:<entrypoint>` is what "launch" resolves to. `design`/`discover`/
+`triage`/`analyze` need judgement — proposing what a new node should say, or
+what a result means — and that judgement is an LLM call, in `workflows.py`
+(`run_design`/`run_discover`/`run_triage`/`run_analyze`, via `engine.py`).
+This module only ever says *that* one of the four is next; it never calls
+the agent or decides what it should say.
 """
 
 from __future__ import annotations
@@ -44,13 +42,17 @@ def suggest_next(
     module docstring for what each action means and does not yet mean.
     """
     selected = config or HirakuConfig.discover()
+    task_id = task.id if isinstance(task, Task) else str(task)
     nodes = list_nodes(task=task, config=selected)
 
     if not nodes:
         return {
             "action": "design",
             "why": "the task has no experiments yet",
-            "next_commands": ["hiraku-agent design", "hiraku-agent discover"],
+            "next_commands": [
+                f"hiraku-agent design --task {task_id}",
+                f"hiraku-agent discover --task {task_id}",
+            ],
         }
 
     children_of: dict[str, list[str]] = defaultdict(list)
@@ -92,6 +94,7 @@ def suggest_next(
                 "action": "analyze",
                 "node": node_id,
                 "why": "has results, no verdict yet",
+                "next_commands": [f"hiraku-agent analyze {node_id} --task {task_id}"],
             }
 
     # Priority 3 — concluded without settling the question.
@@ -102,6 +105,7 @@ def suggest_next(
                 "action": "triage",
                 "node": node_id,
                 "why": f"verdict is {verdict!r}, needs a decision about what's next",
+                "next_commands": [f"hiraku-agent triage {node_id} --task {task_id}"],
             }
 
     # Priority 4 — proposed, gate not yet cleared. In `auto` mode
@@ -113,6 +117,9 @@ def suggest_next(
                 "action": "approve",
                 "node": node_id,
                 "why": "awaiting the approval gate",
+                "next_commands": [
+                    f"hiraku-agent approve {node_id} --task {task_id} --by <you>"
+                ],
             }
 
     return {"action": "exhausted", "why": "nothing left to schedule"}

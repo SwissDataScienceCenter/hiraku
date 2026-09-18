@@ -1,9 +1,10 @@
-"""`hiraku-agent`: the thin CLI over `schedule.suggest_next` and `gates.approve`.
+"""`hiraku-agent`: the thin CLI over the scheduler and the LLM-driven workflows.
 
-Deliberately small. Everything else a research loop needs — creating a node,
-binding a commit, launching, inspecting runs — is already `hiraku`'s own CLI
-(`hiraku experiment ...`, `hiraku launch`, `hiraku run list`). This module
-only adds what `hiraku` doesn't have: "what's next" and "approve this."
+Deliberately small where `hiraku` already covers something. Creating a node, binding a
+commit, launching, inspecting runs — all `hiraku`'s own CLI (`hiraku experiment ...`,
+`hiraku launch`, `hiraku run list`). This module adds what `hiraku` doesn't have:
+"what's next", "approve this," and the four LLM-driven workflows (`design`, `discover`,
+`triage`, `analyze`) described in `workflows.py`.
 """
 
 from __future__ import annotations
@@ -16,9 +17,12 @@ import click
 from hiraku.config import HirakuConfig
 from hiraku.errors import HirakuError, NoActiveTaskError
 
+from .engine import AgentRun, Hooks
+from .engine import agent_command as resolve_agent_cmd
 from .gates import approve as approve_node
 from .node import load_node
 from .schedule import suggest_next
+from .workflows import run_analyze, run_design, run_discover, run_triage
 
 
 def _resolve_task(config: HirakuConfig, task_id: str | None) -> str:
@@ -71,3 +75,258 @@ def approve_command(node_id: str, task_id: str | None, by: str) -> None:
     except HirakuError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"Approved {resolved_task}:{node_id} (by {by})")
+
+
+# ---------------------------------------------------------------------- agent workflows
+
+_AGENT_OPTIONS = (
+    click.option(
+        "instruction", "--instruction", "-m", default="", help="steer the agent"
+    ),
+    click.option(
+        "instruction_file",
+        "--instruction-file",
+        type=click.Path(exists=True, dir_okay=False),
+        default=None,
+        help="read --instruction from a file instead",
+    ),
+    click.option(
+        "agent_cmd", "--agent-cmd", default=None, help="override the agent command"
+    ),
+    click.option(
+        "dry_run", "--dry-run", is_flag=True, help="print the prompt, call nothing"
+    ),
+    click.option(
+        "no_apply", "--no-apply", is_flag=True, help="call the agent, but write nothing"
+    ),
+    click.option(
+        "context_paths", "--context", multiple=True, help="a file to read as background"
+    ),
+    click.option("timeout", "--timeout", type=int, default=None),
+    click.option(
+        "unset_env",
+        "--unset-env",
+        multiple=True,
+        help="drop this env var before calling",
+    ),
+    click.option(
+        "json_output", "--json", is_flag=True, help="print the agent's raw JSON reply"
+    ),
+)
+
+
+def _apply_agent_options(func: Any) -> Any:
+    for option in reversed(_AGENT_OPTIONS):
+        func = option(func)
+    return func
+
+
+def _resolve_instruction(instruction: str, instruction_file: str | None) -> str:
+    if instruction_file:
+        from pathlib import Path
+
+        return Path(instruction_file).read_text(encoding="utf-8")
+    return instruction
+
+
+def _hooks() -> Hooks:
+    """Progress noise on stderr — an agent call is minutes long and silent otherwise."""
+
+    def start(info: dict[str, Any]) -> None:
+        click.echo(f"calling {info['command']!r} ...", err=True)
+
+    last = {"tick": -30.0}
+
+    def tick(elapsed: float) -> None:
+        if elapsed - last["tick"] >= 15:
+            last["tick"] = elapsed
+            click.echo(f"  ... still running ({elapsed:.0f}s)", err=True)
+
+    def done(info: dict[str, Any]) -> None:
+        if info.get("error"):
+            click.echo(f"failed after {info['seconds']}s: {info['error']}", err=True)
+        else:
+            click.echo(f"done in {info['seconds']}s (log: {info['log']})", err=True)
+
+    return Hooks(start=start, tick=tick, done=done)
+
+
+def _run_agent_command(
+    runner: Any,
+    *args: Any,
+    json_output: bool,
+    no_apply: bool,
+    dry_run: bool,
+    **workflow_kwargs: Any,
+) -> None:
+    """Call one workflow function and print its result.
+
+    `json_output`/`no_apply`/`dry_run` are CLI-presentation concerns, kept out of
+    `workflow_kwargs` so it can be splatted straight into the workflow function's own
+    signature (`run_design`, `run_discover`, `run_triage`, `run_analyze` all take
+    `dry_run`/`apply`/... directly, not a `json_output`/`no_apply` pair).
+    """
+    config = HirakuConfig.discover()
+    try:
+        result: AgentRun = runner(
+            *args, config=config, dry_run=dry_run, **workflow_kwargs
+        )
+    except HirakuError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if dry_run:
+        click.echo(result.prompt)
+        return
+    if json_output:
+        click.echo(
+            json_module.dumps(result.data, indent=2, sort_keys=True, default=str)
+        )
+    else:
+        for note_key in ("notes", "missing_evidence", "blocked"):
+            if result.data.get(note_key):
+                click.echo(f"{note_key}: {result.data[note_key]}")
+        if result.written:
+            click.echo("wrote:")
+            for path in result.written:
+                click.echo(f"  {path}")
+        else:
+            click.echo("wrote nothing" + (" (--no-apply)" if no_apply else ""))
+
+
+@main.command("design")
+@click.option("task_id", "--task", default=None)
+@_apply_agent_options
+def design_command(
+    task_id: str | None,
+    instruction: str,
+    instruction_file: str | None,
+    agent_cmd: str | None,
+    dry_run: bool,
+    no_apply: bool,
+    context_paths: tuple[str, ...],
+    timeout: int | None,
+    unset_env: tuple[str, ...],
+    json_output: bool,
+) -> None:
+    """Propose a tree of experiments for a task."""
+    config = HirakuConfig.discover()
+    resolved_task = _resolve_task(config, task_id)
+    _run_agent_command(
+        run_design,
+        resolved_task,
+        instruction=_resolve_instruction(instruction, instruction_file),
+        command=resolve_agent_cmd(agent_cmd) if agent_cmd else None,
+        dry_run=dry_run,
+        apply=not no_apply,
+        context_paths=list(context_paths),
+        unset_env=list(unset_env),
+        hooks=None if dry_run else _hooks(),
+        timeout=timeout,
+        json_output=json_output,
+        no_apply=no_apply,
+    )
+
+
+@main.command("discover")
+@click.option("task_id", "--task", default=None)
+@_apply_agent_options
+def discover_command(
+    task_id: str | None,
+    instruction: str,
+    instruction_file: str | None,
+    agent_cmd: str | None,
+    dry_run: bool,
+    no_apply: bool,
+    context_paths: tuple[str, ...],
+    timeout: int | None,
+    unset_env: tuple[str, ...],
+    json_output: bool,
+) -> None:
+    """Search for candidate hypotheses for a task, from the literature or an idea you
+    give it."""
+    config = HirakuConfig.discover()
+    resolved_task = _resolve_task(config, task_id)
+    _run_agent_command(
+        run_discover,
+        resolved_task,
+        instruction=_resolve_instruction(instruction, instruction_file),
+        command=resolve_agent_cmd(agent_cmd) if agent_cmd else None,
+        dry_run=dry_run,
+        apply=not no_apply,
+        context_paths=list(context_paths),
+        unset_env=list(unset_env),
+        hooks=None if dry_run else _hooks(),
+        timeout=timeout,
+        json_output=json_output,
+        no_apply=no_apply,
+    )
+
+
+@main.command("triage")
+@click.argument("node_id")
+@click.option("task_id", "--task", default=None)
+@_apply_agent_options
+def triage_command(
+    node_id: str,
+    task_id: str | None,
+    instruction: str,
+    instruction_file: str | None,
+    agent_cmd: str | None,
+    dry_run: bool,
+    no_apply: bool,
+    context_paths: tuple[str, ...],
+    timeout: int | None,
+    unset_env: tuple[str, ...],
+    json_output: bool,
+) -> None:
+    """Classify why NODE_ID's result missed its expectation, and decide whether to
+    follow up."""
+    _run_agent_command(
+        run_triage,
+        node_id,
+        task_id=task_id,
+        instruction=_resolve_instruction(instruction, instruction_file),
+        command=resolve_agent_cmd(agent_cmd) if agent_cmd else None,
+        dry_run=dry_run,
+        apply=not no_apply,
+        context_paths=list(context_paths),
+        unset_env=list(unset_env),
+        hooks=None if dry_run else _hooks(),
+        timeout=timeout,
+        json_output=json_output,
+        no_apply=no_apply,
+    )
+
+
+@main.command("analyze")
+@click.argument("node_id")
+@click.option("task_id", "--task", default=None)
+@_apply_agent_options
+def analyze_command(
+    node_id: str,
+    task_id: str | None,
+    instruction: str,
+    instruction_file: str | None,
+    agent_cmd: str | None,
+    dry_run: bool,
+    no_apply: bool,
+    context_paths: tuple[str, ...],
+    timeout: int | None,
+    unset_env: tuple[str, ...],
+    json_output: bool,
+) -> None:
+    """Judge NODE_ID's runs against its expectation and write its findings."""
+    _run_agent_command(
+        run_analyze,
+        node_id,
+        task_id=task_id,
+        instruction=_resolve_instruction(instruction, instruction_file),
+        command=resolve_agent_cmd(agent_cmd) if agent_cmd else None,
+        dry_run=dry_run,
+        apply=not no_apply,
+        context_paths=list(context_paths),
+        unset_env=list(unset_env),
+        hooks=None if dry_run else _hooks(),
+        timeout=timeout,
+        json_output=json_output,
+        no_apply=no_apply,
+    )
