@@ -1,4 +1,4 @@
-"""hiraku_auto: the research-loop scheduler, built on `hiraku`'s own data model.
+"""hiraku_agent: the research-loop scheduler, built on `hiraku`'s own data model.
 
 This package does not reimplement records, tasks, experiments, or launching —
 `hiraku` already owns all of that, and every file this package writes is a

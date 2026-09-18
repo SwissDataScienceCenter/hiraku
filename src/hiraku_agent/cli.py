@@ -1,4 +1,4 @@
-"""`hiraku-auto`: the thin CLI over `schedule.suggest_next` and `gates.approve`.
+"""`hiraku-agent`: the thin CLI over `schedule.suggest_next` and `gates.approve`.
 
 Deliberately small. Everything else a research loop needs — creating a node,
 binding a commit, launching, inspecting runs — is already `hiraku`'s own CLI
@@ -31,7 +31,7 @@ def _resolve_task(config: HirakuConfig, task_id: str | None) -> str:
     )
 
 
-@click.group(name="hiraku-auto")
+@click.group(name="hiraku-agent")
 def main() -> None:
     """The research-loop scheduler on top of `hiraku`."""
 

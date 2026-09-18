@@ -40,7 +40,7 @@ _Decision = Literal["keep", "discard", "crash"]
 
 
 class Node(Experiment):
-    """An `Experiment` plus the extra fields `hiraku_auto`'s scheduler reads and writes.
+    """An `Experiment` plus the extra fields `hiraku_agent`'s scheduler reads.
 
     Attributes:
         parent: The id of this node's parent within the same task, or `None`
@@ -52,7 +52,7 @@ class Node(Experiment):
         kind: What sort of node this is — see `KINDS`.
         origin: Who proposed it — see `ORIGINS`.
         mode: `guided` (the approval gate stops for a person) or `auto` (it
-            clears itself). See `hiraku_auto.gates`.
+            clears itself). See `hiraku_agent.gates`.
         expectation: One falsifiable sentence: predicted direction, metric,
             mechanism.
         verdict: What the evidence showed about the hypothesis — see
@@ -64,7 +64,7 @@ class Node(Experiment):
             refute it and still be a `keep` (e.g. a documented dead end).
         approved_by: Who cleared the approval gate in `guided` mode. `None`
             in `auto` mode, where nothing needs to have signed anything
-            (`hiraku_auto.gates.is_approved` checks `mode` first).
+            (`hiraku_agent.gates.is_approved` checks `mode` first).
         approved_at: When `approved_by` was recorded, as an ISO-8601 string
             — `Record`'s YAML front matter only accepts
             str/int/float/bool/None/list/mapping (see
