@@ -14,7 +14,7 @@ real: `gates.approve` records approval, `hiraku experiment update <id>
 `hiraku launch <id>:<entrypoint>` is what "launch" resolves to. What it does
 *not* yet do is decide the *content* of `design`, `discover`, `triage`, or
 `analyze` — proposing what a new node should say, or judging what a result
-means, both need an LLM in the loop the way `hiraku_auto`'s previous
+means, both need an LLM in the loop the way `hiraku_agent`'s previous
 implementation used `--agent-cmd`, and that subprocess-calling,
 prompt-templated machinery has not been ported yet. Where those actions are
 named below, `suggest_next` is only saying *that* one of them is next, not
@@ -50,7 +50,7 @@ def suggest_next(
         return {
             "action": "design",
             "why": "the task has no experiments yet",
-            "next_commands": ["hiraku-auto design", "hiraku-auto discover"],
+            "next_commands": ["hiraku-agent design", "hiraku-agent discover"],
         }
 
     children_of: dict[str, list[str]] = defaultdict(list)

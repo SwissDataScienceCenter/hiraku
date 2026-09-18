@@ -1,4 +1,4 @@
-"""Tests for hiraku_auto's scheduler, ported onto hiraku's own Task/Experiment model."""
+"""Tests for hiraku_agent's scheduler, ported onto hiraku's Task/Experiment model."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.data import Experiment, Task, load_experiment
-from hiraku_auto.gates import approve, is_approved
-from hiraku_auto.node import Node, create_node, list_nodes, load_node
-from hiraku_auto.schedule import suggest_next
-from hiraku_auto.state import node_state
+from hiraku_agent.gates import approve, is_approved
+from hiraku_agent.node import Node, create_node, list_nodes, load_node
+from hiraku_agent.schedule import suggest_next
+from hiraku_agent.state import node_state
 
 COMMIT_A = "a" * 40
 
@@ -203,8 +203,8 @@ def test_empty_task_asks_to_design_or_discover(
 ) -> None:
     suggestion = suggest_next(task, config=config)
     assert suggestion["action"] == "design"
-    assert "hiraku-auto design" in suggestion["next_commands"]
-    assert "hiraku-auto discover" in suggestion["next_commands"]
+    assert "hiraku-agent design" in suggestion["next_commands"]
+    assert "hiraku-agent discover" in suggestion["next_commands"]
 
 
 def test_approved_proposed_node_asks_to_implement(
