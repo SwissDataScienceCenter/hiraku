@@ -16,13 +16,17 @@ one thing to do next across a whole task's worth of nodes (`schedule.py`).
 (`model_config = ConfigDict(extra="allow")`), which is what makes all of this
 possible without changing anything in `hiraku` itself.
 
-Scope of this first version: the deterministic scheduling skeleton — state
-derivation, the approval gate, and `suggest_next()`. It does not yet include
-the LLM-driven content generation for `design`, `discover`, `triage`, or
-`analyze` (deciding *what* a new node should say, or *what a result means*)
-— `schedule.py`'s docstring says exactly where that plugs in next.
+On top of the deterministic scheduling skeleton — state derivation
+(`state.py`), the approval gate (`gates.py`), and `suggest_next()`
+(`schedule.py`) — this package also has the LLM-driven half: `engine.py`
+calls an agent CLI (`claude -p` by default) and gets one JSON object back,
+`prompts/` holds what each workflow asks it, and `workflows.py`'s
+`run_design`/`run_discover`/`run_triage`/`run_analyze` are what turn that
+reply into `Node` records. `cli.py` exposes all four, plus `next` and
+`approve`, as `hiraku-agent design|discover|triage|analyze|next|approve`.
 """
 
+from .engine import AgentRun, Hooks
 from .gates import approve, is_approved
 from .node import (
     DECISIONS,
@@ -35,20 +39,30 @@ from .node import (
     list_nodes,
     load_node,
 )
+from .schedule import suggest_next
 from .state import STATES, node_state
+from .workflows import run_analyze, run_design, run_discover, run_triage, task_state
 
 __all__ = [
     "DECISIONS",
     "KINDS",
     "MODES",
     "ORIGINS",
-    "VERDICTS",
-    "Node",
     "STATES",
+    "VERDICTS",
+    "AgentRun",
+    "Hooks",
+    "Node",
     "approve",
     "create_node",
     "is_approved",
     "list_nodes",
     "load_node",
     "node_state",
+    "run_analyze",
+    "run_design",
+    "run_discover",
+    "run_triage",
+    "suggest_next",
+    "task_state",
 ]

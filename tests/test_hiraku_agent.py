@@ -204,8 +204,12 @@ def test_empty_task_asks_to_design_or_discover(
 ) -> None:
     suggestion = suggest_next(task, config=config)
     assert suggestion["action"] == "design"
-    assert "hiraku-agent design" in suggestion["next_commands"]
-    assert "hiraku-agent discover" in suggestion["next_commands"]
+    assert any(
+        cmd.startswith("hiraku-agent design") for cmd in suggestion["next_commands"]
+    )
+    assert any(
+        cmd.startswith("hiraku-agent discover") for cmd in suggestion["next_commands"]
+    )
 
 
 def test_approved_proposed_node_asks_to_implement(
@@ -305,6 +309,7 @@ def test_node_with_results_and_no_verdict_asks_to_analyze(
         "action": "analyze",
         "node": "baseline",
         "why": "has results, no verdict yet",
+        "next_commands": ["hiraku-agent analyze baseline --task vo-backend"],
     }
 
 
@@ -361,6 +366,7 @@ def test_a_real_csv_backend_row_moves_the_scheduler(
         "action": "analyze",
         "node": "baseline",
         "why": "has results, no verdict yet",
+        "next_commands": ["hiraku-agent analyze baseline --task vo-backend"],
     }
 
 
