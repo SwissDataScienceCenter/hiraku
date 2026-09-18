@@ -1,0 +1,118 @@
+"""`suggest_next()`: the goal-level scheduling policy (`docs/state.md`, section 5).
+
+Ported onto `hiraku`'s own model: what was `suggest_next(forest, goal_id)`
+over a from-scratch record tree is now `suggest_next(task_id)`, reading
+`Node` records that live in the exact task directories `hiraku` itself
+manages. `hiraku experiment show`/`list` see the same files; they just don't
+know the shape of the extra fields (`Record`'s `extra="allow"` is what makes
+that safe).
+
+**Scope of this version.** This module answers "what's the single next
+thing to do," and the `approve`/`implement`/`launch` actions it names are
+real: `gates.approve` records approval, `hiraku experiment update <id>
+--commit <hash>` is what "implement" resolves to, and
+`hiraku launch <id>:<entrypoint>` is what "launch" resolves to. What it does
+*not* yet do is decide the *content* of `design`, `discover`, `triage`, or
+`analyze` — proposing what a new node should say, or judging what a result
+means, both need an LLM in the loop the way `hiraku_auto`'s previous
+implementation used `--agent-cmd`, and that subprocess-calling,
+prompt-templated machinery has not been ported yet. Where those actions are
+named below, `suggest_next` is only saying *that* one of them is next, not
+producing their output.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from typing import Any
+
+from hiraku.config import HirakuConfig
+from hiraku.data import Task
+
+from .gates import is_approved
+from .node import list_nodes
+from .state import node_state
+
+
+def suggest_next(
+    task: Task | str, *, config: HirakuConfig | None = None
+) -> dict[str, Any]:
+    """The single next action for `task`, and why.
+
+    Returns a dict with at least `action` and `why`; `design`/`exhausted`
+    have no single `node` to name, everything else includes `node`. See the
+    module docstring for what each action means and does not yet mean.
+    """
+    selected = config or HirakuConfig.discover()
+    nodes = list_nodes(task=task, config=selected)
+
+    if not nodes:
+        return {
+            "action": "design",
+            "why": "the task has no experiments yet",
+            "next_commands": ["hiraku-auto design", "hiraku-auto discover"],
+        }
+
+    children_of: dict[str, list[str]] = defaultdict(list)
+    for node in nodes:
+        if node.parent:
+            children_of[node.parent].append(node.id)
+
+    runs_by_id = {node.id: node.runs(config=selected) for node in nodes}
+    states = {
+        node.id: node_state(
+            node, runs_by_id[node.id], has_children=bool(children_of[node.id])
+        )
+        for node in nodes
+    }
+    by_id = {node.id: node for node in nodes}
+
+    # Priority 1 — approved and proposed: no code yet.
+    for node_id, state in states.items():
+        if state == "proposed" and is_approved(by_id[node_id]):
+            return {
+                "action": "implement",
+                "node": node_id,
+                "why": "approved, but no code bound to it yet",
+            }
+
+    # Priority 1 — approved and implemented: never run.
+    for node_id, state in states.items():
+        if state == "implemented" and is_approved(by_id[node_id]):
+            return {
+                "action": "launch",
+                "node": node_id,
+                "why": "implemented and approved, never launched",
+            }
+
+    # Priority 2 — has results, no verdict yet.
+    for node_id, state in states.items():
+        if state == "awaiting_analysis":
+            return {
+                "action": "analyze",
+                "node": node_id,
+                "why": "has results, no verdict yet",
+            }
+
+    # Priority 3 — concluded without settling the question.
+    for node_id, state in states.items():
+        if state == "concluded_untriaged":
+            verdict = by_id[node_id].verdict
+            return {
+                "action": "triage",
+                "node": node_id,
+                "why": f"verdict is {verdict!r}, needs a decision about what's next",
+            }
+
+    # Priority 4 — proposed, gate not yet cleared. In `auto` mode
+    # `is_approved` is already true above, so a node only reaches here in
+    # `guided` mode.
+    for node_id, state in states.items():
+        if state == "proposed":
+            return {
+                "action": "approve",
+                "node": node_id,
+                "why": "awaiting the approval gate",
+            }
+
+    return {"action": "exhausted", "why": "nothing left to schedule"}
