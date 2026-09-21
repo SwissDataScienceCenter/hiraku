@@ -25,10 +25,21 @@ calls an agent CLI (`claude -p` by default) and gets one JSON object back,
 turn that reply into a `Task` or `Node` record. `cli.py` exposes all five,
 plus `next` and `approve`, as
 `hiraku-agent draft|design|discover|triage|analyze|next|approve`.
+
+Two more modules bridge these workflows to `hiraku.agent`'s `Action`/
+`Context`/`Program` records — plain data, never code (see `hiraku.agent`'s
+own docstring: "execution is out of scope"). `actions.py` translates a saved
+`Action`/`Context` record's fields into the keyword arguments the workflow
+functions already take (`--action`/`--context-id` on any of the five
+commands); `loop.py`'s `run_loop` repeats that translation across a whole
+bounded loop driven by a `Program` record (`hiraku-agent loop`). Neither
+module changes what the workflow functions do or take away their existing,
+record-free call path.
 """
 
 from .engine import AgentRun, Hooks
 from .gates import approve, is_approved
+from .loop import LoopResult, LoopStep, run_loop
 from .node import (
     DECISIONS,
     KINDS,
@@ -60,6 +71,8 @@ __all__ = [
     "VERDICTS",
     "AgentRun",
     "Hooks",
+    "LoopResult",
+    "LoopStep",
     "Node",
     "approve",
     "create_node",
@@ -71,6 +84,7 @@ __all__ = [
     "run_design",
     "run_discover",
     "run_draft",
+    "run_loop",
     "run_triage",
     "suggest_next",
     "task_state",
