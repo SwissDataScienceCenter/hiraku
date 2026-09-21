@@ -71,41 +71,23 @@ Use a feature branch and focused commits. [Conventional Commit](https://www.conv
 
 ## Release a new version
 
-Make sure the release notes are current under `## [Unreleased]` in
-`CHANGELOG.md` and the working tree is clean. From an up-to-date `main`, choose
-the version increment and prepare a release branch:
+Release permissions are restricted to maintainers and administrators. Make
+sure the release notes are current under `## [Unreleased]` in `CHANGELOG.md`,
+then update a clean, up-to-date `main` branch:
 
 ```bash
 git switch main
 git pull --ff-only
-
-BUMP=minor  # patch, minor, or major
-VERSION=$(uv run bump-my-version show new_version --increment "$BUMP")
-git switch -c "release/v${VERSION}"
-uv run bump-my-version bump "$BUMP" --commit --no-tag
-git push -u origin "release/v${VERSION}"
+uv run python scripts/release.py patch
 ```
 
-The bump command updates `pyproject.toml` and `CHANGELOG.md`, regenerates
-`uv.lock`, and commits all three files. Open a PR from the release branch and
-merge it through the normal protected path. Do not tag the release branch.
+The script calculates the next version, checks the changelog, runs tests,
+linting, and the documentation build, then asks for confirmation. After
+confirmation, `bump-my-version` updates `pyproject.toml`, `CHANGELOG.md`, and
+`uv.lock`, creates the release commit and `vX.Y.Z` tag, and pushes both to
+`main`. The tag starts the release workflow, which builds the wheel and source
+distribution and attaches them to a new GitHub Release.
 
-After CI passes on the merged `main` commit, update your local branch and tag
-that exact commit:
-
-```bash
-git switch main
-git pull --ff-only
-git show --stat --oneline HEAD  # confirm this is the merged release commit
-
-VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-git tag -a "v${VERSION}" -m "Release v${VERSION}"
-git push origin "v${VERSION}"
-```
-
-Pushing the tag starts the release workflow. It verifies that the tag identifies
-the release version commit on `main` and matches the package and lockfile
-versions. It then reruns the tests, lint, and documentation build before
-building the wheel and source distribution from the tagged commit. If
-validation succeeds, it verifies the artifact checksums and creates the GitHub
-Release.
+Use `--dry-run` to run checks without changing Git. Use `--skip-checks` only
+when checks have already been run separately, and use `--yes` only in a
+trusted, controlled environment.

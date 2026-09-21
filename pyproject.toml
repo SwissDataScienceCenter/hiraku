@@ -74,7 +74,7 @@ replace = "{new_version}"
 regex = false
 ignore_missing_version = false
 
-tag = false
+tag = true
 sign_tags = false
 tag_name = "v{new_version}"
 tag_message = "Release v{new_version}"
@@ -87,7 +87,7 @@ commit_args = ""
 allow_shell_hooks = true
 
 setup_hooks = [
-    "awk '/^## \\[Unreleased\\]/{flag=1; next} /^## \\[[^]]+\\]/{flag=0} flag && /^- /{found=1} END{exit !found}' CHANGELOG.md || (echo 'Error: Add entries under [Unreleased] before bumping!' && exit 1)"
+    "uv run python scripts/check_changelog.py"
 ]
 
 pre_commit_hooks = ["uv lock"]
