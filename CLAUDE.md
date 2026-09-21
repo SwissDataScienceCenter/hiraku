@@ -1,3 +1,3 @@
 @AGENTS.md
 
-# Claude-only instructions below
+# Claude-specific instructions below
