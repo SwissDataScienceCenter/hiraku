@@ -32,8 +32,17 @@ Rules for this workflow:
   short instruction, not a failure.
 - Check `existing_tasks` for a task already covering this instruction's subject. If one
   clearly does, say so in `notes` instead of proposing a near-duplicate.
-- Never propose metrics, entrypoints, or any other field this contract does not ask for —
-  those are set separately, after the task exists.
+- `metrics`: one entry per metric the instruction actually names, or unambiguously
+  implies — `{"name": "...", "direction": "minimize"|"maximize"}`. Name it exactly as
+  the instruction states it; do not normalize its casing or invent a namespaced form
+  (`val/accuracy`) it never used. If the instruction names a metric but its direction is
+  not stated and is not a common, unambiguous convention (accuracy/precision/recall/AUC
+  → maximize; loss/error/latency/RMSE → minimize), leave that metric out of the list and
+  say so in `notes` instead of guessing — a wrong direction here silently flips every
+  comparison made against it later. An instruction naming no metric at all gets an empty
+  `metrics` list; never invent one to fill the field.
+- Never propose `entrypoints` or any other field this contract does not ask for — those
+  are set separately, after the task exists.
 
 ## Current state
 
@@ -56,6 +65,9 @@ nothing to say.
   "question": "one sentence, or an UNSET marker",
   "summary": "one or two sentences, or an UNSET marker",
   "body": "markdown body for the task record, or null",
+  "metrics": [
+    {"name": "exactly as the instruction names it", "direction": "minimize|maximize"}
+  ],
   "notes": "anything the researcher should decide or review before this is created, or null"
 }
 ```

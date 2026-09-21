@@ -195,6 +195,37 @@ def _remove_empty_task_leaf(path: Any, expected: Any) -> None:
             path.rmdir()
 
 
+_METRIC_DIRECTIONS = {"minimize", "maximize"}
+
+
+def _sanitize_metrics(data: dict[str, Any]) -> list[dict[str, str]]:
+    """Keep only agent-proposed metrics shaped the way `hiraku.data.Metric` requires: a
+    non-empty `name` and a `direction` its `Literal["minimize", "maximize"]` will
+    accept.
+
+    A metric missing either is dropped rather than guessed. `Metric.direction` has no
+    room for an `**[UNSET: ...]**` marker the way a plain string field does — passing
+    one through would fail `Task.create`'s validation outright — so the honest move for
+    an ungroundable direction is to leave that metric out, not invent one that could
+    silently point every later comparison the wrong way.
+    """
+    raw = data.get("metrics")
+    if not isinstance(raw, list):
+        return []
+    metrics: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        direction = str(item.get("direction") or "").strip()
+        if not name or direction not in _METRIC_DIRECTIONS or name in seen:
+            continue
+        metrics.append({"name": name, "direction": direction})
+        seen.add(name)
+    return metrics
+
+
 def _create_task(
     task_id: str,
     data: dict[str, Any],
@@ -207,9 +238,12 @@ def _create_task(
     hand: resolve and validate the branch name, persist the record, then bind the git
     branch — rolling the record back if the branch step fails, so the two never diverge.
     """
-    fields = {
+    fields: dict[str, Any] = {
         key: str(data[key]) for key in ("goal", "question", "summary") if data.get(key)
     }
+    metrics = _sanitize_metrics(data)
+    if metrics:
+        fields["metrics"] = metrics
     body = str(data.get("body") or "")
     selected_branch = (
         branch if branch is not None else config.task_branch.format(task_id=task_id)
