@@ -31,11 +31,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping
+from contextlib import suppress
 from typing import Any
 
 from hiraku.config import HirakuConfig
-from hiraku.data import Task, load_task
+from hiraku.data import Task, list_tasks, load_task
 from hiraku.errors import HirakuError
+from hiraku.git import GitRepository
+from hiraku.validation import validate_identifier
 
 from . import sections
 from .engine import (
@@ -163,6 +166,140 @@ def _resolve_context(
     config: HirakuConfig, context_paths: list[str] | None, context_bytes: int | None
 ) -> Bundle:
     return gather_context(config.root, context_paths, max_bytes=context_bytes)
+
+
+# --------------------------------------------------------------------------- draft task
+
+
+def draft_state(config: HirakuConfig, *, task_id: str | None = None) -> dict[str, Any]:
+    """The state an agent sees when drafting a new task: every existing task, for the
+    id-collision and novelty checks `prompts/draft.md` asks it to make."""
+    existing = list_tasks(config=config)
+    return {
+        "existing_tasks": [
+            {
+                "id": task.id,
+                "goal": task.goal,
+                "question": task.question,
+                "summary": task.summary,
+            }
+            for task in existing
+        ],
+        "requested_id": task_id,
+    }
+
+
+def _remove_empty_task_leaf(path: Any, expected: Any) -> None:
+    if path == expected and path.is_dir():
+        with suppress(OSError):
+            path.rmdir()
+
+
+def _create_task(
+    task_id: str,
+    data: dict[str, Any],
+    *,
+    branch: str | None,
+    activate: bool,
+    config: HirakuConfig,
+) -> Task:
+    """Create a `Task` from a `draft` reply, the same way `hiraku task create` does by
+    hand: resolve and validate the branch name, persist the record, then bind the git
+    branch — rolling the record back if the branch step fails, so the two never diverge.
+    """
+    fields = {
+        key: str(data[key]) for key in ("goal", "question", "summary") if data.get(key)
+    }
+    body = str(data.get("body") or "")
+    selected_branch = (
+        branch if branch is not None else config.task_branch.format(task_id=task_id)
+    )
+    repository = GitRepository(config)
+    repository.validate_branch(selected_branch)
+    created = Task.create(
+        task_id,
+        markdown=body,
+        activate=False,
+        config=config,
+        branch=selected_branch,
+        **fields,
+    )
+    created_leaf = created.path.parent
+    try:
+        repository.create_task_branch(task_id, branch=selected_branch)
+    except Exception:
+        created.delete(config=config)
+        _remove_empty_task_leaf(created_leaf, config.tasks_dir / task_id)
+        raise
+    if activate:
+        config.set_active_task(created)
+    return created
+
+
+def run_draft(
+    instruction: str,
+    *,
+    task_id: str | None = None,
+    command: list[str] | None = None,
+    dry_run: bool = False,
+    apply: bool = True,
+    context_paths: list[str] | None = None,
+    context_bytes: int | None = None,
+    unset_env: list[str] | None = None,
+    hooks: Hooks | None = None,
+    timeout: int | None = None,
+    branch: str | None = None,
+    activate: bool = True,
+    config: HirakuConfig | None = None,
+) -> AgentRun:
+    """Turn free-text instruction into a new `Task` — the same effect as running `hiraku
+    task create` by hand.
+
+    Unlike `design`/`discover`/`triage`/`analyze`, there is no task to load first: this
+    workflow creates one. A `task_id` the caller already knows (`--task-id`) is
+    validated before the agent is even called, so a bad id fails fast rather than after
+    a paid call; an id the agent proposes instead is validated once the reply is in,
+    exactly as `hiraku task create` validates whatever id it is given.
+    """
+    if not (instruction or "").strip():
+        raise AgentError("An instruction is required to draft a task.")
+    selected = config or HirakuConfig.discover()
+    if task_id is not None:
+        validate_identifier(task_id, label="task ID")
+    bundle = _resolve_context(selected, context_paths, context_bytes)
+    prompt = build_prompt(
+        "draft",
+        attach_context(draft_state(selected, task_id=task_id), bundle),
+        instruction=instruction,
+        root=selected.root,
+    )
+    result = AgentRun(workflow="draft", prompt=prompt, context=bundle)
+    if dry_run:
+        return result
+
+    result.raw, result.log, result.seconds = invoke(
+        selected,
+        "draft",
+        task_id or "new-task",
+        prompt,
+        bundle,
+        command=command,
+        timeout=timeout,
+        hooks=hooks,
+        unset_env=unset_env,
+    )
+    result.data = extract_json(result.raw)
+    resolved_id = task_id or _require(result.data, "id", str)
+    if task_id is None:
+        validate_identifier(resolved_id, label="task ID")
+    if not apply:
+        return result
+
+    created = _create_task(
+        resolved_id, result.data, branch=branch, activate=activate, config=selected
+    )
+    result.written.append(created.path)
+    return result
 
 
 # ------------------------------------------------------------------------------- design

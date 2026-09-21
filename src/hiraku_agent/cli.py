@@ -3,8 +3,8 @@
 Deliberately small where `hiraku` already covers something. Creating a node, binding a
 commit, launching, inspecting runs — all `hiraku`'s own CLI (`hiraku experiment ...`,
 `hiraku launch`, `hiraku run list`). This module adds what `hiraku` doesn't have:
-"what's next", "approve this," and the four LLM-driven workflows (`design`, `discover`,
-`triage`, `analyze`) described in `workflows.py`.
+"what's next", "approve this," and the five LLM-driven workflows (`draft`, `design`,
+`discover`, `triage`, `analyze`) described in `workflows.py`.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from .engine import agent_command as resolve_agent_cmd
 from .gates import approve as approve_node
 from .node import load_node
 from .schedule import suggest_next
-from .workflows import run_analyze, run_design, run_discover, run_triage
+from .workflows import run_analyze, run_design, run_discover, run_draft, run_triage
 
 
 def _resolve_task(config: HirakuConfig, task_id: str | None) -> str:
@@ -190,6 +190,47 @@ def _run_agent_command(
                 click.echo(f"  {path}")
         else:
             click.echo("wrote nothing" + (" (--no-apply)" if no_apply else ""))
+
+
+@main.command("draft")
+@click.option("task_id", "--task-id", default=None, help="id for the new task")
+@click.option("--branch", default=None, help="git branch (default: the id, per config)")
+@click.option(
+    "no_activate", "--no-activate", is_flag=True, help="don't make the new task active"
+)
+@_apply_agent_options
+def draft_command(
+    task_id: str | None,
+    branch: str | None,
+    no_activate: bool,
+    instruction: str,
+    instruction_file: str | None,
+    agent_cmd: str | None,
+    dry_run: bool,
+    no_apply: bool,
+    context_paths: tuple[str, ...],
+    timeout: int | None,
+    unset_env: tuple[str, ...],
+    json_output: bool,
+) -> None:
+    """Turn free-text instruction into a new task — the same effect as `hiraku task
+    create`."""
+    _run_agent_command(
+        run_draft,
+        _resolve_instruction(instruction, instruction_file),
+        task_id=task_id,
+        branch=branch,
+        activate=not no_activate,
+        command=resolve_agent_cmd(agent_cmd) if agent_cmd else None,
+        dry_run=dry_run,
+        apply=not no_apply,
+        context_paths=list(context_paths),
+        unset_env=list(unset_env),
+        hooks=None if dry_run else _hooks(),
+        timeout=timeout,
+        json_output=json_output,
+        no_apply=no_apply,
+    )
 
 
 @main.command("design")

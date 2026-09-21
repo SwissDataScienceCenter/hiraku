@@ -21,9 +21,10 @@ On top of the deterministic scheduling skeleton — state derivation
 (`schedule.py`) — this package also has the LLM-driven half: `engine.py`
 calls an agent CLI (`claude -p` by default) and gets one JSON object back,
 `prompts/` holds what each workflow asks it, and `workflows.py`'s
-`run_design`/`run_discover`/`run_triage`/`run_analyze` are what turn that
-reply into `Node` records. `cli.py` exposes all four, plus `next` and
-`approve`, as `hiraku-agent design|discover|triage|analyze|next|approve`.
+`run_draft`/`run_design`/`run_discover`/`run_triage`/`run_analyze` are what
+turn that reply into a `Task` or `Node` record. `cli.py` exposes all five,
+plus `next` and `approve`, as
+`hiraku-agent draft|design|discover|triage|analyze|next|approve`.
 """
 
 from .engine import AgentRun, Hooks
@@ -41,7 +42,14 @@ from .node import (
 )
 from .schedule import suggest_next
 from .state import STATES, node_state
-from .workflows import run_analyze, run_design, run_discover, run_triage, task_state
+from .workflows import (
+    run_analyze,
+    run_design,
+    run_discover,
+    run_draft,
+    run_triage,
+    task_state,
+)
 
 __all__ = [
     "DECISIONS",
@@ -62,6 +70,7 @@ __all__ = [
     "run_analyze",
     "run_design",
     "run_discover",
+    "run_draft",
     "run_triage",
     "suggest_next",
     "task_state",

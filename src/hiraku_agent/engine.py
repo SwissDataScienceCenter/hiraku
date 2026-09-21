@@ -57,7 +57,7 @@ from .errors import AgentError
 DEFAULT_AGENT_CMD = "claude -p"
 DEFAULT_TIMEOUT = 900
 
-WORKFLOWS = ("design", "discover", "triage", "analyze")
+WORKFLOWS = ("design", "discover", "triage", "analyze", "draft")
 
 # Failures whose message names a symptom but not the fix. Matched against the whole
 # output, so a warning on stderr and the real error on stdout both count.
