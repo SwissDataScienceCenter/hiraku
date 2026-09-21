@@ -71,9 +71,7 @@ Use a feature branch and focused commits. [Conventional Commit](https://www.conv
 
 ## Release a new version
 
-Release permissions are restricted to maintainers and administrators. Make
-sure the release notes are current under `## [Unreleased]` in `CHANGELOG.md`,
-then update a clean, up-to-date `main` branch:
+Release permissions are restricted to maintainers and administrators. Make sure the release notes are current under `## [Unreleased]` in `CHANGELOG.md`, then update a clean, up-to-date `main` branch:
 
 ```bash
 git switch main
@@ -81,13 +79,6 @@ git pull --ff-only
 uv run python scripts/release.py patch
 ```
 
-The script calculates the next version, checks the changelog, runs tests,
-linting, and the documentation build, then asks for confirmation. After
-confirmation, `bump-my-version` updates `pyproject.toml`, `CHANGELOG.md`, and
-`uv.lock`, creates the release commit and `vX.Y.Z` tag, and pushes both to
-`main`. The tag starts the release workflow, which builds the wheel and source
-distribution and attaches them to a new GitHub Release.
+The script calculates the next version, checks the changelog, runs tests, linting, and the documentation build, then asks for confirmation. After confirmation, `bump-my-version` updates `pyproject.toml`, `CHANGELOG.md`, and `uv.lock`, creates the release commit and `vX.Y.Z` tag, and pushes both to `main`. The tag starts the release workflow, which builds the wheel and source distribution and attaches them to a new GitHub Release.
 
-Use `--dry-run` to run checks without changing Git. Use `--skip-checks` only
-when checks have already been run separately, and use `--yes` only in a
-trusted, controlled environment.
+Use `--dry-run` to run checks without changing Git. Use `--skip-checks` only when checks have already been run separately.
