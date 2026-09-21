@@ -14,12 +14,15 @@ unit test can grade.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from hiraku.config import HirakuConfig
-from hiraku.data import Task
+from hiraku.data import Task, list_tasks, load_task
+from hiraku.errors import RecordNotFoundError, ValidationError
+from hiraku.git import GitRepository
 from hiraku_agent import sections
 from hiraku_agent.engine import (
     Bundle,
@@ -31,7 +34,13 @@ from hiraku_agent.engine import (
 )
 from hiraku_agent.errors import AgentError
 from hiraku_agent.node import create_node, load_node
-from hiraku_agent.workflows import run_analyze, run_design, run_discover, run_triage
+from hiraku_agent.workflows import (
+    run_analyze,
+    run_design,
+    run_discover,
+    run_draft,
+    run_triage,
+)
 
 
 @pytest.fixture
@@ -48,6 +57,31 @@ def task(config: HirakuConfig) -> Task:
         entrypoints={"train": {"command": ["python", "train.py"]}},
         metrics=[{"name": "val_accuracy", "direction": "maximize"}],
     )
+
+
+def _git(path: Path, *arguments: str) -> str:
+    result = subprocess.run(
+        ["git", *arguments], cwd=path, text=True, capture_output=True, check=True
+    )
+    return result.stdout.strip()
+
+
+@pytest.fixture
+def git_config(tmp_path: Path) -> HirakuConfig:
+    """A `HirakuConfig` whose project root is also a real git repository.
+
+    `run_draft` binds a branch through `hiraku.git.GitRepository`, which requires an
+    actual repository with a resolvable `HEAD` (see `hiraku`'s own
+    `tests/test_git.py::_repository`) — the plain `config` fixture above, with no `git
+    init`, is not enough for it.
+    """
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "test@example.invalid")
+    _git(tmp_path, "config", "user.name", "Test")
+    (tmp_path / "tracked.txt").write_text("committed")
+    _git(tmp_path, "add", "tracked.txt")
+    _git(tmp_path, "commit", "-qm", "initial")
+    return HirakuConfig.init(tmp_path)
 
 
 def stub_agent(payload: dict) -> list[str]:
@@ -164,6 +198,104 @@ def test_attach_context_only_adds_the_key_when_non_empty() -> None:
     assert "project_context" not in empty
     full = attach_context({"a": 1}, Bundle(files={"x.md": "text"}))
     assert full["project_context"] == [{"path": "x.md", "excerpt": "text"}]
+
+
+# ---------------------------------------------------------------------------- run_draft
+
+
+def test_run_draft_creates_a_task_with_a_bound_git_branch(
+    git_config: HirakuConfig,
+) -> None:
+    payload = {
+        "id": "vo-backend",
+        "goal": "Improve validation accuracy",
+        "question": "Does a deeper backbone raise val_accuracy?",
+        "summary": "Track backbone changes against the validation set.",
+        "body": "Background: current backbone underperforms on the holdout split.",
+        "notes": None,
+    }
+    result = run_draft(
+        "we should look at whether a deeper backbone helps validation accuracy",
+        command=stub_agent(payload),
+        config=git_config,
+    )
+
+    task = load_task("vo-backend", config=git_config)
+    assert task.goal == "Improve validation accuracy"
+    assert task.question == "Does a deeper backbone raise val_accuracy?"
+    assert "underperforms" in task.markdown
+    assert task.branch == "hiraku/tasks/vo-backend"
+
+    repository = GitRepository(git_config)
+    assert repository.branch_exists("hiraku/tasks/vo-backend")
+    assert git_config.active_task_id == "vo-backend"
+    assert len(result.written) == 1
+
+
+def test_run_draft_respects_a_given_task_id_validated_before_the_agent_call(
+    git_config: HirakuConfig,
+) -> None:
+    with pytest.raises(ValidationError):
+        run_draft(
+            "anything",
+            task_id="not a valid id/",
+            command=["python3", "-c", "raise SystemExit('should never run')"],
+            config=git_config,
+        )
+
+    payload = {"id": "ignored-by-caller", "goal": "g", "question": "q", "summary": "s"}
+    result = run_draft(
+        "draft this",
+        task_id="requested-id",
+        command=stub_agent(payload),
+        config=git_config,
+    )
+    assert result.written[0].parent.name == "requested-id"
+
+
+def test_run_draft_dry_run_calls_nothing(git_config: HirakuConfig) -> None:
+    result = run_draft(
+        "draft this",
+        command=["python3", "-c", "raise SystemExit('should never run')"],
+        dry_run=True,
+        config=git_config,
+    )
+    assert result.data == {}
+    assert result.written == []
+
+
+def test_run_draft_no_apply_writes_nothing(git_config: HirakuConfig) -> None:
+    payload = {"id": "vo-backend", "goal": "g", "question": "q", "summary": "s"}
+    result = run_draft(
+        "draft this",
+        command=stub_agent(payload),
+        apply=False,
+        config=git_config,
+    )
+    assert result.written == []
+    with pytest.raises(RecordNotFoundError):
+        load_task("vo-backend", config=git_config)
+
+
+def test_run_draft_raises_on_empty_instruction(git_config: HirakuConfig) -> None:
+    with pytest.raises(AgentError):
+        run_draft("   ", config=git_config)
+
+
+def test_run_draft_rolls_back_the_task_on_branch_failure(
+    git_config: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom(self: GitRepository, task_id: str, *, branch: str | None = None) -> str:
+        raise RuntimeError("branch creation failed")
+
+    monkeypatch.setattr(GitRepository, "create_task_branch", _boom)
+
+    payload = {"id": "vo-backend", "goal": "g", "question": "q", "summary": "s"}
+    with pytest.raises(RuntimeError):
+        run_draft("draft this", command=stub_agent(payload), config=git_config)
+
+    assert list_tasks(config=git_config) == []
+    assert not (git_config.tasks_dir / "vo-backend").exists()
 
 
 # --------------------------------------------------------------------------- run_design
