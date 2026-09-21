@@ -232,6 +232,66 @@ def test_run_draft_creates_a_task_with_a_bound_git_branch(
     assert len(result.written) == 1
 
 
+def test_run_draft_writes_metrics_named_in_the_agent_reply(
+    git_config: HirakuConfig,
+) -> None:
+    payload = {
+        "id": "vo-backend",
+        "goal": "g",
+        "question": "q",
+        "summary": "s",
+        "body": None,
+        "metrics": [
+            {"name": "val_accuracy", "direction": "maximize"},
+            {"name": "val_accuracy", "direction": "minimize"},  # dup name, dropped
+        ],
+        "notes": None,
+    }
+    run_draft("draft this", command=stub_agent(payload), config=git_config)
+
+    task = load_task("vo-backend", config=git_config)
+    assert [m.model_dump() for m in task.metrics] == [
+        {"name": "val_accuracy", "direction": "maximize"}
+    ]
+
+
+def test_run_draft_leaves_metrics_empty_when_the_agent_names_none(
+    git_config: HirakuConfig,
+) -> None:
+    payload = {"id": "vo-backend", "goal": "g", "question": "q", "summary": "s"}
+    run_draft(
+        "draft this, no metric mentioned",
+        command=stub_agent(payload),
+        config=git_config,
+    )
+
+    task = load_task("vo-backend", config=git_config)
+    assert task.metrics == []
+
+
+def test_run_draft_drops_a_metric_with_no_groundable_direction(
+    git_config: HirakuConfig,
+) -> None:
+    payload = {
+        "id": "vo-backend",
+        "goal": "g",
+        "question": "q",
+        "summary": "s",
+        "metrics": [
+            {"name": "val_accuracy", "direction": "maximize"},
+            {"name": "novel_score", "direction": None},  # ungroundable, dropped
+            {"name": "", "direction": "minimize"},  # no name, dropped
+            "not-even-a-dict",  # malformed, ignored rather than crashing the call
+        ],
+    }
+    run_draft("draft this", command=stub_agent(payload), config=git_config)
+
+    task = load_task("vo-backend", config=git_config)
+    assert [m.model_dump() for m in task.metrics] == [
+        {"name": "val_accuracy", "direction": "maximize"}
+    ]
+
+
 def test_run_draft_respects_a_given_task_id_validated_before_the_agent_call(
     git_config: HirakuConfig,
 ) -> None:
