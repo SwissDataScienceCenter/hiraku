@@ -41,6 +41,7 @@ from hiraku.git import GitRepository
 from hiraku.validation import validate_identifier
 
 from . import sections
+from .actions import apply_overrides
 from .engine import (
     UNVERIFIED_NOTE,
     AgentRun,
@@ -284,6 +285,8 @@ def run_draft(
     timeout: int | None = None,
     branch: str | None = None,
     activate: bool = True,
+    action: str | None = None,
+    context_id: str | None = None,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Turn free-text instruction into a new `Task` — the same effect as running `hiraku
@@ -294,12 +297,25 @@ def run_draft(
     validated before the agent is even called, so a bad id fails fast rather than after
     a paid call; an id the agent proposes instead is validated once the reply is in,
     exactly as `hiraku task create` validates whatever id it is given.
+
+    `action`, if given, needs `task_id` too — an `Action` (`hiraku.agent.Action`) is
+    scoped to a task id (`entity`), and there is no task id to scope it to until this
+    call has already picked one (see `actions.py`).
     """
     if not (instruction or "").strip():
         raise AgentError("An instruction is required to draft a task.")
     selected = config or HirakuConfig.discover()
     if task_id is not None:
         validate_identifier(task_id, label="task ID")
+    command, timeout, context_paths = apply_overrides(
+        action,
+        context_id,
+        entity=task_id,
+        command=command,
+        timeout=timeout,
+        context_paths=context_paths,
+        config=selected,
+    )
     bundle = _resolve_context(selected, context_paths, context_bytes)
     prompt = build_prompt(
         "draft",
@@ -351,12 +367,23 @@ def run_design(
     unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
     timeout: int | None = None,
+    action: str | None = None,
+    context_id: str | None = None,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Propose a tree of experiments for a task. Writes proposed `Node`s (no commit)."""
     selected = config or HirakuConfig.discover()
     task = load_task(task_id, config=selected)
     nodes = list_nodes(task=task, config=selected)
+    command, timeout, context_paths = apply_overrides(
+        action,
+        context_id,
+        entity=task.id,
+        command=command,
+        timeout=timeout,
+        context_paths=context_paths,
+        config=selected,
+    )
     bundle = _resolve_context(selected, context_paths, context_bytes)
     prompt = build_prompt(
         "design",
@@ -425,6 +452,8 @@ def run_discover(
     unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
     timeout: int | None = None,
+    action: str | None = None,
+    context_id: str | None = None,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Search for candidate hypotheses.
@@ -436,6 +465,15 @@ def run_discover(
     selected = config or HirakuConfig.discover()
     task = load_task(task_id, config=selected)
     nodes = list_nodes(task=task, config=selected)
+    command, timeout, context_paths = apply_overrides(
+        action,
+        context_id,
+        entity=task.id,
+        command=command,
+        timeout=timeout,
+        context_paths=context_paths,
+        config=selected,
+    )
     bundle = _resolve_context(selected, context_paths, context_bytes)
     prompt = build_prompt(
         "discover",
@@ -578,6 +616,8 @@ def run_triage(
     unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
     timeout: int | None = None,
+    action: str | None = None,
+    context_id: str | None = None,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Classify why a node's result missed its expectation, and decide whether to
@@ -592,6 +632,15 @@ def run_triage(
     node = load_node(node_id, task=task_id, config=selected)
     task = load_task(node.task_id, config=selected)
     nodes = list_nodes(task=task, config=selected)
+    command, timeout, context_paths = apply_overrides(
+        action,
+        context_id,
+        entity=task.id,
+        command=command,
+        timeout=timeout,
+        context_paths=context_paths,
+        config=selected,
+    )
     bundle = _resolve_context(selected, context_paths, context_bytes)
     prompt = build_prompt(
         "triage",
@@ -694,6 +743,8 @@ def run_analyze(
     unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
     timeout: int | None = None,
+    action: str | None = None,
+    context_id: str | None = None,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Judge a node's runs against its expectation and write its findings."""
@@ -703,6 +754,15 @@ def run_analyze(
         raise HirakuError(f"'{node.id}' has no runs to analyse.")
     task = load_task(node.task_id, config=selected)
     nodes = list_nodes(task=task, config=selected)
+    command, timeout, context_paths = apply_overrides(
+        action,
+        context_id,
+        entity=task.id,
+        command=command,
+        timeout=timeout,
+        context_paths=context_paths,
+        config=selected,
+    )
     bundle = _resolve_context(selected, context_paths, context_bytes)
     prompt = build_prompt(
         "analyze",

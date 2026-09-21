@@ -3,8 +3,9 @@
 Deliberately small where `hiraku` already covers something. Creating a node, binding a
 commit, launching, inspecting runs — all `hiraku`'s own CLI (`hiraku experiment ...`,
 `hiraku launch`, `hiraku run list`). This module adds what `hiraku` doesn't have:
-"what's next", "approve this," and the five LLM-driven workflows (`draft`, `design`,
-`discover`, `triage`, `analyze`) described in `workflows.py`.
+"what's next", "approve this," the five LLM-driven workflows (`draft`, `design`,
+`discover`, `triage`, `analyze`) described in `workflows.py`, and `loop`, the bounded
+driver over `loop.py` for a saved `Program` record.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from hiraku.errors import HirakuError, NoActiveTaskError
 from .engine import AgentRun, Hooks
 from .engine import agent_command as resolve_agent_cmd
 from .gates import approve as approve_node
+from .loop import LoopResult, run_loop
 from .node import load_node
 from .schedule import suggest_next
 from .workflows import run_analyze, run_design, run_discover, run_draft, run_triage
@@ -101,6 +103,18 @@ _AGENT_OPTIONS = (
     ),
     click.option(
         "context_paths", "--context", multiple=True, help="a file to read as background"
+    ),
+    click.option(
+        "action_id",
+        "--action",
+        default=None,
+        help="load agent-cmd/timeout/context defaults from a saved Action record",
+    ),
+    click.option(
+        "context_id",
+        "--context-id",
+        default=None,
+        help="add a saved Context record's files as background",
     ),
     click.option("timeout", "--timeout", type=int, default=None),
     click.option(
@@ -209,6 +223,8 @@ def draft_command(
     dry_run: bool,
     no_apply: bool,
     context_paths: tuple[str, ...],
+    action_id: str | None,
+    context_id: str | None,
     timeout: int | None,
     unset_env: tuple[str, ...],
     json_output: bool,
@@ -225,6 +241,8 @@ def draft_command(
         dry_run=dry_run,
         apply=not no_apply,
         context_paths=list(context_paths),
+        action=action_id,
+        context_id=context_id,
         unset_env=list(unset_env),
         hooks=None if dry_run else _hooks(),
         timeout=timeout,
@@ -244,6 +262,8 @@ def design_command(
     dry_run: bool,
     no_apply: bool,
     context_paths: tuple[str, ...],
+    action_id: str | None,
+    context_id: str | None,
     timeout: int | None,
     unset_env: tuple[str, ...],
     json_output: bool,
@@ -259,6 +279,8 @@ def design_command(
         dry_run=dry_run,
         apply=not no_apply,
         context_paths=list(context_paths),
+        action=action_id,
+        context_id=context_id,
         unset_env=list(unset_env),
         hooks=None if dry_run else _hooks(),
         timeout=timeout,
@@ -278,6 +300,8 @@ def discover_command(
     dry_run: bool,
     no_apply: bool,
     context_paths: tuple[str, ...],
+    action_id: str | None,
+    context_id: str | None,
     timeout: int | None,
     unset_env: tuple[str, ...],
     json_output: bool,
@@ -294,6 +318,8 @@ def discover_command(
         dry_run=dry_run,
         apply=not no_apply,
         context_paths=list(context_paths),
+        action=action_id,
+        context_id=context_id,
         unset_env=list(unset_env),
         hooks=None if dry_run else _hooks(),
         timeout=timeout,
@@ -315,6 +341,8 @@ def triage_command(
     dry_run: bool,
     no_apply: bool,
     context_paths: tuple[str, ...],
+    action_id: str | None,
+    context_id: str | None,
     timeout: int | None,
     unset_env: tuple[str, ...],
     json_output: bool,
@@ -330,6 +358,8 @@ def triage_command(
         dry_run=dry_run,
         apply=not no_apply,
         context_paths=list(context_paths),
+        action=action_id,
+        context_id=context_id,
         unset_env=list(unset_env),
         hooks=None if dry_run else _hooks(),
         timeout=timeout,
@@ -351,6 +381,8 @@ def analyze_command(
     dry_run: bool,
     no_apply: bool,
     context_paths: tuple[str, ...],
+    action_id: str | None,
+    context_id: str | None,
     timeout: int | None,
     unset_env: tuple[str, ...],
     json_output: bool,
@@ -365,9 +397,76 @@ def analyze_command(
         dry_run=dry_run,
         apply=not no_apply,
         context_paths=list(context_paths),
+        action=action_id,
+        context_id=context_id,
         unset_env=list(unset_env),
         hooks=None if dry_run else _hooks(),
         timeout=timeout,
         json_output=json_output,
         no_apply=no_apply,
     )
+
+
+# -------------------------------------------------------------------------------- loop
+
+
+@main.command("loop")
+@click.option("program_id", "--program", required=True, help="Program record to drive")
+@click.option("task_id", "--task", required=True, help="task to loop over")
+@click.option(
+    "max_steps",
+    "--max-steps",
+    type=int,
+    default=None,
+    help="hard cap on loop iterations (overrides the program's own budget fields)",
+)
+@click.option(
+    "json_output", "--json", is_flag=True, help="print the full step-by-step result"
+)
+def loop_command(
+    program_id: str, task_id: str, max_steps: int | None, json_output: bool
+) -> None:
+    """Drive a bounded research loop for TASK_ID, using PROGRAM_ID's bound actions.
+
+    Repeats `hiraku-agent next`'s own suggestion, calling whichever `Action` the
+    program binds to that workflow, until a budget is hit, a step makes no progress,
+    the next suggestion needs a person or a real command (`approve`/`implement`/
+    `launch`), or there is nothing left to schedule.
+    """
+    config = HirakuConfig.discover()
+    try:
+        result: LoopResult = run_loop(
+            program_id,
+            task_id,
+            max_steps=max_steps,
+            hooks=_hooks(),
+            config=config,
+        )
+    except HirakuError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if json_output:
+        click.echo(
+            json_module.dumps(
+                {
+                    "steps": [
+                        {
+                            "action": step.action,
+                            "action_id": step.action_id,
+                            "node": step.node,
+                            "why": step.why,
+                            "written": [str(path) for path in step.written],
+                        }
+                        for step in result.steps
+                    ],
+                    "stopped": result.stopped,
+                },
+                indent=2,
+            )
+        )
+        return
+    for step in result.steps:
+        target = f" {step.node}" if step.node else ""
+        click.echo(f"{step.action}{target} (action: {step.action_id}) — {step.why}")
+        for path in step.written:
+            click.echo(f"  wrote: {path}")
+    click.echo(f"stopped: {result.stopped}")
