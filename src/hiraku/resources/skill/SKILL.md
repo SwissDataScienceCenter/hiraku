@@ -350,7 +350,7 @@ tracking backend.
 
 ## Finish clearly
 
-Verify the requested end state with `show`, `list`, or `run list --json`. Report
+Verify the requested end state with `show`, `list`, or `runs --json`. Report
 what was created, changed, or run; include task and experiment IDs, entrypoint,
 commit, run ID, and key metrics when applicable. Mention failures or missing
 attribution explicitly. Stop when the user's requested scope is complete.
