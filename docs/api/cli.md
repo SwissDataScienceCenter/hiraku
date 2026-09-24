@@ -9,7 +9,7 @@ hiraku init
 hiraku task create <task-id>
 hiraku exp create <experiment-id>
 hiraku launch <experiment-id>:<entrypoint>
-hiraku run list
+hiraku runs
 ```
 
 `hiraku init` requires its target to be a Git repository root. Use

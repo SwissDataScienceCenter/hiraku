@@ -1387,11 +1387,6 @@ def launch_command(
         raise click.exceptions.Exit(result.returncode)
 
 
-@main.group("run")
-def run_group() -> None:
-    """Query tracked runs."""
-
-
 def _abbreviate_values(values: Sequence[str]) -> dict[str, str]:
     distinct = sorted(set(values))
     result: dict[str, str] = {}
@@ -1414,7 +1409,8 @@ def _human_timestamp(value: datetime | None) -> str:
     return current.isoformat(sep=" ", timespec="seconds").replace("+00:00", "Z")
 
 
-@run_group.command("list")
+@main.command("runs")
+@click.argument("subcommand", required=False, type=click.Choice(["list"]))
 @click.option("task_id", "--task")
 @click.option("experiment_id", "--experiment")
 @click.option("--metrics")
@@ -1427,6 +1423,7 @@ def _human_timestamp(value: datetime | None) -> str:
 @click.pass_obj
 def run_list(
     state: CLIContext,
+    subcommand: str | None,
     task_id: str | None,
     experiment_id: str | None,
     metrics: str | None,

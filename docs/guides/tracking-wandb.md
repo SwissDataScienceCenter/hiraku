@@ -52,7 +52,7 @@ configure your training script.
 After the online run finishes syncing:
 
 ```bash
-hiraku run list --task iris --json
+hiraku runs --task iris --json
 ```
 
 The adapter queries W&B's remote API. Offline SDK runs need syncing before

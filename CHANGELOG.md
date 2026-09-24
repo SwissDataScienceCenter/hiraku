@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Rename the tracked-run query command to `hiraku runs`; `hiraku runs list` is
+  also accepted.
 - Improve `hiraku init` to support initializing a target directory and report
   paths relative to the initialized project.
 - Improve the CLI and documentation for task and experiment workflows,

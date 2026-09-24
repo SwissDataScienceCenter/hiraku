@@ -63,9 +63,9 @@ hiraku status # show current active task and experiment
 
 hiraku proposal list  # short for "hiraku exp list --filter commit==None --sort created_at --descending"
 
-hiraku run list
-hiraku run list --columns task_id,exp_id,timestamp,commit --params seed,lr --metrics train/accuracy,val/accuracy,train/cross_entropy,val/cross_entropy --sort val/accuracy --ascending  # custom metric fields
-hiraku run list --sort val/accuracy --ascending
+hiraku runs
+hiraku runs --params seed,lr --metrics train/accuracy,val/accuracy,train/cross_entropy,val/cross_entropy --sort val/accuracy --ascending  # custom metric fields
+hiraku runs --sort val/accuracy --ascending
 ```
 
 ### Python API
@@ -226,7 +226,7 @@ hiraku experiment update heart-disease:logistic-baseline --commit HEAD
 
 # 3. launch named entrypoints and list runs (from CSV or MLflow backend)
 hiraku launch logistic-baseline:train
-hiraku runs heart-disease --sort val/log_loss --ascending
+hiraku runs --task heart-disease --sort val/log_loss --ascending
 
 # 4. analyze the runs and update the local experiment record
 hiraku-agent experiment update "conclude logistic-baseline and record the results"

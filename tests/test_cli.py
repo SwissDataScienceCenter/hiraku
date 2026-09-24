@@ -30,7 +30,7 @@ HELP_PATHS = [
             "program",
             "action",
             "context",
-            "run",
+            "runs",
         )
     ),
     *(
@@ -61,7 +61,7 @@ HELP_PATHS = [
             "program": ("create", "list", "show", "update", "edit", "delete"),
             "action": ("create", "list", "show", "update", "edit", "delete"),
             "context": ("create", "list", "show", "update", "edit", "delete"),
-            "run": ("list",),
+            "runs": ("list",),
         }.items()
         for command in commands
     ),
@@ -692,7 +692,7 @@ def test_run_json_is_complete_and_human_ids_are_unambiguous(
     runner = CliRunner()
 
     result = runner.invoke(
-        main, ["run", "list", "--sort", "loss", "--ascending", "--json"]
+        main, ["runs", "--sort", "loss", "--ascending", "--json"]
     )
     assert result.exit_code == 0, result.output
     runs = json.loads(result.output)
@@ -703,7 +703,8 @@ def test_run_json_is_complete_and_human_ids_are_unambiguous(
     assert runs[0]["timestamp"].endswith("+00:00")
     assert runs[0]["commit"] == commit
 
-    human = runner.invoke(main, ["run", "list"])
+    human = runner.invoke(main, ["runs"])
+    assert human.exit_code == 0, human.output
     assert "abcdefgh1" in human.output
     assert "abcdefgh2" in human.output
     assert "2026-01-01 00:00:00Z" in human.output
@@ -711,3 +712,14 @@ def test_run_json_is_complete_and_human_ids_are_unambiguous(
     assert ".123456Z" not in human.output
     assert "aaaaaaaa" in human.output
     assert commit not in human.output
+
+    listed = runner.invoke(
+        main, ["runs", "list", "--sort", "loss", "--ascending", "--json"]
+    )
+    assert listed.exit_code == 0, listed.output
+    assert json.loads(listed.output) == runs
+    listed_human = runner.invoke(main, ["runs", "list"])
+    assert listed_human.exit_code == 0, listed_human.output
+    assert listed_human.output == human.output
+    removed = runner.invoke(main, ["run", "list"])
+    assert removed.exit_code != 0

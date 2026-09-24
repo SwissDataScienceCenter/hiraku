@@ -49,7 +49,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage experiments | `hiraku experiment ...`: `list`, `show`, `create`, `update`, `set`, `entrypoints`; `hiraku exp` is an alias |
 | Inspect unbound proposals | `hiraku proposal list` |
 | Launch an entrypoint | `hiraku launch [--task TASK] [--commit REF] [--dispatch NAME] TARGET` |
-| Inspect tracked evidence | `hiraku run list` |
+| Inspect tracked evidence | `hiraku runs` |
 | Manage program records | `hiraku program list`, `hiraku program show PROGRAM` |
 | Manage action records | `hiraku action ...` |
 | Manage context records | `hiraku context ...` |
@@ -133,7 +133,7 @@ hiraku task list --json
 hiraku task show [task-id] --json
 hiraku experiment list --task <task-id> --json
 hiraku experiment show <experiment-id> --task <task-id> --json
-hiraku run list --task <task-id> --json
+hiraku runs --task <task-id> --json
 ```
 
 When needed, inspect the repository files required to understand available code,
@@ -280,7 +280,7 @@ For a high-level run request:
 
 ```bash
 hiraku launch <experiment-id>:<entrypoint>
-hiraku run list --task <task-id> --experiment <experiment-id> --json
+hiraku runs --task <task-id> --experiment <experiment-id> --json
 ```
 
 Everything after `--` overrides entrypoint arguments:
@@ -303,7 +303,7 @@ splits, budgets, and evaluation definitions comparable, and do not infer
 experiment attribution when it is absent.
 
 ```bash
-hiraku run list --task <task-id> \
+hiraku runs --task <task-id> \
   --params seed,epochs \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending --json

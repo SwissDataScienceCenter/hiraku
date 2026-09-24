@@ -38,7 +38,7 @@ Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 ## Inspect
 
 ```bash
-hiraku run list --task my-task --sort val/accuracy --descending
+hiraku runs --task my-task --sort val/accuracy --descending
 ```
 
 Metric values read from CSV remain strings in normalized runs; sorting

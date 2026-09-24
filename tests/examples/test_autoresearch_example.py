@@ -147,7 +147,7 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "hiraku task show --json" in program
     assert "hiraku experiment list --task <task> --json" in program
     assert (
-        "hiraku run list --task <task> --experiment <experiment-id> --json" in program
+        "hiraku runs --task <task> --experiment <experiment-id> --json" in program
     )
     assert "--commit HEAD" in program
     assert "Never rebind an experiment" in program
@@ -229,8 +229,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
         invoke(
             runner,
             [
-                "run",
-                "list",
+                "runs",
                 "--task",
                 "sep10",
                 "--experiment",
@@ -263,8 +262,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
         invoke(
             runner,
             [
-                "run",
-                "list",
+                "runs",
                 "--task",
                 "sep10",
                 "--experiment",

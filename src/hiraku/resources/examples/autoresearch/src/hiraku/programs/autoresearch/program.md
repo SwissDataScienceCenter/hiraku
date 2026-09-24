@@ -16,7 +16,7 @@ or resume an experiment, work with the user to:
    `git switch <task-branch>`.
 3. **Read the research history**: Run
    `hiraku experiment list --task <task> --json` and
-   `hiraku run list --task <task> --json`. If an experiment is active or
+   `hiraku runs --task <task> --json`. If an experiment is active or
    incomplete, inspect it with
    `hiraku experiment show <experiment-id> --task <task> --json` and inspect
    its attributed runs before doing new work.
@@ -57,7 +57,7 @@ hiraku experiment create baseline --task <task> \
   --hypothesis "The upstream implementation establishes the reference val_bpb" \
   --commit HEAD
 hiraku launch baseline:train > run.log 2>&1
-hiraku run list --task <task> --experiment baseline --json
+hiraku runs --task <task> --experiment baseline --json
 ```
 
 ## Logging results
@@ -66,7 +66,7 @@ The Hiraku dispatcher writes every execution to project-root `runs.csv`. Do not
 edit the run table. Inspect one experiment's parsed result and attribution with:
 
 ```bash
-hiraku run list --task <task> --experiment <experiment-id> --json
+hiraku runs --task <task> --experiment <experiment-id> --json
 ```
 
 For every completed attempt, update its experiment record with exactly one of
@@ -100,7 +100,7 @@ LOOP FOREVER:
    `hiraku launch <experiment-id>:train > run.log 2>&1` (redirect everything —
    do NOT use tee or let output flood your context).
 6. Inspect the result with
-   `hiraku run list --task <task> --experiment <experiment-id> --json`.
+   `hiraku runs --task <task> --experiment <experiment-id> --json`.
 7. If the recorded execution crashed or timed out, run `tail -n 50 run.log` to
    read the Python stack trace or final diagnostics. If the dispatcher did not
    record a row, inspect the log and treat the missing result as a failure.

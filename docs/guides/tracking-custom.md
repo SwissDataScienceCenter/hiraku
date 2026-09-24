@@ -114,5 +114,5 @@ runs = task.runs(config=config, sort="val/accuracy", ascending=False)
 When the backend is loaded by the CLI application, use:
 
 ```bash
-hiraku run list --task my-task --sort val/accuracy --descending
+hiraku runs --task my-task --sort val/accuracy --descending
 ```

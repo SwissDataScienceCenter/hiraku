@@ -162,7 +162,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
 
     invoke(runner, ["launch", "logistic:train"])
     rows = json.loads(
-        invoke(runner, ["run", "list", "--task", "iris", "--json"]).output
+        invoke(runner, ["runs", "--task", "iris", "--json"]).output
     )
     assert len(rows) == 1
     row = rows[0]
@@ -183,7 +183,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     filtered = json.loads(
         invoke(
             runner,
-            ["run", "list", "--task", "iris", "--experiment", "logistic", "--json"],
+            ["runs", "--task", "iris", "--experiment", "logistic", "--json"],
         ).output
     )
     assert filtered == rows

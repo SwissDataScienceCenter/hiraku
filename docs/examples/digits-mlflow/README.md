@@ -31,7 +31,7 @@ script uses the Hiraku project root to keep that location stable for local and
 worktree dispatchers. Set `MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
 when you want to override the local defaults. These variables affect the
 training process only, so update the task's `tracking_backend` with the matching
-`tracking_uri` and `experiment_name` before using `hiraku run list`.
+`tracking_uri` and `experiment_name` before using `hiraku runs`.
 
 ## Create the task and experiments
 
@@ -63,15 +63,15 @@ hiraku launch strong-l2:train
 ## Compare final metrics and inspect curves
 
 ```bash
-hiraku run list 
+hiraku runs
 
 # list with additional details
-hiraku run list \
+hiraku runs \
   --params alpha,epochs,seed \
   --metrics train/log_loss,val/log_loss,train/accuracy,val/accuracy \
   --sort val/log_loss --ascending
 
-hiraku run list --task digits --experiment strong-l2 --json
+hiraku runs --task digits --experiment strong-l2 --json
 
 uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
 ```
@@ -86,7 +86,7 @@ value of each metric. Full epoch histories remain in MLflow and its UI.
 
 You can list the same runs using Hiraku:
 ```
-hiraku run list
+hiraku runs
 ```
 
 ??? info "Example run results"
