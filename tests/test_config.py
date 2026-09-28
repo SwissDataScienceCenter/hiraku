@@ -238,10 +238,3 @@ def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None
     marker.write_text("hiraku_dir: linked\n")
     with pytest.raises(ValidationError):
         HirakuConfig.load(marker)
-
-
-def test_legacy_config_requires_migration(tmp_path: Path) -> None:
-    marker = tmp_path / "hiraku.yml"
-    marker.write_text("active_task_id: old\n")
-    with pytest.raises(ValidationError, match="requires migration"):
-        HirakuConfig.load(marker)

@@ -48,9 +48,6 @@ nav = [
         { "MLflow" = "guides/tracking-mlflow.md" },
         { "Custom Backend" = "guides/tracking-custom.md"}
       ] },
-      { "Advanced topics" = [
-          { "Migrating to records" = "guides/migrating-to-records.md" },
-      ] },
   ] },
   { "CLI" = "api/cli.md" },
   { "Python API" = [

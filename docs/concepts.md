@@ -48,6 +48,3 @@ The project configuration stores one `active_record_id`. Creation activates
 the new record by default. `hiraku record set ID` changes it, and
 `hiraku status --json` shows it. Commands that accept `--record` use the
 explicit ID instead.
-
-See [Migrating to records](guides/migrating-to-records.md) for projects using
-the earlier task and experiment layout.

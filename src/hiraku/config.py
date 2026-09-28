@@ -65,16 +65,6 @@ class HirakuConfig(BaseModel):
         if not isinstance(values, Mapping):
             return values
         raw = dict(values)
-        legacy = {
-            "active_task_id",
-            "active_experiment_id",
-            "task_branch",
-            "experiment_branch",
-        }
-        if legacy.intersection(raw):
-            raise ValidationError(
-                "Legacy task/experiment configuration requires migration to records"
-            )
         backend = raw.get("tracking_backend")
         if isinstance(backend, str):
             raw["tracking_backend"] = {"type": backend}

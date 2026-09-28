@@ -76,12 +76,9 @@ class CSVBackend(TrackingBackend):
                 reader = csv.DictReader(stream)
                 if reader.fieldnames is None or "id" not in reader.fieldnames:
                     raise BackendError(f"csv backend file {path} has no id column")
-                if "record_id" not in reader.fieldnames and any(
-                    name in reader.fieldnames for name in ("task_id", "experiment_id")
-                ):
+                if "record_id" not in reader.fieldnames:
                     raise BackendError(
-                        f"csv backend file {path} uses legacy task/experiment "
-                        "attribution; migrate it to record_id"
+                        f"csv backend file {path} has no record_id column"
                     )
                 if any(not name for name in reader.fieldnames) or len(
                     set(reader.fieldnames)

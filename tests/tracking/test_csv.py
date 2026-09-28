@@ -64,8 +64,8 @@ def test_csv_backend_preserves_absolute_path_override(tmp_path: Path) -> None:
     assert [run.id for run in runs] == ["a"]
 
 
-def test_legacy_csv_identifies_required_migration(tmp_path: Path) -> None:
+def test_csv_backend_requires_record_id_column(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
-    (tmp_path / "runs.csv").write_text("id,task_id,experiment_id\na,old,child\n")
-    with pytest.raises(BackendError, match="migrate"):
+    (tmp_path / "runs.csv").write_text("id,note\na,missing\n")
+    with pytest.raises(BackendError, match="no record_id column"):
         CSVBackend(config).list_runs(record_id="child")
