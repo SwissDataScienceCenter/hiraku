@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+
+import pytest
+
+from hiraku.config import HirakuConfig
+from hiraku.errors import RecordExistsError, RecordNotFoundError, ValidationError
+from hiraku.records import Record, list_records, load_record
+
+
+def test_paths_and_cross_root_reparenting(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    first = Record.create("first", config=config)
+    other = Record.create("other", config=config)
+    middle = Record.create("middle", parent_id=first.id, config=config)
+    leaf = Record.create("leaf", parent_id=middle.id, config=config)
+    assert first.path == config.records_dir / "first/first.md"
+    assert middle.path == config.records_dir / "first/middle.md"
+    assert leaf.path == config.records_dir / "first/leaf.md"
+    middle.reparent(other.id, config=config)
+    assert (
+        load_record("middle", config=config).path
+        == config.records_dir / "other/middle.md"
+    )
+    assert (
+        load_record("leaf", config=config).path == config.records_dir / "other/leaf.md"
+    )
+    assert [item.id for item in other.descendants(config=config)] == ["leaf", "middle"]
+    middle.reparent(None, config=config)
+    assert (
+        load_record("middle", config=config).path
+        == config.records_dir / "middle/middle.md"
+    )
+    assert (
+        load_record("leaf", config=config).path == config.records_dir / "middle/leaf.md"
+    )
+
+
+def test_invalid_links_cycles_collisions_and_delete(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    first = Record.create("first", config=config)
+    second = Record.create("second", parent_id=first.id, config=config)
+    third = Record.create("third", related_to=[second.id], config=config)
+    with pytest.raises(ValidationError, match="ancestor"):
+        first.reparent(second.id, config=config)
+    with pytest.raises(RecordExistsError):
+        Record.create("second", config=config)
+    with pytest.raises(RecordNotFoundError):
+        Record.create("fourth", parent_id="missing", config=config)
+    second.related_to = ["missing"]
+    with pytest.raises(RecordNotFoundError):
+        second.save()
+    second.related_to = []
+    with pytest.raises(ValidationError, match="referenced"):
+        second.delete(config=config)
+    third.delete(config=config)
+    second.delete(config=config)
+    assert [item.id for item in list_records(config=config)] == ["first"]
+
+
+def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    root = Record.create(
+        "root",
+        config=config,
+        goal="Improve",
+        branch="work",
+        status="accepted",
+        decision="keep",
+        type="task",
+        entrypoints={"train": {"command": ["echo", "root"]}},
+    )
+    child = Record.create("child", parent_id=root.id, config=config, goal=None)
+    resolved = child.resolve(config=config)
+    assert resolved.values["goal"] is None
+    assert resolved.sources["goal"] == "child"
+    assert resolved.values["branch"] == "work"
+    assert resolved.sources["branch"] == "root"
+    assert "status" not in resolved.values
+    assert "decision" not in resolved.values
+    assert "type" not in resolved.values
+    assert resolved.sources["entrypoints"] == {"train": "root"}
+
+
+def test_direct_and_descendant_csv_runs(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    root = Record.create("root", config=config)
+    child = Record.create("child", parent_id=root.id, config=config)
+    with (tmp_path / "runs.csv").open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=["id", "record_id", "metric.loss"])
+        writer.writeheader()
+        writer.writerow({"id": "one", "record_id": "root", "metric.loss": 0.5})
+        writer.writerow({"id": "two", "record_id": "child", "metric.loss": 0.3})
+    assert [run.id for run in root.runs(config=config)] == ["one"]
+    assert {run.id for run in root.runs(config=config, include_descendants=True)} == {
+        "one",
+        "two",
+    }
+    assert [run.id for run in child.runs(config=config)] == ["two"]
+
+
+def test_reparenting_root_with_other_files_requires_manual_move(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    source = Record.create("source", config=config)
+    target = Record.create("target", config=config)
+    (source.path.parent / "artifact.bin").write_bytes(b"research output")
+    with pytest.raises(ValidationError, match="Move files"):
+        source.reparent(target.id, config=config)
+    assert load_record("source", config=config).parent_id is None

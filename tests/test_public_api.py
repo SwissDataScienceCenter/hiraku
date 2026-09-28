@@ -1,9 +1,8 @@
-from hiraku import Entrypoint, Experiment, HirakuConfig, Metric, Run, Task
-from hiraku.data import list_experiments, list_tasks, load_experiment, load_task
+from hiraku import BaseRecord, Entrypoint, HirakuConfig, Metric, Record, Run
 from hiraku.errors import GitError, HirakuError
 from hiraku.io import atomic_write, dump_yaml, load_yaml_mapping
 from hiraku.launch import launch, render_arguments
-from hiraku.records import Record
+from hiraku.records import list_records, load_record
 from hiraku.tracking import TrackingBackend
 
 
@@ -12,20 +11,17 @@ def test_documented_imports() -> None:
         value is not None
         for value in (
             Entrypoint,
-            Experiment,
+            BaseRecord,
             GitError,
             HirakuConfig,
             HirakuError,
             Metric,
             Record,
             Run,
-            Task,
             TrackingBackend,
             launch,
-            list_experiments,
-            list_tasks,
-            load_experiment,
-            load_task,
+            list_records,
+            load_record,
             atomic_write,
             dump_yaml,
             load_yaml_mapping,

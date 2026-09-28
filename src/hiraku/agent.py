@@ -8,19 +8,19 @@ from pydantic import model_validator
 
 from .config import HirakuConfig
 from .errors import ValidationError
-from .records import Record
+from .records import BaseRecord
 from .validation import validate_identifier
 
 
-class Program(Record):
+class Program(BaseRecord):
     """An editable agent program record."""
 
 
-class Context(Record):
+class Context(BaseRecord):
     """A curated context record."""
 
 
-class Action(Record):
+class Action(BaseRecord):
     """An entity-scoped one-step agent action record."""
 
     entity: str
@@ -107,7 +107,7 @@ def list_actions(
 
 
 def _validate_registry_identity(
-    record: Record, identifier: str, path: Path, label: str
+    record: BaseRecord, identifier: str, path: Path, label: str
 ) -> None:
     if record.id != identifier or record.path != path.absolute():
         raise ValidationError(f"{label} identity does not match registry path: {path}")

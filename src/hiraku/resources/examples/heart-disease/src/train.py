@@ -37,8 +37,7 @@ CATEGORICAL = ["sex", "cp", "fbs", "restecg", "exang", "slope", "thal"]
 NUMERIC = [column for column in COLUMNS[:-1] if column not in CATEGORICAL]
 RUN_FIELDS = [
     "id",
-    "task_id",
-    "experiment_id",
+    "record_id",
     "commit",
     "git_state",
     "timestamp",
@@ -50,8 +49,7 @@ RUN_FIELDS = [
     "metric.val/accuracy",
 ]
 PROVENANCE_VARIABLES = [
-    "HIRAKU_TASK_ID",
-    "HIRAKU_EXPERIMENT_ID",
+    "HIRAKU_RECORD_ID",
     "HIRAKU_COMMIT",
     "HIRAKU_GIT_STATE",
     "HIRAKU_ENTRYPOINT",
@@ -150,8 +148,7 @@ def main() -> None:
         runs_path,
         {
             "id": uuid.uuid4().hex,
-            "task_id": attribution["HIRAKU_TASK_ID"],
-            "experiment_id": attribution["HIRAKU_EXPERIMENT_ID"],
+            "record_id": attribution["HIRAKU_RECORD_ID"],
             "commit": attribution["HIRAKU_COMMIT"],
             "git_state": attribution["HIRAKU_GIT_STATE"],
             "timestamp": datetime.now(UTC).isoformat(),

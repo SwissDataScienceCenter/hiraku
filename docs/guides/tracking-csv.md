@@ -1,7 +1,7 @@
 # Track with CSV
 
-CSV is the default backend. Tasks normally read `runs.csv` from the Hiraku
-project root. Override this per task with
+CSV is the default backend. Records normally read `runs.csv` from the Hiraku
+project root. Override this per record with
 `tracking_backend: {type: csv, path: results/runs.csv}`; relative paths resolve
 from the project root.
 
@@ -11,8 +11,8 @@ The CSV adapter reads records; it does not write them. Your evaluation script
 can append a row using this schema:
 
 ```csv
-id,task_id,experiment_id,commit,git_state,timestamp,entrypoint,metric.val/accuracy,param.seed
-run-001,my-task,baseline,abc123,dirty,2026-01-01T12:00:00Z,evaluate,0.84,42
+id,record_id,commit,git_state,timestamp,entrypoint,metric.val/accuracy,param.seed
+run-001,baseline,abc123,dirty,2026-01-01T12:00:00Z,evaluate,0.84,42
 ```
 
 Choose a unique run ID for each execution. Prefix metric columns with
@@ -30,7 +30,7 @@ from pathlib import Path
 runs_path = Path(os.environ["HIRAKU_ROOT"]) / "runs.csv"
 ```
 
-Use `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_ENTRYPOINT`,
+Use `HIRAKU_RECORD_ID`, `HIRAKU_ENTRYPOINT`,
 `HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE` to populate attribution. See
 Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 `hiraku init --example heart-disease` to get a complete writer in `train.py`.
@@ -38,7 +38,7 @@ Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 ## Inspect
 
 ```bash
-hiraku runs --task my-task --sort val/accuracy --descending
+hiraku runs --record my-task --descendants --sort val/accuracy
 ```
 
 Metric values read from CSV remain strings in normalized runs; sorting

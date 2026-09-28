@@ -17,13 +17,9 @@ class TrackingBackend(ABC):
     """Abstract tracking backend implemented by every run-tracking adapter."""
 
     @staticmethod
-    def _validate_filters(task_id: str, experiment_id: str | None) -> None:
-        if not isinstance(task_id, str) or not task_id:
-            raise BackendError("Tracking queries require a non-empty task_id")
-        if experiment_id is not None and (
-            not isinstance(experiment_id, str) or not experiment_id
-        ):
-            raise BackendError("experiment_id must be a non-empty string or null")
+    def _validate_filters(record_id: str) -> None:
+        if not isinstance(record_id, str) or not record_id:
+            raise BackendError("Tracking queries require a non-empty record_id")
 
     @staticmethod
     def _timestamp(value: Any, *, backend: str, context: str) -> datetime | None:
@@ -104,28 +100,20 @@ class TrackingBackend(ABC):
             result = result[:limit]
         return result
 
-    def list_runs(
-        self, *, task_id: str, experiment_id: str | None = None, **query: Any
-    ) -> list[Run]:
+    def list_runs(self, *, record_id: str, **query: Any) -> list[Run]:
         """Return normalized runs for a task and optional experiment.
 
         Args:
-            task_id: The task ID to filter runs by.
-            experiment_id: An optional experiment ID to filter runs by.
+            record_id: The record ID to filter runs by.
             query: Optional query parameters to sort, limit, or filter the results.
 
         Returns:
             A list of normalized Run objects matching the specified filters and query.
         """
 
-        self._validate_filters(task_id, experiment_id)
-        runs = self._read_runs(task_id=task_id, experiment_id=experiment_id)
-        runs = [
-            run
-            for run in runs
-            if run.task_id in {None, task_id}
-            and (experiment_id is None or run.experiment_id == experiment_id)
-        ]
+        self._validate_filters(record_id)
+        runs = self._read_runs(record_id=record_id)
+        runs = [run for run in runs if run.record_id == record_id]
         return self._apply_query(runs, query, self.backend_name)
 
     @property
@@ -133,7 +121,5 @@ class TrackingBackend(ABC):
         return type(self).__name__.removesuffix("Backend").lower()
 
     @abstractmethod
-    def _read_runs(
-        self, *, task_id: str, experiment_id: str | None = None
-    ) -> list[Run]:
+    def _read_runs(self, *, record_id: str) -> list[Run]:
         raise NotImplementedError

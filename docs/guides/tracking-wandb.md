@@ -1,6 +1,6 @@
 # Track with W&B
 
-W&B owns the runs; Hiraku queries them using matching task and experiment IDs.
+W&B owns the runs; Hiraku queries them using matching record IDs.
 
 ## Install and configure
 
@@ -15,11 +15,11 @@ In the training project, install the SDK and authenticate:
 ```bash
 uv add wandb
 uv run wandb login
-hiraku task update iris \
+hiraku record update iris \
   --set 'tracking_backend={type: wandb, entity: your-team, project: hiraku-iris}'
 ```
 
-Replace the entity/project with your workspace. The task must already exist.
+Replace the entity/project with your workspace. The record must already exist.
 The CLI and training process can have separate Python environments; both need
 W&B installed.
 
@@ -32,10 +32,9 @@ import wandb
 with wandb.init(
     entity="your-team",
     project="hiraku-iris",
-    group=os.environ["HIRAKU_TASK_ID"],
+    group=os.environ["HIRAKU_RECORD_ID"],
     config={
-        "hiraku.task_id": os.environ["HIRAKU_TASK_ID"],
-        "hiraku.experiment_id": os.environ["HIRAKU_EXPERIMENT_ID"],
+        "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
         "hiraku.commit": os.environ.get("HIRAKU_COMMIT"),
         "hiraku.entrypoint": os.environ["HIRAKU_ENTRYPOINT"],
     },
@@ -43,7 +42,7 @@ with wandb.init(
     run.log({"test/accuracy": accuracy})  # calculated by your evaluation code
 ```
 
-Use the same entity/project in logging and Hiraku configuration. Task settings
+Use the same entity/project in logging and Hiraku configuration. Record settings
 select the query backend; they do not initialize a W&B run or automatically
 configure your training script.
 
@@ -52,7 +51,7 @@ configure your training script.
 After the online run finishes syncing:
 
 ```bash
-hiraku runs --task iris --json
+hiraku runs --record iris --descendants --json
 ```
 
 The adapter queries W&B's remote API. Offline SDK runs need syncing before

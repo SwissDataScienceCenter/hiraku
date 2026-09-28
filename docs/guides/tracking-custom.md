@@ -38,7 +38,7 @@ class JsonBackend(TrackingBackend):
         self.path = path
 
     def _read_runs(
-        self, *, task_id: str, experiment_id: str | None = None
+        self, *, record_id: str
     ) -> list[Run]:
         try:
             rows: list[dict[str, Any]] = json.loads(
@@ -65,10 +65,10 @@ import my_tracker
 
 The current CLI does not discover arbitrary project modules. Use the Python API for a project-local backend, or package/import the backend from the application startup that invokes the CLI.
 
-Configure the task with the common backend mapping:
+Configure the record with the common backend mapping:
 
 ```bash
-hiraku task update my-task \
+hiraku record update my-task \
   --set 'tracking_backend={type: json, path: tracking/runs.json}'
 ```
 
@@ -80,8 +80,7 @@ The custom service must store records that can be converted to `Run`:
 [
   {
     "id": "run-001",
-    "task_id": "my-task",
-    "experiment_id": "baseline",
+    "record_id": "baseline",
     "commit": "0123456789abcdef0123456789abcdef01234567",
     "timestamp": "2026-01-01T12:00:00Z",
     "entrypoint": "evaluate",
@@ -91,7 +90,7 @@ The custom service must store records that can be converted to `Run`:
 ]
 ```
 
-Use `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, and `HIRAKU_ENTRYPOINT` when
+Use `HIRAKU_RECORD_ID` and `HIRAKU_ENTRYPOINT` when
 writing attribution. Interpret `HIRAKU_COMMIT` together with
 `HIRAKU_GIT_STATE`: a dirty launch reports its current base commit but not an
 immutable source snapshot. Keep credentials outside `hiraku.yml`.
@@ -104,15 +103,16 @@ From Python:
 import my_tracker
 
 from hiraku import HirakuConfig
-from hiraku.data import load_task
+from hiraku.records import load_record
 
 config = HirakuConfig.discover()
-task = load_task("my-task", config=config)
-runs = task.runs(config=config, sort="val/accuracy", ascending=False)
+record = load_record("my-task", config=config)
+runs = record.runs(config=config, include_descendants=True,
+                   sort="val/accuracy", ascending=False)
 ```
 
 When the backend is loaded by the CLI application, use:
 
 ```bash
-hiraku runs --task my-task --sort val/accuracy --descending
+hiraku runs --record my-task --descendants --sort val/accuracy
 ```

@@ -37,8 +37,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     required = (
-        "HIRAKU_TASK_ID",
-        "HIRAKU_EXPERIMENT_ID",
+        "HIRAKU_RECORD_ID",
         "HIRAKU_COMMIT",
         "HIRAKU_ENTRYPOINT",
         "HIRAKU_ROOT",
@@ -50,13 +49,11 @@ def main() -> None:
         )
     tags = {
         f"hiraku.{key}": os.environ[f"HIRAKU_{key.upper()}"]
-        for key in ("task_id", "experiment_id", "commit", "entrypoint")
+        for key in ("record_id", "commit", "entrypoint")
     }
     database = Path(os.environ["HIRAKU_ROOT"]) / "mlflow.db"
     default_tracking_uri = f"sqlite:///{database}"
-    mlflow.set_tracking_uri(
-        os.environ.get("MLFLOW_TRACKING_URI", default_tracking_uri)
-    )
+    mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", default_tracking_uri))
     mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT_NAME", "hiraku-digits"))
     data = load_digits()
     # Pixels have a known range of 0..16; no statistics are fit on validation data.
@@ -75,7 +72,7 @@ def main() -> None:
         learning_rate_init=0.001,
         random_state=args.seed,
     )
-    with mlflow.start_run(run_name=tags["hiraku.experiment_id"], tags=tags):
+    with mlflow.start_run(run_name=tags["hiraku.record_id"], tags=tags):
         mlflow.log_params(
             {
                 **vars(args),

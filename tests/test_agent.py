@@ -15,5 +15,5 @@ def test_agent_record_registries(tmp_path: Path) -> None:
     context = Context(id="literature", markdown="Sources")
     context.save(config.contexts_dir / "literature/context.md")
     assert load_context("literature", config=config).markdown == "Sources"
-    action = load_action("propose", entity="experiment", config=config)
-    assert action.entity == "experiment"
+    action = load_action("propose", entity="record", config=config)
+    assert action.entity == "record"

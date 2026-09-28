@@ -52,15 +52,15 @@ def test_launch_dispatcher_reports_current_commit_and_git_state(
     script = config.dispatch_dir / "launch.sh"
     environment = os.environ.copy()
     environment.update(
-        HIRAKU_TASK_ID="task",
-        HIRAKU_TASK_FILE="/records/task.md",
+        HIRAKU_RECORD_ID="task",
+        HIRAKU_RECORD_FILE="/records/task.md",
         HIRAKU_ENTRYPOINT="train",
     )
     command = [
         "--",
         "/bin/sh",
         "-c",
-        'printf "%s|%s|%s|%s|%s" "$HIRAKU_TASK_ID" "$HIRAKU_TASK_FILE" '
+        'printf "%s|%s|%s|%s|%s" "$HIRAKU_RECORD_ID" "$HIRAKU_RECORD_FILE" '
         '"$HIRAKU_ENTRYPOINT" "$HIRAKU_COMMIT" "$HIRAKU_GIT_STATE"',
     ]
 
@@ -93,8 +93,7 @@ def test_launch_dispatcher_preserves_context_and_reports_unavailable_git(
     config = HirakuConfig.init(tmp_path)
     inherited = os.environ.copy()
     inherited.update(
-        HIRAKU_TASK_ID="stale-task",
-        HIRAKU_EXPERIMENT_ID="stale-experiment",
+        HIRAKU_RECORD_ID="stale-record",
         HIRAKU_COMMIT="stale-commit",
         HIRAKU_GIT_STATE="clean",
     )
@@ -103,12 +102,11 @@ def test_launch_dispatcher_preserves_context_and_reports_unavailable_git(
         "--",
         "/bin/sh",
         "-c",
-        'printf "%s|%s|%s|%s" "$HIRAKU_TASK_ID" '
-        '"$HIRAKU_EXPERIMENT_ID" "$HIRAKU_COMMIT" "$HIRAKU_GIT_STATE"',
+        'printf "%s|%s|%s" "$HIRAKU_RECORD_ID" "$HIRAKU_COMMIT" "$HIRAKU_GIT_STATE"',
         env=inherited,
     )
     assert result.returncode == 0
-    assert result.stdout == "stale-task|stale-experiment||unavailable"
+    assert result.stdout == "stale-record||unavailable"
 
 
 def test_worktree_dispatcher_isolates_and_cleans_up(tmp_path: Path) -> None:

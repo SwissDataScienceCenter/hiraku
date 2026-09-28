@@ -1,7 +1,7 @@
 # Guides
 
 Practical workflows for setting up Hiraku, choosing a tracking backend, and
-working with experiment branches.
+working with research records.
 
 - [Start from scratch](../examples/minimal/README.md)
 - Tracking backends:
@@ -10,4 +10,4 @@ working with experiment branches.
     - [MLflow](tracking-mlflow.md)
     - [Custom backend](tracking-custom.md)
 - Advanced usage:
-    - [Experiment branches](experiment-branches.md)
+    - [Migrating to records](migrating-to-records.md)

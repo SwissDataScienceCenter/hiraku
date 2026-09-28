@@ -49,7 +49,7 @@ nav = [
         { "Custom Backend" = "guides/tracking-custom.md"}
       ] },
       { "Advanced topics" = [
-          { "Experiment branches" = "guides/experiment-branches.md" },
+          { "Migrating to records" = "guides/migrating-to-records.md" },
       ] },
   ] },
   { "CLI" = "api/cli.md" },
@@ -58,8 +58,7 @@ nav = [
       { "Configuration" = "api/python/config.md" },
       { "Records" = "api/python/records.md" },
       { "Data models" = [
-          { "Task" = "api/python/task.md" },
-          { "Experiment" = "api/python/experiment.md" },
+          { "Record" = "api/python/records.md" },
           { "Run" = "api/python/run.md" },
           { "Metric" = "api/python/metric.md" },
           { "Entrypoint" = "api/python/entrypoint.md" },

@@ -153,16 +153,11 @@ class WandbBackend(TrackingBackend):
         cls,
         run: Any,
         *,
-        task_id: str,
-        experiment_id: str | None,
+        record_id: str,
     ) -> bool:
         """Whether a W&B run contains matching Hiraku provenance."""
         config = cls._run_config(run)
-        if config.get("hiraku.task_id") != task_id:
-            return False
-        return (
-            experiment_id is None or config.get("hiraku.experiment_id") == experiment_id
-        )
+        return config.get("hiraku.record_id") == record_id
 
     @classmethod
     def _run_params(cls, run: Any) -> dict[str, Any]:
@@ -197,8 +192,7 @@ class WandbBackend(TrackingBackend):
             id=run.id,
             metrics=dict(run.summary or {}),
             params=cls._run_params(run),
-            task_id=config.get("hiraku.task_id"),
-            experiment_id=config.get("hiraku.experiment_id"),
+            record_id=config.get("hiraku.record_id"),
             commit=config.get("hiraku.commit"),
             timestamp=run.created_at,
             entrypoint=config.get("hiraku.entrypoint"),
@@ -206,9 +200,7 @@ class WandbBackend(TrackingBackend):
             raw=cls._run_raw(run),
         )
 
-    def _read_runs(
-        self, *, task_id: str, experiment_id: str | None = None
-    ) -> list[Run]:
+    def _read_runs(self, *, record_id: str) -> list[Run]:
         try:
             runs = self._get_runs()
             return [
@@ -216,8 +208,7 @@ class WandbBackend(TrackingBackend):
                 for run in runs
                 if self._matches(
                     run,
-                    task_id=task_id,
-                    experiment_id=experiment_id,
+                    record_id=record_id,
                 )
             ]
         except BackendError:

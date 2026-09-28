@@ -104,58 +104,25 @@ class GitRepository:
             raise GitError(f"Git branch does not exist: {branch}")
         self._git("switch", branch)
 
-    def task_branch_name(self, task_id: str) -> str:
+    def record_branch_name(self, record_id: str) -> str:
         if self.config is None:
-            raise GitError("A Hiraku configuration is required for task branches")
-        return self.config.task_branch.format(task_id=task_id)
+            raise GitError("A Hiraku configuration is required for record branches")
+        return self.config.record_branch.format(record_id=record_id)
 
-    def experiment_branch_name(self, task_id: str, experiment_id: str) -> str:
-        if self.config is None:
-            raise GitError("A Hiraku configuration is required for experiment branches")
-        return self.config.experiment_branch.format(
-            task_id=task_id, experiment_id=experiment_id
-        )
-
-    def create_task_branch(
+    def create_record_branch(
         self,
-        task_id: str,
+        record_id: str,
         *,
         branch: str | None = None,
         start_ref: str = "HEAD",
         switch: bool = False,
     ) -> str:
-        selected = self.task_branch_name(task_id) if branch is None else branch
+        selected = self.record_branch_name(record_id) if branch is None else branch
         if self.branch_exists(selected):
             if switch:
                 self.switch(selected)
             return selected
         return self.create_branch(selected, start_ref=start_ref, switch=switch)
-
-    def create_experiment_branch(
-        self,
-        task_id: str,
-        experiment_id: str,
-        *,
-        branch: str | None = None,
-        start_ref: str | None = None,
-        switch: bool = False,
-    ) -> str:
-        selected = (
-            self.experiment_branch_name(task_id, experiment_id)
-            if branch is None
-            else branch
-        )
-        if self.branch_exists(selected):
-            if switch:
-                self.switch(selected)
-            return selected
-        task_branch = self.task_branch_name(task_id)
-        source = start_ref or task_branch
-        return self.create_branch(
-            selected,
-            start_ref=source,
-            switch=switch,
-        )
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         first, second = self.resolve(ancestor), self.resolve(descendant)
@@ -166,16 +133,14 @@ class GitRepository:
             == 0
         )
 
-    def parent_experiments(
-        self, experiment: object, experiments: Sequence[object]
-    ) -> list[object]:
-        commit = getattr(experiment, "commit", None)
+    def parent_records(self, record: object, records: Sequence[object]) -> list[object]:
+        commit = getattr(record, "commit", None)
         if commit is None:
             return []
         candidates = [
             item
-            for item in experiments
-            if item is not experiment
+            for item in records
+            if item is not record
             and getattr(item, "commit", None)
             and self.is_ancestor(item.commit, commit)
         ]
@@ -190,16 +155,14 @@ class GitRepository:
             )
         ]
 
-    def child_experiments(
-        self, experiment: object, experiments: Sequence[object]
-    ) -> list[object]:
-        commit = getattr(experiment, "commit", None)
+    def child_records(self, record: object, records: Sequence[object]) -> list[object]:
+        commit = getattr(record, "commit", None)
         if commit is None:
             return []
         candidates = [
             item
-            for item in experiments
-            if item is not experiment
+            for item in records
+            if item is not record
             and getattr(item, "commit", None)
             and self.is_ancestor(commit, item.commit)
         ]

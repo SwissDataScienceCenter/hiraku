@@ -1,15 +1,15 @@
 # CLI Reference
 
-The CLI is the quickest way to manage tasks, experiments, and runs.
+The CLI manages research records, launches, and tracked runs.
 
 Typical workflow:
 
 ```bash
 hiraku init
-hiraku task create <task-id>
-hiraku exp create <experiment-id>
-hiraku launch <experiment-id>:<entrypoint>
-hiraku runs
+hiraku record create <root-id>
+hiraku record create <child-id> --parent <root-id>
+hiraku launch <entrypoint> --record <child-id>
+hiraku runs --record <root-id> --descendants
 ```
 
 `hiraku init` requires its target to be a Git repository root. Use
@@ -44,8 +44,7 @@ The two options are mutually exclusive. Templates may replace files installed
 by the same initialization, but initialization refuses to overwrite files that
 already existed in the target. Explicit options such as `--tracking-backend`
 take precedence over values from a template-provided `hiraku.yml`.
-After successful initialization, the command lists every file and directory it
-created before printing the final project location.
+After successful initialization, the command prints the project location.
 
 Use `hiraku --help` or the generated command sections below for all options.
 The command reference is generated from Hiraku's Click command tree.

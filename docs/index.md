@@ -46,16 +46,16 @@ uv run hiraku --help
 
 ## The Hiraku workflow
 
-Hiraku connects the research loop with the following three concepts:
+Hiraku connects the research loop with records and tracked runs:
 
 ```mermaid
 flowchart LR
-    T[Task<br/>research goal] --> E[Experiment<br/>reproducible unit] --> R[Run<br/>metric traces]
+    T[Root record<br/>research goal] --> E[Child record<br/>focused attempt] --> R[Run<br/>metric trace]
 ```
 
-* A `Task` defines the research task. It includes user-defined fields (e.g., a goal, question and metrics), documents the research progress, and specifies shared entrypoints and a tracking backend. Tasks are stored as  Markdown records under `hiraku/tasks/{task-id}/task.md`. 
-* An `Experiment` describes one small, reproducible unit within a task. It links a code commit, experiment entrypoints, and runs. Experiments are stored as Markdown records under `hiraku/tasks/{task-id}/experiments/{experiment-id}.md`.
-* A `Run` records an execution of an experiment. Runs are user managed and directly logged to CSV, MLflow, W&B, or any other backend. They are stored in the backend's own format and queried by Hiraku. 
+* A root `Record` may define a research goal, metrics, shared entrypoints, and a tracking backend. It lives at `hiraku/records/{root-id}/{root-id}.md`.
+* A child `Record` may focus on an experiment, diagnosis, or review. It inherits through `parent_id` and may bind its own code commit.
+* A `Run` records one execution attributed to a `record_id`. Runs are managed by CSV, MLflow, W&B, or another backend and queried by Hiraku.
 * Additionally, an `Entrypoint` defines an executable command associated with documented arguments. Hiraku provides launch helpers and customizable dispatch scripts.
 
 ??? tip "Branching and experiment lineage"

@@ -121,7 +121,7 @@ class ProjectInitializer:
                 atomic_write(marker, dump_yaml(config.to_dict()))
                 created_files.append(marker)
                 for directory in (
-                    config.tasks_dir,
+                    config.records_dir,
                     config.programs_dir,
                     config.actions_dir,
                     config.contexts_dir,
@@ -192,15 +192,17 @@ class ProjectInitializer:
         examples = files("hiraku.resources") / "examples"
         source = examples / example / "src"
         if not source.is_dir():
-            available = sorted(
-                item.name
-                for item in examples.iterdir()
-                if item.is_dir() and (item / "src").is_dir()
-            ) if examples.is_dir() else []
+            available = (
+                sorted(
+                    item.name
+                    for item in examples.iterdir()
+                    if item.is_dir() and (item / "src").is_dir()
+                )
+                if examples.is_dir()
+                else []
+            )
             suffix = (
-                f"; available examples: {', '.join(available)}"
-                if available
-                else ""
+                f"; available examples: {', '.join(available)}" if available else ""
             )
             raise ValidationError(f"Unknown example {example!r}{suffix}")
         return stack.enter_context(as_file(source))
@@ -249,9 +251,7 @@ class ProjectInitializer:
             return
         if source_is_dir and destination.is_dir():
             return
-        raise ValidationError(
-            f"Template would overwrite existing path: {destination}"
-        )
+        raise ValidationError(f"Template would overwrite existing path: {destination}")
 
     @staticmethod
     def _ensure_directory(directory: Path, created_dirs: list[Path]) -> None:

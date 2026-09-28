@@ -11,8 +11,7 @@ from hiraku.tracking.wandb import WandbBackend, WandbBackendConfig
 class FakeRun:
     id = "run-1"
     config = {
-        "hiraku.task_id": "iris",
-        "hiraku.experiment_id": "logistic",
+        "hiraku.record_id": "logistic",
         "hiraku.commit": "a" * 40,
         "hiraku.entrypoint": "train",
         "seed": 42,
@@ -47,7 +46,7 @@ def test_wandb_config_accepts_common_mapping() -> None:
 def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "wandb", types.SimpleNamespace(Api=FakeApi))
     backend = WandbBackend(HirakuConfig.init(tmp_path), entity="team", project="iris")
-    runs = backend.list_runs(task_id="iris", experiment_id="logistic")
+    runs = backend.list_runs(record_id="logistic")
     assert len(runs) == 1
     run = runs[0]
     assert run.id == "run-1"

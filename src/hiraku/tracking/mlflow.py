@@ -84,9 +84,7 @@ class MLflowBackend(TrackingBackend):
     def _escape_filter(value: str) -> str:
         return value.replace("\\", "\\\\").replace("'", "\\'")
 
-    def _read_runs(
-        self, *, task_id: str, experiment_id: str | None = None
-    ) -> list[Run]:
+    def _read_runs(self, *, record_id: str) -> list[Run]:
         from ..data import Run
 
         try:
@@ -99,10 +97,12 @@ class MLflowBackend(TrackingBackend):
             client = MlflowClient(tracking_uri=self.tracking_uri)
             experiment_name = self.experiment_name
             if experiment_name is None:
-                from ..data import load_task
+                from ..records import load_record
 
-                task = load_task(task_id, config=self.config)
-                experiment_name = task.mlflow_experiment
+                record = load_record(record_id, config=self.config)
+                experiment_name = record.resolve(config=self.config).values.get(
+                    "mlflow_experiment"
+                )
             if experiment_name:
                 experiment = client.get_experiment_by_name(str(experiment_name))
                 if experiment is None:
@@ -115,18 +115,16 @@ class MLflowBackend(TrackingBackend):
             native_runs = client.search_runs(
                 experiment_ids=experiment_ids,
                 filter_string=(
-                    f"tags.`hiraku.task_id` = '{self._escape_filter(task_id)}'"
+                    f"tags.`hiraku.record_id` = '{self._escape_filter(record_id)}'"
                 ),
             )
             runs: list[Run] = []
             for native in native_runs:
                 info, data = native.info, native.data
                 tags = dict(data.tags)
-                native_task = tags.get("hiraku.task_id")
-                native_experiment = tags.get("hiraku.experiment_id")
+                native_record = tags.get("hiraku.record_id")
                 known_tags = {
-                    "hiraku.task_id",
-                    "hiraku.experiment_id",
+                    "hiraku.record_id",
                     "hiraku.commit",
                     "hiraku.entrypoint",
                 }
@@ -143,8 +141,7 @@ class MLflowBackend(TrackingBackend):
                 runs.append(
                     Run(
                         id=info.run_id,
-                        task_id=native_task,
-                        experiment_id=native_experiment,
+                        record_id=native_record,
                         commit=tags.get("hiraku.commit"),
                         entrypoint=tags.get("hiraku.entrypoint"),
                         timestamp=self._timestamp(

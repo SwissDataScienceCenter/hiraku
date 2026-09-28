@@ -20,8 +20,7 @@ class HirakuConfig(BaseModel):
         root: Project root directory.
         hiraku_dir_name: Relative state directory name.
         default_dispatch: Default launcher script.
-        task_branch: Task branch template.
-        experiment_branch: Experiment branch template.
+        record_branch: Record branch template.
         default_program: Default program identifier.
         tracking_backend: Backend configuration mapping with a required ``type``.
 
@@ -36,12 +35,10 @@ class HirakuConfig(BaseModel):
     DEFAULTS: ClassVar[dict[str, Any]] = {
         "hiraku_dir": "hiraku",
         "default_dispatch": "launch.sh",
-        "task_branch": "hiraku/tasks/{task_id}",
-        "experiment_branch": "hiraku/experiments/{task_id}/{experiment_id}",
+        "record_branch": "hiraku/records/{record_id}",
         "default_program": "interactive",
         "tracking_backend": {"type": "csv"},
-        "active_task_id": None,
-        "active_experiment_id": None,
+        "active_record_id": None,
     }
     model_config = ConfigDict(
         extra="allow", validate_assignment=True, populate_by_name=True
@@ -53,14 +50,12 @@ class HirakuConfig(BaseModel):
         default=DEFAULTS["hiraku_dir"], alias="hiraku_dir", min_length=1
     )
     default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
-    task_branch: str = Field(default=DEFAULTS["task_branch"], min_length=1)
-    experiment_branch: str = Field(default=DEFAULTS["experiment_branch"], min_length=1)
+    record_branch: str = Field(default=DEFAULTS["record_branch"], min_length=1)
     default_program: str = Field(default=DEFAULTS["default_program"], min_length=1)
     tracking_backend: dict[str, Any] = Field(
         default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
     )
-    active_task_id: str | None = DEFAULTS["active_task_id"]
-    active_experiment_id: str | None = DEFAULTS["active_experiment_id"]
+    active_record_id: str | None = DEFAULTS["active_record_id"]
     _hiraku_dir: Path = PrivateAttr()
 
     @model_validator(mode="before")
@@ -70,6 +65,16 @@ class HirakuConfig(BaseModel):
         if not isinstance(values, Mapping):
             return values
         raw = dict(values)
+        legacy = {
+            "active_task_id",
+            "active_experiment_id",
+            "task_branch",
+            "experiment_branch",
+        }
+        if legacy.intersection(raw):
+            raise ValidationError(
+                "Legacy task/experiment configuration requires migration to records"
+            )
         backend = raw.get("tracking_backend")
         if isinstance(backend, str):
             raw["tracking_backend"] = {"type": backend}
@@ -232,9 +237,9 @@ class HirakuConfig(BaseModel):
         )
 
     @property
-    def tasks_dir(self) -> Path:
-        """Return the directory containing task records."""
-        return self.hiraku_dir / "tasks"
+    def records_dir(self) -> Path:
+        """Return the directory containing research records."""
+        return self.hiraku_dir / "records"
 
     @property
     def programs_dir(self) -> Path:
@@ -256,84 +261,26 @@ class HirakuConfig(BaseModel):
         """Return the directory containing launcher dispatch scripts."""
         return self.hiraku_dir / "dispatch"
 
-    def set_active_task(self, task: str | Any) -> None:
-        """Set the active task and clear incompatible experiment state.
+    def set_active_record(self, record: str | Any) -> None:
+        """Persist the active research record."""
+        from .records import Record, load_record
 
-        Args:
-            task: Task identifier or loaded ``Task`` instance.
-
-        Raises:
-            hiraku.errors.RecordNotFoundError: If the task cannot be loaded.
-            hiraku.errors.ValidationError: If configuration persistence fails.
-
-        Example:
-            ``config.set_active_task("heart-disease")``
-        """
-        from .data import Task, load_task
-
-        identifier = task.id if isinstance(task, Task) else task
-        record = load_task(identifier, config=self)
-        old = (self.active_task_id, self.active_experiment_id)
+        identifier = record.id if isinstance(record, Record) else record
+        selected = load_record(identifier, config=self)
+        old = self.active_record_id
         try:
-            self.active_task_id = record.id
-            if old[0] != record.id:
-                self.active_experiment_id = None
+            self.active_record_id = selected.id
             self.save()
         except Exception:
-            self.active_task_id, self.active_experiment_id = old
+            self.active_record_id = old
             raise
 
-    def set_active_experiment(self, experiment: str | Any) -> None:
-        """Set the active experiment and its owning task.
-
-        Args:
-            experiment: Qualified experiment reference or loaded ``Experiment``.
-
-        Raises:
-            hiraku.errors.RecordNotFoundError: If the experiment cannot be loaded.
-            hiraku.errors.ValidationError: If configuration persistence fails.
-
-        Example:
-            ``config.set_active_experiment("heart-disease:random-forest")``
-        """
-        from .data import Experiment, load_experiment
-
-        reference = (
-            f"{experiment.task_id}:{experiment.id}"
-            if isinstance(experiment, Experiment)
-            else experiment
-        )
-        record = load_experiment(reference, config=self)
-        old = (self.active_task_id, self.active_experiment_id)
+    def clear_active_record(self) -> None:
+        """Clear the active research record."""
+        old = self.active_record_id
         try:
-            self.active_task_id = record.task_id
-            self.active_experiment_id = record.id
+            self.active_record_id = None
             self.save()
         except Exception:
-            self.active_task_id, self.active_experiment_id = old
-            raise
-
-    def clear_active_experiment(self) -> None:
-        """Clear the active experiment while retaining the active task.
-
-        Raises:
-            hiraku.errors.ValidationError: If configuration persistence fails.
-        """
-        old = self.active_experiment_id
-        try:
-            self.active_experiment_id = None
-            self.save()
-        except Exception:
-            self.active_experiment_id = old
-            raise
-
-    def clear_active_task(self) -> None:
-        """Atomically clear the active task and its experiment selection."""
-        old = (self.active_task_id, self.active_experiment_id)
-        try:
-            self.active_task_id = None
-            self.active_experiment_id = None
-            self.save()
-        except Exception:
-            self.active_task_id, self.active_experiment_id = old
+            self.active_record_id = old
             raise

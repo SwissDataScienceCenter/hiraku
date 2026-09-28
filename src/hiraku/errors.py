@@ -29,12 +29,8 @@ class AmbiguousReferenceError(ValidationError):
     """A record reference cannot be resolved to one record."""
 
 
-class NoActiveTaskError(HirakuError):
-    """An operation requires an active task."""
-
-
-class NoActiveExperimentError(HirakuError):
-    """An operation requires an active experiment."""
+class NoActiveRecordError(HirakuError):
+    """An operation requires an active research record."""
 
 
 class EntrypointNotFoundError(HirakuError):

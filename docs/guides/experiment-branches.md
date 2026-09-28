@@ -1,13 +1,21 @@
-# Experiment branches
+# Branches and record provenance
 
-In the simplest case, the user creates a task and associated working branch (e.g., `main` or `hiraku/tasks/{task_id}`). Agents are instructed to commit experiment code to the task branch, or (in a future version, a harness might enforce this as a hard constraint. To reject an experiment, the user (or agent) can choose to revert or reset code changes using the standard git commands.
+Hiraku records may name an optional Git branch and a local implementation
+commit. The `branch` field inherits through `parent_id`, so a child may share
+its parent's working branch or override it. `commit` never inherits: bind each
+record to the exact source commit used for its own runs.
 
-Experiment branches allow advanced workflows for creating a DAG over experiments. Users or agents can explore several ideas in parallel using git worktrees, and backtrack or branch from any experiment. To associate an experiment with a branch use
+The Git repository remains responsible for creating branches, committing
+changes, and merging. Hiraku's `record_branch` configuration provides a
+default branch name for code using `GitRepository.create_record_branch`; the
+CLI also accepts a branch as a stored field:
+
 ```bash
-hiraku experiment create ... --branch [BRANCH] [--from REF]
+git switch -c hiraku/records/baseline
+hiraku record create baseline --parent research-root \
+  --set 'branch=hiraku/records/baseline' --commit HEAD
 ```
-Without a value, `--branch` selects `hiraku/experiments/{task_id}/{experiment_id}`; a value selects any valid new or existing branch. The selected branch is recorded in the experiment. `--from` may resolve another branch or commit, defaults to task-branch HEAD, and is used only when creating a branch. Without `--branch`, the experiment remains on the task branch.
 
-The user (or agent) is responsible to merge experiment branches into the task branch, and resolving conflicts. In particular, experiment records should be committed to the task branch so that they can be listed by Hiraku.
-
-> We do not explicitly record experiment lineage. Since experiments refer to a unique commit, experiment lineage is a DAG derived from Git commit history. To be tested, subject to change.
+The logical record tree, `related_to` links, and Git commit history capture
+different relationships. Use `parent_id` for hierarchy and inheritance,
+`related_to` for cross references, and commit ancestry for code provenance.
