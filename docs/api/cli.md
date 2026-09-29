@@ -44,7 +44,8 @@ The two options are mutually exclusive. Templates may replace files installed
 by the same initialization, but initialization refuses to overwrite files that
 already existed in the target. Explicit options such as `--tracking-backend`
 take precedence over values from a template-provided `hiraku.yml`.
-After successful initialization, the command prints the project location.
+After successful initialization, the command lists every file and directory it
+created before printing the final project location.
 
 Use `hiraku --help` or the generated command sections below for all options.
 The command reference is generated from Hiraku's Click command tree.
