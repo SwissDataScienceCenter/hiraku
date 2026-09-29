@@ -151,16 +151,16 @@ skills.
 ## Actions, Programs, Context
 
 !!! info
-    Hiraku stores agent-facing instructions and context but does not provide a separate `hiraku-agent` runner. A coding agent invokes the project-local skill and uses the CLI.
+    Version 0.1.0 only implements the data model and not yet the agent integration. See github issues for the planned features.
 
-Hiraku stores agent instructions as actions, programs, and context. *Actions* describe one-step patterns. A *program* describes a research workflow or loop with its limits and stopping conditions. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files provide project-relevant information to the agent. These records use generic `BaseRecord` persistence rather than research-record inheritance.
+Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state.  A *program* defines complex research workflows and loops end-to-end, with defined permissions and limits. Actions and programs are executed by the `hiraku-agent`. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to provide project-relevant information to the agent.
 
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Action** | `hiraku/actions/{entity}/{action_id}/action.md` | A named action described for the coding agent. |
-| **Program** | `hiraku/programs/{program_id}/program.md` | A named research workflow with instructions, limits, checkpoints, and stopping conditions. |
-| **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature and cross-record summaries. |
+| **Action** | `hiraku/actions/{entity}/{action_id}/{action.md,action.py}` | A named action that can be invoked by the hiraku-agent agent. |
+| **Program** | `hiraku/programs/{program_id}/{program.md,program.py}` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
+| **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
 Programs, action and context records are managed via CLI, e.g.
 
@@ -186,12 +186,23 @@ The following sequence illustrates the intended workflow.
 hiraku init
 hiraku status
 
-# 1. optionally, create curated context
+# 1. optionally, initialize context (not implement yet)
 hiraku context create literature
+hiraku-agent context update literature "Create a curated literature review for heart-disease prediction"
+
+# add literature to the active context
+hiraku context set literature
+# print files that would be added to the context
+hiraku context
 
 # 2. create the research root; creation makes it active
 hiraku record create heart-disease --type task \
   --set 'goal=Develop models for heart disease prediction'
+
+# alternatively, create it with the agent skill inside a coding harness
+# /hiraku "create a new root record for heart-disease prediction"
+
+# query the record and Hiraku status
 hiraku record show heart-disease --json
 hiraku status
 
@@ -200,6 +211,8 @@ hiraku record create logistic-baseline --parent heart-disease \
   --type experiment \
   --set 'summary=Logistic regression baseline' \
   --set 'hypothesis=Regularized logistic regression provides a calibrated baseline'
+# alternatively, use the agent skill to implement the proposal
+# /hiraku "implement the logistic baseline record"
 # implement and commit the code change, then bind the resulting commit
 git commit -m "implement logistic baseline"
 hiraku record update logistic-baseline --commit HEAD \
@@ -215,6 +228,7 @@ hiraku record edit logistic-baseline
 
 # 6. summarize reviewed findings in the root record
 hiraku record edit heart-disease
+# or, with the skill: /hiraku "summarize the reviewed child records"
 ```
 
 The same workflow can be carried out through the installed Hiraku skill in a
@@ -229,9 +243,11 @@ objective, branch, budget, and stopping condition with the user.
 
 ```bash
 hiraku program show autoresearch
+hiraku program show interactive
 hiraku record tree
 hiraku runs --record heart-disease --descendants --json
 ```
 
 The [Autoresearch example](examples/autoresearch/README.md) shows how to use
-the program with the project-local skill and a bounded dispatcher.
+the program with the project-local skill and a bounded dispatcher. The skill
+can be invoked with `/hiraku "run the autoresearch program for heart-disease"`.
