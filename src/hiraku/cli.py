@@ -339,7 +339,8 @@ def record_list(state: CLIContext, json_output: bool) -> None:
     else:
         click.echo(
             _table(
-                ("id", "parent", "type"), [(r.id, r.parent_id, r.type) for r in records]
+                ("id", "parent", "type", "status"),
+                [(r.id, r.parent_id, r.type, r.status) for r in records],
             )
         )
 

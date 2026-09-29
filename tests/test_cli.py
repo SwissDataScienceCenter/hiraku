@@ -61,6 +61,18 @@ def test_record_cli_active_and_validation(tmp_path: Path, monkeypatch) -> None:
     assert invoke("record", "update", "second", "--related-to", "first").exit_code == 0
 
 
+def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    invoke("record", "create", "root", "--type", "task", "--set", "status=active")
+    invoke("record", "create", "child", "--parent", "root")
+
+    lines = invoke("record", "list").output.splitlines()
+    assert lines[0].split() == ["id", "parent", "type", "status"]
+    assert lines[2].split() == ["child", "root"]
+    assert lines[3].split() == ["root", "task", "active"]
+
+
 def test_record_cli_reparents_and_makes_root(tmp_path: Path, monkeypatch) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
