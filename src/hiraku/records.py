@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import re
 from collections.abc import Iterable, Mapping
 from contextlib import suppress
@@ -175,7 +176,7 @@ class BaseRecord(BaseModel):
         return cls._construct_loaded(data, markdown, path)
 
     @classmethod
-    def list(cls, paths: Iterable[Path]) -> list[Self]:
+    def list(cls, paths: Iterable[Path]) -> builtins.list[Self]:
         """Load records from paths in deterministic identifier order.
 
         Args:
@@ -432,6 +433,9 @@ class Record(BaseRecord):
             for item in index.values()
             if item.id == self.id or _is_descendant(item, self.id, index)
         ]
+        old_paths = {item.id: item.path for item in affected if item.path is not None}
+        if len(old_paths) != len(affected):
+            raise ValidationError("Reparenting requires persisted records")
         targets = {
             item.id: selected.records_dir / new_root / f"{item.id}.md"
             for item in affected
@@ -445,7 +449,7 @@ class Record(BaseRecord):
                 if item.id == self.id:
                     content = f"---\n{dump_yaml(self.to_dict())}---\n{self.markdown}"
                 else:
-                    content = item.path.read_text(encoding="utf-8")
+                    content = old_paths[item.id].read_text(encoding="utf-8")
                 atomic_write(target, content)
                 written.append(target)
         except Exception:
@@ -455,13 +459,14 @@ class Record(BaseRecord):
 
         # Keep a list of removed paths to attempt rollback
         # if any error occurs during unlinking.
-        removed = []
+        removed: list[Path] = []
         try:
             for item in affected:
-                item.path.unlink()
-                removed.append(item.path)
+                old_path = old_paths[item.id]
+                old_path.unlink()
+                removed.append(old_path)
         except Exception as exc:
-            rollback_errors = []
+            rollback_errors: list[Exception] = []
             for old_path in removed:
                 target = targets[old_path.stem]
                 try:
@@ -503,19 +508,35 @@ class Record(BaseRecord):
         *,
         backend: Any = None,
         include_descendants: bool = False,
+        include_unattributed: bool = False,
         config: Any = None,
         **query: Any,
     ) -> list[Any]:
-        from .tracking import TrackingBackend, select_backend
+        from .tracking import TrackingBackend, list_runs_for_records
 
-        selected = _config(config) if backend is None or include_descendants else config
+        selected = _config(config) if config is not None or backend is None else None
         records = [self]
         if include_descendants:
+            assert selected is not None
             records.extend(self.descendants(config=selected))
-        runs: list[Any] = []
-        for record in records:
-            adapter = backend or select_backend(record, selected)
-            runs.extend(adapter.list_runs(record_id=record.id))
+        if backend is not None:
+            if include_descendants:
+                runs = backend.list_runs_for_record_ids(
+                    record_ids={record.id for record in records},
+                    include_unattributed=include_unattributed,
+                )
+            else:
+                runs = backend.list_all_recorded_runs(
+                    include_unattributed=include_unattributed
+                )
+        else:
+            assert selected is not None
+            runs = list_runs_for_records(
+                records,
+                selected,
+                include_descendants=include_descendants,
+                include_unattributed=include_unattributed,
+            )
         return TrackingBackend._apply_query(runs, query, "tracking")
 
     def delete(self, *, config: Any = None) -> None:

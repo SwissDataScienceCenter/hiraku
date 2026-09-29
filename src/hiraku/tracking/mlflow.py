@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -80,11 +80,12 @@ class MLflowBackend(TrackingBackend):
         )
         self.experiment_name = settings.experiment_name
 
-    @staticmethod
-    def _escape_filter(value: str) -> str:
-        return value.replace("\\", "\\\\").replace("'", "\\'")
-
-    def _read_runs(self, *, record_id: str) -> list[Run]:
+    def _read_source_runs(
+        self,
+        *,
+        experiment_name: str | None = None,
+        **options: Any,
+    ) -> list[Run]:
         from ..data import Run
 
         try:
@@ -95,14 +96,7 @@ class MLflowBackend(TrackingBackend):
             ) from exc
         try:
             client = MlflowClient(tracking_uri=self.tracking_uri)
-            experiment_name = self.experiment_name
-            if experiment_name is None:
-                from ..records import load_record
-
-                record = load_record(record_id, config=self.config)
-                experiment_name = record.resolve(config=self.config).values.get(
-                    "mlflow_experiment"
-                )
+            experiment_name = experiment_name or self.experiment_name
             if experiment_name:
                 experiment = client.get_experiment_by_name(str(experiment_name))
                 if experiment is None:
@@ -112,12 +106,7 @@ class MLflowBackend(TrackingBackend):
                 experiment_ids = [
                     item.experiment_id for item in client.search_experiments()
                 ]
-            native_runs = client.search_runs(
-                experiment_ids=experiment_ids,
-                filter_string=(
-                    f"tags.`hiraku.record_id` = '{self._escape_filter(record_id)}'"
-                ),
-            )
+            native_runs = client.search_runs(experiment_ids=experiment_ids)
             runs: list[Run] = []
             for native in native_runs:
                 info, data = native.info, native.data

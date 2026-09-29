@@ -200,17 +200,10 @@ class WandbBackend(TrackingBackend):
             raw=cls._run_raw(run),
         )
 
-    def _read_runs(self, *, record_id: str) -> list[Run]:
+    def _read_source_runs(self, **options: Any) -> list[Run]:
         try:
             runs = self._get_runs()
-            return [
-                self._normalize_run(run)
-                for run in runs
-                if self._matches(
-                    run,
-                    record_id=record_id,
-                )
-            ]
+            return [self._normalize_run(run) for run in runs]
         except BackendError:
             raise
         except Exception as exc:

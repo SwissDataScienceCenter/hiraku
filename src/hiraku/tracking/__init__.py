@@ -37,7 +37,7 @@ class WandbBackend(TrackingBackend):
         self.project = project
         self.api_key = api_key
 
-    def _read_runs(self, *, record_id):
+    def _read_source_runs(self):
         try:
             import wandb
         except ImportError as exc:
@@ -67,6 +67,64 @@ def select_backend(record, config):
     return backend_for(specification, config)
 
 
+def list_runs_for_records(
+    records,
+    config,
+    *,
+    include_descendants=False,
+    include_unattributed=False,
+):
+    """Query the source selected by a record, or group a subtree by source."""
+    from collections import defaultdict
+
+    records = list(records)
+    if not records:
+        return []
+    if not include_descendants:
+        record = records[0]
+        adapter = select_backend(record, config)
+        values = record.resolve(config=config).values
+        experiment_name = values.get("mlflow_experiment")
+        if isinstance(adapter, MLflowBackend):
+            return adapter.list_all_recorded_runs(
+                experiment_name=experiment_name,
+                include_unattributed=include_unattributed,
+            )
+        return adapter.list_all_recorded_runs(include_unattributed=include_unattributed)
+
+    groups = defaultdict(list)
+    for record in records:
+        values = record.resolve(config=config).values
+        specification = values.get("tracking_backend") or config.tracking_backend
+        experiment_name = values.get("mlflow_experiment")
+        if isinstance(specification, dict):
+            experiment_name = specification.get("experiment_name") or experiment_name
+        key = (repr(specification), repr(experiment_name))
+        groups[key].append((record, experiment_name))
+
+    runs = []
+    for entries in groups.values():
+        record, experiment_name = entries[0]
+        adapter = select_backend(record, config)
+        record_ids = {item.id for item, _ in entries}
+        if isinstance(adapter, MLflowBackend):
+            source_runs = adapter.list_all_recorded_runs(
+                experiment_name=experiment_name,
+                include_unattributed=include_unattributed,
+            )
+        else:
+            source_runs = adapter.list_all_recorded_runs(
+                include_unattributed=include_unattributed
+            )
+        runs.extend(
+            run
+            for run in source_runs
+            if run.record_id in record_ids
+            or (include_unattributed and run.record_id is None)
+        )
+    return runs
+
+
 __all__ = [
     "BackendConfig",
     "CSVBackend",
@@ -78,6 +136,7 @@ __all__ = [
     "TrackingBackend",
     "available_backends",
     "backend_for",
+    "list_runs_for_records",
     "register_backend",
     "select_backend",
 ]

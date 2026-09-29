@@ -28,9 +28,9 @@ def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
     assert runs[0].metrics == {"loss": "2.5"}
     assert runs[0].params == {"seed": "1"}
     assert runs[0].raw == {"note": "raw"}
-    assert [
+    assert {
         run.id for run in load_record("exp", config=config).runs(config=config)
-    ] == ["earlier", "later"]
+    } == {"earlier", "later", "other"}
     assert (
         task.runs(
             config=config,
@@ -58,11 +58,21 @@ def test_run_queries_use_explicit_owner_filters_without_resolution(
             self.calls.append(record_id)
             return []
 
+        def list_runs_for_record_ids(
+            self, *, record_ids: set[str], **options: object
+        ) -> list[Run]:
+            self.calls.extend(sorted(record_ids))
+            return []
+
+        def list_all_recorded_runs(self, **options: object) -> list[Run]:
+            self.calls.append("source")
+            return []
+
     backend = CapturingBackend()
     task.runs(backend=backend)
     task.path.unlink()
     experiment.runs(backend=backend)
-    assert backend.calls == ["task", "exp"]
+    assert backend.calls == ["source", "source"]
     with pytest.raises(BackendError):
         CSVBackend(config).list_runs(record_id="")
 
@@ -92,8 +102,12 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
         mlflow.log_metric("loss", 2.0, step=0)
         mlflow.log_metric("loss", 1.0, step=1)
         run_id = active.info.run_id
-    run = task.runs(config=config, include_descendants=True)[0]
-    assert len(task.runs(config=config, include_descendants=True)) == 1
+    with mlflow.start_run() as active:
+        mlflow.set_tag("unrelated", "no-record-id")
+        mlflow.log_metric("loss", 4.0)
+        unattributed_id = active.info.run_id
+    run = task.runs(config=config)[0]
+    assert len(task.runs(config=config)) == 1
     assert run.id == run_id
     assert run.record_id == "exp"
     assert run.commit == "a" * 40
@@ -103,3 +117,6 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     assert run.timestamp is not None and run.timestamp.tzinfo is UTC
     assert run.raw["tags"]["unmapped"] == "kept"
     assert load_record("exp", config=config).runs(config=config)[0].id == run_id
+    assert {
+        item.id for item in task.runs(config=config, include_unattributed=True)
+    } == {run_id, unattributed_id}

@@ -78,8 +78,14 @@ class TrackingBackend(ABC):
             ranked = [run for run in result if numeric(run) is not None]
             unranked = [run for run in result if numeric(run) is None]
             ranked.sort(key=lambda run: run.id)
+
+            def numeric_key(run: Run) -> float:
+                number = numeric(run)
+                assert number is not None
+                return number
+
             ranked.sort(
-                key=numeric,
+                key=numeric_key,
                 reverse=not bool(query.get("ascending", True)),
             )
             result = [*ranked, *sorted(unranked, key=lambda run: run.id)]
@@ -112,14 +118,52 @@ class TrackingBackend(ABC):
         """
 
         self._validate_filters(record_id)
-        runs = self._read_runs(record_id=record_id)
+        runs = self._read_source_runs()
         runs = [run for run in runs if run.record_id == record_id]
         return self._apply_query(runs, query, self.backend_name)
+
+    def list_source_runs(
+        self, *, include_unattributed: bool = False, **options: Any
+    ) -> list[Run]:
+        """Return runs with Hiraku record attribution from this source."""
+        runs = self._read_source_runs(**options)
+        if include_unattributed:
+            return runs
+        return [run for run in runs if run.record_id is not None]
+
+    def list_runs_for_record_ids(
+        self,
+        *,
+        record_ids: set[str],
+        include_unattributed: bool = False,
+        **options: Any,
+    ) -> list[Run]:
+        """Return runs tagged with one of the supplied record IDs."""
+        if not record_ids:
+            return []
+        for record_id in record_ids:
+            self._validate_filters(record_id)
+        runs = self._read_source_runs(**options)
+        return [
+            run
+            for run in runs
+            if run.record_id in record_ids
+            or (include_unattributed and run.record_id is None)
+        ]
+
+    def list_all_recorded_runs(
+        self, *, include_unattributed: bool = False, **options: Any
+    ) -> list[Run]:
+        """Return all source runs that have Hiraku record attribution."""
+        return self.list_source_runs(
+            include_unattributed=include_unattributed, **options
+        )
+
+    @abstractmethod
+    def _read_source_runs(self, **options: Any) -> list[Run]:
+        """Read all runs from the configured source once."""
+        raise NotImplementedError
 
     @property
     def backend_name(self) -> str:
         return type(self).__name__.removesuffix("Backend").lower()
-
-    @abstractmethod
-    def _read_runs(self, *, record_id: str) -> list[Run]:
-        raise NotImplementedError

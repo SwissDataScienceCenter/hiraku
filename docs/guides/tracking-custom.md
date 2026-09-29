@@ -10,7 +10,9 @@ The steps to implement a custom backend are:
 2. Define a `TrackingBackend` subclass,
 3. Specify a factory function.
 
-The subclass only needs to implement `_read_runs`; filtering, sorting, and limits are provided by the base class.
+Implement one method, `_read_source_runs`, which reads the configured source
+once and returns normalized `Run` objects. The base class handles record
+filtering, unattributed runs, sorting, and limits.
 
 ```python
 # my_tracker.py
@@ -37,9 +39,7 @@ class JsonBackend(TrackingBackend):
         self.config = config
         self.path = path
 
-    def _read_runs(
-        self, *, record_id: str
-    ) -> list[Run]:
+    def _read_source_runs(self, **options: Any) -> list[Run]:
         try:
             rows: list[dict[str, Any]] = json.loads(
                 self.path.read_text(encoding="utf-8")

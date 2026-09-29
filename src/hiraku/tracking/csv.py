@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -64,7 +64,7 @@ class CSVBackend(TrackingBackend):
                 else (config.root / candidate).resolve()
             )
 
-    def _read_runs(self, *, record_id: str) -> list[Run]:
+    def _read_source_runs(self, **options: Any) -> list[Run]:
         from ..data import Run
 
         path = self.path or self.config.root / "runs.csv"

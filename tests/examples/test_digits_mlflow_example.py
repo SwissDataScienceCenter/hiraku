@@ -145,8 +145,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             ],
         ).output
     )
-    assert len(filtered) == 1
-    assert filtered[0]["record_id"] == "strong-l2"
+    assert {row["record_id"] for row in filtered} == {"weak-l2", "strong-l2"}
 
 
 def test_digits_requires_provenance_before_creating_runs(tmp_path):

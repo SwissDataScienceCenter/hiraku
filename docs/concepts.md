@@ -59,10 +59,12 @@ meaning of a link in Markdown when it matters.
 
 ## Runs and execution
 
-Runs belong to a tracking backend such as CSV, MLflow, or W&B. Each run
-references one `record_id`. `hiraku runs --record ID` returns direct runs;
-add `--descendants` to aggregate the subtree. A record's effective tracking
-configuration chooses the backend for its runs.
+Runs belong to a tracking source such as a CSV file, MLflow experiment, or W&B
+project. `hiraku runs --record ID` uses the record's effective tracking
+configuration to select one source, then lists all runs in that source that
+have a `record_id`, regardless of which record they reference. Add
+`--descendants` to aggregate runs associated with the selected record and its
+descendants across their configured sources.
 
 The backend returns normalized run IDs, metrics, and parameters, with optional
 commit, timestamp, entrypoint, URL, and other attribution. The training script
