@@ -223,8 +223,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
         invoke(
             runner,
             [
-                "run",
-                "list",
+                "runs",
                 "--record",
                 "cpu-test",
                 "--json",
@@ -258,8 +257,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
         invoke(
             runner,
             [
-                "run",
-                "list",
+                "runs",
                 "--record",
                 "failure",
                 "--json",

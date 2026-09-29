@@ -114,8 +114,7 @@ def test_record_cli_entrypoint_launch_and_runs(tmp_path: Path, monkeypatch) -> N
     assert {run["id"] for run in direct} == {"a", "b"}
     with_unattributed = json.loads(
         invoke(
-            "run",
-            "list",
+            "runs",
             "--record",
             "root",
             "--include-unattributed",
