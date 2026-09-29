@@ -107,7 +107,7 @@ class TrackingBackend(ABC):
         return result
 
     def list_runs(self, *, record_id: str, **query: Any) -> list[Run]:
-        """Return normalized runs for a task and optional experiment.
+        """Return normalized runs for a record.
 
         Args:
             record_id: The record ID to filter runs by.
