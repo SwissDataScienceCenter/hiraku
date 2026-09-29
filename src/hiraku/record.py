@@ -104,7 +104,6 @@ class Record(BaseRecord):
         if self.parent_id == self.id or self.id in self.related_to:
             raise ValidationError("A record cannot refer to itself")
         if self.entrypoints is not None:
-            
             for name in self.entrypoints:
                 validate_identifier(name, label="entrypoint name")
             self.__dict__["entrypoints"] = {
@@ -112,7 +111,6 @@ class Record(BaseRecord):
                 for name, value in self.entrypoints.items()
             }
         if self.metrics is not None:
-            
             self.__dict__["metrics"] = [
                 Metric.model_validate(item) for item in self.metrics
             ]
@@ -385,7 +383,7 @@ def _validate_tree(index: Mapping[str, Record], records_dir: Path) -> None:
 def _resolve(
     record: Record, index: Mapping[str, Record], seen: set[str]
 ) -> ResolvedRecord:
-    
+
     if record.id in seen:
         raise ValidationError(f"Record parent cycle at {record.id!r}")
     seen.add(record.id)

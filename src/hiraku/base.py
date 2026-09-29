@@ -254,4 +254,3 @@ class BaseRecord(BaseModel):
         except OSError as exc:
             raise ValidationError(f"Cannot delete record at {target}: {exc}") from exc
         self.path = None
-
