@@ -7,7 +7,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.records import load_record
+from hiraku.record import load_record
 
 
 def invoke(*args: str):

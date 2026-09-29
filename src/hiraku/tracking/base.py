@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from ..errors import BackendError
 
 if TYPE_CHECKING:
-    from ..data import Run
+    from ..run import Run
 
 
 class TrackingBackend(ABC):

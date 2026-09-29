@@ -6,9 +6,9 @@ from pathlib import Path
 
 from pydantic import model_validator
 
+from .base import BaseRecord
 from .config import HirakuConfig
 from .errors import ValidationError
-from .records import BaseRecord
 from .validation import validate_identifier
 
 

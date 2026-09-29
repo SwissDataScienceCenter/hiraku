@@ -7,7 +7,7 @@ import pytest
 from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.launch import launch, render_arguments
-from hiraku.records import Record
+from hiraku.record import Record
 
 
 def test_render_arguments() -> None:

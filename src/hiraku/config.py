@@ -253,7 +253,7 @@ class HirakuConfig(BaseModel):
 
     def set_active_record(self, record: str | Any) -> None:
         """Persist the active research record."""
-        from .records import Record, load_record
+        from .record import Record, load_record
 
         identifier = record.id if isinstance(record, Record) else record
         selected = load_record(identifier, config=self)

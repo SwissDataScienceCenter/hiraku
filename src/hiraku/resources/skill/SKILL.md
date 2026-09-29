@@ -356,8 +356,8 @@ commit, run ID, and key metrics when applicable. Mention failures or missing
 attribution explicitly. Stop when the user's requested scope is complete.
 
 The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
-`BaseRecord`, loaders, and listing functions in `hiraku.records`;
-`Entrypoint`, `Metric`, and `Run` in `hiraku.data`;
+`Entrypoint`, `Metric`, loaders, and listing functions in `hiraku.record`;
+`BaseRecord` in `hiraku.base`; `Run` in `hiraku.run`;
 and `hiraku.launch.launch` for scripted use. `hiraku context`, `hiraku action`,
 and `hiraku program` manage supporting material and instructions. V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.

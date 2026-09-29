@@ -12,7 +12,7 @@ from ..errors import BackendError
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
-    from ..data import Run
+    from ..run import Run
 
 
 class WandbBackendConfig(BaseModel):
@@ -185,7 +185,7 @@ class WandbBackend(TrackingBackend):
     @classmethod
     def _normalize_run(cls, run: Any) -> Run:
         """Convert one W&B public run object into Hiraku's normalized model."""
-        from ..data import Run
+        from ..run import Run
 
         config = cls._run_config(run)
         return Run(

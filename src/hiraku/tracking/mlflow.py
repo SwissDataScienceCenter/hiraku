@@ -12,7 +12,7 @@ from ..errors import BackendError
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
-    from ..data import Run
+    from ..run import Run
 
 
 class MLflowBackendConfig(BaseModel):
@@ -86,7 +86,7 @@ class MLflowBackend(TrackingBackend):
         experiment_name: str | None = None,
         **options: Any,
     ) -> list[Run]:
-        from ..data import Run
+        from ..run import Run
 
         try:
             from mlflow.tracking import MlflowClient

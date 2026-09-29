@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from hiraku.config import HirakuConfig
-from hiraku.data import Run
 from hiraku.errors import BackendError
-from hiraku.records import Record, load_record
+from hiraku.record import Record, load_record
+from hiraku.run import Run
 from hiraku.tracking import CSVBackend
 
 

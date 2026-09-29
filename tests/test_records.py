@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
 from hiraku.errors import RecordExistsError, ValidationError
-from hiraku.records import BaseRecord, Record, list_records, load_record
+from hiraku.record import Record, list_records, load_record
 
 
 def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> None:

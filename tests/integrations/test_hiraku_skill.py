@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from hiraku.config import HirakuConfig
-from hiraku.records import Record, list_records, load_record
+from hiraku.record import Record, list_records, load_record
 from hiraku.tracking import CSVBackend
 
 RUN_AGENT_TESTS = os.environ.get("HIRAKU_RUN_CODEX_SKILL_TESTS") == "1"

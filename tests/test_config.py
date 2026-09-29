@@ -13,7 +13,7 @@ from hiraku.errors import (
     ProjectNotFoundError,
     ValidationError,
 )
-from hiraku.records import Record
+from hiraku.record import Record
 
 
 def _git(path: Path, *arguments: str) -> None:

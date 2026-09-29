@@ -23,7 +23,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from hiraku.config import HirakuConfig
-from hiraku.data import Run
+from hiraku.run import Run
 from hiraku.errors import BackendError
 from hiraku.tracking import TrackingBackend, register_backend
 
@@ -103,7 +103,7 @@ From Python:
 import my_tracker
 
 from hiraku import HirakuConfig
-from hiraku.records import load_record
+from hiraku.record import load_record
 
 config = HirakuConfig.discover()
 record = load_record("my-task", config=config)

@@ -1,48 +1,14 @@
-"""Entrypoints, metric declarations, and normalized tracked runs."""
+"""Normalized tracked runs."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, Literal, TypeAlias
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .errors import ValidationError
-from .records import Record, list_records, load_record
-
-ArgumentScalar: TypeAlias = str | int | float | Path
-ArgumentValue: TypeAlias = ArgumentScalar | bool | None | Sequence[ArgumentScalar]
-
-
-class Entrypoint(BaseModel):
-    """A command and default named arguments."""
-
-    model_config = ConfigDict(extra="forbid")
-    command: list[str]
-    args: dict[str, ArgumentValue] = Field(default_factory=dict)
-
-    @field_validator("args", mode="before")
-    @classmethod
-    def validate_args_mapping(cls, value: Any) -> Any:
-        if not isinstance(value, Mapping):
-            raise ValueError("Entrypoint args must be a mapping")
-        return value
-
-    @field_validator("command")
-    @classmethod
-    def validate_command(cls, value: list[str]) -> list[str]:
-        if not value or any(not item for item in value):
-            raise ValidationError("Entrypoint command must be non-empty strings")
-        return value
-
-
-class Metric(BaseModel):
-    """A declared metric and its preferred direction."""
-
-    name: str = Field(min_length=1)
-    direction: Literal["minimize", "maximize"]
 
 
 class Run(BaseModel):
@@ -81,6 +47,3 @@ class Run(BaseModel):
                 value = value.replace(tzinfo=UTC)
             object.__setattr__(self, "timestamp", value.astimezone(UTC))
         return self
-
-
-__all__ = ["Entrypoint", "Metric", "Record", "Run", "list_records", "load_record"]

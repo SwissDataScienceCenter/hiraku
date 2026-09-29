@@ -13,7 +13,7 @@ from ..errors import BackendError, ValidationError
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
-    from ..data import Run
+    from ..run import Run
 
 
 class CSVBackendConfig(BaseModel):
@@ -65,7 +65,7 @@ class CSVBackend(TrackingBackend):
             )
 
     def _read_source_runs(self, **options: Any) -> list[Run]:
-        from ..data import Run
+        from ..run import Run
 
         path = self.path or self.config.root / "runs.csv"
         if not path.exists():

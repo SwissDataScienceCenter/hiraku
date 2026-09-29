@@ -12,7 +12,7 @@ from .config import HirakuConfig
 from .errors import LaunchError, ValidationError
 
 if TYPE_CHECKING:
-    from .data import ArgumentValue, Entrypoint
+    from .record import ArgumentValue, Entrypoint
 
 _ATTRIBUTION_KEYS = {
     "HIRAKU_RECORD_ID",
@@ -127,8 +127,7 @@ def launch(
         shell expansion.
 
     """
-    from .data import Entrypoint
-    from .records import load_record
+    from .record import Entrypoint, load_record
 
     entrypoint = Entrypoint.model_validate(entrypoint)
     selected = config or HirakuConfig.discover()

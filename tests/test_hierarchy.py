@@ -7,7 +7,7 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.errors import RecordExistsError, RecordNotFoundError, ValidationError
-from hiraku.records import Record, list_records, load_record
+from hiraku.record import Record, list_records, load_record
 from hiraku.tracking.csv import CSVBackend
 
 

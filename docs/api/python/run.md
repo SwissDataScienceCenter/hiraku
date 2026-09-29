@@ -1,3 +1,3 @@
 # Run
 
-::: hiraku.data.Run
+::: hiraku.run.Run

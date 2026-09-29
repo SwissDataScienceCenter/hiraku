@@ -7,7 +7,7 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.errors import BackendError
-from hiraku.records import Record
+from hiraku.record import Record
 from hiraku.tracking.csv import CSVBackend, CSVBackendConfig
 
 
