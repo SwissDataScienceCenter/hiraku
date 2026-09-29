@@ -83,7 +83,7 @@ hiraku experiment create cpu-test \
   --commit HEAD
 
 hiraku launch cpu-test:mock -- --val-bpb 1.0
-hiraku run list
+hiraku runs
 
 hiraku experiment update cpu-test \
   --set decision=discard \
@@ -101,7 +101,7 @@ hiraku experiment create baseline \
   --commit HEAD
 
 hiraku launch baseline:train
-hiraku run list
+hiraku runs
 
 hiraku experiment update baseline \
   --set decision=keep --set 'conclusion="Baseline run completed."'
@@ -130,5 +130,5 @@ Track the agent's progress with:
 
 ```bash
 hiraku experiment list --columns id,commit,summary,hypothesis,conclusion,decision
-hiraku run list --sort metric:val_bpb --ascending
+hiraku runs --sort metric:val_bpb --ascending
 ```

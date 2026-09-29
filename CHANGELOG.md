@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Rename the tracked-run query command to `hiraku runs`; `hiraku runs list` is also accepted.
 - Improve `hiraku init` to support initializing a target directory and report paths relative to the initialized project.
 - Improve the CLI and documentation for task and experiment workflows, entrypoints, dispatching, and run inspection.
 - Update the autoresearch example to use an upstream project with a Hiraku dispatcher wrapper ([PR #25](https://github.com/SwissDataScienceCenter/hiraku/pull/25)), and validate required system utilities ([issue #37](https://github.com/SwissDataScienceCenter/hiraku/issues/37), [PR #38](https://github.com/SwissDataScienceCenter/hiraku/pull/38)).

@@ -54,7 +54,7 @@ hiraku launch baseline:evaluate -- --seed 1
 
 hiraku task list
 hiraku experiment list
-hiraku run list 
+hiraku runs
 ```
 
 The entrypoint runs `uv run python evaluate.py --seed 0`. The script writes its

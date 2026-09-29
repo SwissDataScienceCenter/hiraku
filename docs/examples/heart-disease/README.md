@@ -96,9 +96,9 @@ hiraku launch logistic-baseline:train --dry-run
 hiraku launch logistic-baseline:train
 
 # query runs
-hiraku run list --task heart-disease
+hiraku runs --task heart-disease
 # omitted task defaults to active task
-hiraku run list
+hiraku runs
 ```
 
 Expect one run with `val/log_loss` and `val/accuracy`. The default dispatcher
@@ -134,7 +134,7 @@ hiraku experiment create random-forest \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: random_forest, seed: 42, validation-fraction: 0.25}}}'
 
 hiraku launch random-forest:train
-hiraku run list
+hiraku runs
 ```
 
 Expect two runs, with lower log loss first. Both use the same committed
@@ -257,7 +257,7 @@ experiment and attributed run:
 ```bash
 hiraku task show heart-disease
 hiraku experiment list --task heart-disease
-hiraku run list --task heart-disease \
+hiraku runs --task heart-disease \
   --params model,seed,validation_fraction \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending

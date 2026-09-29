@@ -90,8 +90,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         invoke(
             runner,
             [
-                "run",
-                "list",
+                "runs",
                 "--task",
                 "digits",
                 "--sort",
@@ -140,8 +139,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         invoke(
             runner,
             [
-                "run",
-                "list",
+                "runs",
                 "--task",
                 "digits",
                 "--experiment",

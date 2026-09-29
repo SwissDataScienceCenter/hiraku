@@ -150,13 +150,12 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
     invoke(runner, ["launch", "random-forest:train"])
     assert git(project, "status", "--porcelain") == ""
 
-    all_runs = json.loads(invoke(runner, ["run", "list", "--json"]).output)
+    all_runs = json.loads(invoke(runner, ["runs", "--json"]).output)
     selected = json.loads(
         invoke(
             runner,
             [
-                "run",
-                "list",
+                "runs",
                 "--params",
                 "model,seed,validation_fraction",
                 "--metrics",
@@ -169,8 +168,7 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
         invoke(
             runner,
             [
-                "run",
-                "list",
+                "runs",
                 "--experiment",
                 "logistic-baseline",
                 "--params",
@@ -185,8 +183,7 @@ def test_documented_heart_disease_workflow(tmp_path: Path, monkeypatch) -> None:
         invoke(
             runner,
             [
-                "run",
-                "list",
+                "runs",
                 "--params",
                 "model,seed,validation_fraction",
                 "--metrics",

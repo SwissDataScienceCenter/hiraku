@@ -55,7 +55,7 @@ worktree dispatches writing to the original database.
 ## Inspect
 
 ```bash
-hiraku run list --task my-task --json
+hiraku runs --task my-task --json
 ```
 
 Hiraku reads native run IDs, parameters, metrics, and attribution tags.

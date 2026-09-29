@@ -49,8 +49,8 @@ Launch and inspect the run:
 ```bash
 hiraku launch logistic:train
 hiraku launch random-forest:train
-hiraku run list --task iris --json
-hiraku run list --task iris \
+hiraku runs --task iris --json
+hiraku runs --task iris \
   --metrics test/accuracy,test/f1_macro,test/log_loss \
   --sort test/accuracy --descending
 ```
