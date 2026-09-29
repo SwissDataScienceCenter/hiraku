@@ -71,51 +71,14 @@ Use a feature branch and focused commits. [Conventional Commit](https://www.conv
 
 ## Release a new version
 
-Releases use `bump-my-version` and must be created from `main`.
+Release permissions are restricted to maintainers and administrators. Make sure the release notes are current under `## [Unreleased]` in `CHANGELOG.md`, then update a clean, up-to-date `main` branch:
 
-1. Add release notes under `## [Unreleased]` in `CHANGELOG.md`, including issue
-   or pull request links. Run the checks above, commit the changelog, and merge
-   it to `main`. Do not add the final version heading manually.
-2. Update `main` and confirm that the working tree is clean:
+```bash
+git switch main
+git pull --ff-only
+uv run python scripts/release.py patch
+```
 
-   ```bash
-   git switch main
-   git pull --ff-only origin main
-   git status --short
-   ```
+The script calculates the next version, checks the changelog, runs tests, linting, and the documentation build, then asks for confirmation. After confirmation, `bump-my-version` updates `pyproject.toml`, `CHANGELOG.md`, and `uv.lock`, creates the release commit and `vX.Y.Z` tag, and pushes both to `main`. The tag starts the release workflow, which builds the wheel and source distribution and attaches them to a new GitHub Release.
 
-3. Choose `patch` for fixes, `minor` for compatible features, or `major` for
-   breaking changes. Preview the bump first:
-
-   ```bash
-   uv run bump-my-version bump patch --dry-run
-   ```
-
-4. If the preview is correct, create the release commit and tag:
-
-   ```bash
-   uv run bump-my-version bump patch
-   ```
-
-   This updates `pyproject.toml`, regenerates `uv.lock`, updates `CHANGELOG.md`,
-   and creates a tag such as `v0.1.1`. The lockfile hook runs before the release
-   commit and tag are created.
-5. Verify and build the package:
-
-   ```bash
-   git show --stat --oneline HEAD
-   git status --short
-   git tag --points-at HEAD
-   uv run hiraku --version
-   uv lock --check
-   uv build
-   ```
-
-6. Push the release commit and tag:
-
-   ```bash
-   git push origin main --follow-tags
-   ```
-
-When PyPI publication is enabled, publish the verified artifacts with
-`uv publish`.
+Use `--dry-run` to run checks without changing Git. Use `--skip-checks` only when checks have already been run separately.
