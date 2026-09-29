@@ -453,7 +453,8 @@ class Record(BaseRecord):
                 target.unlink(missing_ok=True)
             raise
 
-        # Keep a list of removed paths to attempt rollback if any error occurs during unlinking.
+        # Keep a list of removed paths to attempt rollback
+        # if any error occurs during unlinking.
         removed = []
         try:
             for item in affected:
