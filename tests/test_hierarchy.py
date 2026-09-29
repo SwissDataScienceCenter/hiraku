@@ -109,3 +109,31 @@ def test_reparenting_root_with_other_files_requires_manual_move(tmp_path: Path) 
     with pytest.raises(ValidationError, match="Move files"):
         source.reparent(target.id, config=config)
     assert load_record("source", config=config).parent_id is None
+
+
+def test_reparenting_rolls_back_if_old_file_unlink_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    source = Record.create("source", config=config)
+    child = Record.create("child", parent_id=source.id, config=config)
+    target = Record.create("target", config=config)
+    old_paths = {source.id: source.path, child.id: child.path}
+    original_unlink = Path.unlink
+    failed = False
+
+    def fail_on_child(path: Path, *args, **kwargs) -> None:
+        nonlocal failed
+        if path == old_paths[child.id] and not failed:
+            failed = True
+            raise OSError("simulated unlink failure")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_on_child)
+    with pytest.raises(OSError, match="simulated unlink failure"):
+        source.reparent(target.id, config=config)
+
+    assert all(path.exists() for path in old_paths.values())
+    assert not (config.records_dir / "target" / "source.md").exists()
+    assert not (config.records_dir / "target" / "child.md").exists()
+    assert load_record("source", config=config).parent_id is None

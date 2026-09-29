@@ -452,8 +452,32 @@ class Record(BaseRecord):
             for target in written:
                 target.unlink(missing_ok=True)
             raise
-        for item in affected:
-            item.path.unlink()
+
+        # Keep a list of removed paths to attempt rollback if any error occurs during unlinking.
+        removed = []
+        try:
+            for item in affected:
+                item.path.unlink()
+                removed.append(item.path)
+        except Exception as exc:
+            rollback_errors = []
+            for old_path in removed:
+                target = targets[old_path.stem]
+                try:
+                    atomic_write(old_path, target.read_text(encoding="utf-8"))
+                except Exception as rollback_exc:
+                    rollback_errors.append(rollback_exc)
+            for target in written:
+                try:
+                    target.unlink(missing_ok=True)
+                except Exception as rollback_exc:
+                    rollback_errors.append(rollback_exc)
+            if rollback_errors:
+                raise ExceptionGroup(
+                    "Reparenting failed and rollback was incomplete",
+                    [exc, *rollback_errors],
+                ) from exc
+            raise
         self.path = targets[self.id]
         with suppress(OSError):
             old_folder.rmdir()
