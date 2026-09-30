@@ -6,7 +6,7 @@ its parent's working branch or override it. `commit` never inherits: bind each
 record to the exact source commit used for its own runs.
 
 The Git repository remains responsible for creating branches, committing
-changes, and merging. Hiraku's `record_branch` configuration provides a
+changes, and merging. Hiraku's `branch` configuration provides a
 default branch name for code using `GitRepository.create_record_branch`; the
 CLI also accepts a branch as a stored field:
 

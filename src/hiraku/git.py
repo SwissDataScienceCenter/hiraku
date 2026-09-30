@@ -107,7 +107,7 @@ class GitRepository:
     def record_branch_name(self, record_id: str) -> str:
         if self.config is None:
             raise GitError("A Hiraku configuration is required for record branches")
-        return self.config.record_branch.format(record_id=record_id)
+        return self.config.branch.format(record_id=record_id)
 
     def create_record_branch(
         self,

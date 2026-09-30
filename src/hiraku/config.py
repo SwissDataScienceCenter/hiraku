@@ -20,7 +20,7 @@ class HirakuConfig(BaseModel):
         root: Project root directory.
         hiraku_dir_name: Relative state directory name.
         default_dispatch: Default launcher script.
-        record_branch: Record branch template.
+        branch: Record branch template.
         default_program: Default program identifier.
         tracking_backend: Backend configuration mapping with a required ``type``.
 
@@ -35,7 +35,7 @@ class HirakuConfig(BaseModel):
     DEFAULTS: ClassVar[dict[str, Any]] = {
         "hiraku_dir": "hiraku",
         "default_dispatch": "launch.sh",
-        "record_branch": "hiraku/records/{record_id}",
+        "branch": "hiraku/records/{record_id}",
         "default_program": "interactive",
         "tracking_backend": {"type": "csv"},
         "active_record_id": None,
@@ -50,7 +50,7 @@ class HirakuConfig(BaseModel):
         default=DEFAULTS["hiraku_dir"], alias="hiraku_dir", min_length=1
     )
     default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
-    record_branch: str = Field(default=DEFAULTS["record_branch"], min_length=1)
+    branch: str = Field(default=DEFAULTS["branch"], min_length=1)
     default_program: str = Field(default=DEFAULTS["default_program"], min_length=1)
     tracking_backend: dict[str, Any] = Field(
         default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
