@@ -93,7 +93,7 @@ hiraku launch train --record logistic-baseline --dry-run
 hiraku launch train --record logistic-baseline
 
 # query runs
-hiraku runs --record heart-disease --descendants
+hiraku runs --record heart-disease
 # the active child record can also be queried directly
 hiraku runs --record logistic-baseline
 ```
@@ -131,7 +131,7 @@ hiraku record create random-forest --parent heart-disease --type experiment \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: random_forest, seed: 42, validation-fraction: 0.25}}}'
 
 hiraku launch train --record random-forest
-hiraku runs --record heart-disease --descendants --sort val/log_loss
+hiraku runs --record heart-disease --sort val/log_loss
 ```
 
 Expect two runs, with lower log loss first. Both use the same committed
@@ -254,7 +254,7 @@ additional child record and attributed run:
 ```bash
 hiraku record show heart-disease
 hiraku record tree
-hiraku runs --record heart-disease --descendants \
+hiraku runs --record heart-disease \
   --params model,seed,validation_fraction \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending

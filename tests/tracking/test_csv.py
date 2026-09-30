@@ -45,10 +45,10 @@ def test_csv_source_listing_returns_all_attributed_runs(tmp_path: Path) -> None:
     runs = CSVBackend(config).list_all_recorded_runs()
 
     assert {run.id for run in runs} == {"one", "two"}
-    assert {
-        run.id
-        for run in CSVBackend(config).list_all_recorded_runs(include_unattributed=True)
-    } == {"one", "two", "three"}
+    assert {run.id for run in CSVBackend(config).list_all_recorded_runs()} == {
+        "one",
+        "two",
+    }
 
 
 def test_csv_backend_resolves_record_path_from_project_root(tmp_path: Path) -> None:

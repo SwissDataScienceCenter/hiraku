@@ -61,7 +61,7 @@ hiraku record delete <record-id>
 hiraku status  # show the active record
 
 hiraku runs --record <record-id>
-hiraku runs --record <root-id> --descendants --params seed,lr --metrics train/accuracy,val/accuracy --sort val/accuracy --descending
+hiraku runs --record <root-id> --params seed,lr --metrics train/accuracy,val/accuracy --sort val/accuracy --descending
 ```
 
 ### Python API
@@ -91,7 +91,7 @@ tracking_backend:
   type: csv
 ```
 
-`hiraku runs --record ID` queries the selected source and includes its attributed runs. Add `--descendants` to collect runs associated with the record and its descendants across their configured sources. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
+`hiraku runs --record ID` queries the selected record's tracking source and lists its attributed runs. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
 
 ## Entrypoints
 
@@ -245,7 +245,7 @@ objective, branch, budget, and stopping condition with the user.
 hiraku program show autoresearch
 hiraku program show interactive
 hiraku record tree
-hiraku runs --record heart-disease --descendants --json
+hiraku runs --record heart-disease --json
 ```
 
 The [Autoresearch example](examples/autoresearch/README.md) shows how to use

@@ -756,8 +756,6 @@ def launch_command(
 @main.command("runs")
 @click.argument("subcommand", required=False, type=click.Choice(["list"]))
 @click.option("--record", "record_id")
-@click.option("--descendants", is_flag=True)
-@click.option("--include-unattributed", is_flag=True)
 @click.option("--metrics")
 @click.option("--params")
 @click.option("--sort")
@@ -770,8 +768,6 @@ def run_list(
     state: CLIContext,
     subcommand: str | None,
     record_id: str | None,
-    descendants: bool,
-    include_unattributed: bool,
     metrics: str | None,
     params: str | None,
     sort: str | None,
@@ -781,6 +777,7 @@ def run_list(
     json_output: bool,
 ) -> None:
     """List runs from the selected record's tracking source."""
+    _ = subcommand
     if ascending and descending:
         raise ValidationError("--ascending and --descending are mutually exclusive")
     if (ascending or descending) and sort is None:
@@ -805,8 +802,6 @@ def run_list(
         )
     runs = record.runs(
         config=state.config,
-        include_descendants=descendants,
-        include_unattributed=include_unattributed,
         **query,
     )
     if json_output:

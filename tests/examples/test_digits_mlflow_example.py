@@ -91,7 +91,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
                 "runs",
                 "--record",
                 "digits",
-                "--descendants",
                 "--sort",
                 "val/log_loss",
                 "--json",

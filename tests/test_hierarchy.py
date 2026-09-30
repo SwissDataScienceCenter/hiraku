@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.errors import RecordExistsError, RecordNotFoundError, ValidationError
+from hiraku.io import atomic_write
 from hiraku.record import Record, list_records, load_record
 from hiraku.tracking.csv import CSVBackend
 
@@ -61,6 +63,20 @@ def test_invalid_links_cycles_collisions_and_delete(tmp_path: Path) -> None:
     assert [item.id for item in list_records(config=config)] == ["first"]
 
 
+def test_duplicate_record_id_without_reparent_journal_is_an_error(
+    tmp_path: Path,
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    record = Record.create("duplicate", config=config)
+    atomic_write(
+        config.records_dir / "other" / "duplicate.md",
+        record.path.read_text(encoding="utf-8"),
+    )
+
+    with pytest.raises(ValidationError, match="Duplicate record ID"):
+        list_records(config=config)
+
+
 def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     root = Record.create(
@@ -85,7 +101,7 @@ def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
     assert resolved.sources["entrypoints"] == {"train": "root"}
 
 
-def test_direct_and_descendant_csv_runs(tmp_path: Path) -> None:
+def test_runs_list_attributed_runs_from_current_backend(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     root = Record.create("root", config=config)
     child = Record.create("child", parent_id=root.id, config=config)
@@ -95,10 +111,6 @@ def test_direct_and_descendant_csv_runs(tmp_path: Path) -> None:
         writer.writerow({"id": "one", "record_id": "root", "metric.loss": 0.5})
         writer.writerow({"id": "two", "record_id": "child", "metric.loss": 0.3})
     assert {run.id for run in root.runs(config=config)} == {"one", "two"}
-    assert {run.id for run in root.runs(config=config, include_descendants=True)} == {
-        "one",
-        "two",
-    }
     assert {run.id for run in child.runs(config=config)} == {"one", "two"}
 
 
@@ -115,19 +127,9 @@ def test_default_run_list_returns_attributed_runs_from_selected_source(
 
     assert {run.id for run in root.runs(config=config)} == {"one", "two", "three"}
     assert {run.id for run in child.runs(config=config)} == {"one", "two", "three"}
-    assert {
-        run.id
-        for run in root.runs(
-            config=config, include_descendants=True, include_unattributed=True
-        )
-    } == {"one", "two", "four"}
-    assert {run.id for run in root.runs(config=config, include_descendants=True)} == {
-        "one",
-        "two",
-    }
 
 
-def test_subtree_run_query_scans_shared_csv_once(
+def test_run_query_scans_selected_csv_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
@@ -147,7 +149,7 @@ def test_subtree_run_query_scans_shared_csv_once(
         "id,record_id\none,root\ntwo,child\nthree,leaf\n", encoding="utf-8"
     )
 
-    assert {run.id for run in root.runs(config=config, include_descendants=True)} == {
+    assert {run.id for run in root.runs(config=config)} == {
         "one",
         "two",
         "three",
@@ -165,7 +167,7 @@ def test_reparenting_root_with_other_files_requires_manual_move(tmp_path: Path) 
     assert load_record("source", config=config).parent_id is None
 
 
-def test_reparenting_rolls_back_if_old_file_unlink_fails(
+def test_reparenting_retries_transient_old_file_unlink_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
@@ -184,10 +186,265 @@ def test_reparenting_rolls_back_if_old_file_unlink_fails(
         original_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", fail_on_child)
-    with pytest.raises(OSError, match="simulated unlink failure"):
+    source.reparent(target.id, config=config)
+
+    assert all(not path.exists() for path in old_paths.values())
+    assert load_record("source", config=config).parent_id == target.id
+    assert load_record("child", config=config).parent_id == source.id
+
+
+def test_reparenting_journal_keeps_records_listable_during_persistent_unlink_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    source = Record.create("source", config=config)
+    child = Record.create("child", parent_id=source.id, config=config)
+    target = Record.create("target", config=config)
+    old_paths = {source.id: source.path, child.id: child.path}
+    original_unlink = Path.unlink
+
+    def fail_on_child(path: Path, *args, **kwargs) -> None:
+        if path == old_paths[child.id]:
+            raise OSError("simulated unlink failure")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_on_child)
+    source.reparent(target.id, config=config)
+
+    target_paths = {
+        source.id: config.records_dir / "target" / "source.md",
+        child.id: config.records_dir / "target" / "child.md",
+    }
+    assert all(path.exists() for path in target_paths.values())
+    assert source.parent_id == target.id
+    journal = json.loads(
+        (config.hiraku_dir / ".reparent-transaction.json").read_text(encoding="utf-8")
+    )
+    assert journal["phase"] == "committed"
+    assert journal["old_root"] == "source"
+    assert journal["new_root"] == "target"
+    assert set(journal["affected_ids"]) == {"source", "child"}
+    assert {record.id for record in list_records(config=config)} == {
+        "source",
+        "child",
+        "target",
+    }
+    assert load_record("source", config=config).path == target_paths[source.id]
+    assert load_record("child", config=config).path == target_paths[child.id]
+    assert old_paths[child.id].exists()
+    with pytest.raises(ValidationError, match="pending reparent recovery"):
+        load_record("child", config=config).delete(config=config)
+
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    assert {record.id for record in list_records(config=config)} == {
+        "source",
+        "child",
+        "target",
+    }
+    assert all(not path.exists() for path in old_paths.values())
+    assert not (config.hiraku_dir / ".reparent-transaction.json").exists()
+
+
+def test_reparenting_cleans_incomplete_destination_copies_after_write_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    source = Record.create("source", config=config)
+    child = Record.create("child", parent_id=source.id, config=config)
+    target = Record.create("target", config=config)
+    old_paths = {source.id: source.path, child.id: child.path}
+    destination_child = config.records_dir / "target" / "child.md"
+    original_atomic_write = atomic_write
+    failed = False
+
+    def fail_after_copy(path: Path, content: str, **options) -> None:
+        nonlocal failed
+        original_atomic_write(path, content, **options)
+        if path == destination_child and not failed:
+            failed = True
+            raise OSError("simulated write failure")
+
+    monkeypatch.setattr("hiraku.record.atomic_write", fail_after_copy)
+    with pytest.raises(OSError, match="simulated write failure"):
         source.reparent(target.id, config=config)
 
     assert all(path.exists() for path in old_paths.values())
     assert not (config.records_dir / "target" / "source.md").exists()
-    assert not (config.records_dir / "target" / "child.md").exists()
-    assert load_record("source", config=config).parent_id is None
+    assert not destination_child.exists()
+    assert source.parent_id is None
+    assert not (config.hiraku_dir / ".reparent-transaction.json").exists()
+
+
+@pytest.mark.parametrize("failure_after_replace", [False, True])
+def test_reparenting_resolves_commit_journal_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_after_replace: bool,
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    source = Record.create("source", config=config)
+    child = Record.create("child", parent_id=source.id, config=config)
+    target = Record.create("target", config=config)
+    original_atomic_write = atomic_write
+    journal_path = config.hiraku_dir / ".reparent-transaction.json"
+
+    def fail_during_commit(path: Path, content: str, **options) -> None:
+        is_commit = path == journal_path and json.loads(content)["phase"] == "committed"
+        if is_commit and not failure_after_replace:
+            raise OSError("simulated failure before journal commit")
+        original_atomic_write(path, content, **options)
+        if is_commit:
+            raise OSError("simulated failure after journal commit")
+
+    monkeypatch.setattr("hiraku.record.atomic_write", fail_during_commit)
+    if failure_after_replace:
+        source.reparent(target.id, config=config)
+        assert load_record("source", config=config).parent_id == target.id
+        assert load_record("child", config=config).parent_id == source.id
+        assert not journal_path.exists()
+    else:
+        with pytest.raises(OSError, match="before journal commit"):
+            source.reparent(target.id, config=config)
+        assert load_record("source", config=config).parent_id is None
+        assert load_record("child", config=config).path == child.path
+        assert not (config.records_dir / "target" / "source.md").exists()
+        assert not (config.records_dir / "target" / "child.md").exists()
+        assert not journal_path.exists()
+
+
+def test_preparing_journal_keeps_old_copies_authoritative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    source = Record.create("source", config=config, goal="old value")
+    child = Record.create("child", parent_id=source.id, config=config)
+    target = Record.create("target", config=config)
+    old_child = child.path
+    destination_child = config.records_dir / "target" / "child.md"
+    original_unlink = Path.unlink
+    original_atomic_write = atomic_write
+    failed = False
+
+    def fail_after_destination_copy(path: Path, content: str, **options) -> None:
+        nonlocal failed
+        original_atomic_write(path, content, **options)
+        if path == destination_child and not failed:
+            failed = True
+            raise OSError("simulated destination write failure")
+
+    def fail_destination_cleanup(path: Path, *args, **kwargs) -> None:
+        if path == destination_child:
+            raise OSError("simulated destination cleanup failure")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr("hiraku.record.atomic_write", fail_after_destination_copy)
+    monkeypatch.setattr(Path, "unlink", fail_destination_cleanup)
+    with pytest.raises(ExceptionGroup, match="recovery is pending"):
+        source.reparent(target.id, config=config)
+
+    journal = json.loads(
+        (config.hiraku_dir / ".reparent-transaction.json").read_text(encoding="utf-8")
+    )
+    assert journal["phase"] == "preparing"
+    assert destination_child.exists()
+    assert load_record("source", config=config).path == source.path
+    assert load_record("child", config=config).path == old_child
+    resolved = load_record("source", config=config).resolve(config=config)
+    assert resolved.values["goal"] == "old value"
+
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    assert {record.id for record in list_records(config=config)} == {
+        "source",
+        "child",
+        "target",
+    }
+    assert not destination_child.exists()
+    assert not (config.hiraku_dir / ".reparent-transaction.json").exists()
+
+
+def test_preparing_journal_errors_when_old_authoritative_copy_is_missing(
+    tmp_path: Path,
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    source = Record.create("source", config=config)
+    child = Record.create("child", parent_id=source.id, config=config)
+    Record.create("target", config=config)
+    ids = [source.id, child.id]
+    moves = [
+        {
+            "old": f"source/{record_id}.md",
+            "new": f"target/{record_id}.md",
+        }
+        for record_id in ids
+    ]
+    for old_record, move in zip((source, child), moves, strict=True):
+        atomic_write(
+            config.records_dir / move["new"],
+            old_record.path.read_text(encoding="utf-8"),
+        )
+    journal_path = config.hiraku_dir / ".reparent-transaction.json"
+    atomic_write(
+        journal_path,
+        json.dumps(
+            {
+                "phase": "preparing",
+                "old_root": "source",
+                "new_root": "target",
+                "affected_ids": ids,
+                "moves": moves,
+            }
+        ),
+    )
+    child.path.unlink()
+
+    with pytest.raises(
+        ValidationError, match="Authoritative pre-commit copy is missing"
+    ):
+        list_records(config=config)
+
+    assert all((config.records_dir / move["new"]).exists() for move in moves)
+    assert journal_path.exists()
+
+
+def test_committed_journal_errors_when_new_authoritative_copy_is_missing(
+    tmp_path: Path,
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    source = Record.create("source", config=config)
+    child = Record.create("child", parent_id=source.id, config=config)
+    Record.create("target", config=config)
+    ids = [source.id, child.id]
+    moves = [
+        {
+            "old": f"source/{record_id}.md",
+            "new": f"target/{record_id}.md",
+        }
+        for record_id in ids
+    ]
+    atomic_write(
+        config.records_dir / moves[0]["new"],
+        source.path.read_text(encoding="utf-8"),
+    )
+    journal_path = config.hiraku_dir / ".reparent-transaction.json"
+    atomic_write(
+        journal_path,
+        json.dumps(
+            {
+                "phase": "committed",
+                "old_root": "source",
+                "new_root": "target",
+                "affected_ids": ids,
+                "moves": moves,
+            }
+        ),
+    )
+
+    with pytest.raises(
+        ValidationError, match="Authoritative committed copy is missing"
+    ):
+        list_records(config=config)
+
+    assert source.path.exists()
+    assert child.path.exists()
+    assert (config.records_dir / moves[0]["new"]).exists()
+    assert journal_path.exists()

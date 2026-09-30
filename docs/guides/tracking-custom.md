@@ -11,8 +11,8 @@ The steps to implement a custom backend are:
 3. Specify a factory function.
 
 Implement one method, `_read_source_runs`, which reads the configured source
-once and returns normalized `Run` objects. The base class handles record
-filtering, unattributed runs, sorting, and limits.
+once and returns normalized `Run` objects. The base class filters to runs with
+record attribution and handles sorting and limits.
 
 ```python
 # my_tracker.py
@@ -107,12 +107,11 @@ from hiraku.record import load_record
 
 config = HirakuConfig.discover()
 record = load_record("my-task", config=config)
-runs = record.runs(config=config, include_descendants=True,
-                   sort="val/accuracy", ascending=False)
+runs = record.runs(config=config, sort="val/accuracy", ascending=False)
 ```
 
 When the backend is loaded by the CLI application, use:
 
 ```bash
-hiraku runs --record my-task --descendants --sort val/accuracy
+hiraku runs --record my-task --sort val/accuracy
 ```

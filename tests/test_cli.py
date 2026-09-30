@@ -108,26 +108,13 @@ def test_record_cli_entrypoint_launch_and_runs(tmp_path: Path, monkeypatch) -> N
         "id,record_id,metric.loss\na,root,0.5\nb,child,0.2\nc,,0.1\n"
     )
     direct = json.loads(invoke("runs", "--record", "root", "--json").output)
-    all_runs = json.loads(
-        invoke("runs", "--record", "root", "--descendants", "--json").output
-    )
+    all_runs = json.loads(invoke("runs", "--record", "root", "--json").output)
     assert {run["id"] for run in direct} == {"a", "b"}
-    with_unattributed = json.loads(
-        invoke(
-            "runs",
-            "--record",
-            "root",
-            "--include-unattributed",
-            "--json",
-        ).output
-    )
-    assert {run["id"] for run in with_unattributed} == {"a", "b", "c"}
     assert {run["id"] for run in all_runs} == {"a", "b"}
     sorted_table = invoke(
         "runs",
         "--record",
         "root",
-        "--descendants",
         "--metrics",
         "loss",
         "--sort",

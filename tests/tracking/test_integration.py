@@ -22,7 +22,7 @@ def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
         "earlier,exp,,2026-01-01T00:00:00+00:00,,,2.5,1,raw\n"
         "other,task,,,,,3.0,3,ignored\n"
     )
-    runs = task.runs(config=config, include_descendants=True)
+    runs = task.runs(config=config)
     assert [run.id for run in runs] == ["earlier", "later", "other"]
     assert runs[0].timestamp is not None and runs[0].timestamp.tzinfo is UTC
     assert runs[0].metrics == {"loss": "2.5"}
@@ -34,7 +34,6 @@ def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
     assert (
         task.runs(
             config=config,
-            include_descendants=True,
             sort="loss",
             ascending=True,
             limit=1,
@@ -56,12 +55,6 @@ def test_run_queries_use_explicit_owner_filters_without_resolution(
 
         def list_runs(self, *, record_id: str, **query: object) -> list[Run]:
             self.calls.append(record_id)
-            return []
-
-        def list_runs_for_record_ids(
-            self, *, record_ids: set[str], **options: object
-        ) -> list[Run]:
-            self.calls.extend(sorted(record_ids))
             return []
 
         def list_all_recorded_runs(self, **options: object) -> list[Run]:
@@ -105,7 +98,6 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     with mlflow.start_run() as active:
         mlflow.set_tag("unrelated", "no-record-id")
         mlflow.log_metric("loss", 4.0)
-        unattributed_id = active.info.run_id
     run = task.runs(config=config)[0]
     assert len(task.runs(config=config)) == 1
     assert run.id == run_id
@@ -117,6 +109,4 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     assert run.timestamp is not None and run.timestamp.tzinfo is UTC
     assert run.raw["tags"]["unmapped"] == "kept"
     assert load_record("exp", config=config).runs(config=config)[0].id == run_id
-    assert {
-        item.id for item in task.runs(config=config, include_unattributed=True)
-    } == {run_id, unattributed_id}
+    assert {item.id for item in task.runs(config=config)} == {run_id}

@@ -9,7 +9,7 @@ hiraku init
 hiraku record create <root-id>
 hiraku record create <child-id> --parent <root-id>
 hiraku launch <entrypoint> --record <child-id>
-hiraku runs --record <root-id> --descendants
+hiraku runs --record <record-id>
 ```
 
 `hiraku record list` includes each record's local `status` in its table.

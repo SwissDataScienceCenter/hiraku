@@ -303,7 +303,7 @@ splits, budgets, and evaluation definitions comparable, and do not infer
 record attribution when it is absent.
 
 ```bash
-hiraku runs --record <root-id> --descendants \
+hiraku runs --record <record-id> \
   --params seed,epochs \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending --json

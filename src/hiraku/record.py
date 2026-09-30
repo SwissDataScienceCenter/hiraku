@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -190,6 +191,11 @@ class Record(BaseRecord):
             raise RecordNotFoundError(f"Record {self.id!r} not found")
         if self.path != index[self.id].path:
             raise ValidationError("Reparenting requires the persisted record")
+        journal_path = _reparent_journal_path(selected)
+        if journal_path.exists():
+            raise ValidationError(
+                f"A previous reparent operation still needs recovery: {journal_path}"
+            )
         if parent_id is not None:
             validate_identifier(parent_id, label="parent ID")
             if parent_id not in index:
@@ -210,9 +216,14 @@ class Record(BaseRecord):
                 raise ValidationError(
                     f"Move files in {old_folder} before reparenting its root"
                 )
-        self.parent_id = parent_id
+        old_parent_id = self.parent_id
         if old_root == new_root:
-            self.save()
+            self.parent_id = parent_id
+            try:
+                self.save()
+            except Exception:
+                self.parent_id = old_parent_id
+                raise
             return
         affected = [
             item
@@ -228,7 +239,22 @@ class Record(BaseRecord):
         }
         if any(target.exists() for target in targets.values()):
             raise RecordExistsError(f"Destination root folder {new_root!r} conflicts")
-        written: list[Path] = []
+        moves = [(old_paths[item.id], targets[item.id]) for item in affected]
+        journal = {
+            "phase": "preparing",
+            "old_root": old_root,
+            "new_root": new_root,
+            "affected_ids": [item.id for item in affected],
+            "moves": [
+                {
+                    "old": old.relative_to(selected.records_dir).as_posix(),
+                    "new": new.relative_to(selected.records_dir).as_posix(),
+                }
+                for old, new in moves
+            ],
+        }
+        atomic_write(journal_path, json.dumps(journal))
+        self.parent_id = parent_id
         try:
             for item in affected:
                 target = targets[item.id]
@@ -237,40 +263,57 @@ class Record(BaseRecord):
                 else:
                     content = old_paths[item.id].read_text(encoding="utf-8")
                 atomic_write(target, content)
-                written.append(target)
-        except Exception:
-            for target in written:
-                target.unlink(missing_ok=True)
-            raise
-
-        # Keep a list of removed paths to attempt rollback
-        # if any error occurs during unlinking.
-        removed: list[Path] = []
-        try:
-            for item in affected:
-                old_path = old_paths[item.id]
-                old_path.unlink()
-                removed.append(old_path)
+                if target.read_text(encoding="utf-8") != content:
+                    raise OSError(f"Destination copy verification failed for {target}")
+                if Record.load(target).id != item.id:
+                    raise ValidationError(
+                        f"Destination copy has an invalid ID: {target}"
+                    )
         except Exception as exc:
-            rollback_errors: list[Exception] = []
-            for old_path in removed:
-                target = targets[old_path.stem]
-                try:
-                    atomic_write(old_path, target.read_text(encoding="utf-8"))
-                except Exception as rollback_exc:
-                    rollback_errors.append(rollback_exc)
-            for target in written:
-                try:
-                    target.unlink(missing_ok=True)
-                except Exception as rollback_exc:
-                    rollback_errors.append(rollback_exc)
-            if rollback_errors:
+            self.parent_id = old_parent_id
+            _, cleanup_errors, complete = _recover_reparenting(selected)
+            if not complete:
                 raise ExceptionGroup(
-                    "Reparenting failed and rollback was incomplete",
-                    [exc, *rollback_errors],
+                    f"Could not write destination records; recovery is pending at "
+                    f"{journal_path}",
+                    [exc, *cleanup_errors],
                 ) from exc
             raise
+
+        journal["phase"] = "committed"
+        try:
+            atomic_write(journal_path, json.dumps(journal))
+        except Exception as exc:
+            try:
+                persisted_phase = json.loads(
+                    journal_path.read_text(encoding="utf-8")
+                ).get("phase")
+            except (OSError, AttributeError, ValueError):
+                persisted_phase = None
+            if persisted_phase == "committed":
+                self.path = targets[self.id]
+                for old_path, _ in moves:
+                    with suppress(OSError):
+                        old_path.unlink()
+                _recover_reparenting(selected)
+                with suppress(OSError):
+                    old_folder.rmdir()
+                return
+            self.parent_id = old_parent_id
+            _, cleanup_errors, complete = _recover_reparenting(selected)
+            if not complete:
+                raise ExceptionGroup(
+                    f"Could not start reparenting; recovery is pending at "
+                    f"{journal_path}",
+                    [exc, *cleanup_errors],
+                ) from exc
+            raise
+
+        for old_path, _ in moves:
+            with suppress(OSError):
+                old_path.unlink()
         self.path = targets[self.id]
+        _recover_reparenting(selected)
         with suppress(OSError):
             old_folder.rmdir()
 
@@ -293,40 +336,38 @@ class Record(BaseRecord):
         self,
         *,
         backend: Any = None,
-        include_descendants: bool = False,
-        include_unattributed: bool = False,
         config: Any = None,
         **query: Any,
     ) -> list[Any]:
-        from .tracking import TrackingBackend, list_runs_for_records
+        from .tracking import MLflowBackend, TrackingBackend, select_backend
 
         selected = _config(config) if config is not None or backend is None else None
-        records = [self]
-        if include_descendants:
-            assert selected is not None
-            records.extend(self.descendants(config=selected))
         if backend is not None:
-            if include_descendants:
-                runs = backend.list_runs_for_record_ids(
-                    record_ids={record.id for record in records},
-                    include_unattributed=include_unattributed,
-                )
-            else:
-                runs = backend.list_all_recorded_runs(
-                    include_unattributed=include_unattributed
-                )
+            adapter = backend
         else:
             assert selected is not None
-            runs = list_runs_for_records(
-                records,
-                selected,
-                include_descendants=include_descendants,
-                include_unattributed=include_unattributed,
+            adapter = select_backend(self, selected)
+        options = {}
+        if isinstance(adapter, MLflowBackend):
+            values = (
+                self.resolve(config=selected).values if selected is not None else {}
             )
+            options["experiment_name"] = adapter.experiment_name or values.get(
+                "mlflow_experiment"
+            )
+        runs = adapter.list_all_recorded_runs(**options)
         return TrackingBackend._apply_query(runs, query, "tracking")
 
     def delete(self, *, config: Any = None) -> None:
         records = list_records(config=config)
+        selected = _config(config)
+        if _reparent_journal_path(selected).exists():
+            raise ValidationError(
+                "Cannot delete records until pending reparent recovery is complete"
+            )
+        persisted = next((item for item in records if item.id == self.id), None)
+        if persisted is not None and self.path != persisted.path:
+            raise ValidationError("Cannot delete a stale record instance; reload it")
         if any(item.parent_id == self.id for item in records):
             raise ValidationError(f"Cannot delete record {self.id!r} with children")
         if any(self.id in item.related_to for item in records if item.id != self.id):
@@ -342,9 +383,114 @@ def _config(config: Any) -> Any:
     return HirakuConfig.discover()
 
 
+def _reparent_journal_path(config: Any) -> Path:
+    return config.hiraku_dir / ".reparent-transaction.json"
+
+
+def _recover_reparenting(config: Any) -> tuple[set[Path], list[Exception], bool]:
+    """Retry an interrupted reparent and hide stale copies while cleanup is pending."""
+    journal_path = _reparent_journal_path(config)
+    if not journal_path.exists():
+        return set(), [], True
+    try:
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+        phase = journal["phase"]
+        raw_moves = journal["moves"]
+        old_root = journal["old_root"]
+        new_root = journal["new_root"]
+        affected_ids = journal["affected_ids"]
+        if (
+            phase not in {"preparing", "committed"}
+            or not isinstance(raw_moves, list)
+            or not isinstance(old_root, str)
+            or not isinstance(new_root, str)
+            or not isinstance(affected_ids, list)
+            or any(not isinstance(record_id, str) for record_id in affected_ids)
+            or len(raw_moves) != len(affected_ids)
+        ):
+            raise ValueError("invalid journal structure")
+        moves = []
+        for record_id, item in zip(affected_ids, raw_moves, strict=True):
+            old = Path(item["old"])
+            new = Path(item["new"])
+            if (
+                old.is_absolute()
+                or new.is_absolute()
+                or ".." in old.parts
+                or ".." in new.parts
+            ):
+                raise ValueError("journal paths must stay inside the records folder")
+            if (
+                old.parent != Path(old_root)
+                or new.parent != Path(new_root)
+                or old.name != f"{record_id}.md"
+                or new.name != f"{record_id}.md"
+            ):
+                raise ValueError("journal paths do not match the affected records")
+            moves.append((config.records_dir / old, config.records_dir / new))
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise ValidationError(
+            f"Cannot read reparent recovery journal {journal_path}: {exc}"
+        ) from exc
+
+    ignored_paths: set[Path] = set()
+    cleanup_errors: list[Exception] = []
+    if phase == "preparing":
+        missing_old = [old for old, _ in moves if not old.exists()]
+        if missing_old:
+            missing = ", ".join(str(path) for path in missing_old)
+            raise ValidationError(
+                f"Authoritative pre-commit copy is missing: {missing}"
+            )
+        ignored_paths.update(new for _, new in moves)
+        for _, new in moves:
+            try:
+                new.unlink(missing_ok=True)
+            except OSError as exc:
+                cleanup_errors.append(
+                    OSError(
+                        f"Could not remove incomplete destination copy {new}: {exc}"
+                    )
+                )
+        complete = all(not new.exists() for _, new in moves)
+    else:
+        missing_new = [new for _, new in moves if not new.exists()]
+        if missing_new:
+            missing = ", ".join(str(path) for path in missing_new)
+            raise ValidationError(f"Authoritative committed copy is missing: {missing}")
+        ignored_paths.update(old for old, _ in moves)
+        for old, _ in moves:
+            unlink_error: OSError | None = None
+            try:
+                old.unlink(missing_ok=True)
+            except OSError as exc:
+                unlink_error = exc
+            if old.exists():
+                detail = f": {unlink_error}" if unlink_error else ""
+                cleanup_errors.append(
+                    OSError(f"Could not remove old record copy {old}{detail}")
+                )
+        complete = all(not old.exists() and new.exists() for old, new in moves)
+
+    if complete:
+        try:
+            journal_path.unlink()
+        except OSError as exc:
+            cleanup_errors.append(
+                OSError(
+                    f"Could not clear reparent recovery journal {journal_path}: {exc}"
+                )
+            )
+            complete = False
+    return ignored_paths, cleanup_errors, complete
+
+
 def _record_index(config: Any) -> dict[str, Record]:
+    ignored_paths, _, _ = _recover_reparenting(config)
     index: dict[str, Record] = {}
     for path in sorted(config.records_dir.glob("*/*.md")):
+        if path in ignored_paths:
+            continue
         record = Record.load(path)
         if record.id in index:
             raise ValidationError(f"Duplicate record ID {record.id!r}")

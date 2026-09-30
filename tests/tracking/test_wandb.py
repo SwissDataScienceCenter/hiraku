@@ -59,6 +59,4 @@ def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) 
     assert run.metrics == {"test/accuracy": 0.95}
     assert run.raw["tags"] == ["baseline", "iris"]
     assert [item.id for item in backend.list_all_recorded_runs()] == ["run-1"]
-    assert {
-        item.id for item in backend.list_all_recorded_runs(include_unattributed=True)
-    } == {"run-1", "run-unattributed"}
+    assert [item.id for item in backend.list_all_recorded_runs()] == ["run-1"]
