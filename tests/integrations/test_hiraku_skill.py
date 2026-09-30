@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from hiraku.config import HirakuConfig
-from hiraku.data import Experiment, Task, list_experiments, list_tasks, load_experiment
+from hiraku.record import Record, list_records, load_record
 from hiraku.tracking import CSVBackend
 
 RUN_AGENT_TESTS = os.environ.get("HIRAKU_RUN_CODEX_SKILL_TESTS") == "1"
@@ -106,8 +106,8 @@ def _run_codex(project: Path, prompt: str) -> str:
     return result.stdout
 
 
-def _create_task(config: HirakuConfig) -> Task:
-    return Task.create(
+def _create_task(config: HirakuConfig) -> Record:
+    return Record.create(
         "heart-disease",
         config=config,
         branch="main",
@@ -128,12 +128,12 @@ def _create_task(config: HirakuConfig) -> Task:
 
 def _create_logistic_experiment(
     config: HirakuConfig,
-    task: Task,
+    task: Record,
     commit: str,
-) -> Experiment:
-    return Experiment.create(
+) -> Record:
+    return Record.create(
         "logistic-baseline",
-        task=task,
+        parent_id=task.id,
         config=config,
         commit=commit,
         summary="Logistic regression baseline",
@@ -156,15 +156,16 @@ def test_agent_creates_task_from_high_level_request(tmp_path: Path) -> None:
 
     agent_output = _run_codex(
         project,
-        """Use the $hiraku skill to create a task named heart-disease. Its goal is
+        """Use the $hiraku skill to create a root record named heart-disease.
+Its goal is
 to develop and evaluate predictive models for heart disease on the fixed
 Cleveland cohort without restricting the task to particular model families. Ask
 which modeling approaches achieve the best validation log loss and accuracy.
 Track val/log_loss to minimize and val/accuracy to maximize. Only create and
-verify the task.""",
+verify the record.""",
     )
 
-    tasks = list_tasks(config=config)
+    tasks = list_records(config=config)
     assert len(tasks) == 1, agent_output
     task = tasks[0]
     assert task.id == "heart-disease"
@@ -182,8 +183,8 @@ verify the task.""",
         {"name": "val/log_loss", "direction": "minimize"},
         {"name": "val/accuracy", "direction": "maximize"},
     ]
-    assert list_experiments(task=task, config=config) == []
-    assert CSVBackend(config).list_runs(task_id=task.id) == []
+    assert task.children(config=config) == []
+    assert CSVBackend(config).list_runs(record_id=task.id) == []
     assert _git(project, "status", "--porcelain") == ""
 
 
@@ -193,15 +194,15 @@ def test_agent_creates_experiment_from_high_level_request(tmp_path: Path) -> Non
 
     agent_output = _run_codex(
         project,
-        """Use the $hiraku skill to create an experiment named logistic-baseline
-for the active task. Use the summary 'Logistic regression baseline' and the
+        """Use the $hiraku skill to create a child record named logistic-baseline
+under heart-disease. Use the summary 'Logistic regression baseline' and the
 hypothesis 'Regularized logistic regression provides a calibrated baseline'. It
 should use uv run to invoke train.py with the logistic model, seed 42, and a
 validation fraction of 0.25. Bind it to the current commit. Only create and
-verify the experiment; do not run it.""",
+verify the record; do not run it.""",
     )
 
-    experiments = list_experiments(task=task, config=config)
+    experiments = task.children(config=config)
     assert len(experiments) == 1, agent_output
     experiment = experiments[0]
     assert experiment.id == "logistic-baseline"
@@ -221,7 +222,7 @@ verify the experiment; do not run it.""",
         "seed": 42,
         "validation-fraction": 0.25,
     }
-    assert CSVBackend(config).list_runs(task_id=task.id) == []
+    assert CSVBackend(config).list_runs(record_id=task.id) == []
     assert _git(project, "status", "--porcelain") == ""
 
 
@@ -234,24 +235,20 @@ def test_agent_runs_existing_experiment_without_other_changes(tmp_path: Path) ->
 
     agent_output = _run_codex(
         project,
-        """Use the $hiraku skill to run the logistic-baseline experiment and
+        """Use the $hiraku skill to run the logistic-baseline record and
 report its tracked validation metrics. Do not create or update other records.""",
     )
 
     assert task.path.read_bytes() == task_before, agent_output
-    current = load_experiment(experiment.id, task=task, config=config)
+    current = load_record(experiment.id, config=config)
     assert current.path.read_bytes() == experiment_before
-    assert [item.id for item in list_experiments(task=task, config=config)] == [
-        "logistic-baseline"
-    ]
+    assert [item.id for item in task.children(config=config)] == ["logistic-baseline"]
     runs = CSVBackend(config).list_runs(
-        task_id=task.id,
-        experiment_id=experiment.id,
+        record_id=experiment.id,
     )
     assert len(runs) == 1
     run = runs[0]
-    assert run.task_id == task.id
-    assert run.experiment_id == experiment.id
+    assert run.record_id == experiment.id
     assert run.commit == commit
     assert run.entrypoint == "train"
     assert run.params == {

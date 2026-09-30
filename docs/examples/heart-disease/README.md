@@ -14,7 +14,7 @@ uv tool install .
 ```
 
 Then create a project and let Hiraku install the training script, processed
-dataset, and dependencies for this example. 
+dataset, and dependencies for this example.
 ```bash
 mkdir heart-disease
 cd heart-disease
@@ -23,7 +23,7 @@ hiraku init --example heart-disease
 ```
 Initialization creates `hiraku.yml`, metadata directories, and the agent
 skill. The `heart-disease` example also copies `train.py`, `pyproject.toml`, and
-`data/processed.cleveland.data` into the project. 
+`data/processed.cleveland.data` into the project.
 Logistic regression and a random forest are included as initial baselines.
 
 
@@ -42,14 +42,14 @@ git commit -m "initialize Heart Disease example"
 The commit records the exact
 training code and dataset that the initial baseline experiments will evaluate.
 
-??? note "Tracking Hiraku metadata in git"
+??? note "Tracking Hiraku metadata in Git"
     In this example, `.gitignore` excludes hiraku metadata (`hiraku.yml`, `hiraku/*`) and the `runs.csv` file.
 
     Hiraku is (mostly) agnostic to Git state: You can commit metadata, and Hiraku shows what is currently visible in the working tree.
-    Merging task and experiment records is a user (or agent) responsibility.
+    Merging research records is a user (or agent) responsibility.
 
 
-## 2. Define the task
+## 2. Define the research root
 
 ??? tip "Agent workflow using skill"
     Jump to [Run the example with an agent](#using-the-hiraku-skill) to
@@ -57,48 +57,45 @@ training code and dataset that the initial baseline experiments will evaluate.
     same workflow.
 
 ```bash
-hiraku task create heart-disease \
-  --goal "Develop and evaluate predictive models for heart disease on a fixed Cleveland cohort" \
-  --question "Which modeling approaches achieve the best validation log loss and accuracy on this cohort?" \
+hiraku record create heart-disease --type task \
+  --set "goal=Develop and evaluate predictive models for heart disease on a fixed Cleveland cohort" \
+  --set "question=Which modeling approaches achieve the best validation log loss and accuracy on this cohort?" \
   --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]'
 
+hiraku record show heart-disease
 hiraku status
-
-hiraku task show heart-disease
-# omit task name since it's the current active task
-hiraku task show  
 ```
 
-You should see `active_task_id` to be `heart-disease` and the tracking backend to be
-CSV. 
+You should see `active_record_id` set to `heart-disease` and the tracking
+backend set to CSV.
 
-??? tip "Defining a task branch"
-    Hiraku records a task branch in the task metadata. Use `hiraku task create --branch main` if you want the task record to point to
-    the current branch instead.
+??? tip "Defining a working branch"
+    Store a branch name with `--set 'branch=main'` if the record should point to
+    the current branch. Create and switch Git branches explicitly.
 
 ## 3. Create a baseline experiment
 
 ```bash
-hiraku experiment create logistic-baseline \
-  --summary "Logistic regression baseline" \
-  --hypothesis "Regularized logistic regression provides a calibrated baseline" \
+hiraku record create logistic-baseline --parent heart-disease --type experiment \
+  --set "summary=Logistic regression baseline" \
+  --set "hypothesis=Regularized logistic regression provides a calibrated baseline" \
   --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: logistic, seed: 42, validation-fraction: 0.25}}}'
 
-hiraku experiment show logistic-baseline
+hiraku record show logistic-baseline
 
 # show entrypoint definitions
-hiraku experiment entrypoints
+hiraku record entrypoints logistic-baseline
 
 # preview the command
-hiraku launch logistic-baseline:train --dry-run
+hiraku launch train --record logistic-baseline --dry-run
 
-hiraku launch logistic-baseline:train
+hiraku launch train --record logistic-baseline
 
 # query runs
-hiraku runs --task heart-disease
-# omitted task defaults to active task
-hiraku runs
+hiraku runs --record heart-disease
+# the active child record can also be queried directly
+hiraku runs --record logistic-baseline
 ```
 
 Expect one run with `val/log_loss` and `val/accuracy`. The default dispatcher
@@ -109,32 +106,32 @@ training program writes the CSV row to project-root `runs.csv`.
     Hiraku does **not** handle, control or own metric logging. Training scripts log metrics directly to a user-managed tracking backend, independently of Hiraku.
 
 
-    In this example, results are written to `runs.csv`, but more advanced projects can use [Weights & Biases](http://localhost:8000/hiraku/guides/tracking-wandb/), [MLflow](http://localhost:8000/hiraku/guides/tracking-mlflow/), or [custom backends](http://localhost:8000/hiraku/guides/tracking-custom/).
+    In this example, results are written to `runs.csv`, but more advanced projects can use [Weights & Biases](../../guides/tracking-wandb.md), [MLflow](../../guides/tracking-mlflow.md), or [custom backends](../../guides/tracking-custom.md).
 
     Hiraku only **queries the tracking backend for existing runs and metrics**. This means the same training and logging setup can be used with or without Hiraku.
 
 
 ??? note "Launch dispatchers and isolated execution"
-    By default `hiraku launch logistic-baseline:train` passes the entrypoint command to a bash script in `hiraku/dispatch/launch.sh`, which executes the command. Launch scripts are project data that can be modified to support custom launch dispatch behaviour, e.g. submitting a job to a compute platform.
+    By default `hiraku launch train --record logistic-baseline` passes the entrypoint command to a bash script in `hiraku/dispatch/launch.sh`, which executes the command. Launch scripts are project data that can be modified to support custom launch dispatch behaviour, e.g. submitting a job to a compute platform.
 
-    Hiraku ships a second default `worktree` dispatcher, which runs the entrypoint in a separate worktree at the commit specified by the experiment. Try the following:
+    Hiraku ships a second default `worktree` dispatcher, which runs the entrypoint in a separate worktree at the commit specified by the record. Try the following:
     ```bash
-    hiraku launch --dispatch worktree logistic-baseline:train
-    hiraku launch --dispatch worktree --commit <sha> logistic-baseline:train
+    hiraku launch train --record logistic-baseline --dispatch worktree
+    hiraku launch train --record logistic-baseline --dispatch worktree --commit <sha>
     ```
 
 
 ## 4. Run a second experiment
 
 ```bash
-hiraku experiment create random-forest \
-  --summary "Random forest comparison" \
-  --hypothesis "Nonlinear feature interactions improve validation log loss" \
+hiraku record create random-forest --parent heart-disease --type experiment \
+  --set "summary=Random forest comparison" \
+  --set "hypothesis=Nonlinear feature interactions improve validation log loss" \
   --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: random_forest, seed: 42, validation-fraction: 0.25}}}'
 
-hiraku launch random-forest:train
-hiraku runs
+hiraku launch train --record random-forest
+hiraku runs --record heart-disease --sort val/log_loss
 ```
 
 Expect two runs, with lower log loss first. Both use the same committed
@@ -172,7 +169,7 @@ the manual workflow without limiting the task to those model families:
 
 ```text
 Use the Hiraku skill to investigate predictive models on the bundled Cleveland
-heart-disease data. Create an open-ended task named heart-disease whose goal is
+heart-disease data. Create an open-ended root record named heart-disease whose goal is
 to identify models with low `val/log_loss` and high `val/accuracy`; do not
 restrict the task to particular model families. As initial baselines, create and
 run a logistic-baseline experiment and a random-forest experiment using seed 42
@@ -189,26 +186,26 @@ its model calls smaller by testing the core actions independently.
 You can instead keep each agent turn focused. These prompts intentionally use
 research intent rather than Hiraku CLI syntax:
 
-1. Create the task:
+1. Create the root record:
 
     ```text
-    Use the Hiraku skill to create a task named heart-disease. Its goal is to
+    Use the Hiraku skill to create a root record named heart-disease. Its goal is to
     develop and evaluate predictive models for heart disease on the fixed
     Cleveland cohort without restricting the task to particular model
     families. Ask which modeling approaches achieve the best validation log
     loss and accuracy. Track `val/log_loss` to minimize and `val/accuracy` to
-    maximize. Only create and verify the task.
+    maximize. Only create and verify the record.
     ```
 
 2. Create the baseline experiment:
 
     ```text
-    Use the Hiraku skill to create an experiment named logistic-baseline for
-    the active task. Use the summary "Logistic regression baseline" and the
+    Use the Hiraku skill to create a child record named logistic-baseline under
+    heart-disease. Use the summary "Logistic regression baseline" and the
     hypothesis "Regularized logistic regression provides a calibrated
     baseline". It should use uv run to invoke train.py with the logistic model,
     seed 42, and a validation fraction of 0.25. Bind it to the current commit.
-    Only create and verify the experiment; do not run it.
+    Only create and verify the record; do not run it.
     ```
 
 3. Run the baseline:
@@ -221,8 +218,8 @@ research intent rather than Hiraku CLI syntax:
 4. Create and run a second baseline:
 
     ```text
-    Use the Hiraku skill to create and run a random-forest experiment as a
-    second baseline for the active task. Use uv run to invoke train.py with the
+    Use the Hiraku skill to create and run a random-forest child record as a
+    second baseline under heart-disease. Use uv run to invoke train.py with the
     random_forest model, seed 42, and a validation fraction of 0.25, bound to
     the current commit. Report its tracked validation metrics.
     ```
@@ -238,26 +235,26 @@ research intent rather than Hiraku CLI syntax:
 6. Propose, implement, and run another model:
 
     ```text
-    Use the Hiraku skill to review the heart-disease task, its baseline results,
+    Use the Hiraku skill to review the heart-disease root record, its baseline results,
     and train.py. Suggest a promising model family that has not yet been
-    evaluated and briefly justify it. Create an experiment for that model,
-    implement the focused support needed in train.py, commit the implementation on the intended task or experiment
-    branch, bind the experiment to that commit, and run it with seed 42 and a
+    evaluated and briefly justify it. Create a child record for that model,
+    implement the focused support needed in train.py, commit the implementation on the intended working
+    branch, bind the record to that commit, and run it with seed 42 and a
     validation fraction of 0.25. Report its tracked metrics compared with the
-    two baselines. Do not modify the existing experiment records or rerun the
+    two baselines. Do not modify the existing baseline records or rerun the
     baselines.
     ```
 
 ### Verify the agent's work
 
-The initial baseline workflow should contain one task, two experiments, and two
-attributed runs. After the extension prompt, it should contain one additional
-experiment and attributed run:
+The initial baseline workflow should contain one root, two child records, and
+two attributed runs. After the extension prompt, it should contain one
+additional child record and attributed run:
 
 ```bash
-hiraku task show heart-disease
-hiraku experiment list --task heart-disease
-hiraku runs --task heart-disease \
+hiraku record show heart-disease
+hiraku record tree
+hiraku runs --record heart-disease \
   --params model,seed,validation_fraction \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending

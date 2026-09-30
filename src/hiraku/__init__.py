@@ -1,6 +1,8 @@
 """Hiraku's production core Python API."""
 
+from .base import BaseRecord
 from .config import HirakuConfig
-from .data import Entrypoint, Experiment, Metric, Run, Task
+from .record import Entrypoint, Metric, Record
+from .run import Run
 
-__all__ = ["Entrypoint", "Experiment", "HirakuConfig", "Metric", "Run", "Task"]
+__all__ = ["BaseRecord", "Entrypoint", "HirakuConfig", "Metric", "Record", "Run"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,7 +13,7 @@ from ..errors import BackendError, ValidationError
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
-    from ..data import Run
+    from ..run import Run
 
 
 class CSVBackendConfig(BaseModel):
@@ -39,8 +39,7 @@ class CSVBackend(TrackingBackend):
 
     STANDARD = {
         "id",
-        "task_id",
-        "experiment_id",
+        "record_id",
         "commit",
         "timestamp",
         "entrypoint",
@@ -65,10 +64,8 @@ class CSVBackend(TrackingBackend):
                 else (config.root / candidate).resolve()
             )
 
-    def _read_runs(
-        self, *, task_id: str, experiment_id: str | None = None
-    ) -> list[Run]:
-        from ..data import Run
+    def _read_source_runs(self, **options: Any) -> list[Run]:
+        from ..run import Run
 
         path = self.path or self.config.root / "runs.csv"
         if not path.exists():
@@ -79,6 +76,10 @@ class CSVBackend(TrackingBackend):
                 reader = csv.DictReader(stream)
                 if reader.fieldnames is None or "id" not in reader.fieldnames:
                     raise BackendError(f"csv backend file {path} has no id column")
+                if "record_id" not in reader.fieldnames:
+                    raise BackendError(
+                        f"csv backend file {path} has no record_id column"
+                    )
                 if any(not name for name in reader.fieldnames) or len(
                     set(reader.fieldnames)
                 ) != len(reader.fieldnames):
@@ -115,8 +116,7 @@ class CSVBackend(TrackingBackend):
                         }
                         run = Run(
                             id=run_id,
-                            task_id=normalized.get("task_id"),
-                            experiment_id=normalized.get("experiment_id"),
+                            record_id=normalized.get("record_id"),
                             commit=normalized.get("commit"),
                             timestamp=self._timestamp(
                                 normalized.get("timestamp"),

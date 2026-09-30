@@ -14,11 +14,11 @@ In the training project:
 
 ```bash
 uv add mlflow
-hiraku task update my-task \
+hiraku record update my-task \
   --set 'tracking_backend={type: mlflow, database: mlflow.db, experiment_name: my-task}'
 ```
 
-The task must already exist. The database path is relative to the Hiraku
+The record must already exist. The database path is relative to the Hiraku
 project root. For a remote server, specify `tracking_uri` instead of
 `database`; the options are mutually exclusive.
 
@@ -39,8 +39,7 @@ import mlflow
 mlflow.set_experiment("my-task")
 with mlflow.start_run():
     mlflow.set_tags({
-        "hiraku.task_id": os.environ["HIRAKU_TASK_ID"],
-        "hiraku.experiment_id": os.environ["HIRAKU_EXPERIMENT_ID"],
+        "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
         "hiraku.entrypoint": os.environ["HIRAKU_ENTRYPOINT"],
     })
     if os.environ.get("HIRAKU_COMMIT"):
@@ -49,15 +48,15 @@ with mlflow.start_run():
 ```
 
 The launcher inherits the environment; it does not derive the training
-process's MLflow URI from the task's backend settings. An absolute URI keeps
+process's MLflow URI from the record's backend settings. An absolute URI keeps
 worktree dispatches writing to the original database.
 
 ## Inspect
 
 ```bash
-hiraku runs --task my-task --json
+hiraku runs --record my-task --json
 ```
 
 Hiraku reads native run IDs, parameters, metrics, and attribution tags.
-The MLflow experiment name is a backend grouping, distinct from Hiraku's
-experiment ID.
+The MLflow experiment name is a backend grouping, distinct from a Hiraku
+record ID.

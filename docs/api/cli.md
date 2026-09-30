@@ -1,16 +1,18 @@
 # CLI Reference
 
-The CLI is the quickest way to manage tasks, experiments, and runs.
+The CLI manages research records, launches, and tracked runs.
 
 Typical workflow:
 
 ```bash
 hiraku init
-hiraku task create <task-id>
-hiraku exp create <experiment-id>
-hiraku launch <experiment-id>:<entrypoint>
-hiraku runs
+hiraku record create <root-id>
+hiraku record create <child-id> --parent <root-id>
+hiraku launch <entrypoint> --record <child-id>
+hiraku runs --record <record-id>
 ```
+
+`hiraku record list` includes each record's local `status` in its table.
 
 `hiraku init` requires its target to be a Git repository root. Use
 `hiraku init PATH --ignore-git` to intentionally initialize a nested or non-Git

@@ -12,7 +12,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.data import load_task
+from hiraku.record import load_record
 
 REPOSITORY = Path(__file__).parents[2]
 DOCS_EXAMPLE = REPOSITORY / "docs" / "examples" / "autoresearch"
@@ -73,16 +73,19 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
     git(project, "add", ".gitignore", "cpu_mock.py")
     git(project, "commit", "-m", "add Hiraku autoresearch workflow")
 
+    git(project, "switch", "-c", "autoresearch/sep10")
     invoke(
         runner,
         [
-            "task",
+            "record",
             "create",
             "sep10",
-            "--branch",
-            "autoresearch/sep10",
-            "--goal",
-            "Find the best architecture, optimizer, and hyperparameters to "
+            "--type",
+            "task",
+            "--set",
+            "branch=autoresearch/sep10",
+            "--set",
+            "goal=Find the best architecture, optimizer, and hyperparameters to "
             "minimize `val_bpb` within the fixed 5-minute training budget.",
             "--markdown-file",
             "task.md",
@@ -96,7 +99,6 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
             "args: {val-bpb: 1.0}}}",
         ],
     )
-    git(project, "switch", "autoresearch/sep10")
     return project, runner
 
 
@@ -125,11 +127,10 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "/.agents/" in readme
     assert "/.claude/" in readme
     assert "--markdown-file task.md" in readme
-    assert "hiraku task create sep10" in readme
-    assert "--branch autoresearch/sep10" in readme
-    assert "hiraku task show sep10 --json" in readme
-    assert "hiraku program show autoresearch" in readme
-    assert "hiraku experiment update cpu-test" in readme
+    assert "hiraku record create sep10" in readme
+    assert "branch=autoresearch/sep10" in readme
+    assert "hiraku record show sep10 --json" in readme
+    assert "hiraku record update cpu-test" in readme
     assert "--set decision=discard" in readme
 
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
@@ -144,29 +145,20 @@ def test_autoresearch_is_an_overlay() -> None:
 
     program = PROGRAM.read_text(encoding="utf-8")
     assert "hiraku status --json" in program
-    assert "hiraku task show --json" in program
-    assert "hiraku experiment list --task <task> --json" in program
-    assert (
-        "hiraku runs --task <task> --experiment <experiment-id> --json" in program
-    )
+    assert "hiraku record tree" in program
+    assert "hiraku runs --record <id> --json" in program
     assert "--commit HEAD" in program
-    assert "Never rebind an experiment" in program
-    assert "git reset --soft <experiment-commit>^" in program
-    assert "git reset --hard <experiment-commit>^" in program
-    assert "tail -n 50 run.log" in program
-    assert "fixed\ntime budget of 5 minutes" in program
+    assert "Never rebind a completed attempt" in program
     assert "results.tsv" not in program
     assert "grep " not in program
     assert "Choose the history mode" not in program
-    assert (
-        "hiraku experiment update <experiment-id> --task <task> --commit" not in program
-    )
+    assert "hiraku experiment" not in program
     assert "Changelog" not in program
 
 
-def test_autoresearch_overlay_initializes_task(tmp_path, monkeypatch):
+def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     project, _ = create_overlay_project(tmp_path, monkeypatch)
-    task = load_task("sep10", config=HirakuConfig.discover(project))
+    task = load_record("sep10", config=HirakuConfig.discover(project))
 
     assert (project / "README.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "README.md"
@@ -193,7 +185,7 @@ def test_autoresearch_overlay_initializes_task(tmp_path, monkeypatch):
     assert installed_program == PROGRAM.read_text(encoding="utf-8")
     assert (project / "task.md").read_text(encoding="utf-8") == task_template
     assert task.markdown == task_template
-    assert task.path == project / "hiraku/tasks/sep10/task.md"
+    assert task.path == project / "hiraku/records/sep10/sep10.md"
     assert task.markdown not in installed_program
     assert installed_program not in task.markdown
     assert task.branch == "autoresearch/sep10"
@@ -201,8 +193,7 @@ def test_autoresearch_overlay_initializes_task(tmp_path, monkeypatch):
         "Find the best architecture, optimizer, and hyperparameters to minimize "
         "`val_bpb` within the fixed 5-minute training budget."
     )
-    assert task.question is None
-    assert task.summary is None
+    assert task.type == "task"
     assert task.program == "autoresearch"
     assert task.entrypoints["train"].command == ["uv", "run", "python", "train.py"]
     assert task.entrypoints["mock"].command[-1] == "cpu_mock.py"
@@ -217,11 +208,14 @@ def test_autoresearch_overlay_initializes_task(tmp_path, monkeypatch):
 def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     project, runner = create_overlay_project(tmp_path, monkeypatch)
     commit = git(project, "rev-parse", "HEAD")
-    invoke(runner, ["experiment", "create", "cpu-test", "--commit", "HEAD"])
+    invoke(
+        runner,
+        ["record", "create", "cpu-test", "--parent", "sep10", "--commit", "HEAD"],
+    )
 
     invoke(
         runner,
-        ["launch", "cpu-test:mock", "--", "--val-bpb", "0.9"],
+        ["launch", "mock", "--record", "cpu-test", "--", "--val-bpb", "0.9"],
     )
 
     assert "val_bpb: 0.900000" in capfd.readouterr().out
@@ -230,9 +224,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
             runner,
             [
                 "runs",
-                "--task",
-                "sep10",
-                "--experiment",
+                "--record",
                 "cpu-test",
                 "--json",
             ],
@@ -240,8 +232,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     )
     assert len(rows) == 1
     row = rows[0]
-    assert row["task_id"] == "sep10"
-    assert row["experiment_id"] == "cpu-test"
+    assert row["record_id"] == "cpu-test"
     assert row["commit"] == commit
     assert row["entrypoint"] == "mock"
     assert row["raw"]["git_state"] == "clean"
@@ -252,9 +243,13 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
 @LINUX_ONLY
 def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
     _, runner = create_overlay_project(tmp_path, monkeypatch)
-    invoke(runner, ["experiment", "create", "failure", "--commit", "HEAD"])
+    invoke(
+        runner, ["record", "create", "failure", "--parent", "sep10", "--commit", "HEAD"]
+    )
 
-    failed = runner.invoke(main, ["launch", "failure:mock", "--", "--fail"])
+    failed = runner.invoke(
+        main, ["launch", "mock", "--record", "failure", "--", "--fail"]
+    )
 
     assert failed.exit_code != 0
     assert "val_bpb: 0.000000" in capfd.readouterr().out
@@ -263,9 +258,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
             runner,
             [
                 "runs",
-                "--task",
-                "sep10",
-                "--experiment",
+                "--record",
                 "failure",
                 "--json",
             ],
@@ -280,8 +273,7 @@ def dispatcher_environment(root: Path) -> dict[str, str]:
     return {
         **os.environ,
         "HIRAKU_ROOT": str(root),
-        "HIRAKU_TASK_ID": "sep10",
-        "HIRAKU_EXPERIMENT_ID": "cpu-test",
+        "HIRAKU_RECORD_ID": "cpu-test",
         "HIRAKU_ENTRYPOINT": "test",
     }
 

@@ -1,3 +1,3 @@
 # Entrypoint
 
-::: hiraku.data.Entrypoint
+::: hiraku.record.Entrypoint

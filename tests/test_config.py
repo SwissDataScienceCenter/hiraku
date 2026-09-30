@@ -8,12 +8,12 @@ import yaml
 
 import hiraku.project
 from hiraku.config import HirakuConfig
-from hiraku.data import Experiment, Task
 from hiraku.errors import (
     ProjectExistsError,
     ProjectNotFoundError,
     ValidationError,
 )
+from hiraku.record import Record
 
 
 def _git(path: Path, *arguments: str) -> None:
@@ -50,7 +50,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert HirakuConfig.discover(nested).root == root
     assert (config.programs_dir / "interactive/program.md").is_file()
     assert (config.programs_dir / "autoresearch/program.md").is_file()
-    assert (config.actions_dir / "experiment/propose/action.md").is_file()
+    assert (config.actions_dir / "record/propose/action.md").is_file()
     for name in ("launch.sh", "worktree.sh"):
         assert (config.dispatch_dir / name).stat().st_mode & 0o111
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
@@ -58,8 +58,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert codex_skill.is_file()
     assert claude_skill.is_file()
     assert codex_skill.read_text() == claude_skill.read_text()
-    assert config.active_task_id is None
-    assert config.active_experiment_id is None
+    assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
     HirakuConfig.init(without_skill, install_skill=False)
@@ -86,10 +85,7 @@ def test_init_from_template_applies_arbitrary_overlay(tmp_path: Path) -> None:
     (template / "custom/dispatch").mkdir(parents=True)
     (template / "empty").mkdir()
     (template / "hiraku.yml").write_text(
-        "hiraku_dir: custom\n"
-        "tracking_backend: wandb\n"
-        "extension:\n"
-        "  enabled: true\n"
+        "hiraku_dir: custom\ntracking_backend: wandb\nextension:\n  enabled: true\n"
     )
     launcher = template / "custom/dispatch/launch.sh"
     launcher.write_text("#!/bin/sh\necho template\n")
@@ -161,9 +157,7 @@ def test_template_rejects_symlinks_and_invalid_config(tmp_path: Path) -> None:
     assert not invalid_root.exists()
 
 
-def test_template_failure_rolls_back_created_paths(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_template_failure_rolls_back_created_paths(tmp_path: Path, monkeypatch) -> None:
     template = tmp_path / "template"
     template.mkdir()
     (template / "first.txt").write_text("first")
@@ -214,21 +208,21 @@ def test_init_rejects_conflicting_template_sources(tmp_path: Path) -> None:
         HirakuConfig.init(tmp_path / "project", template=template, example="demo")
 
 
-def test_config_preserves_unknown_keys_and_active_invariants(tmp_path: Path) -> None:
+def test_config_preserves_unknown_keys_and_active_record(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     raw = yaml.safe_load(config.path.read_text())
     raw["extension"] = {"enabled": True}
     config.path.write_text(yaml.safe_dump(raw, sort_keys=False))
     config = HirakuConfig.discover(tmp_path)
-    first = Task.create("first", config=config)
-    experiment = Experiment.create("trial", task=first, config=config)
-    second = Task.create("second", config=config)
+    first = Record.create("first", config=config)
+    child = Record.create("trial", parent_id=first.id, config=config)
+    second = Record.create("second", config=config)
 
-    assert config.active_task_id == second.id
-    assert config.active_experiment_id is None
-    config.set_active_experiment(experiment)
-    assert (config.active_task_id, config.active_experiment_id) == ("first", "trial")
-    config.clear_active_experiment()
+    assert config.active_record_id == second.id
+    config.set_active_record(child)
+    assert config.active_record_id == "trial"
+    config.clear_active_record()
+    assert config.active_record_id is None
     assert yaml.safe_load(config.path.read_text())["extension"] == {"enabled": True}
 
 

@@ -10,20 +10,16 @@ from typing import TYPE_CHECKING, Any
 from ..errors import BackendError
 
 if TYPE_CHECKING:
-    from ..data import Run
+    from ..run import Run
 
 
 class TrackingBackend(ABC):
     """Abstract tracking backend implemented by every run-tracking adapter."""
 
     @staticmethod
-    def _validate_filters(task_id: str, experiment_id: str | None) -> None:
-        if not isinstance(task_id, str) or not task_id:
-            raise BackendError("Tracking queries require a non-empty task_id")
-        if experiment_id is not None and (
-            not isinstance(experiment_id, str) or not experiment_id
-        ):
-            raise BackendError("experiment_id must be a non-empty string or null")
+    def _validate_filters(record_id: str) -> None:
+        if not isinstance(record_id, str) or not record_id:
+            raise BackendError("Tracking queries require a non-empty record_id")
 
     @staticmethod
     def _timestamp(value: Any, *, backend: str, context: str) -> datetime | None:
@@ -82,8 +78,14 @@ class TrackingBackend(ABC):
             ranked = [run for run in result if numeric(run) is not None]
             unranked = [run for run in result if numeric(run) is None]
             ranked.sort(key=lambda run: run.id)
+
+            def numeric_key(run: Run) -> float:
+                number = numeric(run)
+                assert number is not None
+                return number
+
             ranked.sort(
-                key=numeric,
+                key=numeric_key,
                 reverse=not bool(query.get("ascending", True)),
             )
             result = [*ranked, *sorted(unranked, key=lambda run: run.id)]
@@ -104,36 +106,31 @@ class TrackingBackend(ABC):
             result = result[:limit]
         return result
 
-    def list_runs(
-        self, *, task_id: str, experiment_id: str | None = None, **query: Any
-    ) -> list[Run]:
-        """Return normalized runs for a task and optional experiment.
+    def list_runs(self, *, record_id: str, **query: Any) -> list[Run]:
+        """Return normalized runs for a record.
 
         Args:
-            task_id: The task ID to filter runs by.
-            experiment_id: An optional experiment ID to filter runs by.
+            record_id: The record ID to filter runs by.
             query: Optional query parameters to sort, limit, or filter the results.
 
         Returns:
             A list of normalized Run objects matching the specified filters and query.
         """
 
-        self._validate_filters(task_id, experiment_id)
-        runs = self._read_runs(task_id=task_id, experiment_id=experiment_id)
-        runs = [
-            run
-            for run in runs
-            if run.task_id in {None, task_id}
-            and (experiment_id is None or run.experiment_id == experiment_id)
-        ]
+        self._validate_filters(record_id)
+        runs = self._read_source_runs()
+        runs = [run for run in runs if run.record_id == record_id]
         return self._apply_query(runs, query, self.backend_name)
+
+    def list_all_recorded_runs(self, **options: Any) -> list[Run]:
+        """Return all source runs that have Hiraku record attribution."""
+        return [run for run in self._read_source_runs(**options) if run.record_id]
+
+    @abstractmethod
+    def _read_source_runs(self, **options: Any) -> list[Run]:
+        """Read all runs from the configured source once."""
+        raise NotImplementedError
 
     @property
     def backend_name(self) -> str:
         return type(self).__name__.removesuffix("Backend").lower()
-
-    @abstractmethod
-    def _read_runs(
-        self, *, task_id: str, experiment_id: str | None = None
-    ) -> list[Run]:
-        raise NotImplementedError

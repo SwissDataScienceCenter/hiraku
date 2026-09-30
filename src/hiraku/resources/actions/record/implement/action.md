@@ -1,8 +1,7 @@
 ---
 id: implement
-entity: experiment
+entity: record
 ---
-# Implement an experiment
+# Implement a record
 
 Implement the active proposal and expose the changes for review.
-

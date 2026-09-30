@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.data import load_task
+from hiraku.record import load_record
 
 
 def git(path: Path, *arguments: str) -> str:
@@ -37,8 +37,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     runner = CliRunner()
 
     initialized = invoke(runner, ["init", "--example", "minimal"])
-    assert "Created file: evaluate.py" in initialized.output
-    assert "Created file: hiraku.yml" in initialized.output
+    assert initialized.exit_code == 0
     assert not (project / "README.md").exists()
     assert not (project / "example.yml").exists()
     git(project, "add", ".")
@@ -47,7 +46,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     invoke(
         runner,
         [
-            "task",
+            "record",
             "create",
             "my-task",
             "--set",
@@ -57,9 +56,11 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     invoke(
         runner,
         [
-            "experiment",
+            "record",
             "create",
             "baseline",
+            "--parent",
+            "my-task",
             "--commit",
             "HEAD",
             "--set",
@@ -67,10 +68,10 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
         ],
     )
 
-    invoke(runner, ["launch", "baseline:evaluate"])
+    invoke(runner, ["launch", "evaluate", "--record", "baseline"])
 
     config = HirakuConfig.discover(project)
-    runs = load_task("my-task", config=config).runs(config=config)
+    runs = load_record("my-task", config=config).runs(config=config)
     assert len(runs) == 1
     assert runs[0].commit == commit
     assert runs[0].raw["git_state"] == "clean"

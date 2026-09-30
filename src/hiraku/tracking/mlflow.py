@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -12,7 +12,7 @@ from ..errors import BackendError
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
-    from ..data import Run
+    from ..run import Run
 
 
 class MLflowBackendConfig(BaseModel):
@@ -80,14 +80,13 @@ class MLflowBackend(TrackingBackend):
         )
         self.experiment_name = settings.experiment_name
 
-    @staticmethod
-    def _escape_filter(value: str) -> str:
-        return value.replace("\\", "\\\\").replace("'", "\\'")
-
-    def _read_runs(
-        self, *, task_id: str, experiment_id: str | None = None
+    def _read_source_runs(
+        self,
+        *,
+        experiment_name: str | None = None,
+        **options: Any,
     ) -> list[Run]:
-        from ..data import Run
+        from ..run import Run
 
         try:
             from mlflow.tracking import MlflowClient
@@ -97,12 +96,7 @@ class MLflowBackend(TrackingBackend):
             ) from exc
         try:
             client = MlflowClient(tracking_uri=self.tracking_uri)
-            experiment_name = self.experiment_name
-            if experiment_name is None:
-                from ..data import load_task
-
-                task = load_task(task_id, config=self.config)
-                experiment_name = task.mlflow_experiment
+            experiment_name = experiment_name or self.experiment_name
             if experiment_name:
                 experiment = client.get_experiment_by_name(str(experiment_name))
                 if experiment is None:
@@ -112,21 +106,14 @@ class MLflowBackend(TrackingBackend):
                 experiment_ids = [
                     item.experiment_id for item in client.search_experiments()
                 ]
-            native_runs = client.search_runs(
-                experiment_ids=experiment_ids,
-                filter_string=(
-                    f"tags.`hiraku.task_id` = '{self._escape_filter(task_id)}'"
-                ),
-            )
+            native_runs = client.search_runs(experiment_ids=experiment_ids)
             runs: list[Run] = []
             for native in native_runs:
                 info, data = native.info, native.data
                 tags = dict(data.tags)
-                native_task = tags.get("hiraku.task_id")
-                native_experiment = tags.get("hiraku.experiment_id")
+                native_record = tags.get("hiraku.record_id")
                 known_tags = {
-                    "hiraku.task_id",
-                    "hiraku.experiment_id",
+                    "hiraku.record_id",
                     "hiraku.commit",
                     "hiraku.entrypoint",
                 }
@@ -143,8 +130,7 @@ class MLflowBackend(TrackingBackend):
                 runs.append(
                     Run(
                         id=info.run_id,
-                        task_id=native_task,
-                        experiment_id=native_experiment,
+                        record_id=native_record,
                         commit=tags.get("hiraku.commit"),
                         entrypoint=tags.get("hiraku.entrypoint"),
                         timestamp=self._timestamp(

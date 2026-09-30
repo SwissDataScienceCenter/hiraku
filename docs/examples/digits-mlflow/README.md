@@ -30,48 +30,48 @@ MLflow creates `mlflow.db` in the project root on the first launch. The training
 script uses the Hiraku project root to keep that location stable for local and
 worktree dispatchers. Set `MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
 when you want to override the local defaults. These variables affect the
-training process only, so update the task's `tracking_backend` with the matching
+training process only, so update the root record's `tracking_backend` with the matching
 `tracking_uri` and `experiment_name` before using `hiraku runs`.
 
-## Create the task and experiments
+## Create the research root and child records
 
 ```bash
-hiraku task create digits \
-  --goal "Understand how L2 regularization affects Digits learning curves" \
-  --question "Does stronger regularization reduce overfitting on the Digits dataset?" \
+hiraku record create digits --type task \
+  --set "goal=Understand how L2 regularization affects Digits learning curves" \
+  --set "question=Does stronger regularization reduce overfitting on the Digits dataset?" \
   --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]' \
   --set 'tracking_backend={type: mlflow, database: mlflow.db, experiment_name: hiraku-digits}'
 
-hiraku experiment create weak-l2 \
-  --summary "Weak L2 baseline" \
-  --hypothesis "Weak regularization fits training data well but may overfit" \
+hiraku record create weak-l2 --parent digits --type experiment \
+  --set "summary=Weak L2 baseline" \
+  --set "hypothesis=Weak regularization fits training data well but may overfit" \
   --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {alpha: 0.0001, epochs: 40, hidden-units: 64, seed: 42, validation-fraction: 0.25}}}'
 
-hiraku experiment create strong-l2 \
-  --summary "Stronger L2 comparison" \
-  --hypothesis "Stronger regularization reduces the training-validation gap" \
+hiraku record create strong-l2 --parent digits --type experiment \
+  --set "summary=Stronger L2 comparison" \
+  --set "hypothesis=Stronger regularization reduces the training-validation gap" \
   --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {alpha: 1.0, epochs: 40, hidden-units: 64, seed: 42, validation-fraction: 0.25}}}'
 
-hiraku experiment list
+hiraku record list
 
-hiraku launch weak-l2:train
-hiraku launch strong-l2:train
+hiraku launch train --record weak-l2
+hiraku launch train --record strong-l2
 ```
 
 ## Compare final metrics and inspect curves
 
 ```bash
-hiraku runs
+hiraku runs --record digits
 
 # list with additional details
-hiraku runs \
+hiraku runs --record digits \
   --params alpha,epochs,seed \
   --metrics train/log_loss,val/log_loss,train/accuracy,val/accuracy \
   --sort val/log_loss --ascending
 
-hiraku runs --task digits --experiment strong-l2 --json
+hiraku runs --record strong-l2 --json
 
 uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
 ```
@@ -79,21 +79,21 @@ uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port
 Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs
 in the native MLflow interface.
 
-One MLflow experiment contains both Hiraku experiments. Native MLflow tags
-`hiraku.task_id`, `hiraku.experiment_id`, `hiraku.commit`, and `hiraku.entrypoint`
+One MLflow experiment contains both Hiraku child records. Native MLflow tags
+`hiraku.record_id`, `hiraku.commit`, and `hiraku.entrypoint`
 link each run back to Hiraku. The script owns logging; Hiraku queries the latest
 value of each metric. Full epoch histories remain in MLflow and its UI.
 
 You can list the same runs using Hiraku:
 ```
-hiraku runs
+hiraku runs --record digits
 ```
 
 ??? info "Example run results"
     The table is a compact, illustrative view of final MLflow values. Click a
     column heading to sort it; full epoch histories remain available in MLflow.
 
-    | id | experiment | timestamp | commit | metric:val/log_loss | metric:val/accuracy |
+    | id | record | timestamp | commit | metric:val/log_loss | metric:val/accuracy |
     | --- | --- | --- | --- | ---: | ---: |
     | `15895756` | `weak-l2` | `2026-09-10 06:35:05Z` | `17f59bac` | 0.12493475669652965 | 0.9688888888888889 |
     | `f6f6de2f` | `strong-l2` | `2026-09-10 06:35:10Z` | `17f59bac` | 0.4801207515207299 | 0.9266666666666666 |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -26,7 +27,7 @@ _FRONT_MATTER = re.compile(
 )
 
 
-class Record(BaseModel):
+class BaseRecord(BaseModel):
     """Base class for detached or persisted Markdown records.
 
     Attributes:
@@ -35,7 +36,7 @@ class Record(BaseModel):
         path: Persistence path, populated after saving or loading.
 
     Example:
-        ``Record(id="demo", markdown="## Objective\\nMeasure accuracy.")``
+        ``BaseRecord(id="demo", markdown="## Objective\\nMeasure accuracy.")``
 
     Raises:
         pydantic.ValidationError: If the identifier or Markdown value is invalid.
@@ -164,7 +165,7 @@ class Record(BaseModel):
             hiraku.errors.ValidationError: If front matter or model fields are invalid.
 
         Example:
-            ``task = Task.load("hiraku/tasks/demo/task.md")``
+            ``record = Record.load("hiraku/records/demo/demo.md")``
         """
         path = Path(path).expanduser().absolute()
         if not path.is_file():
@@ -173,7 +174,7 @@ class Record(BaseModel):
         return cls._construct_loaded(data, markdown, path)
 
     @classmethod
-    def list(cls, paths: Iterable[Path]) -> list[Self]:
+    def list(cls, paths: Iterable[Path]) -> builtins.list[Self]:
         """Load records from paths in deterministic identifier order.
 
         Args:
@@ -203,7 +204,7 @@ class Record(BaseModel):
 
         Example:
             ```python
-            record = Record(id="demo")
+            record = BaseRecord(id="demo")
             record.save("demo.md")
             ```
         """

@@ -20,37 +20,37 @@ git add .
 git commit -m "initialize Iris W&B example"
 ```
 
-Create a task configured with the W&B backend:
+Create a research root configured with the W&B backend:
 
 ```bash
-hiraku task create iris \
-  --goal "Maximize Iris test accuracy" \
-  --question "How accurately can model families classify Iris?" \
+hiraku record create iris --type task \
+  --set "goal=Maximize Iris test accuracy" \
+  --set "question=How accurately can model families classify Iris?" \
   --set 'metrics=[{name: test/accuracy, direction: maximize}, {name: test/f1_macro, direction: maximize}, {name: test/log_loss, direction: minimize}]' \
   --set 'tracking_backend={type: wandb, project: hiraku-iris}'
 
-hiraku experiment create logistic \
-  --summary "Logistic regression baseline" \
-  --hypothesis "A regularized linear classifier provides a strong Iris baseline." \
+hiraku record create logistic --parent iris --type experiment \
+  --set "summary=Logistic regression baseline" \
+  --set "hypothesis=A regularized linear classifier provides a strong Iris baseline." \
   --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: logistic, seed: 42, test-size: 0.25}}}'
 
-hiraku experiment create random-forest \
-  --summary "Random forest comparison" \
-  --hypothesis "A random forest improves Iris classification accuracy." \
+hiraku record create random-forest --parent iris --type experiment \
+  --set "summary=Random forest comparison" \
+  --set "hypothesis=A random forest improves Iris classification accuracy." \
   --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: random_forest, seed: 42, test-size: 0.25}}}'
 
-hiraku experiment list
+hiraku record list
 ```
 
 Launch and inspect the run:
 
 ```bash
-hiraku launch logistic:train
-hiraku launch random-forest:train
-hiraku runs --task iris --json
-hiraku runs --task iris \
+hiraku launch train --record logistic
+hiraku launch train --record random-forest
+hiraku runs --record iris --json
+hiraku runs --record iris \
   --metrics test/accuracy,test/f1_macro,test/log_loss \
   --sort test/accuracy --descending
 ```
@@ -70,4 +70,3 @@ W&B project or run.
     | `logistic` | `iris-logistic-42` | Logistic regression | 0.9474 | 0.9468 | finished |
     | `random-forest` | `iris-rf-42` | Random forest | 0.9737 | 0.9735 | finished |
     | `random-forest` | `iris-rf-7` | Random forest | 0.9474 | 0.9469 | finished |
-

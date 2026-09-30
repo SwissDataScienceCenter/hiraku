@@ -2,8 +2,7 @@
 This package exposes a stable backend and a registry for tracking backends
 with some pre-defined ones.
 
-The registry allows for the registration of new custom tracking backends,
-which can be used to track experiments and their results in a consistent manner.
+The registry allows registration of custom tracking backends for research runs.
 
 To add a new backend follow these steps:
 1. Create a new backend file (e.g., tracking/wandb.py)
@@ -38,7 +37,7 @@ class WandbBackend(TrackingBackend):
         self.project = project
         self.api_key = api_key
 
-    def _read_runs(self, *, task_id, experiment_id=None):
+    def _read_source_runs(self):
         try:
             import wandb
         except ImportError as exc:
@@ -61,9 +60,10 @@ from .wandb import WandbBackend, WandbBackendConfig
 BackendConfig = CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig
 
 
-def select_backend(task, config):
-    """Select the configured backend for a task."""
-    specification = task.tracking_backend or config.tracking_backend
+def select_backend(record, config):
+    """Select the configured backend for a research record."""
+    specification = record.resolve(config=config).values.get("tracking_backend")
+    specification = specification or config.tracking_backend
     return backend_for(specification, config)
 
 

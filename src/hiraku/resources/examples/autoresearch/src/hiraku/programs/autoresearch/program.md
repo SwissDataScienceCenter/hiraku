@@ -5,20 +5,21 @@ id: autoresearch
 
 ## Setup
 
-The Hiraku task and its dedicated branch have already been created. To set up
+The Hiraku root record and its dedicated branch have already been created. To set up
 or resume an experiment, work with the user to:
 
-1. **Get the current task**: Run `hiraku status --json` and
-   `hiraku task show --json`. Record its task ID as `<task>` and its branch as
-   `<task-branch>`. Read the complete canonical task record returned by Hiraku.
-2. **Verify the task branch**: Check that the current branch is
-   `<task-branch>`. If it is not, switch to it with
-   `git switch <task-branch>`.
+1. **Get the current root record**: Run `hiraku status --json`,
+   `hiraku record tree`, and
+   `hiraku record show <root-id> --json`. Record its ID as `<root-id>` and its branch as
+   `<root-branch>`. Read the complete canonical record returned by Hiraku.
+2. **Verify the root branch**: Check that the current branch is
+   `<root-branch>`. If it is not, switch to it with
+   `git switch <root-branch>`.
 3. **Read the research history**: Run
-   `hiraku experiment list --task <task> --json` and
-   `hiraku runs --task <task> --json`. If an experiment is active or
+   `hiraku record list --json` and
+   `hiraku runs --record <record-id> --json`. If an experiment is active or
    incomplete, inspect it with
-   `hiraku experiment show <experiment-id> --task <task> --json` and inspect
+   `hiraku record show <experiment-id> --json` and inspect
    its attributed runs before doing new work.
 4. **Read the in-scope files**: The repo is small. Read these files for full
    context:
@@ -42,7 +43,7 @@ Once you get confirmation, kick off the experimentation.
 Each experiment runs on a single GPU. The training script runs for a **fixed
 time budget of 5 minutes** (wall clock training time, excluding
 startup/compilation). You launch it as:
-`hiraku launch <experiment-id>:train`.
+`hiraku launch train --record <experiment-id>`.
 
 **The first run**: Your very first run should always be to establish the
 baseline, so you will run the training script as is. If no successful baseline
@@ -52,12 +53,12 @@ cites the run ID, commit, val_bpb, and peak VRAM. If a successful baseline is
 already recorded, do not run it again.
 
 ```bash
-hiraku experiment create baseline --task <task> \
-  --summary "Unmodified upstream baseline" \
-  --hypothesis "The upstream implementation establishes the reference val_bpb" \
+hiraku record create baseline --parent <root-id> --type experiment \
+  --set 'summary=Unmodified upstream baseline' \
+  --set 'hypothesis=The upstream implementation establishes the reference val_bpb' \
   --commit HEAD
-hiraku launch baseline:train > run.log 2>&1
-hiraku runs --task <task> --experiment baseline --json
+hiraku launch train --record baseline > run.log 2>&1
+hiraku runs --record baseline --json
 ```
 
 ## Logging results
@@ -66,7 +67,7 @@ The Hiraku dispatcher writes every execution to project-root `runs.csv`. Do not
 edit the run table. Inspect one experiment's parsed result and attribution with:
 
 ```bash
-hiraku runs --task <task> --experiment <experiment-id> --json
+hiraku runs --record <id> --json
 ```
 
 For every completed attempt, update its experiment record with exactly one of
@@ -76,31 +77,31 @@ failure evidence. Execution status in `runs.csv` is evidence; it is not the
 research decision.
 
 ```bash
-hiraku experiment update <experiment-id> --task <task> \
+hiraku record update <experiment-id> \
   --set decision=<decision> --set 'conclusion="<evidence-backed conclusion>"'
 ```
 
 ## The experiment loop
 
-The experiment runs on the dedicated task branch recorded by Hiraku.
+The experiment runs on the dedicated root branch recorded by Hiraku.
 
 LOOP FOREVER:
 
-1. Look at the git state: the current branch/commit we're on. Review the task's
+1. Look at the git state: the current branch/commit we're on. Review the root's
    experiment records and runs, and identify the best retained result.
 2. Choose an experiment ID and a single experimental idea. Tune `train.py` by
    directly hacking the code.
 3. Commit only `train.py`. Each experiment represents exactly one candidate
    commit.
 4. Create the experiment record with a short summary and hypothesis, binding it
-   once with `hiraku experiment create <experiment-id> --task <task>
-   --summary "<summary>" --hypothesis "<hypothesis>" --commit HEAD`.
-   Never rebind an experiment to another commit.
+   once with `hiraku record create <experiment-id> --parent <root-id> --type experiment
+   --set 'summary=<summary>' --set 'hypothesis=<hypothesis>' --commit HEAD`.
+   Never rebind a completed attempt to another commit.
 5. Run the experiment:
-   `hiraku launch <experiment-id>:train > run.log 2>&1` (redirect everything —
+   `hiraku launch train --record <experiment-id> > run.log 2>&1` (redirect everything —
    do NOT use tee or let output flood your context).
 6. Inspect the result with
-   `hiraku runs --task <task> --experiment <experiment-id> --json`.
+   `hiraku runs --record <experiment-id> --json`.
 7. If the recorded execution crashed or timed out, run `tail -n 50 run.log` to
    read the Python stack trace or final diagnostics. If the dispatcher did not
    record a row, inspect the log and treat the missing result as a failure.

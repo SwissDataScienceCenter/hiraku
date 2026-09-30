@@ -49,7 +49,7 @@ Hiraku should distinguish implementation from execution. Examples include:
 Failure types and exception handling should allow the system to:
 
 - retry a failed **Run**;
-- create a new Experiment after an implementation failure;
+- create a new record after an implementation failure;
 - stop after repeated identical failures; and
 - preserve the output of failed attempts.
 
@@ -80,7 +80,7 @@ The dynamic planning steps should be limited to:
 
 - proposal discovery, as a lightweight form of DeepResearch;
 - implementation strategy, when implementation is agent-driven; and
-- next-Experiment selection.
+- next-record selection.
 
 Only these steps need to be agentic.
 
@@ -96,7 +96,7 @@ The Memory and Context patterns suggest always keeping a research context with:
 - open questions; and
 - resource usage.
 
-Before proposing a new Experiment, the agent should receive or have access to this context. This gives it a concise summary of the overall research context.
+Before proposing a new record, the agent should receive or have access to this context. This gives it a concise summary of the overall research context.
 
 ### 10. Prefer structured agent outputs
 

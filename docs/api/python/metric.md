@@ -1,3 +1,3 @@
 # Metric
 
-::: hiraku.data.Metric
+::: hiraku.record.Metric

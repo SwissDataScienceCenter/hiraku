@@ -15,8 +15,7 @@ from sklearn.metrics import accuracy_score, f1_score, log_loss
 from sklearn.model_selection import train_test_split
 
 HIRAKU_VARIABLES = (
-    "HIRAKU_TASK_ID",
-    "HIRAKU_EXPERIMENT_ID",
+    "HIRAKU_RECORD_ID",
     "HIRAKU_COMMIT",
     "HIRAKU_ENTRYPOINT",
 )
@@ -63,8 +62,7 @@ def main() -> None:
             "WANDB_NOTES", "Deterministic Iris classification experiment"
         ),
         config={
-            "hiraku.task_id": attribution["HIRAKU_TASK_ID"],
-            "hiraku.experiment_id": attribution["HIRAKU_EXPERIMENT_ID"],
+            "hiraku.record_id": attribution["HIRAKU_RECORD_ID"],
             "hiraku.commit": attribution["HIRAKU_COMMIT"],
             "hiraku.entrypoint": attribution["HIRAKU_ENTRYPOINT"],
             "dataset.name": "scikit-learn iris",

@@ -32,8 +32,8 @@ def test_git_resolution_and_branches(tmp_path: Path) -> None:
     config, repository = _repository(tmp_path)
     assert len(repository.resolve("HEAD")) == 40
     assert repository.current_branch is not None
-    branch = repository.create_task_branch("demo")
-    assert branch == "hiraku/tasks/demo"
+    branch = repository.create_record_branch("demo")
+    assert branch == "hiraku/records/demo"
     assert repository.branch_exists(branch)
     with pytest.raises(ValidationError):
         repository.validate_branch("bad..branch")
@@ -41,26 +41,24 @@ def test_git_resolution_and_branches(tmp_path: Path) -> None:
     assert config.root == tmp_path
 
 
-def test_custom_task_and_reusable_experiment_branches(tmp_path: Path) -> None:
+def test_custom_and_reusable_record_branches(tmp_path: Path) -> None:
     _, repository = _repository(tmp_path)
     current = repository.current_branch
     assert current is not None
-    assert repository.create_task_branch("demo", branch=current) == current
-    assert repository.create_task_branch("demo", branch="main-copy") == "main-copy"
+    assert repository.create_record_branch("demo", branch=current) == current
+    assert repository.create_record_branch("demo", branch="main-copy") == "main-copy"
     assert repository.branch_exists("main-copy")
     with pytest.raises(ValidationError):
-        repository.create_task_branch("demo", branch="")
+        repository.create_record_branch("demo", branch="")
 
-    default = repository.create_experiment_branch("demo", "baseline", start_ref="HEAD")
-    assert default == "hiraku/experiments/demo/baseline"
-    assert repository.create_experiment_branch("demo", "baseline") == default
+    default = repository.create_record_branch("baseline", start_ref="HEAD")
+    assert default == "hiraku/records/baseline"
+    assert repository.create_record_branch("baseline") == default
 
-    repository.create_branch("shared-experiment")
+    repository.create_branch("shared-record")
     assert (
-        repository.create_experiment_branch(
-            "demo", "second", branch="shared-experiment"
-        )
-        == "shared-experiment"
+        repository.create_record_branch("second", branch="shared-record")
+        == "shared-record"
     )
 
 

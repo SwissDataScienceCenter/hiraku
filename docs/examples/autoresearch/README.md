@@ -1,6 +1,6 @@
 # Karpathy's LLM autoresearch example with Hiraku
 
-This example adds Hiraku task and experiment records, attributed CSV runs, and
+This example adds Hiraku research records, attributed CSV runs, and
 an autonomous research program to Andrej Karpathy's original
 [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch) repository.
 It does not vendor or modify the upstream training implementation.
@@ -10,7 +10,7 @@ The dispatcher currently supports Linux only. It requires GNU `timeout`,
 
 The overlay contains:
 
-- `task.md` — the Markdown body used to create the Hiraku task.
+- `task.md` — the Markdown body used to create the research root.
 - `cpu_mock.py` — a fast CPU-only check with the same summary format as training.
 - `hiraku/programs/autoresearch/program.md` — the upstream research loop adapted
   to Hiraku records and runs.
@@ -35,7 +35,7 @@ uv run train.py
 ## Initialize the Hiraku project
 
 From the root of the autoresearch repository, install the example. Initialization copies root `task.md` as a bootstrap template and installs the
-separate program at `hiraku/programs/autoresearch/program.md`. 
+separate program at `hiraku/programs/autoresearch/program.md`.
 
 ```bash
 hiraku init --example autoresearch
@@ -61,31 +61,31 @@ git commit -m "add Hiraku autoresearch workflow"
 ```
 
 As in the upstream
-example, choose a tag and branch for the autoresearch, e.g., `sep10` and `autoresearch/sep10`. The task tag must be new.
+example, choose a tag and branch for the autoresearch, e.g., `sep10` and `autoresearch/sep10`. The record ID must be new.
 ```bash
-hiraku task create sep10 \
-  --branch autoresearch/sep10 \
-  --goal "Find the best architecture, optimizer, and hyperparameters to minimize `val_bpb` within the fixed 5-minute training budget." \
+hiraku record create sep10 --type task \
+  --set 'branch=autoresearch/sep10' \
+  --set "goal=Find the best architecture, optimizer, and hyperparameters to minimize `val_bpb` within the fixed 5-minute training budget." \
   --markdown-file task.md \
   --set 'program=autoresearch' \
   --set 'metrics=[{name: val_bpb, direction: minimize}]' \
   --set 'entrypoints={train: {command: [uv, run, python, train.py]}, mock: {command: [uv, run, python, cpu_mock.py], args: {val-bpb: 1.0}}}'
 
-git switch autoresearch/sep10
+git switch -c autoresearch/sep10
 ```
 
 ## Test the CPU workflow with Hiraku
 
 ```bash
-hiraku experiment create cpu-test \
-  --summary "CPU-only mock run" \
-  --hypothesis "The Hiraku dispatcher records an attributed mock result" \
+hiraku record create cpu-test --parent sep10 --type experiment \
+  --set "summary=CPU-only mock run" \
+  --set "hypothesis=The Hiraku dispatcher records an attributed mock result" \
   --commit HEAD
 
-hiraku launch cpu-test:mock -- --val-bpb 1.0
-hiraku runs
+hiraku launch mock --record cpu-test -- --val-bpb 1.0
+hiraku runs --record cpu-test
 
-hiraku experiment update cpu-test \
+hiraku record update cpu-test \
   --set decision=discard \
   --set 'conclusion="CPU-only workflow test; not a training result."'
 ```
@@ -95,15 +95,15 @@ hiraku experiment update cpu-test \
 Here we manually create and run the baseline experiment. Alternatively, ask your agent to invoke the Hiraku skill to create and run the baseline experiment for you.
 
 ```bash
-hiraku experiment create baseline \
-  --summary "Establish the baseline" \
-  --hypothesis "Provide a reasonable starting point for comparison" \
+hiraku record create baseline --parent sep10 --type experiment \
+  --set "summary=Establish the baseline" \
+  --set "hypothesis=Provide a reasonable starting point for comparison" \
   --commit HEAD
 
-hiraku launch baseline:train
-hiraku runs
+hiraku launch train --record baseline
+hiraku runs --record baseline
 
-hiraku experiment update baseline \
+hiraku record update baseline \
   --set decision=keep --set 'conclusion="Baseline run completed."'
 ```
 
@@ -115,20 +115,20 @@ initialized repository. Hiraku installs the skill for Codex at
 Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code.
 
 Currently, Hiraku records the program association but does not automatically inject its Markdown into an agent prompt. Start an agent in the repository and ask it to
-load the canonical task and installed program with:
+load the root record and installed program with:
 
 
 ```bash
 Use the Hiraku skill and start the autoresearch program.
 
-To read the current task and program, run:
-hiraku task show sep10 --json
+To read the root record and program, run:
+hiraku record show sep10 --json
 hiraku program show autoresearch
 ```
 
 Track the agent's progress with:
 
 ```bash
-hiraku experiment list --columns id,commit,summary,hypothesis,conclusion,decision
-hiraku runs --sort metric:val_bpb --ascending
+hiraku record list --json
+hiraku runs --record sep10 --sort val_bpb --ascending
 ```

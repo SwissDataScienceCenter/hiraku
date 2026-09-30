@@ -13,7 +13,7 @@ uv tool install ".[mlflow,wandb]"
 
 ## Initialize
 
-If the project is new, initialize Git first. 
+If the project is new, initialize Git first.
 
 ```bash
 mkdir my-project
@@ -31,36 +31,33 @@ git commit -m "initial commit"
 
 Review `hiraku status` to confirm that the project is correctly initialized.
 
-## Create a task, experiment, and log a run
+## Create records and log a run
 
 The `minimal` example installs a small `evaluate.py` script that launches with
 `uv run python evaluate.py --seed 0`. Replace it with your own evaluation when
 you are ready.
 
-Create a task and an experiment.
+Create a research root and a child record.
 ```bash
-hiraku task create my-task \
-  --goal "Improve validation accuracy on my dataset" \
+hiraku record create my-task --type task \
+  --set "goal=Improve validation accuracy on my dataset" \
   --set 'metrics=[{name: val/accuracy, direction: maximize}]'
 
-hiraku experiment create baseline \
-  --hypothesis "The existing representation establishes a reference." \
+hiraku record create baseline --parent my-task --type experiment \
+  --set "hypothesis=The existing representation establishes a reference." \
   --commit HEAD \
   --set 'entrypoints={evaluate: {command: [uv, run, python, evaluate.py], args: {seed: 0}}}'
 
-hiraku launch baseline:evaluate
-hiraku launch baseline:evaluate -- --seed 1
-
-
-hiraku task list
-hiraku experiment list
-hiraku runs
+hiraku launch evaluate --record baseline
+hiraku launch evaluate --record baseline -- --seed 1
+hiraku record list
+hiraku runs --record my-task
 ```
 
 The entrypoint runs `uv run python evaluate.py --seed 0`. The script writes its
 score and launch attribution to the project-root `runs.csv`, so the final
 command lists the baseline result. Metric declarations describe how to compare
-results; the evaluation script is responsible for calculating and logging. 
+results; the evaluation script is responsible for calculating and logging.
 For other tracking backends, see [W&B](../../guides/tracking-wandb.md) or
 [MLflow](../../guides/tracking-mlflow.md).
 

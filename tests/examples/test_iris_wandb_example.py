@@ -11,7 +11,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.data import load_experiment, load_task
+from hiraku.record import load_record
 
 EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "iris-wandb"
 
@@ -116,13 +116,13 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     invoke(
         runner,
         [
-            "task",
+            "record",
             "create",
             "iris",
-            "--goal",
-            "Maximize Iris test accuracy",
-            "--question",
-            "How accurately can a classifier predict Iris species?",
+            "--set",
+            "goal=Maximize Iris test accuracy",
+            "--set",
+            "question=How accurately can a classifier predict Iris species?",
             "--set",
             "metrics=[{name: test/accuracy, direction: maximize}, "
             "{name: test/f1_macro, direction: maximize}, "
@@ -132,19 +132,21 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     config = HirakuConfig.discover(project)
-    task = load_task("iris", config=config)
-    assert task.tracking_backend == {"type": "wandb", "project": "hiraku-iris"}
+    root = load_record("iris", config=config)
+    assert root.tracking_backend == {"type": "wandb", "project": "hiraku-iris"}
 
     invoke(
         runner,
         [
-            "experiment",
+            "record",
             "create",
             "logistic",
-            "--summary",
-            "Logistic regression baseline",
-            "--hypothesis",
-            "A linear classifier provides a strong Iris baseline.",
+            "--parent",
+            "iris",
+            "--set",
+            "summary=Logistic regression baseline",
+            "--set",
+            "hypothesis=A linear classifier provides a strong Iris baseline.",
             "--commit",
             "HEAD",
             "--set",
@@ -152,22 +154,19 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "{model: logistic, seed: 42, test-size: 0.25}}}",
         ],
     )
-    experiment = load_experiment("logistic", task=task, config=config)
-    assert experiment.commit == source_commit
-    assert experiment.entrypoint("train").args == {
+    record = load_record("logistic", config=config)
+    assert record.commit == source_commit
+    assert record.entrypoint("train", config=config).args == {
         "model": "logistic",
         "seed": 42,
         "test-size": 0.25,
     }
 
-    invoke(runner, ["launch", "logistic:train"])
-    rows = json.loads(
-        invoke(runner, ["runs", "--task", "iris", "--json"]).output
-    )
+    invoke(runner, ["launch", "train", "--record", "logistic"])
+    rows = json.loads(invoke(runner, ["runs", "--record", "iris", "--json"]).output)
     assert len(rows) == 1
     row = rows[0]
-    assert row["task_id"] == "iris"
-    assert row["experiment_id"] == "logistic"
+    assert row["record_id"] == "logistic"
     assert row["commit"] == source_commit
     assert row["entrypoint"] == "train"
     assert row["params"]["model"] == "logistic"
@@ -183,7 +182,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     filtered = json.loads(
         invoke(
             runner,
-            ["runs", "--task", "iris", "--experiment", "logistic", "--json"],
+            ["runs", "--record", "logistic", "--json"],
         ).output
     )
     assert filtered == rows

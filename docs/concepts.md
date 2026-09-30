@@ -9,29 +9,31 @@ In the model development phase of a data science project, the data and objective
 2. implementation and debugging,
 3. executing runs and tracking metrics,
 4. analyzing and comparing results, and
-5. iterating or concluding; revisit task goal if needed.
+5. iterating or concluding; revisit the research goal if needed.
 
 While standard tools support individual stages of this cycle (e.g., Git for version control, Weights & Biases or MLflow for experiment tracking, and notebooks for analysis, etc), the meta-level information that connects these stages is often only loosely documented.
 
 This fragmentation creates an inherent barrier for effective Human-AI collaboration: proposals, hypotheses, implementation, experiments, diagnostics, results, and conclusions are not consistently linked or documented as part of a coherent research process. Without a lightweight but explicit protocol for capturing the research process, AI systems cannot reliably inspect prior work, understand why decisions were made, propose meaningful next steps, to effectively support data scientists through iterative experimentation. Similarly, without a metadata trace, the data scientist cannot track, inspect and verify the output of an autonomous research agent.
 
-## Tasks, experiments, runs
+## Records and runs
 
-Hiraku uses three lightweight data structures to track the model-development lifecycle: tasks, experiments, runs.
+Hiraku uses two lightweight data structures to track the model-development lifecycle: records and runs.
 
-Only tasks and experiments are managed directly by Hiraku. Runs are owned by a user-managed tracking backend  (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
+Only records are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
-A *task* defines a working scope and goal, and documents the research progress. *Experiments* are small, reproducible units within a task that link a code, execution entrypoints, and runs. Experiments carry no specific semantics beyond this role; the user may create experiments to implement baselines, hypotheses, diagnostics, models runs, ablations, hyperparameter optimization, etc. *Runs* record execution traces for a specified task or experiment and code commit.
+A root *record* defines a working scope and goal, and documents the research progress. Child records are focused, reproducible units within that scope that can link code, execution entrypoints, and runs. Records carry no required semantic type; users may create them for baselines, hypotheses, diagnostics, model runs, ablations, hyperparameter optimization, etc. *Runs* record execution traces attributed to one record and, when available, a code commit.
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Task** | `hiraku/tasks/{task_id}/task.md`| A task is the top-level Hiraku abstraction that defines the scope of a research effort.  |
-| **Experiment** | `hiraku/tasks/{task_id}/experiments/{experiment_id}.md` | An *experiment* is a reproducible unit within a task that refers to a source commit and execution entrypoints. An experiment without a reference commit is called a *proposal*. |
+| **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared fields and entrypoints. |
+| **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit and entrypoints. A proposed investigation may have no commit. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
-Tasks and experiments are stored as markdown with yaml frontmatter. This allows the user and agents to directly read and modify the data records.
+Records are stored as Markdown with YAML front matter. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent, and all descendants are stored flat in their root's folder. IDs are unique across the project.
 
-At any time, a single task and experiment can be set as "active". By default, "create" actions activate the new task or experiment. The user can switch explicitly with `hiraku task set <task-id>` or `hiraku experiment set <experiment-id>`. The current status can be queried with `hiraku status`.
+Fields inherit through `parent_id` by default: the nearest definition wins, an explicit `null` clears an inherited field, and entrypoints merge by name. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
+
+At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. The current status can be queried with `hiraku status`.
 
 !!! note
     Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
@@ -47,25 +49,19 @@ hiraku init PATH --ignore-git  # explicitly skip Git-root validation
 hiraku init --template ./path/to/template  # apply a local project overlay
 hiraku init --example <name>  # apply the src/ tree of a packaged example
 
-hiraku task create <task-id>
-hiraku task list
-hiraku task list --columns task_id,question,goal  # list user-defined fields
-hiraku task delete <task-id>
-hiraku task show
+hiraku record create <root-id>
+hiraku record create <child-id> --parent <root-id> --type experiment
+hiraku record list
+hiraku record tree
+hiraku record show <record-id>  # effective fields and their sources
+hiraku record show <record-id> --raw  # stored fields
+hiraku record update <record-id> --commit HEAD
+hiraku record delete <record-id>
 
-hiraku exp create <exp-id>
-hiraku exp list
-hiraku exp list --columns exp_id,created_at,hypothesis,commit,status,result --sort created_at --ascending # list user-defined fields
-hiraku exp update <exp-id> --commit <hash>
-hiraku exp delete <exp-id>
+hiraku status  # show the active record
 
-hiraku status # show current active task and experiment
-
-hiraku proposal list  # short for "hiraku exp list --filter commit==None --sort created_at --descending"
-
-hiraku runs
-hiraku runs --params seed,lr --metrics train/accuracy,val/accuracy,train/cross_entropy,val/cross_entropy --sort val/accuracy --ascending  # custom metric fields
-hiraku runs --sort val/accuracy --ascending
+hiraku runs --record <record-id>
+hiraku runs --record <root-id> --params seed,lr --metrics train/accuracy,val/accuracy --sort val/accuracy --descending
 ```
 
 ### Python API
@@ -73,18 +69,20 @@ hiraku runs --sort val/accuracy --ascending
 Hiraku data records are managed by the [Python API](api/python/index.md). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible.
 
 ```python
-from hirak.records import Record
-from hiraku.data import Entrypoint, Experiment, Metric, Run, Task
+from hiraku.base import BaseRecord
+from hiraku.record import Entrypoint, Metric, Record, list_records, load_record
+from hiraku.run import Run
 ```
 
 
 ## Tracking Backend
 
-A **tracking backend** is a compatibility interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters; additional adapters can be registered by users. The backend needs to implement the following functions
-- List runs associated to a given task
-- Return normalized runs with a required run ID, metrics, and parameters; task ID, experiment ID, commit, timestamp, entrypoint, and URL attribution may be absent.
+A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters; additional adapters can be registered by users. The backend needs to:
 
-CSV is the default project backend. A task may set `tracking_backend` to
+- List runs from the tracking source selected by a record.
+- Return normalized runs with a required run ID, metrics, and parameters; record ID, commit, timestamp, entrypoint, and URL attribution may be absent.
+
+CSV is the default project backend. A record may set `tracking_backend` to
 override the project default. Backend configuration uses one common mapping
 shape, with `type` identifying the adapter:
 
@@ -93,11 +91,13 @@ tracking_backend:
   type: csv
 ```
 
+`hiraku runs --record ID` queries the selected record's tracking source and lists its attributed runs. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
+
 ## Entrypoints
 
-Tasks and experiments can define named **entrypoints** for launching runs. Entrypoints document reproducible code invocations, including default hyperparameters or command-line arguments, and provide convenient functions for users and agents to run or dispatch code.
+Records can define named **entrypoints** for launching runs. Entrypoints document reproducible code invocations, including default hyperparameters or command-line arguments, and provide convenient functions for users and agents to run or dispatch code.
 
-Entrypoints are defined in the task or experiment YAML front matter with the `entrypoints` key, e.g.,
+Entrypoints are defined in record YAML front matter with the `entrypoints` key, e.g.,
 
 ```yaml
 entrypoints:
@@ -111,20 +111,19 @@ entrypoints:
 Entrypoints can be invoked via the CLI:
 
 ```bash
-hiraku launch <entrypoint>  # task entrypoint
-hiraku launch <exp-id>:<entrypoint>  # experiment entrypoint, falling back to task
-hiraku launch --task <task-id> <entrypoint>  # task defaults to active task
-hiraku launch <exp-id>:<entrypoint> -- --seed 1  # override entrypoint arguments
+hiraku launch <entrypoint>  # uses the active record
+hiraku launch <entrypoint> --record <record-id>  # explicit attribution
+hiraku launch <entrypoint> --record <record-id> -- --seed 1  # override defaults
 ```
 
 The project-owned dispatcher controls Git behavior:
 ```bash
-hiraku launch <entrypoint>                              # current working state
-hiraku launch --dispatch worktree <exp-id>:<entrypoint> # exact commit
+hiraku launch <entrypoint> --record <record-id>                      # current working state
+hiraku launch <entrypoint> --record <record-id> --dispatch worktree  # exact commit
 ```
 
-Hiraku injects `HIRAKU_TASK_ID`, `HIRAKU_EXPERIMENT_ID`, `HIRAKU_ROOT`,
-`HIRAKU_TASK_FILE`, `HIRAKU_EXPERIMENT_FILE`, and `HIRAKU_ENTRYPOINT`. The
+Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`,
+and `HIRAKU_ENTRYPOINT`. The
 dispatcher reports `HIRAKU_COMMIT` and `HIRAKU_GIT_STATE`: `launch.sh` reports
 the current HEAD and whether the tree is clean or dirty, while `worktree.sh`
 reports the exact checked-out commit and a clean state.
@@ -132,7 +131,7 @@ reports the exact checked-out commit and a clean state.
 The user can define custom dispatch scripts, e.g.
 
 ```bash
-hiraku launch --dispatch runai <exp-id>:<entrypoint>
+hiraku launch <entrypoint> --record <record-id> --dispatch runai
 ```
 
 This invokes the project-owned `hiraku/dispatch/runai.sh`, which inherits the
@@ -196,60 +195,59 @@ hiraku context set literature
 # print files that would be added to the context
 hiraku context
 
-# 2. a) create task, with CLI
-hiraku task create heart-disease  --goal "Develop models for heart disease prediction" # creates and sets the active task
+# 2. create the research root; creation makes it active
+hiraku record create heart-disease --type task \
+  --set 'goal=Develop models for heart disease prediction'
 
-# 2. b) create task with agent and provided context
-hiraku-agent task create heart-disease --goal "Develop models for heart disease prediction" --context literature # creates and sets the active task
+# alternatively, create it with the agent skill inside a coding harness
+# /hiraku "create a new root record for heart-disease prediction"
 
-# 2. c) create task with agent skill inside coding harness (e.g, Claude, Codex, ...)
-/hiraku "create a new task for heart-disease prediction"
+# query the record and Hiraku status
+hiraku record show heart-disease --json
+hiraku status
 
-# query task record and Hiraku status
-hiraku task show [heart-disease]
-hiraku task show heart-disease --json
-hiraku status  # show current active task
-
-# 2. create an experiment, then implement and bind it
-hiraku experiment create logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic  # creates and sets the active experiment
-hiraku status  # show current active experiment
-
-# 2. a) implement the experiment with agent
-hiraku-agent experiment implement logistic-baseline
-# 2. b) implement the experiment with agent skill inside coding harness (e.g, Claude, Codex, ...)
-/hiraku "implement logistic baseline experiment"
-
-# commit code change
+# 3. create a child proposal and implement it
+hiraku record create logistic-baseline --parent heart-disease \
+  --type experiment \
+  --set 'summary=Logistic regression baseline' \
+  --set 'hypothesis=Regularized logistic regression provides a calibrated baseline'
+# alternatively, use the agent skill to implement the proposal
+# /hiraku "implement the logistic baseline record"
+# implement and commit the code change, then bind the resulting commit
 git commit -m "implement logistic baseline"
-hiraku experiment update heart-disease:logistic-baseline --commit HEAD
+hiraku record update logistic-baseline --commit HEAD \
+  --set 'entrypoints={train: {command: [uv, run, python, train.py]}}'
 
+# 4. launch the entrypoint and list attributed runs
+hiraku launch train --record logistic-baseline
+hiraku runs --record logistic-baseline --sort val/log_loss --ascending
 
-# 3. launch named entrypoints and list runs (from CSV or MLflow backend)
-hiraku launch logistic-baseline:train
-hiraku runs --task heart-disease --sort val/log_loss --ascending
+# 5. review the runs and document the conclusion on the child record
+hiraku record update logistic-baseline --set decision=keep
+hiraku record edit logistic-baseline
 
-# 4. analyze the runs and update the local experiment record
-hiraku-agent experiment update "conclude logistic-baseline and record the results"
-
-# 5. summarize reviewed findings in tracked task documentation
-hiraku-agent task update "summarize the reviewed experiments in task.md"
-# or, with skill
-/hiraku "summarize the reviewed experiments in task.md"
+# 6. summarize reviewed findings in the root record
+hiraku record edit heart-disease
+# or, with the skill: /hiraku "summarize the reviewed child records"
 ```
+
+The same workflow can be carried out through the installed Hiraku skill in a
+coding agent. The [Heart Disease example](examples/heart-disease/README.md)
+shows prompts for both a complete investigation and individual steps.
 
 ### Autoresearch workflow
-> ToDo: The exact invocation of an agentic research loop (harness) or program.md (prompted loop) is still tbd.
+
+The packaged program describes an autonomous loop. Read its instructions and
+the research history before starting it in a coding agent; agree on the
+objective, branch, budget, and stopping condition with the user.
 
 ```bash
-hiraku-agent task create heart-disease --goal "Develop models for heart disease prediction" --context literature
-
 hiraku program show autoresearch
 hiraku program show interactive
-
-# invoke autoresearch program, via agent
-hiraku-agent --program autoresearch --task heart-disease
-hiraku-agent --program interactive --task heart-disease --max-experiments 5 --max-runs 20 --time-budget 2h
-
-# invoke autoresearch program via skill
-/hiraku "run the autoresearch program for heart-disease prediction task"
+hiraku record tree
+hiraku runs --record heart-disease --json
 ```
+
+The [Autoresearch example](examples/autoresearch/README.md) shows how to use
+the program with the project-local skill and a bounded dispatcher. The skill
+can be invoked with `/hiraku "run the autoresearch program for heart-disease"`.

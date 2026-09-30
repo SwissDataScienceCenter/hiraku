@@ -12,13 +12,11 @@ from .config import HirakuConfig
 from .errors import LaunchError, ValidationError
 
 if TYPE_CHECKING:
-    from .data import ArgumentValue, Entrypoint
+    from .record import ArgumentValue, Entrypoint
 
 _ATTRIBUTION_KEYS = {
-    "HIRAKU_TASK_ID",
-    "HIRAKU_TASK_FILE",
-    "HIRAKU_EXPERIMENT_ID",
-    "HIRAKU_EXPERIMENT_FILE",
+    "HIRAKU_RECORD_ID",
+    "HIRAKU_RECORD_FILE",
     "HIRAKU_COMMIT",
     "HIRAKU_GIT_STATE",
     "HIRAKU_ROOT",
@@ -91,8 +89,7 @@ def launch(
     *,
     name: str | None = None,
     args: Mapping[str, ArgumentValue] | None = None,
-    task_id: str,
-    experiment_id: str | None = None,
+    record_id: str,
     commit: str | None = None,
     dispatch: str | None = None,
     env: Mapping[str, str] | None = None,
@@ -107,8 +104,7 @@ def launch(
         entrypoint: Entrypoint model or mapping accepted by ``model_validate``.
         name: Logical entrypoint name for attribution.
         args: Call-time arguments overriding entrypoint defaults.
-        task_id: Required task attribution.
-        experiment_id: Optional experiment attribution.
+        record_id: Required record attribution.
         commit: Optional Git ref supplied to the dispatcher.
         dispatch: Optional dispatcher script override.
         env: Additional environment variables.
@@ -125,25 +121,20 @@ def launch(
         hiraku.errors.LaunchError: If the command cannot be started.
 
     Example:
-        ``launch({"command": ["python", "evaluate.py"]}, task_id="demo")``
+        ``launch({"command": ["python", "evaluate.py"]}, record_id="demo")``
     Warning:
         Commands are executed from the selected project context and do not use
         shell expansion.
 
     """
-    from .data import Entrypoint, load_experiment, load_task
+    from .record import Entrypoint, load_record
 
     entrypoint = Entrypoint.model_validate(entrypoint)
     selected = config or HirakuConfig.discover()
-    task = load_task(task_id, config=selected)
-    experiment = (
-        load_experiment(experiment_id, task=task, config=selected)
-        if experiment_id is not None
-        else None
-    )
+    record = load_record(record_id, config=selected)
     selected_commit = commit
-    if selected_commit is None and experiment is not None:
-        selected_commit = experiment.commit
+    if selected_commit is None:
+        selected_commit = record.commit
     defaults = dict(entrypoint.args)
     if args is not None:
         if not isinstance(args, Mapping):
@@ -170,12 +161,8 @@ def launch(
     process_env.update(additions)
     process_env.update(
         {
-            "HIRAKU_TASK_ID": task.id,
-            "HIRAKU_TASK_FILE": str(task.path.resolve()),
-            "HIRAKU_EXPERIMENT_ID": experiment.id if experiment is not None else "",
-            "HIRAKU_EXPERIMENT_FILE": (
-                str(experiment.path.resolve()) if experiment is not None else ""
-            ),
+            "HIRAKU_RECORD_ID": record.id,
+            "HIRAKU_RECORD_FILE": str(record.path.resolve()),
             "HIRAKU_COMMIT": "",
             "HIRAKU_GIT_STATE": "unavailable",
             "HIRAKU_ROOT": str(selected.root.resolve()),

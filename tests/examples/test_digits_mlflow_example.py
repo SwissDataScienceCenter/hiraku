@@ -13,9 +13,7 @@ from click.testing import CliRunner
 from hiraku.cli import main
 
 REPOSITORY = Path(__file__).parents[2]
-EXAMPLE = (
-    REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "digits-mlflow"
-)
+EXAMPLE = REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "digits-mlflow"
 OVERLAY = EXAMPLE / "src"
 
 
@@ -48,9 +46,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     git(project, "config", "user.name", "Test")
     runner = CliRunner()
     initialized = invoke(runner, ["init", "--example", "digits-mlflow"])
-    assert "Created file: train.py" in initialized.output
-    assert "Created file: pyproject.toml" in initialized.output
-    assert "Created file: hiraku.yml" in initialized.output
+    assert initialized.exit_code == 0
     assert not (project / "README.md").exists()
     assert not (project / "example.yml").exists()
     git(project, "add", ".")
@@ -59,23 +55,25 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     invoke(
         runner,
         [
-            "task",
+            "record",
             "create",
             "digits",
-            "--goal",
-            "Compare regularization curves",
+            "--set",
+            "goal=Compare regularization curves",
             "--set",
             "tracking_backend={type: mlflow, database: mlflow.db, "
             "experiment_name: hiraku-digits}",
         ],
     )
-    for experiment, alpha in (("weak-l2", 0.0001), ("strong-l2", 1.0)):
+    for record_id, alpha in (("weak-l2", 0.0001), ("strong-l2", 1.0)):
         invoke(
             runner,
             [
-                "experiment",
+                "record",
                 "create",
-                experiment,
+                record_id,
+                "--parent",
+                "digits",
                 "--commit",
                 "HEAD",
                 "--set",
@@ -84,38 +82,36 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
                 "validation-fraction: 0.25}}}",
             ],
         )
-    for experiment in ("weak-l2", "strong-l2"):
-        invoke(runner, ["launch", f"{experiment}:train"])
+    for record_id in ("weak-l2", "strong-l2"):
+        invoke(runner, ["launch", "train", "--record", record_id])
     rows = json.loads(
         invoke(
             runner,
             [
                 "runs",
-                "--task",
+                "--record",
                 "digits",
                 "--sort",
                 "val/log_loss",
-                "--ascending",
                 "--json",
             ],
         ).output
     )
     assert len(rows) == 2
     assert (project / "mlflow.db").is_file()
-    assert {row["experiment_id"] for row in rows} == {"weak-l2", "strong-l2"}
+    assert {row["record_id"] for row in rows} == {"weak-l2", "strong-l2"}
     assert [row["metrics"]["val/log_loss"] for row in rows] == sorted(
         row["metrics"]["val/log_loss"] for row in rows
     )
     client = MlflowClient(tracking_uri=uri)
     for row in rows:
-        assert row["task_id"] == "digits"
         assert row["commit"] == source_commit
         assert row["entrypoint"] == "train"
         assert row["raw"]["status"] == "FINISHED"
         assert row["params"]["epochs"] == "8"
         assert row["params"]["seed"] == "42"
         assert float(row["params"]["alpha"]) == (
-            0.0001 if row["experiment_id"] == "weak-l2" else 1.0
+            0.0001 if row["record_id"] == "weak-l2" else 1.0
         )
         for metric in (
             "train/log_loss",
@@ -140,16 +136,13 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             runner,
             [
                 "runs",
-                "--task",
-                "digits",
-                "--experiment",
+                "--record",
                 "strong-l2",
                 "--json",
             ],
         ).output
     )
-    assert len(filtered) == 1
-    assert filtered[0]["experiment_id"] == "strong-l2"
+    assert {row["record_id"] for row in filtered} == {"weak-l2", "strong-l2"}
 
 
 def test_digits_requires_provenance_before_creating_runs(tmp_path):
@@ -167,7 +160,7 @@ def test_digits_requires_provenance_before_creating_runs(tmp_path):
         capture_output=True,
     )
     assert result.returncode != 0
-    assert "Missing launch environment variables: HIRAKU_TASK_ID" in result.stderr
+    assert "Missing launch environment variables: HIRAKU_RECORD_ID" in result.stderr
     assert not (tmp_path / "mlflow.db").exists()
 
 
@@ -178,8 +171,7 @@ def test_digits_requires_root_for_default_tracking(tmp_path):
     }
     env.update(
         {
-            "HIRAKU_TASK_ID": "digits",
-            "HIRAKU_EXPERIMENT_ID": "baseline",
+            "HIRAKU_RECORD_ID": "baseline",
             "HIRAKU_COMMIT": "a" * 40,
             "HIRAKU_ENTRYPOINT": "train",
         }

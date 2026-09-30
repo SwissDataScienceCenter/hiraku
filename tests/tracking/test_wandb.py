@@ -11,8 +11,7 @@ from hiraku.tracking.wandb import WandbBackend, WandbBackendConfig
 class FakeRun:
     id = "run-1"
     config = {
-        "hiraku.task_id": "iris",
-        "hiraku.experiment_id": "logistic",
+        "hiraku.record_id": "logistic",
         "hiraku.commit": "a" * 40,
         "hiraku.entrypoint": "train",
         "seed": 42,
@@ -28,13 +27,18 @@ class FakeRun:
     metadata = {"python": "3.14"}
 
 
+class FakeUnattributedRun(FakeRun):
+    id = "run-unattributed"
+    config = {"seed": 7}
+
+
 class FakeApi:
     def __init__(self, api_key=None):
         self.api_key = api_key
 
     def runs(self, path):
         assert path == "team/iris"
-        return [FakeRun()]
+        return [FakeRun(), FakeUnattributedRun()]
 
 
 def test_wandb_config_accepts_common_mapping() -> None:
@@ -47,10 +51,12 @@ def test_wandb_config_accepts_common_mapping() -> None:
 def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "wandb", types.SimpleNamespace(Api=FakeApi))
     backend = WandbBackend(HirakuConfig.init(tmp_path), entity="team", project="iris")
-    runs = backend.list_runs(task_id="iris", experiment_id="logistic")
+    runs = backend.list_runs(record_id="logistic")
     assert len(runs) == 1
     run = runs[0]
     assert run.id == "run-1"
     assert run.params == {"seed": 42}
     assert run.metrics == {"test/accuracy": 0.95}
     assert run.raw["tags"] == ["baseline", "iris"]
+    assert [item.id for item in backend.list_all_recorded_runs()] == ["run-1"]
+    assert [item.id for item in backend.list_all_recorded_runs()] == ["run-1"]

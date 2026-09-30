@@ -80,11 +80,12 @@ The repository is a single `uv`-managed Python project.
 | Path | Purpose |
 | --- | --- |
 | `src/hiraku/` | Installed Python package |
-| `src/hiraku/data.py` | Tasks, experiments, runs, entrypoints, and metrics |
-| `src/hiraku/records.py` | Markdown record serialization and validation |
+| `src/hiraku/base.py` | Generic Markdown record serialization and validation |
+| `src/hiraku/record.py` | Research records, entrypoints, and metrics |
+| `src/hiraku/run.py` | Normalized tracked runs |
 | `src/hiraku/config.py` | Project discovery, configuration, and active context |
 | `src/hiraku/cli.py` | Click-based command-line interface |
-| `src/hiraku/launch.py` | Entrypoint validation and dispatch execution |
+| `src/hiraku/launch.py` | Entrypoint argument rendering and dispatch execution |
 | `src/hiraku/tracking/` | Tracking backend adapters and run normalization |
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
 | `src/hiraku/agent.py` | Programs, actions, and agent-facing resources |
@@ -102,16 +103,15 @@ Generated or transient paths:
 
 ### Architecture boundaries
 
-- `Record` owns generic Markdown/YAML persistence and validation.
-- `Task` and `Experiment` are domain records with different scope and
-  execution responsibilities; do not merge their semantics casually.
+- `BaseRecord` owns generic Markdown/YAML persistence and validation.
+- `Record` owns research hierarchy, inheritance, and record-local fields.
 - `HirakuConfig` owns project discovery and persistent active-context state.
-- The CLI should call the public data/config/launch APIs rather than duplicate
+- The CLI should call the public record/config/launch APIs rather than duplicate
   persistence or validation logic.
 - Tracking backends are queried through their adapter interfaces. Keep backend-
   specific behavior inside `src/hiraku/tracking/`.
 - Launches go through the configured dispatcher and must preserve attribution
-  such as task, experiment, entrypoint, and commit metadata.
+  such as record, entrypoint, and commit metadata.
 - Bundled resources under `src/hiraku/resources/` are installed by
   `hiraku init`; changes to them may affect newly initialized projects and
   should include appropriate example or integration coverage.
