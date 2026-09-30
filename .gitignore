@@ -36,6 +36,7 @@ htmlcov/
 .ipynb_checkpoints/
 .idea/
 .vscode/
+*.code-workspace
 
 scratch/
 worktrees/
