@@ -26,7 +26,7 @@ A root *record* defines a working scope and goal, and documents the research pro
 | Term | Data | Summary |
 | --- | ---  | --- |
 | **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared fields and entrypoints. |
-| **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit and entrypoints. A proposed investigation may have no commit. |
+| **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit and entrypoints. A draft investigation may have no commit. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
 Records are stored as Markdown with YAML front matter. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent, and all descendants are stored flat in their root's folder. IDs are unique across the project.
@@ -151,14 +151,15 @@ skills.
 ## Actions, Programs, Context
 
 !!! info
-    Version 0.1.0 only implements the data model and not yet the agent integration. See github issues for the planned features.
+    Agent execution supports `task draft`, `experiment draft`, and `experiment implement`.
+    Programs, scheduling, and automatic loops remain future work.
 
-Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state.  A *program* defines complex research workflows and loops end-to-end, with defined permissions and limits. Actions and programs are executed by the `hiraku-agent`. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to provide project-relevant information to the agent.
+Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state. A *program* is intended to define a longer research workflow. Actions execute through `hiraku agent`; programs are metadata only for now. Bundled actions are resolved at runtime, while a project action of the same type and ID takes precedence. `hiraku init` does not copy bundled actions into the project. *Context* records hold project-relevant information for future agent workflows.
 
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Action** | `hiraku/actions/{entity}/{action_id}/{action.md,action.py}` | A named action that can be invoked by the hiraku-agent agent. |
+| **Action** | `hiraku/actions/{entity}/{action_id}/{action.md,hooks.py}` | A project-defined action that overrides a bundled action of the same name. |
 | **Program** | `hiraku/programs/{program_id}/{program.md,program.py}` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
@@ -172,6 +173,75 @@ hiraku context list
 hiraku action create <entity>/<action-id>
 hiraku action list
 ```
+
+Typed records have an explicit local status. Type definitions live at
+`hiraku/types/<type>.md` and fall back to bundled definitions. Like actions, a
+`RecordType` derives from `BaseRecord`, with YAML front matter and a Markdown
+description. Existing project `<type>.yml` definitions are also readable;
+Markdown takes precedence within the same directory.
+
+Types declare `initial_status` and a `lifecycle` list of labels, without a
+transition graph. The initial status is valid even if it is not repeated in
+the lifecycle. List order documents the lifecycle; it does not restrict moves.
+Actions declare their own source and destination and validate both against the
+type's labels. Manual status edits remain flexible. New bundled typed records
+start at `draft`; older statusless records remain readable.
+
+Inspect resolved definitions with `hiraku type list` and
+`hiraku type show experiment` (both support `--json`). Project definitions
+override bundled types with the same ID.
+
+For example, a project can override the experiment lifecycle with
+`hiraku/types/experiment.md`:
+
+```yaml
+---
+id: experiment
+initial_status: draft
+lifecycle: [draft, implemented, running, ready, completed]
+---
+A research experiment with a hypothesis.
+```
+
+Type definitions specify lifecycle structure. Field requirements and scientific
+validation are deferred.
+
+```bash
+hiraku agent experiment draft --record my-task -m "Test a deeper backbone"
+hiraku agent experiment draft --record baseline -m "Extend this experiment"
+hiraku agent task draft -m "Investigate calibration drift in the validation cohort"
+hiraku agent experiment implement --record deeper-backbone
+```
+
+For experiment actions, `--record` defaults to the active record. For `draft`, it selects the parent,
+which may be a task or experiment. For `implement`, it selects the experiment.
+`implement` requires a clean starting tree. Hiraku commits the new work, binds
+its hash, and advances to `implemented`. Both actions accept
+`--provider codex|claude` and `--model MODEL`;
+Codex also accepts `--reasoning-effort`. Each attempt writes its prompt, reply
+or error, and metadata under `hiraku/agent-logs/`. Action Markdown contains the
+output format and workflow instructions; `-m` adds only the user's research
+brief. Both experiment actions work without `-m`, using the selected record as
+context. Task drafting requires `-m` and creates and activates a root task.
+Drafting runs Codex in a read-only sandbox, or Claude without tools.
+Hiraku creates the record and assigns its parent, type, and status itself.
+
+Provider commands and file changes stream to stderr, alongside deterministic
+checks, record creation, commits, commit binding, and status changes. `--json`
+keeps stdout reserved for the final JSON result. Each attempt also stores
+`provider.log` (the provider stream) and `events.jsonl` (timestamped activity).
+
+Action Markdown declares `effect: create|transition` and relevant statuses.
+An action may also declare `hooks: hooks.py`.
+Only a declared local hook module executes. Hooks receive an `ActionContext`
+containing the selected record, related records, its attributed runs, and
+project config. Hooks can call `context.report(kind, message, **details)` to
+report deterministic changes to the terminal and event log, and use
+`context.state` to carry values between phases.
+The supported synchronous phases are `precondition`, `before`,
+`after`, `postcondition`, and `cleanup`; conditions return `ConditionResult`.
+In-process hooks are trusted project code. The current runtime includes Codex
+and Claude CLI adapters; further providers and actions can use the same interface.
 
 
 

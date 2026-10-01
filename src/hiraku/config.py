@@ -39,6 +39,9 @@ class HirakuConfig(BaseModel):
         "default_program": "interactive",
         "tracking_backend": {"type": "csv"},
         "active_record_id": None,
+        "agent_provider": "codex",
+        "agent_model": None,
+        "agent_reasoning_effort": None,
     }
     model_config = ConfigDict(
         extra="allow", validate_assignment=True, populate_by_name=True
@@ -56,6 +59,9 @@ class HirakuConfig(BaseModel):
         default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
     )
     active_record_id: str | None = DEFAULTS["active_record_id"]
+    agent_provider: str = DEFAULTS["agent_provider"]
+    agent_model: str | None = DEFAULTS["agent_model"]
+    agent_reasoning_effort: str | None = DEFAULTS["agent_reasoning_effort"]
     _hiraku_dir: Path = PrivateAttr()
 
     @model_validator(mode="before")
@@ -240,6 +246,11 @@ class HirakuConfig(BaseModel):
     def actions_dir(self) -> Path:
         """Return the directory containing agent action records."""
         return self.hiraku_dir / "actions"
+
+    @property
+    def types_dir(self) -> Path:
+        """Return the directory containing project lifecycle definitions."""
+        return self.hiraku_dir / "types"
 
     @property
     def contexts_dir(self) -> Path:

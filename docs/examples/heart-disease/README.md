@@ -150,6 +150,40 @@ launch that never logs a row will not appear as a run.
     | `logistic-baseline` | `23b1c42c` | Logistic regression | 0.32254890 | 0.85526316 |
     | `random-forest` | `880d2cd3` | Random forest | 0.35226763 | 0.86842105 |
 
+## 5. Draft and implement a new model with agent actions
+
+After creating the `heart-disease` task in section 2, an agent can draft one
+new experiment and implement it as two separate invocations. This is the same
+workflow exercised by the opt-in agent action integration test:
+
+```bash
+hiraku agent experiment draft --record heart-disease \
+  -m "Draft one hypothesis experiment with id gradient-boosting for adding GradientBoostingClassifier to train.py. Include an implementation brief: use model name gradient_boosting, update argparse choices and build_model, preserve existing models and metrics."
+
+hiraku record show gradient-boosting
+```
+
+The new child has `status: draft` and stores its brief in the Markdown body.
+Add a training entrypoint:
+
+```bash
+hiraku record update gradient-boosting \
+  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: gradient_boosting, seed: 42}}}'
+
+hiraku agent experiment implement --record gradient-boosting
+
+hiraku record show gradient-boosting
+hiraku launch train --record gradient-boosting
+hiraku runs --record gradient-boosting
+```
+
+`implement` requires a clean working tree before it calls the agent. Hiraku
+commits the changed implementation, binds the resulting hash to the experiment,
+and changes its status to `implemented`. The example's `.gitignore` excludes
+Hiraku metadata and `runs.csv`, so editing the draft record does not dirty the
+code checkout. The Codex test uses `--model gpt-5.6-luna --reasoning-effort low`;
+omit these flags to use the project's configured provider and model.
+
 ## Using the Hiraku skill
 
 `hiraku init` installs the same project-local Hiraku skill for Codex at

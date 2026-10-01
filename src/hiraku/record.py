@@ -155,6 +155,12 @@ class Record(BaseRecord):
         **fields: Any,
     ) -> Record:
         selected = _config(config)
+        record_type = fields.get("type")
+        if record_type is not None:
+            from .state import load_type
+
+            definition = load_type(record_type, config=selected)
+            fields.setdefault("status", definition.initial_status)
         index = _record_index(selected)
         if record_id in index:
             raise RecordExistsError(f"Record {record_id!r} already exists")

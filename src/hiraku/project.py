@@ -124,6 +124,7 @@ class ProjectInitializer:
                     config.records_dir,
                     config.programs_dir,
                     config.actions_dir,
+                    config.types_dir,
                     config.contexts_dir,
                     config.dispatch_dir,
                 ):
@@ -131,7 +132,6 @@ class ProjectInitializer:
                 resource_root = files("hiraku.resources")
                 copies = [
                     (resource_root / "programs", config.programs_dir),
-                    (resource_root / "actions", config.actions_dir),
                     (resource_root / "dispatch", config.dispatch_dir),
                 ]
                 if install_skill:

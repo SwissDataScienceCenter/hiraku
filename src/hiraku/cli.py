@@ -17,17 +17,9 @@ import yaml
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-from .agent import (
-    Action,
-    Context,
-    Program,
-    list_actions,
-    list_contexts,
-    list_programs,
-    load_action,
-    load_context,
-    load_program,
-)
+from .agent.action import Action, action_origin, list_actions, load_action, run_action
+from .agent.context import Context, list_contexts, load_context
+from .agent.program import Program, list_programs, load_program
 from .base import BaseRecord
 from .config import HirakuConfig
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
@@ -36,6 +28,7 @@ from .io import dump_yaml
 from .launch import _dispatcher, launch, render_arguments
 from .record import Record, list_records, load_record
 from .run import Run
+from .state import list_types, load_type
 from .validation import validate_identifier
 
 
@@ -603,9 +596,99 @@ _install_generic("program", Program, load_program, list_programs, "programs_dir"
 _install_generic("context", Context, load_context, list_contexts, "contexts_dir")
 
 
+@main.group("type")
+def type_group() -> None:
+    """Inspect project and bundled record types."""
+
+
+@type_group.command("list")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def type_list(state: CLIContext, json_output: bool) -> None:
+    definitions = list_types(config=state.config)
+    _emit_json(definitions) if json_output else click.echo(
+        _table(
+            ("id", "initial_status", "lifecycle"),
+            [
+                (item.id, item.initial_status, ", ".join(item.lifecycle))
+                for item in definitions
+            ],
+        )
+    )
+
+
+@type_group.command("show")
+@click.argument("identifier")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def type_show(state: CLIContext, identifier: str, json_output: bool) -> None:
+    definition = load_type(identifier, config=state.config)
+    _emit_json(definition) if json_output else click.echo(
+        f"---\n{dump_yaml(definition.to_dict())}---\n{definition.markdown}", nl=False
+    )
+
+
 @main.group("action")
 def action_group() -> None:
     """Manage agent actions."""
+
+
+@main.command("agent")
+@click.argument("entity")
+@click.argument("action_id")
+@click.option("--record", "record_id")
+@click.option("-m", "--message", default="", help="Instruction for the agent")
+@click.option("--provider")
+@click.option("--model")
+@click.option("--reasoning-effort")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def agent_command(
+    state: CLIContext,
+    entity: str,
+    action_id: str,
+    record_id: str | None,
+    message: str,
+    provider: str | None,
+    model: str | None,
+    reasoning_effort: str | None,
+    json_output: bool,
+) -> None:
+    """Execute one declared agent action for the active or selected record."""
+    selected_record_id = record_id
+    if selected_record_id is None and not (entity == "task" and action_id == "draft"):
+        selected_record_id = state.config.active_record_id
+    result = run_action(
+        entity,
+        action_id,
+        record_id=selected_record_id,
+        instruction=message,
+        provider=provider,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        config=state.config,
+        on_event=lambda event: click.echo(event["message"], err=True),
+    )
+    payload = {
+        "action": f"{entity}/{action_id}",
+        "record": result.record.id,
+        "status": result.record.status,
+        "origin": result.origin,
+        "provider": result.provider,
+        "model": result.model,
+        "log": result.log,
+        "cleanup_error": result.cleanup_error,
+    }
+    if json_output:
+        _emit_json(payload)
+    else:
+        click.echo(
+            f"{payload['action']} -> {payload['record']} "
+            f"({payload['status']}); {payload['origin']} action, "
+            f"{payload['provider']} provider"
+        )
+        if result.cleanup_error:
+            click.echo(f"Cleanup error: {result.cleanup_error}", err=True)
 
 
 @action_group.command("list")
@@ -630,11 +713,18 @@ def action_show(state: CLIContext, reference: str, json_output: bool) -> None:
     )
 
 
-def _action_ref(reference: str, config: HirakuConfig) -> Action:
+def _action_ref(
+    reference: str, config: HirakuConfig, *, project_only: bool = False
+) -> Action:
     if reference.count("/") != 1:
         raise ValidationError("ACTION must have the form entity/action-id")
     entity, identifier = reference.split("/", 1)
-    return load_action(identifier, entity=entity, config=config)
+    action = load_action(identifier, entity=entity, config=config)
+    if project_only and action_origin(action, config=config) != "project":
+        raise ValidationError(
+            f"Action {reference!r} is bundled; create a project override to edit it"
+        )
+    return action
 
 
 @action_group.command("create")
@@ -678,7 +768,7 @@ def action_update(
     markdown_file: Path | None,
 ) -> None:
     _update_fields(
-        _action_ref(reference, state.config),
+        _action_ref(reference, state.config, project_only=True),
         set_values,
         unset_values,
         markdown_file,
@@ -694,10 +784,11 @@ def action_edit(state: CLIContext, reference: str) -> None:
     if reference.count("/") != 1:
         raise ValidationError("ACTION must have the form entity/action-id")
     entity, identifier = reference.split("/", 1)
+    _action_ref(reference, state.config, project_only=True)
     path = state.config.actions_dir / entity / identifier / "action.md"
     _edit_recoverable(
         path,
-        lambda: _action_ref(reference, state.config),
+        lambda: _action_ref(reference, state.config, project_only=True),
         f"Action {reference!r}",
     )
     click.echo(f"Validated action {reference}")
@@ -707,7 +798,7 @@ def action_edit(state: CLIContext, reference: str) -> None:
 @click.argument("reference")
 @click.pass_obj
 def action_delete(state: CLIContext, reference: str) -> None:
-    _action_ref(reference, state.config).delete()
+    _action_ref(reference, state.config, project_only=True).delete()
     click.echo(f"Deleted action {reference}")
 
 
