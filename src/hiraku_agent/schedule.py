@@ -8,15 +8,18 @@ know the shape of the extra fields (`Record`'s `extra="allow"` is what makes
 that safe).
 
 **Scope of this module.** It answers "what's the single next thing to do,"
-never *how* to do it. `approve`/`implement`/`launch` are real, mechanical
-actions: `gates.approve` records approval, `hiraku experiment update <id>
---commit <hash>` is what "implement" resolves to, and `hiraku launch
-<id>:<entrypoint>` is what "launch" resolves to. `design`/`discover`/
-`triage`/`analyze` need judgement — proposing what a new node should say, or
-what a result means — and that judgement is an LLM call, in `workflows.py`
-(`run_design`/`run_discover`/`run_triage`/`run_analyze`, via `engine.py`).
-This module only ever says *that* one of the four is next; it never calls
-the agent or decides what it should say.
+never *how* to do it. `approve`/`launch` are real, mechanical actions:
+`gates.approve` records approval, and `hiraku launch <id>:<entrypoint>` is
+what "launch" resolves to — this module only ever says *that* one of these
+is next, it never calls the agent or runs the command itself.
+`design`/`discover`/`implement`/`triage`/`analyze` need judgement —
+proposing what a new node should say, writing the code an approved proposal
+describes, or deciding what a result means — and that judgement is an LLM
+call, in `workflows.py` (`run_design`/`run_discover`/`run_implement`/
+`run_triage`/`run_analyze`, via `engine.py`). `implement` still ends the
+same way it always did, `hiraku experiment update <id> --commit <hash>` (or
+its `run_implement` equivalent — see that function's own docstring); the
+only thing that changed is who can be asked to get there.
 """
 
 from __future__ import annotations
@@ -97,14 +100,16 @@ def suggest_next(
                 "next_commands": [f"hiraku-agent analyze {node_id} --task {task_id}"],
             }
 
-    # Priority 3 — concluded without settling the question.
+    # Priority 3 — concluded, no decision yet about whether to go further.
+    # (Applies to a `supports` verdict too, not only `refutes`/`inconclusive` — a
+    # positive result can still be worth a follow-up; see `state.node_state`.)
     for node_id, state in states.items():
-        if state == "concluded_untriaged":
+        if state == "concluded":
             verdict = by_id[node_id].verdict
             return {
                 "action": "triage",
                 "node": node_id,
-                "why": f"verdict is {verdict!r}, needs a decision about what's next",
+                "why": f"verdict is {verdict!r}, decide whether to go further",
                 "next_commands": [f"hiraku-agent triage {node_id} --task {task_id}"],
             }
 

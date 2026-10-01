@@ -8,13 +8,18 @@ just applied across a whole loop instead of a single command. See
 `hiraku/program-action-merge-proposal-zou.md` (the "Phase 1" section) for the design
 this implements.
 
-Nothing here executes what `suggest_next` cannot already name. `implement`/`launch`
-are a real commit and a real command a person or a CI job runs; `approve` is a
-person's decision. The loop stops and reports these rather than guessing at them —
-that is `Program`'s whole job: it bounds *what may run automatically*, never *whether
-a human reviews it*. The approval gate in `gates.py` is unmoved by anything below;
-`is_approved()` already decides that, inside `suggest_next()`, before this module ever
-sees a suggestion.
+Nothing here executes what `suggest_next` cannot already name. `launch` is a real
+command a person or a CI job runs, and `approve` is a person's decision — the loop
+stops and reports those rather than guessing at them, since that is `Program`'s whole
+job: it bounds *what may run automatically*, never *whether a human reviews it*.
+`implement` is no longer in that excluded set: `workflows.run_implement` is an LLM call
+too, just one with real file-write and commit side effects (`engine.py`'s
+`DEFAULT_IMPLEMENT_AGENT_CMD`) instead of only returning JSON. It is safe to drive
+automatically here for the same reason everything else in `LLM_WORKFLOWS` is: the
+approval gate in `gates.py` is unmoved by anything below, `is_approved()` already
+decided it, inside `suggest_next()`, before this module ever sees the suggestion — and
+`run_implement` checks it again itself (see its own docstring for why both checks
+exist).
 """
 
 from __future__ import annotations
@@ -32,22 +37,24 @@ from .engine import Hooks
 from .errors import AgentError
 from .node import list_nodes
 from .schedule import suggest_next
-from .workflows import run_analyze, run_design, run_discover, run_triage
+from .workflows import run_analyze, run_design, run_discover, run_implement, run_triage
 
 # A loop with no `max_steps` and a `Program` that sets none of `max_experiments`/
 # `max_runs`/`time_budget` either would otherwise have no bound at all — this is the
 # floor under that, not a substitute for setting a real one.
 _DEFAULT_MAX_STEPS = 25
 
-# The workflows this module can drive automatically — everything `suggest_next` can
-# say that is an LLM call rather than a real commit (`implement`), a real command
-# (`launch`), or a person's decision (`approve`). `discover` is included for
-# completeness even though `schedule.suggest_next` never names it today (`design` is
-# what it suggests when a task has no experiments yet) — a `Program` may still bind it
-# for whenever the scheduling policy grows to suggest it.
+# The workflows this module can drive automatically — everything `suggest_next` can say
+# that is an LLM call, as opposed to a real command (`launch`) or a person's decision
+# (`approve`). `discover` is included for completeness even though `schedule.
+# suggest_next` never names it today (`design` is what it suggests when a task has no
+# experiments yet) — a `Program` may still bind it for whenever the scheduling policy
+# grows to suggest it. `implement` belongs here precisely because `run_implement`
+# re-checks `is_approved` itself before writing anything — see its docstring.
 LLM_WORKFLOWS = {
     "design": run_design,
     "discover": run_discover,
+    "implement": run_implement,
     "triage": run_triage,
     "analyze": run_analyze,
 }
@@ -212,7 +219,7 @@ def run_loop(
             "config": selected,
             "hooks": hooks,
         }
-        if next_action in {"triage", "analyze"}:
+        if next_action in {"triage", "analyze", "implement"}:
             run = runner(suggestion["node"], task_id=task_id, **call_kwargs)
         else:
             run = runner(task_id, **call_kwargs)

@@ -214,12 +214,15 @@ hiraku status  # show current active task
 hiraku experiment create logistic-baseline --summary "Logistic regression baseline" --hypothesis "Regularized logistic regression provides a calibrated baseline" --entrypoint logistic  # creates and sets the active experiment
 hiraku status  # show current active experiment
 
-# 2. a) implement the experiment with agent
-hiraku-agent experiment implement logistic-baseline
+# 2. a) implement the experiment with agent — requires approval first in guided mode
+# (the default); the agent writes and commits the code, hiraku-agent binds the commit
+hiraku-agent approve logistic-baseline --task heart-disease --by <you>
+hiraku-agent implement logistic-baseline --task heart-disease
 # 2. b) implement the experiment with agent skill inside coding harness (e.g, Claude, Codex, ...)
 /hiraku "implement logistic baseline experiment"
 
-# commit code change
+# commit code change (only needed for 2.b — hiraku-agent implement in 2.a already
+# committed and bound it for you)
 git commit -m "implement logistic baseline"
 hiraku experiment update heart-disease:logistic-baseline --commit HEAD
 

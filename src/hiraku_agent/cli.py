@@ -1,11 +1,13 @@
 """`hiraku-agent`: the thin CLI over the scheduler and the LLM-driven workflows.
 
 Deliberately small where `hiraku` already covers something. Creating a node, binding a
-commit, launching, inspecting runs — all `hiraku`'s own CLI (`hiraku experiment ...`,
-`hiraku launch`, `hiraku run list`). This module adds what `hiraku` doesn't have:
-"what's next", "approve this," the five LLM-driven workflows (`draft`, `design`,
-`discover`, `triage`, `analyze`) described in `workflows.py`, and `loop`, the bounded
-driver over `loop.py` for a saved `Program` record.
+commit by hand, launching, inspecting runs — all `hiraku`'s own CLI (`hiraku experiment
+...`, `hiraku launch`, `hiraku run list`). This module adds what `hiraku` doesn't have:
+"what's next", "approve this," the six LLM-driven workflows (`draft`, `design`,
+`discover`, `implement`, `triage`, `analyze`) described in `workflows.py`, and `loop`,
+the bounded driver over `loop.py` for a saved `Program` record. `implement` is the one
+workflow among those six that writes real files and a real commit rather than only a
+`Node` record — see `workflows.run_implement`'s docstring.
 """
 
 from __future__ import annotations
@@ -24,7 +26,14 @@ from .gates import approve as approve_node
 from .loop import LoopResult, run_loop
 from .node import load_node
 from .schedule import suggest_next
-from .workflows import run_analyze, run_design, run_discover, run_draft, run_triage
+from .workflows import (
+    run_analyze,
+    run_design,
+    run_discover,
+    run_draft,
+    run_implement,
+    run_triage,
+)
 
 
 def _resolve_task(config: HirakuConfig, task_id: str | None) -> str:
@@ -328,6 +337,52 @@ def discover_command(
     )
 
 
+@main.command("implement")
+@click.argument("node_id")
+@click.option("task_id", "--task", default=None)
+@_apply_agent_options
+def implement_command(
+    node_id: str,
+    task_id: str | None,
+    instruction: str,
+    instruction_file: str | None,
+    agent_cmd: str | None,
+    dry_run: bool,
+    no_apply: bool,
+    context_paths: tuple[str, ...],
+    action_id: str | None,
+    context_id: str | None,
+    timeout: int | None,
+    unset_env: tuple[str, ...],
+    json_output: bool,
+) -> None:
+    """Write NODE_ID's approved proposal as real code, and bind the resulting commit.
+
+    NODE_ID must already be approved (`hiraku-agent approve`) — in guided mode that
+    approval is the human trigger; the agent is what writes the code either way. Unlike
+    every other workflow here, the agent is given file-write and shell tools (see
+    `workflows.run_implement`'s docstring), so review what it wrote with `git diff`/`git
+    log` on the commit it reports before trusting it.
+    """
+    _run_agent_command(
+        run_implement,
+        node_id,
+        task_id=task_id,
+        instruction=_resolve_instruction(instruction, instruction_file),
+        command=resolve_agent_cmd(agent_cmd) if agent_cmd else None,
+        dry_run=dry_run,
+        apply=not no_apply,
+        context_paths=list(context_paths),
+        action=action_id,
+        context_id=context_id,
+        unset_env=list(unset_env),
+        hooks=None if dry_run else _hooks(),
+        timeout=timeout,
+        json_output=json_output,
+        no_apply=no_apply,
+    )
+
+
 @main.command("triage")
 @click.argument("node_id")
 @click.option("task_id", "--task", default=None)
@@ -430,8 +485,9 @@ def loop_command(
 
     Repeats `hiraku-agent next`'s own suggestion, calling whichever `Action` the
     program binds to that workflow, until a budget is hit, a step makes no progress,
-    the next suggestion needs a person or a real command (`approve`/`implement`/
-    `launch`), or there is nothing left to schedule.
+    the next suggestion needs a person or a real command (`approve`/`launch`), or
+    there is nothing left to schedule. `implement` is no longer in that stopping set —
+    see `loop.LLM_WORKFLOWS`'s comment for why driving it automatically is still safe.
     """
     config = HirakuConfig.discover()
     try:

@@ -57,7 +57,18 @@ from .errors import AgentError
 DEFAULT_AGENT_CMD = "claude -p"
 DEFAULT_TIMEOUT = 900
 
-WORKFLOWS = ("design", "discover", "triage", "analyze", "draft")
+# `design`/`discover`/`triage`/`analyze`/`draft` only ever need to read and return one
+# JSON object, so the plain default above is deliberately narrow — `claude -p` with no
+# `--allowedTools` denies anything it was not told about up front (see
+# `KNOWN_FAILURES`'s "requested permissions to use" entry), which is exactly the least
+# privilege those five workflows need. `implement` (`workflows.run_implement`) is the
+# one workflow whose whole job is to edit real files and make a real commit, so it
+# needs its own, separately-named default and override variable rather than quietly
+# widening what `HIRAKU_AGENT_CMD`/`DEFAULT_AGENT_CMD` grant everything else.
+DEFAULT_IMPLEMENT_AGENT_CMD = "claude -p --allowedTools Read,Write,Edit,Glob,Grep,Bash"
+IMPLEMENT_AGENT_CMD_ENV_VAR = "HIRAKU_IMPLEMENT_AGENT_CMD"
+
+WORKFLOWS = ("design", "discover", "triage", "analyze", "draft", "implement")
 
 # Failures whose message names a symptom but not the fix. Matched against the whole
 # output, so a warning on stderr and the real error on stdout both count.
@@ -266,13 +277,23 @@ def build_prompt(
 # ------------------------------------------------------------------- command resolution
 
 
-def agent_command(override: str | None = None) -> list[str]:
-    """Precedence: `override` (`--agent-cmd`), then `HIRAKU_AGENT_CMD`, then the
-    default.
+def agent_command(
+    override: str | None = None,
+    *,
+    env_var: str = "HIRAKU_AGENT_CMD",
+    default: str = DEFAULT_AGENT_CMD,
+) -> list[str]:
+    """Precedence: `override` (`--agent-cmd`), then `env_var`, then `default`.
+
+    `env_var`/`default` let one caller (`workflows.run_implement`) resolve a
+    differently-privileged fallback without changing what every other workflow falls
+    back to — see `DEFAULT_IMPLEMENT_AGENT_CMD`'s comment. Every other call site uses
+    the keyword defaults, which reproduce the original `HIRAKU_AGENT_CMD`/
+    `DEFAULT_AGENT_CMD` behaviour exactly.
 
     See the module docstring: there is deliberately no project-config layer yet.
     """
-    raw = override or os.environ.get("HIRAKU_AGENT_CMD") or DEFAULT_AGENT_CMD
+    raw = override or os.environ.get(env_var) or default
     parts = shlex.split(raw)
     if not parts:
         raise AgentError("Agent command is empty.")

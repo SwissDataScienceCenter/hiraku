@@ -29,9 +29,8 @@ STATES = (
     "proposed",
     "implemented",
     "awaiting_analysis",
-    "concluded_untriaged",
-    "concluded_settled",
-    "abandoned",
+    "concluded",
+    "completed",
 )
 
 
@@ -54,7 +53,7 @@ def node_state(node: Node, runs: Sequence[Any], *, has_children: bool) -> str:
         One of `STATES`.
     """
     if node.abandoned:
-        return "abandoned"
+        return "completed"
     if node.is_proposal:
         # `commit is None` — no real code exists yet, whatever else might be
         # set on the record.
@@ -64,9 +63,20 @@ def node_state(node: Node, runs: Sequence[Any], *, has_children: bool) -> str:
         # happened, independent of whatever `runs` a tracking-backend lookup
         # happens to return right now (a stale or misconfigured backend must
         # not make an already-judged node look unjudged again).
-        if node.verdict == "supports" or has_children:
-            return "concluded_settled"
-        return "concluded_untriaged"
+        #
+        # Unlike the old model, a `supports` verdict does NOT settle this by
+        # itself: a positive result can still be worth going deeper on (a
+        # robustness check, a natural ablation, pushing the same idea
+        # further) exactly as a negative one can — so both go through the
+        # same `concluded` → `triage` decision. What ends it is either
+        # `triage` having actually produced children (`has_children`), or
+        # `triage` having completed and explicitly said "no further
+        # children" (`node.triaged`) — `run_analyze` resets `triaged` to
+        # `False` on every *new* verdict, so a fresh verdict always gets a
+        # fresh decision.
+        if has_children or node.triaged:
+            return "completed"
+        return "concluded"
     if runs:
         return "awaiting_analysis"
     return "implemented"

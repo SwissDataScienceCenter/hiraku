@@ -29,18 +29,29 @@ for it — not a decision about it:
 | `implemented` | a real, runnable launch configuration exists, no runs yet | Code and launch config exist; nothing has been executed yet. |
 | `running` | a run is in flight | Evidence is being generated right now. |
 | `awaiting analysis` | has runs, no verdict yet | Results exist; nobody (or nothing) has judged them yet. |
-| `concluded, untriaged` | verdict is `refutes` or `inconclusive`, no children | The result needs a decision about what happens next. |
-| `concluded, settled` | verdict is `supports`, or already has children | This branch of reasoning is done. |
-| `abandoned` | explicitly dropped | An exit, reachable from most points on this path — not a stage on it. |
+| `concluded` | has a verdict (`supports`, `refutes`, or `inconclusive`), no children, not yet triaged | The result needs a decision about whether it's worth going further. |
+| `completed` | has children, or `triage` already decided not to produce any, or explicitly dropped | This branch of reasoning is done — nothing schedules here again. |
+| `abandoned` | explicitly dropped | Not a state of its own any more — a fact (`Node.abandoned`) that resolves straight to `completed`, the same way a `triage` call that decided "no further children" does. Kept here as a name because it's still how you *reach* that fact, even though `node_state` returns `completed` for it. |
 
 For a single node, the non-exit states form a linear path:
 
 ```
-proposed → implemented → running → awaiting analysis → concluded, untriaged → concluded, settled
+proposed → implemented → running → awaiting analysis → concluded → completed
 ```
 
-`concluded, untriaged` is the one branch point on this path: it can produce zero, one, or several
-new child nodes, each of which restarts this same path independently, one level deeper in the tree.
+**A `supports` verdict is `concluded`, not automatically `completed`.** The earlier version of
+this model let a `supports` verdict settle a branch by itself, on the theory that a hypothesis
+that held needed no further attention. That is not generally true: a result that supports its
+expectation can still be worth a robustness check across seeds, a natural ablation isolating
+which part of the change mattered, or simply pushing the same lever further — exactly the same
+shape of question a `refutes`/`inconclusive` result asks. So both kinds of verdict land on
+`concluded` and go through the same decision, `triage`, which judges them through different
+lenses (see `prompts/triage.md`) but asks the same question either way: is there a good reason to
+go deeper. `concluded` is the one branch point on this path: `triage` can produce zero, one, or
+several new child nodes, each of which restarts this same path independently, one level deeper in
+the tree — or it can produce none and still move the node to `completed`, because the record that
+a decision was made (`Node.triaged`) is what distinguishes "nobody has looked at this yet" from
+"somebody looked, and decided to stop here."
 
 `approved` is deliberately not on this list. Whether a node may proceed is a decision, not a fact
 about its evidence — see the gates section below. Two experiments can be in the identical state
@@ -61,8 +72,13 @@ condition checked before acting on a node that is already in some state.
   is checked once, on entry — it is not re-cleared separately before implementing and again before
   launching.
 - **Implement, trigger.** Code has to exist before a run is possible, in either mode — that part is
-  not optional. What `mode` changes is who causes it to happen: in `guided` mode, a person is asked
-  to write and trigger it; in `auto` mode, it triggers itself.
+  not optional, and the agent is what writes it either way (`workflows.run_implement`), never a
+  person. What `mode` changes is only who *triggers* that call: in `guided` mode, a person runs
+  `hiraku-agent implement` (or `/hiraku "implement ..."` from inside a coding agent) once the node
+  is approved; in `auto` mode, `hiraku-agent loop` triggers it itself, with no stop. Conflating "who
+  writes the code" with "who triggers writing it" was an earlier mistake in this project's own
+  thinking about this gate — they are the trigger axis and the authorship axis, and only the first
+  one is ever optional.
 - **Launch, trigger.** Same shape as implement — a run has to be launched by something. In `guided`
   mode this stops for a person; in `auto` mode it launches on its own.
 - **Triage's blocking condition.** When triage finds something that needs judgment, that stop is not
@@ -81,10 +97,10 @@ them, each independently at its own point on that line, in its own `mode`, at th
 moment the tree might look like:
 
 ```
-baseline        ─ concluded, settled
+baseline        ─ completed
 ├─ variant-a    ─ running
 ├─ variant-b    ─ implemented, awaiting the approval gate
-└─ variant-c    ─ concluded, untriaged
+└─ variant-c    ─ concluded
 ```
 
 Four nodes, four different states, all true simultaneously — and each may or may not need a human to
@@ -97,12 +113,11 @@ This is the part that makes it a *loop* rather than a one-shot pipeline: a concl
 not settle the question does not end the tree, it starts a new one, one level down.
 
 ```
-proposed → (approval gate) → implement → launch → running
+proposed → (approval gate) → implement (agent writes it) → launch → running
     → analyze (writes verdict + concluded, in the same step)
-        → verdict: supports              → concluded, settled — done, nothing schedules here again
-        → verdict: refutes/inconclusive  → concluded, untriaged
-                                              → triage
-                                                  → new child, proposed → back to the top
+        → triage (same decision, either verdict — different lens per `prompts/triage.md`)
+            → proceed: yes  → new child(ren), proposed → back to the top
+            → proceed: no   → completed — done, nothing schedules here again
 ```
 
 Three precisions worth being exact about:
@@ -112,13 +127,16 @@ Three precisions worth being exact about:
   triage reacts to is the verdict analyze already wrote.
 - **Triage's output is a new node, `proposed`, not a separate kind of record.** It passes through the
   same approval gate as anything else that starts at `proposed` — triage grants it no shortcut.
-- **The loop only continues where the result did not settle the question.** `supports` ends that
-  branch; only `refutes`/`inconclusive` re-enters the cycle, and only until triage has produced
-  children for it. `concluded, untriaged` is the one state on the whole path that is still "open."
+- **Every verdict goes through triage, not only a miss.** The earlier version of this loop let
+  `supports` skip straight to done; it does not any more (see section 1's note on why). What ends a
+  branch is `triage` actually deciding to stop — recorded as `Node.triaged` — not which way the
+  verdict happened to go. `concluded` is the one state on the whole path that is still "open."
 
 In `auto` mode, this entire loop can run with no stop at all, from `proposed` all the way back
-around to the next `proposed` — every gate on the path clears itself. What still ends a branch is
-unchanged: a `supports` verdict, or `abandoned`.
+around to the next `proposed` — every gate on the path clears itself, including `implement`'s (the
+agent writes the code regardless of `mode`; only whether a person has to trigger it changes). What
+still ends a branch is unchanged in shape, just no longer tied to the verdict's polarity: `triage`
+deciding not to proceed, or `abandoned`.
 
 Each child a `triage` call produces restarts this exact path independently, one level deeper — the
 same "parallel across the tree" picture from section 3 applies to it immediately.
@@ -132,10 +150,10 @@ first match.
 | --- | --- | --- | --- |
 | — | The goal has zero experiments | `design` or `discover` (researcher picks) | Always a researcher choice, regardless of `mode` |
 | 0 | Any node `running` | `analyze` | None |
-| 1 | Any node `proposed`, approval cleared, no real code yet | `implement` | Approval (once, on entry) |
+| 1 | Any node `proposed`, approval cleared, no real code yet | `implement` (agent writes it) | Approval (once, on entry) |
 | 1 | Any node `implemented`, approval cleared, no runs | `launch` | Approval (already cleared above) |
 | 2 | Any node has runs, no verdict | `analyze` | None |
-| 3 | Any node concluded `refutes`/`inconclusive`, no children | `triage` | Not yet mode-dependent — always stops on a blocking condition |
+| 3 | Any node `concluded` (any verdict, no children, not yet triaged) | `triage` | Not yet mode-dependent — always stops on a blocking condition |
 | 4 | Any node `proposed`, approval not yet cleared | `approve` (or auto-clears) | This *is* the gate |
 | — | None of the above | `exhausted` | — |
 
@@ -161,29 +179,31 @@ Two things worth being explicit about:
   thing `mode` is allowed to make optional.
 - Every gate that is optional today — approval, and the implement/launch triggers — resolves the
   same way in `auto` mode: no stop, because either nothing but a person's judgment could satisfy it
-  (approval, cleared automatically) or the tool can perform the step itself (implement, launch).
-- The tree is not a one-pass pipeline: `triage` closing on `refutes`/`inconclusive` is what turns a
-  dead end into a new child to run, which is what makes this a *loop* rather than a sequence that
-  terminates the first time a hypothesis fails.
+  (approval, cleared automatically) or the tool can perform the step itself (`implement`, `launch`
+  — `implement` meaning the agent runs on its own, not that a person's code gets skipped, since the
+  agent was always who wrote it).
+- The tree is not a one-pass pipeline: `triage` deciding to proceed is what turns any concluded
+  node — a `refutes`/`inconclusive` dead end or a `supports` worth pushing further — into a new
+  child to run, which is what makes this a *loop* rather than a sequence that terminates the first
+  time a question gets an answer.
 - In `auto` mode, the entire loop — proposed through concluded and back around through triage — can
   run with no human stop at all; in `guided` mode, every gate above stops as documented.
 
 ## Open questions
 
-- **How does a cleared approval get recorded, now that it is not a status value?** Something has to
-  distinguish an approved `proposed` node from one still waiting, without reusing `status` for it —
-  an explicit field (who approved it, when), or is the fact that `implement`/`launch` were allowed
-  to run itself sufficient evidence, the same way "implemented" is answered by reading the launch
-  configuration rather than a stored flag?
+- **Resolved — how does a cleared approval get recorded?** An explicit field pair,
+  `Node.approved_by`/`approved_at` (`gates.approve`), not a derived fact — `hiraku-agent approve`
+  writes them, `gates.is_approved` reads them back (`True` unconditionally in `auto` mode).
 - **Does triage's blocking condition become an optional, `mode`-dependent gate, the same as
   approval?** Right now it always stops. If the condition it checks is itself a derivable fact
   rather than a judgment call, `auto` mode could clear it the same way it clears approval.
 - **Does `design` belong in the same priority list as the rest, or is it categorically different?**
   It can only fire when the tree is completely empty, so a goal that already has some structure can
   never be offered "propose more nodes" as a scheduled action — only as something invoked directly.
-- **Do `analyze` and `triage` need to exclude `abandoned` nodes explicitly?** Neither condition
+- **Do `analyze` and `triage` need to exclude `completed` nodes explicitly?** Neither condition
   currently checks status. A node someone has explicitly abandoned, if it still has unanalyzed runs
-  or a stale untriaged verdict from before it was abandoned, would still match those conditions.
+  or a stale, not-yet-triaged verdict from before it was abandoned, would still match those
+  conditions.
 - **Should the priority table become declarative data** (a list read at runtime) **rather than the
   order of checks in code?** That would make the policy inspectable and editable without a code
   change, at the cost of an extra layer of indirection for what is currently a short, readable

@@ -91,10 +91,16 @@ not cleared), `implement` (approved, no code bound), `launch` (implemented, neve
 # approve — a person's decision, in guided mode (skip in auto mode, see step 5)
 uv run hiraku-agent approve baseline --task vo-backend --by qianqian
 
-# implement — bind the commit that actually implements the experiment
-git checkout -b exp/baseline hiraku/tasks/vo-backend   # or whatever branch you're using
+# implement — the agent writes the code, commits it, and binds the commit itself.
+# Approval is the human trigger; the agent is what writes the code either way (see
+# `workflows.run_implement`'s docstring). Review what it wrote before trusting it:
+uv run hiraku-agent implement baseline --task vo-backend
+git log -1 --stat $(uv run hiraku experiment show baseline --task vo-backend --json | jq -r .commit)
+
+# (manual alternative, if you'd rather write the code yourself:)
+# git checkout -b exp/baseline hiraku/tasks/vo-backend
 # ... write the code, commit it ...
-uv run hiraku experiment update baseline --task vo-backend --commit $(git rev-parse HEAD)
+# uv run hiraku experiment update baseline --task vo-backend --commit $(git rev-parse HEAD)
 
 # launch — run it, tracked
 uv run hiraku launch baseline:train --task vo-backend
@@ -114,14 +120,15 @@ uv run hiraku run list --task vo-backend --sort val_accuracy --descending
 ```
 
 Just keep calling `hiraku-agent next` — that's the whole cycle. It stops suggesting
-anything once every branch has a settled verdict (`design`/`discover` again from there, or
-`triage` a `concluded_untriaged` node to decide on children).
+anything once every branch is `completed` (`design`/`discover` again from there, or
+`triage` a `concluded` node — any verdict, `supports` included — to decide whether it's
+worth going further).
 
 ## 4. Reusable call configs: `Action` / `Context`
 
-Every `design`/`discover`/`triage`/`analyze`/`draft` call above took its `--agent-cmd`/
-`--timeout`/`--context` fresh each time. An `Action` record saves a set of those as a
-named, reusable default — created with ordinary `hiraku` CLI, no new command:
+Every `design`/`discover`/`triage`/`analyze`/`draft`/`implement` call above took its
+`--agent-cmd`/`--timeout`/`--context` fresh each time. An `Action` record saves a set of
+those as a named, reusable default — created with ordinary `hiraku` CLI, no new command:
 
 ```bash
 uv run hiraku action create vo-backend/nightly-design \
@@ -136,7 +143,7 @@ settable through `--set` (it's immutable, fixed by the path). `entity` **must eq
 task id** you'll use it with — that's a `hiraku_agent` convention (see
 `hiraku/program-action-merge-proposal-zou.md`), not a `hiraku` core rule. `--action` on
 `hiraku-agent`, below, takes just the bare `nightly-design` part — it already knows the
-entity from `--task`. `workflow` names which of the five commands this Action configures.
+entity from `--task`. `workflow` names which of the six commands this Action configures.
 Then:
 
 ```bash
@@ -177,8 +184,12 @@ uv run hiraku-agent loop --program nightly-loop --task vo-backend
 
 What it does, each iteration: asks `suggest_next` (same as `hiraku-agent next`), and if the
 answer is one of the workflows an Action is bound to, calls it — otherwise **stops and
-tells you why**. `approve`/`implement`/`launch` always stop the loop; those need a person
-or a real commit/command, and no `Program` setting changes that. It also stops if a budget
+tells you why**. `approve`/`launch` always stop the loop; those are a person's decision or
+a real command, and no `Program` setting changes that. `implement` is different: it's an
+LLM-driven workflow like `design`/`discover`/`analyze`/`triage`, so bind an Action to it
+(`--set workflow=implement`) and the loop will write the code for an approved node and
+move on by itself — the approval gate it already had to clear is the human checkpoint, not
+a second stop inside `loop`. It also stops if a budget
 field (`max_experiments`/`max_runs`/`time_budget`) is hit, if a step writes nothing (no
 point repeating an unproductive call), or if nothing's left to schedule. No `--max-steps`
 and no budget field set at all still caps it at 25 iterations — a `Program` is meant to be
@@ -211,17 +222,25 @@ uv run hiraku-agent next --task vo-backend
 # -> approve baseline
 uv run hiraku-agent approve baseline --task vo-backend --by qianqian
 
-# ... implement it for real, commit, then:
-uv run hiraku experiment update baseline --task vo-backend --commit <sha>
+# the agent writes the code, commits it, and binds the commit itself:
+uv run hiraku-agent implement baseline --task vo-backend
 uv run hiraku launch baseline:train --task vo-backend
 uv run hiraku-agent next --task vo-backend
 # -> analyze baseline
 uv run hiraku-agent analyze baseline --task vo-backend
+uv run hiraku-agent next --task vo-backend
+# -> triage baseline (whichever way the verdict went — see docs/state.md for why a
+#    "supports" result still lands here instead of ending the branch by itself)
+uv run hiraku-agent triage baseline --task vo-backend
 
 # once you trust the shape of it, save it as a reusable config and let a bounded
-# loop take the next round:
-uv run hiraku action create vo-backend/auto-design --set workflow=design
-uv run hiraku program create solo-loop --set actions='[auto-design]' --set max_experiments=5
+# loop take the next round — including implement and triage, neither of which need a
+# person to trigger them each time any more, only to have approved the node once:
+uv run hiraku action create vo-backend/auto-design    --set workflow=design
+uv run hiraku action create vo-backend/auto-implement --set workflow=implement
+uv run hiraku action create vo-backend/auto-triage    --set workflow=triage
+uv run hiraku program create solo-loop \
+  --set actions='[auto-design, auto-implement, auto-triage]' --set max_experiments=5
 uv run hiraku-agent loop --program solo-loop --task vo-backend
 ```
 
@@ -233,9 +252,11 @@ uv run hiraku-agent loop --program solo-loop --task vo-backend
 - `loop` never calls `discover` on its own, because `schedule.suggest_next` never
   suggests it (only `design`, for an empty task) — bind it on a `Program` anyway if a
   future scheduling policy starts suggesting it.
-- `loop` cannot clear the approval gate, bind a commit, or launch anything — those are
-  real decisions and real commands, deliberately left to a person, exactly like guided
-  mode already works today.
+- `loop` cannot clear the approval gate or launch anything — those are a person's decision
+  and a real command, deliberately left to a person, exactly like guided mode already
+  works today. It *can* drive `implement` once a node is approved — the agent always wrote
+  the code, this just lets the loop trigger that step instead of a person calling
+  `hiraku-agent implement` by hand each time.
 - `Action`/`Context`/`Program` are still plain `hiraku.agent` records carrying
   `hiraku_agent`-only extra fields (`workflow`, `agent_cmd`, `context`, `actions`,
   `max_experiments`, ...) — nothing has been proposed to `hiraku` core to make these
