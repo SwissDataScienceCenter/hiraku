@@ -129,14 +129,18 @@ class ProjectInitializer:
                 ):
                     cls._ensure_directory(directory, created_dirs)
                 resource_root = files("hiraku.resources")
+                ai_resources = Path(__file__).parents[2] / ".ai"
+                if not ai_resources.is_dir():
+                    ai_resources = resource_root / ".ai"
                 copies = [
                     (resource_root / "programs", config.programs_dir),
                     (resource_root / "actions", config.actions_dir),
                     (resource_root / "dispatch", config.dispatch_dir),
                 ]
                 if install_skill:
+                    skill = ai_resources / "skills/hiraku"
                     copies.extend(
-                        (resource_root / "skill", target)
+                        (skill, target)
                         for target in (
                             project_root / ".agents/skills/hiraku",
                             project_root / ".claude/skills/hiraku",

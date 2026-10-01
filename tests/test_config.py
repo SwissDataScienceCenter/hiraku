@@ -53,17 +53,24 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert (config.actions_dir / "record/propose/action.md").is_file()
     for name in ("launch.sh", "worktree.sh"):
         assert (config.dispatch_dir / name).stat().st_mode & 0o111
+    source_skill = Path(__file__).parents[1] / ".ai/skills/hiraku/SKILL.md"
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
+    assert source_skill.is_file()
+    assert (root / ".agents/skills/hiraku/references").is_dir()
+    assert (root / ".claude/skills/hiraku/references").is_dir()
     assert codex_skill.is_file()
     assert claude_skill.is_file()
-    assert codex_skill.read_text() == claude_skill.read_text()
+    assert codex_skill.read_text() == source_skill.read_text()
+    assert claude_skill.read_text() == source_skill.read_text()
+    assert not (root / ".ai").exists()
     assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
     HirakuConfig.init(without_skill, install_skill=False)
     assert not (without_skill / ".agents").exists()
     assert not (without_skill / ".claude").exists()
+    assert not (without_skill / ".ai").exists()
 
     with pytest.raises(ProjectExistsError):
         HirakuConfig.init(root)
