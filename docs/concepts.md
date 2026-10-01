@@ -151,15 +151,15 @@ skills.
 ## Actions, Programs, Context
 
 !!! info
-    Agent execution supports `task draft`, `experiment draft`, and `experiment implement`.
+    Agent execution supports `create task`, `create experiment`, and `implement`.
     Programs, scheduling, and automatic loops remain future work.
 
-Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state. A *program* is intended to define a longer research workflow. Actions execute through `hiraku agent`; programs are metadata only for now. Bundled actions are resolved at runtime, while a project action of the same type and ID takes precedence. `hiraku init` does not copy bundled actions into the project. *Context* records hold project-relevant information for future agent workflows.
+Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state. A *program* is intended to define a longer research workflow. Actions execute through `hiraku agent`; programs are metadata only for now. Bundled actions are resolved at runtime, while a project action of the same ID takes precedence. `hiraku init` does not copy bundled actions into the project. *Context* records hold project-relevant information for future agent workflows.
 
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Action** | `hiraku/actions/{entity}/{action_id}/{action.md,hooks.py}` | A project-defined action that overrides a bundled action of the same name. |
+| **Action** | `hiraku/actions/{action_id}/{action.md,hooks.py}` | A project-defined action that overrides a bundled action of the same name. |
 | **Program** | `hiraku/programs/{program_id}/{program.md,program.py}` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
@@ -170,7 +170,7 @@ hiraku program create <program-id>
 hiraku program list
 hiraku context create <context-id>
 hiraku context list
-hiraku action create <entity>/<action-id>
+hiraku action create <action-id> --set 'accepted_types=[task, experiment]'
 hiraku action list
 ```
 
@@ -207,13 +207,13 @@ Type definitions specify lifecycle structure. Field requirements and scientific
 validation are deferred.
 
 ```bash
-hiraku agent experiment draft --record my-task -m "Test a deeper backbone"
-hiraku agent experiment draft --record baseline -m "Extend this experiment"
-hiraku agent task draft -m "Investigate calibration drift in the validation cohort"
-hiraku agent experiment implement --record deeper-backbone
+hiraku agent create experiment --record my-task -m "Test a deeper backbone"
+hiraku agent create experiment --record baseline -m "Extend this experiment"
+hiraku agent create task -m "Investigate calibration drift in the validation cohort"
+hiraku agent implement --record deeper-backbone
 ```
 
-For experiment actions, `--record` defaults to the active record. For `draft`, it selects the parent,
+For experiment actions, `--record` defaults to the active record. For `create`, it selects the parent,
 which may be a task or experiment. For `implement`, it selects the experiment.
 `implement` requires a clean starting tree. Hiraku commits the new work, binds
 its hash, and advances to `implemented`. Both actions accept
@@ -222,8 +222,8 @@ Codex also accepts `--reasoning-effort`. Each attempt writes its prompt, reply
 or error, and metadata under `hiraku/agent-logs/`. Action Markdown contains the
 output format and workflow instructions; `-m` adds only the user's research
 brief. Both experiment actions work without `-m`, using the selected record as
-context. Task drafting requires `-m` and creates and activates a root task.
-Drafting runs Codex in a read-only sandbox, or Claude without tools.
+context. Task creation requires `-m` and creates and activates a root task.
+Creation runs Codex in a read-only sandbox, or Claude without tools.
 Hiraku creates the record and assigns its parent, type, and status itself.
 
 Provider commands and file changes stream to stderr, alongside deterministic
@@ -321,3 +321,16 @@ hiraku runs --record heart-disease --json
 The [Autoresearch example](examples/autoresearch/README.md) shows how to use
 the program with the project-local skill and a bounded dispatcher. The skill
 can be invoked with `/hiraku "run the autoresearch program for heart-disease"`.
+
+
+Actions declare `accepted_types` and an optional `default_type`. Creation
+resolves the positional type first, then the default; bundled `create` requires
+an explicit type. Other actions infer the type from the selected or active
+record. An explicit type must match that record. Optional `--id` assigns a
+creation ID deterministically, with validation before the provider runs.
+
+The common create prompt renders `{{type_prompt}}`, `{{state}}`, and
+`{{instruction}}`. Its `type_prompts` mapping selects a local Markdown
+fragment whose front matter declares parent types, `requires_prompt`, and
+activation. Hiraku sets the type-defined initial status. One action and shared
+hooks handle both task and experiment creation.

@@ -50,7 +50,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert HirakuConfig.discover(nested).root == root
     assert (config.programs_dir / "interactive/program.md").is_file()
     assert (config.programs_dir / "autoresearch/program.md").is_file()
-    assert not (config.actions_dir / "record/draft/action.md").exists()
+    assert not (config.actions_dir / "create/action.md").exists()
     assert not (config.types_dir / "experiment.yml").exists()
     for name in ("launch.sh", "worktree.sh"):
         assert (config.dispatch_dir / name).stat().st_mode & 0o111

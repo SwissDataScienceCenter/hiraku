@@ -1,6 +1,6 @@
 ---
 id: implement
-entity: experiment
+accepted_types: [experiment]
 effect: transition
 from_status: draft
 to_status: implemented

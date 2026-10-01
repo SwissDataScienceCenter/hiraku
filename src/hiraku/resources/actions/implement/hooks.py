@@ -42,6 +42,10 @@ def _changed_paths(context, *, exclude_hiraku):
 
 
 def precondition(context):
+    if context.record.commit is not None:
+        return ConditionResult.fail(
+            "Implementation requires a record without a bound commit"
+        )
     staged = _git(context, "diff", "--cached", "--quiet", check=False)
     if staged.returncode or _changed_paths(context, exclude_hiraku=False):
         return ConditionResult.fail("Implementation requires a clean starting tree")

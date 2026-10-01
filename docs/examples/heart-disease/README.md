@@ -150,15 +150,15 @@ launch that never logs a row will not appear as a run.
     | `logistic-baseline` | `23b1c42c` | Logistic regression | 0.32254890 | 0.85526316 |
     | `random-forest` | `880d2cd3` | Random forest | 0.35226763 | 0.86842105 |
 
-## 5. Draft and implement a new model with agent actions
+## 5. Create and implement a new model with agent actions
 
-After creating the `heart-disease` task in section 2, an agent can draft one
+After creating the `heart-disease` task in section 2, an agent can create one
 new experiment and implement it as two separate invocations. This is the same
 workflow exercised by the opt-in agent action integration test:
 
 ```bash
-hiraku agent experiment draft --record heart-disease \
-  -m "Draft one hypothesis experiment with id gradient-boosting for adding GradientBoostingClassifier to train.py. Include an implementation brief: use model name gradient_boosting, update argparse choices and build_model, preserve existing models and metrics."
+hiraku agent create experiment --id gradient-boosting --record heart-disease \
+  -m "Create one hypothesis experiment for adding GradientBoostingClassifier to train.py. Include an implementation brief: use model name gradient_boosting, update argparse choices and build_model, preserve existing models and metrics."
 
 hiraku record show gradient-boosting
 ```
@@ -170,7 +170,7 @@ Add a training entrypoint:
 hiraku record update gradient-boosting \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: gradient_boosting, seed: 42}}}'
 
-hiraku agent experiment implement --record gradient-boosting
+hiraku agent implement --record gradient-boosting
 
 hiraku record show gradient-boosting
 hiraku launch train --record gradient-boosting

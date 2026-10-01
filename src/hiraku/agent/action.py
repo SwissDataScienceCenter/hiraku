@@ -50,6 +50,11 @@ class ActionContext:
     instruction: str
     runs: list[Any]
     related_records: list[Record]
+    record_type: str = ""
+    supplied_id: str | None = None
+    type_prompt: TypePrompt | None = None
+    type_description: str = ""
+    research_context: dict[str, Any] = field(default_factory=dict)
     report: Callable[..., None] = field(default=lambda *args, **kwargs: None)
     log: Path | None = None
     state: dict[str, Any] = field(default_factory=dict)
@@ -68,24 +73,53 @@ class ActionResult:
     checks: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
-class Action(BaseRecord):
-    """A type-scoped action that creates or transitions one research record."""
+class TypePrompt(BaseRecord):
+    """Type-specific creation instructions and deterministic behavior."""
 
-    entity: str
-    effect: Literal["create", "transition"] | None = None
     parent_types: list[str] = Field(default_factory=list)
     requires_prompt: bool = False
+    activate: bool = False
+
+    @model_validator(mode="after")
+    def validate_parent_types(self) -> TypePrompt:
+        for parent_type in self.parent_types:
+            validate_identifier(parent_type, label="parent type")
+        return self
+
+
+class Action(BaseRecord):
+    """A named action accepting one or more research record types."""
+
+    accepted_types: list[str]
+    default_type: str | None = None
+    type_prompts: dict[str, str] = Field(default_factory=dict)
+    effect: Literal["create", "transition"] | None = None
     from_status: str | None = None
     to_status: str | None = None
     hooks: str | None = None
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> Action:
-        validate_identifier(self.entity, label="action entity")
-        for parent_type in self.parent_types:
-            validate_identifier(parent_type, label="parent type")
-        if self.effect == "create" and self.to_status is None:
-            raise ValidationError("Create actions require an initial status")
+        if {"entity", "parent_types", "requires_prompt"}.intersection(
+            self.model_extra or {}
+        ):
+            raise ValidationError("Use accepted_types and type prompt fragments")
+        if not self.accepted_types or len(set(self.accepted_types)) != len(
+            self.accepted_types
+        ):
+            raise ValidationError("Actions require distinct accepted types")
+        for record_type in self.accepted_types:
+            validate_identifier(record_type, label="record type")
+        if (
+            self.default_type is not None
+            and self.default_type not in self.accepted_types
+        ):
+            raise ValidationError("Action default_type must be an accepted type")
+        for record_type, filename in self.type_prompts.items():
+            if record_type not in self.accepted_types:
+                raise ValidationError("Type prompt must belong to an accepted type")
+            if Path(filename).name != filename or not filename.endswith(".md"):
+                raise ValidationError("Type prompts must be local Markdown filenames")
         if self.effect == "transition" and self.to_status is None:
             raise ValidationError("Transition actions require a destination status")
         return self
@@ -94,49 +128,48 @@ class Action(BaseRecord):
 def load_action(
     action_id: str,
     *,
-    entity: str,
     config: HirakuConfig | None = None,
 ) -> Action:
     selected = config or HirakuConfig.discover()
-    validate_identifier(entity, label="action entity")
     validate_identifier(action_id, label="action ID")
-    path = selected.actions_dir / entity / action_id / "action.md"
+    path = selected.actions_dir / action_id / "action.md"
     if not path.is_file():
         path = Path(
             str(
                 importlib.resources.files("hiraku.resources")
                 / "actions"
-                / entity
                 / action_id
                 / "action.md"
             )
         )
     action = Action.load(path)
     _validate_identity(action, action_id, path, "Action")
-    if action.entity != entity:
-        raise ValidationError(
-            f"Action entity {action.entity!r} does not match path entity {entity!r}"
-        )
     return action
 
 
 def action_origin(action: Action, *, config: HirakuConfig) -> str:
-    path = config.actions_dir / action.entity / action.id / "action.md"
+    path = config.actions_dir / action.id / "action.md"
     return "project" if action.path == path.absolute() else "bundled"
 
 
 def list_actions(
-    *, entity: str | None = None, config: HirakuConfig | None = None
+    *, record_type: str | None = None, config: HirakuConfig | None = None
 ) -> list[Action]:
     selected = config or HirakuConfig.discover()
-    if entity is not None:
-        validate_identifier(entity, label="action entity")
-    pattern = f"{entity}/*/action.md" if entity else "*/*/action.md"
-    actions = Action.list(selected.actions_dir.glob(pattern))
-    for action in actions:
-        expected = selected.actions_dir / action.entity / action.id / "action.md"
-        _validate_identity(action, action.id, expected, "Action")
-    return actions
+    bundled = Path(str(importlib.resources.files("hiraku.resources") / "actions"))
+    identifiers = {
+        path.parent.name
+        for root in (bundled, selected.actions_dir)
+        for path in root.glob("*/action.md")
+    }
+    actions = [
+        load_action(identifier, config=selected) for identifier in sorted(identifiers)
+    ]
+    return [
+        action
+        for action in actions
+        if record_type is None or record_type in action.accepted_types
+    ]
 
 
 def _load_hooks(action: Action) -> Any | None:
@@ -147,7 +180,7 @@ def _load_hooks(action: Action) -> Any | None:
     path = action.path.parent / action.hooks
     if not path.is_file():
         raise ValidationError(f"Declared action hooks not found: {path}")
-    name = f"_hiraku_action_{action.entity}_{action.id}_{id(action)}"
+    name = f"_hiraku_action_{action.id}_{id(action)}"
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ValidationError(f"Cannot load action hooks: {path}")
@@ -193,7 +226,7 @@ def _condition(
 
 def _prompt(context: ActionContext) -> str:
     records = list_records(config=context.config)
-    if context.action.entity == "task":
+    if context.record_type == "task" and context.action.effect == "create":
         state: dict[str, Any] = {
             "existing_tasks": [record.id for record in records if record.type == "task"]
         }
@@ -223,12 +256,31 @@ def _prompt(context: ActionContext) -> str:
                 if run.record_id == record.id
             ],
         }
-    prompt = context.action.markdown
-    prompt = prompt.replace("{{state}}", json.dumps(state, default=str, indent=2))
-    prompt = prompt.replace("{{instruction}}", context.instruction)
-    if re.search(r"\{\{[^{}]+}}", prompt):
-        raise ValidationError("Action prompt contains an unknown template variable")
-    return prompt
+    definition = load_type(context.record_type, config=context.config)
+    state.update(
+        type=context.record_type,
+        supplied_id=context.supplied_id,
+        type_description=definition.markdown,
+        record=_record_data(context.record),
+    )
+    context.type_description = definition.markdown
+    context.research_context = state
+    variables = {
+        "state": json.dumps(state, default=str, indent=2),
+        "instruction": context.instruction,
+        "type_prompt": context.type_prompt.markdown if context.type_prompt else "",
+    }
+    prompt = context.action.markdown.replace(
+        "{{type_prompt}}", variables["type_prompt"]
+    )
+
+    def render(match: re.Match[str]) -> str:
+        key = match.group(1).strip()
+        if key not in variables:
+            raise ValidationError("Action prompt contains an unknown template variable")
+        return variables[key]
+
+    return re.sub(r"\{\{([^{}]+)}}", render, prompt)
 
 
 def _record_data(record: Record | None) -> dict[str, Any] | None:
@@ -261,29 +313,25 @@ def _parse_reply(reply: str) -> dict[str, Any]:
 
 def _apply_result(context: ActionContext, result: ActionResult) -> Record:
     action = context.action
-    if action.to_status is None:
+    if action.effect == "transition" and action.to_status is None:
         raise ValidationError("Executable action requires to_status")
     if action.effect == "create":
-        identifier = result.data.get("id")
+        identifier = context.supplied_id or result.data.get("id")
         if not isinstance(identifier, str) or not identifier:
             raise ActionError("Create action reply requires a record id")
-        allowed_statuses = load_type(action.entity, config=context.config)
-        if action.to_status not in {
-            allowed_statuses.initial_status,
-            *allowed_statuses.lifecycle,
-        }:
-            raise ValidationError("Create action has an invalid initial status")
+        definition = load_type(context.record_type, config=context.config)
+        validate_identifier(identifier, label="record ID")
         reserved = {"id", "type", "status", "parent_id", "related_to", "path", "commit"}
-        if reserved.intersection(result.data) != {"id"}:
+        if reserved.intersection(result.data) - {"id"}:
             raise ActionError("Create action reply contains reserved record fields")
-        if context.record and action.parent_types:
-            if context.record.type not in action.parent_types:
+        fragment = context.type_prompt or TypePrompt(id=context.record_type)
+        if context.record and fragment.parent_types:
+            if context.record.type not in fragment.parent_types:
                 raise ValidationError(
-                    f"Action {action.entity}/{action.id} cannot create under "
-                    f"{context.record.type!r}"
+                    f"Action {action.id} cannot create under {context.record.type!r}"
                 )
             parent_id = context.record.id
-        elif context.record is None and not action.parent_types:
+        elif context.record is None and not fragment.parent_types:
             parent_id = None
         else:
             raise ValidationError(
@@ -298,9 +346,9 @@ def _apply_result(context: ActionContext, result: ActionResult) -> Record:
         created = Record.create(
             identifier,
             parent_id=parent_id,
-            type=action.entity,
-            status=action.to_status,
-            activate=action.entity == "task",
+            type=context.record_type,
+            status=definition.initial_status,
+            activate=fragment.activate,
             config=context.config,
             markdown=markdown,
             **fields,
@@ -315,9 +363,9 @@ def _apply_result(context: ActionContext, result: ActionResult) -> Record:
     if context.record is None:
         raise ValidationError("Transition action requires a selected record")
     live = load_record(context.record.id, config=context.config)
-    if live.type != action.entity:
+    if live.type != context.record_type:
         raise ValidationError(
-            f"Action {action.entity}/{action.id} needs a {action.entity} record"
+            f"Action {action.id} needs a {context.record_type} record"
         )
     if live.status != context.record.status:
         raise ActionError("Agent changed status; Hiraku owns the transition")
@@ -331,10 +379,11 @@ def _apply_result(context: ActionContext, result: ActionResult) -> Record:
 
 
 def run_action(
-    entity: str,
     action_id: str,
     *,
-    record_id: str | None,
+    record_type: str | None = None,
+    record_id: str | None = None,
+    supplied_id: str | None = None,
     instruction: str = "",
     provider: str | None = None,
     model: str | None = None,
@@ -346,30 +395,64 @@ def run_action(
     from .provider import call_provider, provider_command
 
     selected = config or HirakuConfig.discover()
-    action = load_action(action_id, entity=entity, config=selected)
-    if action.requires_prompt and not instruction.strip():
-        raise ValidationError(f"Action {entity}/{action_id} requires -m/--message")
-    target = load_record(record_id, config=selected) if record_id else None
+    action = load_action(action_id, config=selected)
+    fragment = None
     if action.effect == "create":
-        if action.parent_types and target is None:
+        entity = record_type or action.default_type
+        if entity is None:
+            raise ValidationError(
+                f"Action {action_id} requires an explicit record type"
+            )
+    elif action.effect == "transition":
+        if supplied_id is not None:
+            raise ValidationError("--id is only supported for create actions")
+        identifier = record_id or selected.active_record_id
+        if identifier is None:
+            raise ValidationError("Action requires --record or an active record")
+        target = load_record(identifier, config=selected)
+        entity = record_type or target.type
+        if entity != target.type:
+            raise ValidationError("Explicit type does not match the selected record")
+    else:
+        raise ValidationError(f"Action {action_id} is not executable")
+    if entity not in action.accepted_types:
+        raise ValidationError(f"Action {action_id} does not support type {entity!r}")
+    load_type(entity, config=selected)
+    if action.effect == "create":
+        filename = action.type_prompts.get(entity)
+        fragment = (
+            TypePrompt.load(action.path.parent / filename)
+            if filename
+            else TypePrompt(id=entity)
+        )
+        if fragment.id != entity:
+            raise ValidationError("Type prompt ID does not match the selected type")
+        if fragment.requires_prompt and not instruction.strip():
+            raise ValidationError(
+                f"Action {action_id} for {entity} requires -m/--message"
+            )
+        if supplied_id is not None:
+            validate_identifier(supplied_id, label="record ID")
+            if any(
+                record.id == supplied_id for record in list_records(config=selected)
+            ):
+                raise ValidationError(f"Record {supplied_id!r} already exists")
+        identifier = record_id or (
+            selected.active_record_id if fragment.parent_types else None
+        )
+        target = load_record(identifier, config=selected) if identifier else None
+        if fragment.parent_types and target is None:
             raise ValidationError(
                 "This create action requires --record or an active record"
             )
-        if not action.parent_types and target is not None:
+        if not fragment.parent_types and target is not None:
             raise ValidationError(
                 "This create action creates a root record without a parent"
             )
-        if target is not None and target.type not in action.parent_types:
+        if target is not None and target.type not in fragment.parent_types:
             raise ValidationError(
-                f"Action {entity}/{action_id} cannot create under {target.type!r}"
+                f"Action {action_id} cannot create under {target.type!r}"
             )
-        definition = load_type(entity, config=selected)
-        if action.to_status not in {definition.initial_status, *definition.lifecycle}:
-            raise ValidationError("Create action has an invalid initial status")
-    elif action.effect == "transition" and (target is None or target.type != entity):
-        raise ValidationError(f"Action {entity}/{action_id} requires a {entity} record")
-    elif action.effect is None:
-        raise ValidationError(f"Action {entity}/{action_id} is not executable")
     if (
         action.from_status is not None
         and target
@@ -406,6 +489,9 @@ def run_action(
                 )
             ]
         ),
+        record_type=entity,
+        supplied_id=supplied_id,
+        type_prompt=fragment,
     )
     resolved_provider = provider or selected.agent_provider
     resolved_model = model or (
@@ -491,7 +577,9 @@ def run_action(
         (result.log / "meta.json").write_text(
             json.dumps(
                 {
-                    "action": f"{entity}/{action_id}",
+                    "action": action_id,
+                    "record_type": entity,
+                    "supplied_id": supplied_id,
                     "target": target.id if target else None,
                     "origin": result.origin,
                     "provider": resolved_provider,

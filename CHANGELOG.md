@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Add explicit record lifecycles and project-overridable type definitions with
   `hiraku type list` and `hiraku type show`.
-- Add agent task drafting, experiment drafting, and implementation through
+- Add agent task creation, experiment creation, and implementation through
   configurable Codex or Claude providers, with streamed progress, attempt logs,
   declared Python hooks, and deterministic record and commit updates (issue #3).
 

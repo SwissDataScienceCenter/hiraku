@@ -143,17 +143,19 @@ def test_generic_agent_commands_still_work(tmp_path: Path, monkeypatch) -> None:
         invoke("program", "update", "test", "--set", "purpose=inspect").exit_code == 0
     )
     assert invoke("context", "create", "literature").exit_code == 0
-    assert invoke("action", "create", "record/review").exit_code == 0
     assert (
-        json.loads(invoke("action", "show", "record/review", "--json").output)["id"]
-        == "review"
-    )
-    assert invoke("action", "list", "--entity", "record").exit_code == 0
-    assert (
-        invoke("action", "update", "record/review", "--set", "status=ready").exit_code
+        invoke(
+            "action", "create", "review", "--set", 'accepted_types=["record"]'
+        ).exit_code
         == 0
     )
-    assert invoke("action", "delete", "record/review").exit_code == 0
+    assert (
+        json.loads(invoke("action", "show", "review", "--json").output)["id"]
+        == "review"
+    )
+    assert invoke("action", "list", "--type", "record").exit_code == 0
+    assert invoke("action", "update", "review", "--set", "status=ready").exit_code == 0
+    assert invoke("action", "delete", "review").exit_code == 0
 
 
 def test_edit_uses_stored_file(tmp_path: Path, monkeypatch) -> None:

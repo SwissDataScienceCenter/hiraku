@@ -1,12 +1,10 @@
 ---
-id: draft
-entity: task
-effect: create
-to_status: draft
+id: task
+parent_types: []
 requires_prompt: true
-hooks: hooks.py
+activate: true
 ---
-# Task: draft a new task from a researcher's instruction
+# Task: create a new task from a researcher's instruction
 
 You are helping start a research task inside a Hiraku project. There is no
 experiment tree yet; that is designed after the task exists. Turn the
@@ -36,13 +34,7 @@ goal, question, or metric that was not stated or is not a direct restatement.
   `notes`. If no metric is named or implied, return an empty list.
 - Do not propose entrypoints or fields outside this contract.
 
-## Current state
 
-```json
-{{state}}
-```
-
-{{instruction}}
 
 ## Output contract
 

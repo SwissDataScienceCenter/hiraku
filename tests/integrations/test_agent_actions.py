@@ -61,8 +61,10 @@ def test_codex_drafts_and_implements_heart_disease_model(
         runner,
         [
             "agent",
+            "create",
             "experiment",
-            "draft",
+            "--id",
+            "gradient-boosting",
             "--record",
             task.id,
             "--provider",
@@ -72,7 +74,7 @@ def test_codex_drafts_and_implements_heart_disease_model(
             "--reasoning-effort",
             "low",
             "-m",
-            "Draft one experiment with id gradient-boosting to test adding "
+            "Create one hypothesis experiment to test adding "
             "GradientBoostingClassifier to the Heart Disease train.py example. "
             "Include an implementation brief: use model name gradient_boosting, "
             "update argparse choices and build_model, preserve existing models "
@@ -95,7 +97,6 @@ def test_codex_drafts_and_implements_heart_disease_model(
         runner,
         [
             "agent",
-            "experiment",
             "implement",
             "--record",
             experiment.id,

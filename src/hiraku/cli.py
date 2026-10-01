@@ -634,8 +634,9 @@ def action_group() -> None:
 
 
 @main.command("agent")
-@click.argument("entity")
 @click.argument("action_id")
+@click.argument("record_type", required=False)
+@click.option("--id", "supplied_id")
 @click.option("--record", "record_id")
 @click.option("-m", "--message", default="", help="Instruction for the agent")
 @click.option("--provider")
@@ -645,8 +646,9 @@ def action_group() -> None:
 @click.pass_obj
 def agent_command(
     state: CLIContext,
-    entity: str,
     action_id: str,
+    record_type: str | None,
+    supplied_id: str | None,
     record_id: str | None,
     message: str,
     provider: str | None,
@@ -655,13 +657,11 @@ def agent_command(
     json_output: bool,
 ) -> None:
     """Execute one declared agent action for the active or selected record."""
-    selected_record_id = record_id
-    if selected_record_id is None and not (entity == "task" and action_id == "draft"):
-        selected_record_id = state.config.active_record_id
     result = run_action(
-        entity,
         action_id,
-        record_id=selected_record_id,
+        record_type=record_type,
+        supplied_id=supplied_id,
+        record_id=record_id,
         instruction=message,
         provider=provider,
         model=model,
@@ -670,7 +670,7 @@ def agent_command(
         on_event=lambda event: click.echo(event["message"], err=True),
     )
     payload = {
-        "action": f"{entity}/{action_id}",
+        "action": action_id,
         "record": result.record.id,
         "status": result.record.status,
         "origin": result.origin,
@@ -692,13 +692,16 @@ def agent_command(
 
 
 @action_group.command("list")
-@click.option("--entity")
+@click.option("--type", "record_type")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def action_list(state: CLIContext, entity: str | None, json_output: bool) -> None:
-    records = list_actions(entity=entity, config=state.config)
+def action_list(state: CLIContext, record_type: str | None, json_output: bool) -> None:
+    records = list_actions(record_type=record_type, config=state.config)
     _emit_json(records) if json_output else click.echo(
-        _table(("entity", "id"), [(r.entity, r.id) for r in records])
+        _table(
+            ("id", "accepted types"),
+            [(r.id, ", ".join(r.accepted_types)) for r in records],
+        )
     )
 
 
@@ -716,10 +719,7 @@ def action_show(state: CLIContext, reference: str, json_output: bool) -> None:
 def _action_ref(
     reference: str, config: HirakuConfig, *, project_only: bool = False
 ) -> Action:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    action = load_action(identifier, entity=entity, config=config)
+    action = load_action(reference, config=config)
     if project_only and action_origin(action, config=config) != "project":
         raise ValidationError(
             f"Action {reference!r} is bundled; create a project override to edit it"
@@ -738,18 +738,14 @@ def action_create(
     set_values: tuple[str, ...],
     markdown_file: Path | None,
 ) -> None:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    validate_identifier(entity, label="action entity")
+    identifier = reference
     validate_identifier(identifier, label="action ID")
     record = Action(
         id=identifier,
-        entity=entity,
         markdown=_markdown(markdown_file),
         **_fields(set_values),
     )
-    path = state.config.actions_dir / entity / identifier / "action.md"
+    path = state.config.actions_dir / identifier / "action.md"
     record.save(path)
     click.echo(f"Created action {reference} at {path}")
 
@@ -772,7 +768,7 @@ def action_update(
         set_values,
         unset_values,
         markdown_file,
-        immutable={"id", "entity"},
+        immutable={"id"},
     )
     click.echo(f"Updated action {reference}")
 
@@ -781,11 +777,8 @@ def action_update(
 @click.argument("reference")
 @click.pass_obj
 def action_edit(state: CLIContext, reference: str) -> None:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
     _action_ref(reference, state.config, project_only=True)
-    path = state.config.actions_dir / entity / identifier / "action.md"
+    path = state.config.actions_dir / reference / "action.md"
     _edit_recoverable(
         path,
         lambda: _action_ref(reference, state.config, project_only=True),

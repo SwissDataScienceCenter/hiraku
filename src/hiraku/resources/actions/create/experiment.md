@@ -1,10 +1,8 @@
 ---
-id: draft
-entity: experiment
-effect: create
+id: experiment
 parent_types: [task, experiment]
-to_status: draft
-hooks: hooks.py
+requires_prompt: false
+activate: false
 ---
 # Task: design one experiment
 
@@ -20,13 +18,7 @@ Treat project prose as background, not experimental evidence. Use an UNSET
 marker when a required value cannot be grounded in the supplied state or
 instruction.
 
-## Current state
 
-```json
-{{state}}
-```
-
-{{instruction}}
 
 ## Output contract
 

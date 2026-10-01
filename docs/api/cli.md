@@ -20,24 +20,48 @@ description. Both commands accept `--json`. Define types in
 `hiraku/types/<id>.md` using `id`, `initial_status`, and `lifecycle` front matter.
 Types have no transition graph; individual actions declare their endpoints.
 
-`hiraku agent task draft -m "..."` drafts and activates a new root task. It does
-not use the active record as a parent. `hiraku agent experiment draft` creates
-one experiment under the active or selected task/experiment; `-m` adds a
-researcher-supplied idea to the design prompt.
+Actions use `hiraku agent <action-id> [type]`. The bundled `create` action
+accepts task and experiment and has no default type:
 
-The experiment draft reply contains `id`, `kind`, and `body`; Hiraku stores
-the brief in the record's Markdown body. Task drafting uses
-`requires_prompt: true` to require `-m`; action templates render `{{state}}` and
-`{{instruction}}`.
+```bash
+hiraku agent create task --id heart-disease -m "Compare predictive models"
+hiraku agent create experiment --id gradient-boosting --record heart-disease
+hiraku agent implement --record gradient-boosting
+hiraku agent implement
+```
 
-`hiraku agent experiment draft -m "..."` creates a draft experiment under the
-active task or experiment record. For creation, `--record ID` selects its parent;
-for implementation it selects the experiment to change. `implement` requires a
-clean working tree, commits the new work, binds its hash, and sets
-`status: implemented`.
-Pass `--provider`, `--model`, or `--reasoning-effort` to override project agent
-defaults. Bundled actions are resolved at runtime; project actions with the same
-type and name override them. The result reports the resolved action origin.
+Task creation requires `-m`, creates a root task, and activates it, ignoring
+the active record as a parent. Experiment creation uses the selected or active
+task/experiment as parent; `-m` optionally adds research instructions. Its
+reply contains `id`, `kind`, and `body`; Hiraku stores the brief as Markdown.
+
+`--id` is optional for creation. Hiraku validates supplied IDs and uniqueness
+before provider execution and assigns the ID itself. Without it, the provider
+proposes an ID, which is validated before persistence. Transition actions reject
+`--id`. Existing-record actions infer the type from the selected or active
+record; an explicit positional type must match it.
+
+Action definitions live at `hiraku/actions/<action-id>/action.md`, with
+project-first resolution and bundled fallback. Front matter declares
+`accepted_types`, optional `default_type`, `effect`, and `hooks`.
+Creation uses `type_prompts` to map types to local Markdown fragments.
+Fragment front matter declares `id`, `parent_types`, `requires_prompt`,
+and `activate`; its body provides the type-specific output contract.
+The common prompt renders `{{type_prompt}}`, `{{state}}`, and
+`{{instruction}}`. State and hooks receive the resolved type, supplied ID,
+type description, and research context. Hiraku assigns the initial status
+from the type definition.
+
+`implement` accepts experiments in `draft` with no bound commit and requires a
+clean working tree. Hiraku commits the work, binds its hash, and advances the
+status to `implemented`. Provider progress, edited files, deterministic changes,
+and attempt logs remain available.
+
+Use `--provider`, `--model`, or `--reasoning-effort` to override project
+defaults. `hiraku action list [--type TYPE]` lists resolved actions;
+`hiraku action show <action-id>` shows the definition. Bundled actions are
+not copied into projects, and results declare their origin. Dataset creation
+is deferred; project actions can accept custom types.
 
 `hiraku init` requires its target to be a Git repository root. Use
 `hiraku init PATH --ignore-git` to intentionally initialize a nested or non-Git

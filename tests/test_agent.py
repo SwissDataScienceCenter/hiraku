@@ -20,10 +20,10 @@ def test_agent_record_registries(tmp_path: Path) -> None:
     context = Context(id="literature", markdown="Sources")
     context.save(config.contexts_dir / "literature/context.md")
     assert load_context("literature", config=config).markdown == "Sources"
-    action = load_action("draft", entity="experiment", config=config)
-    assert action.entity == "experiment"
+    action = load_action("create", config=config)
+    assert action.accepted_types == ["task", "experiment"]
     assert action_origin(action, config=config) == "bundled"
-    assert not (config.actions_dir / "experiment/draft/action.md").exists()
+    assert not (config.actions_dir / "create/action.md").exists()
 
 
 def test_bundled_action_cannot_be_edited_or_deleted(
@@ -32,7 +32,7 @@ def test_bundled_action_cannot_be_edited_or_deleted(
     config = HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     for command in ("update", "edit", "delete"):
-        result = CliRunner().invoke(main, ["action", command, "experiment/draft"])
+        result = CliRunner().invoke(main, ["action", command, "create"])
         assert result.exit_code != 0
         assert "bundled" in result.output
-    assert load_action("draft", entity="experiment", config=config).id == "draft"
+    assert load_action("create", config=config).id == "create"

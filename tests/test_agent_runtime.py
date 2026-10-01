@@ -8,11 +8,117 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from hiraku.agent.action import Action, ActionContext
+from hiraku.agent.action import Action, ActionContext, run_action
 from hiraku.agent.provider import call_provider as _call_provider
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
+from hiraku.errors import HirakuError
 from hiraku.record import Record, list_records, load_record
+from hiraku.state import RecordType
+
+
+@pytest.mark.parametrize(
+    "arguments, message",
+    [
+        (["create"], "explicit record type"),
+        (["create", "dataset"], "does not support"),
+        (["create", "experiment", "--id", "bad/id"], "record ID"),
+        (["create", "experiment", "--id", "task"], "already exists"),
+        (["implement", "task", "--record", "child"], "does not match"),
+        (["implement", "--record", "task"], "does not support"),
+        (["implement", "--record", "child", "--id", "new"], "only supported"),
+        (["draft", "experiment"], "not found"),
+    ],
+)
+def test_invalid_action_selection_skips_provider(
+    tmp_path, monkeypatch, arguments, message
+):
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    Record.create("task", type="task", config=config)
+    Record.create("child", type="experiment", parent_id="task", config=config)
+    monkeypatch.chdir(tmp_path)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Provider should not run")
+
+    monkeypatch.setattr("hiraku.agent.provider.call_provider", unexpected)
+    result = CliRunner().invoke(main, ["agent", *arguments])
+    assert result.exit_code != 0
+    assert message in result.output
+
+
+def test_supplied_id_and_type_context(tmp_path, monkeypatch):
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    Record.create("task", type="task", config=config)
+
+    def reply(provider, model, prompt, root, effort, **kwargs):
+        context = kwargs["context"]
+        assert (context.record_type, context.supplied_id) == ("experiment", "chosen")
+        assert '"type_description"' in prompt
+        assert '"supplied_id": "chosen"' in prompt
+        assert "Markdown experiment brief" in prompt
+        assert "probability calibration" not in prompt
+        assert "{{type_prompt}}" not in prompt
+        return '{"id":"ignored","kind":"hypothesis","body":"Test a new model"}'
+
+    monkeypatch.setattr("hiraku.agent.provider.call_provider", reply)
+    result = run_action(
+        "create", record_type="experiment", supplied_id="chosen", config=config
+    )
+    assert (result.record.id, result.record.parent_id, result.record.markdown) == (
+        "chosen",
+        "task",
+        "Test a new model",
+    )
+
+
+@pytest.mark.parametrize("identifier", ["task", "bad/id"])
+def test_generated_id_validation(tmp_path, monkeypatch, identifier):
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    Record.create("task", type="task", config=config)
+    monkeypatch.setattr(
+        "hiraku.agent.provider.call_provider",
+        lambda *args, **kwargs: json.dumps(
+            {"id": identifier, "kind": "baseline", "body": "Brief"}
+        ),
+    )
+    with pytest.raises(HirakuError):
+        run_action("create", record_type="experiment", config=config)
+    assert [record.id for record in list_records(config=config)] == ["task"]
+
+
+def test_custom_default_type_and_initial_status(tmp_path, monkeypatch):
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    RecordType(
+        id="survey",
+        initial_status="planned",
+        lifecycle=["planned", "ready"],
+        markdown="Collect participant responses",
+    ).save(config.types_dir / "survey.md")
+    Action(
+        id="collect",
+        accepted_types=["survey"],
+        default_type="survey",
+        effect="create",
+        markdown="{{state}} {{instruction}}",
+    ).save(config.actions_dir / "collect/action.md")
+    monkeypatch.setattr(
+        "hiraku.agent.provider.call_provider",
+        lambda *args, **kwargs: '{"id":"survey-one","markdown":"Questions"}',
+    )
+    result = run_action("collect", config=config)
+    assert (result.record.type, result.record.status) == ("survey", "planned")
+
+
+def test_implement_rejects_bound_commit_before_provider(tmp_path, monkeypatch):
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    Record.create("child", type="experiment", commit="a" * 40, config=config)
+    monkeypatch.setattr(
+        "hiraku.agent.provider.call_provider",
+        lambda *args, **kwargs: pytest.fail("Provider should not run"),
+    )
+    with pytest.raises(HirakuError, match="without a bound commit"):
+        run_action("implement", config=config)
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -43,8 +149,8 @@ def test_draft_creates_under_task_or_experiment(tmp_path: Path, monkeypatch) -> 
         main,
         [
             "agent",
+            "create",
             "experiment",
-            "draft",
             "--record",
             "task",
             "-m",
@@ -62,8 +168,8 @@ def test_draft_creates_under_task_or_experiment(tmp_path: Path, monkeypatch) -> 
         main,
         [
             "agent",
+            "create",
             "experiment",
-            "draft",
             "--record",
             "baseline",
             "-m",
@@ -106,15 +212,15 @@ def test_task_draft_creates_and_activates_root_task(
 
     monkeypatch.setattr("hiraku.agent.provider.call_provider", reply)
     runner = CliRunner()
-    missing = runner.invoke(main, ["agent", "task", "draft"])
+    missing = runner.invoke(main, ["agent", "create", "task"])
     assert missing.exit_code != 0
     assert "requires -m/--message" in missing.output
     result = runner.invoke(
         main,
         [
             "agent",
+            "create",
             "task",
-            "draft",
             "-m",
             "Investigate calibration drift",
             "--json",
@@ -157,7 +263,6 @@ def test_implement_binds_hash_and_transitions(tmp_path: Path, monkeypatch) -> No
         main,
         [
             "agent",
-            "experiment",
             "implement",
             "--record",
             "baseline",
@@ -185,7 +290,6 @@ def test_implement_binds_hash_and_transitions(tmp_path: Path, monkeypatch) -> No
             main,
             [
                 "agent",
-                "experiment",
                 "implement",
                 "--record",
                 "baseline",
@@ -209,7 +313,6 @@ def test_implement_rejects_dirty_start(tmp_path: Path, monkeypatch) -> None:
         main,
         [
             "agent",
-            "experiment",
             "implement",
             "--record",
             "baseline",
@@ -225,7 +328,6 @@ def test_implement_rejects_dirty_start(tmp_path: Path, monkeypatch) -> None:
         main,
         [
             "agent",
-            "experiment",
             "implement",
             "--record",
             "baseline",
@@ -240,14 +342,17 @@ def test_project_draft_overrides_bundled(tmp_path: Path, monkeypatch) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     Record.create("task", type="task", config=config)
     custom = Action(
-        id="draft",
-        entity="experiment",
+        id="create",
+        accepted_types=["experiment"],
         effect="create",
-        parent_types=["task"],
+        type_prompts={"experiment": "experiment.md"},
         to_status="draft",
         markdown="Project-specific experiment prompt",
     )
-    custom.save(config.actions_dir / "experiment/draft/action.md")
+    custom.save(config.actions_dir / "create/action.md")
+    (custom.path.parent / "experiment.md").write_text(
+        "---\nid: experiment\nparent_types: [task]\n---\n"
+    )
     (custom.path.parent / "hooks.py").write_text(
         "raise RuntimeError('undeclared hook executed')\n", encoding="utf-8"
     )
@@ -259,7 +364,7 @@ def test_project_draft_overrides_bundled(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr("hiraku.agent.provider.call_provider", reply)
     result = CliRunner().invoke(
-        main, ["agent", "experiment", "draft", "--record", "task", "--json"]
+        main, ["agent", "create", "experiment", "--record", "task", "--json"]
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["origin"] == "project"
@@ -317,7 +422,13 @@ def test_provider_streams_before_completion(
         lambda *args: [sys.executable, str(script)],
     )
     context = ActionContext(
-        config, Action(id="test", entity="experiment"), record, "", [], [], log=tmp_path
+        config,
+        Action(id="test", accepted_types=["experiment"]),
+        record,
+        "",
+        [],
+        [],
+        log=tmp_path,
     )
     context.report = lambda *args, **kwargs: marker.touch()
     reply = _call_provider(provider, None, "brief", tmp_path, context=context)
@@ -332,14 +443,14 @@ def test_declared_hooks_receive_record_and_runs(tmp_path: Path, monkeypatch) -> 
     (tmp_path / "runs.csv").write_text("id,record_id\none,baseline\ntwo,task\n")
     custom = Action(
         id="inspect",
-        entity="experiment",
+        accepted_types=["experiment"],
         effect="transition",
         from_status="draft",
         to_status="implemented",
         hooks="hooks.py",
         markdown="Inspect it",
     )
-    custom.save(config.actions_dir / "experiment/inspect/action.md")
+    custom.save(config.actions_dir / "inspect/action.md")
     (custom.path.parent / "hooks.py").write_text(
         "from hiraku.agent.action import ConditionResult\n"
         "def precondition(context):\n"
@@ -358,7 +469,6 @@ def test_declared_hooks_receive_record_and_runs(tmp_path: Path, monkeypatch) -> 
         main,
         [
             "agent",
-            "experiment",
             "inspect",
             "--record",
             "baseline",
@@ -378,7 +488,7 @@ def test_invalid_create_reply_keeps_parent_unchanged(
         "hiraku.agent.provider.call_provider",
         lambda *args, **kwargs: "not JSON",
     )
-    result = CliRunner().invoke(main, ["agent", "experiment", "draft"])
+    result = CliRunner().invoke(main, ["agent", "create", "experiment"])
     assert result.exit_code != 0
     assert "JSON object" in result.output
     assert load_record("task", config=config).status == "draft"
@@ -404,8 +514,8 @@ def test_provider_override_does_not_reuse_codex_defaults(
         main,
         [
             "agent",
+            "create",
             "experiment",
-            "draft",
             "--provider",
             "claude",
         ],
