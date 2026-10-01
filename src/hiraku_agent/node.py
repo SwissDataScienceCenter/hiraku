@@ -69,9 +69,21 @@ class Node(Experiment):
             — `Record`'s YAML front matter only accepts
             str/int/float/bool/None/list/mapping (see
             `Record._validate_yaml_value`), not a raw `datetime`.
-        abandoned: Explicitly dropped. The one state in `docs/state.md` with
-            no evidence to derive it from — dropping a node is always a
-            decision, so it always needs an explicit flag.
+        abandoned: Explicitly dropped. One of the two ways a node reaches
+            `completed` with no evidence to derive it from — dropping a node
+            is always a decision, so it always needs an explicit flag. See
+            `state.node_state`.
+        triaged: Whether `triage` has already recorded a go/no-go decision
+            for this node's *current* verdict. The other way (besides
+            `abandoned` and already having children) a `concluded` node
+            becomes `completed`: a node can conclude with no children and
+            still be done, once something has judged it and said so — a
+            `supports` verdict that doesn't warrant a follow-up ablation is
+            just as "decided" as a `refutes` one that doesn't. Set by
+            `workflows.run_triage` when it completes (not when it reports
+            `blocked`); reset to `False` by `workflows.run_analyze` whenever
+            it writes a *new* verdict, since a fresh verdict needs a fresh
+            decision — see `state.node_state`.
     """
 
     parent: str | None = None
@@ -84,6 +96,7 @@ class Node(Experiment):
     approved_by: str | None = None
     approved_at: str | None = None
     abandoned: bool = False
+    triaged: bool = False
 
 
 def create_node(
@@ -103,9 +116,11 @@ def create_node(
 
     Deliberately does not accept `commit`: a node is created `proposed` (see
     `state.node_state`), and moves to `implemented` only once real code
-    exists to bind, via `hiraku experiment update <id> --commit <hash>` (or
-    the `Node` equivalent once `implement` is ported — see `schedule.py`'s
-    module docstring).
+    exists to bind — by hand with `hiraku experiment update <id> --commit
+    <hash>`, or by having an agent write that code and bind it itself with
+    `hiraku-agent implement <id>` (`workflows.run_implement`; see its
+    docstring for the approval gate that authorizes it to write anything at
+    all).
     """
     return Node.create(
         node_id,

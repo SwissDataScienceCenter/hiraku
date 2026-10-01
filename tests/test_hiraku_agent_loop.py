@@ -17,6 +17,7 @@ from hiraku.agent import Action, Program
 from hiraku.config import HirakuConfig
 from hiraku.data import Run, Task
 from hiraku_agent.errors import AgentError
+from hiraku_agent.gates import approve
 from hiraku_agent.loop import _duration_seconds, run_loop
 from hiraku_agent.node import Node, create_node, load_node
 
@@ -154,6 +155,56 @@ def test_run_loop_calls_analyze_for_a_node_awaiting_analysis(
     assert result.steps[0].node == "baseline"
     reloaded = load_node("baseline", task=task, config=config)
     assert reloaded.verdict == "supports"
+    # A `supports` verdict is `concluded`, not `completed` — it still needs a `triage`
+    # decision (see `state.node_state`), and this Program has no Action bound for that
+    # workflow, so the loop stops here rather than silently skipping it.
+    assert "triage" in result.stopped
+    assert "supports" in result.stopped
+
+
+def test_run_loop_calls_triage_for_a_concluded_node_even_with_a_supports_verdict(
+    config: HirakuConfig, task: Task, tmp_path: Path
+) -> None:
+    """Unlike the old model, the loop doesn't treat `supports` as the end of the
+    branch — bind a `triage` Action and it drives that decision automatically too,
+    exactly like `design`/`analyze`/`implement`."""
+    node = create_node(
+        "baseline", task=task, kind="baseline", expectation="x", config=config
+    )
+    node.commit = "a" * 40
+    node.verdict = "supports"
+    node.save()
+
+    payload = {
+        "blocked": None,
+        "failure_class": None,
+        "class_evidence": None,
+        "verdict": None,
+        "findings": "Holds on one seed.",
+        "conclusions": "No competing explanation worth a follow-up run.",
+        "investigation_test": {},
+        "proceed": False,
+        "blocking_condition": "named_cause",
+        "children": [],
+    }
+    script = _stub_script(tmp_path, payload)
+    _save_action(
+        config,
+        "auto-triage",
+        "vo-backend",
+        workflow="triage",
+        agent_cmd=f"python3 {script}",
+    )
+    _save_program(config, "auto-loop", actions=["auto-triage"])
+
+    result = run_loop("auto-loop", "vo-backend", config=config)
+
+    assert len(result.steps) == 1
+    assert result.steps[0].action == "triage"
+    assert result.steps[0].node == "baseline"
+    reloaded = load_node("baseline", task=task, config=config)
+    assert reloaded.verdict == "supports"  # untouched
+    assert reloaded.triaged is True
     assert result.stopped == "nothing left to schedule"
 
 
@@ -178,10 +229,51 @@ def test_run_loop_rejects_two_actions_bound_to_the_same_workflow(
 def test_run_loop_rejects_an_action_with_no_recognized_workflow(
     config: HirakuConfig, task: Task
 ) -> None:
-    _save_action(config, "a1", "vo-backend", workflow="implement")
+    # "launch" (like "approve") is deliberately excluded from `LLM_WORKFLOWS` — it is a
+    # real command, not an LLM call — so it still exercises this rejection after
+    # "implement" graduated into `LLM_WORKFLOWS` (see
+    # `test_run_loop_calls_implement_for_an_approved_proposed_node`, below).
+    _save_action(config, "a1", "vo-backend", workflow="launch")
     _save_program(config, "bad-loop", actions=["a1"])
     with pytest.raises(AgentError):
         run_loop("bad-loop", "vo-backend", config=config)
+
+
+def test_run_loop_calls_implement_for_an_approved_proposed_node(
+    config: HirakuConfig, task: Task, tmp_path: Path
+) -> None:
+    """`implement` is now in `LLM_WORKFLOWS`, so the loop must route an approved,
+    not-yet-implemented node to it exactly as it already does for `design`/`analyze`.
+
+    Uses the agent's `"blocked"` reply rather than a real commit, so this test needs no
+    git repository (`run_implement` returns before ever calling `GitRepository.resolve`
+    when blocked) — the git-backed path is covered in
+    `test_hiraku_agent_workflows.py::test_run_implement_binds_the_reported_commit`.
+    """
+    node = create_node(
+        "baseline", task=task, kind="baseline", expectation="x", config=config
+    )
+    approve(node, by="qianqian")
+
+    payload = {"blocked": "needs a person to decide the target branch", "commit": None}
+    script = _stub_script(tmp_path, payload)
+    _save_action(
+        config,
+        "auto-implement",
+        "vo-backend",
+        workflow="implement",
+        agent_cmd=f"python3 {script}",
+    )
+    _save_program(config, "auto-loop", actions=["auto-implement"])
+
+    result = run_loop("auto-loop", "vo-backend", config=config)
+
+    assert len(result.steps) == 1
+    assert result.steps[0].action == "implement"
+    assert result.steps[0].node == "baseline"
+    assert result.steps[0].written == []
+    assert "wrote nothing" in result.stopped
+    assert load_node("baseline", task=task, config=config).is_proposal
 
 
 def test_run_loop_stops_immediately_on_max_experiments(

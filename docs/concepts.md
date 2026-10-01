@@ -206,14 +206,21 @@ hiraku record create heart-disease --type task \
 hiraku record show heart-disease --json
 hiraku status
 
-# 3. create a child proposal and implement it
+# 3. create a child proposal
 hiraku record create logistic-baseline --parent heart-disease \
   --type experiment \
   --set 'summary=Logistic regression baseline' \
   --set 'hypothesis=Regularized logistic regression provides a calibrated baseline'
-# alternatively, use the agent skill to implement the proposal
+
+# 3. a) implement it with the agent — requires approval first in guided mode
+# (the default); the agent writes and commits the code, hiraku-agent binds the commit
+hiraku-agent approve logistic-baseline --task heart-disease --by <you>
+hiraku-agent implement logistic-baseline --task heart-disease
+# 3. b) implement it with the agent skill inside a coding harness (e.g. Claude, Codex, ...)
 # /hiraku "implement the logistic baseline record"
-# implement and commit the code change, then bind the resulting commit
+
+# commit code change (only needed for 3.b — hiraku-agent implement in 3.a already
+# committed and bound it for you), then bind the resulting commit
 git commit -m "implement logistic baseline"
 hiraku record update logistic-baseline --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py]}}'

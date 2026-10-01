@@ -21,11 +21,14 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.data import Task, list_tasks, load_task
-from hiraku.errors import RecordNotFoundError, ValidationError
+from hiraku.errors import HirakuError, RecordNotFoundError, ValidationError
 from hiraku.git import GitRepository
 from hiraku_agent import sections
 from hiraku_agent.engine import (
+    DEFAULT_IMPLEMENT_AGENT_CMD,
+    IMPLEMENT_AGENT_CMD_ENV_VAR,
     Bundle,
+    agent_command,
     attach_context,
     build_prompt,
     extract_json,
@@ -33,12 +36,15 @@ from hiraku_agent.engine import (
     prompt_delivery,
 )
 from hiraku_agent.errors import AgentError
+from hiraku_agent.gates import approve
 from hiraku_agent.node import create_node, load_node
+from hiraku_agent.state import node_state
 from hiraku_agent.workflows import (
     run_analyze,
     run_design,
     run_discover,
     run_draft,
+    run_implement,
     run_triage,
 )
 
@@ -84,6 +90,20 @@ def git_config(tmp_path: Path) -> HirakuConfig:
     return HirakuConfig.init(tmp_path)
 
 
+@pytest.fixture
+def git_task(git_config: HirakuConfig) -> Task:
+    """Like `task`, but scoped to `git_config`'s real repository — `run_implement`
+    resolves the agent's reported commit with `GitRepository.resolve`, which needs an
+    actual repo the way `run_draft`'s branch binding does (see `git_config`)."""
+    return Task.create(
+        "vo-backend",
+        config=git_config,
+        goal="Improve validation accuracy",
+        entrypoints={"train": {"command": ["python", "train.py"]}},
+        metrics=[{"name": "val_accuracy", "direction": "maximize"}],
+    )
+
+
 def stub_agent(payload: dict) -> list[str]:
     """A fake agent: prints `payload` as JSON, ignoring whatever prompt it was given.
 
@@ -91,6 +111,25 @@ def stub_agent(payload: dict) -> list[str]:
     `engine.prompt_delivery` appends after it lands in `sys.argv[2]` and is never read.
     """
     return ["python3", "-c", "import sys; print(sys.argv[1])", json.dumps(payload)]
+
+
+def stub_implement_agent(payload: dict, *, make_commit: bool = True) -> list[str]:
+    """Like `stub_agent`, but for `run_implement`: when `make_commit` is true, it first
+    makes a real commit in whatever repository `cwd` is set to (`engine.invoke` sets it
+    to `config.root` — the same repository `git_config`/`git_task` set up), so a test
+    can assert against a real, `GitRepository.resolve`-able commit instead of a literal
+    hash `run_implement` would reject as unresolvable. `git_config` already sets
+    `user.email`/`user.name`, so no `-c` overrides are needed here.
+    """
+    commit_lines = (
+        "open('implemented.py', 'w').write('# implemented\\n')\n"
+        "subprocess.run(['git', 'add', 'implemented.py'], check=True)\n"
+        "subprocess.run(['git', 'commit', '-qm', 'implement'], check=True)\n"
+        if make_commit
+        else ""
+    )
+    script = "import subprocess, sys\n" + commit_lines + "print(sys.argv[1])\n"
+    return ["python3", "-c", script, json.dumps(payload)]
 
 
 # -------------------------------------------------------------------------- sections.py
@@ -176,6 +215,55 @@ def test_build_prompt_fills_in_state_and_instruction() -> None:
 def test_build_prompt_rejects_an_unknown_workflow() -> None:
     with pytest.raises(AgentError):
         build_prompt("bogus-workflow", {})
+
+
+def test_build_prompt_accepts_implement_as_a_known_workflow() -> None:
+    prompt = build_prompt("implement", {"task": {"id": "vo-backend"}})
+    assert "implement an approved proposal" in prompt
+    assert "{{state}}" not in prompt
+
+
+def test_agent_command_falls_back_to_its_own_default_and_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(IMPLEMENT_AGENT_CMD_ENV_VAR, raising=False)
+    assert (
+        agent_command(
+            None,
+            env_var=IMPLEMENT_AGENT_CMD_ENV_VAR,
+            default=DEFAULT_IMPLEMENT_AGENT_CMD,
+        )
+        == DEFAULT_IMPLEMENT_AGENT_CMD.split()
+    )
+
+
+def test_agent_command_env_var_overrides_the_implement_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        IMPLEMENT_AGENT_CMD_ENV_VAR, "claude -p --dangerously-skip-permissions"
+    )
+    assert agent_command(
+        None, env_var=IMPLEMENT_AGENT_CMD_ENV_VAR, default=DEFAULT_IMPLEMENT_AGENT_CMD
+    ) == ["claude", "-p", "--dangerously-skip-permissions"]
+
+
+def test_agent_command_explicit_override_wins_over_implement_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(IMPLEMENT_AGENT_CMD_ENV_VAR, "should-not-be-used")
+    assert agent_command(
+        "claude -p --allowedTools Read",
+        env_var=IMPLEMENT_AGENT_CMD_ENV_VAR,
+        default=DEFAULT_IMPLEMENT_AGENT_CMD,
+    ) == ["claude", "-p", "--allowedTools", "Read"]
+
+
+def test_agent_command_default_behaviour_is_unchanged_for_existing_callers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("HIRAKU_AGENT_CMD", raising=False)
+    assert agent_command() == ["claude", "-p"]
 
 
 def test_gather_context_reads_named_files_only(tmp_path: Path) -> None:
@@ -491,6 +579,182 @@ def test_run_discover_skips_an_id_that_already_exists(
     assert result.data["skipped_existing"] == ["focal-loss"]
 
 
+# ---------------------------------------------------------------------- run_implement
+
+
+def test_run_implement_binds_the_reported_commit_and_merges_entrypoints(
+    git_config: HirakuConfig, git_task: Task
+) -> None:
+    # An experiment-level entrypoint override, set before implementing — distinct from
+    # the task-level "train" entrypoint `git_task` already carries (`Node.entrypoints`
+    # is "Experiment-specific command overrides", never a copy of the task's own).
+    node = create_node(
+        "baseline",
+        task=git_task,
+        kind="baseline",
+        expectation="Reaches 0.80 val_accuracy.",
+        entrypoints={"train": {"command": ["python", "train_baseline.py"], "args": {}}},
+        config=git_config,
+    )
+    approve(node, by="qianqian")
+
+    payload = {
+        "blocked": None,
+        "commit": "HEAD",
+        "entrypoints": {"eval": {"command": ["python", "eval.py"], "args": {}}},
+        "files_changed": ["implemented.py"],
+        "notes": "Added a minimal training script matching the proposal's scope.",
+    }
+    result = run_implement(
+        "baseline",
+        task_id="vo-backend",
+        command=stub_implement_agent(payload),
+        config=git_config,
+    )
+
+    expected_commit = GitRepository(git_config).resolve("HEAD")
+    reloaded = load_node("baseline", task=git_task, config=git_config)
+    assert reloaded.commit == expected_commit
+    assert not reloaded.is_proposal
+    # The node's own pre-existing override survives the merge ...
+    assert reloaded.entrypoints["train"].command == ["python", "train_baseline.py"]
+    # ... alongside the new one the agent reported.
+    assert "eval" in reloaded.entrypoints
+    assert "minimal training script" in sections.read_section(
+        reloaded.markdown, "Implementation notes"
+    )
+    assert result.written == [reloaded.path]
+
+
+def test_run_implement_raises_if_the_node_is_not_approved(
+    config: HirakuConfig, task: Task
+) -> None:
+    create_node(
+        "baseline", task=task, kind="baseline", expectation="x", config=config
+    )  # guided mode (the default), never approved
+    with pytest.raises(AgentError, match="not approved"):
+        run_implement(
+            "baseline",
+            task_id="vo-backend",
+            command=stub_agent({"commit": "deadbeef"}),
+            config=config,
+        )
+
+
+def test_run_implement_proceeds_without_approval_in_auto_mode(
+    git_config: HirakuConfig, git_task: Task
+) -> None:
+    create_node(
+        "baseline",
+        task=git_task,
+        kind="baseline",
+        expectation="x",
+        mode="auto",
+        config=git_config,
+    )
+    payload = {"blocked": None, "commit": "HEAD", "notes": None}
+    result = run_implement(
+        "baseline",
+        task_id="vo-backend",
+        command=stub_implement_agent(payload),
+        config=git_config,
+    )
+    assert len(result.written) == 1
+    assert not load_node("baseline", task=git_task, config=git_config).is_proposal
+
+
+def test_run_implement_raises_if_the_node_already_has_a_commit(
+    config: HirakuConfig, task: Task
+) -> None:
+    node = create_node(
+        "baseline", task=task, kind="baseline", expectation="x", config=config
+    )
+    node.commit = "a" * 40
+    node.save()
+    approve(node, by="qianqian")
+    with pytest.raises(HirakuError, match="already has a commit"):
+        run_implement(
+            "baseline",
+            task_id="vo-backend",
+            command=stub_agent({"commit": "deadbeef"}),
+            config=config,
+        )
+
+
+def test_run_implement_raises_for_an_abandoned_node(
+    config: HirakuConfig, task: Task
+) -> None:
+    node = create_node(
+        "baseline",
+        task=task,
+        kind="baseline",
+        expectation="x",
+        abandoned=True,
+        config=config,
+    )
+    approve(node, by="qianqian")
+    with pytest.raises(HirakuError, match="abandoned"):
+        run_implement(
+            "baseline",
+            task_id="vo-backend",
+            command=stub_agent({"commit": "deadbeef"}),
+            config=config,
+        )
+
+
+def test_run_implement_blocked_reply_writes_nothing(
+    git_config: HirakuConfig, git_task: Task
+) -> None:
+    node = create_node(
+        "baseline", task=git_task, kind="baseline", expectation="x", config=git_config
+    )
+    approve(node, by="qianqian")
+
+    payload = {"blocked": "needs a person to decide the target branch", "commit": None}
+    result = run_implement(
+        "baseline",
+        task_id="vo-backend",
+        command=stub_implement_agent(payload, make_commit=False),
+        config=git_config,
+    )
+    assert result.data["blocked"]
+    assert result.written == []
+    assert load_node("baseline", task=git_task, config=git_config).is_proposal
+
+
+def test_run_implement_dry_run_calls_nothing_and_writes_nothing(
+    config: HirakuConfig, task: Task
+) -> None:
+    node = create_node(
+        "baseline", task=task, kind="baseline", expectation="x", config=config
+    )
+    approve(node, by="qianqian")
+    result = run_implement(
+        "baseline", task_id="vo-backend", dry_run=True, config=config
+    )
+    assert result.raw == ""
+    assert result.written == []
+    assert "implement an approved proposal" in result.prompt
+
+
+def test_run_implement_raises_if_the_agent_reports_an_unresolvable_commit(
+    git_config: HirakuConfig, git_task: Task
+) -> None:
+    node = create_node(
+        "baseline", task=git_task, kind="baseline", expectation="x", config=git_config
+    )
+    approve(node, by="qianqian")
+    payload = {"blocked": None, "commit": "not-a-real-ref", "notes": None}
+    with pytest.raises(HirakuError):
+        run_implement(
+            "baseline",
+            task_id="vo-backend",
+            command=stub_implement_agent(payload, make_commit=False),
+            config=git_config,
+        )
+    assert load_node("baseline", task=git_task, config=git_config).is_proposal
+
+
 # --------------------------------------------------------------------------- run_triage
 
 
@@ -547,6 +811,51 @@ def test_run_triage_sets_verdict_and_creates_a_child_on_class_b(
     assert child.kind == "diagnostic"
     assert child.is_proposal
     assert len(result.written) == 2
+    # A completed call always records its decision — see `state.node_state`.
+    assert reloaded.triaged is True
+
+
+def test_run_triage_on_a_supports_verdict_has_no_failure_to_classify(
+    config: HirakuConfig, task: Task
+) -> None:
+    """Generalizes `triage` past "only runs on a miss": a `supports` verdict can
+    still land here (see `suggest_next`'s `concluded` priority), and the prompt's
+    contract says `failure_class`/`class_evidence` come back `null` in that case —
+    this just confirms the tool doesn't choke on that, and doesn't clobber the
+    verdict that was already there."""
+    node = create_node(
+        "baseline",
+        task=task,
+        kind="baseline",
+        expectation="Reaches 0.80 val_accuracy.",
+        config=config,
+    )
+    node.commit = "a" * 40
+    node.verdict = "supports"
+    node.save()
+
+    payload = {
+        "blocked": None,
+        "failure_class": None,
+        "class_evidence": None,
+        "verdict": None,
+        "findings": "r1: val_accuracy 0.84, comfortably above the 0.80 bar.",
+        "conclusions": "Holds on the single seed run so far; no competing explanation "
+        "named worth a follow-up run.",
+        "investigation_test": {},
+        "proceed": False,
+        "blocking_condition": "named_cause",
+        "children": [],
+    }
+    result = run_triage(
+        "baseline", task_id="vo-backend", command=stub_agent(payload), config=config
+    )
+
+    reloaded = load_node("baseline", task=task, config=config)
+    assert reloaded.verdict == "supports"  # untouched — triage never overwrote it
+    assert reloaded.triaged is True
+    assert node_state(reloaded, runs=[object()], has_children=False) == "completed"
+    assert result.written == [reloaded.path]
 
 
 def test_run_triage_class_a_sets_no_verdict_and_no_children(
@@ -578,9 +887,14 @@ def test_run_triage_class_a_sets_no_verdict_and_no_children(
     reloaded = load_node("baseline", task=task, config=config)
     assert reloaded.verdict is None
     assert len(result.written) == 1  # only the node itself, no children
+    # `triaged` is set even here (the call completed), but with no verdict it has no
+    # effect on the derived state yet — see `state.node_state`'s docstring.
+    assert reloaded.triaged is True
+    state = node_state(reloaded, runs=[object()], has_children=False)
+    assert state == "awaiting_analysis"
 
 
-def test_run_triage_blocked_reply_writes_nothing(
+def test_run_triage_blocked_reply_does_not_mark_the_node_triaged(
     config: HirakuConfig, task: Task
 ) -> None:
     create_node("baseline", task=task, config=config)
@@ -590,6 +904,7 @@ def test_run_triage_blocked_reply_writes_nothing(
     )
     assert result.written == []
     assert result.data["blocked"] == "no expectation recorded"
+    assert load_node("baseline", task=task, config=config).triaged is False
 
 
 # -------------------------------------------------------------------------- run_analyze
@@ -647,6 +962,59 @@ def test_run_analyze_sets_verdict_and_writes_findings(
     assert "3 more seeds" in next_steps
     assert "Candidate run: `r1`" in next_steps
     assert len(result.written) == 1
+    # A fresh verdict is `concluded`, not `completed` — it still needs `triage`'s
+    # go/no-go decision, even though this one supports the hypothesis.
+    assert node_state(reloaded, runs=[stub_run], has_children=False) == "concluded"
+
+
+def test_run_analyze_resets_triaged_on_a_fresh_verdict(
+    config: HirakuConfig, task: Task, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A node triage already decided on (no children, `triaged=True`) can still come
+    back around — e.g. a re-run after a code fix. A new verdict from `analyze` must
+    reopen the go/no-go decision, not leave the node looking already-completed from
+    a verdict that no longer holds."""
+    from hiraku.data import Run
+    from hiraku_agent.node import Node
+
+    node = create_node(
+        "baseline", task=task, kind="baseline", expectation="x", config=config
+    )
+    node.commit = "a" * 40
+    node.verdict = "refutes"
+    node.triaged = True
+    node.save()
+
+    stub_run = Run(
+        id="r2",
+        metrics={"val_accuracy": 0.91},
+        params={},
+        task_id="vo-backend",
+        experiment_id="baseline",
+        commit="a" * 40,
+        timestamp="2026-09-19T00:00:00Z",
+        entrypoint="train",
+        url="",
+        raw={},
+    )
+    monkeypatch.setattr(Node, "runs", lambda self, **_: [stub_run])
+
+    payload = {
+        "verdict": "supports",
+        "findings": "r2: val_accuracy 0.91, now above target after the fix.",
+        "conclusions": "Expectation met on the corrected run.",
+        "next_steps": None,
+        "promotable_candidate": None,
+        "missing_evidence": None,
+    }
+    run_analyze(
+        "baseline", task_id="vo-backend", command=stub_agent(payload), config=config
+    )
+
+    reloaded = load_node("baseline", task=task, config=config)
+    assert reloaded.verdict == "supports"
+    assert reloaded.triaged is False
+    assert node_state(reloaded, runs=[stub_run], has_children=False) == "concluded"
 
 
 def test_run_analyze_raises_without_runs(config: HirakuConfig, task: Task) -> None:

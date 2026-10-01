@@ -18,10 +18,13 @@ different task — say so rather than proposing a protocol change.
 
 A node's place in the loop (`state` in the JSON you are shown) is derived from evidence,
 never stored as a status you set directly: `proposed` (no commit yet), `implemented` (a
-commit, no runs), `awaiting_analysis` (runs, no verdict), `concluded_untriaged` /
-`concluded_settled` (a verdict is set — settled once it has children or the verdict is
-`supports`), `abandoned` (dropped on purpose). You influence this only through the fields
-below, never by naming a state directly.
+commit, no runs), `awaiting_analysis` (runs, no verdict), `concluded` (a verdict is set —
+`supports`, `refutes`, or `inconclusive` — but nothing has yet decided whether to go
+further), `completed` (dropped on purpose, already has children, or a decision not to
+pursue it further has already been recorded). A `supports` verdict is `concluded`, not
+automatically `completed` — a positive result can still be worth going deeper on, exactly
+like a negative one. You influence this only through the fields below, never by naming a
+state directly.
 
 `verdict` is one of: `supports`, `refutes`, `inconclusive` — set only once evidence
 exists to judge, and it is about the node's **expectation**, never about whether a number
@@ -31,6 +34,10 @@ IDs are lowercase slugs, hyphen-separated, globally unique, never reused. Name t
 question, not the position in the tree.
 
 ## The three failure classes
+
+These classify a *miss* — a `refutes` or `inconclusive` verdict — and apply to `triage`
+only. A `supports` verdict has no failure to classify; see `prompts/triage.md` for what
+`triage` does with one instead.
 
 - **A — execution defect.** The run did not test the expectation: crash, non-zero exit,
   shape error, split leakage, metric on the wrong subset, stale inputs. The expectation is
@@ -52,8 +59,8 @@ A child may be proposed only if ALL of these hold. Answer each explicitly.
    not "try a bigger model".
 2. **Discriminating** — the run distinguishes at least two named explanations; state what
    each predicts. If every outcome leads to the same next action, it is not worth doing.
-3. **Novel** — no node in this task's tree — `abandoned` and `concluded` ones included —
-   already tested it. The tree you are shown IS the memory; check it. An idea the
+3. **Novel** — no node in this task's tree, in any state, already tested it. The tree you
+   are shown IS the memory; check it. An idea the
    researcher or a past `discover` call considered and rejected is recorded as an
    `abandoned` node with no commit; it counts as tested.
 4. **In scope** — inside the task's scope, under its unmodified evaluation protocol.

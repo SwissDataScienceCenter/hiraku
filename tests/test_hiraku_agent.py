@@ -155,34 +155,45 @@ def test_awaiting_analysis_has_runs_and_no_verdict(
     assert node_state(node, runs=[object()], has_children=False) == "awaiting_analysis"
 
 
-def test_supports_settles_even_without_children(
-    config: HirakuConfig, task: Task
+@pytest.mark.parametrize("verdict", ["supports", "refutes", "inconclusive"])
+def test_any_verdict_without_a_decision_is_concluded(
+    config: HirakuConfig, task: Task, verdict: str
 ) -> None:
+    """A `supports` verdict no longer settles by itself — see `state.node_state`'s
+    docstring: a positive result can still be worth a follow-up, exactly like a
+    negative one, so every fresh verdict lands on `concluded` until something
+    (`triage`) actually decides whether to go further."""
     node = create_node("baseline", task=task, config=config)
     node.commit = COMMIT_A
-    node.verdict = "supports"
+    node.verdict = verdict
     node.save()
-    assert node_state(node, runs=[object()], has_children=False) == "concluded_settled"
+    assert node_state(node, runs=[object()], has_children=False) == "concluded"
 
 
-@pytest.mark.parametrize("verdict", ["refutes", "inconclusive"])
-def test_refutes_or_inconclusive_without_children_is_untriaged(
+@pytest.mark.parametrize("verdict", ["supports", "refutes", "inconclusive"])
+def test_any_verdict_with_children_is_completed(
     config: HirakuConfig, task: Task, verdict: str
 ) -> None:
     node = create_node("baseline", task=task, config=config)
     node.commit = COMMIT_A
     node.verdict = verdict
     node.save()
-    state = node_state(node, runs=[object()], has_children=False)
-    assert state == "concluded_untriaged"
+    assert node_state(node, runs=[object()], has_children=True) == "completed"
 
 
-def test_refutes_with_children_is_settled(config: HirakuConfig, task: Task) -> None:
+@pytest.mark.parametrize("verdict", ["supports", "refutes", "inconclusive"])
+def test_any_verdict_already_triaged_with_no_children_is_completed(
+    config: HirakuConfig, task: Task, verdict: str
+) -> None:
+    """`triage` deciding "no, don't go further" produces no children — `triaged` is
+    the only record that a decision was actually made, so it alone (besides having
+    children) must be enough to reach `completed`."""
     node = create_node("baseline", task=task, config=config)
     node.commit = COMMIT_A
-    node.verdict = "refutes"
+    node.verdict = verdict
+    node.triaged = True
     node.save()
-    assert node_state(node, runs=[object()], has_children=True) == "concluded_settled"
+    assert node_state(node, runs=[object()], has_children=False) == "completed"
 
 
 def test_abandoned_wins_over_everything_else(config: HirakuConfig, task: Task) -> None:
@@ -191,7 +202,7 @@ def test_abandoned_wins_over_everything_else(config: HirakuConfig, task: Task) -
     node.verdict = "supports"
     node.abandoned = True
     node.save()
-    assert node_state(node, runs=[object()], has_children=False) == "abandoned"
+    assert node_state(node, runs=[object()], has_children=False) == "completed"
 
 
 # ---------------------------------------------------------------------------
@@ -382,3 +393,33 @@ def test_analyze_outranks_triage_and_approve(config: HirakuConfig, task: Task) -
     assert suggestion["action"] == "triage"
     assert suggestion["node"] == "dead-end"
     assert "refutes" in suggestion["why"]
+
+
+def test_a_supports_verdict_still_asks_to_triage(
+    config: HirakuConfig, task: Task
+) -> None:
+    """Unlike the old model, `supports` doesn't skip straight past triage — a
+    positive result still needs a decision about whether it's worth going
+    further on."""
+    node = create_node("baseline", task=task, config=config)
+    node.commit = COMMIT_A
+    node.verdict = "supports"
+    node.save()
+
+    suggestion = suggest_next(task, config=config)
+    assert suggestion["action"] == "triage"
+    assert suggestion["node"] == "baseline"
+    assert "go further" in suggestion["why"]
+
+
+def test_triaged_node_with_no_children_is_exhausted_not_retriaged(
+    config: HirakuConfig, task: Task
+) -> None:
+    node = create_node("baseline", task=task, config=config)
+    node.commit = COMMIT_A
+    node.verdict = "refutes"
+    node.triaged = True
+    node.save()
+
+    suggestion = suggest_next(task, config=config)
+    assert suggestion["action"] == "exhausted"

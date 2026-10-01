@@ -138,14 +138,14 @@ implements the data model and not yet the agent integration." Concretely:
 
 ## `hiraku-agent`
 
-Every `design`/`discover`/`triage`/`analyze` command shares one set of
+Every `design`/`discover`/`draft`/`implement`/`triage`/`analyze` command shares one set of
 agent-calling options (`_AGENT_OPTIONS` in `hiraku_agent/cli.py`):
 
 | Option | Does |
 | --- | --- |
 | `-m, --instruction TEXT` | Extra steering text folded into the prompt as "Instruction from the researcher". |
 | `--instruction-file PATH` | Read `--instruction` from a file instead. |
-| `--agent-cmd CMD` | Override the agent command for this call. Otherwise: `HIRAKU_AGENT_CMD` env var, then the default `claude -p`. |
+| `--agent-cmd CMD` | Override the agent command for this call. Otherwise: `HIRAKU_AGENT_CMD` env var, then the default `claude -p` (`implement` instead defaults to `HIRAKU_IMPLEMENT_AGENT_CMD` / `claude -p --allowedTools Read,Write,Edit,Glob,Grep,Bash` — the one workflow given file-write and shell access, since it's the one workflow that writes real code; see `workflows.run_implement`). |
 | `--dry-run` | Build and print the prompt; call nothing, write nothing. |
 | `--no-apply` | Call the agent, print/log the reply, but write no `Node` files. |
 | `--context PATH` (repeatable) | A project file to read verbatim and offer to the agent as background. Not automatic — nothing is read unless named here. |
@@ -160,15 +160,21 @@ no CLI flag — see `cli.md`'s "Deciding: CLI or Python API" section.
 | --- | --- |
 | `hiraku-agent next [--task ID] [--json]` | Print the single next action for a task and why (`design`, `implement`, `launch`, `analyze`, `triage`, `approve`, or `exhausted`), plus a ready-to-run `hiraku-agent ...`/`hiraku ...` command when there is an obvious one. |
 | `hiraku-agent approve NODE_ID [--task ID] --by WHO` | Clear the approval gate on a proposed node. A no-op in `auto` mode. |
+| `hiraku-agent draft -m INSTRUCTION [--task-id ID] [--branch NAME] [--no-activate] [agent options]` | Turn free text into a new `Task` — the same effect as `hiraku task create`. `--task-id` is optional: omit it and the agent proposes one, the same way `hiraku task create` would need *a* id but not necessarily yours. |
 | `hiraku-agent design [--task ID] [agent options]` | Propose a tree of experiments for a task. Writes proposed `Node`s (no commit). |
 | `hiraku-agent discover [--task ID] [agent options]` | Search for candidate hypotheses (literature or an idea you give it via `--instruction`). Writes accepted ideas as proposed `Node`s and declined ones as `abandoned` `Node`s (so a later `discover` doesn't re-propose them). |
-| `hiraku-agent triage NODE_ID [--task ID] [agent options]` | Classify why `NODE_ID`'s result missed its expectation and decide whether to add follow-up child nodes. |
+| `hiraku-agent implement NODE_ID [--task ID] [agent options]` | Write `NODE_ID`'s approved proposal as real code, commit it, and bind the resulting commit — the one workflow where the agent writes files and runs shell commands instead of only returning JSON. `NODE_ID` must already be approved (`hiraku-agent approve`); the approval is the human trigger in `guided` mode, the agent is what writes the code either way. See `workflows.run_implement`. |
+| `hiraku-agent triage NODE_ID [--task ID] [agent options]` | Judge whether `NODE_ID` — any verdict, `supports` included — is worth going further on: classifies the miss for a `refutes`/`inconclusive` result, or names the further question worth asking of a `supports` one, then decides whether to add follow-up child nodes. See `prompts/triage.md`. |
 | `hiraku-agent analyze NODE_ID [--task ID] [agent options]` | Judge `NODE_ID`'s runs against its expectation; writes findings/conclusions and, when warranted, a verdict. |
+| `hiraku-agent loop --program ID --task ID [--max-steps N] [--json]` | Drive a bounded loop: repeats `hiraku-agent next`'s own suggestion, calling whichever `Action` the named `Program` binds to that workflow, until a budget is hit, a step writes nothing, the next suggestion needs a person or a real command (`approve`/`launch`), or nothing is left to schedule. `implement` is drivable here like any other LLM workflow — see `docs/state.md`'s gates section for why that's safe (the approval gate is unmoved; `run_implement` re-checks it anyway). |
 
 `--task` is required unless a task is already active (`hiraku task set`);
-`triage`/`analyze` take `NODE_ID` positionally and resolve its task from the
-node reference the same way `hiraku experiment show` does (qualified
-`task:id`, or the active task).
+`implement`/`triage`/`analyze` take `NODE_ID` positionally and resolve its
+task from the node reference the same way `hiraku experiment show` does
+(qualified `task:id`, or the active task). `draft` is the odd one out —
+there is no task to resolve `--task` against yet, since this call is what
+creates it, so it takes `--task-id` instead (see "Why `--task-id`, not
+`--task`?" note below).
 
 ### Examples
 
@@ -182,6 +188,11 @@ hiraku-agent design
 # Preview the exact prompt without calling anything.
 hiraku-agent discover --dry-run --context docs/vo-backend-notes.md
 
+# Approve a proposal, then have the agent write and commit the code for it —
+# this is the one workflow with file-write and shell access (see the table above).
+hiraku-agent approve baseline --by qianqian
+hiraku-agent implement baseline
+
 # Call the agent, inspect the reply, but don't write Node files yet.
 hiraku-agent triage awaiting-node --no-apply --json
 
@@ -192,9 +203,19 @@ hiraku-agent analyze leaky-eval --json > analysis.json
 hiraku-agent next --json
 ```
 
+#### Why `--task-id`, not `--task`?
+
+`--task` (on `design`/`discover`/`implement`/`triage`/`analyze`/`loop`) means "use this
+*existing* task, or fall back to the active one if omitted" — a reference. `draft`'s
+`--task-id` means "give the task about to be created this id, or let the agent propose one
+if omitted" — a name for something that doesn't exist yet. These are genuinely different
+questions, not an inconsistency: it mirrors `hiraku`'s own core CLI, which likewise uses a
+bare id for naming something new (`hiraku task create <task-id>`) and `--task <task-id>`
+for referencing something that already exists (`hiraku launch --task <task-id>`).
+
 ### Where a call's evidence lives
 
-Every `design`/`discover`/`triage`/`analyze` call is logged under
+Every `design`/`discover`/`draft`/`implement`/`triage`/`analyze` call is logged under
 `<project>/<hiraku_dir>/agent-logs/<timestamp>-<workflow>-<target>/`
 (`hiraku_dir` defaults to `hiraku`, so normally
 `hiraku/agent-logs/...`):
@@ -210,12 +231,11 @@ Every `design`/`discover`/`triage`/`analyze` call is logged under
 
 | State (`hiraku_agent.STATES`) | Meaning | Command that gets you there / past it |
 | --- | --- | --- |
-| `proposed` | No commit yet. | `hiraku-agent design` / `discover` create it; `hiraku-agent approve` (in `guided` mode) clears the gate; `hiraku experiment update <id> --commit <hash>` binds code. |
+| `proposed` | No commit yet. | `hiraku-agent design` / `discover` create it; `hiraku-agent approve` (in `guided` mode) clears the gate; `hiraku-agent implement <id>` writes the code and binds it (or, by hand, `hiraku experiment update <id> --commit <hash>`). |
 | `implemented` | Has a commit, no runs yet. | `hiraku launch <id>:<entrypoint>`. |
 | `awaiting_analysis` | Has runs, no verdict. | `hiraku-agent analyze <id>`. |
-| `concluded_untriaged` | Has a verdict (`refutes`/`inconclusive`), no children yet. | `hiraku-agent triage <id>`. |
-| `concluded_settled` | Verdict is `supports`, or already has children. | Nothing further — `hiraku-agent next` moves on. |
-| `abandoned` | Explicitly dropped (`abandoned=True`), e.g. a `discover` idea that got declined. | Terminal; not resumed automatically. |
+| `concluded` | Has a verdict — `supports`, `refutes`, or `inconclusive` — no children yet, not yet triaged. | `hiraku-agent triage <id>`, whichever way the verdict went — see `docs/state.md` for why `supports` doesn't skip this. |
+| `completed` | Already has children, or `triage` already decided not to produce any (`Node.triaged`), or explicitly dropped (`abandoned=True`, e.g. a `discover` idea that got declined). | Terminal; not resumed automatically. |
 
 `hiraku-agent next` computes this same table across a whole task and returns
 the single highest-priority action — it is the recommended way to drive the
