@@ -18,7 +18,7 @@ import pytest
 
 from hiraku.agent import Action, Context
 from hiraku.config import HirakuConfig
-from hiraku.data import Task
+from hiraku.record import Record
 from hiraku_agent.actions import apply_overrides, resolve_action, resolve_context
 from hiraku_agent.errors import AgentError
 from hiraku_agent.workflows import run_design
@@ -30,9 +30,11 @@ def config(tmp_path: Path) -> HirakuConfig:
 
 
 @pytest.fixture
-def task(config: HirakuConfig) -> Task:
-    return Task.create(
+def task(config: HirakuConfig) -> Record:
+    return Record.create(
         "vo-backend",
+        parent_id=None,
+        type="task",
         config=config,
         goal="Improve validation accuracy",
         entrypoints={"train": {"command": ["python", "train.py"]}},
@@ -214,7 +216,7 @@ def test_apply_overrides_context_id_adds_to_context_paths(
 
 
 def test_run_design_uses_an_actions_agent_cmd_and_context(
-    config: HirakuConfig, task: Task, tmp_path: Path
+    config: HirakuConfig, task: Record, tmp_path: Path
 ) -> None:
     (tmp_path / "notes.md").write_text("Background: prior work found X.")
     payload = {

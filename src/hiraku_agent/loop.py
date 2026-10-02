@@ -31,7 +31,7 @@ from typing import Any
 
 from hiraku.agent import Program, load_action, load_program
 from hiraku.config import HirakuConfig
-from hiraku.data import load_task
+from hiraku.record import load_record
 
 from .engine import Hooks
 from .errors import AgentError
@@ -176,7 +176,7 @@ def run_loop(
     """
     selected = config or HirakuConfig.discover()
     program = load_program(program_id, config=selected)
-    load_task(task_id, config=selected)  # fail fast on a bad task id
+    load_record(task_id, config=selected)  # fail fast on a bad task id
     bound = _bound_actions(program, task_id=task_id, config=selected)
     has_own_budget = any(
         (program.model_extra or {}).get(key) is not None

@@ -15,7 +15,8 @@ import pytest
 
 from hiraku.agent import Action, Program
 from hiraku.config import HirakuConfig
-from hiraku.data import Run, Task
+from hiraku.record import Record
+from hiraku.run import Run
 from hiraku_agent.errors import AgentError
 from hiraku_agent.gates import approve
 from hiraku_agent.loop import _duration_seconds, run_loop
@@ -28,9 +29,11 @@ def config(tmp_path: Path) -> HirakuConfig:
 
 
 @pytest.fixture
-def task(config: HirakuConfig) -> Task:
-    return Task.create(
+def task(config: HirakuConfig) -> Record:
+    return Record.create(
         "vo-backend",
+        parent_id=None,
+        type="task",
         config=config,
         goal="Improve validation accuracy",
         entrypoints={"train": {"command": ["python", "train.py"]}},
@@ -83,7 +86,7 @@ def test_duration_seconds(value: object, expected: float | None) -> None:
 
 
 def test_run_loop_runs_one_step_then_stops_for_approval(
-    config: HirakuConfig, task: Task, tmp_path: Path
+    config: HirakuConfig, task: Record, tmp_path: Path
 ) -> None:
     payload = {
         "experiments": [{"id": "baseline", "kind": "baseline", "expectation": "x"}],
@@ -109,7 +112,7 @@ def test_run_loop_runs_one_step_then_stops_for_approval(
 
 def test_run_loop_calls_analyze_for_a_node_awaiting_analysis(
     config: HirakuConfig,
-    task: Task,
+    task: Record,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -122,8 +125,7 @@ def test_run_loop_calls_analyze_for_a_node_awaiting_analysis(
         id="r1",
         metrics={"val_accuracy": 0.83},
         params={},
-        task_id="vo-backend",
-        experiment_id="baseline",
+        record_id="baseline",
         commit="a" * 40,
         timestamp="2026-09-18T00:00:00Z",
         entrypoint="train",
@@ -163,7 +165,7 @@ def test_run_loop_calls_analyze_for_a_node_awaiting_analysis(
 
 
 def test_run_loop_calls_triage_for_a_concluded_node_even_with_a_supports_verdict(
-    config: HirakuConfig, task: Task, tmp_path: Path
+    config: HirakuConfig, task: Record, tmp_path: Path
 ) -> None:
     """Unlike the old model, the loop doesn't treat `supports` as the end of the
     branch — bind a `triage` Action and it drives that decision automatically too,
@@ -209,7 +211,7 @@ def test_run_loop_calls_triage_for_a_concluded_node_even_with_a_supports_verdict
 
 
 def test_run_loop_requires_the_program_to_name_actions(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     _save_program(config, "empty-loop")
     with pytest.raises(AgentError):
@@ -217,7 +219,7 @@ def test_run_loop_requires_the_program_to_name_actions(
 
 
 def test_run_loop_rejects_two_actions_bound_to_the_same_workflow(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     _save_action(config, "a1", "vo-backend", workflow="design")
     _save_action(config, "a2", "vo-backend", workflow="design")
@@ -227,7 +229,7 @@ def test_run_loop_rejects_two_actions_bound_to_the_same_workflow(
 
 
 def test_run_loop_rejects_an_action_with_no_recognized_workflow(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     # "launch" (like "approve") is deliberately excluded from `LLM_WORKFLOWS` — it is a
     # real command, not an LLM call — so it still exercises this rejection after
@@ -240,7 +242,7 @@ def test_run_loop_rejects_an_action_with_no_recognized_workflow(
 
 
 def test_run_loop_calls_implement_for_an_approved_proposed_node(
-    config: HirakuConfig, task: Task, tmp_path: Path
+    config: HirakuConfig, task: Record, tmp_path: Path
 ) -> None:
     """`implement` is now in `LLM_WORKFLOWS`, so the loop must route an approved,
     not-yet-implemented node to it exactly as it already does for `design`/`analyze`.
@@ -277,7 +279,7 @@ def test_run_loop_calls_implement_for_an_approved_proposed_node(
 
 
 def test_run_loop_stops_immediately_on_max_experiments(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     create_node("baseline", task=task, kind="baseline", expectation="x", config=config)
     _save_action(config, "auto-design", "vo-backend", workflow="design")
@@ -292,7 +294,7 @@ def test_run_loop_stops_immediately_on_max_experiments(
 
 
 def test_run_loop_max_steps_overrides_everything(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     _save_action(config, "auto-design", "vo-backend", workflow="design")
     _save_program(config, "loop", actions=["auto-design"])
@@ -303,7 +305,7 @@ def test_run_loop_max_steps_overrides_everything(
 
 
 def test_run_loop_stops_when_a_step_writes_nothing(
-    config: HirakuConfig, task: Task, tmp_path: Path
+    config: HirakuConfig, task: Record, tmp_path: Path
 ) -> None:
     payload = {"experiments": [], "notes": "nothing worth proposing yet"}
     script = _stub_script(tmp_path, payload)

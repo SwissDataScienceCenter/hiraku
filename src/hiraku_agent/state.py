@@ -44,10 +44,10 @@ def node_state(node: Node, runs: Sequence[Any], *, has_children: bool) -> str:
             caller scoring a whole task's nodes can fetch runs once per node
             instead of once per `node_state` call.
         has_children: Whether any other node in the task has
-            `parent == node.id`. A node cannot answer this from its own
+            `parent_id == node.id`. A node cannot answer this from its own
             record alone, since "child" is a fact about a *different*
-            record's `parent` field — the caller must compute it across the
-            whole task's nodes.
+            record's `parent_id` field — the caller must compute it across
+            the whole task's nodes.
 
     Returns:
         One of `STATES`.

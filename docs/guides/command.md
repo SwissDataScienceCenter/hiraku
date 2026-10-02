@@ -18,43 +18,31 @@ from anywhere inside a `hiraku` project.
 | Command | Does |
 | --- | --- |
 | `hiraku init [PATH] [--tracking-backend NAME] [--template DIR \| --example NAME] [--ignore-git]` | Initialize a `hiraku` project at `PATH` (default: cwd). |
-| `hiraku status [--json]` | Show project root, active task/experiment, default program, tracking backend, current git branch. |
+| `hiraku status [--json]` | Show project root, active record, tracking backend, current git branch. |
 
-### `hiraku task` — task records and the active task
+### `hiraku record` — research records (tasks and nodes are both just `Record`s)
 
-| Command | Does |
-| --- | --- |
-| `hiraku task create TASK_ID [--goal] [--question] [--summary] [--markdown-file PATH] [--set KEY=VALUE ...] [--branch NAME] [--no-set]` | Create a task, its git branch, and (unless `--no-set`) make it active. |
-| `hiraku task list [--columns c1,c2,...] [--json]` | List tasks (default columns: `id, summary, branch`). |
-| `hiraku task show [TASK_ID] [--json]` | Show a task (defaults to the active task). |
-| `hiraku task update [TASK_ID] [--goal] [--question] [--summary] [--markdown-file PATH] [--set KEY=VALUE ...] [--unset KEY ...]` | Update and re-validate a task. |
-| `hiraku task edit [TASK_ID]` | Open the task's Markdown file in `$EDITOR` (default `vim`), then re-validate. |
-| `hiraku task delete TASK_ID` | Delete a task that has no experiments. |
-| `hiraku task set TASK_ID` | Set the active task. |
-| `hiraku task entrypoints [TASK_ID] [--json]` | List a task's own entrypoint declarations. |
-
-### `hiraku experiment` (alias `hiraku exp`) — experiments and the active experiment
-
-An experiment with no `--commit` is a **proposal** (`Experiment.is_proposal`);
-this is also what a `hiraku_agent.Node` is before it has code bound to it.
+`hiraku` has one record class now, `Record` (`src/hiraku/record.py`), not the
+old two-class `Task`/`Experiment` split. A record with `parent_id is None` is
+a root — what this guide and `hiraku_agent` call a *task* — and any other
+record is a node somewhere under one, to arbitrary depth (`--parent` can name
+another node, not only a root). `type` is a free, unenforced string some
+workflows set for readability (e.g. `--type task`, `--type experiment`); it
+is not a separate schema. A record with no `--commit` is a **proposal**
+(`commit is None`); this is also what a `hiraku_agent.Node` is before it has
+code bound to it — see `hiraku_agent.node.Node.is_proposal`.
 
 | Command | Does |
 | --- | --- |
-| `hiraku experiment create EXPERIMENT_ID [--task ID] [--summary] [--hypothesis] [--commit REF] [--branch \| --branch=NAME \| --branch-name NAME] [--from REF] [--markdown-file PATH] [--set KEY=VALUE ...] [--no-set]` | Create an experiment under a task (defaults to the active task), optionally binding a commit and/or creating its git branch. `EXPERIMENT_ID` may be `task:id` to name the task inline. |
-| `hiraku experiment list [--task ID] [--columns c1,c2,...] [--json]` | List a task's experiments (default columns: `id, summary, commit, branch`; commit values are shown abbreviated). |
-| `hiraku experiment show [EXPERIMENT_ID] [--task ID] [--json]` | Show an experiment (defaults to the active one). |
-| `hiraku experiment update [EXPERIMENT_ID] [--task ID] [--summary] [--hypothesis] [--commit REF] [--markdown-file PATH] [--set KEY=VALUE ...] [--unset KEY ...]` | Update and re-validate an experiment. This is how a proposed node gets its commit bound — the "implement" step in `hiraku-agent next`'s suggestions. |
-| `hiraku experiment edit [EXPERIMENT_ID] [--task ID]` | Open the experiment's Markdown file in `$EDITOR`, then re-validate. |
-| `hiraku experiment delete EXPERIMENT_ID [--task ID]` | Delete an experiment record. |
-| `hiraku experiment set EXPERIMENT_ID [--task ID]` | Activate an experiment (and its task). |
-| `hiraku experiment clear` | Clear the active experiment. |
-| `hiraku experiment entrypoints [EXPERIMENT_ID] [--task ID] [--json]` | List the experiment's effective entrypoints (its own, merged over the task's). |
-
-### `hiraku proposal` — read-only view over unbound experiments
-
-| Command | Does |
-| --- | --- |
-| `hiraku proposal list [--task ID] [--json]` | List experiments in a task that have no commit yet (i.e. every `is_proposal` node). |
+| `hiraku record create RECORD_ID [--parent ID] [--related-to ID ...] [--type NAME] [--commit REF] [--markdown-file PATH] [--set KEY=VALUE ...] [--no-activate]` | Create a root record (no `--parent`) or a child record under an existing one. |
+| `hiraku record list [--json]` | List every record (`id, parent, type, status` by default). |
+| `hiraku record show [RECORD_ID] [--raw] [--json]` | Show a record's effective (inherited) or, with `--raw`, stored-only fields and their sources (defaults to the active record). |
+| `hiraku record update RECORD_ID [--parent ID \| --root] [--related-to ID ...] [--commit REF] [--set KEY=VALUE ...] [--unset KEY ...] [--markdown-file PATH]` | Update stored fields, or move the record (`--parent`) / promote it to a root (`--root`). This is how a proposed node gets its commit bound — the "implement" step in `hiraku-agent next`'s suggestions. |
+| `hiraku record edit RECORD_ID` | Open the record's Markdown file in `$EDITOR` (default `vim`), then re-validate. |
+| `hiraku record delete RECORD_ID` | Delete a leaf record (one with no children and nothing still linking to it). |
+| `hiraku record set RECORD_ID` | Set the active record. |
+| `hiraku record tree [--json]` | Show the whole project as a parent/child tree. |
+| `hiraku record entrypoints [RECORD_ID] [--json]` | List a record's *effective* entrypoints (its own, merged over its ancestors') and which record each came from. |
 
 ### `hiraku program` / `hiraku context` — generic record CRUD (data model only — see below)
 
@@ -72,8 +60,10 @@ exactly the same six commands:
 
 `hiraku context ...` has the identical six commands over `Context` records.
 There is deliberately no `hiraku context set` / "active context" — that is
-not an oversight in this doc, it does not exist in `HirakuConfig` today
-(compare `active_task_id`/`active_experiment_id`).
+not an oversight in this doc, it does not exist in `HirakuConfig` today.
+`HirakuConfig` tracks exactly one piece of active-record state,
+`active_record_id` (`hiraku record set`/`hiraku status`); it has no separate
+notion of an active `Context`.
 
 **`Program`, `Action`, and `Context` (`hiraku.agent`) are data-model-only in
 this version — nothing executes them, and `hiraku_agent` does not read
@@ -133,8 +123,8 @@ implements the data model and not yet the agent integration." Concretely:
 
 | Command | Does |
 | --- | --- |
-| `hiraku launch TARGET [-- ENTRYPOINT_OVERRIDES...] [--task ID] [--commit REF] [--dispatch NAME] [--dry-run]` | Resolve an entrypoint (`TARGET` is `name` or `experiment_id:name`) and launch it. `--dry-run` prints the resolved dispatcher and command instead of running them. |
-| `hiraku run list [--task ID] [--experiment ID] [--metrics a,b] [--params a,b] [--sort NAME] [--ascending \| --descending] [--limit N] [--json]` | List normalized tracked runs for a task or one experiment. |
+| `hiraku launch ENTRYPOINT_NAME [-- ENTRYPOINT_OVERRIDES...] [--record ID] [--commit REF] [--dispatch NAME] [--dry-run]` | Resolve `ENTRYPOINT_NAME` on `--record` (defaults to the active record; inheritance means a node can launch an entrypoint declared on an ancestor) and launch it. `--dry-run` prints the resolved dispatcher and command instead of running them. |
+| `hiraku runs [list] [--record ID] [--metrics a,b] [--params a,b] [--sort NAME] [--ascending \| --descending] [--limit N] [--json]` | List normalized tracked runs from `--record`'s resolved tracking source. **Scopes to the tracking source, not to `--record` itself**: it returns every run with any record attribution in that source, siblings and descendants included — see `hiraku_agent.node.Node.runs`'s docstring for why `hiraku_agent`'s own scheduler cannot use this call directly and instead filters by `record_id` itself. |
 
 ## `hiraku-agent`
 
@@ -160,7 +150,7 @@ no CLI flag — see `cli.md`'s "Deciding: CLI or Python API" section.
 | --- | --- |
 | `hiraku-agent next [--task ID] [--json]` | Print the single next action for a task and why (`design`, `implement`, `launch`, `analyze`, `triage`, `approve`, or `exhausted`), plus a ready-to-run `hiraku-agent ...`/`hiraku ...` command when there is an obvious one. |
 | `hiraku-agent approve NODE_ID [--task ID] --by WHO` | Clear the approval gate on a proposed node. A no-op in `auto` mode. |
-| `hiraku-agent draft -m INSTRUCTION [--task-id ID] [--branch NAME] [--no-activate] [agent options]` | Turn free text into a new `Task` — the same effect as `hiraku task create`. `--task-id` is optional: omit it and the agent proposes one, the same way `hiraku task create` would need *a* id but not necessarily yours. |
+| `hiraku-agent draft -m INSTRUCTION [--task-id ID] [--branch NAME] [--no-activate] [agent options]` | Turn free text into a new task — a root `Record` — the same effect as `hiraku record create ID --type task`. `--task-id` is optional: omit it and the agent proposes one, the same way `hiraku record create` would need *a* id but not necessarily yours. |
 | `hiraku-agent design [--task ID] [agent options]` | Propose a tree of experiments for a task. Writes proposed `Node`s (no commit). |
 | `hiraku-agent discover [--task ID] [agent options]` | Search for candidate hypotheses (literature or an idea you give it via `--instruction`). Writes accepted ideas as proposed `Node`s and declined ones as `abandoned` `Node`s (so a later `discover` doesn't re-propose them). |
 | `hiraku-agent implement NODE_ID [--task ID] [agent options]` | Write `NODE_ID`'s approved proposal as real code, commit it, and bind the resulting commit — the one workflow where the agent writes files and runs shell commands instead of only returning JSON. `NODE_ID` must already be approved (`hiraku-agent approve`); the approval is the human trigger in `guided` mode, the agent is what writes the code either way. See `workflows.run_implement`. |
@@ -168,18 +158,20 @@ no CLI flag — see `cli.md`'s "Deciding: CLI or Python API" section.
 | `hiraku-agent analyze NODE_ID [--task ID] [agent options]` | Judge `NODE_ID`'s runs against its expectation; writes findings/conclusions and, when warranted, a verdict. |
 | `hiraku-agent loop --program ID --task ID [--max-steps N] [--json]` | Drive a bounded loop: repeats `hiraku-agent next`'s own suggestion, calling whichever `Action` the named `Program` binds to that workflow, until a budget is hit, a step writes nothing, the next suggestion needs a person or a real command (`approve`/`launch`), or nothing is left to schedule. `implement` is drivable here like any other LLM workflow — see `docs/state.md`'s gates section for why that's safe (the approval gate is unmoved; `run_implement` re-checks it anyway). |
 
-`--task` is required unless a task is already active (`hiraku task set`);
+`--task` is required unless a task is already active (`hiraku record set`);
 `implement`/`triage`/`analyze` take `NODE_ID` positionally and resolve its
-task from the node reference the same way `hiraku experiment show` does
-(qualified `task:id`, or the active task). `draft` is the odd one out —
-there is no task to resolve `--task` against yet, since this call is what
-creates it, so it takes `--task-id` instead (see "Why `--task-id`, not
-`--task`?" note below).
+task by walking `parent_id` up to the root (`hiraku_agent.node.task_of`) —
+record ids are globally unique project-wide now, so the bare id alone is
+enough; there is no qualified `task:id` syntax to resolve any more (compare
+`hiraku record show`, which likewise just takes a bare id). `draft` is the
+odd one out — there is no task to resolve `--task` against yet, since this
+call is what creates it, so it takes `--task-id` instead (see "Why
+`--task-id`, not `--task`?" note below).
 
 ### Examples
 
 ```bash
-hiraku task set vo-backend
+hiraku record set vo-backend
 
 # Interactive default: prompts printed on stderr while the agent runs,
 # a plain-text summary of what got written on success.
@@ -210,8 +202,8 @@ hiraku-agent next --json
 `--task-id` means "give the task about to be created this id, or let the agent propose one
 if omitted" — a name for something that doesn't exist yet. These are genuinely different
 questions, not an inconsistency: it mirrors `hiraku`'s own core CLI, which likewise uses a
-bare id for naming something new (`hiraku task create <task-id>`) and `--task <task-id>`
-for referencing something that already exists (`hiraku launch --task <task-id>`).
+bare id for naming something new (`hiraku record create <task-id>`) and `--record <id>`
+for referencing something that already exists (`hiraku launch --record <id>`).
 
 ### Where a call's evidence lives
 
@@ -231,8 +223,8 @@ Every `design`/`discover`/`draft`/`implement`/`triage`/`analyze` call is logged 
 
 | State (`hiraku_agent.STATES`) | Meaning | Command that gets you there / past it |
 | --- | --- | --- |
-| `proposed` | No commit yet. | `hiraku-agent design` / `discover` create it; `hiraku-agent approve` (in `guided` mode) clears the gate; `hiraku-agent implement <id>` writes the code and binds it (or, by hand, `hiraku experiment update <id> --commit <hash>`). |
-| `implemented` | Has a commit, no runs yet. | `hiraku launch <id>:<entrypoint>`. |
+| `proposed` | No commit yet. | `hiraku-agent design` / `discover` create it; `hiraku-agent approve` (in `guided` mode) clears the gate; `hiraku-agent implement <id>` writes the code and binds it (or, by hand, `hiraku record update <id> --commit <hash>`). |
+| `implemented` | Has a commit, no runs yet. | `hiraku launch <entrypoint> --record <id>`. |
 | `awaiting_analysis` | Has runs, no verdict. | `hiraku-agent analyze <id>`. |
 | `concluded` | Has a verdict — `supports`, `refutes`, or `inconclusive` — no children yet, not yet triaged. | `hiraku-agent triage <id>`, whichever way the verdict went — see `docs/state.md` for why `supports` doesn't skip this. |
 | `completed` | Already has children, or `triage` already decided not to produce any (`Node.triaged`), or explicitly dropped (`abandoned=True`, e.g. a `discover` idea that got declined). | Terminal; not resumed automatically. |

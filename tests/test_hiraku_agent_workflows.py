@@ -20,9 +20,9 @@ from pathlib import Path
 import pytest
 
 from hiraku.config import HirakuConfig
-from hiraku.data import Task, list_tasks, load_task
 from hiraku.errors import HirakuError, RecordNotFoundError, ValidationError
 from hiraku.git import GitRepository
+from hiraku.record import Record, list_records, load_record
 from hiraku_agent import sections
 from hiraku_agent.engine import (
     DEFAULT_IMPLEMENT_AGENT_CMD,
@@ -55,9 +55,11 @@ def config(tmp_path: Path) -> HirakuConfig:
 
 
 @pytest.fixture
-def task(config: HirakuConfig) -> Task:
-    return Task.create(
+def task(config: HirakuConfig) -> Record:
+    return Record.create(
         "vo-backend",
+        parent_id=None,
+        type="task",
         config=config,
         goal="Improve validation accuracy",
         entrypoints={"train": {"command": ["python", "train.py"]}},
@@ -91,12 +93,14 @@ def git_config(tmp_path: Path) -> HirakuConfig:
 
 
 @pytest.fixture
-def git_task(git_config: HirakuConfig) -> Task:
+def git_task(git_config: HirakuConfig) -> Record:
     """Like `task`, but scoped to `git_config`'s real repository — `run_implement`
     resolves the agent's reported commit with `GitRepository.resolve`, which needs an
     actual repo the way `run_draft`'s branch binding does (see `git_config`)."""
-    return Task.create(
+    return Record.create(
         "vo-backend",
+        parent_id=None,
+        type="task",
         config=git_config,
         goal="Improve validation accuracy",
         entrypoints={"train": {"command": ["python", "train.py"]}},
@@ -308,15 +312,15 @@ def test_run_draft_creates_a_task_with_a_bound_git_branch(
         config=git_config,
     )
 
-    task = load_task("vo-backend", config=git_config)
+    task = load_record("vo-backend", config=git_config)
     assert task.goal == "Improve validation accuracy"
     assert task.question == "Does a deeper backbone raise val_accuracy?"
     assert "underperforms" in task.markdown
-    assert task.branch == "hiraku/tasks/vo-backend"
+    assert task.branch == "hiraku/records/vo-backend"
 
     repository = GitRepository(git_config)
-    assert repository.branch_exists("hiraku/tasks/vo-backend")
-    assert git_config.active_task_id == "vo-backend"
+    assert repository.branch_exists("hiraku/records/vo-backend")
+    assert git_config.active_record_id == "vo-backend"
     assert len(result.written) == 1
 
 
@@ -337,13 +341,13 @@ def test_run_draft_writes_metrics_named_in_the_agent_reply(
     }
     run_draft("draft this", command=stub_agent(payload), config=git_config)
 
-    task = load_task("vo-backend", config=git_config)
+    task = load_record("vo-backend", config=git_config)
     assert [m.model_dump() for m in task.metrics] == [
         {"name": "val_accuracy", "direction": "maximize"}
     ]
 
 
-def test_run_draft_leaves_metrics_empty_when_the_agent_names_none(
+def test_run_draft_leaves_metrics_unset_when_the_agent_names_none(
     git_config: HirakuConfig,
 ) -> None:
     payload = {"id": "vo-backend", "goal": "g", "question": "q", "summary": "s"}
@@ -353,8 +357,10 @@ def test_run_draft_leaves_metrics_empty_when_the_agent_names_none(
         config=git_config,
     )
 
-    task = load_task("vo-backend", config=git_config)
-    assert task.metrics == []
+    task = load_record("vo-backend", config=git_config)
+    # `Record.metrics` defaults to `None`, not `[]` (unlike the old `Task.metrics`) —
+    # `_create_task` only sets it at all when `_sanitize_metrics` found something.
+    assert task.metrics is None
 
 
 def test_run_draft_drops_a_metric_with_no_groundable_direction(
@@ -374,7 +380,7 @@ def test_run_draft_drops_a_metric_with_no_groundable_direction(
     }
     run_draft("draft this", command=stub_agent(payload), config=git_config)
 
-    task = load_task("vo-backend", config=git_config)
+    task = load_record("vo-backend", config=git_config)
     assert [m.model_dump() for m in task.metrics] == [
         {"name": "val_accuracy", "direction": "maximize"}
     ]
@@ -422,7 +428,7 @@ def test_run_draft_no_apply_writes_nothing(git_config: HirakuConfig) -> None:
     )
     assert result.written == []
     with pytest.raises(RecordNotFoundError):
-        load_task("vo-backend", config=git_config)
+        load_record("vo-backend", config=git_config)
 
 
 def test_run_draft_raises_on_empty_instruction(git_config: HirakuConfig) -> None:
@@ -436,21 +442,21 @@ def test_run_draft_rolls_back_the_task_on_branch_failure(
     def _boom(self: GitRepository, task_id: str, *, branch: str | None = None) -> str:
         raise RuntimeError("branch creation failed")
 
-    monkeypatch.setattr(GitRepository, "create_task_branch", _boom)
+    monkeypatch.setattr(GitRepository, "create_record_branch", _boom)
 
     payload = {"id": "vo-backend", "goal": "g", "question": "q", "summary": "s"}
     with pytest.raises(RuntimeError):
         run_draft("draft this", command=stub_agent(payload), config=git_config)
 
-    assert list_tasks(config=git_config) == []
-    assert not (git_config.tasks_dir / "vo-backend").exists()
+    assert list_records(config=git_config) == []
+    assert not (git_config.records_dir / "vo-backend").exists()
 
 
 # --------------------------------------------------------------------------- run_design
 
 
 def test_run_design_writes_proposed_nodes_from_the_agent_reply(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     payload = {
         "experiments": [
@@ -481,7 +487,7 @@ def test_run_design_writes_proposed_nodes_from_the_agent_reply(
 
 
 def test_run_design_dry_run_calls_nothing_and_writes_nothing(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     result = run_design("vo-backend", dry_run=True, config=config)
     assert result.raw == ""
@@ -490,7 +496,7 @@ def test_run_design_dry_run_calls_nothing_and_writes_nothing(
 
 
 def test_run_design_no_apply_calls_the_agent_but_writes_nothing(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     payload = {"experiments": [{"id": "baseline", "expectation": "x"}], "notes": None}
     result = run_design(
@@ -503,7 +509,7 @@ def test_run_design_no_apply_calls_the_agent_but_writes_nothing(
 
 
 def test_run_design_raises_if_the_reply_has_no_experiments_key(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     with pytest.raises(AgentError):
         run_design("vo-backend", command=stub_agent({"notes": "oops"}), config=config)
@@ -513,7 +519,7 @@ def test_run_design_raises_if_the_reply_has_no_experiments_key(
 
 
 def test_run_discover_writes_accepted_and_declined_as_nodes(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     payload = {
         "proposals": [
@@ -566,7 +572,7 @@ def test_run_discover_writes_accepted_and_declined_as_nodes(
 
 
 def test_run_discover_skips_an_id_that_already_exists(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     create_node("focal-loss", task=task, kind="hypothesis", config=config)
     payload = {
@@ -583,7 +589,7 @@ def test_run_discover_skips_an_id_that_already_exists(
 
 
 def test_run_implement_binds_the_reported_commit_and_merges_entrypoints(
-    git_config: HirakuConfig, git_task: Task
+    git_config: HirakuConfig, git_task: Record
 ) -> None:
     # An experiment-level entrypoint override, set before implementing — distinct from
     # the task-level "train" entrypoint `git_task` already carries (`Node.entrypoints`
@@ -627,7 +633,7 @@ def test_run_implement_binds_the_reported_commit_and_merges_entrypoints(
 
 
 def test_run_implement_raises_if_the_node_is_not_approved(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     create_node(
         "baseline", task=task, kind="baseline", expectation="x", config=config
@@ -642,7 +648,7 @@ def test_run_implement_raises_if_the_node_is_not_approved(
 
 
 def test_run_implement_proceeds_without_approval_in_auto_mode(
-    git_config: HirakuConfig, git_task: Task
+    git_config: HirakuConfig, git_task: Record
 ) -> None:
     create_node(
         "baseline",
@@ -664,7 +670,7 @@ def test_run_implement_proceeds_without_approval_in_auto_mode(
 
 
 def test_run_implement_raises_if_the_node_already_has_a_commit(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     node = create_node(
         "baseline", task=task, kind="baseline", expectation="x", config=config
@@ -682,7 +688,7 @@ def test_run_implement_raises_if_the_node_already_has_a_commit(
 
 
 def test_run_implement_raises_for_an_abandoned_node(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     node = create_node(
         "baseline",
@@ -703,7 +709,7 @@ def test_run_implement_raises_for_an_abandoned_node(
 
 
 def test_run_implement_blocked_reply_writes_nothing(
-    git_config: HirakuConfig, git_task: Task
+    git_config: HirakuConfig, git_task: Record
 ) -> None:
     node = create_node(
         "baseline", task=git_task, kind="baseline", expectation="x", config=git_config
@@ -723,7 +729,7 @@ def test_run_implement_blocked_reply_writes_nothing(
 
 
 def test_run_implement_dry_run_calls_nothing_and_writes_nothing(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     node = create_node(
         "baseline", task=task, kind="baseline", expectation="x", config=config
@@ -738,7 +744,7 @@ def test_run_implement_dry_run_calls_nothing_and_writes_nothing(
 
 
 def test_run_implement_raises_if_the_agent_reports_an_unresolvable_commit(
-    git_config: HirakuConfig, git_task: Task
+    git_config: HirakuConfig, git_task: Record
 ) -> None:
     node = create_node(
         "baseline", task=git_task, kind="baseline", expectation="x", config=git_config
@@ -759,7 +765,7 @@ def test_run_implement_raises_if_the_agent_reports_an_unresolvable_commit(
 
 
 def test_run_triage_sets_verdict_and_creates_a_child_on_class_b(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     node = create_node(
         "baseline",
@@ -807,7 +813,7 @@ def test_run_triage_sets_verdict_and_creates_a_child_on_class_b(
     assert "0.62" in sections.read_section(reloaded.markdown, "Findings")
 
     child = load_node("label-smoothing", task=task, config=config)
-    assert child.parent == "baseline"
+    assert child.parent_id == "baseline"
     assert child.kind == "diagnostic"
     assert child.is_proposal
     assert len(result.written) == 2
@@ -816,7 +822,7 @@ def test_run_triage_sets_verdict_and_creates_a_child_on_class_b(
 
 
 def test_run_triage_on_a_supports_verdict_has_no_failure_to_classify(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     """Generalizes `triage` past "only runs on a miss": a `supports` verdict can
     still land here (see `suggest_next`'s `concluded` priority), and the prompt's
@@ -859,7 +865,7 @@ def test_run_triage_on_a_supports_verdict_has_no_failure_to_classify(
 
 
 def test_run_triage_class_a_sets_no_verdict_and_no_children(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     create_node(
         "baseline", task=task, kind="baseline", expectation="x", config=config
@@ -895,7 +901,7 @@ def test_run_triage_class_a_sets_no_verdict_and_no_children(
 
 
 def test_run_triage_blocked_reply_does_not_mark_the_node_triaged(
-    config: HirakuConfig, task: Task
+    config: HirakuConfig, task: Record
 ) -> None:
     create_node("baseline", task=task, config=config)
     payload = {"blocked": "no expectation recorded"}
@@ -911,9 +917,9 @@ def test_run_triage_blocked_reply_does_not_mark_the_node_triaged(
 
 
 def test_run_analyze_sets_verdict_and_writes_findings(
-    config: HirakuConfig, task: Task, monkeypatch: pytest.MonkeyPatch
+    config: HirakuConfig, task: Record, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from hiraku.data import Run
+    from hiraku.run import Run
     from hiraku_agent.node import Node
 
     node = create_node(
@@ -933,8 +939,7 @@ def test_run_analyze_sets_verdict_and_writes_findings(
         id="r1",
         metrics={"val_accuracy": 0.83},
         params={},
-        task_id="vo-backend",
-        experiment_id="baseline",
+        record_id="baseline",
         commit="a" * 40,
         timestamp="2026-09-18T00:00:00Z",
         entrypoint="train",
@@ -968,13 +973,13 @@ def test_run_analyze_sets_verdict_and_writes_findings(
 
 
 def test_run_analyze_resets_triaged_on_a_fresh_verdict(
-    config: HirakuConfig, task: Task, monkeypatch: pytest.MonkeyPatch
+    config: HirakuConfig, task: Record, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A node triage already decided on (no children, `triaged=True`) can still come
     back around — e.g. a re-run after a code fix. A new verdict from `analyze` must
     reopen the go/no-go decision, not leave the node looking already-completed from
     a verdict that no longer holds."""
-    from hiraku.data import Run
+    from hiraku.run import Run
     from hiraku_agent.node import Node
 
     node = create_node(
@@ -989,8 +994,7 @@ def test_run_analyze_resets_triaged_on_a_fresh_verdict(
         id="r2",
         metrics={"val_accuracy": 0.91},
         params={},
-        task_id="vo-backend",
-        experiment_id="baseline",
+        record_id="baseline",
         commit="a" * 40,
         timestamp="2026-09-19T00:00:00Z",
         entrypoint="train",
@@ -1017,7 +1021,7 @@ def test_run_analyze_resets_triaged_on_a_fresh_verdict(
     assert node_state(reloaded, runs=[stub_run], has_children=False) == "concluded"
 
 
-def test_run_analyze_raises_without_runs(config: HirakuConfig, task: Task) -> None:
+def test_run_analyze_raises_without_runs(config: HirakuConfig, task: Record) -> None:
     from hiraku.errors import HirakuError
 
     node = create_node("baseline", task=task, config=config)

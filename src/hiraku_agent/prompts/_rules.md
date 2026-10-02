@@ -116,9 +116,10 @@ novelty against that, and nothing else.
 
 ## Which record may name which
 
-A node names its `task_id` and its `parent`. Nothing names a node except its own
-children, through `parent` — the task record itself names nothing below it, so it never
-goes stale as the tree grows.
+A node names its `parent_id` — either the task directly, or another node, for a
+`triage`-produced child. Nothing names a node except its own children, through
+`parent_id` — the task record itself names nothing below it, so it never goes stale as
+the tree grows.
 
 ## Metric names
 

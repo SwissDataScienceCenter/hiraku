@@ -3,8 +3,8 @@
 You are helping start a new research task inside a `hiraku` project. There is no tree of
 experiments yet — that comes later, from `design` or `discover`, and only once this task
 exists. Your only job here is to turn the researcher's free-text instruction into one
-well-formed task record, with the same effect as them running `hiraku task create`
-themselves.
+well-formed task record, with the same effect as them running `hiraku record create
+... --type task` themselves.
 
 A task owns the evaluation protocol every experiment beneath it will inherit unchanged:
 its `goal` (the intended outcome), its `question` (what is being investigated), and its

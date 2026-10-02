@@ -12,7 +12,7 @@ rather than copied:
 
 - No separate "proposal" record type. The old version wrote `discover`'s output to a
   lighter-weight `research/proposals/` record, distinct from an "experiment". `hiraku`
-  has exactly one kind of record for an attempt: `Experiment` (`Node`, here) — a
+  has exactly one kind of record for an attempt: `Record` (`Node`, here) — a
   proposal already exists as a `Node` with no commit (`Node.is_proposal`).
   `discover`'s accepted proposals become ordinary proposed nodes, exactly like
   `design`'s; there is no second file format to keep in sync.
@@ -24,9 +24,9 @@ rather than copied:
   further), so an idea nobody built is the same fact as a node somebody dropped; both
   are the novelty-check memory the six-condition test in `prompts/_rules.md` asks for.
 
-Every node this module writes is a plain `hiraku` experiment underneath — `hiraku
-experiment show` reads it unmodified; only the extra fields carry meaning `hiraku`
-itself doesn't know about (see `node.py`'s module docstring).
+Every node this module writes is a plain `hiraku` record underneath — `hiraku record
+show` reads it unmodified; only the extra fields carry meaning `hiraku` itself doesn't
+know about (see `node.py`'s module docstring).
 """
 
 from __future__ import annotations
@@ -37,9 +37,9 @@ from contextlib import suppress
 from typing import Any
 
 from hiraku.config import HirakuConfig
-from hiraku.data import Task, list_tasks, load_task
 from hiraku.errors import HirakuError
 from hiraku.git import GitRepository
+from hiraku.record import Record, list_records, load_record
 from hiraku.validation import validate_identifier
 
 from . import sections
@@ -62,7 +62,7 @@ from .engine import (
 )
 from .errors import AgentError
 from .gates import is_approved
-from .node import ORIGINS, Node, create_node, list_nodes, load_node
+from .node import ORIGINS, Node, create_node, list_nodes, load_node, task_of
 from .state import node_state
 
 
@@ -96,7 +96,7 @@ def _write_sections(
 
 
 def _serialize_run(run: Any) -> dict[str, Any]:
-    """`run.model_dump()`, tolerant of `hiraku.data.Run`'s normalized fields.
+    """`run.model_dump()`, tolerant of `hiraku.run.Run`'s normalized fields.
 
     `Run.metrics`/`.params` are frozen into `types.MappingProxyType` (see `Run`'s own
     docstring: "normalized to immutable mapping proxies"), a type pydantic's JSON mode
@@ -122,8 +122,8 @@ def _node_bookkeeping(
     children."""
     children_of: dict[str, list[str]] = defaultdict(list)
     for node in nodes:
-        if node.parent:
-            children_of[node.parent].append(node.id)
+        if node.parent_id:
+            children_of[node.parent_id].append(node.id)
     runs_by_id = {node.id: node.runs(config=config) for node in nodes}
     states = {
         node.id: node_state(
@@ -135,7 +135,7 @@ def _node_bookkeeping(
 
 
 def task_state(
-    task: Task,
+    task: Record,
     nodes: list[Node],
     *,
     config: HirakuConfig,
@@ -145,9 +145,10 @@ def task_state(
 
     Scoped to one task on purpose, the way the old `hiraku_auto`'s `slim_state` scoped
     to one goal — it keeps the prompt small and stops the agent reasoning across
-    incomparable protocols. `hiraku_agent` has no separate goal layer to scope by (a
-    `Task` already carries `goal`/`question`/`metrics` — see `node.py`'s module
-    docstring and `docs/state.md`), so scoping by task is the whole of it.
+    incomparable protocols. `hiraku_agent` has no separate goal layer to scope by (the
+    task's own `Record` already carries `goal`/`question`/`metrics` as extras — see
+    `node.py`'s module docstring and `docs/state.md`), so scoping by task is the whole
+    of it.
     """
     runs_by_id, states, children_of = _node_bookkeeping(nodes, config=config)
     serialized: dict[str, Any] = {}
@@ -178,8 +179,16 @@ def _resolve_context(
 
 def draft_state(config: HirakuConfig, *, task_id: str | None = None) -> dict[str, Any]:
     """The state an agent sees when drafting a new task: every existing task, for the
-    id-collision and novelty checks `prompts/draft.md` asks it to make."""
-    existing = list_tasks(config=config)
+    id-collision and novelty checks `prompts/draft.md` asks it to make.
+
+    "Existing task" means a root record (`parent_id is None`) — `hiraku.record`
+    itself has no separate task/experiment distinction any more, so this filters
+    `list_records()` by hand rather than calling a `list_tasks`-shaped helper that
+    no longer exists.
+    """
+    existing = [
+        record for record in list_records(config=config) if record.parent_id is None
+    ]
     return {
         "existing_tasks": [
             {
@@ -204,15 +213,15 @@ _METRIC_DIRECTIONS = {"minimize", "maximize"}
 
 
 def _sanitize_metrics(data: dict[str, Any]) -> list[dict[str, str]]:
-    """Keep only agent-proposed metrics shaped the way `hiraku.data.Metric` requires: a
-    non-empty `name` and a `direction` its `Literal["minimize", "maximize"]` will
+    """Keep only agent-proposed metrics shaped the way `hiraku.record.Metric` requires:
+    a non-empty `name` and a `direction` its `Literal["minimize", "maximize"]` will
     accept.
 
     A metric missing either is dropped rather than guessed. `Metric.direction` has no
     room for an `**[UNSET: ...]**` marker the way a plain string field does — passing
-    one through would fail `Task.create`'s validation outright — so the honest move for
-    an ungroundable direction is to leave that metric out, not invent one that could
-    silently point every later comparison the wrong way.
+    one through would fail `Record.create`'s validation outright — so the honest move
+    for an ungroundable direction is to leave that metric out, not invent one that
+    could silently point every later comparison the wrong way.
     """
     raw = data.get("metrics")
     if not isinstance(raw, list):
@@ -238,10 +247,11 @@ def _create_task(
     branch: str | None,
     activate: bool,
     config: HirakuConfig,
-) -> Task:
-    """Create a `Task` from a `draft` reply, the same way `hiraku task create` does by
-    hand: resolve and validate the branch name, persist the record, then bind the git
-    branch — rolling the record back if the branch step fails, so the two never diverge.
+) -> Record:
+    """Create a task — a root `Record` — from a `draft` reply, the same way `hiraku
+    record create ... --type task` does by hand: resolve and validate the branch name,
+    persist the record, then bind the git branch — rolling the record back if the
+    branch step fails, so the two never diverge.
     """
     fields: dict[str, Any] = {
         key: str(data[key]) for key in ("goal", "question", "summary") if data.get(key)
@@ -251,12 +261,14 @@ def _create_task(
         fields["metrics"] = metrics
     body = str(data.get("body") or "")
     selected_branch = (
-        branch if branch is not None else config.task_branch.format(task_id=task_id)
+        branch if branch is not None else config.branch.format(record_id=task_id)
     )
     repository = GitRepository(config)
     repository.validate_branch(selected_branch)
-    created = Task.create(
+    created = Record.create(
         task_id,
+        parent_id=None,
+        type="task",
         markdown=body,
         activate=False,
         config=config,
@@ -265,13 +277,13 @@ def _create_task(
     )
     created_leaf = created.path.parent
     try:
-        repository.create_task_branch(task_id, branch=selected_branch)
+        repository.create_record_branch(task_id, branch=selected_branch)
     except Exception:
         created.delete(config=config)
-        _remove_empty_task_leaf(created_leaf, config.tasks_dir / task_id)
+        _remove_empty_task_leaf(created_leaf, config.records_dir / task_id)
         raise
     if activate:
-        config.set_active_task(created)
+        config.set_active_record(created)
     return created
 
 
@@ -293,14 +305,14 @@ def run_draft(
     context_id: str | None = None,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
-    """Turn free-text instruction into a new `Task` — the same effect as running `hiraku
-    task create` by hand.
+    """Turn free-text instruction into a new task (a root `Record`) — the same effect
+    as running `hiraku record create ... --type task` by hand.
 
     Unlike `design`/`discover`/`triage`/`analyze`, there is no task to load first: this
     workflow creates one. A `task_id` the caller already knows (`--task-id`) is
     validated before the agent is even called, so a bad id fails fast rather than after
     a paid call; an id the agent proposes instead is validated once the reply is in,
-    exactly as `hiraku task create` validates whatever id it is given.
+    exactly as `hiraku record create` validates whatever id it is given.
 
     `action`, if given, needs `task_id` too — an `Action` (`hiraku.agent.Action`) is
     scoped to a task id (`entity`), and there is no task id to scope it to until this
@@ -377,7 +389,7 @@ def run_design(
 ) -> AgentRun:
     """Propose a tree of experiments for a task. Writes proposed `Node`s (no commit)."""
     selected = config or HirakuConfig.discover()
-    task = load_task(task_id, config=selected)
+    task = load_record(task_id, config=selected)
     nodes = list_nodes(task=task, config=selected)
     command, timeout, context_paths = apply_overrides(
         action,
@@ -467,7 +479,7 @@ def run_discover(
     type.
     """
     selected = config or HirakuConfig.discover()
-    task = load_task(task_id, config=selected)
+    task = load_record(task_id, config=selected)
     nodes = list_nodes(task=task, config=selected)
     command, timeout, context_paths = apply_overrides(
         action,
@@ -645,17 +657,17 @@ def run_implement(
     if not node.is_proposal:
         raise HirakuError(
             f"'{node.id}' already has a commit bound ({node.commit}) — nothing to "
-            f"implement. Use `hiraku experiment update` directly if you meant to "
+            f"implement. Use `hiraku record update` directly if you meant to "
             f"rebind it."
         )
     if not is_approved(node):
         raise AgentError(
             f"'{node.id}' is not approved yet. Run `hiraku-agent approve {node.id} "
-            f"--task {node.task_id} --by <you>` first — in guided mode that approval "
-            f"is what authorizes this workflow to write real code."
+            f"--task {task_of(node, config=selected).id} --by <you>` first — in guided "
+            f"mode that approval is what authorizes this workflow to write real code."
         )
 
-    task = load_task(node.task_id, config=selected)
+    task = task_of(node, config=selected)
     nodes = list_nodes(task=task, config=selected)
     command, timeout, context_paths = apply_overrides(
         action,
@@ -771,7 +783,7 @@ def run_triage(
     """
     selected = config or HirakuConfig.discover()
     node = load_node(node_id, task=task_id, config=selected)
-    task = load_task(node.task_id, config=selected)
+    task = task_of(node, config=selected)
     nodes = list_nodes(task=task, config=selected)
     command, timeout, context_paths = apply_overrides(
         action,
@@ -897,7 +909,7 @@ def run_analyze(
     node = load_node(node_id, task=task_id, config=selected)
     if not node.runs(config=selected):
         raise HirakuError(f"'{node.id}' has no runs to analyse.")
-    task = load_task(node.task_id, config=selected)
+    task = task_of(node, config=selected)
     nodes = list_nodes(task=task, config=selected)
     command, timeout, context_paths = apply_overrides(
         action,

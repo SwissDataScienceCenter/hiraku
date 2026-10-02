@@ -2,10 +2,10 @@
 
 Ported onto `hiraku`'s own model: what was `suggest_next(forest, goal_id)`
 over a from-scratch record tree is now `suggest_next(task_id)`, reading
-`Node` records that live in the exact task directories `hiraku` itself
-manages. `hiraku experiment show`/`list` see the same files; they just don't
-know the shape of the extra fields (`Record`'s `extra="allow"` is what makes
-that safe).
+`Node` records that live under the exact root record directory `hiraku`
+itself manages. `hiraku record show`/`list` see the same files; they just
+don't know the shape of the extra fields (`Record`'s `extra="allow"` is what
+makes that safe).
 
 **Scope of this module.** It answers "what's the single next thing to do,"
 never *how* to do it. `approve`/`launch` are real, mechanical actions:
@@ -17,7 +17,7 @@ proposing what a new node should say, writing the code an approved proposal
 describes, or deciding what a result means — and that judgement is an LLM
 call, in `workflows.py` (`run_design`/`run_discover`/`run_implement`/
 `run_triage`/`run_analyze`, via `engine.py`). `implement` still ends the
-same way it always did, `hiraku experiment update <id> --commit <hash>` (or
+same way it always did, `hiraku record update <id> --commit <hash>` (or
 its `run_implement` equivalent — see that function's own docstring); the
 only thing that changed is who can be asked to get there.
 """
@@ -28,7 +28,7 @@ from collections import defaultdict
 from typing import Any
 
 from hiraku.config import HirakuConfig
-from hiraku.data import Task
+from hiraku.record import Record
 
 from .gates import is_approved
 from .node import list_nodes
@@ -36,7 +36,7 @@ from .state import node_state
 
 
 def suggest_next(
-    task: Task | str, *, config: HirakuConfig | None = None
+    task: Record | str, *, config: HirakuConfig | None = None
 ) -> dict[str, Any]:
     """The single next action for `task`, and why.
 
@@ -45,7 +45,7 @@ def suggest_next(
     module docstring for what each action means and does not yet mean.
     """
     selected = config or HirakuConfig.discover()
-    task_id = task.id if isinstance(task, Task) else str(task)
+    task_id = task.id if isinstance(task, Record) else str(task)
     nodes = list_nodes(task=task, config=selected)
 
     if not nodes:
@@ -60,8 +60,8 @@ def suggest_next(
 
     children_of: dict[str, list[str]] = defaultdict(list)
     for node in nodes:
-        if node.parent:
-            children_of[node.parent].append(node.id)
+        if node.parent_id:
+            children_of[node.parent_id].append(node.id)
 
     runs_by_id = {node.id: node.runs(config=selected) for node in nodes}
     states = {

@@ -1,6 +1,8 @@
 # hiraku + hiraku-agent: end-to-end guide
 
-Everything below is real, working CLI on `feat/poc-agent` as of commit `47908a6` — every
+Everything below is real, working CLI on `feat/poc-agent`, ported onto `hiraku` core's
+unified-records model (`main`, release `0.1.1` — `Task`/`Experiment` collapsed into one
+`Record` class; see `hiraku/unified-records-port-plan-zou.md` for the port itself) — every
 command is either read straight out of `hiraku/src/hiraku/cli.py` or
 `hiraku_agent/src/hiraku_agent/cli.py`, or actually run while writing this. Two binaries:
 `hiraku` (the deterministic record/tracking layer, your colleagues' code) and
@@ -15,23 +17,26 @@ cd your-repo               # must be a git repo (or pass --ignore-git)
 uv run hiraku init
 ```
 
-Creates `hiraku/` (where every record lives — `hiraku/tasks/`, `hiraku/experiments/`,
-`hiraku/actions/`, `hiraku/contexts/`, `hiraku/programs/`, `hiraku/agent-logs/`) and the
-project config. `--tracking-backend mlflow` (or `csv`) picks how runs get tracked; default
-is fine to start.
+Creates `hiraku/` (where every record lives — `hiraku/records/`, `hiraku/actions/`,
+`hiraku/contexts/`, `hiraku/programs/`, `hiraku/agent-logs/`) and the project config.
+`--tracking-backend mlflow` (or `csv`) picks how runs get tracked; default is fine to
+start.
 
 ## 1. Get a task — two ways
 
-A task owns the evaluation protocol (`goal`/`question`/`metrics`) every experiment beneath
-it inherits unchanged. Everything downstream (`design`, `discover`, `next`, `loop`) needs
-one to exist first — there is no "no task yet" mode for any of them except `draft` itself.
+A task is just a root record (`parent_id is None`) — `hiraku` core draws no class
+distinction between a task and a node under it any more, only the convention of calling
+a root record's `type` field `"task"`. A task owns the evaluation protocol
+(`goal`/`question`/`metrics`) every record beneath it inherits unchanged. Everything
+downstream (`design`, `discover`, `next`, `loop`) needs one to exist first — there is no
+"no task yet" mode for any of them except `draft` itself.
 
 **Manual**, when you already know the shape of it:
 
 ```bash
-uv run hiraku task create vo-backend \
-  --goal "Improve visual-odometry backend accuracy" \
-  --question "Does a deeper backbone raise val_accuracy?" \
+uv run hiraku record create vo-backend --type task \
+  --set goal="Improve visual-odometry backend accuracy" \
+  --set question="Does a deeper backbone raise val_accuracy?" \
   --set metrics='[{name: val_accuracy, direction: maximize}]' \
   --set entrypoints='{train: {command: [python, train.py]}}'
 ```
@@ -43,17 +48,17 @@ uv run hiraku-agent draft -m "we should look at whether a deeper backbone helps 
   validation accuracy on the vo backend" --task-id vo-backend
 ```
 
-Same effect as `hiraku task create`, including binding a git branch (default
-`hiraku/tasks/vo-backend`) — see it in `hiraku task show vo-backend`. Two things `draft`
-does **not** do today: it only fills `metrics` when your instruction actually names one
-(with a groundable direction — see the note at the end); and it never touches
-`entrypoints`, so run `hiraku task update vo-backend --set entrypoints='{...}'` yourself
-before you try to `launch` anything.
+Same effect as `hiraku record create vo-backend --type task`, including binding a git
+branch (default `hiraku/records/vo-backend`) — see it in `hiraku record show vo-backend`.
+Two things `draft` does **not** do today: it only fills `metrics` when your instruction
+actually names one (with a groundable direction — see the note at the end); and it never
+touches `entrypoints`, so run `hiraku record update vo-backend --set entrypoints='{...}'`
+yourself before you try to `launch` anything.
 
 Check what got created:
 
 ```bash
-uv run hiraku task show vo-backend
+uv run hiraku record show vo-backend
 ```
 
 ## 2. Build the experiment tree
@@ -67,12 +72,17 @@ uv run hiraku-agent discover --task vo-backend -m "check the literature on backb
 `discover` searches for candidate hypotheses (from the literature, or from an idea you
 give it in `-m`) and writes both accepted proposals and declined ones (so a future
 `discover` doesn't re-propose something already considered). Both write plain, uncommitted
-`hiraku experiment` records — inspect with:
+child `hiraku record` entries — inspect with:
 
 ```bash
-uv run hiraku experiment list --task vo-backend
-uv run hiraku experiment show baseline --task vo-backend
+uv run hiraku record tree
+uv run hiraku record show baseline
 ```
+
+(`hiraku record tree`/`list` show the whole project, not just one task's subtree — the old
+`hiraku experiment list --task ID` scoping is gone along with the separate `Task`/
+`Experiment` classes; for one project this is rarely a problem, but it's worth knowing if
+you keep several unrelated tasks side by side.)
 
 ## 3. The guided cycle: `next` → act → repeat
 
@@ -95,15 +105,15 @@ uv run hiraku-agent approve baseline --task vo-backend --by qianqian
 # Approval is the human trigger; the agent is what writes the code either way (see
 # `workflows.run_implement`'s docstring). Review what it wrote before trusting it:
 uv run hiraku-agent implement baseline --task vo-backend
-git log -1 --stat $(uv run hiraku experiment show baseline --task vo-backend --json | jq -r .commit)
+git log -1 --stat $(uv run hiraku record show baseline --json | jq -r .values.commit)
 
 # (manual alternative, if you'd rather write the code yourself:)
-# git checkout -b exp/baseline hiraku/tasks/vo-backend
+# git checkout -b exp/baseline hiraku/records/vo-backend
 # ... write the code, commit it ...
-# uv run hiraku experiment update baseline --task vo-backend --commit $(git rev-parse HEAD)
+# uv run hiraku record update baseline --commit $(git rev-parse HEAD)
 
 # launch — run it, tracked
-uv run hiraku launch baseline:train --task vo-backend
+uv run hiraku launch train --record baseline
 
 # analyze — once a run exists
 uv run hiraku-agent analyze baseline --task vo-backend
@@ -112,12 +122,18 @@ uv run hiraku-agent analyze baseline --task vo-backend
 uv run hiraku-agent triage baseline --task vo-backend
 ```
 
-Check runs and the leaderboard any time:
+Check runs any time:
 
 ```bash
-uv run hiraku run list --task vo-backend --experiment baseline
-uv run hiraku run list --task vo-backend --sort val_accuracy --descending
+uv run hiraku runs --record baseline
+uv run hiraku runs --record baseline --sort val_accuracy --descending
 ```
+
+(`hiraku runs --record ID` lists every run attributed to anything in `ID`'s resolved
+tracking source, not only `ID`'s own runs — see `docs/guides/command.md`'s "Launching and
+runs" section. `hiraku_agent`'s own scheduler needs the narrower, per-node view instead, so
+`hiraku_agent.node.Node.runs` filters this back down by hand — see that method's
+docstring.)
 
 Just keep calling `hiraku-agent next` — that's the whole cycle. It stops suggesting
 anything once every branch is `completed` (`design`/`discover` again from there, or
@@ -205,7 +221,7 @@ will run one `design` step and then stop citing `approve` — that's correct, no
 person still has to clear the gate before anything downstream happens. To let it run past
 that unattended, the nodes it creates need `mode: auto` — `design`'s prompt doesn't set
 this today, so for now that means editing the node afterward
-(`hiraku experiment update <id> --set mode=auto`) or accepting that `loop` in guided mode
+(`hiraku record update <id> --set mode=auto`) or accepting that `loop` in guided mode
 does one honest step at a time between check-ins.
 
 ## Worked example, start to finish
@@ -215,7 +231,7 @@ uv run hiraku init
 
 uv run hiraku-agent draft -m "investigate whether a deeper backbone raises validation \
   accuracy on the vo backend" --task-id vo-backend
-uv run hiraku task update vo-backend --set entrypoints='{train: {command: [python, train.py]}}'
+uv run hiraku record update vo-backend --set entrypoints='{train: {command: [python, train.py]}}'
 
 uv run hiraku-agent design --task vo-backend
 uv run hiraku-agent next --task vo-backend
@@ -224,7 +240,7 @@ uv run hiraku-agent approve baseline --task vo-backend --by qianqian
 
 # the agent writes the code, commits it, and binds the commit itself:
 uv run hiraku-agent implement baseline --task vo-backend
-uv run hiraku launch baseline:train --task vo-backend
+uv run hiraku launch train --record baseline
 uv run hiraku-agent next --task vo-backend
 # -> analyze baseline
 uv run hiraku-agent analyze baseline --task vo-backend

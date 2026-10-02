@@ -1,8 +1,8 @@
 """`hiraku-agent`: the thin CLI over the scheduler and the LLM-driven workflows.
 
 Deliberately small where `hiraku` already covers something. Creating a node, binding a
-commit by hand, launching, inspecting runs — all `hiraku`'s own CLI (`hiraku experiment
-...`, `hiraku launch`, `hiraku run list`). This module adds what `hiraku` doesn't have:
+commit by hand, launching, inspecting runs — all `hiraku`'s own CLI (`hiraku record
+...`, `hiraku launch`, `hiraku runs`). This module adds what `hiraku` doesn't have:
 "what's next", "approve this," the six LLM-driven workflows (`draft`, `design`,
 `discover`, `implement`, `triage`, `analyze`) described in `workflows.py`, and `loop`,
 the bounded driver over `loop.py` for a saved `Program` record. `implement` is the one
@@ -18,7 +18,7 @@ from typing import Any
 import click
 
 from hiraku.config import HirakuConfig
-from hiraku.errors import HirakuError, NoActiveTaskError
+from hiraku.errors import HirakuError, NoActiveRecordError
 
 from .engine import AgentRun, Hooks
 from .engine import agent_command as resolve_agent_cmd
@@ -39,10 +39,10 @@ from .workflows import (
 def _resolve_task(config: HirakuConfig, task_id: str | None) -> str:
     if task_id is not None:
         return task_id
-    if config.active_task_id is not None:
-        return config.active_task_id
-    raise NoActiveTaskError(
-        "No task given, and no active task is set (`hiraku task set <id>`)"
+    if config.active_record_id is not None:
+        return config.active_record_id
+    raise NoActiveRecordError(
+        "No task given, and no active record is set (`hiraku record set <id>`)"
     )
 
 
@@ -238,8 +238,8 @@ def draft_command(
     unset_env: tuple[str, ...],
     json_output: bool,
 ) -> None:
-    """Turn free-text instruction into a new task — the same effect as `hiraku task
-    create`."""
+    """Turn free-text instruction into a new task — the same effect as `hiraku record
+    create ... --type task`."""
     _run_agent_command(
         run_draft,
         _resolve_instruction(instruction, instruction_file),
