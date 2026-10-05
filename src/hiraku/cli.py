@@ -212,8 +212,7 @@ def tui_command(state: CLIContext) -> None:
         from .tui import RecordTUI
     except ImportError as exc:
         raise click.ClickException(
-            "The TUI extra is not installed. Install it with "
-            "`pip install 'hiraku[tui]'`."
+            "The TUI extra is not installed. Install it with `uv sync --extra tui`."
         ) from exc
 
     RecordTUI(config=state.config).run()
