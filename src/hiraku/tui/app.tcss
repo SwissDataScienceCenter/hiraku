@@ -1,0 +1,59 @@
+Screen {
+    background: $surface;
+}
+
+#browser-layout {
+    height: 1fr;
+    padding: 0 1 1 1;
+}
+
+#record-tree {
+    width: 32%;
+    min-width: 28;
+    border: round $primary;
+    margin-right: 1;
+    padding: 0 1;
+}
+
+#record-panel {
+    width: 1fr;
+    height: 1fr;
+    min-height: 0;
+}
+
+#record-summary {
+    height: auto;
+    min-height: 5;
+    max-height: 8;
+    border: round $secondary;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+#record-tabs {
+    height: 1fr;
+    min-height: 0;
+    border: round $secondary;
+}
+
+#overview-scroll,
+#fields-scroll,
+#markdown-scroll {
+    height: 1fr;
+    min-height: 0;
+    overflow-y: auto;
+    border: round $secondary;
+}
+
+#overview-scroll:focus,
+#fields-scroll:focus,
+#markdown-scroll:focus {
+    border: round $accent;
+}
+
+#record-overview,
+#record-fields,
+#record-content {
+    height: auto;
+    padding: 1 2;
+}

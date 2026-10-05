@@ -27,6 +27,7 @@ hiraku = "hiraku.cli:main"
 [project.optional-dependencies]
 mlflow = ["mlflow==3.16.0"]
 wandb = ["wandb>=0.29.0"]
+tui = ["textual>=8.2.8"]
 
 [dependency-groups]
 dev = [
