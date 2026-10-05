@@ -6,15 +6,13 @@ import json
 import os
 import shlex
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import suppress
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import click
 import yaml
-from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
 from .agent import (
@@ -35,7 +33,7 @@ from .git import GitRepository
 from .io import dump_yaml
 from .launch import _dispatcher, launch, render_arguments
 from .record import Record, list_records, load_record
-from .run import Run
+from .serialization import _json_value
 from .validation import validate_identifier
 
 
@@ -56,34 +54,6 @@ class HirakuGroup(click.Group):
             return super().invoke(ctx)
         except (HirakuError, PydanticValidationError) as exc:
             raise click.ClickException(str(exc)) from exc
-
-
-def _json_value(value: Any) -> Any:
-    if isinstance(value, BaseRecord):
-        return {**_json_value(value.to_dict()), "markdown": value.markdown}
-    if isinstance(value, Run):
-        return {
-            "id": value.id,
-            "metrics": _json_value(value.metrics),
-            "params": _json_value(value.params),
-            "record_id": value.record_id,
-            "commit": value.commit,
-            "timestamp": _json_value(value.timestamp),
-            "entrypoint": value.entrypoint,
-            "url": value.url,
-            "raw": _json_value(value.raw),
-        }
-    if isinstance(value, BaseModel):
-        return _json_value(value.model_dump())
-    if isinstance(value, datetime):
-        return (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
-        return [_json_value(item) for item in value]
-    if isinstance(value, Path):
-        return str(value)
-    return value
 
 
 def _emit_json(value: Any) -> None:
@@ -232,6 +202,21 @@ def _update_fields(
 def main(ctx: click.Context) -> None:
     """Manage research records, launches, and tracked runs."""
     ctx.ensure_object(CLIContext)
+
+
+@main.command("tui")
+@click.pass_obj
+def tui_command(state: CLIContext) -> None:
+    """Browse research records in a terminal interface."""
+    try:
+        from .tui import RecordTUI
+    except ImportError as exc:
+        raise click.ClickException(
+            "The TUI extra is not installed. Install it with "
+            "`pip install 'hiraku[tui]'`."
+        ) from exc
+
+    RecordTUI(config=state.config).run()
 
 
 @main.command("init")

@@ -14,6 +14,8 @@ hiraku runs --record <record-id>
 
 `hiraku record list` includes each record's local `status` in its table.
 
+There is also a TUI for browsing records and inspecting their contents. Use `hiraku tui` to launch the TUI.
+
 `hiraku init` requires its target to be a Git repository root. Use
 `hiraku init PATH --ignore-git` to intentionally initialize a nested or non-Git
 location. Python initialization is permissive by default; callers can request
