@@ -79,6 +79,7 @@ The repository is a single `uv`-managed Python project.
 
 | Path | Purpose |
 | --- | --- |
+| `.ai/skills/hiraku/` | Hiraku agent skill packaged into distributions |
 | `src/hiraku/` | Installed Python package |
 | `src/hiraku/base.py` | Generic Markdown record serialization and validation |
 | `src/hiraku/record.py` | Research records, entrypoints, and metrics |
@@ -89,7 +90,7 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/tracking/` | Tracking backend adapters and run normalization |
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
 | `src/hiraku/agent.py` | Programs, actions, and agent-facing resources |
-| `src/hiraku/resources/` | Bundled programs, actions, dispatchers, skills, and examples |
+| `src/hiraku/resources/` | Bundled programs, actions, dispatchers, and examples |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
 | `docs/` | Documentation sources |
 | `scripts/` | Development and release utilities |
