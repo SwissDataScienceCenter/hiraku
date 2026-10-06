@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# After the user approved the review: write result.md and decision.md from the
+# workspace into the record's `result` and `decision` fields and set `status`. Run push first
+# for the summary.
+#
+# Usage: finalize RECORD_ID [STATUS]    (STATUS defaults to "reviewed")
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+[ $# -ge 1 ] && [ $# -le 2 ] || { echo "usage: finalize RECORD_ID [STATUS]" >&2; exit 2; }
+status=${2:-reviewed}
+dir=$(workspace_dir "$1")
+for f in result.md decision.md; do
+  grep -q '[^[:space:]]' "$dir/$f" 2>/dev/null \
+    || { echo "$f is missing or blank in $dir" >&2; exit 3; }
+done
+# JSON strings are valid YAML flow scalars, so quoting is safe for any text.
+hk record update \
+  --set "result=$(jq -Rs 'rtrimstr("\n")' < "$dir/result.md")" \
+  --set "decision=$(jq -Rs 'rtrimstr("\n")' < "$dir/decision.md")" \
+  --set "status=$(jq -n --arg s "$status" '$s')" -- "$1"
+ledger_append "$dir" "finalized result and decision"
+echo "finalized $1"

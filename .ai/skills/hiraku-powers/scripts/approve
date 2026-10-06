@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Record a user approval in the ledger. Run only after the user approved.
+#   approve ID proposal                      needs Hypothesis and Success
+#                                            criterion lines in ## Summary
+#   approve ID plan MODE AUTO                MODE: implement | implement-and-run
+#                                            AUTO: yes | no
+# The plan approval pins the plan content (ticks and ### Deviations excluded);
+# `state` reports drift if the plan changes afterwards. The plan must be pushed.
+#
+# Usage: approve RECORD_ID proposal | plan MODE AUTO
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+usage() { echo "usage: approve RECORD_ID proposal | plan implement|implement-and-run yes|no" >&2; exit 2; }
+[ $# -ge 2 ] || usage
+id=$1
+dir=$(bash "$here/workspace" "$id")
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+split_body "$id" "$tmp"
+case "$2" in
+  proposal)
+    grep -q '^- Hypothesis: [^[:space:]]' "$tmp/summary.md" \
+      && grep -q '^- Success criterion: [^[:space:]]' "$tmp/summary.md" \
+      || { echo "the pushed ## Summary needs '- Hypothesis:' and '- Success criterion:' lines" >&2; exit 3; }
+    ledger_append "$dir" "proposal approved" ;;
+  plan)
+    [ $# -eq 4 ] || usage
+    case "$3" in implement|implement-and-run) ;; *) usage ;; esac
+    case "$4" in yes|no) ;; *) usage ;; esac
+    [ -s "$tmp/plan.md" ] || { echo "no ## Plan in the record; push it first" >&2; exit 3; }
+    if unsynced_edits "$dir"; then
+      echo "workspace has unpushed edits; push before approving the plan" >&2; exit 3
+    fi
+    ledger_append "$dir" "plan approved: mode=$3; auto-continue=$4; plan-sha=$(plan_sha < "$tmp/plan.md")" ;;
+  *) usage ;;
+esac
+echo "approved $id $2"

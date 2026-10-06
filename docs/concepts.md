@@ -148,6 +148,12 @@ Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code. Other coding
 harnesses can use the same `SKILL.md` when they support compatible project-local
 skills.
 
+`hiraku init` also installs the `hiraku-powers` skills (`hiraku-powers`,
+`hiraku-powers-define`, `-plan`, `-implement`, `-review`). They take one record
+from idea to reviewed result in four gated stages, keep a git-ignored workspace
+and ledger under `.hiraku-powers/records/<record-id>/`, and update the record through
+helper scripts that need `bash` and `jq`.
+
 ## Actions, Programs, Context
 
 !!! info

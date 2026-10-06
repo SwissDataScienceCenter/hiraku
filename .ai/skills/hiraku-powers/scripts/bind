@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Bind a verified commit to the record and note it in the ledger. Refuses to
+# replace an existing commit unless --rebind is given (only with user approval;
+# a fix after review belongs in a new related record instead).
+#
+# Usage: bind RECORD_ID [REF] [--rebind]    (REF defaults to HEAD)
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+id=${1:-}
+[ -n "$id" ] || { echo "usage: bind RECORD_ID [REF] [--rebind]" >&2; exit 2; }
+shift
+ref=HEAD
+rebind=0
+for arg in "$@"; do
+  case "$arg" in
+    --rebind) rebind=1 ;;
+    *) ref=$arg ;;
+  esac
+done
+require_record "$id"
+current=$(hk record show --raw --json -- "$id" | jq -r '.values.commit // empty')
+if [ -n "$current" ] && [ "$rebind" = 0 ]; then
+  echo "record $id is already bound to $current; use --rebind only with user approval" >&2
+  exit 5
+fi
+sha=$(git rev-parse "$ref")
+hk record update --commit "$sha" -- "$id"
+ledger_append "$(bash "$here/workspace" "$id")" "bound commit $sha${current:+ (replaced $current)}"
+echo "bound $id to $sha"

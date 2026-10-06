@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Refresh workspace files from the record body:
+#   head.md (text before the first ##), summary.md (## Summary),
+#   plan.md (## Plan), rest.md (every other ## section).
+# Refuses to overwrite unpushed workspace edits unless --discard is given.
+# With --to DIR, writes the parts into DIR (never the workspace itself) and
+# leaves the workspace untouched; use it to diff and merge after a stale-body
+# refusal.
+#
+# Usage: pull RECORD_ID [--discard | --to DIR]
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+[ $# -ge 1 ] || { echo "usage: pull RECORD_ID [--discard | --to DIR]" >&2; exit 2; }
+
+id=$1
+mode=${2:-}
+if [ "$mode" = "--to" ]; then
+  [ $# -eq 3 ] || { echo "usage: pull RECORD_ID --to DIR" >&2; exit 2; }
+  dir=$(workspace_dir "$id")
+  mkdir -p "$3"
+  [ "$(cd "$3" && pwd -P)" != "$(cd "$dir" && pwd -P)" ] \
+    || { echo "--to DIR must not be the workspace itself" >&2; exit 2; }
+  split_body "$id" "$3"
+  echo "pulled $id into $3 (workspace untouched)"
+  exit 0
+fi
+[ -z "$mode" ] || [ "$mode" = "--discard" ] \
+  || { echo "usage: pull RECORD_ID [--discard | --to DIR]" >&2; exit 2; }
+
+dir=$(workspace_dir "$id")
+lock "$dir"
+if [ "$mode" != "--discard" ] && [ -d "$dir/.synced" ] && unsynced_edits "$dir"; then
+  echo "workspace has unpushed edits; push them, or pull --discard to drop them" >&2
+  exit 4
+fi
+split_body "$id" "$dir"
+snapshot "$dir"
+body_of "$id" | sha_of > "$dir/.pulled-sha"   # written last: marks a complete seed
+echo "pulled $id into $dir"

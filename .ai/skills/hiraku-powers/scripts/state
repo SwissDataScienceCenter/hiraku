@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Print the record's stage, computed from the ledger markers (latest wins) and
+# checked against the record: define -> plan -> implement -> review -> present
+# -> done. If the plan changed after approval, the stage falls back to plan.
+#
+# Usage: state RECORD_ID
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+[ $# -eq 1 ] || { echo "usage: state RECORD_ID" >&2; exit 2; }
+id=$1
+dir=$(bash "$here/workspace" "$id")
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+split_body "$id" "$tmp"
+
+stage=define mode="" auto="" psha="" base="" stopped="" note=""
+while IFS= read -r line; do
+  msg=${line#* }
+  case "$msg" in
+    "proposal approved"*) stage=plan ;;
+    "proposal reopened"*) stage=define ;;
+    "plan reopened"*) stage=plan ;;
+    "plan approved:"*)
+      stage=implement stopped=""
+      mode=$(printf '%s' "$msg" | sed -n 's/.*mode=\([^;]*\);.*/\1/p')
+      auto=$(printf '%s' "$msg" | sed -n 's/.*auto-continue=\([^;]*\);.*/\1/p')
+      psha=$(printf '%s' "$msg" | sed -n 's/.*plan-sha=\(.*\)$/\1/p') ;;
+    "base "*) [ -n "$base" ] || base=${msg#base } ;;
+    "implement stop"*) stage=implement stopped=${msg#implement stop: } ;;
+    "implement done"*) stage=review stopped="" ;;
+    "review drafted"*) stage=present ;;
+    "finalized"*) stage=done ;;
+  esac
+done < <(grep -v '^#' "$dir/ledger.md" || true)
+
+case "$stage" in
+  implement|review|present)
+    if [ "$(plan_sha < "$tmp/plan.md")" != "$psha" ]; then
+      stage=plan note="plan changed after approval: present it again and re-approve"
+    fi ;;
+esac
+
+bound=$(hk record show --raw --json -- "$id" | jq -r '.values.commit // empty')
+ready=no
+if grep -q '^- Hypothesis: [^[:space:]]' "$tmp/summary.md" \
+   && grep -q '^- Success criterion: [^[:space:]]' "$tmp/summary.md"; then ready=yes; fi
+printf 'record: %s\nstage: %s\n' "$id" "$stage"
+[ -z "$note" ] || printf 'note: %s\n' "$note"
+[ -z "$stopped" ] || printf 'stopped: %s\n' "$stopped"
+printf 'summary-has-hypothesis-and-criterion: %s\n' "$ready"
+printf 'mode: %s\nauto-continue: %s\nbase: %s\nbound: %s\n' "$mode" "$auto" "$base" "$bound"

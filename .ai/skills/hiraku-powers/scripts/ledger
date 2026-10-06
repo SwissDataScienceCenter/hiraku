@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Append to the record's ledger, the recovery map after context loss. Stage
+# detection reads only reserved marker lines, so free-form text is stored as
+# "note: ..." and can never collide with a marker.
+#
+# Usage: ledger RECORD_ID "note text"
+#        ledger RECORD_ID --marker base                  (once; HEAD at start)
+#        ledger RECORD_ID --marker implement-done
+#        ledger RECORD_ID --marker implement-stop "reason"
+#        ledger RECORD_ID --marker review-drafted
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+[ $# -ge 2 ] || usage
+id=$1
+dir=$(bash "$here/workspace" "$id")
+if [ "$2" != "--marker" ]; then
+  [ $# -eq 2 ] || usage
+  ledger_append "$dir" "note: $2"
+  exit 0
+fi
+[ $# -ge 3 ] || usage
+case "$3" in
+  base)
+    existing=$(grep -E '^[^ ]+ base ' "$dir/ledger.md" | head -n1 | cut -d' ' -f3 || true)
+    if [ -n "$existing" ]; then echo "base already recorded: $existing"; exit 0; fi
+    sha=$(git rev-parse HEAD)
+    ledger_append "$dir" "base $sha"
+    echo "base $sha" ;;
+  implement-done) ledger_append "$dir" "implement done" ;;
+  implement-stop)
+    [ -n "${4:-}" ] || { echo "implement-stop needs a reason" >&2; exit 2; }
+    ledger_append "$dir" "implement stop: $4" ;;
+  review-drafted) ledger_append "$dir" "review drafted" ;;
+  *) usage ;;
+esac

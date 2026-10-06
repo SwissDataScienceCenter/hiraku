@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Revoke an approval and send the record back a stage. Use whenever the plan or
+# proposal changes after approval, or the router moves you back a stage.
+#
+# Usage: reopen RECORD_ID plan | proposal
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+[ $# -eq 2 ] && { [ "$2" = plan ] || [ "$2" = proposal ]; } \
+  || { echo "usage: reopen RECORD_ID plan|proposal" >&2; exit 2; }
+dir=$(bash "$here/workspace" "$1")
+ledger_append "$dir" "$2 reopened"
+echo "reopened $1 $2"

@@ -64,6 +64,21 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert codex_skill.read_text() == source_skill.read_text()
     assert claude_skill.read_text() == source_skill.read_text()
     assert not (root / ".ai").exists()
+    powers = Path(__file__).parents[1] / ".ai/skills/hiraku-powers"
+    for agent_dir in (".agents/skills", ".claude/skills"):
+        installed = root / agent_dir
+        assert (installed / "hiraku-powers/SKILL.md").read_text() == (
+            powers / "SKILL.md"
+        ).read_text()
+        for stage in ("define", "plan", "implement", "review"):
+            skill = installed / f"hiraku-powers-{stage}/SKILL.md"
+            assert skill.read_text() == (powers / stage / "SKILL.md").read_text()
+            assert f"name: hiraku-powers-{stage}\n" in skill.read_text()
+            # Stages are flattened, not nested inside the group skill.
+            assert not (installed / "hiraku-powers" / stage).exists()
+        scripts = installed / "hiraku-powers/scripts"
+        assert (scripts / "push").stat().st_mode & 0o111
+        assert not (installed / "hiraku-powers-plan/scripts").exists()
     assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
@@ -245,3 +260,19 @@ def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None
     marker.write_text("hiraku_dir: linked\n")
     with pytest.raises(ValidationError):
         HirakuConfig.load(marker)
+
+
+def test_installed_powers_skills_reference_existing_files(tmp_path: Path) -> None:
+    import re
+
+    root = tmp_path / "project"
+    HirakuConfig.init(root)
+    skills = root / ".claude/skills"
+    for skill in sorted(skills.glob("hiraku-powers*")):
+        text = (skill / "SKILL.md").read_text()
+        targets = re.findall(r"\]\(([^)#]+\.md)\)", text)
+        targets += re.findall(r"`(\.\./[\w-]+/[\w./-]+\.md)`", text)
+        for target in targets:
+            assert (skill / target).is_file(), f"{skill.name} -> {target}"
+    assert (skills / "hiraku-powers/PROTOCOL.md").is_file()
+    assert (skills / "hiraku-powers-define/grill-questions.md").stat().st_size > 0

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# List records that have a workspace and are not finished, with their stage.
+# Use it to resume work instead of relying on the active record, which this
+# skill family never changes.
+#
+# Usage: inprogress
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+root=$(project_root)
+for ws in "$root"/.hiraku-powers/records/*/; do
+  [ -f "$ws/ledger.md" ] || continue
+  id=$(basename "$ws")
+  case "$id" in *.stale-*) continue ;; esac
+  stage=$(bash "$here/state" "$id" 2>/dev/null | sed -n 's/^stage: //p') || continue
+  [ "$stage" = done ] || printf '%s\t%s\n' "$id" "$stage"
+done

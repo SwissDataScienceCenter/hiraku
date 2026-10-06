@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Assemble head, summary, plan and rest into the record body and apply it with
+# `hiraku record update --markdown-file`. Before writing, the assembled body is
+# split again and must equal the parts (this catches unclosed fences and odd
+# headings that would fold one part into another). Refuses when the workspace
+# was never seeded, a part is missing or malformed, a part that had content is
+# now empty (unless --drop PART), or the record body changed since the last
+# pull (then: `pull ID --to DIR`, merge by hand, `push ID --force`).
+#
+# Usage: push RECORD_ID [--force] [--drop PART]...
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+usage() { echo "usage: push RECORD_ID [--force] [--drop head|summary|plan|rest]..." >&2; exit 2; }
+[ $# -ge 1 ] || usage
+id=$1; shift
+force=0
+drops=" "
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --force) force=1 ;;
+    --drop) shift; [ $# -gt 0 ] || usage; drops="$drops$1 " ;;
+    *) usage ;;
+  esac
+  shift
+done
+
+dir=$(workspace_dir "$id")
+[ -f "$dir/.pulled-sha" ] \
+  || { echo "workspace not seeded; run workspace $id first" >&2; exit 4; }
+lock "$dir"
+
+for part in $PARTS; do
+  [ -f "$dir/$part.md" ] || { echo "$part.md is missing from the workspace" >&2; exit 3; }
+  if [ ! -s "$dir/$part.md" ] && [ -s "$dir/.synced/$part.md" ]; then
+    case "$drops" in
+      *" $part "*) ;;
+      *) echo "$part.md is empty but the record had content; pass --drop $part to remove it" >&2; exit 3 ;;
+    esac
+  fi
+done
+
+# Each part holds exactly its own top-level section, so nothing is folded away.
+headings() { awk -v mode=headings -f "$SECTIONS" "$dir/$1.md"; }
+expect() { # part, required heading ("" = none allowed)
+  local found
+  found=$(headings "$1")
+  if [ -z "$2" ]; then
+    [ -z "$found" ] || { echo "$1.md must not contain top-level '## ' headings (use ###): $found" >&2; exit 3; }
+  elif [ -s "$dir/$1.md" ] || [ "$1" = summary ]; then
+    [ "$found" = "$2" ] || { echo "$1.md must have exactly one '## ' heading, '$2' (use ### inside it)" >&2; exit 3; }
+    [ "$(head -n1 "$dir/$1.md" | sed 's/[[:space:]]*$//')" = "$2" ] \
+      || { echo "$1.md must start with '$2'" >&2; exit 3; }
+  fi
+}
+expect head ""
+expect summary "## Summary"
+expect plan "## Plan"
+if headings rest | grep -qxE '## (Summary|Plan)'; then
+  echo "rest.md must not contain '## Summary' or '## Plan'" >&2; exit 3
+fi
+
+if [ "$force" = 0 ] && [ "$(body_of "$id" | sha_of)" != "$(cat "$dir/.pulled-sha")" ]; then
+  echo "record body changed since pull. Merge: pull $id --to <dir>, diff against" >&2
+  echo "the workspace parts, merge by hand, then push $id --force" >&2
+  exit 4
+fi
+
+out=$(mktemp)
+check=$(mktemp -d)
+trap 'rm -rf "$out" "$check"; rmdir "$LOCK_DIR/.lock" 2>/dev/null || true' EXIT
+first=1
+for part in $PARTS; do
+  [ -s "$dir/$part.md" ] || continue
+  [ "$first" = 1 ] || printf '\n'
+  first=0
+  trim < "$dir/$part.md"
+done > "$out"
+
+split_text "$check" < "$out"
+for part in $PARTS; do
+  trim < "$dir/$part.md" | cmp -s - "$check/$part.md" \
+    || { echo "assembled body would not round-trip ($part.md changes when split again): unclosed code fence or odd heading?" >&2; exit 3; }
+done
+
+hk record update --markdown-file "$out" -- "$id"
+HP_LOCKED=1 bash "$here/pull" "$id" --discard >/dev/null
+echo "pushed $id"
