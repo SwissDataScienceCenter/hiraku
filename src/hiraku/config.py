@@ -160,7 +160,7 @@ class HirakuConfig(BaseModel):
 
         Args:
             root: Directory to initialize.
-            install_skill: Whether to install the repository-local skill for
+            install_skill: Whether to install repository-local skills for
                 supported coding agents.
             tracking_backend: Optional default tracking backend name.
             ignore_git: Skip validation that root is a Git repository root.

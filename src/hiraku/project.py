@@ -43,7 +43,7 @@ class ProjectInitializer:
 
         Args:
             root: Root directory where the project will be created.
-            install_skill: Whether to install repository-local skill resources for
+            install_skill: Whether to install repository-local skills for
                 supported coding agents.
             tracking_backend: Optional default tracking backend name.
             ignore_git: Skip validation that root is a Git repository root.
@@ -81,6 +81,7 @@ class ProjectInitializer:
         """Initialize a project and report paths created by the operation."""
         from .config import HirakuConfig
         from .git import GitRepository
+        from .mcp import HirakuMCPServer
 
         if template is not None and example is not None:
             raise ValidationError("template and example are mutually exclusive")
@@ -138,12 +139,13 @@ class ProjectInitializer:
                     (resource_root / "dispatch", config.dispatch_dir),
                 ]
                 if install_skill:
-                    skill = ai_resources / "skills/hiraku"
+                    skills = ai_resources / "skills"
                     copies.extend(
-                        (skill, target)
+                        (skills, target)
                         for target in (
-                            project_root / ".agents/skills/hiraku",
-                            project_root / ".claude/skills/hiraku",
+                            project_root / ".agents/skills",
+                            project_root / ".codex/skills",
+                            project_root / ".claude/skills",
                         )
                     )
                 for source, target in copies:
@@ -156,6 +158,9 @@ class ProjectInitializer:
                     dispatcher = config.dispatch_dir / name
                     if dispatcher.is_file():
                         dispatcher.chmod(dispatcher.stat().st_mode | 0o111)
+                codex_config = HirakuMCPServer.install_codex_config(project_root)
+                created_files.extend(codex_config.created_files)
+                created_dirs.extend(codex_config.created_dirs)
                 return _InitializationResult(
                     config=config,
                     created_files=tuple(dict.fromkeys(created_files)),

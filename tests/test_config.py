@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert HirakuConfig.discover(nested).root == root
     assert (config.programs_dir / "interactive/program.md").is_file()
     assert (config.programs_dir / "autoresearch/program.md").is_file()
+    assert (config.programs_dir / "literature-review/program.md").is_file()
     assert (config.actions_dir / "record/propose/action.md").is_file()
     for name in ("launch.sh", "worktree.sh"):
         assert (config.dispatch_dir / name).stat().st_mode & 0o111
@@ -63,7 +65,20 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert claude_skill.is_file()
     assert codex_skill.read_text() == source_skill.read_text()
     assert claude_skill.read_text() == source_skill.read_text()
+    for skill in (Path(__file__).parents[1] / ".ai/skills").iterdir():
+        if skill.is_dir():
+            installed_skill = skill / "SKILL.md"
+            if installed_skill.is_file():
+                codex_copy = root / ".agents/skills" / skill.name / "SKILL.md"
+                claude_copy = root / ".claude/skills" / skill.name / "SKILL.md"
+                assert codex_copy.read_text() == installed_skill.read_text()
+                assert claude_copy.read_text() == installed_skill.read_text()
     assert not (root / ".ai").exists()
+    codex_config = tomllib.loads((root / ".codex/config.toml").read_text())
+    assert codex_config["mcp_servers"]["hiraku"] == {
+        "command": "hiraku",
+        "args": ["mcp"],
+    }
     assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
@@ -71,6 +86,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert not (without_skill / ".agents").exists()
     assert not (without_skill / ".claude").exists()
     assert not (without_skill / ".ai").exists()
+    assert (without_skill / ".codex/config.toml").is_file()
 
     with pytest.raises(ProjectExistsError):
         HirakuConfig.init(root)
@@ -85,6 +101,34 @@ def test_init_sets_tracking_backend(tmp_path: Path) -> None:
     assert yaml.safe_load(config.path.read_text())["tracking_backend"] == {
         "type": "mlflow"
     }
+
+
+def test_init_adds_hiraku_to_existing_codex_config(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    codex_config = root / ".codex/config.toml"
+    codex_config.parent.mkdir(parents=True)
+    codex_config.write_text('[mcp_servers.docs]\ncommand = "docs-mcp"\nargs = []\n')
+
+    HirakuConfig.init(root)
+
+    settings = tomllib.loads(codex_config.read_text())
+    assert settings["mcp_servers"]["docs"] == {"command": "docs-mcp", "args": []}
+    assert settings["mcp_servers"]["hiraku"] == {
+        "command": "hiraku",
+        "args": ["mcp"],
+    }
+
+
+def test_init_preserves_existing_hiraku_codex_server(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    codex_config = root / ".codex/config.toml"
+    codex_config.parent.mkdir(parents=True)
+    original = '[mcp_servers.hiraku]\ncommand = "custom-hiraku"\nargs = []\n'
+    codex_config.write_text(original)
+
+    HirakuConfig.init(root)
+
+    assert codex_config.read_text() == original
 
 
 def test_init_from_template_applies_arbitrary_overlay(tmp_path: Path) -> None:

@@ -142,11 +142,13 @@ Dispatcher names may omit `.sh`, so `--dispatch worktree` selects `worktree.sh`.
 
 ## Agent Skill
 
-`hiraku init` installs the project-local skill for Codex at
-`.agents/skills/hiraku/` and for Claude Code at `.claude/skills/hiraku/`.
-Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code. Other coding
-harnesses can use the same `SKILL.md` when they support compatible project-local
-skills.
+`hiraku init` installs every repository skill under `.ai/skills/` for Codex at
+`.agents/skills/` and for Claude Code at `.claude/skills/`. Invoke the Hiraku
+skill as `$hiraku` in Codex or `/hiraku` in Claude Code. Bundled Programs under
+`src/hiraku/resources/programs/` are copied into the project's configured
+Programs directory during initialization. Init also adds the Hiraku MCP
+stdio server to `.codex/config.toml`; Codex loads project settings after the
+project is trusted.
 
 ## Actions, Programs, Context
 

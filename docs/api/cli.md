@@ -19,6 +19,11 @@ hiraku runs --record <record-id>
 location. Python initialization is permissive by default; callers can request
 the CLI policy with `ignore_git=False`.
 
+Initialization adds a project-local `.codex/config.toml` entry that starts the
+`hiraku mcp` stdio server. Codex must trust the project and find the `hiraku`
+command on its `PATH` to load it. Existing Codex settings are preserved; an
+existing `mcp_servers.hiraku` entry is left unchanged.
+
 Initialize from an arbitrary local project overlay with `--template`:
 
 ```bash
