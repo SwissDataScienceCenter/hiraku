@@ -1,0 +1,2 @@
+id: eurosat-rgb
+description: Compare a flattened-pixel MLP and shallow CNN on EuroSAT RGB with a fixed number of training epochs.
