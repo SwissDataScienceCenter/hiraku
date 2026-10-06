@@ -133,23 +133,26 @@ class ProjectInitializer:
                 if not ai_resources.is_dir():
                     ai_resources = resource_root / ".ai"
                 copies = [
-                    (resource_root / "programs", config.programs_dir),
-                    (resource_root / "actions", config.actions_dir),
-                    (resource_root / "dispatch", config.dispatch_dir),
+                    (resource_root / "programs", config.programs_dir, ()),
+                    (resource_root / "actions", config.actions_dir, ()),
+                    (resource_root / "dispatch", config.dispatch_dir, ()),
                 ]
                 if install_skill:
-                    skill = ai_resources / "skills/hiraku"
-                    copies.extend(
-                        (skill, target)
-                        for target in (
-                            project_root / ".agents/skills/hiraku",
-                            project_root / ".claude/skills/hiraku",
+                    for name, skill, exclude in cls._bundled_skills(
+                        ai_resources / "skills"
+                    ):
+                        copies.extend(
+                            (skill, project_root / agent_dir / name, exclude)
+                            for agent_dir in (".agents/skills", ".claude/skills")
                         )
-                    )
-                for source, target in copies:
+                for source, target, exclude in copies:
                     with as_file(source) as source_path:
                         cls._copy_resource_tree(
-                            source_path, target, created_files, created_dirs
+                            source_path,
+                            target,
+                            created_files,
+                            created_dirs,
+                            exclude=exclude,
                         )
                 cls._apply_overlay(entries, project_root, created_files, created_dirs)
                 for name in ("launch.sh", "worktree.sh"):
@@ -298,8 +301,35 @@ class ProjectInitializer:
                 created.add(destination)
 
     @staticmethod
+    def _bundled_skills(
+        skills_root: Path,
+    ) -> list[tuple[str, Path, tuple[Path, ...]]]:
+        """Return ``(installed name, source, excluded subtrees)`` per skill.
+
+        Agents discover skills one directory deep, so a skill group such as
+        ``hiraku-powers`` installs its root and each stage subdirectory
+        (``hiraku-powers/plan`` -> ``hiraku-powers-plan``) as separate skills.
+        """
+        skills: list[tuple[str, Path, tuple[Path, ...]]] = []
+        for group in sorted(skills_root.iterdir()):
+            if not (group / "SKILL.md").is_file():
+                continue
+            stages = tuple(
+                sorted(
+                    path for path in group.iterdir() if (path / "SKILL.md").is_file()
+                )
+            )
+            skills.append((group.name, group, stages))
+            skills.extend((f"{group.name}-{stage.name}", stage, ()) for stage in stages)
+        return skills
+
+    @staticmethod
     def _copy_resource_tree(
-        source: Path, target: Path, created_files: list[Path], created_dirs: list[Path]
+        source: Path,
+        target: Path,
+        created_files: list[Path],
+        created_dirs: list[Path],
+        exclude: tuple[Path, ...] = (),
     ) -> None:
         missing: list[Path] = []
         current = target
@@ -310,6 +340,8 @@ class ProjectInitializer:
             directory.mkdir()
             created_dirs.append(directory)
         for item in source.rglob("*"):
+            if any(item.is_relative_to(path) for path in exclude):
+                continue
             relative = item.relative_to(source)
             destination = target / relative
             if item.is_dir():

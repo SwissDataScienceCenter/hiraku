@@ -50,10 +50,10 @@ dev = [
 packages = ["src/hiraku"]
 
 [tool.hatch.build.targets.wheel.force-include]
-".ai/skills/hiraku" = "hiraku/resources/.ai/skills/hiraku"
+".ai/skills" = "hiraku/resources/.ai/skills"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/hiraku", "tests", "README.md", "docs", ".ai/skills/hiraku", "pyproject.toml"]
+include = ["src/hiraku", "tests", "README.md", "docs", ".ai/skills", "pyproject.toml"]
 
 [tool.ruff]
 target-version = "py311"

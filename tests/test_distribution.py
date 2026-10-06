@@ -7,7 +7,7 @@ from zipfile import ZipFile
 REPOSITORY = Path(__file__).parents[1]
 PACKAGE = REPOSITORY / "src" / "hiraku"
 EXAMPLES = PACKAGE / "resources" / "examples"
-AI_SKILL = REPOSITORY / ".ai" / "skills" / "hiraku"
+AI_SKILLS = REPOSITORY / ".ai" / "skills"
 
 
 def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
@@ -34,8 +34,8 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         if path.is_file() and "__pycache__" not in path.parts
     }
     expected.update(
-        f"hiraku/resources/.ai/skills/hiraku/{path.relative_to(AI_SKILL)}"
-        for path in AI_SKILL.rglob("*")
+        f"hiraku/resources/.ai/skills/{path.relative_to(AI_SKILLS)}"
+        for path in AI_SKILLS.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts
     )
     with ZipFile(wheels[0]) as wheel:
