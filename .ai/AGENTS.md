@@ -21,21 +21,12 @@ consistent with the existing public API.
 
 - Run project Python commands through `uv run`; do not depend on packages
   installed in the host Python environment.
-- Install local pre-commit hooks when working on several changes:
-
-  ```bash
-  uv run pre-commit install
-  ```
-
-- Do not edit `uv.lock` manually. Change dependencies through `uv` and commit
-  the resulting lockfile update.
 
 ## Commands
 
 Use focused commands while iterating:
 
 ```bash
-uv run pytest tests/test_records.py
 uv run pytest tests/test_cli.py::test_name
 uv run ruff check src tests
 ```
@@ -79,7 +70,8 @@ The repository is a single `uv`-managed Python project.
 
 | Path | Purpose |
 | --- | --- |
-| `.ai/skills/hiraku/` | Hiraku agent skill packaged into distributions |
+| `.ai/` | Canonical portable AI-agent resources and instructions |
+| `.ai/skills/hiraku/` | Hiraku usage skill |
 | `src/hiraku/` | Installed Python package |
 | `src/hiraku/base.py` | Generic Markdown record serialization and validation |
 | `src/hiraku/record.py` | Research records, entrypoints, and metrics |
@@ -89,7 +81,7 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/launch.py` | Entrypoint argument rendering and dispatch execution |
 | `src/hiraku/tracking/` | Tracking backend adapters and run normalization |
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
-| `src/hiraku/agent.py` | Programs, actions, and agent-facing resources |
+| `src/hiraku/agent.py` | Program and Action discovery/loading |
 | `src/hiraku/resources/` | Bundled programs, actions, dispatchers, and examples |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
 | `docs/` | Documentation sources |
@@ -116,6 +108,16 @@ Generated or transient paths:
 - Bundled resources under `src/hiraku/resources/` are installed by
   `hiraku init`; changes to them may affect newly initialized projects and
   should include appropriate example or integration coverage.
+
+### Agent architecture
+
+Keep Hiraku harness-neutral.
+
+- **Skills** describe reusable capabilities and operating guidance.
+- **Programs** describe complete research procedures such as autoresearch.
+- **MCP tools** expose authoritative research state and deterministic operations.
+- The coding harness owns reasoning, planning, code editing, looping, context management, and user interaction.
+- Prefer the smallest existing surface that can express a feature: instruction in a Skill or Program before runtime machinery; MCP behavior only when Hiraku must enforce or persist something deterministically.
 
 ## Coding Standards
 

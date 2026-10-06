@@ -34,6 +34,7 @@ from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .git import GitRepository
 from .io import dump_yaml
 from .launch import _dispatcher, launch, render_arguments
+from .mcp import serve as serve_mcp
 from .record import Record, list_records, load_record
 from .run import Run
 from .validation import validate_identifier
@@ -232,6 +233,16 @@ def _update_fields(
 def main(ctx: click.Context) -> None:
     """Manage research records, launches, and tracked runs."""
     ctx.ensure_object(CLIContext)
+
+
+@main.command("mcp")
+@click.option(
+    "--project", type=click.Path(path_type=Path, exists=True, file_okay=False)
+)
+def mcp_command(project: Path | None) -> None:
+    """Run the local stdio MCP server for harness integrations."""
+    config = HirakuConfig.discover(project) if project is not None else None
+    serve_mcp(config)
 
 
 @main.command("init")
