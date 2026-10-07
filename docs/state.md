@@ -27,11 +27,29 @@ for it — not a decision about it:
 | --- | --- | --- |
 | `proposed` | exists, no real launch configuration yet | An idea worth considering; nothing has been built for it. |
 | `implemented` | a real, runnable launch configuration exists, no runs yet | Code and launch config exist; nothing has been executed yet. |
-| `running` | a run is in flight | Evidence is being generated right now. |
+| `running` | a run attributed to it reports it is still running (read from the tracking backend), or a live `mark-running` marker | Evidence is being generated right now. Takes precedence over `awaiting analysis` and over an earlier verdict, because results so far are partial. |
 | `awaiting analysis` | has runs, no verdict yet | Results exist; nobody (or nothing) has judged them yet. |
 | `concluded` | has a verdict (`supports`, `refutes`, or `inconclusive`), no children, not yet triaged | The result needs a decision about whether it's worth going further. |
 | `completed` | has children, or `triage` already decided not to produce any, or explicitly dropped | This branch of reasoning is done — nothing schedules here again. |
 | `abandoned` | explicitly dropped | Not a state of its own any more — a fact (`Node.abandoned`) that resolves straight to `completed`, the same way a `triage` call that decided "no further children" does. Kept here as a name because it's still how you *reach* that fact, even though `node_state` returns `completed` for it. |
+
+`running` is the one state not read off the node's own record, and the only one that comes from outside it.
+`hiraku launch` returns when its dispatcher does, so a long experiment leaves nothing in the record while
+it runs. Two signals fill that gap, and either one is enough:
+
+- **The run reports it** (no setup). Every tracking backend already carries the run's own status: MLflow
+  `RUNNING`, Weights & Biases `running`, or a `status` column in a CSV source. It works for any way of
+  launching (a laptop, Slurm, a cloud job), provided the experiment registers its run when it *starts*.
+  A run that has said "running" for more than a week is ignored, because a killed process can leave it
+  stuck.
+- **A marker you set** when the run cannot report itself: `hiraku-agent mark-running ID` with `--job-id`
+  (Slurm), `--pid` (a local process) or `--check CMD` (any command that exits 0 while the work is alive).
+  It is never cleaned up by hand: it counts for as long as its check holds, so a finished or cancelled job
+  stops counting by itself.
+
+If the work cannot be checked (`squeue` unreachable, say), it counts as still running rather than
+finished. The scheduler treats a `running` node as neither implementable, launchable, analysable nor
+triageable, and answers `wait` (not `exhausted`) when only running nodes remain.
 
 For a single node, the non-exit states form a linear path:
 
@@ -149,12 +167,15 @@ first match.
 | Priority | Condition (first match across the tree wins) | Action | Gate before it proceeds |
 | --- | --- | --- | --- |
 | — | The goal has zero experiments | `design` or `discover` (researcher picks) | Always a researcher choice, regardless of `mode` |
-| 0 | Any node `running` | `analyze` | None |
 | 1 | Any node `proposed`, approval cleared, no real code yet | `implement` (agent writes it) | Approval (once, on entry) |
 | 1 | Any node `implemented`, approval cleared, no runs | `launch` | Approval (already cleared above) |
-| 2 | Any node has runs, no verdict | `analyze` | None |
+| 2 | Any node has runs, no verdict, and runs the last analysis has not already judged | `analyze` | None |
 | 3 | Any node `concluded` (any verdict, no children, not yet triaged) | `triage` | Not yet mode-dependent — always stops on a blocking condition |
-| 4 | Any node `proposed`, approval not yet cleared | `approve` (or auto-clears) | This *is* the gate |
+| 4 | Any node whose runs `triage` classed as an execution defect (class A), and no other runs yet | `fix` (a person fixes the code, binds the new commit, launches again) | — |
+| 4 | Any node whose last `analyze` set no verdict, with no new runs since (`analyzed_runs`) | `needs_evidence` (what is missing is in its `## Missing evidence`) | — |
+| 4 | Any node `implemented` but not approved (an `update` cleared the approval after the code was bound) | `approve`, after checking the code still matches the expectation | This *is* the gate |
+| 5 | Any node `proposed`, approval not yet cleared | `approve` (or auto-clears) | This *is* the gate |
+| — | None of the above, but a node is `running` | `wait` | None |
 | — | None of the above | `exhausted` | — |
 
 Two things worth being explicit about:
@@ -168,6 +189,12 @@ Two things worth being explicit about:
   others. It also does not resolve to a single action: the tool hands the researcher two options,
   `design` (formalize an idea) and `discover` (search for one first) — a human choice in either
   `mode`, since nothing yet exists for `auto` mode to act on.
+
+`fix` and `needs_evidence` exist so that a call that cannot change anything is not repeated.
+Analysing the same runs again cannot turn a `null` verdict into a real one, and runs that did not
+test the expectation stay void however often they are read. Both clear by themselves when new runs
+arrive. `hiraku-agent loop` stops on them, as on any action that needs a person, and additionally
+stops when it is about to repeat the previous step on the same node with nothing changed.
 
 ## 6. Summary
 

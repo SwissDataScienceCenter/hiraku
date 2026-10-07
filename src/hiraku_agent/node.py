@@ -87,6 +87,16 @@ class Node(Record):
             `blocked`); reset to `False` by `workflows.run_analyze` whenever
             it writes a *new* verdict, since a fresh verdict needs a fresh
             decision — see `state.node_state`.
+        analyzed_runs: The run ids the latest `analyze` call judged. When that call
+            set no verdict and the node's runs are still exactly these, analysing
+            again cannot change anything, so `schedule.suggest_next` asks for more
+            evidence instead of repeating the call.
+        execution_defect: Set by `triage` when it classifies the result as class A
+            (the runs did not test the expectation). The verdict is cleared, and
+            `schedule.suggest_next` asks for a fix rather than a new analysis until
+            runs other than `defect_runs` exist.
+        defect_runs: The run ids `triage` found defective. `analyze` is told not to
+            use them as evidence.
 
     Note:
         `parent_id` (inherited from `Record`) is this node's place in the
@@ -104,6 +114,9 @@ class Node(Record):
     approved_at: str | None = None
     abandoned: bool = False
     triaged: bool = False
+    analyzed_runs: list[str] | None = None
+    execution_defect: bool = False
+    defect_runs: list[str] | None = None
 
     @property
     def is_proposal(self) -> bool:

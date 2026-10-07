@@ -403,6 +403,45 @@ def test_analyze_outranks_triage_and_approve(
     assert "refutes" in suggestion["why"]
 
 
+def test_running_beats_runs_and_an_old_verdict(
+    config: HirakuConfig, task: Record
+) -> None:
+    node = create_node("baseline", task=task, config=config)
+    node.commit = COMMIT_A
+    node.save()
+    assert (
+        node_state(node, runs=[object()], has_children=False, running=True) == "running"
+    )
+    node.verdict = "refutes"
+    assert (
+        node_state(node, runs=[object()], has_children=False, running=True) == "running"
+    )
+    # but a node with no code yet is still just proposed
+    bare = create_node("other", task=task, config=config)
+    assert node_state(bare, runs=[], has_children=False, running=True) == "proposed"
+
+
+def test_a_launch_in_flight_means_wait_not_exhausted(
+    config: HirakuConfig, task: Record
+) -> None:
+    import os
+
+    from hiraku_agent.launches import mark_running
+
+    node = create_node("baseline", task=task, config=config)
+    node.commit = COMMIT_A
+    node.verdict = "refutes"
+    node.triaged = True
+    node.save()
+    assert suggest_next(task, config=config)["action"] == "exhausted"
+
+    mark_running("baseline", pid=os.getpid(), config=config)
+    suggestion = suggest_next(task, config=config)
+    assert suggestion["action"] == "wait"
+    assert suggestion["node"] == "baseline"
+    assert "pid" in suggestion["why"]
+
+
 def test_a_supports_verdict_still_asks_to_triage(
     config: HirakuConfig, task: Record
 ) -> None:

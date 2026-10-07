@@ -139,6 +139,7 @@ agent-calling options (`_AGENT_OPTIONS` in `hiraku_agent/cli.py`):
 | `--dry-run` | Build and print the prompt; call nothing, write nothing. |
 | `--no-apply` | Call the agent, print/log the reply, but write no `Node` files. |
 | `--context PATH` (repeatable) | A project file to read verbatim and offer to the agent as background. Not automatic — nothing is read unless named here. |
+| `--repo PATH` (agent option on `draft`, `update`, `design`, `discover`, `triage`, `analyze`; repeatable) | Give the agent read-only access to another repository, so it grounds metrics, datasets and conventions in that repo's `CLAUDE.md`/README/docs/code instead of generic defaults; not available on `implement`. |
 | `--timeout SECONDS` | Override the default 900s subprocess timeout. |
 | `--unset-env NAME` (repeatable) | Drop this environment variable before invoking the agent (e.g. `--unset-env ANTHROPIC_API_KEY` to force the `claude.ai` login instead of an API key). |
 | `--json` | Print the agent's parsed JSON reply instead of the human-readable summary. |
@@ -148,15 +149,22 @@ no CLI flag — see `cli.md`'s "Deciding: CLI or Python API" section.
 
 | Command | Does |
 | --- | --- |
-| `hiraku-agent next [--task ID] [--json]` | Print the single next action for a task and why (`design`, `implement`, `launch`, `analyze`, `triage`, `approve`, or `exhausted`), plus a ready-to-run `hiraku-agent ...`/`hiraku ...` command when there is an obvious one. |
+| `hiraku-agent next [--task ID] [--json]` | Print the single next action for a task and why (`design`, `implement`, `launch`, `analyze`, `triage`, `approve`, `fix` (triage found the runs did not test the expectation), `needs_evidence` (the last analysis reached no verdict and no new runs have arrived), `wait` (only launches in flight remain), or `exhausted`), plus a ready-to-run `hiraku-agent ...`/`hiraku ...` command when there is an obvious one. |
+| `hiraku-agent mark-running ID (--job-id N ... \| --pid N \| --check CMD)` | Record that node `ID` has a launch in flight, for work whose run cannot report itself. `--job-id` is a Slurm id (from `sbatch --parsable`; repeat per job), `--pid` a process on this host, `--check` any command that exits 0 while the work is alive. The node stays `running` while the check holds; no clean-up call is needed. If the check cannot be run, the work counts as still running. |
+| `hiraku-agent mark-done ID` | Remove a node's in-flight marker (a cancelled job whose marker you do not want to wait out). |
+| `hiraku-agent running [ID] [--json]` | List the launches in flight. With `ID`, exit status 0 if it is running, else 1: put `hiraku-agent running "$HIRAKU_RECORD_ID" && exit 1` at the top of a submit script to refuse a second submission. |
 | `hiraku-agent approve NODE_ID [--task ID] --by WHO` | Clear the approval gate on a proposed node. A no-op in `auto` mode. |
-| `hiraku-agent draft -m INSTRUCTION [--task-id ID] [--branch NAME] [--no-activate] [agent options]` | Turn free text into a new task — a root `Record` — the same effect as `hiraku record create ID --type task`. `--task-id` is optional: omit it and the agent proposes one, the same way `hiraku record create` would need *a* id but not necessarily yours. |
-| `hiraku-agent design [--task ID] [agent options]` | Propose a tree of experiments for a task. Writes proposed `Node`s (no commit). |
-| `hiraku-agent discover [--task ID] [agent options]` | Search for candidate hypotheses (literature or an idea you give it via `--instruction`). Writes accepted ideas as proposed `Node`s and declined ones as `abandoned` `Node`s (so a later `discover` doesn't re-propose them). |
-| `hiraku-agent implement NODE_ID [--task ID] [agent options]` | Write `NODE_ID`'s approved proposal as real code, commit it, and bind the resulting commit — the one workflow where the agent writes files and runs shell commands instead of only returning JSON. `NODE_ID` must already be approved (`hiraku-agent approve`); the approval is the human trigger in `guided` mode, the agent is what writes the code either way. See `workflows.run_implement`. |
+| `hiraku-agent draft -m INSTRUCTION [--task-id ID] [--branch NAME] [--no-activate] [agent options]` | Turn free text into a new task — a root `Record` — the same effect as `hiraku record create ID --type task`. `--task-id` is optional: omit it and the agent proposes one. Where the instruction leaves the protocol open, the agent *proposes* metrics (with directions), the dataset/split and the seeds, and records them with a rationale in the body's `## Proposed protocol` section — edit them freely, or revise with `hiraku-agent update`. It also writes a `## Decision rule` section (target, guards, report-only metrics, tolerance, verdict rules, how to rank methods against each other): yours if you describe one in `-m`, otherwise a default whose tolerance is defined by method (twice the baseline's seed-to-seed spread) rather than a guessed number. For a benchmark task it also records under `**Candidate methods**` whether you named the methods to compare (`specified`, with the list) or not (`unspecified`). Refuses an id that already exists, before calling the agent. |
+| `hiraku-agent update RECORD_ID -m INSTRUCTION [agent options]` | Revise an existing task or experiment from an instruction. Takes any record id. A **task** can be updated in full only until another record refers to it (a child, or a `related_to` link); after that only its `## Decision rule` section can change, and only until some experiment under it has a verdict. An **experiment** can be updated only until it has runs. Past those points it refuses and tells you to draft a new one, because the record is by then a fact about work already done. Changing an experiment's `expectation` clears its approval. Never changes the id, parent, branch, commit or entrypoints. |
+| `hiraku-agent plan -m INSTRUCTION [--task-id ID] [--branch NAME] [--no-activate] [agent options]` | `draft` then `design` in one go: two or three sentences in, a task and its first experiments out. Two agent calls with the same context and repositories. The task is written first, so if the design step fails you keep a valid task (the error says so; re-run `design --task ID`). `--dry-run` and `--no-apply` stop after the draft, because the design prompt depends on the task it would write. |
+| `hiraku-agent delete RECORD_ID [--dry-run] [--yes] [--force]` | Delete a record and everything beneath it: a whole task to start over, or one node's subtree. Lists what goes (children first) and asks before deleting. Everything is checked first, so a refusal deletes nothing: a record outside the tree that names one inside it in `related_to` blocks it; records with runs or a commit need `--force` (their runs stay in the tracking source, commits stay in Git). Clears the active record if it was inside, and any running marker. Git branches are listed, never deleted. |
+| `hiraku-agent defaults [--repo PATH]... [--context FILE]... [--context-id ID] [--clear]` | Show or set what every agent command reads by default, stored in `<hiraku_dir>/agent.yaml`. See "What the agent reads by default" below. |
+| `hiraku-agent design [--task ID] [agent options]` | Propose a tree of experiments for a task. Writes proposed `Node`s (no commit). When the task names the methods to compare, each becomes a sibling node (`origin: researcher`); when it compares methods without naming them, `design` builds only the baseline and tells you to run `discover` first rather than inventing a list. Values a node depends on that the task does not give (paths, thresholds, budgets) are looked up in `--context`/`--repo` files when given, otherwise defaulted with a rationale; each is listed in the node's `## Open items` as found / default / choice / unset, and `notes` keeps only what could not be read or an irreversible or expensive decision. Without `--repo` or `--context*` the run says so, since it could not look anything up. **`design --revise -m '...'`** revises the experiments already written under the task instead of adding new ones: one agent call sees all of them, so a value they share (a ground-truth file, a threshold) is settled once. Only experiments with no runs change; the rest are listed as skipped, and a changed expectation clears that node's approval. The task itself is never touched here — use `update <task-id>` for that. |
+| `hiraku-agent discover [--task ID] [--on RECORD] [--findings-only] [agent options]` | Search for candidate hypotheses (literature or an idea you give it via `--instruction`), and/or investigate what already exists. `--on` names the record the call is about — the task (default) or any node beneath it; proposals with no explicit parent are placed under it. Writes accepted ideas as proposed `Node`s and declined ones as `abandoned` `Node`s (so a later `discover` doesn't re-propose them). The agent may also return an `investigation` — cited findings, inferences labelled as unverified, open questions — which is **appended** to that record's own file under `## Investigation` as a dated entry (earlier entries are kept). `--findings-only` records the investigation and proposes nothing. Reading this project's files, logs or code needs `--repo PATH` or `--context FILE`; without either, the findings are marked unverified. |
+| `hiraku-agent implement NODE_ID [--task ID] [agent options]` | Write `NODE_ID`'s approved proposal as real code, commit it, and bind the resulting commit — the one workflow where the agent writes files and runs shell commands instead of only returning JSON. `NODE_ID` must already be approved (`hiraku-agent approve`); the approval is the human trigger in `guided` mode, the agent is what writes the code either way. The reported commit must be new: one that already existed before the call (the starting HEAD or older) is refused and nothing is bound. On a timeout the agent's whole process group is stopped, nothing is bound, and its uncommitted edits are listed and kept. See `workflows.run_implement`. |
 | `hiraku-agent triage NODE_ID [--task ID] [agent options]` | Judge whether `NODE_ID` — any verdict, `supports` included — is worth going further on: classifies the miss for a `refutes`/`inconclusive` result, or names the further question worth asking of a `supports` one, then decides whether to add follow-up child nodes. See `prompts/triage.md`. |
-| `hiraku-agent analyze NODE_ID [--task ID] [agent options]` | Judge `NODE_ID`'s runs against its expectation; writes findings/conclusions and, when warranted, a verdict. |
-| `hiraku-agent loop --program ID --task ID [--max-steps N] [--json]` | Drive a bounded loop: repeats `hiraku-agent next`'s own suggestion, calling whichever `Action` the named `Program` binds to that workflow, until a budget is hit, a step writes nothing, the next suggestion needs a person or a real command (`approve`/`launch`), or nothing is left to schedule. `implement` is drivable here like any other LLM workflow — see `docs/state.md`'s gates section for why that's safe (the approval gate is unmoved; `run_implement` re-checks it anyway). |
+| `hiraku-agent analyze ID [--task ID] [--allow-running] [agent options]` | Takes any record id. For an **experiment**: refused while its launch is still running unless `--allow-running` (findings are then marked as partial); runs `triage` marked as an execution defect are left out; the run ids judged are recorded, so a `null` verdict is not re-analysed until new runs arrive. Judges its runs against its expectation using the task's `## Decision rule`, and writes into its file a `## Metric comparison` table against the baseline (computed in code, not by the agent), `## Findings`, `## Conclusions`, `## Decisions and next steps`, `## Missing evidence`, and, when warranted, a verdict. For a **task**: a joint reading of all its nodes, not a leaderboard. The evidence is any node's runs *or* its written Findings/Conclusions, so parallel experiments, diagnostics and investigations count alongside benchmarks. When the declared metrics have numbers it writes a computed `## Metric comparison` table (mean ± std, ranking, which nodes are not dominated, which have no runs yet); the agent adds `## Findings` (per node or group), `## Cross-node insights` (what the nodes show together, with untested inference labelled as such), `## Conclusions`, `## Decisions and next steps`, `## Missing evidence` into the task's own file. Sets no verdict. `--nodes a,b,c` (task level only) analyses just those nodes: the result goes into its own `## Subset analysis: a, b, c` section of the task's file, which says which nodes it covers and which it leaves out, and the whole-task sections are left untouched. A node's `## Investigation` entries are read as that node's evidence. Re-run it as more experiments finish. |
+| `hiraku-agent loop --program ID --task ID [--max-steps N] [--repo PATH]... [--context FILE]... [--context-id ID] [--json]` | Drive a bounded loop: repeats `hiraku-agent next`'s own suggestion, calling whichever `Action` the named `Program` binds to that workflow, with the project defaults (`hiraku-agent defaults`) and `--repo`/`--context`/`--context-id` passed to every step, until a budget is hit, a step writes nothing, the same step would repeat on a node in the same state, the next suggestion needs a person or a real command (`approve`/`launch`), or nothing is left to schedule. `implement` is drivable here like any other LLM workflow — see `docs/state.md`'s gates section for why that's safe (the approval gate is unmoved; `run_implement` re-checks it anyway). |
 
 `--task` is required unless a task is already active (`hiraku record set`);
 `implement`/`triage`/`analyze` take `NODE_ID` positionally and resolve its
@@ -205,6 +213,48 @@ questions, not an inconsistency: it mirrors `hiraku`'s own core CLI, which likew
 bare id for naming something new (`hiraku record create <task-id>`) and `--record <id>`
 for referencing something that already exists (`hiraku launch --record <id>`).
 
+### What the agent reads by default, and how it fills in what you did not say
+
+A single-shot agent only sees what a call hands it. To avoid repeating `--repo ... --context-id ...`
+on every command (and to avoid a call that forgot them planning blind), name them once:
+
+```bash
+hiraku-agent defaults --repo ~/work/mapillary_alignment --context-id matcher-context
+```
+
+This writes `<hiraku_dir>/agent.yaml`:
+
+```yaml
+repo:
+  - ~/work/mapillary_alignment   # read-only, like --repo
+context_id: matcher-context      # a Context record, like --context-id
+context:
+  - notes/benchmark-notes.md     # literal files, like --context
+```
+
+Every agent command that takes those options merges the defaults in: repositories and
+files are added to whatever the call names, and an explicit `--context-id` wins over the
+default. The agent gets read-only file tools (`Read`, `Glob`, `Grep`) on the repositories,
+so it can look at `CLAUDE.md`, notes, configs and the evaluation code itself. A listed
+repository that is missing on this machine is skipped with a notice, so the same file works
+on a laptop and on a cluster. `HIRAKU_AGENT_NO_DEFAULTS=1` ignores the file for one call.
+
+Whatever the instruction leaves open is settled in this order, and every value says which
+step produced it: **look** (read it from the context or the repository; labelled *found*),
+**default** (a conventional value, an initial value to calibrate), **choose** (a real choice
+between options: the agent picks the one it recommends and says what the alternatives
+trade off), and only then a **gap** (`UNSET`, when it cannot be known at all). It asks you
+first only when a wrong guess would be irreversible or expensive. You review the labelled
+values and change any of them with one `update`.
+
+A task's protocol is deliberately narrow: metrics, evaluation data or split, seeds, the
+decision rule, and the candidate methods, i.e. what has to be identical for the
+experiments to be comparable. Thresholds, hyperparameters, preprocessing, checkpoints,
+GPU budgets and paths belong to the experiments and are recorded by `design` under each
+node's `## Open items`. A condition that is the same for all methods is written as a
+principle ("identical inputs and ground truth for every method") with an exception allowed
+only under a control run, not as a frozen value.
+
 ### Where a call's evidence lives
 
 Every `design`/`discover`/`draft`/`implement`/`triage`/`analyze` call is logged under
@@ -219,12 +269,47 @@ Every `design`/`discover`/`draft`/`implement`/`triage`/`analyze` call is logged 
 | `error.txt` | The exception message, if the call failed (no `reply.txt` in that case). |
 | `meta.json` | Command, timeout, dropped env vars, whether web tools were reachable, duration, and (on success) reply length. |
 
+### Telling hiraku-agent that a node is running
+
+`hiraku launch` returns when its dispatcher does, so a long experiment would still read
+`implemented` (and `next` would suggest launching it again) while it runs. There are two ways to
+fix that, and either is enough.
+
+**Let the run say so (no setup).** If the experiment logs to MLflow or Weights & Biases, its run
+already carries a status (`RUNNING` / `running`) from the moment it starts, and a node with such a run is
+`running`. A CSV source cannot do this: a file has no "finished" signal, and making every experiment
+write a `running` row and then rewrite it is not worth it. With a CSV source, use a marker (below). A
+run that has said "running" for more than a week is ignored, so a killed process cannot hold a node
+forever.
+
+**Or set a marker** when the run cannot report itself, from the script that starts the work (`hiraku
+launch` already exports `HIRAKU_RECORD_ID` to it):
+
+```sh
+hiraku-agent running "$HIRAKU_RECORD_ID" && { echo "already running" >&2; exit 1; }
+
+# Slurm: one call per job
+jid=$(sbatch --parsable run_chunk.sbatch "$@")
+hiraku-agent mark-running "$HIRAKU_RECORD_ID" --job-id "$jid"
+
+# a local background process
+./train.sh & hiraku-agent mark-running "$HIRAKU_RECORD_ID" --pid $!
+
+# anything else: a command that exits 0 while the work is alive
+hiraku-agent mark-running "$HIRAKU_RECORD_ID" --check "docker inspect -f '{{.State.Running}}' mycontainer"
+```
+
+While the work is alive the node is `running` and `hiraku-agent next` says `wait`. The marker is kept
+in the Git directory (not the working tree, so runs are not recorded as dirty) and is not removed by
+whoever wrote it: it stops counting when its check stops holding.
+
 ### Node lifecycle, and which command moves it
 
 | State (`hiraku_agent.STATES`) | Meaning | Command that gets you there / past it |
 | --- | --- | --- |
 | `proposed` | No commit yet. | `hiraku-agent design` / `discover` create it; `hiraku-agent approve` (in `guided` mode) clears the gate; `hiraku-agent implement <id>` writes the code and binds it (or, by hand, `hiraku record update <id> --commit <hash>`). |
 | `implemented` | Has a commit, no runs yet. | `hiraku launch <entrypoint> --record <id>`. |
+| `running` | A run attributed to the node reports it is still running (MLflow `RUNNING`, W&B `running`, or a `status` column in a CSV source), or a live `hiraku-agent mark-running` marker. Beats `awaiting_analysis` and an older verdict, so partial results are not analysed, and makes `next` say `wait` instead of re-suggesting `launch`. | Ends by itself when the run finishes or the marker's check stops holding; `hiraku-agent mark-done <id>` clears a marker by hand. |
 | `awaiting_analysis` | Has runs, no verdict. | `hiraku-agent analyze <id>`. |
 | `concluded` | Has a verdict — `supports`, `refutes`, or `inconclusive` — no children yet, not yet triaged. | `hiraku-agent triage <id>`, whichever way the verdict went — see `docs/state.md` for why `supports` doesn't skip this. |
 | `completed` | Already has children, or `triage` already decided not to produce any (`Node.triaged`), or explicitly dropped (`abandoned=True`, e.g. a `discover` idea that got declined). | Terminal; not resumed automatically. |

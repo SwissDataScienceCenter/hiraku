@@ -4,18 +4,11 @@ Every state below is a fact about what exists for the node — not a decision
 about it. Approval is handled separately in `gates.py`: it is a decision,
 not a fact, and does not appear here.
 
-**Known gap — `running` is not derived here.** `hiraku.launch.launch()` runs
-a dispatch script via a blocking `subprocess` call (see the autoresearch
-example: `hiraku launch <id>:train > run.log 2>&1` in a plain shell) — by
-the time a `hiraku launch` invocation returns, the attempt is already
-finished, crashed, or timed out. There is no persisted "still running"
-signal to read back between two separate calls into this module, the way
-there would be for a background dispatcher. A node this module hasn't seen
-mid-launch is either `implemented` (no runs yet) or already past it (has
-runs) — never caught "running" from the outside. Scheduling several
-launches at once, if that's wanted, is a concern for whatever calls
-`schedule.suggest_next()` in a loop (running more than one `hiraku launch`
-concurrently in its own process), not something a node's file can record.
+**`running`** is the one state that is not a fact about the node's own record: it
+comes from `launches.running_nodes()` — a run attributed to the node that says it is
+still running (read from the tracking backend), or a marker set with `hiraku-agent
+mark-running` — so an experiment that runs for hours stays visible between two separate
+calls. The caller passes it in (`running=`) the way it passes `runs`.
 """
 
 from __future__ import annotations
@@ -28,13 +21,16 @@ from .node import Node
 STATES = (
     "proposed",
     "implemented",
+    "running",
     "awaiting_analysis",
     "concluded",
     "completed",
 )
 
 
-def node_state(node: Node, runs: Sequence[Any], *, has_children: bool) -> str:
+def node_state(
+    node: Node, runs: Sequence[Any], *, has_children: bool, running: bool = False
+) -> str:
     """`node`'s position on the lifecycle path.
 
     Args:
@@ -48,6 +44,7 @@ def node_state(node: Node, runs: Sequence[Any], *, has_children: bool) -> str:
             record alone, since "child" is a fact about a *different*
             record's `parent_id` field — the caller must compute it across
             the whole task's nodes.
+        running: Whether a launch of this node is in flight (see the module docstring).
 
     Returns:
         One of `STATES`.
@@ -58,6 +55,10 @@ def node_state(node: Node, runs: Sequence[Any], *, has_children: bool) -> str:
         # `commit is None` — no real code exists yet, whatever else might be
         # set on the record.
         return "proposed"
+    if running:
+        # In flight: whatever runs exist so far are partial, so neither a new analysis
+        # nor a triage of an older verdict should be suggested until it ends.
+        return "running"
     if node.verdict is not None:
         # A recorded verdict is the authoritative sign that analysis
         # happened, independent of whatever `runs` a tracking-backend lookup

@@ -60,7 +60,11 @@ from .workflows import (
     run_design,
     run_discover,
     run_draft,
+    run_implement,
+    run_plan,
+    run_revise,
     run_triage,
+    run_update,
     task_state,
 )
 
@@ -86,8 +90,12 @@ __all__ = [
     "run_design",
     "run_discover",
     "run_draft",
+    "run_implement",
+    "run_plan",
     "run_loop",
+    "run_revise",
     "run_triage",
+    "run_update",
     "suggest_next",
     "task_state",
 ]

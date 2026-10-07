@@ -44,9 +44,11 @@ Do this in order:
    actually ran to check this — never claim a verification you skipped.
 6. **Commit.** One commit, a clear message in English describing what this implements
    and for which node, touching only the files this change needs.
-7. **Report.** Return the JSON contract below. `commit` must be a ref that resolves in
-   this repository right now (`HEAD` is fine) — `hiraku_agent` resolves it with `git
-   rev-parse` itself and will reject anything that does not.
+7. **Report.** Return the JSON contract below. `commit` is the full hash of the commit
+   you just made (`git rev-parse HEAD` after committing). `hiraku_agent` checks that it
+   resolves and that it is new: a commit that already existed before this call (the
+   HEAD you started from, or anything older) is rejected, because binding it would
+   claim code that this call never wrote. If you could not commit, set `blocked`.
 
 ## Current state
 
@@ -61,7 +63,7 @@ Do this in order:
 ```json
 {
   "blocked": "reason, or null",
-  "commit": "HEAD, or another ref that resolves in this repository, or null if blocked",
+  "commit": "the full hash of the commit you just made, or null if blocked",
   "entrypoints": {
     "train": {"command": ["uv", "run", "python", "train.py"], "args": {}}
   },

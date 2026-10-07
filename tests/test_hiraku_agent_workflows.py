@@ -176,6 +176,20 @@ def test_extract_json_from_bare_braces_with_surrounding_prose() -> None:
     assert extract_json(reply) == {"a": 1, "b": [1, 2]}
 
 
+def test_extract_json_skips_a_stray_brace_in_prose() -> None:
+    reply = 'I used {x} as the key. Here is the reply:\n{"verdict": "refutes", "a": 1}'
+    assert extract_json(reply) == {"verdict": "refutes", "a": 1}
+
+
+def test_extract_json_prefers_the_reply_over_a_small_example() -> None:
+    reply = (
+        'Format like {"id": "x"}.\n'
+        '{"experiments": [{"id": "a"}], "notes": null, "extra": 1}'
+    )
+    assert extract_json(reply)["experiments"] == [{"id": "a"}]
+    assert extract_json(reply, keys=("id",)) == {"id": "x"}
+
+
 def test_extract_json_unwraps_claude_output_format_json() -> None:
     inner = json.dumps({"verdict": "refutes"})
     wrapped = json.dumps({"result": inner, "other": "meta"})
@@ -347,6 +361,75 @@ def test_run_draft_writes_metrics_named_in_the_agent_reply(
     ]
 
 
+def _draft_payload(**extra: object) -> dict[str, object]:
+    return {
+        "id": "bench",
+        "goal": "g",
+        "question": "q",
+        "summary": "s",
+        "body": None,
+        "metrics": [{"name": "auc", "direction": "maximize"}],
+        "notes": None,
+        **extra,
+    }
+
+
+def test_run_draft_records_named_candidate_methods(git_config: HirakuConfig) -> None:
+    payload = _draft_payload(
+        candidate_methods={"status": "specified", "methods": ["LightGlue", "LoFTR"]}
+    )
+    run_draft(
+        "benchmark LightGlue and LoFTR", command=stub_agent(payload), config=git_config
+    )
+
+    protocol = sections.read_section(
+        load_record("bench", config=git_config).markdown, "Proposed protocol"
+    )
+    assert "**Candidate methods**" in protocol
+    assert "specified by the researcher (2 methods)" in protocol
+    assert "- LightGlue" in protocol and "- LoFTR" in protocol
+
+
+def test_run_draft_marks_unnamed_candidates_as_needing_discover(
+    git_config: HirakuConfig,
+) -> None:
+    payload = _draft_payload(
+        candidate_methods={"status": "unspecified", "methods": ["invented"]}
+    )
+    run_draft("benchmark some matchers", command=stub_agent(payload), config=git_config)
+
+    protocol = sections.read_section(
+        load_record("bench", config=git_config).markdown, "Proposed protocol"
+    )
+    assert "unspecified" in protocol
+    assert "hiraku-agent discover" in protocol
+    assert "invented" not in protocol
+
+
+def test_run_draft_ignores_candidate_methods_for_a_non_comparison_task(
+    git_config: HirakuConfig,
+) -> None:
+    payload = _draft_payload(candidate_methods=None)
+    run_draft("tune the loss", command=stub_agent(payload), config=git_config)
+
+    body = load_record("bench", config=git_config).markdown
+    assert "Candidate methods" not in body
+
+
+def test_draft_and_design_prompts_carry_the_candidate_methods_rules() -> None:
+    from hiraku_agent.engine import build_prompt
+
+    draft = build_prompt("draft", {})
+    assert "candidate_methods" in draft
+    assert "NOT specified" in draft
+    design = build_prompt("design", {})
+    assert "Comparison tasks" in design
+    assert "do NOT invent a list" in design
+    assert "hiraku-agent discover" in design
+    assert "open_items" in design
+    assert "decide, label, proceed" in design
+
+
 def test_run_draft_leaves_metrics_unset_when_the_agent_names_none(
     git_config: HirakuConfig,
 ) -> None:
@@ -475,7 +558,7 @@ def test_run_design_writes_proposed_nodes_from_the_agent_reply(
     }
     result = run_design("vo-backend", command=stub_agent(payload), config=config)
 
-    assert result.data == payload
+    assert {k: v for k, v in result.data.items() if k != "inputs_note"} == payload
     assert len(result.written) == 1
     node = load_node("baseline", task=task, config=config)
     assert node.kind == "baseline"
@@ -484,6 +567,78 @@ def test_run_design_writes_proposed_nodes_from_the_agent_reply(
     assert node.is_proposal
     assert sections.read_section(node.markdown, "Scope").startswith("The reference")
     assert "Nothing else" in sections.read_section(node.markdown, "Rationale")
+
+
+def test_run_design_writes_open_items_into_the_node(
+    config: HirakuConfig, task: Record
+) -> None:
+    payload = {
+        "experiments": [
+            {
+                "id": "baseline",
+                "expectation": "x",
+                "open_items": [
+                    {
+                        "item": "GT file",
+                        "value": "data/gt.csv",
+                        "status": "found",
+                        "source": "CLAUDE.md",
+                    },
+                    {
+                        "item": "keypoint budget",
+                        "value": "2048",
+                        "status": "default",
+                        "source": "common setting",
+                    },
+                    {
+                        "item": "GIM variant",
+                        "value": "indoor",
+                        "status": "choice",
+                        "source": "indoor/outdoor trade-off",
+                    },
+                ],
+            }
+        ],
+        "notes": None,
+    }
+    run_design("vo-backend", command=stub_agent(payload), config=config)
+
+    node = load_node("baseline", task=task, config=config)
+    items = sections.read_section(node.markdown, "Open items")
+    assert "**GT file** — data/gt.csv (found in the project; CLAUDE.md)" in items
+    assert "(default, to be calibrated; common setting)" in items
+    assert (
+        "**GIM variant** — indoor (recommended choice, change if you disagree; "
+        "indoor/outdoor trade-off)" in items
+    )
+
+
+def test_run_design_omits_open_items_when_the_agent_gives_none(
+    config: HirakuConfig, task: Record
+) -> None:
+    payload = {"experiments": [{"id": "baseline", "expectation": "x"}], "notes": None}
+    run_design("vo-backend", command=stub_agent(payload), config=config)
+
+    node = load_node("baseline", task=task, config=config)
+    assert "Open items" not in node.markdown
+
+
+def test_run_design_warns_when_it_read_neither_context_nor_repo(
+    config: HirakuConfig, task: Record, tmp_path: Path
+) -> None:
+    payload = {"experiments": [{"id": "baseline", "expectation": "x"}], "notes": None}
+    bare = run_design("vo-backend", command=stub_agent(payload), config=config)
+    assert "read no --context" in bare.data["inputs_note"]
+
+    (config.root / "ctx.md").write_text("facts", encoding="utf-8")
+    payload["experiments"][0]["id"] = "second"
+    fed = run_design(
+        "vo-backend",
+        command=stub_agent(payload),
+        context_paths=["ctx.md"],
+        config=config,
+    )
+    assert "inputs_note" not in fed.data
 
 
 def test_run_design_dry_run_calls_nothing_and_writes_nothing(
@@ -502,7 +657,7 @@ def test_run_design_no_apply_calls_the_agent_but_writes_nothing(
     result = run_design(
         "vo-backend", command=stub_agent(payload), apply=False, config=config
     )
-    assert result.data == payload
+    assert {k: v for k, v in result.data.items() if k != "inputs_note"} == payload
     assert result.written == []
     with pytest.raises(Exception):  # noqa: B017 - RecordNotFoundError, not our concern
         load_node("baseline", task=task, config=config)
@@ -893,9 +1048,12 @@ def test_run_triage_class_a_sets_no_verdict_and_no_children(
     reloaded = load_node("baseline", task=task, config=config)
     assert reloaded.verdict is None
     assert len(result.written) == 1  # only the node itself, no children
-    # `triaged` is set even here (the call completed), but with no verdict it has no
-    # effect on the derived state yet — see `state.node_state`'s docstring.
-    assert reloaded.triaged is True
+    # Class A is not a go/no-go decision: the node needs a fix, so it is not triaged.
+    assert reloaded.triaged is False
+    assert reloaded.execution_defect is True
+    assert "shape mismatch" in sections.read_section(
+        reloaded.markdown, "Execution defect"
+    )
     state = node_state(reloaded, runs=[object()], has_children=False)
     assert state == "awaiting_analysis"
 

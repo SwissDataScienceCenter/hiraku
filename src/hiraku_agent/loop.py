@@ -24,6 +24,7 @@ exist).
 
 from __future__ import annotations
 
+import inspect
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,11 +34,19 @@ from hiraku.agent import Program, load_action, load_program
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
 
+from .defaults import merge_defaults
 from .engine import Hooks
 from .errors import AgentError
 from .node import list_nodes
 from .schedule import suggest_next
-from .workflows import run_analyze, run_design, run_discover, run_implement, run_triage
+from .workflows import (
+    _node_bookkeeping,
+    run_analyze,
+    run_design,
+    run_discover,
+    run_implement,
+    run_triage,
+)
 
 # A loop with no `max_steps` and a `Program` that sets none of `max_experiments`/
 # `max_runs`/`time_budget` either would otherwise have no bound at all — this is the
@@ -75,6 +84,7 @@ class LoopStep:
 class LoopResult:
     steps: list[LoopStep] = field(default_factory=list)
     stopped: str = ""
+    notices: list[str] = field(default_factory=list)
 
 
 def _duration_seconds(value: Any) -> float | None:
@@ -164,6 +174,9 @@ def run_loop(
     *,
     max_steps: int | None = None,
     hooks: Hooks | None = None,
+    repo_paths: list[str] | None = None,
+    context_paths: list[str] | None = None,
+    context_id: str | None = None,
     config: HirakuConfig | None = None,
 ) -> LoopResult:
     """Drive `suggest_next(task_id)` using `program_id`'s bound actions until a budget
@@ -173,6 +186,12 @@ def run_loop(
     `max_steps` overrides `program_id`'s own budget fields when given; when neither
     supplies one, `_DEFAULT_MAX_STEPS` still bounds the loop — a `Program` is meant to
     be a *bounded* loop, and an unset budget should not silently mean unbounded.
+
+    `repo_paths`/`context_paths`/`context_id` are passed to every step whose workflow
+    takes them, merged with the project defaults (`hiraku/agent.yaml`) exactly as a
+    single command merges them. The loop also stops when it is about to repeat the
+    previous step on the same node in the same state: that call could only repeat
+    itself.
     """
     selected = config or HirakuConfig.discover()
     program = load_program(program_id, config=selected)
@@ -186,9 +205,18 @@ def run_loop(
     if effective_max_steps is None and not has_own_budget:
         effective_max_steps = _DEFAULT_MAX_STEPS
 
-    result = LoopResult()
+    inputs, notices = merge_defaults(
+        {
+            "repo_paths": list(repo_paths or []),
+            "context_paths": list(context_paths or []),
+            "context_id": context_id,
+        },
+        selected,
+    )
+    result = LoopResult(notices=notices)
     started = time.monotonic()
     steps_taken = 0
+    previous: tuple[str, str | None, str] | None = None
     while True:
         if effective_max_steps is not None and steps_taken >= effective_max_steps:
             result.stopped = f"max_steps ({effective_max_steps}) reached"
@@ -205,6 +233,9 @@ def run_loop(
         if next_action == "exhausted":
             result.stopped = "nothing left to schedule"
             break
+        if next_action == "wait":
+            result.stopped = f"waiting: {suggestion['why']}"
+            break
         if next_action not in bound:
             result.stopped = (
                 f"next action is {next_action!r} ({suggestion['why']}) — that needs a "
@@ -212,12 +243,31 @@ def run_loop(
             )
             break
 
+        signature = (
+            next_action,
+            suggestion.get("node"),
+            _progress_marker(task_id, suggestion.get("node"), config=selected),
+        )
+        if signature == previous:
+            result.stopped = (
+                f"{next_action} on {suggestion.get('node') or task_id} again, with "
+                "nothing changed since the last call — stopping instead of repeating it"
+            )
+            break
+        previous = signature
+
         action_id = bound[next_action]
         runner = LLM_WORKFLOWS[next_action]
+        accepted = inspect.signature(runner).parameters
         call_kwargs: dict[str, Any] = {
             "action": action_id,
             "config": selected,
             "hooks": hooks,
+            **{
+                key: value
+                for key, value in inputs.items()
+                if key in accepted and value not in (None, [])
+            },
         }
         if next_action in {"triage", "analyze", "implement"}:
             run = runner(suggestion["node"], task_id=task_id, **call_kwargs)
@@ -242,3 +292,30 @@ def run_loop(
             )
             break
     return result
+
+
+def _progress_marker(task_id: str, node_id: str | None, *, config: HirakuConfig) -> str:
+    """The facts a step on `node_id` (or on the task, if None) exists to change: the
+    node's derived state, verdict, commit, decision flags and children; for the task,
+    its set of nodes. Prose sections are left out on purpose — rewriting them is not
+    progress."""
+    nodes = list_nodes(task=task_id, config=config)
+    if node_id is None:
+        return ",".join(sorted(node.id for node in nodes))
+    _, states, _ = _node_bookkeeping(nodes, config=config)
+    node = next((item for item in nodes if item.id == node_id), None)
+    if node is None:
+        return "missing"
+    children = sorted(item.id for item in nodes if item.parent_id == node_id)
+    return "|".join(
+        str(part)
+        for part in (
+            states.get(node_id),
+            node.verdict,
+            node.commit,
+            node.triaged,
+            node.execution_defect,
+            node.analyzed_runs,
+            children,
+        )
+    )

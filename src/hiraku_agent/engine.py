@@ -36,12 +36,14 @@ are scoped down rather than silently dropped:
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import json
 import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -52,23 +54,33 @@ from typing import Any
 
 from hiraku.config import HirakuConfig
 
-from .errors import AgentError
+from .errors import AgentError, AgentTimeout
 
 DEFAULT_AGENT_CMD = "claude -p"
 DEFAULT_TIMEOUT = 900
 
-# `design`/`discover`/`triage`/`analyze`/`draft` only ever need to read and return one
-# JSON object, so the plain default above is deliberately narrow — `claude -p` with no
-# `--allowedTools` denies anything it was not told about up front (see
-# `KNOWN_FAILURES`'s "requested permissions to use" entry), which is exactly the least
-# privilege those five workflows need. `implement` (`workflows.run_implement`) is the
-# one workflow whose whole job is to edit real files and make a real commit, so it
+# `design`/`discover`/`triage`/`analyze`/`draft`/`update` only ever need to read and
+# return one JSON object, so the plain default above is deliberately narrow —
+# `claude -p` with no `--allowedTools` denies anything it was not told about up front
+# (see `KNOWN_FAILURES`'s "requested permissions to use" entry), which is exactly the
+# least privilege those six workflows need. `implement` (`workflows.run_implement`) is
+# the one workflow whose whole job is to edit real files and make a real commit, so it
 # needs its own, separately-named default and override variable rather than quietly
 # widening what `HIRAKU_AGENT_CMD`/`DEFAULT_AGENT_CMD` grant everything else.
 DEFAULT_IMPLEMENT_AGENT_CMD = "claude -p --allowedTools Read,Write,Edit,Glob,Grep,Bash"
 IMPLEMENT_AGENT_CMD_ENV_VAR = "HIRAKU_IMPLEMENT_AGENT_CMD"
 
-WORKFLOWS = ("design", "discover", "triage", "analyze", "draft", "implement")
+WORKFLOWS = (
+    "design",
+    "discover",
+    "triage",
+    "analyze",
+    "draft",
+    "implement",
+    "update",
+    "revise",
+    "analyze_task",
+)
 
 # Failures whose message names a symptom but not the fix. Matched against the whole
 # output, so a warning on stderr and the real error on stdout both count.
@@ -144,6 +156,35 @@ def web_allowed(command: list[str]) -> bool:
     if "--dangerously-skip-permissions" in text or "bypasspermissions" in text:
         return True
     return any(tool in text for tool in WEB_TOOLS)
+
+
+FILE_TOOLS = ("read", "grep", "glob")
+UNVERIFIED_FILES_NOTE = (
+    "**[UNVERIFIED: the agent had no file access on this call — no Read/Glob/Grep tool "
+    "and no `--context` file — so nothing below was read from this project's files, "
+    "logs or code; it is recalled or inferred. Re-run with `--repo PATH` or "
+    "`--context FILE`.]**"
+)
+
+
+def files_readable(command: list[str] | None, bundle: Bundle | None) -> bool:
+    """Could the agent actually read this project's files on this call?
+
+    True when the caller handed it files (`--context`), or its `claude` command names a
+    read tool (`--allowedTools Read,...`, which is what `--repo` adds) or skips
+    permissions. A plain `claude -p` can read nothing it was not given, and an
+    investigation written without that access would be recalled knowledge presented as
+    reading — the same trap `web_allowed` guards against for citations.
+    """
+    if bundle:
+        return True
+    argv = command or agent_command()
+    if Path(argv[0]).name not in {"claude", "claude.exe"}:
+        return True  # some other agent: not ours to second-guess
+    text = " ".join(argv).lower()
+    if "--dangerously-skip-permissions" in text or "bypasspermissions" in text:
+        return True
+    return any(tool in text for tool in FILE_TOOLS)
 
 
 def web_was_denied(reply: str) -> bool:
@@ -237,6 +278,71 @@ def _instruction_block(instruction: str) -> str:
     return f"## Instruction from the researcher\n\n{text}\n" if text else ""
 
 
+REPO_TOOLS = "Read,Glob,Grep"
+_CLAUDE_NAMES = {"claude", "claude.exe"}
+
+
+def resolve_repos(repos: list[str] | None) -> list[str]:
+    """Absolute, existing directories for `--repo`; `AgentError` names a bad one."""
+    resolved: list[str] = []
+    for raw in repos or []:
+        path = Path(raw).expanduser().resolve()
+        if not path.is_dir():
+            raise AgentError(f"--repo {raw!r} is not a directory.")
+        text = str(path)
+        if text not in resolved:
+            resolved.append(text)
+    return resolved
+
+
+def with_repos(command: list[str] | None, repos: list[str] | None) -> list[str] | None:
+    """Give a `claude` agent read-only access to `repos` (`--repo PATH`).
+
+    Adds `--add-dir PATH` for each repository — the only way `claude -p` may look
+    outside the project it runs in — and, unless the command already chose its own
+    `--allowedTools`, the read-only set `Read,Glob,Grep`. Never adds a tool that can
+    write or run anything: `--repo` exists so the agent can *ground* a proposal in a
+    repository that is not this one, not so it can change it. Returns `command`
+    untouched when no repo is given.
+    """
+    resolved = resolve_repos(repos)
+    if not resolved:
+        return command
+    argv = list(command or agent_command())
+    if Path(argv[0]).name not in _CLAUDE_NAMES:
+        raise AgentError(
+            "--repo needs a `claude` agent command (it works by passing --add-dir and "
+            "--allowedTools). For another agent, name the directories in --agent-cmd "
+            "yourself."
+        )
+    has_tools = any(
+        arg in {"--allowedTools", "--allowed-tools"}
+        or arg.startswith(("--allowedTools=", "--allowed-tools="))
+        for arg in argv
+    )
+    if not has_tools:
+        argv += ["--allowedTools", REPO_TOOLS]
+    for path in resolved:
+        argv += ["--add-dir", path]
+    return argv
+
+
+def _repos_block(repos: list[str]) -> str:
+    listing = "\n".join(f"- `{path}`" for path in repos)
+    return (
+        "## Repositories you may read\n\n"
+        "You have read-only access (Read, Glob, Grep) to:\n\n"
+        f"{listing}\n\n"
+        "Use them to ground what you propose in what actually exists there: start with "
+        "`CLAUDE.md`, `README`, memory/notes files and `docs/`, then the code and "
+        "evaluation scripts the instruction is about (current implementation, "
+        "available datasets and splits, existing metrics and their definitions). "
+        "Prefer a definition, dataset or convention you find there over a generic "
+        "default, and name the file it came from. Do not modify anything. What you "
+        "read is background, never a measured result.\n"
+    )
+
+
 def build_prompt(
     workflow: str,
     state: dict[str, Any],
@@ -244,9 +350,11 @@ def build_prompt(
     instruction: str = "",
     root: Path | None = None,
     brief: str = "",
+    repos: list[str] | None = None,
 ) -> str:
     """Fill in `prompts/{workflow}.md`, substituting `{{rules}}`, `{{state}}`,
-    `{{instruction}}`, `{{brief}}`.
+    `{{instruction}}`, `{{brief}}`, `{{assumptions}}` (the shared policy for values
+    nobody gave: look, default, choose, gap; also pulled in by `{{rules}}`).
 
     A project may override any prompt (or the shared rules) by placing its own copy at
     `.agents/skills/hiraku-agent/{workflow}.md` (or `_rules.md`) under `root` — checked
@@ -265,13 +373,24 @@ def build_prompt(
         return (PROMPT_DIR / name).read_text(encoding="utf-8")
 
     text = _read(f"{workflow}.md")
-    rules = _read("_rules.md")
-    return (
-        text.replace("{{rules}}", rules)
+    assumptions = _read("_assumptions.md")
+    prompt = (
+        text.replace("{{rules}}", _read("_rules.md"))
+        .replace("{{assumptions}}", assumptions)
         .replace("{{state}}", json.dumps(state, indent=2, default=str, sort_keys=True))
         .replace("{{instruction}}", _instruction_block(instruction))
         .replace("{{brief}}", brief or "")
     )
+    resolved = resolve_repos(repos)
+    if resolved:
+        block = _repos_block(resolved)
+        marker = "## Output contract"
+        if marker in prompt:
+            head, tail = prompt.split(marker, 1)
+            prompt = f"{head}{block}\n{marker}{tail}"
+        else:
+            prompt = f"{prompt.rstrip()}\n\n{block}"
+    return prompt
 
 
 # ------------------------------------------------------------------- command resolution
@@ -371,6 +490,9 @@ def call_agent(
         text=True,
         cwd=str(cwd) if cwd else None,
         env=agent_env(unset_env),
+        # Its own process group, so a timeout or Ctrl-C stops everything it started
+        # (an agent CLI runs tools and shells as children), not just the CLI itself.
+        start_new_session=os.name == "posix",
     )
     buffers: dict[str, str] = {"out": "", "err": ""}
 
@@ -395,21 +517,28 @@ def call_agent(
         reader.start()
 
     started = time.monotonic()
-    while True:
-        try:
-            process.wait(timeout=0.5)
-            break
-        except subprocess.TimeoutExpired:
-            elapsed = time.monotonic() - started
-            if elapsed > timeout:
-                process.kill()
-                process.wait()
-                raise AgentError(
-                    f"Agent timed out after {timeout}s. Raise it with --timeout, or "
-                    f"run the prompt yourself: the exact text is in the log directory."
-                ) from None
-            if progress:
-                progress(elapsed)
+    try:
+        while True:
+            try:
+                process.wait(timeout=0.5)
+                break
+            except subprocess.TimeoutExpired:
+                elapsed = time.monotonic() - started
+                if elapsed > timeout:
+                    _stop_process_group(process)
+                    raise AgentTimeout(
+                        f"Agent timed out after {timeout}s. Raise it with --timeout, "
+                        f"or run the prompt yourself: the exact text is in the log "
+                        f"directory."
+                    ) from None
+                if progress:
+                    progress(elapsed)
+    except BaseException:
+        # Ctrl-C included: the agent no longer shares our process group, so it would
+        # otherwise keep running (and editing files) after we are gone.
+        if process.poll() is None:
+            _stop_process_group(process)
+        raise
     for reader in readers:
         reader.join(timeout=5)
 
@@ -433,45 +562,79 @@ def call_agent(
     return buffers["out"]
 
 
-def extract_json(text: str) -> dict[str, Any]:
-    """Pull one JSON object out of an agent's reply, fenced or bare."""
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
-    candidates = [fenced.group(1)] if fenced else []
-    start = text.find("{")
-    while start != -1:
-        depth = 0
-        in_string = False
-        escape = False
-        for index in range(start, len(text)):
-            char = text[index]
-            if in_string:
-                if escape:
-                    escape = False
-                elif char == "\\":
-                    escape = True
-                elif char == '"':
-                    in_string = False
-                continue
-            if char == '"':
-                in_string = True
-            elif char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    candidates.append(text[start : index + 1])
-                    break
-        break
-    for candidate in candidates:
+def _stop_process_group(process: subprocess.Popen[str], grace: float = 5.0) -> None:
+    """SIGTERM the agent's whole process group, then SIGKILL whatever is left."""
+    if os.name != "posix":
+        process.kill()
+        process.wait()
+        return
+    try:
+        group = os.getpgid(process.pid)
+    except ProcessLookupError:
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
-            parsed = json.loads(candidate)
+            os.killpg(group, sig)
+        except ProcessLookupError:
+            break
+        try:
+            process.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            continue
+        if sig == signal.SIGTERM:
+            # The leader is gone; make sure nothing it started outlives it.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(group, signal.SIGKILL)
+        break
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=grace)
+
+
+def _json_objects(text: str) -> list[dict[str, Any]]:
+    """Every outermost JSON object in `text`, in order.
+
+    Tries each `{` as a start, not only the first: prose before the reply ("use {x} as
+    the key") must not hide the object that follows it. An object found is skipped as a
+    whole, so its own nested objects are not returned separately.
+    """
+    decoder = json.JSONDecoder()
+    found: list[dict[str, Any]] = []
+    index = text.find("{")
+    while index != -1:
+        try:
+            parsed, end = decoder.raw_decode(text, index)
         except json.JSONDecodeError:
+            index = text.find("{", index + 1)
             continue
         if isinstance(parsed, dict):
-            # `claude --output-format json` wraps the reply; unwrap it.
-            if "result" in parsed and isinstance(parsed["result"], str):
-                return extract_json(parsed["result"])
-            return parsed
+            found.append(parsed)
+        index = text.find("{", end)
+    return found
+
+
+def extract_json(text: str, keys: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Pull the reply's JSON object out of an agent's reply, fenced or bare.
+
+    Fenced blocks come first, then bare objects. Among them, the first that has one of
+    `keys` wins when `keys` is given; otherwise the one with the most top-level keys
+    (a reply object has many, a stray example in prose few).
+    """
+    fenced = [
+        obj
+        for block in re.findall(r"```(?:json)?\s*(.*?)```", text, re.S)
+        for obj in _json_objects(block)
+    ]
+    candidates = fenced or _json_objects(text)
+    # `claude --output-format json` wraps the reply; unwrap it.
+    for candidate in candidates:
+        if isinstance(candidate.get("result"), str):
+            return extract_json(candidate["result"], keys)
+    if candidates:
+        if keys:
+            for candidate in candidates:
+                if any(key in candidate for key in keys):
+                    return candidate
+        return max(candidates, key=len)
     raise AgentError(
         "The agent did not return a JSON object. First 500 characters of the reply:\n"
         + text[:500]

@@ -13,3 +13,7 @@ from hiraku.errors import HirakuError
 
 class AgentError(HirakuError):
     """The agent command failed, timed out, or returned something unusable."""
+
+
+class AgentTimeout(AgentError):
+    """The agent command ran past its timeout and was stopped."""

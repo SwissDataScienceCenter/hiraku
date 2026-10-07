@@ -30,9 +30,24 @@ from typing import Any
 from hiraku.config import HirakuConfig
 from hiraku.record import Record
 
+from . import sections
 from .gates import is_approved
+from .launches import running_nodes
 from .node import list_nodes
 from .state import node_state
+
+
+def _describe_marker(info: dict[str, Any]) -> str:
+    if info.get("source") == "tracking":
+        return f"run {info.get('run')} reports {info.get('status')}"
+    parts = []
+    if info.get("jobs"):
+        parts.append("Slurm job " + ", ".join(str(job) for job in info["jobs"]))
+    if info.get("check"):
+        parts.append("check command alive")
+    if info.get("pid") is not None:
+        parts.append(f"pid {info['pid']} on {info.get('host')}")
+    return "; ".join(parts) or "marker"
 
 
 def suggest_next(
@@ -41,7 +56,8 @@ def suggest_next(
     """The single next action for `task`, and why.
 
     Returns a dict with at least `action` and `why`; `design`/`exhausted`
-    have no single `node` to name, everything else includes `node`. See the
+    have no single `node` to name, everything else includes `node`; `wait` means only
+    launches in flight remain. See the
     module docstring for what each action means and does not yet mean.
     """
     selected = config or HirakuConfig.discover()
@@ -64,9 +80,13 @@ def suggest_next(
             children_of[node.parent_id].append(node.id)
 
     runs_by_id = {node.id: node.runs(config=selected) for node in nodes}
+    in_flight = running_nodes(runs_by_id, selected)
     states = {
         node.id: node_state(
-            node, runs_by_id[node.id], has_children=bool(children_of[node.id])
+            node,
+            runs_by_id[node.id],
+            has_children=bool(children_of[node.id]),
+            running=node.id in in_flight,
         )
         for node in nodes
     }
@@ -90,9 +110,16 @@ def suggest_next(
                 "why": "implemented and approved, never launched",
             }
 
-    # Priority 2 — has results, no verdict yet.
+    run_ids = {
+        node_id: {str(run.id) for run in runs if getattr(run, "id", None) is not None}
+        for node_id, runs in runs_by_id.items()
+    }
+
+    # Priority 2 — has results, no verdict yet, and something new to judge.
     for node_id, state in states.items():
-        if state == "awaiting_analysis":
+        if state == "awaiting_analysis" and not _needs_person(
+            by_id[node_id], run_ids[node_id]
+        ):
             return {
                 "action": "analyze",
                 "node": node_id,
@@ -113,7 +140,56 @@ def suggest_next(
                 "next_commands": [f"hiraku-agent triage {node_id} --task {task_id}"],
             }
 
-    # Priority 4 — proposed, gate not yet cleared. In `auto` mode
+    # Priority 4 — needs a person: a run that did not test its expectation, or an
+    # analysis that could not reach a verdict from runs that have not changed since.
+    for node_id, state in states.items():
+        if state != "awaiting_analysis":
+            continue
+        node = by_id[node_id]
+        reason = _needs_person(node, run_ids[node_id])
+        if reason == "fix":
+            return {
+                "action": "fix",
+                "node": node_id,
+                "why": (
+                    "triage found an execution defect: the runs did not test the "
+                    "expectation. Fix the code, bind the new commit and launch again."
+                ),
+                "next_commands": [
+                    f"hiraku record update {node_id} --commit <fixed commit>",
+                    f"hiraku launch --record {node_id}",
+                ],
+            }
+        if reason == "needs_evidence":
+            missing = sections.read_section(node.markdown, "Missing evidence")
+            return {
+                "action": "needs_evidence",
+                "node": node_id,
+                "why": (
+                    "analysis could not reach a verdict and no new runs have come in "
+                    "since: " + (_first_line(missing) or "see the node's findings")
+                ),
+                "next_commands": [f"hiraku launch --record {node_id}"],
+            }
+
+    # Implemented but not approved: the approval was cleared after the code was bound
+    # (an `update` or `design --revise` that changed the expectation).
+    for node_id, state in states.items():
+        if state == "implemented" and not is_approved(by_id[node_id]):
+            return {
+                "action": "approve",
+                "node": node_id,
+                "why": (
+                    "implemented but not approved (the approval was cleared, e.g. by "
+                    "an update): check the code still matches the expectation, then "
+                    "approve"
+                ),
+                "next_commands": [
+                    f"hiraku-agent approve {node_id} --task {task_id} --by <you>"
+                ],
+            }
+
+    # Priority 5 — proposed, gate not yet cleared. In `auto` mode
     # `is_approved` is already true above, so a node only reaches here in
     # `guided` mode.
     for node_id, state in states.items():
@@ -127,4 +203,39 @@ def suggest_next(
                 ],
             }
 
+    # Nothing else to do, but a launch is still in flight: its result is not in yet, so
+    # this is "wait", not "exhausted" (which would end a loop that has work coming).
+    for node_id, state in states.items():
+        if state == "running":
+            marker = in_flight.get(node_id, {})
+            return {
+                "action": "wait",
+                "node": node_id,
+                "why": (
+                    f"launch in flight since {marker.get('started_at')} "
+                    f"({_describe_marker(marker)})"
+                ),
+            }
+
     return {"action": "exhausted", "why": "nothing left to schedule"}
+
+
+def _needs_person(node: Any, run_ids: set[str]) -> str | None:
+    """Why a node with runs and no verdict should not be analysed again, or None.
+
+    `fix`: triage classified its runs as an execution defect and no other runs exist.
+    `needs_evidence`: the last analysis judged exactly these runs and set no verdict.
+    """
+    if node.execution_defect and run_ids <= set(node.defect_runs or []):
+        return "fix"
+    if node.analyzed_runs is not None and run_ids == set(node.analyzed_runs):
+        return "needs_evidence"
+    return None
+
+
+def _first_line(text: str | None) -> str:
+    for line in (text or "").splitlines():
+        line = line.strip().lstrip("-* ").strip()
+        if line:
+            return line
+    return ""

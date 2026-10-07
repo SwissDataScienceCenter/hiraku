@@ -98,21 +98,24 @@ from.
 
 ## What counts as this project's memory
 
-The `state` block in this prompt, plus `project_context` where one is given, is the whole
-memory. It is assembled from the records as they stand right now, and it is complete: if
-something is not in it, it is not part of this task's state.
+The `state` block in this prompt is assembled from the records as they stand right now,
+and it is complete for this task's tree: if a node is not in it, it is not part of the
+tree. Judge novelty against that.
+
+Beyond the tree, you may read what the researcher pointed you at: the `project_context`
+block and, when you are allowed to read a repository, its notes (`CLAUDE.md`, `README`,
+memory or notes files), configs and evaluation code. That is where values the task does
+not state usually live (paths, thresholds, configurations), so look there before you
+assume anything. Say which file a value came from.
 
 `.hiraku/agent-logs/` holds the prompt and the raw reply of every past call. It is an
 audit trail for the researcher, not a source for you. **Do not read it, search it, or
 reason from it.** A past reply is a draft that may have been rejected, edited, or
-superseded — a proposal justified by an earlier reply is circular, and one resurrected
-from a log is being reintroduced by the tool's own bookkeeping rather than by the
-researcher. The same goes for deleted records recoverable from git history: a record that
+superseded. The same goes for deleted records recoverable from git history: a record that
 is absent was removed on purpose.
 
 Where a past decision is meant to survive, it survives as a record — an `abandoned` node,
-a `concluded` node with its verdict — and those are in the `state` block below. Judge
-novelty against that, and nothing else.
+a `concluded` node with its verdict — and those are in the `state` block.
 
 ## Which record may name which
 
@@ -128,16 +131,7 @@ If the comparison you want needs a quantity that is not defined there, say so an
 as a gap — do not invent a name and use it as though it existed. An undefined name in a
 findings paragraph is indistinguishable from a measured one.
 
-## Unfilled values
-
-Where a required value cannot be grounded in the state or the project context, do not
-guess and do not hedge. Write the marker
-
-    **[UNSET: what is needed — why you could not determine it]**
-
-in place of that value. A hedge ("a standard split", "the usual threshold") reads as
-filled in and is worse than an honest gap, because nobody can tell it apart from a
-grounded fact later.
+{{assumptions}}
 
 ## Honesty rules
 
