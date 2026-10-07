@@ -25,9 +25,7 @@ def provenance() -> dict[str, str]:
     """Read the provenance injected by ``hiraku launch``."""
     missing = [name for name in HIRAKU_VARIABLES if name not in os.environ]
     if missing:
-        raise RuntimeError(
-            f"Missing Hiraku provenance variables: {', '.join(missing)}"
-        )
+        raise RuntimeError(f"Missing Hiraku provenance variables: {', '.join(missing)}")
     return {name: os.environ[name] for name in HIRAKU_VARIABLES}
 
 
