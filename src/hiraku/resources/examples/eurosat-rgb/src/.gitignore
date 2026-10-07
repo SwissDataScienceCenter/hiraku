@@ -1,6 +1,6 @@
+/data/
 .venv/
 __pycache__/
 *.py[cod]
 /hiraku.yml
 /hiraku/
-/data/

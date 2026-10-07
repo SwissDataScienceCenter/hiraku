@@ -11,6 +11,7 @@ def test_agent_record_registries(tmp_path: Path) -> None:
     assert [record.id for record in list_programs(config=config)] == [
         "autoresearch",
         "interactive",
+        "literature-review",
     ]
     context = Context(id="literature", markdown="Sources")
     context.save(config.contexts_dir / "literature/context.md")
