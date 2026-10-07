@@ -39,31 +39,9 @@ class FlattenedPixelMLP(nn.Module):
         return self.layers(images)
 
 
-class ShallowCNN(nn.Module):
-    """Two convolutional layers with local connectivity and pooling."""
-
-    def __init__(self, num_classes: int) -> None:
-        super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(CHANNELS, 16, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Flatten(),
-        )
-        self.classifier = nn.Linear(32, num_classes)
-
-    def forward(self, images: torch.Tensor) -> torch.Tensor:
-        return self.classifier(self.features(images))
-
-
 def build_model(model_name: str, num_classes: int) -> nn.Module:
     if model_name == "mlp":
         return FlattenedPixelMLP(num_classes)
-    if model_name == "shallow_cnn":
-        return ShallowCNN(num_classes)
     raise ValueError(f"Unsupported model: {model_name}")
 
 
@@ -136,11 +114,11 @@ def evaluate(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["mlp", "shallow_cnn"], required=True)
+    parser.add_argument("--model", choices=["mlp"], required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--validation-fraction", type=float, default=0.2)
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
-    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=0.001)
     return parser.parse_args()
 
