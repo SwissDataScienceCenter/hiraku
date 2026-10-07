@@ -12,7 +12,7 @@ Project root: <absolute path>
 Skills dir: <absolute path to .claude/skills or .agents/skills>
 Scripts: <skills dir>/hiraku-powers/scripts
 Base sha (state `base:`): <sha>   Bound commit (state `bound:`): <sha>
-Run IDs: <ids>
+Derive run IDs yourself: `hiraku runs --record <record-id> --json`.
 Read first: <skills dir>/hiraku-powers-review/SKILL.md, then
 <skills dir>/hiraku-powers/PROTOCOL.md
 

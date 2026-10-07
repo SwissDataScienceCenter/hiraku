@@ -11,8 +11,10 @@ scripts, and the state machine: `../hiraku-powers/PROTOCOL.md`.
 
 <HARD-GATE>
 Do not start implementation until the user approved the written plan, the
-execution mode, and auto-continue, and you ran `approve <id> plan ...`. The
-approval pins the plan: any later change needs `reopen` and a new approval.
+execution mode, and auto-continue, and you ran
+`approve <id> plan ... --quote "<their words>"`. The approval pins the plan: any
+later change needs a new approval (`reopen` before editing; if `state` already
+says `plan`, just re-present).
 </HARD-GATE>
 
 ## Process
@@ -36,7 +38,10 @@ approval pins the plan: any later change needs `reopen` and a new approval.
    inconclusive.
 4. **Write it.** Run `workspace <id>`; write `plan.md` (starting `## Plan`) and
    refresh `summary.md` (status `planned`). Other sections stay untouched in
-   `rest.md`. Then `push <id>` and verify with `hiraku record show <id> --json`.
+   `rest.md`. Keep the plan's `### Deviations` heading last and empty (the
+   approval pins everything above it). Keep the summary's `- Hypothesis:` and
+   `- Success criterion:` lines byte-identical. Then `push <id>` and verify with
+   `hiraku record show <id> --json`.
 5. **No decisions left.** Before presenting, check: every task names files and a
    check; entrypoint, args, dispatcher, branch, commit message, smoke and full
    run, and budget are fixed; instrumentation is planned; side effects are
@@ -44,13 +49,16 @@ approval pins the plan: any later change needs `reopen` and a new approval.
 6. **Present** the plan and ask for approval, the execution mode, and
    **auto-continue to review: yes or no**. Put both in `### Execution`, `push`,
    and only after the user says yes run
-   `approve <id> plan <implement|implement-and-run> <yes|no>`. A pushed plan
-   alone is a draft; `state` shows `implement` only after `approve`.
+   `approve <id> plan <implement|implement-and-run> <yes|no> --quote "<their
+   words>"`. The arguments must equal the plan's `- Mode:` and `- Auto-continue to
+   review:` lines, each holding exactly one value. Mode `implement` allows the
+   planned smoke run within budget but no full run. A pushed plan alone is a
+   draft; `state` shows `implement` only after `approve`.
 
 ## Exit
 
-When `state` says `implement`, dispatch the implement subagent per the flow in
-PROTOCOL.md. If the user declines, stay in plan. If planning shows the
+When `state` says `implement`, dispatch the implement subagent per
+`../hiraku-powers/DISPATCH.md`. If the user declines, stay in plan. If planning shows the
 hypothesis is wrong or unclear, `reopen <id> proposal` and go back to
 `hiraku-powers-define`.
 
@@ -61,4 +69,4 @@ hypothesis is wrong or unclear, `reopen <id> proposal` and go back to
 | "I'll decide that while coding" | Decide it now or it is a deviation later. |
 | "I'll add a flag for flexibility" | Not in the hypothesis means not in the plan. |
 | "The smoke run is cheap, skip it" | The plan must name it or state in writing why it is omitted. |
-| "A one-word plan edit after approval is fine" | The pinned hash will fail it. `reopen`, present, re-approve. |
+| "A one-word plan edit after approval is fine" | The pinned hash will fail it. `reopen` before editing, present, re-approve. |

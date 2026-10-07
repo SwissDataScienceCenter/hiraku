@@ -11,17 +11,19 @@ scripts, and the state machine: `../hiraku-powers/PROTOCOL.md`.
 <HARD-GATE>
 Do not create the record until the user approved the written-back understanding,
 and do not start planning until they approved the proposal and you ran
-`approve <id> proposal`.
+`approve <id> proposal --quote "<their words>"`.
 </HARD-GATE>
 
 ## Process
 
-1. **Ground.** Run `hiraku status --json`, then `record tree` and `record show`
-   for the active record's root (or the root the user named). Read sibling
-   results, `hiraku runs --record <id> --json`, and the code the idea touches.
-   Resume existing work (`inprogress`) instead of duplicating it. If
-   `record tree` is empty there is no root: create it first (goal, question,
-   metrics with directions) and include it in the write-back for approval.
+1. **Ground.** Run `hiraku status --json` and `record tree`. `record show` the
+   active record (the experiment the user works under), its root, siblings, and
+   their runs, and read the code the idea touches. With no active record: one
+   root, use it; several, ask (recommend the most recently worked one). Resume
+   existing work (`inprogress`) instead of duplicating it. If `record tree` is
+   empty there is no root: put one in the write-back (goal, question, metrics
+   with directions) and, once the user approves, create it first with
+   `--no-activate`.
 2. **Grill.** Ask one question at a time, each with your recommended answer.
    Skip anything the records or code already answer. Keep going until the user
    can state the hypothesis and the pass/fail criterion.
@@ -32,12 +34,14 @@ and do not start planning until they approved the proposal and you ran
    metrics in the same step. Add one definition line per metric or symbol (the
    metric schema has no description field). Incorporate corrections.
 4. **Propose.** After approval, check the ID is unused project-wide, then create
-   the proposal. Always pass `--no-activate`: this skill never changes the
-   active record, which stays the experiment the user works under.
+   the proposal under the active experiment's root, with `--related-to
+   <active-id>` when the active record is a child. Always pass `--no-activate`:
+   this skill never changes the active record, which stays the experiment the
+   user works under.
 
 ```bash
 hiraku record create <id> --parent <root-id> --type experiment --no-activate \
-  --set 'summary=...' --set 'hypothesis=...'
+  [--related-to <active-id>] --set 'summary=...' --set 'hypothesis=...'
 hiraku record show <id> --json
 ```
 
@@ -46,13 +50,15 @@ hiraku record show <id> --json
    `--commit` unset. If the idea splits into independent investigations,
    propose several records and let the user choose one to continue.
 6. Present the record. Only after the user approves it, run
-   `approve <id> proposal` (it needs the Hypothesis and Success criterion
-   lines in the pushed summary).
+   `approve <id> proposal --quote "<their words>"` (it needs stage `define` and
+   the Hypothesis and Success criterion lines in the pushed summary, and pins
+   them).
 
 ## Exit
 
 Hand off to `hiraku-powers-plan`. If the user changes the proposal later,
-`reopen <id> proposal`.
+`reopen <id> proposal` before editing it (if `state` already says `define`, just
+re-present and re-approve).
 
 ## Red flags
 

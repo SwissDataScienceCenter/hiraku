@@ -11,7 +11,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/_lib.sh"
-usage() { echo "usage: push RECORD_ID [--force] [--drop head|summary|plan|rest]..." >&2; exit 2; }
+usage() { echo "usage: push RECORD_ID [--force] [--drop head|plan|rest]..." >&2; exit 2; }
 [ $# -ge 1 ] || usage
 id=$1; shift
 force=0
@@ -19,7 +19,9 @@ drops=" "
 while [ $# -gt 0 ]; do
   case "$1" in
     --force) force=1 ;;
-    --drop) shift; [ $# -gt 0 ] || usage; drops="$drops$1 " ;;
+    --drop)
+      shift; [ $# -gt 0 ] || usage
+      case "$1" in head|plan|rest) drops="$drops$1 " ;; *) usage ;; esac ;;
     *) usage ;;
   esac
   shift
@@ -35,7 +37,13 @@ for part in $PARTS; do
   if [ ! -s "$dir/$part.md" ] && [ -s "$dir/.synced/$part.md" ]; then
     case "$drops" in
       *" $part "*) ;;
-      *) echo "$part.md is empty but the record had content; pass --drop $part to remove it" >&2; exit 3 ;;
+      *)
+        if [ "$part" = summary ]; then
+          echo "summary.md is empty; the record body must start with '## Summary' (it cannot be dropped)" >&2
+        else
+          echo "$part.md is empty but the record had content; pass --drop $part to remove it" >&2
+        fi
+        exit 3 ;;
     esac
   fi
 done
@@ -61,14 +69,29 @@ if headings rest | grep -qxE '## (Summary|Plan)'; then
 fi
 
 if [ "$force" = 0 ] && [ "$(body_of "$id" | sha_of)" != "$(cat "$dir/.pulled-sha")" ]; then
-  echo "record body changed since pull. Merge: pull $id --to <dir>, diff against" >&2
-  echo "the workspace parts, merge by hand, then push $id --force" >&2
-  exit 4
+  # A push that died after writing the record leaves the body equal to the
+  # workspace but not to the snapshot: recognise that and carry on.
+  cur=$(mktemp -d)
+  split_body "$id" "$cur"
+  same=1
+  for part in $PARTS; do
+    trim < "$dir/$part.md" | cmp -s - "$cur/$part.md" || same=0
+  done
+  rm -rf "$cur"
+  if [ "$same" = 1 ]; then
+    echo "note: the record body differs from the last pull but matches the workspace parts (a crashed push, or sections reordered or reformatted elsewhere); continuing" >&2
+  fi
+  if [ "$same" = 0 ]; then
+    echo "record body changed since pull. Merge: pull $id --to <dir>, diff against" >&2
+    echo "the workspace parts, merge by hand, then push $id --force" >&2
+    exit 4
+  fi
 fi
+[ ! -s "$dir/head.md" ] || echo "warning: head.md is not empty, so the body will not start with '## Summary'" >&2
 
 out=$(mktemp)
 check=$(mktemp -d)
-trap 'rm -rf "$out" "$check"; rmdir "$LOCK_DIR/.lock" 2>/dev/null || true' EXIT
+trap 'rm -rf "$out" "$check" "$LOCK_DIR/.lock"' EXIT
 first=1
 for part in $PARTS; do
   [ -s "$dir/$part.md" ] || continue

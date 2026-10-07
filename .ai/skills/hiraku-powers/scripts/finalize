@@ -9,7 +9,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/_lib.sh"
 [ $# -ge 1 ] && [ $# -le 2 ] || { echo "usage: finalize RECORD_ID [STATUS]" >&2; exit 2; }
 status=${2:-reviewed}
-dir=$(workspace_dir "$1")
+dir=$(bash "$here/workspace" "$1")
+require_stage "$1" present
 for f in result.md decision.md; do
   grep -q '[^[:space:]]' "$dir/$f" 2>/dev/null \
     || { echo "$f is missing or blank in $dir" >&2; exit 3; }

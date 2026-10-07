@@ -1,7 +1,8 @@
 # Implementer prompt
 
 Fill the placeholders and dispatch one fresh subagent per record. Run
-`clear-report <id>` first, and only if `state <id>` says `implement`. Give the
+`clear-report <id>` and `ledger <id> --marker implement-started` first, and only
+if `state <id>` says `implement` and `dispatched: no`. Give the
 subagent nothing else; it reads the rest from the workspace.
 
 ```text
@@ -25,8 +26,11 @@ Rules:
   ticks and ### Deviations.
 - Follow project instructions (CLAUDE.md, AGENTS.md) for commits.
 - Smoke run with `--commit HEAD` before `bind`; never rebind a commit.
-- Launch only if the plan mode is implement-and-run; never exceed its budget.
-- Markers only through scripts: `ledger <id> --marker base` at start,
+- Obey `state`'s `mode:`: `implement` allows the plan's smoke run, no full run;
+  `implement-and-run` allows the full run too. Never exceed the budget.
+- Answers the user gave after an earlier STOP are `user answer:` notes in
+  ledger.md; follow them. Note each run ID with `ledger <record-id> "smoke run <run-id>"` (or "full run").
+- Markers only through scripts: `ledger <record-id> --marker base` at start,
   `--marker implement-done` or `--marker implement-stop "<reason>"` at the end.
 - You cannot ask the user. On a deviation, failed check, failed run, or run
   without a tracked row: record it under ### Deviations, push, write

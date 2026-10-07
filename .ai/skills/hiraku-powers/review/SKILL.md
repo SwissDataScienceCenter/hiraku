@@ -1,25 +1,28 @@
 ---
 name: hiraku-powers-review
-description: Use when a Hiraku record's state says review, meaning implementation finished and its result must be checked and drafted; read by the review subagent the main agent dispatches. Stage 4 of hiraku-powers.
+description: Use only when you were dispatched as the hiraku-powers review subagent for a record whose state says review. The main agent dispatches this stage through hiraku-powers/DISPATCH.md and does not run it inline unless it has no subagent tool.
 ---
-# Review the record (subagent drafts, main agent presents)
+# Review the record (subagent brief)
 
 ## Subagent brief
 
 You are the review subagent. You are read-only except for `findings.md`,
 `result.md`, and `decision.md` in the workspace, and the ledger. You get the
-record ID, the `base` and bound commit, and run IDs. You must **not read** the
+record ID and the `base` and bound commit; derive the run IDs yourself with
+`hiraku runs --record <id> --json` (smoke runs carry no tag; the ledger notes
+name them). You must **not read** the
 implement `report.md`. Treat `ledger.md` and `### Deviations` as the
 implementer's self-report and verify claims against `git diff` and
 `hiraku runs`, so your judgment stays independent. Never run `push`,
 `finalize`, `bind`, or a launch. You cannot ask the user: put questions in
-`findings.md`. Protocol: `../hiraku-powers/PROTOCOL.md`.
+`findings.md`. The main agent presents your drafts and runs `push` and
+`finalize` after the user approves. Protocol: `../hiraku-powers/PROTOCOL.md`.
 
 1. `workspace <id>`; read `plan.md`, `ledger.md`, the record, `runs`, and
    `git diff <base>..<commit>`; optionally run the `code-review` skill.
 2. Write `findings.md` (by severity), `result.md` (supports, refutes, or
    inconclusive, with run IDs, metrics, and commit), and `decision.md`.
-3. `ledger <id> --marker review-drafted`.
+3. `ledger <id> --marker review-drafted` (needs all three drafts non-blank).
 
 ### Review dimensions
 
@@ -37,24 +40,6 @@ implementer's self-report and verify claims against `git diff` and
 - **Lean check:** waste, unplanned runs, budget overruns, unplanned side effects.
 - **Record hygiene:** body preserved, plan ticked, nothing summarized that was
   not run.
-
-## Main agent
-
-<HARD-GATE>
-Nothing is written to the record's `result`, `decision`, or status until the
-user approved the draft. `push` and `finalize` are run by the main agent only.
-</HARD-GATE>
-
-1. Dispatch with [reviewer-prompt.md](reviewer-prompt.md) only when `state`
-   says `review`, passing `base:` and `bound:` from `state`. Do not pass or
-   mention `report.md`.
-2. When `state` says `present`, present findings and drafts, plus suggested
-   follow-up proposals. Do not re-dispatch; the drafts may already be discussed.
-3. On approval update `summary.md` (`Result`, `Evidence`, `Status: reviewed`,
-   `Next`), `push <id>`, `finalize <id>`, and verify with `record show`.
-
-Stop at the requested scope. A fix after a blocker is a new related record
-through `hiraku-powers-define`; never rebind.
 
 ## Red flags
 

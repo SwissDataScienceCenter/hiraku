@@ -154,6 +154,26 @@ from idea to reviewed result in four gated stages, keep a git-ignored workspace
 and ledger under `.hiraku-powers/records/<record-id>/`, and update the record through
 helper scripts that need `bash` and `jq`.
 
+`hiraku init` only runs in a new project. To add the skills to an existing
+project, copy them from the installed package (or the repository's
+`.ai/skills/`) into both skill directories. A group such as `hiraku-powers`
+installs its root skill under its own name and each stage subdirectory as a
+separate skill named `<group>-<stage>`. `hiraku-powers` expects the core `hiraku`
+skill (`.ai/skills/hiraku`) to be installed the same way:
+
+```bash
+skills=.ai/skills   # or <site-packages>/hiraku/resources/.ai/skills
+src=$skills/hiraku-powers
+for dir in .claude/skills .agents/skills; do
+  mkdir -p "$dir/hiraku" && rsync -a "$skills/hiraku/" "$dir/hiraku/"   # core skill
+  mkdir -p "$dir/hiraku-powers"
+  rsync -a --exclude='/define' --exclude='/plan' --exclude='/implement' --exclude='/review' "$src/" "$dir/hiraku-powers/"
+  for stage in define plan implement review; do
+    mkdir -p "$dir/hiraku-powers-$stage" && rsync -a "$src/$stage/" "$dir/hiraku-powers-$stage/"
+  done
+done
+```
+
 ## Actions, Programs, Context
 
 !!! info

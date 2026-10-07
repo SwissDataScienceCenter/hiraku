@@ -18,6 +18,11 @@ if TYPE_CHECKING:
     from .config import HirakuConfig
 
 
+def _is_junk(name: str) -> bool:
+    """Editor and OS leftovers that must never be installed into a project."""
+    return name in {".DS_Store", "__pycache__"} or name.endswith((".pyc", ".swp", "~"))
+
+
 @dataclass(frozen=True, slots=True)
 class _InitializationResult:
     config: HirakuConfig
@@ -129,8 +134,10 @@ class ProjectInitializer:
                 ):
                     cls._ensure_directory(directory, created_dirs)
                 resource_root = files("hiraku.resources")
+                # Use the repository's .ai/ only in a source checkout, recognised by
+                # the bundled skill itself, never a user's own .ai/ directory.
                 ai_resources = Path(__file__).parents[2] / ".ai"
-                if not ai_resources.is_dir():
+                if not (ai_resources / "skills/hiraku/SKILL.md").is_file():
                     ai_resources = resource_root / ".ai"
                 copies = [
                     (resource_root / "programs", config.programs_dir, ()),
@@ -321,6 +328,12 @@ class ProjectInitializer:
             )
             skills.append((group.name, group, stages))
             skills.extend((f"{group.name}-{stage.name}", stage, ()) for stage in stages)
+        names = [name for name, _, _ in skills]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValidationError(
+                f"Bundled skills install under the same name: {', '.join(duplicates)}"
+            )
         return skills
 
     @staticmethod
@@ -341,6 +354,8 @@ class ProjectInitializer:
             created_dirs.append(directory)
         for item in source.rglob("*"):
             if any(item.is_relative_to(path) for path in exclude):
+                continue
+            if any(_is_junk(part) for part in item.relative_to(source).parts):
                 continue
             relative = item.relative_to(source)
             destination = target / relative

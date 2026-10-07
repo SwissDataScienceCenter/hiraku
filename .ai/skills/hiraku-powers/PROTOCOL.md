@@ -19,17 +19,23 @@ call with `cd <project-root> &&` (a stray `cd` persists in the shell). They need
 
 | Script | Purpose |
 | --- | --- |
-| `workspace ID` | Print the workspace; seed it on first use; archive it if the record was re-created |
+| `workspace ID` | Print the workspace; seed it on first use; archive it (to `.hiraku-powers/archive/`) if the record was re-created |
 | `pull ID [--discard \| --to DIR]` | Refresh parts from the record; refuses to overwrite unpushed edits; `--to` never touches the workspace |
 | `push ID [--force] [--drop PART]` | Validate, re-split to prove the round trip, then write the body; refuses a stale body, a missing part, or silently emptying a part |
-| `state ID` | Print the stage computed from the ledger and the record |
+| `state ID` | Print the stage computed from the ledger and the record, plus `dispatched:`, `mode:`, `base:`, `bound:`, approval quotes |
 | `inprogress` | List unfinished records with their stage |
-| `approve ID proposal` / `approve ID plan MODE AUTO` | Record a user approval (MODE `implement` or `implement-and-run`, AUTO `yes` or `no`); pins the plan |
-| `reopen ID plan\|proposal` | Revoke an approval |
-| `ledger ID "text"` / `ledger ID --marker KIND [text]` | Add a note, or a marker: `base` (once), `implement-done`, `implement-stop "reason"`, `review-drafted` |
-| `bind ID [REF] [--rebind]` | Bind a verified commit (default `HEAD`); refuses to replace one |
+| `approve ID proposal --quote T` / `approve ID plan MODE AUTO --quote T` | Record an approval with the user's words (MODE `implement` or `implement-and-run`, equal to the plan's `- Mode:` line; AUTO `yes` or `no`, equal to its `- Auto-continue to review:` line); pins the proposal or plan |
+| `reopen ID plan\|proposal` | Revoke an approval (not allowed once finalized) |
+| `ledger ID "text"` / `ledger ID --marker KIND [text]` | Add a one-line note, or a marker: `base` (once), `implement-started`, `implement-done`, `implement-stop "reason"`, `review-started`, `review-stop "reason"`, `review-drafted` |
+| `bind ID [REF] [--rebind]` | Bind a verified commit (default `HEAD`; same commit is a no-op); refuses to replace one; stage `implement` only |
 | `clear-report ID` | Remove a stale `report.md` before dispatch |
-| `finalize ID [STATUS]` | Write `result.md`, `decision.md`, and `status` (default `reviewed`) after approval |
+| `finalize ID [STATUS]` | Write `result.md`, `decision.md`, and `status` (default `reviewed`); stage `present` only |
+
+Scripts refuse out-of-order steps (exit 7 names the stage that is needed and
+why), so a shortcut through the scripts needs the whole ordered sequence, each
+step visible in the ledger. `reopen plan` is only allowed from `implement`,
+`review`, or `present`; a subagent that stopped or returned without a marker is
+closed by the main agent with `ledger ID --marker implement-stop "reason"`.
 
 If `push` reports a changed body: `pull ID --to <dir>`, diff against the
 workspace parts, merge by hand, then `push ID --force`. Never use `--force`,
@@ -38,47 +44,27 @@ workspace parts, merge by hand, then `push ID --force`. Never use `--force`,
 ## State machine
 
 The ledger is the recovery map; after context loss trust `state`, the ledger,
-and `git log` over memory. Markers are written only by scripts (free text is
-stored as `note:` and can never act as a marker); the latest marker wins:
+and `git log` over memory. Scripts write markers, one timestamped line each. Free
+text is stored as `note:` with newlines flattened, lines without a timestamp are
+ignored, and each marker is parsed with one anchored pattern, so words inside a
+note or an approval quote cannot act as a marker or override its fields. This
+protects against mistakes made through the scripts; it does not stop anyone who
+edits `ledger.md` directly. The latest marker wins:
 
 `proposal approved` -> `plan approved: mode; auto-continue; plan-sha` ->
-`base <sha>` -> `bound commit <sha>` -> `implement done` (or `implement stop:
-reason`) -> `review drafted` -> `finalized`. `proposal reopened` and `plan
-reopened` step back. The plan hash ignores ticks and `### Deviations`, so
-progress is allowed but any other plan change returns the stage to `plan`.
+`implement started` (main agent, at dispatch) -> `base <sha>` ->
+`bound commit <sha>` -> `implement done` (or `implement stop: reason`) ->
+`review started` -> `review drafted` -> `finalized`. `proposal reopened` returns to `define`; `plan
+reopened` lowers the stage to `plan` only from `implement` or later.
 
-## Subagent flow (stages 3 and 4)
-
-1. Dispatch only if `state` says `implement`. Check that the commands the plan
-   needs (tests, launches, `git commit`) are permitted for a subagent; if
-   unsure, tell the user before dispatch.
-2. `clear-report ID`, then dispatch the **implement subagent** with the record
-   ID, project root, scripts directory, and skills directory
-   (`implement/implementer-prompt.md`). Do not poll; wait for the notification.
-3. Run `state`. If it still says `implement` (a `stopped:` line, or no
-   `implement done`), or `report.md` is missing, `STOP`, a failed check, a failed
-   run, or a run without a tracked row: relay `report.md` questions to the user,
-   or `reopen plan` and go back to plan. Never continue past a STOP. If `state`
-   says `review` and auto-continue is yes, go on; if no, ask.
-4. Dispatch the **review subagent** (`review/reviewer-prompt.md`) only when
-   `state` says `review`, never in parallel with implement. Give it the record
-   ID, the `base:` and `bound:` values from `state`, and run IDs.
-5. When `state` says `present`, present findings and drafts; do not re-dispatch.
-   Only after approval update `summary.md`, `push`, then `finalize`.
-
-Subagents share only the workspace files and ledger, never ask the user (they
-write questions to `report.md` or `findings.md`), and never exceed the plan's
-budget. Anything the user said that matters for judgment belongs in the record
-or plan, because subagents cannot see the conversation.
-
-**No subagent tool** (e.g. some Codex setups): run the stage inline as your own
-brief, keeping the same files and ledger. For review, derive findings from the
-diff, the runs, and the record, and do not rely on `report.md`; draft as above.
-
-**Long runs:** a subagent's foreground command is time-limited. Start a full
-run in the background and monitor it through `hiraku runs --record <id>`; never
-call a foreground timeout a failure before checking `hiraku runs`.
-
-**Independence:** the reviewer does not read `report.md`, and treats `ledger.md`
-and `### Deviations` as the implementer's self-report: verify claims against
-`git diff` and `hiraku runs`.
+Both approvals pin a hash. The plan hash covers everything above the first
+`### Deviations` heading, ignoring ticks, so a plan edit above it returns the
+stage to `plan`. `approve plan` therefore requires exactly one `### Deviations`
+heading, as the last `###` heading and (at the first approval) empty, so no plan
+content sits outside the hash at that point. The log itself is never pinned (a
+re-approval may keep earlier progress in it, and text appended there later is
+not detected), so the reviewer checks it against the diff. A plan also needs
+exactly one `- Mode:` and one `- Auto-continue to review:` line. Changing the proposal's `- Hypothesis:` or `- Success criterion:` line
+returns the stage to `define`. Those two lines must stay byte-identical when
+`summary.md` is rewritten for status, evidence, or results; change them only
+through `reopen proposal`.

@@ -269,10 +269,56 @@ def test_installed_powers_skills_reference_existing_files(tmp_path: Path) -> Non
     HirakuConfig.init(root)
     skills = root / ".claude/skills"
     for skill in sorted(skills.glob("hiraku-powers*")):
-        text = (skill / "SKILL.md").read_text()
-        targets = re.findall(r"\]\(([^)#]+\.md)\)", text)
-        targets += re.findall(r"`(\.\./[\w-]+/[\w./-]+\.md)`", text)
-        for target in targets:
-            assert (skill / target).is_file(), f"{skill.name} -> {target}"
+        # Every markdown file of the skill, not only SKILL.md (PROTOCOL.md and
+        # the prompt files also name other files).
+        for doc in sorted(skill.glob("*.md")):
+            text = doc.read_text()
+            targets = [(skill, t) for t in re.findall(r"\]\(([^)#]+\.md)\)", text)]
+            targets += [
+                (skill, t) for t in re.findall(r"`(\.\./[\w-]+/[\w./-]+\.md)`", text)
+            ]
+            targets += [
+                (skills, t)
+                for t in re.findall(r"<skills-dir>/([\w-]+/[\w./-]+\.md)", text)
+            ]
+            targets += [
+                (skills, t)
+                for t in re.findall(r"<skills dir>/([\w-]+/[\w./-]+\.md)", text)
+            ]
+            for base, target in targets:
+                assert (base / target).is_file(), f"{doc.name} -> {target}"
     assert (skills / "hiraku-powers/PROTOCOL.md").is_file()
     assert (skills / "hiraku-powers-define/grill-questions.md").stat().st_size > 0
+
+
+def test_skill_name_collisions_are_rejected(tmp_path: Path) -> None:
+    from hiraku.errors import ValidationError
+    from hiraku.project import ProjectInitializer
+
+    for name in ("group", "group-plan"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "SKILL.md").write_text("---\nname: x\n---\n")
+    (tmp_path / "group" / "plan").mkdir()
+    (tmp_path / "group" / "plan" / "SKILL.md").write_text("---\nname: x\n---\n")
+
+    with pytest.raises(ValidationError, match="group-plan"):
+        ProjectInitializer._bundled_skills(tmp_path)
+
+
+def test_editor_and_os_junk_is_not_installed(tmp_path: Path) -> None:
+    from hiraku.project import ProjectInitializer
+
+    source = tmp_path / "source"
+    (source / "__pycache__").mkdir(parents=True)
+    (source / "SKILL.md").write_text("x")
+    for junk in (".DS_Store", "a.swp", "a.pyc", "a~", "__pycache__/m.pyc"):
+        (source / junk).write_text("junk")
+    target = tmp_path / "target"
+    files: list[Path] = []
+    dirs: list[Path] = []
+
+    ProjectInitializer._copy_resource_tree(source, target, files, dirs)
+
+    assert sorted(path.name for path in target.rglob("*") if path.is_file()) == [
+        "SKILL.md"
+    ]

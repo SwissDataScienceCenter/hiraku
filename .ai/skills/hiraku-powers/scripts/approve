@@ -1,38 +1,79 @@
 #!/usr/bin/env bash
-# Record a user approval in the ledger. Run only after the user approved.
-#   approve ID proposal                      needs Hypothesis and Success
-#                                            criterion lines in ## Summary
-#   approve ID plan MODE AUTO                MODE: implement | implement-and-run
-#                                            AUTO: yes | no
-# The plan approval pins the plan content (ticks and ### Deviations excluded);
-# `state` reports drift if the plan changes afterwards. The plan must be pushed.
+# Record an approval the user gave, with their words. Running this without the
+# user's explicit yes in this conversation fabricates an approval; show the user
+# the printed line. Both forms require --quote "<the user's words>".
+#   approve ID proposal --quote TEXT
+#       needs stage define and Hypothesis and Success criterion lines in the
+#       pushed ## Summary; pins those lines
+#   approve ID plan MODE AUTO --quote TEXT
+#       needs stage plan, a pushed plan whose "- Mode:" and "- Auto-continue to
+#       review:" lines equal MODE (implement | implement-and-run) and AUTO
+#       (yes | no); pins the plan (ticks and ### Deviations excluded)
 #
-# Usage: approve RECORD_ID proposal | plan MODE AUTO
+# Usage: approve RECORD_ID proposal | plan MODE AUTO  --quote TEXT
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/_lib.sh"
-usage() { echo "usage: approve RECORD_ID proposal | plan implement|implement-and-run yes|no" >&2; exit 2; }
-[ $# -ge 2 ] || usage
-id=$1
+usage() { echo "usage: approve RECORD_ID proposal|plan [MODE AUTO] --quote TEXT" >&2; exit 2; }
+[ $# -ge 4 ] || usage
+id=$1 kind=$2; shift 2
+args=() quote=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --quote) shift; [ $# -gt 0 ] || usage; quote=$1 ;;
+    *) args+=("$1") ;;
+  esac
+  shift
+done
+printf '%s' "$quote" | grep -q '[^[:space:]]' || { echo "--quote must hold the user's words" >&2; exit 2; }
+quote=$(printf '%s' "$quote" | tr '\r\n' '  ' | utf8_clean)
 dir=$(bash "$here/workspace" "$id")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 split_body "$id" "$tmp"
-case "$2" in
+case "$kind" in
   proposal)
+    [ ${#args[@]} -eq 0 ] || usage
+    require_stage "$id" define
     grep -q '^- Hypothesis: [^[:space:]]' "$tmp/summary.md" \
       && grep -q '^- Success criterion: [^[:space:]]' "$tmp/summary.md" \
       || { echo "the pushed ## Summary needs '- Hypothesis:' and '- Success criterion:' lines" >&2; exit 3; }
-    ledger_append "$dir" "proposal approved" ;;
+    marker="proposal approved: summary-sha=$(proposal_sha < "$tmp/summary.md") | quote: $quote" ;;
   plan)
-    [ $# -eq 4 ] || usage
-    case "$3" in implement|implement-and-run) ;; *) usage ;; esac
-    case "$4" in yes|no) ;; *) usage ;; esac
+    [ ${#args[@]} -eq 2 ] || usage
+    mode=${args[0]} auto=${args[1]}
+    case "$mode" in implement|implement-and-run) ;; *) usage ;; esac
+    case "$auto" in yes|no) ;; *) usage ;; esac
+    require_stage "$id" plan
     [ -s "$tmp/plan.md" ] || { echo "no ## Plan in the record; push it first" >&2; exit 3; }
     if unsynced_edits "$dir"; then
       echo "workspace has unpushed edits; push before approving the plan" >&2; exit 3
     fi
-    ledger_append "$dir" "plan approved: mode=$3; auto-continue=$4; plan-sha=$(plan_sha < "$tmp/plan.md")" ;;
+    h3=$(awk -v mode=h3 -f "$SECTIONS" "$tmp/plan.md")
+    devs=$(printf '%s\n' "$h3" | grep -cx '### Deviations' || true)
+    last_h3=$(printf '%s\n' "$h3" | tail -n1)
+    if [ "$devs" != 1 ] || [ "$last_h3" != "### Deviations" ]; then
+      echo "the plan needs exactly one '### Deviations' heading, as its last ### heading (everything after it is not pinned)" >&2
+      exit 3
+    fi
+    # The log may hold earlier progress only when this is a re-approval.
+    if ! grep -Eq "${LEDGER_LINE}plan approved:" "$dir/ledger.md" \
+       && awk -v mode=devtail -f "$SECTIONS" "$tmp/plan.md" | grep -q '[^[:space:]]'; then
+      echo "### Deviations must be empty when the plan is first approved; it is the implementer's log" >&2
+      exit 3
+    fi
+    for label in "Mode" "Auto-continue to review"; do
+      [ "$(grep -c "^- $label:" "$tmp/plan.md" || true)" = 1 ] \
+        || { echo "the plan needs exactly one '- $label:' line" >&2; exit 3; }
+    done
+    in_plan_mode=$(plan_field Mode < "$tmp/plan.md")
+    in_plan_auto=$(plan_field "Auto-continue to review" < "$tmp/plan.md")
+    if [ "$in_plan_mode" != "$mode" ] || [ "$in_plan_auto" != "$auto" ]; then
+      echo "plan says Mode='$in_plan_mode', Auto-continue='$in_plan_auto' but you approve '$mode', '$auto': fix the plan or the approval" >&2
+      exit 3
+    fi
+    marker="plan approved: mode=$mode; auto-continue=$auto; plan-sha=$(plan_sha < "$tmp/plan.md") | quote: $quote" ;;
   *) usage ;;
 esac
-echo "approved $id $2"
+ledger_append "$dir" "$marker"
+echo "approved $id $kind (quote: $quote)"

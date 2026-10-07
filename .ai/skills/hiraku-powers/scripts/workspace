@@ -2,11 +2,13 @@
 # Print the scratch workspace for a record. On first use it seeds the workspace
 # from the record body (pull first, ledger last, so a failed seed is retried).
 # If the record was deleted and re-created (its body is empty while the
-# workspace holds synced content), the old workspace is archived, not reused.
+# workspace holds synced content), a direct `workspace ID` call archives the old
+# workspace instead of reusing it; every other script only warns.
 #
 # Usage: workspace RECORD_ID
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
+direct=${HP_INTERNAL:-}   # read before _lib.sh sets it: only a direct call archives
 . "$here/_lib.sh"
 [ $# -eq 1 ] || { echo "usage: workspace RECORD_ID" >&2; exit 2; }
 
@@ -15,10 +17,15 @@ if [ -f "$dir/.pulled-sha" ]; then
   tmp=$(mktemp -d)
   split_body "$1" "$tmp"
   if [ -z "$(cat "$tmp"/*.md)" ] && [ -n "$(cat "$dir"/.synced/*.md 2>/dev/null)" ]; then
-    stale="$dir.stale-$(date +%s)"
-    mv "$dir" "$stale"
-    echo "record $1 is empty but its workspace had content (re-created record?): archived to $stale" >&2
-    dir=$(workspace_dir "$1")
+    if [ -n "$direct" ] || [ -n "${HP_NO_ARCHIVE:-}" ]; then
+      echo "warning: record $1 is empty but its workspace has content (re-created record?); run 'workspace $1' to archive it" >&2
+    else
+      stale="$(workspace_base)/archive/$1-$(date +%s)-$$"
+      mkdir -p "$(dirname "$stale")"
+      mv "$dir" "$stale"
+      echo "record $1 is empty but its workspace had content (re-created record?): archived to $stale" >&2
+      dir=$(workspace_dir "$1")
+    fi
   fi
   rm -rf "$tmp"
 fi

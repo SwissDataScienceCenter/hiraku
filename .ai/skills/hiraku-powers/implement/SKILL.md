@@ -1,21 +1,24 @@
 ---
 name: hiraku-powers-implement
-description: Use when a Hiraku record's state says implement, meaning its plan is approved and must be built; read by the implement subagent the main agent dispatches. Stage 3 of hiraku-powers.
+description: Use only when you were dispatched as the hiraku-powers implement subagent for a record whose state says implement. The main agent dispatches this stage through hiraku-powers/DISPATCH.md and does not run it inline unless it has no subagent tool.
 ---
 # Implement the record (subagent brief)
 
 You are the implement subagent. The main agent gave you only the record ID,
 project root, scripts directory, and skills directory; you read `plan.md`,
 `ledger.md`, the record, and the repo. Execute the approved `## Plan`, nothing
-more. Workspace, scripts, and the state machine: `../hiraku-powers/PROTOCOL.md`.
+more. Answers the user gave after an earlier STOP are in the ledger as
+`user answer:` notes; follow them. Workspace, scripts, and the state machine: `../hiraku-powers/PROTOCOL.md`.
 Follow the core skill's branch and Git rules: inspect `git status --short
 --branch`, use the record's effective `branch`, switch only from a clean
 worktree, never discard user work.
 
 <HARD-GATE>
-Start only if `state <id>` says `implement`. Launch only if the plan's mode is
-`implement-and-run` and it names a budget; never exceed that budget. A
-deviation stops the work. Never write `result` or `decision`. Never rebind.
+Start only if `state <id>` says `implement`. `state`'s `mode:` is the approved mode (`approve` checked it against the plan
+text): mode `implement` allows the plan's smoke run within budget and
+no full run; `implement-and-run` allows the planned full run too. Never exceed
+the budget. A deviation stops the work. Never write `result` or `decision`.
+Never rebind.
 </HARD-GATE>
 
 ## Lean principles
@@ -40,9 +43,9 @@ deviation stops the work. Never write `result` or `decision`. Never rebind.
 ## Process
 
 1. `workspace <id>`; confirm `state <id>` says `implement`; read `ledger.md`,
-   `plan.md`, `record show`, `git status`; confirm the branch. Resume from the
-   ledger; do not redo ticked tasks. `ledger <id> --marker base` (a no-op if a
-   base exists).
+   `plan.md`, `record show`, `git status`; switch to the record's branch (core
+   skill rules). Resume from the ledger; do not redo ticked tasks. Then
+   `ledger <id> --marker base`, after the switch (a no-op if a base exists).
 2. Per task: change, run its check, tick it in `plan.md`, `ledger <id> "note"`.
    Ticks and `### Deviations` do not count as plan changes; nothing else in
    `plan.md` may change. If the plan itself is wrong, that is a STOP.
@@ -51,20 +54,27 @@ deviation stops the work. Never write `result` or `decision`. Never rebind.
 4. Verify the planned checks. Commit (follow project instructions over default
    attribution). Dry-run with `hiraku launch <entrypoint> --record <id>
    --commit HEAD --dry-run`.
-5. Smoke run: `hiraku launch <entrypoint> --record <id> --commit HEAD ...`.
-   Only after it passes, `bind <id>`. If `bind` refuses because a commit is
-   already bound (a re-dispatch), do not rebind: STOP and ask in `report.md`
-   whether a rebind is approved or a new record is wanted.
-6. Mode `implement-and-run`: the full run with `--record <id>`. Start long runs
+5. Smoke run: `hiraku launch <entrypoint> --record <id> --commit HEAD ...`;
+   note its run ID with `ledger <id> "smoke run <run-id>"`. Only after it
+   passes, `bind <id>` (binding the commit that is already bound is a no-op). If
+   `bind` refuses because a different commit is bound (a re-dispatch), do not
+   rebind: STOP and ask in `report.md` whether a rebind is approved or a new
+   record is wanted.
+6. Mode `implement-and-run`: the full run with `--record <id>`, its run ID
+   noted with `ledger <id> "full run <run-id>"`. Start long runs
    in the background and watch `hiraku runs --record <id> --json`; a foreground
    timeout is not a failure until `runs` says so. A failed run, or a run without
    a tracked row, is `STOP`. Mode `implement` ends after `bind`.
-7. Update `summary.md` (status, commit, run IDs, key metrics), `push <id>`,
+7. Update `summary.md` (status, commit, run IDs, key metrics; leave the
+   `- Hypothesis:` and `- Success criterion:` lines byte-identical, because they
+   are pinned), `push <id>`,
    write `report.md`, then `ledger <id> --marker implement-done`. Questions for
    the user go into `report.md`.
 8. On `STOP`: `push <id>` so deviations and ticks reach the record, list
    uncommitted partial changes under Side effects (never discard them), write
-   `report.md`, and `ledger <id> --marker implement-stop "<reason>"`.
+   `report.md`, and `ledger <id> --marker implement-stop "<reason>"`. If a script
+   refuses with a stage message (for example the plan drifted), report that text
+   in `report.md`; `implement-stop` is still allowed.
 
 ## report.md
 

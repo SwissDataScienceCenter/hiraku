@@ -34,8 +34,8 @@ inconclusive.
 - Smoke run: <cheap subset or budget, or "none: <reason>">
 - Full run: <args, seeds>
 - Budget: <max runs, time, cost, hardware>
-- Mode: implement | implement-and-run
-- Auto-continue to review: yes | no
+- Mode: <implement | implement-and-run: exactly one value>
+- Auto-continue to review: <yes | no: exactly one value>
 - Expected worktree side effects: <e.g. uv.lock re-lock, or none; prefer `uv run --frozen`>
 
 ### Tasks
@@ -43,7 +43,7 @@ inconclusive.
 - [ ] 2. Instrumentation (if the code does not yet track): metrics written,
   backend, columns, and the root metric each maps to; root metrics this record
   does not produce
-- [ ] 2. ...
+- [ ] 3. ...
 
 ### Evidence
 - Compare against: <sibling ids>
@@ -51,5 +51,7 @@ inconclusive.
 - Result is read from: <metrics, run filters>
 
 ### Deviations
-(Appended during implementation. Empty at approval.)
 ```
+
+Leave `### Deviations` empty and last when the plan is approved: it is the
+implementer's log, and the approval pins everything above it.
