@@ -1,0 +1,2 @@
+id: iris-wandb
+description: Compare two classifiers on the Iris dataset with Weights & Biases tracking backend.
