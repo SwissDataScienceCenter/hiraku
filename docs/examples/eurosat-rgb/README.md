@@ -1,18 +1,27 @@
 # EuroSAT RGB autoresearch example
 
-This example demonstrates the full Hiraku research workflow on a small image-classification problem that can run on CPU.
+![Preview of RGB satellite imagery from the EuroSAT dataset](https://huggingface.co/datasets/blanchon/EuroSAT_RGB/resolve/main/thumbnail.jpg)
 
-The research loop then uses literature evidence and experimental results to decide which architectural changes are worth testing next.
+*EuroSAT RGB contains 27,000 labeled 64x64 Sentinel-2 image patches across 10 land-cover classes. Source: [`blanchon/EuroSAT_RGB`](https://huggingface.co/datasets/blanchon/EuroSAT_RGB).*
 
-The research question is:
+This example demonstrates the full Hiraku research workflow on a small image-classification problem.
 
-> Under a fixed number of training epochs, which architectural inductive biases most improve EuroSAT RGB land-cover classification over a flattened-image MLP baseline?
+The research loop uses literature evidence and experimental results to decide which architectural changes are worth testing next.
 
 The starter implementation contains only the MLP baseline. Follow-up architectures are intentionally not predefined: the literature review and autoresearch loop should motivate and implement them.
 
 All experiments use the same dataset split, seed, optimizer settings, and training budget so architectural changes can be compared under a stable evaluation protocol.
 
 W&B records training and validation loss and accuracy after every epoch, together with model parameter count and per-epoch CPU time.
+
+!!! question "Research question"
+    Under a fixed number of training epochs, which architectural inductive biases most improve EuroSAT RGB land-cover classification over a flattened-image MLP baseline?
+
+!!! info "Starting point"
+    The starter implementation contains only the flattened-image MLP baseline. Follow-up architectures are chosen from literature evidence and experimental results.
+
+!!! tip "Evaluation and tracking"
+    Experiments share the same dataset split, seed, optimizer settings, and training budget. W&B records validation loss and accuracy, parameter count, and per-epoch CPU time.
 
 ## Initialize the example
 
@@ -41,11 +50,18 @@ git commit -m "initialize EuroSAT RGB example"
 
 The first training run downloads the RGB EuroSAT dataset.
 
-Runs are logged to the `eurosat-rgb` W&B project. Set `WANDB_ENTITY` when the project belongs to a specific entity. `WANDB_PROJECT` can be used to override the default project name.
+Runs are logged to the `eurosat-rgb` W&B project.
+
+Set `WANDB_ENTITY` when the project belongs to a specific entity.
+
+`WANDB_PROJECT` can be used to override the default project name.
 
 ## Run the full research workflow
 
-After initialization, give a coding agent the prompt below. It directs the agent to create the task and baseline, conduct the literature review, then run the bounded autoresearch loop. It explicitly authorizes the complete loop so the agent does not pause for per-experiment approval. The agent must still stop if it reaches the experiment limit or needs a decision outside the authorization.
+After initialization, give a coding agent the prompt below. It directs the agent to create the task and baseline, conduct the literature review, then run the bounded autoresearch loop.
+
+!!! info "Bounded autonomous run"
+    The prompt explicitly authorizes the complete loop, so the agent does not pause for per-experiment approval. It must stop at the experiment limit or if it needs a decision outside the authorization.
 
 ```text
 Complete the EuroSAT RGB research workflow in this project. Resume existing work if the task or baseline already exists; do not create duplicates.
@@ -59,21 +75,16 @@ Create and launch the flattened-image MLP baseline through Hiraku if it does not
 I authorize the complete bounded loop: run up to five experiments total, counting the baseline. This is standing approval for each experiment that the `autoresearch` Program judges evidence-backed, within the task's question and evaluation protocol, and within the stated budget. Create, implement, commit, launch through Hiraku, and analyze one experiment at a time. Do not ask me for per-experiment approval. Do not create speculative future experiment records. Stop when the budget is reached, no justified experiment remains, a run or project constraint blocks safe progress, or continuing would require changing the research question, metrics, protocol, or authorized scope. Report the review, records, run results, and final conclusions.
 ```
 
-The example deliberately does not prescribe which architecture should be tried after the MLP baseline. The literature review and observed results determine the next experiment.
-
 ## Expected research flow
 
 The example exercises the complete Hiraku workflow:
 
 ```mermaid
 flowchart TD
-    A[MLP baseline] --> B[literature review]
-    B --> C[guided research design]
-    C --> D[experiment proposal]
-    D --> E[standing approval check]
-    E --> F[implementation]
-    F --> G[launch]
-    G --> H[analysis]
-    H --> I[triage]
-    I --> C
+    A[MLP baseline] --> B[Literature review]
+    B --> C[Propose one experiment]
+    C --> D[Run and analyze]
+    D --> E{Continue?}
+    E -->|Yes| C
+    E -->|Stop or budget reached| F[Conclusion]
 ```
