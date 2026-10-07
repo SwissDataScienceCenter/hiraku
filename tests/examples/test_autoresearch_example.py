@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -315,6 +316,42 @@ def test_autoresearch_dispatcher_records_timeout_and_invalid_output(tmp_path):
     assert [row["status"] for row in rows] == ["timeout", "crashed"]
     assert rows[0]["metric.val_bpb"] == ""
     assert len({row["id"] for row in rows}) == 2
+
+
+@LINUX_ONLY
+def test_autoresearch_dispatcher_accepts_non_gnu_timeout_version(tmp_path):
+    dispatcher = DISPATCHER
+    system_timeout = shutil.which("timeout")
+    assert system_timeout is not None
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_timeout = fake_bin / "timeout"
+    fake_timeout.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "--version" ]]; then\n'
+        '  echo "timeout 0.1 (uutils coreutils)"\n'
+        "  exit 0\n"
+        "fi\n"
+        f'exec "{system_timeout}" "$@"\n',
+        encoding="utf-8",
+    )
+    fake_timeout.chmod(0o755)
+
+    environment = dispatcher_environment(tmp_path)
+    environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+    result = subprocess.run(
+        [dispatcher, "--", sys.executable, "-c", "print('val_bpb: 0.8')"],
+        cwd=tmp_path,
+        env=environment,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    with (tmp_path / "runs.csv").open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    assert rows[0]["status"] == "finished"
+    assert rows[0]["metric.val_bpb"] == "0.8"
 
 
 @LINUX_ONLY
