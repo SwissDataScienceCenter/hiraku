@@ -2,7 +2,7 @@
 
 This example demonstrates the full Hiraku research workflow on a small image-classification problem that can run on CPU.
 
-The starting point is a flattened-image MLP. The research loop then uses literature evidence and experimental results to decide which architectural changes are worth testing next.
+The research loop then uses literature evidence and experimental results to decide which architectural changes are worth testing next.
 
 The research question is:
 
@@ -19,7 +19,7 @@ W&B records training and validation loss and accuracy after every epoch, togethe
 Install Hiraku with its W&B extra in your CLI environment first. From the Hiraku checkout:
 
 ```bash
-uv tool install --force '.[wandb]'
+uv tool install --force .
 ```
 
 Then create and initialize a new project:
@@ -39,129 +39,27 @@ git add .
 git commit -m "initialize EuroSAT RGB example"
 ```
 
-The first training run downloads the RGB EuroSAT dataset with:
-
-```python
-torchvision.datasets.EuroSAT(root="data", download=True)
-```
-
-The dataset and downloaded archive are ignored by Git.
+The first training run downloads the RGB EuroSAT dataset.
 
 Runs are logged to the `eurosat-rgb` W&B project. Set `WANDB_ENTITY` when the project belongs to a specific entity. `WANDB_PROJECT` can be used to override the default project name.
 
-## Create the research task
-
-Create the research task with the fixed research question, metrics, and tracking backend:
-
-```bash
-hiraku record create eurosat-rgb --type task \
-  --set 'goal=Investigate image-specific architectural inductive biases for EuroSAT RGB under a fixed CPU training budget' \
-  --set 'question=Under a fixed number of training epochs, which architectural inductive biases most improve EuroSAT RGB land-cover classification over a flattened-image MLP baseline?' \
-  --set 'metrics=[{name: val/accuracy, direction: maximize}, {name: val/loss, direction: minimize}]' \
-  --set 'tracking_backend={type: wandb, project: eurosat-rgb}'
-```
-
-The evaluation protocol is fixed throughout the research loop:
-
-- EuroSAT RGB,
-- images at 64×64 resolution,
-- stratified 80/20 train/validation split,
-- seed 42,
-- Adam optimizer,
-- learning rate `0.001`,
-- batch size `128`,
-- 10 training epochs,
-- CPU execution only,
-- no pretrained models.
-
-Validation accuracy is the primary metric. Validation loss, parameter count, and CPU time are supporting evidence.
-
-## Run the MLP baseline
-
-The starter implementation contains a one-hidden-layer MLP that receives flattened RGB pixels.
-
-Create the baseline record:
-
-```bash
-hiraku record create mlp-baseline --parent eurosat-rgb --type experiment \
-  --set 'summary=Flattened RGB pixels with a one-hidden-layer MLP' \
-  --set 'hypothesis=The flattened-pixel MLP establishes the reference validation accuracy and loss under the fixed training budget' \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: mlp, seed: 42, validation-fraction: 0.2, epochs: 10, batch-size: 128, learning-rate: 0.001}}}'
-```
-
-Launch it through Hiraku:
-
-```bash
-hiraku launch train --record mlp-baseline
-hiraku runs --record mlp-baseline
-```
-
-This baseline deliberately ignores the spatial structure of the input images.
-
 ## Run the full research workflow
 
-After the baseline is established, ask a coding agent to continue the investigation using the Hiraku Programs.
+After initialization, give a coding agent the prompt below. It directs the agent to create the task and baseline, conduct the literature review, then run the bounded autoresearch loop. It explicitly authorizes the complete loop so the agent does not pause for per-experiment approval. The agent must still stop if it reaches the experiment limit or needs a decision outside the authorization.
 
 ```text
-Use Hiraku to investigate the `eurosat-rgb` research task.
+Complete the EuroSAT RGB research workflow in this project. Resume existing work if the task or baseline already exists; do not create duplicates.
 
-Start with the `literature-review`.
+Create a Hiraku task named `eurosat-rgb` for investigating image-specific architectural inductive biases on EuroSAT RGB. Declare `val/accuracy` as the primary metric to maximize and `val/loss` as a supporting metric to minimize. Use W&B project `eurosat-rgb`.
 
-Review relevant literature on architectural inductive biases for small image
-classification models, focusing on approaches that can be trained quickly on
-CPU and compared fairly with a flattened-image MLP.
+Use the following protocol: EuroSAT RGB at 64x64 resolution, stratified 80/20 train/validation split, seed 42, Adam with learning rate 0.001, batch size 64, 10 epochs, CPU only, and no pretrained models. Record this protocol and a total experiment budget of five, including the baseline, on the task.
 
-Identify evidence-backed architectural directions that may improve EuroSAT RGB
-classification without pretrained models.
+Create and launch the flattened-image MLP baseline through Hiraku if it does not already exist. Then use the `literature-review` Program to review architectural inductive biases for small image classification models. Focus on approaches that train quickly on CPU and can be compared fairly with the MLP. Identify evidence-backed directions that may improve EuroSAT RGB classification without pretrained models. After delivering the review, continue directly to the `autoresearch` Program; do not stop after the review.
 
-Keep the existing `mlp-baseline` run as the reference and preserve the fixed
-evaluation protocol:
-
-- EuroSAT RGB,
-- 64x64 RGB input,
-- stratified 80/20 train/validation split,
-- seed 42,
-- Adam optimizer,
-- learning rate 0.001,
-- batch size 128,
-- 10 training epochs,
-- validation accuracy as the primary metric,
-- validation loss as a supporting metric,
-- CPU only,
-- no pretrained models.
-
-Prefer architectural hypotheses and image-specific inductive biases over broad
-hyperparameter search.
-
-Select one of the identified directions and run an `autoresearch` loop.
-
-Run one focused experiment at a time and perform at most 5 experiments beyond
-the MLP baseline.
-
-For each experiment:
-
-- formulate one falsifiable hypothesis,
-- implement only the approved architectural change,
-- launch it through Hiraku,
-- analyze attributed runs against the stated hypothesis,
-- record supported, refuted, and inconclusive results,
-- use triage to decide whether another experiment is justified.
-
-Each next experiment should be motivated by literature evidence or by results
-already recorded in this task.
-
-Do not change the evaluation protocol during the loop.
-
-Stop when:
-
-- the five-experiment budget is exhausted,
-- no justified follow-up remains,
-- the research question has been answered sufficiently,
-- or a new user decision is required.
+I authorize the complete bounded loop: run up to five experiments total, counting the baseline. This is standing approval for each experiment that the `autoresearch` Program judges evidence-backed, within the task's question and evaluation protocol, and within the stated budget. Create, implement, commit, launch through Hiraku, and analyze one experiment at a time. Do not ask me for per-experiment approval. Do not create speculative future experiment records. Stop when the budget is reached, no justified experiment remains, a run or project constraint blocks safe progress, or continuing would require changing the research question, metrics, protocol, or authorized scope. Report the review, records, run results, and final conclusions.
 ```
 
-The example deliberately does not prescribe which architecture should be tried after the MLP.
+The example deliberately does not prescribe which architecture should be tried after the MLP baseline. The literature review and observed results determine the next experiment.
 
 ## Expected research flow
 
@@ -172,7 +70,7 @@ flowchart TD
     A[MLP baseline] --> B[literature review]
     B --> C[guided research design]
     C --> D[experiment proposal]
-    D --> E[approval]
+    D --> E[standing approval check]
     E --> F[implementation]
     F --> G[launch]
     G --> H[analysis]

@@ -66,13 +66,13 @@ Create only the selected experiment. Do not materialize a speculative tree of fu
 
 ## 3. Approve
 
-Present the concrete experiment proposal before implementation.
+Present the concrete experiment proposal before implementation. A user's explicit standing authorization for a bounded loop may approve individual proposals without another confirmation when each proposal is within the stated research question, protocol, and resource limits.
 
-Use the harness's interactive confirmation mechanism when available.
+Check the authorization scope against the concrete proposal. When using Hiraku's approval operation under standing authorization, record that authorization as the basis for approval.
 
-Only explicit approval authorizes implementation.
+Only explicit approval authorizes implementation. Approval may be per-experiment or a clearly scoped standing authorization that covers this proposal.
 
-If interactive confirmation is unavailable, stop at this checkpoint and request approval.
+If no applicable approval exists, stop at this checkpoint and request approval.
 
 Approval is permission to test the proposal. It is not evidence that the hypothesis is correct.
 

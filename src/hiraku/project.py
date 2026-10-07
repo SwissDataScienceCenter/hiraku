@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tomllib
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from importlib.resources import as_file, files
@@ -23,6 +24,14 @@ class _InitializationResult:
     config: HirakuConfig
     created_files: tuple[Path, ...]
     created_dirs: tuple[Path, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _MCPConfigInstall:
+    """Filesystem changes made while installing Codex MCP configuration."""
+
+    created_files: tuple[Path, ...] = ()
+    created_dirs: tuple[Path, ...] = ()
 
 
 class ProjectInitializer:
@@ -81,7 +90,6 @@ class ProjectInitializer:
         """Initialize a project and report paths created by the operation."""
         from .config import HirakuConfig
         from .git import GitRepository
-        from .mcp import HirakuMCPServer
 
         if template is not None and example is not None:
             raise ValidationError("template and example are mutually exclusive")
@@ -158,7 +166,7 @@ class ProjectInitializer:
                     dispatcher = config.dispatch_dir / name
                     if dispatcher.is_file():
                         dispatcher.chmod(dispatcher.stat().st_mode | 0o111)
-                codex_config = HirakuMCPServer.install_codex_config(project_root)
+                codex_config = cls._install_codex_mcp_config(project_root)
                 created_files.extend(codex_config.created_files)
                 created_dirs.extend(codex_config.created_dirs)
                 return _InitializationResult(
@@ -215,6 +223,51 @@ class ProjectInitializer:
             )
             raise ValidationError(f"Unknown example {example!r}{suffix}")
         return stack.enter_context(as_file(source))
+
+    @staticmethod
+    def _install_codex_mcp_config(project_root: Path) -> _MCPConfigInstall:
+        """Install Codex's project-local Hiraku stdio server configuration."""
+        codex_dir = project_root / ".codex"
+        config_path = codex_dir / "config.toml"
+        if codex_dir.is_symlink() or config_path.is_symlink():
+            raise ValidationError(
+                f"Codex configuration path cannot be a symbolic link: {config_path}"
+            )
+
+        server_config = '[mcp_servers.hiraku]\ncommand = "hiraku"\nargs = ["mcp"]\n'
+        created_dirs: tuple[Path, ...] = ()
+        if not config_path.exists():
+            if not codex_dir.exists():
+                codex_dir.mkdir()
+                created_dirs = (codex_dir,)
+            try:
+                atomic_write(config_path, server_config)
+            except Exception:
+                for directory in reversed(created_dirs):
+                    directory.rmdir()
+                raise
+            return _MCPConfigInstall((config_path,), created_dirs)
+        if not config_path.is_file():
+            raise ValidationError(f"Codex configuration is not a file: {config_path}")
+
+        content = config_path.read_text(encoding="utf-8")
+        try:
+            settings = tomllib.loads(content)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValidationError(
+                f"Cannot add Hiraku MCP to invalid Codex config {config_path}: {exc}"
+            ) from exc
+        servers = settings.get("mcp_servers", {})
+        if not isinstance(servers, dict):
+            raise ValidationError(
+                f"Invalid mcp_servers table in Codex config: {config_path}"
+            )
+        if "hiraku" in servers:
+            return _MCPConfigInstall()
+
+        separator = "\n" if content.endswith("\n") or not content else "\n\n"
+        atomic_write(config_path, f"{content.rstrip()}{separator}{server_config}")
+        return _MCPConfigInstall()
 
     @classmethod
     def _inventory_overlay(
