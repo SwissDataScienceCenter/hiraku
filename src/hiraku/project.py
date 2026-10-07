@@ -134,24 +134,13 @@ class ProjectInitializer:
                 ):
                     cls._ensure_directory(directory, created_dirs)
                 resource_root = files("hiraku.resources")
-                # Use the repository's .ai/ only in a source checkout, recognised by
-                # the bundled skill itself, never a user's own .ai/ directory.
-                ai_resources = Path(__file__).parents[2] / ".ai"
-                if not (ai_resources / "skills/hiraku/SKILL.md").is_file():
-                    ai_resources = resource_root / ".ai"
                 copies = [
                     (resource_root / "programs", config.programs_dir, ()),
                     (resource_root / "actions", config.actions_dir, ()),
                     (resource_root / "dispatch", config.dispatch_dir, ()),
                 ]
                 if install_skill:
-                    for name, skill, exclude in cls._bundled_skills(
-                        ai_resources / "skills"
-                    ):
-                        copies.extend(
-                            (skill, project_root / agent_dir / name, exclude)
-                            for agent_dir in (".agents/skills", ".claude/skills")
-                        )
+                    copies.extend(cls._skill_copies(project_root))
                 for source, target, exclude in copies:
                     with as_file(source) as source_path:
                         cls._copy_resource_tree(
@@ -306,6 +295,47 @@ class ProjectInitializer:
                 shutil.copy2(source, destination)
                 created_files.append(destination)
                 created.add(destination)
+
+    @classmethod
+    def install_skills(cls, root: Path | str = ".") -> list[Path]:
+        """Install or refresh the bundled agent skills in an existing directory.
+
+        Each bundled skill directory under ``.agents/skills`` and
+        ``.claude/skills`` is replaced, so local edits to those directories are
+        lost and files removed from the bundle disappear. Other skills and
+        project files are left untouched.
+
+        Returns:
+            The installed skill directories.
+        """
+        project_root = Path(root).expanduser().absolute()
+        if not project_root.is_dir():
+            raise ValidationError(f"Directory not found: {project_root}")
+        installed: list[Path] = []
+        for source, target, exclude in cls._skill_copies(project_root):
+            if target.is_symlink() or (target.exists() and not target.is_dir()):
+                raise ValidationError(f"Skill path is not a directory: {target}")
+            if target.exists():
+                shutil.rmtree(target)
+            with as_file(source) as source_path:
+                cls._copy_resource_tree(source_path, target, [], [], exclude=exclude)
+            installed.append(target)
+        return installed
+
+    @classmethod
+    def _skill_copies(
+        cls, project_root: Path
+    ) -> list[tuple[Path, Path, tuple[Path, ...]]]:
+        # Use the repository's .ai/ only in a source checkout, recognised by the
+        # bundled skill itself, never a user's own .ai/ directory.
+        ai_resources = Path(__file__).parents[2] / ".ai"
+        if not (ai_resources / "skills/hiraku/SKILL.md").is_file():
+            ai_resources = files("hiraku.resources") / ".ai"
+        return [
+            (skill, project_root / agent_dir / name, exclude)
+            for name, skill, exclude in cls._bundled_skills(ai_resources / "skills")
+            for agent_dir in (".agents/skills", ".claude/skills")
+        ]
 
     @staticmethod
     def _bundled_skills(

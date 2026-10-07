@@ -19,6 +19,11 @@ hiraku runs --record <record-id>
 location. Python initialization is permissive by default; callers can request
 the CLI policy with `ignore_git=False`.
 
+`hiraku init --skills-only [PATH]` installs or refreshes only the bundled agent
+skills under `.agents/skills/` and `.claude/skills/`, also in an existing
+project; it cannot be combined with `--tracking-backend`, `--template`, or
+`--example`.
+
 Initialize from an arbitrary local project overlay with `--template`:
 
 ```bash

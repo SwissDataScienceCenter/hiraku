@@ -163,3 +163,36 @@ def test_edit_uses_stored_file(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("EDITOR", "true")
     assert invoke("record", "edit", "one").exit_code == 0
     assert load_record("one").id == "one"
+
+
+def test_init_skills_only_installs_and_refreshes_skills(tmp_path: Path) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    marker = (tmp_path / "hiraku.yml").read_text()
+    stale = tmp_path / ".claude/skills/hiraku-powers/STALE.md"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("removed from the bundle")
+    own = tmp_path / ".claude/skills/my-skill/SKILL.md"
+    own.parent.mkdir(parents=True)
+    own.write_text("mine")
+
+    result = invoke("init", "--skills-only", str(tmp_path))
+
+    assert result.exit_code == 0
+    assert "Installed skill" in result.output
+    for agent_dir in (".agents/skills", ".claude/skills"):
+        assert (tmp_path / agent_dir / "hiraku/SKILL.md").is_file()
+        assert (tmp_path / agent_dir / "hiraku-powers-plan/SKILL.md").is_file()
+        assert (tmp_path / agent_dir / "hiraku-powers/scripts/state").is_file()
+    assert not stale.exists()
+    assert own.read_text() == "mine"
+    assert (tmp_path / "hiraku.yml").read_text() == marker
+
+
+def test_init_skills_only_rejects_project_options(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        main, ["init", "--skills-only", "--example", "minimal", str(tmp_path)]
+    )
+
+    assert result.exit_code == 2
+    assert "--skills-only cannot be combined" in result.output
+    assert not (tmp_path / ".claude").exists()

@@ -34,6 +34,7 @@ from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .git import GitRepository
 from .io import dump_yaml
 from .launch import _dispatcher, launch, render_arguments
+from .project import ProjectInitializer
 from .record import Record, list_records, load_record
 from .run import Run
 from .validation import validate_identifier
@@ -240,16 +241,32 @@ def main(ctx: click.Context) -> None:
 @click.option("--template", type=click.Path(path_type=Path))
 @click.option("--example")
 @click.option("--ignore-git", is_flag=True)
+@click.option(
+    "--skills-only",
+    is_flag=True,
+    help="Install or refresh only the bundled agent skills, also in an existing "
+    "project.",
+)
 def init_command(
     path: Path | None,
     tracking_backend: str | None,
     template: Path | None,
     example: str | None,
     ignore_git: bool,
+    skills_only: bool,
 ) -> None:
     """Initialize a project."""
     if template is not None and example is not None:
         raise click.UsageError("--template and --example are mutually exclusive")
+    if skills_only:
+        if tracking_backend or template or example:
+            raise click.UsageError(
+                "--skills-only cannot be combined with --tracking-backend, "
+                "--template, or --example"
+            )
+        for directory in ProjectInitializer.install_skills(path or Path.cwd()):
+            click.echo(f"Installed skill {directory}")
+        return
     config = HirakuConfig.init(
         path or Path.cwd(),
         tracking_backend=tracking_backend,

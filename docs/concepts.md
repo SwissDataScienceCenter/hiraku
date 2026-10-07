@@ -48,6 +48,7 @@ hiraku init  # initialize at the current Git repository root
 hiraku init PATH --ignore-git  # explicitly skip Git-root validation
 hiraku init --template ./path/to/template  # apply a local project overlay
 hiraku init --example <name>  # apply the src/ tree of a packaged example
+hiraku init --skills-only  # install or update only the bundled agent skills
 
 hiraku record create <root-id>
 hiraku record create <child-id> --parent <root-id> --type experiment
@@ -150,29 +151,23 @@ skills.
 
 `hiraku init` also installs the `hiraku-powers` skills (`hiraku-powers`,
 `hiraku-powers-define`, `-plan`, `-implement`, `-review`). They take one record
-from idea to reviewed result in four gated stages, keep a git-ignored workspace
-and ledger under `.hiraku-powers/records/<record-id>/`, and update the record through
-helper scripts that need `bash` and `jq`.
+from idea to reviewed result in four stages: the user approves the proposal
+(`hypothesis` and `success_criterion` fields) and the plan (`## Plan` in the
+record body), a subagent implements and runs it, and a second subagent reviews
+the evidence before `result` and `decision` are written. Approvals and progress
+are kept in a git-ignored ledger under `.hiraku-powers/records/<record-id>/`,
+and helper scripts that need `bash` and `jq` enforce the order.
+See [Agent record cycle](guides/hiraku-powers.md) for how to use them.
 
-`hiraku init` only runs in a new project. To add the skills to an existing
-project, copy them from the installed package (or the repository's
-`.ai/skills/`) into both skill directories. A group such as `hiraku-powers`
-installs its root skill under its own name and each stage subdirectory as a
-separate skill named `<group>-<stage>`. `hiraku-powers` expects the core `hiraku`
-skill (`.ai/skills/hiraku`) to be installed the same way:
+To install or update the bundled skills in an existing project, run:
 
 ```bash
-skills=.ai/skills   # or <site-packages>/hiraku/resources/.ai/skills
-src=$skills/hiraku-powers
-for dir in .claude/skills .agents/skills; do
-  mkdir -p "$dir/hiraku" && rsync -a "$skills/hiraku/" "$dir/hiraku/"   # core skill
-  mkdir -p "$dir/hiraku-powers"
-  rsync -a --exclude='/define' --exclude='/plan' --exclude='/implement' --exclude='/review' "$src/" "$dir/hiraku-powers/"
-  for stage in define plan implement review; do
-    mkdir -p "$dir/hiraku-powers-$stage" && rsync -a "$src/$stage/" "$dir/hiraku-powers-$stage/"
-  done
-done
+hiraku init --skills-only
 ```
+
+This replaces only the bundled skill directories under `.agents/skills/` and
+`.claude/skills/` (local edits to them are lost) and leaves the rest of the
+project untouched.
 
 ## Actions, Programs, Context
 
