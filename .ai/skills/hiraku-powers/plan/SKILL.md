@@ -4,69 +4,39 @@ description: Use after a Hiraku proposal is approved and before any code changes
 ---
 # Plan the record
 
-Specify exactly how the record will be executed, so implementation needs no
-decisions. Write the plan into the record body using
-[plan-template.md](plan-template.md). Make no source changes. Workspace,
-scripts, and the state machine: `../hiraku-powers/PROTOCOL.md`.
+Write a plan that a subagent can execute without asking anything. No source
+changes. Scripts: `../hiraku-powers/PROTOCOL.md`.
 
-<HARD-GATE>
-Do not start implementation until the user approved the written plan, the
-execution mode, and auto-continue, and you ran
-`approve <id> plan ... --quote "<their words>"`. The approval pins the plan: any
-later change needs a new approval (`reopen` before editing; if `state` already
-says `plan`, just re-present).
-</HARD-GATE>
+1. **Ground.** `state <id>` (stage `plan`), `hiraku record show <id> --json`,
+   `hiraku record entrypoints <id> --json`, the code to change, and
+   `git status --short --branch`.
+   - **Branch:** use `state`'s `branch:`. If reaching it would need a dirty
+     worktree switched or would hide untracked records, ask the user now.
+   - **Tracking:** confirm the entrypoint writes a run row with the root metrics
+     and that the parameter under test shows up in the run's params; if not,
+     plan that as a task.
+2. **Choose the leanest design:** an argument over a code change, a code change
+   over a new module. Include only what the hypothesis needs.
+3. **Write it.** `open <id>`, put a `## Plan` from
+   [plan-template.md](plan-template.md) into `body.md` (keep other sections),
+   and `save <id>`. Every task names its files and a check; the entrypoint, args,
+   branch, commit message, smoke and full run, budget, and evidence rule are
+   fixed. Leave `### Deviations` last and empty.
+4. **Present** the plan. Mode defaults to `implement-and-run`, auto-continue to
+   `yes`, and implement to `subagent`; ask about them only if the full run is
+   expensive or the user wants to look before review. Edit the plan's lines to
+   match, save, then, after the user's yes:
 
-## Process
+```bash
+bash <scripts>/approve <id> plan --quote "<their words>"
+```
 
-1. **Ground.** `state <id>` (should say `plan`), then `hiraku record show <id>
-   --json` and `hiraku record entrypoints <id> --json`. Read the code the change
-   touches, the inherited entrypoints, and `git status --short --branch`.
-   Resolve the effective `branch`.
-   **Branch check:** if the worktree is dirty or the records are untracked,
-   switching or creating a branch can hide them from Hiraku. List the options
-   and ask now; do not defer to implement.
-   **Tracking check:** confirm the code writes a tracked run. Compare the
-   `runs.csv` schema the installed CLI expects with what the project
-   environment's `hiraku` writes (e.g. `record_id` vs `task_id`); report a
-   mismatch as a Hiraku issue.
-2. **Prefer the leanest design.** Argument change over code change, code change
-   over new module. List only what the hypothesis needs.
-3. **Fill the template.** Tasks are small, each with its files and a concrete
-   check. Name the smoke run and the full run, the dispatcher, the commit
-   strategy, the budget, and the evidence that decides pass, fail, or
-   inconclusive.
-4. **Write it.** Run `workspace <id>`; write `plan.md` (starting `## Plan`) and
-   refresh `summary.md` (status `planned`). Other sections stay untouched in
-   `rest.md`. Keep the plan's `### Deviations` heading last and empty (the
-   approval pins everything above it). Keep the summary's `- Hypothesis:` and
-   `- Success criterion:` lines byte-identical. Then `push <id>` and verify with
-   `hiraku record show <id> --json`.
-5. **No decisions left.** Before presenting, check: every task names files and a
-   check; entrypoint, args, dispatcher, branch, commit message, smoke and full
-   run, and budget are fixed; instrumentation is planned; side effects are
-   listed. A subagent cannot ask the user, so an open decision costs a round trip.
-6. **Present** the plan and ask for approval, the execution mode, and
-   **auto-continue to review: yes or no**. Put both in `### Execution`, `push`,
-   and only after the user says yes run
-   `approve <id> plan <implement|implement-and-run> <yes|no> --quote "<their
-   words>"`. The arguments must equal the plan's `- Mode:` and `- Auto-continue to
-   review:` lines, each holding exactly one value. Mode `implement` allows the
-   planned smoke run within budget but no full run. A pushed plan alone is a
-   draft; `state` shows `implement` only after `approve`.
-
-## Exit
-
-When `state` says `implement`, dispatch the implement subagent per
-`../hiraku-powers/DISPATCH.md`. If the user declines, stay in plan. If planning shows the
-hypothesis is wrong or unclear, `reopen <id> proposal` and go back to
-`hiraku-powers-define`.
-
-## Red flags
+`approve` prints the mode and auto-continue it pinned. Then dispatch the
+implement subagent (`../hiraku-powers/SKILL.md`). If planning shows the
+hypothesis is wrong, `reopen <id> proposal` and go back to define.
 
 | Thought | Reality |
 | --- | --- |
-| "I'll decide that while coding" | Decide it now or it is a deviation later. |
-| "I'll add a flag for flexibility" | Not in the hypothesis means not in the plan. |
-| "The smoke run is cheap, skip it" | The plan must name it or state in writing why it is omitted. |
-| "A one-word plan edit after approval is fine" | The pinned hash will fail it. `reopen` before editing, present, re-approve. |
+| "I'll decide that while coding" | The subagent cannot ask. Decide it now. |
+| "I'll add a flag for flexibility" | Not needed by the hypothesis, not in the plan. |
+| "A small edit after approval is fine" | `reopen`, edit, present, approve again. |

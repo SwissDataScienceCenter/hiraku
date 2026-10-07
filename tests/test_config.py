@@ -77,7 +77,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
             # Stages are flattened, not nested inside the group skill.
             assert not (installed / "hiraku-powers" / stage).exists()
         scripts = installed / "hiraku-powers/scripts"
-        assert (scripts / "push").stat().st_mode & 0o111
+        assert (scripts / "state").stat().st_mode & 0o111
         assert not (installed / "hiraku-powers-plan/scripts").exists()
     assert config.active_record_id is None
 

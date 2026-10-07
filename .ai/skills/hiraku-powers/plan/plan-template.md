@@ -1,57 +1,39 @@
 # Plan template
 
-The record body is `## Summary` first, then `## Plan`. Keep headings exactly;
-later stages parse them.
+Keep the headings; the scripts read `## Plan`, `- Mode:`,
+`- Auto-continue to review:`, `- Implement:` (`subagent`, or `inline` in the
+small cycle), and `### Deviations`. The hypothesis and success
+criterion live in the record fields, not here.
 
 ```markdown
-## Summary
-
-- Status: proposed | planned | implemented | run | reviewed
-- Hypothesis: <one falsifiable sentence>
-- Success criterion: <metric, direction, threshold>
-- Approach: <one line: what differs from the baseline>
-- Execution: <branch, entrypoint, mode>
-- Evidence: <commit, run IDs, key metrics; "none yet">
-- Result: <supports | refutes | inconclusive, one line; "pending">
-- Next: <the single next action or open question>
-
 ## Plan
 
-### Hypothesis and success criterion
-One falsifiable sentence. Metric, direction, threshold for support, refutation,
-inconclusive.
-
-### Scope
-- In: ...
-- Out: ...
-
 ### Execution
-- Branch: <effective branch>
-- Dispatcher: launch | worktree
-- Entrypoint and args: <name> <args>
-- Commit strategy: <one commit, message prefix>. Smoke run with `--commit HEAD`;
-  `bind` only after it passes
-- Smoke run: <cheap subset or budget, or "none: <reason>">
-- Full run: <args, seeds>
-- Budget: <max runs, time, cost, hardware>
-- Mode: <implement | implement-and-run: exactly one value>
-- Auto-continue to review: <yes | no: exactly one value>
-- Expected worktree side effects: <e.g. uv.lock re-lock, or none; prefer `uv run --frozen`>
+- Branch: <state's branch, or the current branch>
+- Entrypoint and args: <name> <args>; set on the record with `hiraku record update --set 'entrypoints=...'` if they differ from the parent
+- Dispatcher: <launch | worktree>
+- Commit: <one commit, message, or "none: no code change">
+- Smoke run: <cheap launch with `--commit HEAD`, or "none: <reason>">
+- Full run: <launches after the smoke run, seeds>
+- Budget: <max runs, time, hardware>
+- Side effects: <expected changed files besides the commit, or none>
+- Mode: implement-and-run
+- Auto-continue to review: yes
+- Implement: subagent
 
 ### Tasks
 - [ ] 1. <change> - files: <paths> - check: <command and expected result>
-- [ ] 2. Instrumentation (if the code does not yet track): metrics written,
-  backend, columns, and the root metric each maps to; root metrics this record
-  does not produce
-- [ ] 3. ...
+- [ ] 2. ...
 
 ### Evidence
-- Compare against: <sibling ids>
-- Comparable on: <split, budget, seeds, protocol>
-- Result is read from: <metrics, run filters>
+- Baseline runs: <sibling record and run IDs, or the filter that selects them>
+- Comparable on: <split, seeds, budget, protocol>
+- Decision rule: <how the runs map to supports, refutes, inconclusive>
 
 ### Deviations
 ```
 
-Leave `### Deviations` empty and last when the plan is approved: it is the
-implementer's log, and the approval pins everything above it.
+Tasks are the changes and checks; the smoke run, `bind`, and the full run are
+protocol steps the implementer always does, so they are not tasks.
+`Mode: implement` stops after the smoke run and `bind`; `implement-and-run`
+also does the full run.

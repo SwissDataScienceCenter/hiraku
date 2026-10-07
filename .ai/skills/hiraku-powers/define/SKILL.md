@@ -4,67 +4,44 @@ description: Use when starting a new Hiraku experiment, deciding what to try nex
 ---
 # Define the next record
 
-Turn an idea into an unbound child proposal. Create no source changes and no
-commits. Questions come from [grill-questions.md](grill-questions.md). Workspace,
-scripts, and the state machine: `../hiraku-powers/PROTOCOL.md`.
+Turn an idea into a child record with a falsifiable hypothesis. No source
+changes, no commits. Scripts: `../hiraku-powers/PROTOCOL.md`.
 
-<HARD-GATE>
-Do not create the record until the user approved the written-back understanding,
-and do not start planning until they approved the proposal and you ran
-`approve <id> proposal --quote "<their words>"`.
-</HARD-GATE>
-
-## Process
-
-1. **Ground.** Run `hiraku status --json` and `record tree`. `record show` the
-   active record (the experiment the user works under), its root, siblings, and
-   their runs, and read the code the idea touches. With no active record: one
-   root, use it; several, ask (recommend the most recently worked one). Resume
-   existing work (`inprogress`) instead of duplicating it. If `record tree` is
-   empty there is no root: put one in the write-back (goal, question, metrics
-   with directions) and, once the user approves, create it first with
-   `--no-activate`.
-2. **Grill.** Ask one question at a time, each with your recommended answer.
-   Skip anything the records or code already answer. Keep going until the user
-   can state the hypothesis and the pass/fail criterion.
-3. **Write back.** Summarize deliverable, goal, parent, hypothesis, metric and
-   threshold, comparability constraints, and what is out of scope. Separate what
-   the user said from your assumptions. Check that every metric in the
-   hypothesis and success criterion is a root metric; if not, change the root
-   metrics in the same step. Add one definition line per metric or symbol (the
-   metric schema has no description field). Incorporate corrections.
-4. **Propose.** After approval, check the ID is unused project-wide, then create
-   the proposal under the active experiment's root, with `--related-to
-   <active-id>` when the active record is a child. Always pass `--no-activate`:
-   this skill never changes the active record, which stays the experiment the
-   user works under.
+1. **Ground.** `hiraku status --json`, `hiraku record tree`, then `record show`
+   the active record, its root, and its siblings, and their runs. Read the code
+   the idea touches. If `inprogress` lists the same idea, resume it instead. If
+   there is no root yet, include one (goal, question, metrics with directions)
+   in the proposal.
+2. **Ask** only what grounding did not answer, one question at a time, each with
+   your recommended answer ([grill-questions.md](grill-questions.md)). Stop
+   when you can state the hypothesis and the pass/fail rule.
+3. **Propose.** Present, keeping what the user said apart from your
+   assumptions:
+   - record ID (unused project-wide), parent, `related_to`;
+   - `summary` (one line) and `hypothesis` (one sentence a run could
+     contradict);
+   - `success_criterion`: root metric, direction, and the margins that count as
+     supports, refutes, or inconclusive;
+   - baseline sibling, comparability constraints, out of scope.
+   Every metric must be a root metric; if not, propose the root change too.
+   **Cycle** (`../hiraku-powers/SKILL.md`): for the run-only and small cycles,
+   draft the plan now (`hiraku-powers-plan`, steps 1-3; small cycle with
+   `- Implement: inline`) and present proposal and plan together.
+4. **On approval,** create the record and record the approval with the user's
+   words:
 
 ```bash
 hiraku record create <id> --parent <root-id> --type experiment --no-activate \
-  [--related-to <active-id>] --set 'summary=...' --set 'hypothesis=...'
-hiraku record show <id> --json
+  [--related-to <active-id>] --set 'summary=...' --set 'hypothesis=...' \
+  --set 'success_criterion=...' --set status=proposed
+bash <scripts>/approve <id> proposal --quote "<their words>"
+# run-only or small cycle: `open`, write exactly the presented plan, `save`, then
+bash <scripts>/approve <id> proposal-and-plan --quote "<their words>"
 ```
 
-5. `workspace <id>`, write `summary.md` (`- Status: proposed`, `- Hypothesis:`,
-   `- Success criterion:`, parent, out of scope), and `push <id>`. Leave
-   `--commit` unset. If the idea splits into independent investigations,
-   propose several records and let the user choose one to continue.
-6. Present the record. Only after the user approves it, run
-   `approve <id> proposal --quote "<their words>"` (it needs stage `define` and
-   the Hypothesis and Success criterion lines in the pushed summary, and pins
-   them).
+Never pass `--commit` here and never activate the record; pass `--record <id>`
+to later commands instead. If the idea splits into independent questions,
+propose several records and let the user pick one.
 
-## Exit
-
-Hand off to `hiraku-powers-plan`. If the user changes the proposal later,
-`reopen <id> proposal` before editing it (if `state` already says `define`, just
-re-present and re-approve).
-
-## Red flags
-
-| Thought | Reality |
-| --- | --- |
-| "The hypothesis is implied" | Write it as a falsifiable sentence or ask. |
-| "I'll ask everything up front" | One question at a time, with a recommendation. |
-| "I'll check the code later" | If the code can answer it, do not ask the user. |
-| "I'll activate it so later commands work" | Never. Pass `--record <id>` instead. |
+Then continue with `hiraku-powers-plan` (full cycle) or with stage 3
+(`../hiraku-powers/SKILL.md`).

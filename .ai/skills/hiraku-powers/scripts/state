@@ -1,96 +1,81 @@
 #!/usr/bin/env bash
-# Print the record's stage, computed from the ledger markers (latest wins) and
-# checked against the record: define -> plan -> implement -> review -> present
-# -> done. If the proposal or plan changed after its approval, the stage falls
-# back to define or plan.
+# Print the record's stage (define, plan, implement, review, present, done) from
+# the ledger markers, the latest winning, checked against the record: if the
+# hypothesis, success criterion, or plan changed after approval, the stage falls
+# back to define or plan. Read-only.
 #
 # Usage: state RECORD_ID
 set -euo pipefail
-# Byte-wise matching: a hand-edited ledger line with invalid UTF-8 must not break
-# the marker patterns.
 export LC_ALL=C
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/_lib.sh"
 [ $# -eq 1 ] || { echo "usage: state RECORD_ID" >&2; exit 2; }
 id=$1
-dir=$(bash "$here/workspace" "$id")
-[ -f "$dir/ledger.md" ] || { echo "no ledger in $dir" >&2; exit 1; }
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-split_body "$id" "$tmp"
+case "$id" in */*|"") echo "invalid record ID: '$id'" >&2; exit 2 ;; esac
+raw=$(raw_json "$id") || { echo "record '$id' not found" >&2; exit 2; }
+ledger="$(workspace_path "$id")/ledger.md"
+[ -f "$ledger" ] || ledger=/dev/null
 
 stage=define mode="" auto="" psha="" propsha="" base="" stopped="" note=""
-started=no pquote="" aquote="" warnings=""
-# One anchored pattern per marker: the quote comes last and is never searched
-# for fields, so words inside it cannot override the pinned values.
-re_prop='^proposal approved: summary-sha=([0-9a-f]*) \| quote: (.*)$'
+started=no pquote="" aquote=""
+re_prop='^proposal approved: sha=([0-9a-f]*) \| quote: (.*)$'
 re_plan='^plan approved: mode=([^;]*); auto-continue=([^;]*); plan-sha=([0-9a-f]*) \| quote: (.*)$'
 while IFS= read -r line; do
-  # Only timestamped lines count; anything else is not a ledger entry.
   [[ $line =~ $LEDGER_LINE ]] || continue
   msg=${line#* }
   case "$msg" in
-    "proposal approved"*)
-      if [[ $msg =~ $re_prop ]]; then
-        stage=plan propsha=${BASH_REMATCH[1]} pquote=${BASH_REMATCH[2]}
-      else
-        warnings="$warnings${warnings:+; }ignored malformed marker: ${msg:0:60}"
-      fi ;;
+    "proposal approved: "*)
+      [[ $msg =~ $re_prop ]] || continue
+      stage=plan propsha=${BASH_REMATCH[1]} pquote=${BASH_REMATCH[2]} ;;
     "proposal reopened"*) stage=define ;;
+    "plan approved: "*)
+      [[ $msg =~ $re_plan ]] || continue
+      case "$stage" in define|done) continue ;; esac
+      stage=implement stopped="" started=no
+      mode=${BASH_REMATCH[1]} auto=${BASH_REMATCH[2]}
+      psha=${BASH_REMATCH[3]} aquote=${BASH_REMATCH[4]} ;;
     "plan reopened"*)
-      # Lowers the stage only; it can never skip an unapproved proposal.
       case "$stage" in implement|review|present) stage=plan ;; esac ;;
-    "plan approved:"*)
-      if [[ $msg =~ $re_plan ]]; then
-        stage=implement stopped="" started=no
-        mode=${BASH_REMATCH[1]} auto=${BASH_REMATCH[2]}
-        psha=${BASH_REMATCH[3]} aquote=${BASH_REMATCH[4]}
-      else
-        warnings="$warnings${warnings:+; }ignored malformed marker: ${msg:0:60}"
-      fi ;;
     "base "*) [ -n "$base" ] || base=${msg#base } ;;
-    "implement started"*)
-      [ "$stage" != implement ] || { started=yes; stopped=""; } ;;
-    "implement stop"*)
-      # Only an implementing record can be stopped; a stop marker can never bring
-      # back a stage that a reopen or a drifted approval took away.
+    "implement started"*) [ "$stage" != implement ] || { started=yes; stopped=""; } ;;
+    "implement stop: "*)
       [ "$stage" != implement ] || { stopped=${msg#implement stop: }; started=no; } ;;
-    "implement done"*) stage=review stopped="" started=no ;;
+    "implement done"*) [ "$stage" != implement ] || { stage=review started=no; } ;;
     "review started"*) [ "$stage" != review ] || started=yes ;;
-    "review stop"*) [ "$stage" != review ] || started=no ;;
-    "review drafted"*) stage=present started=no ;;
-    "finalized"*) stage=done ;;
+    "review stop: "*) [ "$stage" != review ] || started=no ;;
+    "review drafted"*) [ "$stage" != review ] || { stage=present started=no; } ;;
+    "finalized"*) [ "$stage" != present ] || stage=done ;;
   esac
-done < <(grep -a -v '^#' "$dir/ledger.md" || [ $? -eq 1 ])
+done < "$ledger"
 
-case "$stage" in
-  plan|implement|review|present)
-    if [ -n "$propsha" ] && [ "$(proposal_sha < "$tmp/summary.md")" != "$propsha" ]; then
-      stage=define note="proposal changed after approval: present it again and re-approve"
-    fi ;;
-esac
+if [ "$stage" != define ] && [ "$stage" != done ] \
+   && [ "$(printf '%s\n' "$raw" | proposal_sha)" != "$propsha" ]; then
+  stage=define note="hypothesis or success criterion changed after approval: present it again and re-approve"
+fi
 case "$stage" in
   implement|review|present)
-    if [ "$(plan_sha < "$tmp/plan.md")" != "$psha" ]; then
+    if [ "$(printf '%s\n' "$raw" | jq -r '.markdown' | plan_of | plan_sha)" != "$psha" ]; then
       stage=plan note="plan changed after approval: present it again and re-approve"
     fi ;;
 esac
 case "$stage" in implement|review) ;; *) started=no ;; esac
 [ "$stage" = implement ] || stopped=""
-# Show only approvals still in force.
-[ "$stage" != define ] || { pquote=""; }
+[ "$stage" != define ] || pquote=""
 case "$stage" in define|plan) mode="" auto="" aquote="" ;; esac
 
-bound=$(hk record show --raw --json -- "$id" | jq -r '.values.commit // empty')
-ready=no
-if grep -q '^- Hypothesis: [^[:space:]]' "$tmp/summary.md" \
-   && grep -q '^- Success criterion: [^[:space:]]' "$tmp/summary.md"; then ready=yes; fi
 printf 'record: %s\nstage: %s\n' "$id" "$stage"
 [ -z "$note" ] || printf 'note: %s\n' "$note"
-[ -z "$warnings" ] || printf 'warning: %s\n' "$warnings"
 [ -z "$stopped" ] || printf 'stopped: %s\n' "$stopped"
-printf 'summary-has-hypothesis-and-criterion: %s\n' "$ready"
 printf 'dispatched: %s\n' "$started"
-printf 'mode: %s\nauto-continue: %s\nbase: %s\nbound: %s\n' "$mode" "$auto" "$base" "$bound"
+printf 'mode: %s\nauto-continue: %s\n' "$mode" "$auto"
+impl=""
+if [ -n "$mode" ]; then
+  impl=$(printf '%s\n' "$raw" | jq -r '.markdown' | plan_of | plan_field Implement)
+  impl=${impl:-subagent}
+fi
+printf 'implement: %s\n' "$impl"
+branch=$(hk record show --json -- "$id" | jq -r '.values.branch // empty')
+printf 'branch: %s\n' "${branch:-(none set: stay on the current branch)}"
+printf 'base: %s\nbound: %s\n' "$base" "$(printf '%s\n' "$raw" | jq -r '.values.commit // empty')"
 [ -z "$pquote" ] || printf 'proposal-approval-quote: %s\n' "$pquote"
 [ -z "$aquote" ] || printf 'plan-approval-quote: %s\n' "$aquote"

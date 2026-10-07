@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Write the workspace body.md into the record body. Refuses when the record body
+# changed since `open` (unless --force) and when the body has more than one
+# "## Plan" section.
+#
+# Usage: save RECORD_ID [--force]
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+[ $# -ge 1 ] && [ $# -le 2 ] && [ "${2:---force}" = --force ] \
+  || { echo "usage: save RECORD_ID [--force]" >&2; exit 2; }
+dir=$(workspace_dir "$1")
+[ -f "$dir/body.md" ] && [ -f "$dir/.body-sha" ] \
+  || { echo "no body.md; run 'open $1' first" >&2; exit 4; }
+if [ -z "${2:-}" ] && [ "$(body_of "$1" | sha_of)" != "$(cat "$dir/.body-sha")" ]; then
+  echo "the record body changed since 'open $1'. Compare it with body.md" >&2
+  echo "('hiraku record show $1 --raw --json'), merge, then 'save $1 --force'" >&2
+  exit 4
+fi
+plans=$(awk -v mode=h2 -f "$SECTIONS" "$dir/body.md" | grep -cx '## Plan' || true)
+[ "$plans" -le 1 ] || { echo "body.md has $plans '## Plan' sections; keep one" >&2; exit 3; }
+hk record update --markdown-file "$dir/body.md" -- "$1" >/dev/null
+# Reload what Hiraku stored (it may normalise whitespace) as the new baseline.
+body_of "$1" > "$dir/body.md"
+sha_of < "$dir/body.md" > "$dir/.body-sha"
+echo "saved $1"

@@ -12,6 +12,19 @@ import pytest
 from hiraku.config import HirakuConfig
 
 SCRIPTS = Path(__file__).parents[1] / ".ai/skills/hiraku-powers/scripts"
+QUOTE = ("--quote", "yes, go ahead")
+PLAN = """\
+## Plan
+
+### Execution
+- Mode: implement-and-run
+- Auto-continue to review: yes
+
+### Tasks
+- [ ] 1. change - files: a.py - check: true
+
+### Deviations
+"""
 
 pytestmark = pytest.mark.skipif(
     shutil.which("jq") is None or shutil.which("bash") is None,
@@ -36,12 +49,6 @@ def _run(project: Path, name: str, *args: str, check: bool = True):
     )
 
 
-def _set_body(project: Path, text: str) -> None:
-    path = project / "body.md"
-    path.write_text(text)
-    _hiraku(project, "record", "update", "r1", "--markdown-file", str(path))
-
-
 def _hiraku(project: Path, *args: str) -> str:
     return subprocess.run(
         ["hiraku", *args],
@@ -53,10 +60,20 @@ def _hiraku(project: Path, *args: str) -> str:
     ).stdout
 
 
-def _body(project: Path, record_id: str) -> str:
-    return json.loads(_hiraku(project, "record", "show", record_id, "--json"))[
-        "markdown"
-    ]
+def _values(project: Path, record_id: str = "r1") -> dict:
+    return json.loads(_hiraku(project, "record", "show", record_id, "--raw", "--json"))
+
+
+def _stage(project: Path, record_id: str = "r1") -> str:
+    out = _run(project, "state", record_id).stdout
+    return next(line for line in out.splitlines() if line.startswith("stage: "))[7:]
+
+
+def _write_body(project: Path, text: str, record_id: str = "r1") -> Path:
+    workspace = Path(_run(project, "open", record_id).stdout.strip())
+    (workspace / "body.md").write_text(text)
+    _run(project, "save", record_id)
+    return workspace
 
 
 @pytest.fixture
@@ -71,912 +88,385 @@ def project(tmp_path: Path) -> Path:
     ):
         subprocess.run(command, cwd=root, check=True)
     HirakuConfig.init(root, install_skill=False)
-    _hiraku(root, "record", "create", "r1", "--type", "task", "--set", "goal=g")
+    _hiraku(root, "record", "create", "root", "--type", "task", "--set", "goal=g")
+    _create(root, "r1")
     return root
 
 
-def test_workspace_is_seeded_ignored_and_stable(project: Path) -> None:
-    body = project / "body.md"
-    body.write_text("## Notes\nkeep\n\n```\n## Summary\n```\n")
-    _hiraku(project, "record", "update", "r1", "--markdown-file", str(body))
-
-    workspace = Path(_run(project, "workspace", "r1").stdout.strip())
-
-    assert workspace == project / ".hiraku-powers/records/r1"
-    assert (workspace / "ledger.md").is_file()
-    assert "keep" in (workspace / "rest.md").read_text()
-    # A fenced "## Summary" is content, not a section.
-    assert not (workspace / "summary.md").read_text().strip()
-    status = subprocess.run(
-        ["git", "status", "--short"], cwd=project, text=True, capture_output=True
-    ).stdout
-    assert ".hiraku-powers" not in status
-
-
-def test_push_assembles_sections_without_accumulating_blank_lines(
-    project: Path,
-) -> None:
-    workspace = Path(_run(project, "workspace", "r1").stdout.strip())
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-    (workspace / "plan.md").write_text("## Plan\n\n- [ ] 1\n")
-
-    for _ in range(3):
-        _run(project, "push", "r1")
-
-    body = _body(project, "r1")
-    assert body.startswith("## Summary\n\n- Status: proposed\n\n## Plan\n")
-    assert "\n\n\n" not in body
-
-
-def test_push_refuses_stale_workspace_unless_forced(project: Path) -> None:
-    workspace = Path(_run(project, "workspace", "r1").stdout.strip())
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-    _run(project, "push", "r1")
-    edited = project / "edited.md"
-    edited.write_text("## Notes\nedited elsewhere\n")
-    _hiraku(project, "record", "update", "r1", "--markdown-file", str(edited))
-
-    stale = _run(project, "push", "r1", check=False)
-
-    assert stale.returncode == 4
-    assert "changed since pull" in stale.stderr
-    assert "edited elsewhere" in _body(project, "r1")
-    _run(project, "push", "r1", "--force")
-    assert "## Summary" in _body(project, "r1")
-
-
-def test_push_requires_summary_heading(project: Path) -> None:
-    workspace = Path(_run(project, "workspace", "r1").stdout.strip())
-    (workspace / "summary.md").write_text("- no heading\n")
-
-    result = _run(project, "push", "r1", check=False)
-
-    assert result.returncode == 3
-    assert "## Summary" in result.stderr
-
-
-FENCED = (
-    "~~~\n## Plan\nnot a section\n~~~\n\n````\n```\n## Summary\nstill code\n```\n````\n"
-)
-
-
-def test_fences_of_any_style_survive_a_round_trip(project: Path) -> None:
-    _set_body(project, "# Title\n\nintro\n\n## Notes\n" + FENCED)
-    workspace = Path(_run(project, "workspace", "r1").stdout.strip())
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-
-    _run(project, "push", "r1")
-
-    body = _body(project, "r1")
-    assert body.startswith("# Title\n\nintro\n\n## Summary\n")
-    assert FENCED.strip() in body
-    assert body.count("## Summary\n\n- Status: proposed") == 1
-    assert body.endswith(FENCED)
-
-
-def test_headings_with_trailing_space_or_crlf_are_recognised(project: Path) -> None:
-    _set_body(project, "## Summary  \r\n\r\n- Status: proposed\r\n")
-
-    workspace = Path(_run(project, "workspace", "r1").stdout.strip())
-    _run(project, "push", "r1")
-
-    assert "proposed" in (workspace / "summary.md").read_text()
-    assert _body(project, "r1").count("## Summary") == 1
-
-
-def test_failed_seed_does_not_disable_protection(project: Path) -> None:
-    failed = _run(project, "ledger", "later", "msg", check=False)
-    assert failed.returncode != 0
-    assert not (project / ".hiraku-powers/records/later").exists()
-
-    _hiraku(project, "record", "create", "later", "--type", "task", "--set", "goal=g")
-    body = project / "body.md"
-    body.write_text("## Notes\nprecious\n")
-    _hiraku(project, "record", "update", "later", "--markdown-file", str(body))
-    workspace = Path(_run(project, "workspace", "later").stdout.strip())
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-    _run(project, "push", "later")
-
-    assert "precious" in _body(project, "later")
-
-
-def test_unseeded_workspace_cannot_push(project: Path) -> None:
-    workspace = project / ".hiraku-powers/records/r1"
-    workspace.mkdir(parents=True)
-    (workspace / "summary.md").write_text("## Summary\n")
-
-    result = _run(project, "push", "r1", check=False)
-
-    assert result.returncode == 4
-    assert "not seeded" in result.stderr
-
-
-def test_path_like_ids_create_nothing(project: Path) -> None:
-    for bad in ("../../escape", "nosuch"):
-        result = _run(project, "workspace", bad, check=False)
-        assert result.returncode != 0
-    assert not (project.parent / "escape").exists()
-    assert not (project / ".hiraku-powers/records/nosuch").exists()
-
-
-def test_pull_protects_unpushed_edits(project: Path) -> None:
-    workspace = Path(_run(project, "workspace", "r1").stdout.strip())
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: draft\n")
-
-    refused = _run(project, "pull", "r1", check=False)
-    scratch = project / "scratch"
-    _run(project, "pull", "r1", "--to", str(scratch))
-
-    assert refused.returncode == 4
-    assert "draft" in (workspace / "summary.md").read_text()
-    assert (scratch / "summary.md").exists()
-    _run(project, "pull", "r1", "--discard")
-    assert "draft" not in (workspace / "summary.md").read_text()
-
-
-@pytest.mark.parametrize(
-    ("part", "text", "message"),
-    [
-        ("plan", "## Plan\n\n## Tasks\n- x\n", "exactly one"),
-        ("plan", "no heading\n", "exactly one"),
-        ("rest", "## Plan\nsmuggled\n", "rest.md must not"),
-        ("head", "## Oops\n", "head.md must not"),
-    ],
-)
-def test_push_validates_every_part(
-    project: Path, part: str, text: str, message: str
-) -> None:
-    workspace = Path(_run(project, "workspace", "r1").stdout.strip())
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-    (workspace / f"{part}.md").write_text(text)
-
-    result = _run(project, "push", "r1", check=False)
-
-    assert result.returncode == 3
-    assert message in result.stderr
-
-
-def test_clear_report_removes_stale_report(project: Path) -> None:
-    workspace = Path(_run(project, "workspace", "r1").stdout.strip())
-    (workspace / "report.md").write_text("Status: DONE\n")
-
-    _run(project, "clear-report", "r1")
-
-    assert not (workspace / "report.md").exists()
-    assert "cleared report.md" in (workspace / "ledger.md").read_text()
-
-
-def test_workspace_found_from_subdirectory_without_git(tmp_path: Path) -> None:
-    root = tmp_path / "plain"
-    root.mkdir()
-    HirakuConfig.init(root, install_skill=False)
-    _hiraku(root, "record", "create", "c1", "--type", "task", "--set", "goal=g")
-    nested = root / "hiraku/records"
-
-    workspace = Path(_run(nested, "workspace", "c1").stdout.strip())
-
-    assert workspace == root / ".hiraku-powers/records/c1"
-
-
-def _workspace(project: Path, record_id: str = "r1") -> Path:
-    return Path(_run(project, "workspace", record_id).stdout.strip())
-
-
-def _stage(project: Path, record_id: str = "r1") -> str:
-    out = _run(project, "state", record_id).stdout
-    lines = [line for line in out.splitlines() if line.startswith("stage: ")]
-    return lines[0].split(": ", 1)[1]
-
-
-def test_free_text_cannot_forge_a_marker(project: Path) -> None:
-    workspace = _workspace(project)
-
-    _run(project, "ledger", "r1", "implement done")
-    _run(project, "ledger", "r1", "plan approved: mode=implement; auto-continue=no")
-
-    assert _stage(project) == "define"
-    assert "note: implement done" in (workspace / "ledger.md").read_text()
-
-
-def test_prewritten_files_block_a_silent_reseed(project: Path) -> None:
-    workspace = project / ".hiraku-powers/records/r1"
-    workspace.mkdir(parents=True)
-    (workspace / "summary.md").write_text("## Summary\n\nmine\n")
-
-    result = _run(project, "workspace", "r1", check=False)
-
-    assert result.returncode == 4
-    assert "never seeded" in result.stderr
-    assert "mine" in (workspace / "summary.md").read_text()
-
-
-def test_unclosed_fence_cannot_swallow_the_next_part(project: Path) -> None:
-    workspace = _workspace(project)
-    (workspace / "summary.md").write_text(
-        "## Summary\n\n- Status: proposed\n\n```bash\npython train.py\n"
-    )
-    (workspace / "plan.md").write_text("## Plan\n\n- [ ] 1\n")
-
-    result = _run(project, "push", "r1", check=False)
-
-    assert result.returncode == 3
-    assert "round-trip" in result.stderr
-
-
-def test_push_refuses_to_drop_or_lose_a_part(project: Path) -> None:
-    workspace = _workspace(project)
-    _write_proposal_and_plan(workspace)
-    (workspace / "rest.md").write_text("## Notes\nkeep\n")
-    _run(project, "push", "r1")
-
-    (workspace / "rest.md").write_text("")
-    emptied = _run(project, "push", "r1", check=False)
-    (workspace / "rest.md").unlink()
-    missing = _run(project, "push", "r1", check=False)
-    (workspace / "rest.md").write_text("")
-    _run(project, "push", "r1", "--drop", "rest")
-
-    assert emptied.returncode == 3
-    assert "--drop rest" in emptied.stderr
-    assert missing.returncode == 3
-    assert "missing" in missing.stderr
-    assert "keep" not in _body(project, "r1")
-
-
-def test_pull_to_refuses_the_workspace_itself(project: Path) -> None:
-    workspace = _workspace(project)
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: draft\n")
-
-    result = _run(project, "pull", "r1", "--to", str(workspace), check=False)
-
-    assert result.returncode == 2
-    assert "draft" in (workspace / "summary.md").read_text()
-
-
-def test_record_id_cannot_collide_with_workspace_files(project: Path) -> None:
+def _create(project: Path, record_id: str) -> None:
     _hiraku(
-        project, "record", "create", ".gitignore", "--type", "task", "--set", "goal=g"
+        project,
+        "record",
+        "create",
+        record_id,
+        "--parent",
+        "root",
+        "--no-activate",
+        "--set",
+        "hypothesis=h",
+        "--set",
+        "success_criterion=c",
+        "--set",
+        "status=proposed",
     )
 
-    workspace = _workspace(project, ".gitignore")
 
-    assert workspace.is_dir()
-    status = subprocess.run(
-        ["git", "status", "--short"], cwd=project, text=True, capture_output=True
-    ).stdout
-    assert ".hiraku-powers" not in status
-
-
-def test_ids_starting_with_dash_work(project: Path) -> None:
-    _hiraku(
-        project, "record", "create", "--type", "task", "--set", "goal=g", "--", "-x"
-    )
-
-    workspace = _workspace(project, "-x")
-
-    assert workspace.name == "-x"
-
-
-def test_second_writer_is_locked_out(project: Path) -> None:
-    workspace = _workspace(project)
-    (workspace / ".lock").mkdir()
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-
-    result = _run(project, "push", "r1", check=False)
-
-    assert result.returncode == 6
-    assert "another hiraku-powers operation" in result.stderr
-
-
-QUOTE = ("--quote", "yes, go ahead")
-STAGES = ["define", "plan", "implement", "review", "present"]
-
-
-def _write_proposal_and_plan(
-    workspace: Path, mode: str = "implement-and-run", auto: str = "yes"
-) -> None:
-    (workspace / "summary.md").write_text(
-        "## Summary\n\n- Status: proposed\n- Hypothesis: h\n- Success criterion: c\n"
-    )
-    (workspace / "plan.md").write_text(
-        "## Plan\n\n### Execution\n"
-        f"- Mode: {mode}\n- Auto-continue to review: {auto}\n\n"
-        "### Tasks\n- [ ] 1. x\n\n### Deviations\n"
-    )
+STAGES = ("define", "plan", "implement", "review", "present")
 
 
 def _advance(project: Path, stage: str, record_id: str = "r1") -> Path:
-    """Drive a record through the real script sequence up to ``stage``."""
-    workspace = _workspace(project, record_id)
-    _write_proposal_and_plan(workspace)
-    _run(project, "push", record_id)
+    """Drive a record through the scripts up to the given stage."""
+    workspace = Path(_run(project, "open", record_id).stdout.strip())
     if stage == "define":
         return workspace
     _run(project, "approve", record_id, "proposal", *QUOTE)
     if stage == "plan":
         return workspace
-    _run(project, "approve", record_id, "plan", "implement-and-run", "yes", *QUOTE)
+    _write_body(project, PLAN, record_id)
+    _run(project, "approve", record_id, "plan", *QUOTE)
     if stage == "implement":
         return workspace
+    _run(project, "ledger", record_id, "--marker", "implement-started")
     _run(project, "ledger", record_id, "--marker", "base")
     _run(project, "bind", record_id)
-    (workspace / "report.md").write_text("Status: DONE\n")
+    (workspace / "implement-notes.md").write_text("Status: DONE\n")
     _run(project, "ledger", record_id, "--marker", "implement-done")
     if stage == "review":
         return workspace
-    for name in ("findings.md", "result.md", "decision.md"):
-        (workspace / name).write_text("supports\n")
+    _run(project, "ledger", record_id, "--marker", "review-started")
+    for name in ("review-notes.md", "result.md", "decision.md"):
+        (workspace / name).write_text("supports: x\n")
     _run(project, "ledger", record_id, "--marker", "review-drafted")
     return workspace
 
 
-def test_stage_follows_ledger_markers(project: Path) -> None:
+def test_open_creates_an_ignored_workspace_and_protects_unsaved_edits(
+    project: Path,
+) -> None:
+    _hiraku(project, "record", "update", "r1", "--markdown-file", "/dev/null")
+    workspace = Path(_run(project, "open", "r1").stdout.strip())
+
+    assert workspace == project / ".hiraku-powers/records/r1"
+    assert (workspace / "ledger.md").is_file()
+    status = subprocess.run(
+        ["git", "status", "--short"], cwd=project, text=True, capture_output=True
+    ).stdout
+    assert ".hiraku-powers" not in status
+
+    (workspace / "body.md").write_text("## Notes\nunsaved\n")
+    refused = _run(project, "open", "r1", check=False)
+    assert refused.returncode == 4
+    assert "unsaved" in (workspace / "body.md").read_text()
+    _run(project, "open", "r1", "--discard")
+    assert "unsaved" not in (workspace / "body.md").read_text()
+
+
+def test_save_writes_the_body_and_refuses_a_stale_one(project: Path) -> None:
+    workspace = _write_body(project, "## Notes\nmine\n")
+    assert "mine" in _values(project)["markdown"]
+
+    other = project / "other.md"
+    other.write_text("## Notes\nedited elsewhere\n")
+    _hiraku(project, "record", "update", "r1", "--markdown-file", str(other))
+    (workspace / "body.md").write_text("## Notes\nmine again\n")
+
+    stale = _run(project, "save", "r1", check=False)
+    assert stale.returncode == 4
+    assert "edited elsewhere" in _values(project)["markdown"]
+    _run(project, "save", "r1", "--force")
+    assert "mine again" in _values(project)["markdown"]
+
+
+def test_save_refuses_two_plans_but_ignores_fenced_headings(project: Path) -> None:
+    workspace = Path(_run(project, "open", "r1").stdout.strip())
+    (workspace / "body.md").write_text("## Plan\na\n\n## Plan\nb\n")
+    assert _run(project, "save", "r1", check=False).returncode == 3
+
+    (workspace / "body.md").write_text("## Plan\na\n\n```\n## Plan\n```\n")
+    _run(project, "save", "r1")
+
+
+def test_state_is_read_only(project: Path) -> None:
+    assert _stage(project) == "define"
+    assert not (project / ".hiraku-powers").exists()
+
+
+def test_full_cycle_sets_status_and_fields(project: Path) -> None:
     for stage in STAGES:
-        _hiraku(
-            project,
-            "record",
-            "create",
-            f"s-{stage}",
-            "--type",
-            "task",
-            "--set",
-            "goal=g",
-        )
-        _advance(project, stage, f"s-{stage}")
-        assert _stage(project, f"s-{stage}") == stage
+        if stage != "define":
+            _create(project, f"s-{stage}")
+        _advance(project, stage, "r1" if stage == "define" else f"s-{stage}")
+        assert _stage(project, "r1" if stage == "define" else f"s-{stage}") == stage
 
-    present = project / ".hiraku-powers/records/s-present"
-    (present / "decision.md").write_text("adopt\n")
+    assert _values(project, "s-plan")["values"]["status"] == "proposed"
+    assert _values(project, "s-implement")["values"]["status"] == "planned"
+    assert _values(project, "s-review")["values"]["status"] == "implemented"
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=project, text=True, capture_output=True
+    ).stdout.strip()
+    assert _values(project, "s-review")["values"]["commit"] == head
+
     _run(project, "finalize", "s-present")
+    values = _values(project, "s-present")["values"]
     assert _stage(project, "s-present") == "done"
-    assert _run(project, "inprogress").stdout.count("\n") == len(STAGES) - 1
+    assert values["status"] == "reviewed"
+    assert values["result"] == "supports: x"
+    listed = _run(project, "inprogress").stdout
+    assert "s-present" not in listed
+    assert "s-review\treview" in listed
 
 
-def test_stop_then_done_flow(project: Path) -> None:
+def test_inprogress_says_when_nothing_is_open(project: Path) -> None:
+    assert _run(project, "inprogress").stdout.strip() == "no unfinished records"
+
+
+def test_approve_proposal_needs_both_fields(project: Path) -> None:
+    _hiraku(project, "record", "update", "r1", "--unset", "success_criterion")
+
+    result = _run(project, "approve", "r1", "proposal", *QUOTE, check=False)
+
+    assert result.returncode == 3
+    assert "success_criterion" in result.stderr
+
+
+def test_approve_needs_a_quote(project: Path) -> None:
+    result = _run(project, "approve", "r1", "proposal", "--quote", " ", check=False)
+    assert result.returncode == 2
+
+
+def test_approve_plan_reads_mode_and_auto_continue_from_the_plan(
+    project: Path,
+) -> None:
+    _advance(project, "plan")
+    _write_body(project, PLAN.replace("implement-and-run", "implement"))
+
+    out = _run(project, "approve", "r1", "plan", *QUOTE).stdout
+
+    assert "mode implement, auto-continue yes" in out
+    state = _run(project, "state", "r1").stdout
+    assert "mode: implement\n" in state
+    assert "plan-approval-quote: yes, go ahead" in state
+
+
+@pytest.mark.parametrize(
+    ("plan", "message"),
+    [
+        (PLAN.replace("implement-and-run", "maybe"), "must be implement"),
+        (PLAN.replace("- Auto-continue to review: yes", ""), "exactly one"),
+        (PLAN + "- Mode: implement\n", "exactly one"),
+        (PLAN.replace("### Deviations\n", ""), "### Deviations"),
+        (PLAN + "### Later\n", "last ### heading"),
+        ("## Notes\nno plan\n", "no '## Plan'"),
+        (PLAN.replace("### Tasks", "- Implement: maybe\n\n### Tasks"), "subagent or"),
+        (
+            PLAN.replace(
+                "### Tasks", "- Implement: inline\n- Implement: inline\n\n### Tasks"
+            ),
+            "more than one",
+        ),
+    ],
+)
+def test_approve_plan_rejects_malformed_plans(
+    project: Path, plan: str, message: str
+) -> None:
+    _advance(project, "plan")
+    _write_body(project, plan)
+
+    result = _run(project, "approve", "r1", "plan", *QUOTE, check=False)
+
+    assert result.returncode == 3
+    assert message in result.stderr
+    assert _stage(project) == "plan"
+
+
+def test_approve_plan_refuses_unsaved_edits(project: Path) -> None:
+    workspace = _advance(project, "plan")
+    (workspace / "body.md").write_text(PLAN)
+
+    result = _run(project, "approve", "r1", "plan", *QUOTE, check=False)
+
+    assert result.returncode == 3
+    assert "save" in result.stderr
+
+
+def test_fast_path_approves_proposal_and_plan_at_once(project: Path) -> None:
+    _write_body(project, PLAN)
+
+    _run(project, "approve", "r1", "proposal-and-plan", *QUOTE)
+
+    assert _stage(project) == "implement"
+
+
+def test_ticks_and_deviations_are_progress_not_plan_changes(project: Path) -> None:
     workspace = _advance(project, "implement")
-    _run(project, "ledger", "r1", "--marker", "implement-started")
-    assert "dispatched: yes" in _run(project, "state", "r1").stdout
-    _run(project, "ledger", "r1", "--marker", "implement-stop", "smoke failed")
-    stopped = _run(project, "state", "r1").stdout
-    assert "stage: implement" in stopped
-    assert "stopped: smoke failed" in stopped
-    assert "dispatched: no" in stopped
-    _run(project, "ledger", "r1", "--marker", "base")
-    _run(project, "bind", "r1")
-    (workspace / "report.md").write_text("Status: DONE\n")
-    _run(project, "ledger", "r1", "--marker", "implement-done")
-    assert _stage(project) == "review"
+    progress = PLAN.replace("- [ ] 1.", "- [x] 1.") + "- used a different path\n"
+    _write_body(project, progress)
+    assert _stage(project) == "implement"
+
+    (workspace / "body.md").write_text(progress.replace("change", "other change"))
+    _run(project, "save", "r1")
+    state = _run(project, "state", "r1").stdout
+    assert "stage: plan" in state
+    assert "plan changed after approval" in state
+
+
+def test_fenced_deviations_heading_does_not_hide_plan_changes(project: Path) -> None:
+    fenced = PLAN.replace("### Tasks", "```\n### Deviations\n```\n\n### Tasks")
+    _advance(project, "plan")
+    _write_body(project, fenced)
+    _run(project, "approve", "r1", "plan", *QUOTE)
+
+    _write_body(project, fenced.replace("change", "other change"))
+
+    assert _stage(project) == "plan"
+
+
+def test_hypothesis_change_after_approval_returns_to_define(project: Path) -> None:
+    _advance(project, "implement")
+
+    _hiraku(project, "record", "update", "r1", "--set", "hypothesis=other")
+
+    state = _run(project, "state", "r1").stdout
+    assert "stage: define" in state
+    assert "hypothesis or success criterion changed" in state
 
 
 @pytest.mark.parametrize(
     ("setup", "argv", "needs"),
     [
-        (
-            "define",
-            ("approve", "r1", "plan", "implement-and-run", "yes", *QUOTE),
-            "plan",
-        ),
+        ("define", ("approve", "r1", "plan", *QUOTE), "plan"),
         ("plan", ("approve", "r1", "proposal", *QUOTE), "define"),
-        ("plan", ("ledger", "r1", "--marker", "review-drafted"), "review"),
-        ("implement", ("ledger", "r1", "--marker", "review-drafted"), "review"),
-        ("implement", ("finalize", "r1"), "present"),
-        ("review", ("finalize", "r1"), "present"),
         ("plan", ("bind", "r1"), "implement"),
+        ("implement", ("ledger", "r1", "--marker", "review-drafted"), "review"),
+        ("review", ("finalize", "r1"), "present"),
     ],
 )
-def test_transitions_must_follow_the_order(
+def test_out_of_order_steps_exit_seven(
     project: Path, setup: str, argv: tuple[str, ...], needs: str
 ) -> None:
-    workspace = _advance(project, setup)
-    for name in ("result.md", "decision.md", "findings.md"):
-        (workspace / name).write_text("x\n")
+    _advance(project, setup)
 
     result = _run(project, *argv, check=False)
 
     assert result.returncode == 7
-    assert needs in result.stderr
-    assert _stage(project) == setup
+    assert f"this step needs: {needs}" in result.stderr
 
 
-def test_implement_done_needs_bound_commit_and_done_report(project: Path) -> None:
+def test_implement_done_needs_bound_commit_and_done_notes(project: Path) -> None:
     workspace = _advance(project, "implement")
+    (workspace / "implement-notes.md").write_text("Status: DONE\n")
+    _run(project, "ledger", "r1", "--marker", "implement-started")
+    assert not (workspace / "implement-notes.md").exists()
 
-    unbound = _run(project, "ledger", "r1", "--marker", "implement-done", check=False)
+    no_commit = _run(project, "ledger", "r1", "--marker", "implement-done", check=False)
+    assert "bind it first" in no_commit.stderr
     _run(project, "bind", "r1")
-    (workspace / "report.md").write_text("Status: STOP\n")
+    (workspace / "implement-notes.md").write_text("Status: STOP\n")
     stopped = _run(project, "ledger", "r1", "--marker", "implement-done", check=False)
-
-    assert unbound.returncode == 3
-    assert "bind" in unbound.stderr
-    assert stopped.returncode == 3
     assert "Status: DONE" in stopped.stderr
+    assert _stage(project) == "implement"
+
+
+def test_stop_and_redispatch(project: Path) -> None:
+    _advance(project, "implement")
+    _run(project, "ledger", "r1", "--marker", "implement-started")
+    assert "dispatched: yes" in _run(project, "state", "r1").stdout
+    assert _run(project, "reopen", "r1", "plan", check=False).returncode == 7
+
+    _run(project, "ledger", "r1", "--marker", "implement-stop", "smoke failed")
+
+    state = _run(project, "state", "r1").stdout
+    assert "stopped: smoke failed" in state
+    assert "dispatched: no" in state
+    _run(project, "ledger", "r1", "--marker", "implement-started")
+    assert "stopped:" not in _run(project, "state", "r1").stdout
 
 
 def test_review_drafted_needs_all_three_drafts(project: Path) -> None:
     workspace = _advance(project, "review")
-    (workspace / "findings.md").write_text("ok\n")
+    (workspace / "result.md").write_text("supports: x\n")
 
     result = _run(project, "ledger", "r1", "--marker", "review-drafted", check=False)
 
     assert result.returncode == 3
+    assert "review-notes.md" in result.stderr
 
 
-def test_approvals_need_their_preconditions(project: Path) -> None:
-    workspace = _workspace(project)
-    no_summary = _run(project, "approve", "r1", "proposal", *QUOTE, check=False)
-    _write_proposal_and_plan(workspace)
-    _run(project, "push", "r1")
-    _run(project, "approve", "r1", "proposal", *QUOTE)
-    (workspace / "plan.md").write_text("## Plan\n\n- Mode: implement\n")
-    unpushed = _run(
-        project, "approve", "r1", "plan", "implement", "no", *QUOTE, check=False
-    )
-    no_quote = _run(project, "approve", "r1", "plan", "implement", "no", check=False)
-
-    assert no_summary.returncode == 3
-    assert unpushed.returncode == 3
-    assert no_quote.returncode == 2
-    assert _stage(project) == "plan"
-
-
-def test_approved_mode_must_match_the_plan_text(project: Path) -> None:
-    workspace = _workspace(project)
-    _write_proposal_and_plan(workspace, mode="implement-and-run", auto="yes")
-    _run(project, "push", "r1")
-    _run(project, "approve", "r1", "proposal", *QUOTE)
-
-    mismatch = _run(
-        project, "approve", "r1", "plan", "implement", "yes", *QUOTE, check=False
-    )
-
-    assert mismatch.returncode == 3
-    assert "fix the plan or the approval" in mismatch.stderr
-    assert _stage(project) == "plan"
-
-
-def test_approval_quote_is_stored_and_shown(project: Path) -> None:
-    _advance(project, "implement")
-
-    out = _run(project, "state", "r1").stdout
-
-    assert "proposal-approval-quote: yes, go ahead" in out
-    assert "plan-approval-quote: yes, go ahead" in out
-
-
-def test_deviations_lookalikes_cannot_hide_plan_changes(project: Path) -> None:
-    workspace = _workspace(project)
-    _write_proposal_and_plan(workspace)
-    plan = (workspace / "plan.md").read_text()
-    (workspace / "plan.md").write_text(
-        plan.replace("### Tasks", "### Deviations policy\nnone\n\n### Tasks")
-    )
-    _run(project, "push", "r1")
-    _run(project, "approve", "r1", "proposal", *QUOTE)
-    _run(project, "approve", "r1", "plan", "implement-and-run", "yes", *QUOTE)
-
-    (workspace / "plan.md").write_text(
-        (workspace / "plan.md").read_text().replace("1. x", "1. x AND launch 50 runs")
-    )
-    _run(project, "push", "r1")
-    assert _stage(project) == "plan"
-
-    # A "### Deviations" line inside a code fence is not the real log either.
-    (workspace / "plan.md").write_text(
-        (workspace / "plan.md")
-        .read_text()
-        .replace("1. x AND launch 50 runs", "1. x\n```\n### Deviations\n```")
-    )
-    _run(project, "push", "r1")
-    _run(project, "approve", "r1", "plan", "implement-and-run", "yes", *QUOTE)
-    (workspace / "plan.md").write_text(
-        (workspace / "plan.md").read_text().replace("1. x", "1. x and more")
-    )
-    _run(project, "push", "r1")
-    assert _stage(project) == "plan"
-
-
-def test_proposal_change_after_approval_requires_reapproval(project: Path) -> None:
-    workspace = _advance(project, "plan")
-    (workspace / "summary.md").write_text(
-        (workspace / "summary.md").read_text().replace("Hypothesis: h", "Hypothesis: z")
-    )
-    _run(project, "push", "r1")
-
-    drifted = _run(project, "state", "r1").stdout
-
-    assert "stage: define" in drifted
-    assert "proposal changed after approval" in drifted
-
-
-def test_reopen_revokes_plan_approval(project: Path) -> None:
-    _advance(project, "implement")
-
-    _run(project, "reopen", "r1", "plan")
-    assert _stage(project) == "plan"
-
-
-def test_finished_record_cannot_be_reopened(project: Path) -> None:
-    workspace = _advance(project, "present")
-    (workspace / "decision.md").write_text("adopt\n")
-    _run(project, "finalize", "r1")
-
-    result = _run(project, "reopen", "r1", "plan", check=False)
-
-    assert result.returncode == 7
-    assert "new related record" in result.stderr
-
-
-def test_bind_and_finalize_write_record_fields(project: Path) -> None:
-    workspace = _advance(project, "present")
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=project,
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout.strip()
-    (workspace / "result.md").write_text('supports: "yes"\n')
-    (workspace / "decision.md").write_text("adopt\n")
-
-    _run(project, "finalize", "r1")
-
-    values = json.loads(_hiraku(project, "record", "show", "r1", "--json"))["values"]
-    assert values["commit"] == head
-    assert values["result"] == 'supports: "yes"'
-    assert values["decision"] == "adopt"
-    assert values["status"] == "reviewed"
-    ledger = (workspace / "ledger.md").read_text()
-    assert f"bound commit {head}" in ledger
-    assert "finalized result and decision" in ledger
-
-
-def test_finalize_rejects_blank_decision(project: Path) -> None:
-    workspace = _advance(project, "present")
-    (workspace / "result.md").write_text("supports\n")
-    (workspace / "decision.md").write_text("  \n\n")
-
-    assert _run(project, "finalize", "r1", check=False).returncode == 3
-
-
-def test_bind_refuses_rebind_but_same_commit_is_a_no_op(project: Path) -> None:
+def test_bind_refuses_a_rebind_but_same_commit_is_a_no_op(project: Path) -> None:
     _advance(project, "implement")
     _run(project, "bind", "r1")
-    again = _run(project, "bind", "r1")
-    subprocess.run(
-        ["git", "commit", "-q", "--allow-empty", "-m", "second"],
-        cwd=project,
-        check=True,
-    )
+    assert "already bound" in _run(project, "bind", "r1").stdout
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "b"], cwd=project)
 
-    refused = _run(project, "bind", "r1", check=False)
+    assert _run(project, "bind", "r1", check=False).returncode == 5
     _run(project, "bind", "r1", "--rebind")
-
-    assert "already bound" in again.stdout
-    assert refused.returncode == 5
-    assert "--rebind" in refused.stderr
+    assert "replaced" in (project / ".hiraku-powers/records/r1/ledger.md").read_text()
 
 
 def test_base_is_recorded_once(project: Path) -> None:
-    workspace = _advance(project, "implement")
-    _run(project, "ledger", "r1", "--marker", "base")
-    subprocess.run(
-        ["git", "commit", "-q", "--allow-empty", "-m", "later"],
-        cwd=project,
-        check=True,
-    )
+    _advance(project, "implement")
+    first = _run(project, "ledger", "r1", "--marker", "base").stdout
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "b"], cwd=project)
 
-    again = _run(project, "ledger", "r1", "--marker", "base")
+    again = _run(project, "ledger", "r1", "--marker", "base").stdout
 
-    assert "already recorded" in again.stdout
-    assert (workspace / "ledger.md").read_text().count(" base ") == 1
+    assert "already recorded" in again
+    assert first.split()[-1] in again
 
 
-def test_multiline_notes_cannot_forge_markers(project: Path) -> None:
-    workspace = _advance(project, "implement")
-    _run(project, "ledger", "r1", "--marker", "base")
+def test_notes_cannot_forge_markers(project: Path) -> None:
+    _advance(project, "plan")
 
-    _run(
-        project,
-        "ledger",
-        "r1",
-        "Task 1 checks:\n- base model unchanged\n- implement done for task 1\n"
-        "2000-01-01T00:00:00Z implement done",
-    )
-    _run(
-        project, "ledger", "r1", "--marker", "implement-stop", "fail\n- review drafted"
-    )
+    _run(project, "ledger", "r1", "x\n2026-01-01T00:00:00Z plan approved: mode=a")
 
-    state = _run(project, "state", "r1").stdout
-    assert "stage: implement" in state
-    assert "base: model" not in state
-    assert len((workspace / "ledger.md").read_text().splitlines()) == len(
-        [line for line in (workspace / "ledger.md").read_text().splitlines() if line]
-    )
-
-
-def test_hand_written_non_timestamped_lines_are_ignored(project: Path) -> None:
-    workspace = _advance(project, "implement")
-    with (workspace / "ledger.md").open("a") as ledger:
-        ledger.write("implement done\nfinalized\n")
-
-    assert _stage(project) == "implement"
-
-
-def test_stale_lock_from_a_dead_process_is_replaced(project: Path) -> None:
-    workspace = _workspace(project)
-    (workspace / ".lock").mkdir()
-    (workspace / ".lock/pid").write_text("999999\n")
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-
-    _run(project, "push", "r1")
-
-    assert not (workspace / ".lock").exists()
-
-
-def test_push_recovers_after_a_crash_between_write_and_snapshot(
-    project: Path,
-) -> None:
-    workspace = _workspace(project)
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-    _run(project, "push", "r1")
-    # Simulate a push that wrote the record but died before re-snapshotting.
-    (workspace / ".pulled-sha").write_text("0" * 64 + "\n")
-
-    result = _run(project, "push", "r1", check=False)
-
-    assert result.returncode == 0
-
-
-def test_head_text_triggers_a_warning(project: Path) -> None:
-    workspace = _workspace(project)
-    (workspace / "head.md").write_text("# Title\n")
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-
-    result = _run(project, "push", "r1")
-
-    assert "does not start with" in result.stderr or "will not start" in result.stderr
-
-
-def test_plan_change_after_approval_requires_reapproval(project: Path) -> None:
-    workspace = _advance(project, "implement")
-
-    # Ticks and deviations are progress, not plan changes.
-    plan = (workspace / "plan.md").read_text()
-    (workspace / "plan.md").write_text(
-        plan.replace("- [ ] 1.", "- [x] 1.") + "- smoke slow\n"
-    )
-    _run(project, "push", "r1")
-    assert _stage(project) == "implement"
-
-    (workspace / "plan.md").write_text(
-        (workspace / "plan.md")
-        .read_text()
-        .replace("### Tasks", "### Tasks\n- [ ] 2. new work")
-    )
-    _run(project, "push", "r1")
-    drifted = _run(project, "state", "r1").stdout
-    assert "stage: plan" in drifted
-    assert "plan changed after approval" in drifted
-    # The log from earlier progress may stay on a re-approval.
-    _run(project, "approve", "r1", "plan", "implement-and-run", "yes", *QUOTE)
-    assert _stage(project) == "implement"
-
-
-def test_tick_styles_and_duplicate_deviation_headings_are_progress(
-    project: Path,
-) -> None:
-    workspace = _workspace(project)
-    _write_proposal_and_plan(workspace)
-    plan = (workspace / "plan.md").read_text()
-    (workspace / "plan.md").write_text(
-        plan.replace("- [ ] 1. x\n", "- [ ] 1. x\n* [ ] 2. y\n1. [ ] 3. z\n")
-    )
-    _run(project, "push", "r1")
-    _run(project, "approve", "r1", "proposal", *QUOTE)
-    _run(project, "approve", "r1", "plan", "implement-and-run", "yes", *QUOTE)
-
-    ticked = (workspace / "plan.md").read_text()
-    ticked = ticked.replace("* [ ]", "* [x]").replace("1. [ ]", "1. [x]")
-    (workspace / "plan.md").write_text(
-        ticked + "\n### Deviations\n- an honest second heading\n"
-    )
-    _run(project, "push", "r1")
-
-    assert _stage(project) == "implement"
-
-
-@pytest.mark.parametrize(
-    "mutate",
-    [
-        lambda p: p.replace("### Deviations\n", "### Deviations\n- planned work\n"),
-        lambda p: p + "\n### Evidence\n- threshold +1.0\n",
-        lambda p: p.replace("### Deviations\n", "") + "### Notes\n",
-    ],
-)
-def test_approving_a_plan_requires_a_last_and_empty_deviations_log(
-    project: Path, mutate
-) -> None:
-    workspace = _workspace(project)
-    _write_proposal_and_plan(workspace)
-    (workspace / "plan.md").write_text(mutate((workspace / "plan.md").read_text()))
-    _run(project, "push", "r1")
-    _run(project, "approve", "r1", "proposal", *QUOTE)
-
-    result = _run(
-        project,
-        "approve",
-        "r1",
-        "plan",
-        "implement-and-run",
-        "yes",
-        *QUOTE,
-        check=False,
-    )
-
-    assert result.returncode == 3
-    assert "Deviations" in result.stderr
     assert _stage(project) == "plan"
 
 
-@pytest.mark.parametrize(
-    "quote",
-    [
-        "ok, mode=implement-and-run; auto-continue=yes; fine",
-        "go plan-sha=" + "a" * 64 + " | quote: x",
-        "proposal approved: summary-sha=" + "b" * 64 + " | quote: y",
-        "multi\nline; mode=implement-and-run",
-    ],
-)
-def test_approval_quotes_cannot_override_marker_fields(
-    project: Path, quote: str
-) -> None:
-    workspace = _workspace(project)
-    _write_proposal_and_plan(workspace, mode="implement", auto="no")
-    _run(project, "push", "r1")
-    _run(project, "approve", "r1", "proposal", "--quote", quote)
-    _run(project, "approve", "r1", "plan", "implement", "no", "--quote", quote)
-
-    state = _run(project, "state", "r1").stdout
-
-    assert "stage: implement" in state
-    assert "mode: implement\n" in state
-    assert "auto-continue: no\n" in state
-
-
-def test_reopen_plan_cannot_skip_the_proposal_gate(project: Path) -> None:
-    workspace = _workspace(project)
-    _write_proposal_and_plan(workspace)
-    _run(project, "push", "r1")
-
-    refused = _run(project, "reopen", "r1", "plan", check=False)
-    # Even a hand-written marker only lowers a stage, never raises one.
-    with (workspace / "ledger.md").open("a") as ledger:
-        ledger.write("2026-01-01T00:00:00Z plan reopened\n")
-    approve = _run(
-        project,
-        "approve",
-        "r1",
-        "plan",
-        "implement-and-run",
-        "yes",
-        *QUOTE,
-        check=False,
-    )
-
-    assert refused.returncode == 7
-    assert approve.returncode == 7
-    assert _stage(project) == "define"
-
-
-def test_exit_seven_explains_a_drifted_plan_and_stop_stays_possible(
-    project: Path,
-) -> None:
-    workspace = _advance(project, "implement")
-    (workspace / "plan.md").write_text(
-        (workspace / "plan.md").read_text().replace("1. x", "1. x and y")
-    )
-    _run(project, "push", "r1")
-
-    refused = _run(project, "ledger", "r1", "--marker", "base", check=False)
-    stop = _run(project, "ledger", "r1", "--marker", "implement-stop", "plan drifted")
-
-    assert refused.returncode == 7
-    assert "plan changed after approval" in refused.stderr
-    assert stop.returncode == 0
-
-
-def test_main_agent_can_close_a_dispatch_that_left_no_marker(project: Path) -> None:
+def test_reopen_rules(project: Path) -> None:
     _advance(project, "implement")
-    _run(project, "ledger", "r1", "--marker", "implement-started")
-    assert "dispatched: yes" in _run(project, "state", "r1").stdout
+    _run(project, "reopen", "r1", "plan")
+    assert _stage(project) == "plan"
+    _run(project, "approve", "r1", "plan", *QUOTE)
 
-    _run(project, "ledger", "r1", "--marker", "implement-stop", "subagent timed out")
-    closed = _run(project, "state", "r1").stdout
-    _run(project, "ledger", "r1", "--marker", "implement-started")
-    redispatched = _run(project, "state", "r1").stdout
-
-    assert "dispatched: no" in closed
-    assert "stopped: subagent timed out" in closed
-    assert "dispatched: yes" in redispatched
-    assert "stopped:" not in redispatched
-
-
-def test_proposal_pin_covers_whitespace_but_not_progress_lines(
-    project: Path,
-) -> None:
-    workspace = _advance(project, "implement")
-    summary = (workspace / "summary.md").read_text()
-
-    (workspace / "summary.md").write_text(
-        summary.replace("Status: proposed", "Status: implemented") + "- Evidence: x\n"
-    )
-    _run(project, "push", "r1")
-    assert _stage(project) == "implement"
-
-    (workspace / "summary.md").write_text(
-        (workspace / "summary.md")
-        .read_text()
-        .replace("Hypothesis: h", "Hypothesis:  h")
-    )
-    _run(project, "push", "r1")
+    _run(project, "reopen", "r1", "proposal")
+    assert _stage(project) == "define"
+    # A later plan approval cannot skip the reopened proposal.
+    ledger = project / ".hiraku-powers/records/r1/ledger.md"
+    approved = [
+        line for line in ledger.read_text().splitlines() if "plan approved" in line
+    ]
+    ledger.write_text(ledger.read_text() + approved[-1] + "\n")
     assert _stage(project) == "define"
 
-
-def test_recreated_record_does_not_inherit_old_workspace(project: Path) -> None:
-    workspace = _advance(project, "plan")
-    _hiraku(project, "record", "delete", "r1")
-    _hiraku(project, "record", "create", "r1", "--type", "task", "--set", "goal=g")
-
-    fresh = _workspace(project)
-
-    assert fresh == workspace
-    assert _stage(project) == "define"
-    assert list((workspace.parents[1] / "archive").glob("r1-*"))
-    assert "r1\tdefine" in _run(project, "inprogress").stdout
+    _create(project, "done")
+    _advance(project, "present", "done")
+    _run(project, "finalize", "done")
+    assert _run(project, "reopen", "done", "plan", check=False).returncode == 7
 
 
-def test_listing_never_archives_a_workspace_silently(project: Path) -> None:
-    workspace = _advance(project, "implement")
-    _hiraku(project, "record", "update", "r1", "--markdown-file", str(_empty(project)))
+def test_state_shows_the_effective_branch(project: Path) -> None:
+    assert "branch: (none set" in _run(project, "state", "r1").stdout
 
-    listing = _run(project, "inprogress")
+    _hiraku(project, "record", "update", "root", "--set", "branch=exp")
 
-    assert "empty but its workspace has content" in listing.stderr
-    assert (workspace / "ledger.md").is_file()
-    assert not (workspace.parents[1] / "archive").exists()
+    assert "branch: exp\n" in _run(project, "state", "r1").stdout
 
 
-def _empty(project: Path) -> Path:
-    path = project / "empty.md"
-    path.write_text("")
-    return path
-
-
-def test_drop_is_validated(project: Path) -> None:
-    workspace = _workspace(project)
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-
-    assert _run(project, "push", "r1", "--drop", "summary", check=False).returncode == 2
-    assert _run(project, "push", "r1", "--drop", "bogus", check=False).returncode == 2
-
-
-def test_sections_awk_is_portable_across_awk_flavours() -> None:
-    body = "# T\n\n## Notes\n" + FENCED + "\n## Summary\nreal\n"
+def test_sections_awk_agrees_across_awk_flavours() -> None:
+    body = "## Notes\n```\n## Plan\n```\n## Plan\nreal\n## Other\nx\n"
     plan = (
-        "## Plan\n\n- [x] a\n* [X] b\n```\n- [x] code\n### Deviations\n```\n"
-        "### Tasks\n1. [x] c\n\n### Deviations\n- late\n### Deviations\n- later\n"
+        "## Plan\n\n- [x] a\n```\n- [x] code\n### Deviations\n```\n"
+        "### Deviations\n- late\n"
     )
-    awk = SCRIPTS / "_sections.awk"
     flavours = [
         cmd
         for cmd in (["gawk"], ["mawk"], ["busybox", "awk"], ["awk"])
         if shutil.which(cmd[0])
     ]
-    assert len(flavours) >= 2
 
-    def run(cmd: list[str], text: str, *flags: str) -> str:
+    def run(cmd: list[str], text: str, mode: str) -> str:
         return subprocess.run(
-            [*cmd, *flags, "-f", str(awk)],
+            [*cmd, "-v", f"mode={mode}", "-f", str(SCRIPTS / "_sections.awk")],
             input=text,
             text=True,
             capture_output=True,
@@ -984,179 +474,38 @@ def test_sections_awk_is_portable_across_awk_flavours() -> None:
         ).stdout
 
     seen = {
-        (
-            run(cmd, body, "-v", "mode=split", "-v", "want=Summary"),
-            run(cmd, body, "-v", "mode=headings"),
-            run(cmd, plan, "-v", "mode=planbody"),
-            run(cmd, plan, "-v", "mode=h3"),
-            run(cmd, plan, "-v", "mode=devtail"),
-        )
+        (run(cmd, body, "h2"), run(cmd, body, "plan"), run(cmd, plan, "planhash"))
         for cmd in flavours
     }
     assert len(seen) == 1
-    ((split, headings, planbody, h3, devtail),) = seen
-    assert split == "## Summary\nreal\n"
-    assert headings == "## Notes\n## Summary\n"
-    # Ticks normalised everywhere outside fences, cut at the FIRST real heading.
-    assert planbody == (
-        "## Plan\n\n- [ ] a\n* [ ] b\n```\n- [x] code\n### Deviations\n```\n"
-        "### Tasks\n1. [ ] c\n\n"
-    )
-    assert h3 == "### Tasks\n### Deviations\n### Deviations\n"
-    assert devtail == "- late\n### Deviations\n- later\n"
+    ((h2, section, planhash),) = seen
+    assert h2 == "## Notes\n## Plan\n## Other\n"
+    assert section == "## Plan\nreal\n"
+    assert planhash == "## Plan\n\n- [ ] a\n```\n- [x] code\n### Deviations\n```\n"
 
 
-def test_implement_stop_cannot_resurrect_a_reopened_stage(project: Path) -> None:
+def test_plan_template_passes_its_own_approval_rules(project: Path) -> None:
+    text = (SCRIPTS.parent / "plan/plan-template.md").read_text()
+    block = text.split("```markdown\n", 1)[1].split("\n```", 1)[0] + "\n"
+    _advance(project, "plan")
+    _write_body(project, block)
+
+    _run(project, "approve", "r1", "plan", *QUOTE)
+
+    assert _stage(project) == "implement"
+
+
+def test_small_cycle_is_approved_once_and_shown_by_state(project: Path) -> None:
+    _write_body(project, PLAN.replace("### Tasks", "- Implement: inline\n\n### Tasks"))
+
+    out = _run(project, "approve", "r1", "proposal-and-plan", *QUOTE).stdout
+
+    assert "implement inline" in out
+    assert "implement: inline\n" in _run(project, "state", "r1").stdout
+
+
+def test_implement_defaults_to_subagent(project: Path) -> None:
+    assert "implement: \n" in _run(project, "state", "r1").stdout
     _advance(project, "implement")
-    _run(project, "reopen", "r1", "plan")
 
-    _run(project, "ledger", "r1", "--marker", "implement-stop", "subagent crashed")
-    after_plan = _run(project, "state", "r1").stdout
-
-    _run(project, "reopen", "r1", "proposal")
-    _run(project, "approve", "r1", "proposal", *QUOTE)
-    _run(project, "ledger", "r1", "--marker", "implement-stop", "again")
-    after_proposal = _run(project, "state", "r1").stdout
-
-    assert "stage: plan" in after_plan
-    assert "stage: plan" in after_proposal
-    refused = _run(project, "ledger", "r1", "--marker", "base", check=False)
-    assert refused.returncode == 7
-
-
-def test_plan_template_passes_its_own_approval_rules() -> None:
-    path = SCRIPTS.parent / "plan/plan-template.md"
-    text = path.read_text()
-    block = text.split("```markdown\n", 1)[1].split("\n```", 1)[0]
-    awk = SCRIPTS / "_sections.awk"
-
-    def run(mode: str) -> str:
-        return subprocess.run(
-            ["awk", "-v", f"mode={mode}", "-f", str(awk)],
-            input=block,
-            text=True,
-            capture_output=True,
-            check=True,
-        ).stdout
-
-    assert run("devtail").strip() == ""
-    assert run("h3").splitlines()[-1] == "### Deviations"
-    assert run("h3").count("### Deviations") == 1
-    assert block.count("- [ ] 2.") == 1
-
-
-def test_state_never_archives_but_a_direct_workspace_call_does(
-    project: Path,
-) -> None:
-    workspace = _advance(project, "implement")
-    _hiraku(project, "record", "update", "r1", "--markdown-file", str(_empty(project)))
-
-    state = _run(project, "state", "r1")
-
-    assert "empty but its workspace has content" in state.stderr
-    assert "stage: define" in state.stdout
-    assert "proposal changed after approval" in state.stdout
-    assert (workspace / "ledger.md").is_file()
-    assert not (workspace.parents[1] / "archive").exists()
-    _run(project, "workspace", "r1")
-    assert list((workspace.parents[1] / "archive").glob("r1-*"))
-
-
-def test_state_shows_only_approvals_still_in_force(project: Path) -> None:
-    _advance(project, "implement")
-    _run(project, "reopen", "r1", "proposal")
-
-    out = _run(project, "state", "r1").stdout
-
-    assert "stage: define" in out
-    assert "mode: implement" not in out
-    assert "approval-quote" not in out
-
-
-def test_invalid_utf8_cannot_hide_a_marker(project: Path) -> None:
-    workspace = _workspace(project)
-    _write_proposal_and_plan(workspace)
-    _run(project, "push", "r1")
-
-    _run(project, "approve", "r1", "proposal", "--quote", b"ja \xff\xfe ok")
-    _run(project, "ledger", "r1", b"latin1 \xe9 note")
-
-    assert _stage(project) == "plan"
-
-
-def test_malformed_markers_are_reported_not_silently_ignored(project: Path) -> None:
-    workspace = _workspace(project)
-    with (workspace / "ledger.md").open("a") as ledger:
-        ledger.write("2026-01-01T00:00:00Z proposal approved | quote: x\n")
-
-    out = _run(project, "state", "r1").stdout
-
-    assert "stage: define" in out
-    assert "warning: ignored malformed marker" in out
-
-
-def test_push_explains_why_summary_cannot_be_dropped(project: Path) -> None:
-    workspace = _workspace(project)
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-    _run(project, "push", "r1")
-    (workspace / "summary.md").write_text("")
-
-    result = _run(project, "push", "r1", check=False)
-
-    assert result.returncode == 3
-    assert "cannot be dropped" in result.stderr
-    assert "--drop summary" not in result.stderr
-
-
-def test_plan_with_two_mode_lines_is_not_approved(project: Path) -> None:
-    workspace = _workspace(project)
-    _write_proposal_and_plan(workspace, mode="implement", auto="no")
-    plan = (workspace / "plan.md").read_text()
-    (workspace / "plan.md").write_text(
-        plan.replace(
-            "- Mode: implement\n", "- Mode: implement\n- Mode: implement-and-run\n"
-        )
-    )
-    _run(project, "push", "r1")
-    _run(project, "approve", "r1", "proposal", *QUOTE)
-
-    result = _run(
-        project, "approve", "r1", "plan", "implement", "no", *QUOTE, check=False
-    )
-
-    assert result.returncode == 3
-    assert "exactly one '- Mode:'" in result.stderr
-
-
-def test_review_dispatch_is_tracked_and_reopen_waits_for_subagents(
-    project: Path,
-) -> None:
-    _advance(project, "review")
-    _run(project, "ledger", "r1", "--marker", "review-started")
-    started = _run(project, "state", "r1").stdout
-    refused = _run(project, "reopen", "r1", "plan", check=False)
-
-    _run(project, "ledger", "r1", "--marker", "review-stop", "reviewer died")
-    stopped = _run(project, "state", "r1").stdout
-
-    assert "dispatched: yes" in started
-    assert refused.returncode == 7
-    assert "still dispatched" in refused.stderr
-    assert "dispatched: no" in stopped
-    _run(project, "reopen", "r1", "plan")
-    assert _stage(project) == "plan"
-
-
-def test_reordered_body_is_reported_when_push_recovers(project: Path) -> None:
-    workspace = _workspace(project)
-    (workspace / "summary.md").write_text("## Summary\n\n- Status: proposed\n")
-    (workspace / "plan.md").write_text("## Plan\n\n- [ ] 1\n")
-    _run(project, "push", "r1")
-    reordered = project / "reordered.md"
-    reordered.write_text("## Plan\n\n- [ ] 1\n\n## Summary\n\n- Status: proposed\n")
-    _hiraku(project, "record", "update", "r1", "--markdown-file", str(reordered))
-
-    result = _run(project, "push", "r1")
-
-    assert "matches the workspace parts" in result.stderr
-    assert _body(project, "r1").startswith("## Summary")
+    assert "implement: subagent\n" in _run(project, "state", "r1").stdout
