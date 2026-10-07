@@ -81,10 +81,13 @@ The example exercises the complete Hiraku workflow:
 
 ```mermaid
 flowchart TD
-    A[MLP baseline] --> B[Literature review]
-    B --> C[Propose one experiment]
-    C --> D[Run and analyze]
-    D --> E{Continue?}
-    E -->|Yes| C
-    E -->|Stop or budget reached| F[Conclusion]
+    T[Research task] --> L[Review literature]
+    L --> B[Create and run MLP baseline]
+    B --> P[Propose next experiment]
+    P --> R[Implement, launch, and analyze]
+    R --> D{Continue?}
+    D -->|Yes| P
+    D -->|No or budget reached| F[Conclude]
 ```
+
+The task is the root record. The MLP baseline and each follow-up are experiment records under that task.
