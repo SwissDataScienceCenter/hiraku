@@ -9,6 +9,9 @@ from mcp.server.mcpserver import MCPServer
 
 from ...core.config import HirakuConfig
 from ...core.errors import ValidationError
+from ...core.experiments import (
+    commit_implementation as commit_experiment_implementation,
+)
 from ...core.git import GitRepository
 from ...core.launch_job import get_launch_status as read_launch_status
 from ...core.launch_job import submit_launch
@@ -26,83 +29,9 @@ def register(
         record_id: str, paths: list[str], message: str
     ) -> dict[str, Any]:
         """Validate and commit explicitly selected implementation files."""
-        config = get_config()
-        record = load_record(record_id, config=config)
-        if record.type != "experiment":
-            raise ValidationError("Implementation requires an experiment record")
-        if not paths or not message.strip():
-            raise ValidationError("paths and message must be non-empty")
-        git = GitRepository(config)
-        resolved_paths: list[str] = []
-        for path in paths:
-            candidate = (config.root / path).resolve()
-            try:
-                candidate.relative_to(config.root.resolve())
-            except ValueError as exc:
-                raise ValidationError(f"Path is outside the project: {path}") from exc
-            if (
-                candidate == config.hiraku_dir
-                or config.hiraku_dir in candidate.parents
-                or ".git" in candidate.parts
-            ):
-                raise ValidationError(
-                    "Hiraku state and Git metadata cannot be implementation paths"
-                )
-            if not candidate.is_file():
-                raise ValidationError(f"Implementation file does not exist: {path}")
-            resolved_paths.append(str(candidate.relative_to(config.root.resolve())))
-        staged_paths = {
-            path
-            for path in git._git("diff", "--cached", "--name-only", "-z").stdout.split(
-                "\0"
-            )
-            if path
-        }
-        unrelated_staged = staged_paths.difference(resolved_paths)
-        if unrelated_staged:
-            raise ValidationError(
-                f"Refusing to commit unrelated staged paths: {sorted(unrelated_staged)}"
-            )
-        git._git("add", "--", *resolved_paths)
-        git._git("diff", "--cached", "--check")
-        changed_paths = {
-            path
-            for path in git._git("diff", "--cached", "--name-only", "-z").stdout.split(
-                "\0"
-            )
-            if path
-        }
-        if not changed_paths:
-            untracked_paths = [
-                path
-                for path in resolved_paths
-                if git._git("ls-files", "--error-unmatch", path, check=False).returncode
-                != 0
-            ]
-            if untracked_paths:
-                raise ValidationError(
-                    "No implementation changes were staged and these paths are not "
-                    f"tracked: {untracked_paths}"
-                )
-            record.commit = git.head
-            record.status = "implemented"
-            record.save()
-            return {
-                "record_id": record.id,
-                "commit": record.commit,
-                "committed_paths": [],
-                "bound_paths": resolved_paths,
-            }
-        git._git("-c", "commit.gpgSign=false", "commit", "-m", message)
-        commit = git.head
-        record.commit = commit
-        record.status = "implemented"
-        record.save()
-        return {
-            "record_id": record.id,
-            "commit": commit,
-            "committed_paths": resolved_paths,
-        }
+        return commit_experiment_implementation(
+            record_id, paths, message, config=get_config()
+        )
 
     @server.tool()
     def launch_experiment(
@@ -111,7 +40,11 @@ def register(
         args: dict[str, Any] | None = None,
         cpu_time_limit_seconds: int | None = None,
     ) -> dict[str, Any]:
-        """Submit a committed experiment and return its launch handle."""
+        """Submit a committed experiment and return its launch handle.
+
+        ``cpu_time_limit_seconds`` applies per process on POSIX systems; it does
+        not cap aggregate CPU usage or elapsed wall-clock time for the job.
+        """
         config = get_config()
         record = load_record(record_id, config=config)
         if record.type != "experiment" or not record.commit:

@@ -33,8 +33,7 @@ does not set one by default.
 
 Count every attempted experiment, including failed, invalid, and discarded
 attempts. Do not launch another experiment after the experiment budget is
-exhausted. A task's `experiment_budget` field is informational and does not
-override the Program or explicit session limits.
+exhausted.
 
 Record the primary metric, evaluation protocol, and implementation files in
 scope before the first proposal. If a limit or scope is missing and cannot be

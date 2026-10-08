@@ -29,8 +29,6 @@ def register(
             "goal": task.goal,
             "metrics": [metric.model_dump() for metric in task.metrics],
         }
-        if task.experiment_budget is not None:
-            task_fields["experiment_budget"] = task.experiment_budget
         if task.tracking_backend is not None:
             task_fields["tracking_backend"] = task.tracking_backend
         record = Record.create(

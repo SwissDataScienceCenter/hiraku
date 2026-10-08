@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..core.record import Metric
 
@@ -26,11 +26,12 @@ class ExperimentProposal(BaseModel):
 
 
 class ResearchTask(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(min_length=1)
     goal: str = Field(min_length=1)
     metrics: list[Metric] = Field(min_length=1)
     protocol: str = Field(min_length=1)
-    experiment_budget: int | None = Field(default=None, gt=0)
     tracking_backend: dict[str, Any] | None = None
 
 

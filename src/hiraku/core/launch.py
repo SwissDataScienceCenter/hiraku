@@ -110,8 +110,9 @@ def launch(
         commit: Optional Git ref supplied to the dispatcher.
         dispatch: Optional dispatcher script override.
         env: Additional environment variables.
-        cpu_time_limit_seconds: Optional per-process CPU time limit. Supported on
-            POSIX project hosts.
+        cpu_time_limit_seconds: Optional POSIX ``RLIMIT_CPU`` limit, measured in
+            CPU seconds for each process. It is not an aggregate or elapsed-time
+            limit for the full experiment or its child processes.
         capture_output: Capture child output in the result instead of streaming it.
         check: Raise on non-zero child exit when true.
         config: Project configuration; discovered when omitted.

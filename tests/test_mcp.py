@@ -7,9 +7,11 @@ import time
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.core.config import HirakuConfig
 from hiraku.core.errors import ValidationError
+from hiraku.core.experiments import commit_implementation as commit_core_implementation
 from hiraku.core.record import Record
 from hiraku.mcp import (
     Analysis,
@@ -60,11 +62,20 @@ def test_mcp_guided_heart_disease_cycle(tmp_path: Path) -> None:
                 {"name": "val/accuracy", "direction": "maximize"},
             ],
             protocol="Use a fixed stratified split and seed.",
-            experiment_budget=3,
         )
     )
     assert created_task["type"] == "task"
-    assert Record.load(config.records_dir / "heart-disease/heart-disease.md").goal
+    task_record = Record.load(config.records_dir / "heart-disease/heart-disease.md")
+    assert task_record.goal
+    assert "experiment_budget" not in task_record.to_dict()
+    with pytest.raises(PydanticValidationError, match="experiment_budget"):
+        ResearchTask(
+            id="invalid-budget-task",
+            goal="A task should not define the Program budget.",
+            metrics=[{"name": "val/accuracy", "direction": "maximize"}],
+            protocol="Fixed protocol.",
+            experiment_budget=3,
+        )
     review = save_literature_review(
         "heart-disease",
         LiteratureReview(
@@ -190,10 +201,11 @@ def test_mcp_guided_heart_disease_cycle(tmp_path: Path) -> None:
         )
     git(tmp_path, "reset", "--", "unrelated.py")
 
-    committed = commit_implementation(
+    committed = commit_core_implementation(
         "logistic-guided",
         ["train.py"],
         "test: retain seeded logistic baseline",
+        config=config,
     )
     assert committed["commit"] == git(tmp_path, "rev-parse", "HEAD")
     assert committed["committed_paths"] == ["train.py"]
@@ -256,7 +268,6 @@ def test_create_task_persists_tracking_backend_without_connecting(
             goal="Keep task tracking configuration with task state.",
             metrics=[{"name": "val/accuracy", "direction": "maximize"}],
             protocol="Fixed protocol.",
-            experiment_budget=2,
             tracking_backend={"type": "wandb", "project": "tracked-task"},
         )
     )

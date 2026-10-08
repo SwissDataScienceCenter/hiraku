@@ -178,6 +178,9 @@ separate campaign or experiment-approval system. Programs define the research
 workflow, iteration budget, and stopping conditions; Hiraku validates research
 records, implementation paths, commit provenance, dispatch, and run tracking.
 Launcher-level CPU limits remain available where supported.
+On POSIX, the optional launch CPU limit uses `RLIMIT_CPU` and applies per
+process. It does not cap aggregate CPU usage across a multi-process experiment
+or its elapsed wall-clock duration.
 
 Literature reviews are stored separately as task-linked Context records. The
 MCP `save_literature_review` operation records a synthesis, candidate

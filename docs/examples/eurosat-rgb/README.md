@@ -86,7 +86,7 @@ The autoresearch Program defines the experiment budget and stopping rules; the
 coding harness controls which operations are permitted.
 
 !!! info "Bounded autonomous run"
-    The Program counts every attempted experiment, including failed runs, against its session budget. The Hiraku task's `experiment_budget` value is informational.
+    The Program counts every attempted experiment, including failed runs, against its session budget. Experiment count and stopping rules come from the Program and session request.
 
 ```text
 Create the Hiraku task `eurosat-rgb` if it does not already exist.
