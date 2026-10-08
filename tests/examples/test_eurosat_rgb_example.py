@@ -25,13 +25,14 @@ def test_eurosat_rgb_example_initializes_without_downloading_data(
     ).read_text()
 
 
-def test_eurosat_trainer_starts_with_only_the_mlp_baseline() -> None:
+def test_eurosat_trainer_leaves_model_implementation_to_experiments() -> None:
     source = (EXAMPLE / "src/train.py").read_text(encoding="utf-8")
 
     assert "datasets.EuroSAT(" in source
     assert "download=True" in source
-    assert 'choices=["mlp"]' in source
-    assert "class FlattenedPixelMLP" in source
+    assert "class FlattenedPixelMLP" not in source
+    assert 'choices=["mlp"]' not in source
+    assert "Model {model_name!r} is not implemented" in source
     assert "ShallowCNN" not in source
     assert "RandomForest" not in source
     assert "processed.cleveland" not in source

@@ -1,5 +1,0 @@
-default_dispatch: launch.sh
-default_program: eurosat-autoresearch
-tracking_backend:
-  type: wandb
-  project: eurosat-rgb

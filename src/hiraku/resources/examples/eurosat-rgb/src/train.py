@@ -12,7 +12,6 @@ from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
 IMAGE_SIZE = 64
-CHANNELS = 3
 DEFAULT_EPOCHS = 10
 PROVENANCE_VARIABLES = (
     "HIRAKU_RECORD_ID",
@@ -23,26 +22,11 @@ PROVENANCE_VARIABLES = (
 )
 
 
-class FlattenedPixelMLP(nn.Module):
-    """One hidden layer over flattened RGB pixels."""
-
-    def __init__(self, num_classes: int) -> None:
-        super().__init__()
-        self.layers = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(CHANNELS * IMAGE_SIZE * IMAGE_SIZE, 128),
-            nn.ReLU(),
-            nn.Linear(128, num_classes),
-        )
-
-    def forward(self, images: torch.Tensor) -> torch.Tensor:
-        return self.layers(images)
-
-
 def build_model(model_name: str, num_classes: int) -> nn.Module:
-    if model_name == "mlp":
-        return FlattenedPixelMLP(num_classes)
-    raise ValueError(f"Unsupported model: {model_name}")
+    """Create the architecture implemented for the current experiment."""
+    raise NotImplementedError(
+        f"Model {model_name!r} is not implemented; add it for the experiment."
+    )
 
 
 def stratified_indices(
@@ -114,7 +98,9 @@ def evaluate(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["mlp"], required=True)
+    parser.add_argument(
+        "--model", required=True, help="Name of the implemented experiment model"
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--validation-fraction", type=float, default=0.2)
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)

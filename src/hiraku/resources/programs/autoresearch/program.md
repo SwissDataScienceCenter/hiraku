@@ -16,10 +16,9 @@ Before starting, verify that the selected task defines enough of the research co
 - a research objective or question,
 - declared metrics and their directions,
 - an evaluation protocol,
-- a baseline or meaningful comparison,
 - experiment, run, time, compute, or cost limits as applicable.
 
-If these are materially incomplete, stop and return to guided research design rather than inventing them during the loop.
+If these are materially incomplete, stop and return to guided research design rather than inventing them during the loop. A baseline is not a precondition when the task needs one: establish the baseline as the first experiment before testing improvements.
 
 ## 1. Inspect
 
@@ -41,6 +40,14 @@ Research relationships and execution configuration are separate. Do not assume t
 
 Choose one focused next experiment grounded in the current evidence.
 
+If the task needs a baseline and no valid baseline exists yet, make the
+baseline the next experiment. Use the task's stated reference method when
+available; otherwise choose the simplest meaningful comparison justified by
+the research question and protocol. Implement and evaluate it before proposing
+architectural improvements. Do not let the absence of baseline results block
+the baseline itself. Once a valid baseline exists, choose follow-up experiments
+that test whether a justified change improves on it.
+
 The experiment must state:
 
 - one falsifiable hypothesis,
@@ -50,6 +57,10 @@ The experiment must state:
 - what observation would support or refute the hypothesis,
 - the evaluation needed to distinguish the relevant explanations,
 - the experiment-local execution required to test it.
+
+For a baseline, the hypothesis may establish an expected reference result and
+the measurement needed to make later comparisons meaningful; it need not claim
+that the baseline improves on a prior method.
 
 Before proposing it, verify that the experiment is:
 

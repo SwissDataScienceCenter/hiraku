@@ -1,2 +1,2 @@
 id: eurosat-rgb
-description: Compare a flattened-pixel MLP and shallow CNN on EuroSAT RGB with a fixed number of training epochs.
+description: Review evidence, establish a flattened-pixel MLP baseline, and test justified image-classification improvements on EuroSAT RGB.

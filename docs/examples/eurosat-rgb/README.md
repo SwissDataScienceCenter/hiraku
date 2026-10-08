@@ -8,7 +8,7 @@ This example demonstrates the full Hiraku research workflow on a small image-cla
 
 The research loop uses literature evidence and experimental results to decide which architectural changes are worth testing next.
 
-The starter implementation contains only the MLP baseline. Follow-up architectures are intentionally not predefined: the literature review and autoresearch loop should motivate and implement them.
+The starter contains the data and training scaffold, but no model implementation. The workflow reviews the literature first, implements and runs the flattened-image MLP as the baseline, then uses the review and baseline results to choose follow-up experiments that may improve it.
 
 All experiments use the same dataset split, seed, optimizer settings, and training budget so architectural changes can be compared under a stable evaluation protocol.
 
@@ -16,9 +16,6 @@ W&B records training and validation loss and accuracy after every epoch, togethe
 
 !!! question "Research question"
     Under a fixed number of training epochs, which architectural inductive biases most improve EuroSAT RGB land-cover classification over a flattened-image MLP baseline?
-
-!!! info "Starting point"
-    The starter implementation contains only the flattened-image MLP baseline. Follow-up architectures are chosen from literature evidence and experimental results.
 
 !!! tip "Evaluation and tracking"
     Experiments share the same dataset split, seed, optimizer settings, and training budget. W&B records validation loss and accuracy, parameter count, and per-epoch CPU time.
@@ -83,8 +80,10 @@ pi mcp add alphaxiv --url https://api.alphaxiv.org/mcp/v1 --bearer-token-env-var
 
 After initialization, give a coding agent the prompt below. The prompt defines
 the sequence across the reusable `literature-review` and `autoresearch`
-Programs. The user's explicit instruction to continue into autoresearch is the
-handoff after the literature review.
+Programs: review the literature, establish the MLP baseline, then run justified
+follow-up experiments. The explicit handoff continues into autoresearch after
+the review; autoresearch establishes a missing baseline before testing
+improvements.
 
 !!! info "Bounded autonomous run"
     The prompt explicitly authorizes the complete loop, so the agent does not pause for per-experiment approval. It must stop at the experiment limit or if it needs a decision outside the authorization.
@@ -99,11 +98,10 @@ Use W&B project `eurosat-rgb`.
 Use the following protocol: EuroSAT RGB at 64x64 resolution, stratified 80/20 train/validation split, seed 42, Adam with learning rate 0.001, batch size 64, 10 epochs, CPU only, and no pretrained models.
 Record this protocol and a total experiment budget of five, including the baseline, on the task.
 
-Create and launch the flattened-image MLP baseline through Hiraku if it does not already exist.
-Then do a literature review to review architectural inductive biases for small image classification models.
+Do a literature review to identify architectural inductive biases that have been shown to improve image classification on small datasets without pretrained models.
 Focus on approaches that train quickly on CPU and can be compared fairly with the MLP.
 Identify evidence-backed directions that may improve EuroSAT RGB classification without pretrained models.
-After delivering the review, run an autoresearch loop until the budget is reached, no justified experiment remains, a run or project constraint blocks safe progress, or continuing would require changing the research question, metrics, protocol, or authorized scope.
+After delivering the review, continue directly into the autoresearch Program. If the baseline does not already exist, implement and launch the flattened-image MLP baseline first. Then use the review and baseline results to run justified follow-up experiments until the budget is reached, no justified experiment remains, a run or project constraint blocks safe progress, or continuing would require changing the research question, metrics, protocol, or authorized scope.
 ```
 
 ## Expected research flow
