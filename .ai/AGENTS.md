@@ -71,6 +71,7 @@ The repository is a single `uv`-managed Python project.
 | Path | Purpose |
 | --- | --- |
 | `.ai/` | Canonical portable AI-agent resources and instructions |
+| `.ai/skills/alphaxiv/` | AlphaXiv skills for literature review |
 | `.ai/skills/hiraku/` | Hiraku usage skill |
 | `src/hiraku/` | Installed Python package |
 | `src/hiraku/base.py` | Generic Markdown record serialization and validation |
