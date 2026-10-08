@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Print the record's workspace and refresh body.md from the record body. Refuses
+# when body.md holds edits that were never saved, unless --discard is given.
+#
+# Usage: open RECORD_ID [--discard]
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+[ $# -ge 1 ] && [ $# -le 2 ] && [ "${2:---discard}" = --discard ] \
+  || { echo "usage: open RECORD_ID [--discard]" >&2; exit 2; }
+dir=$(workspace_dir "$1")
+if [ -z "${2:-}" ] && [ -f "$dir/body.md" ] && [ -f "$dir/.body-sha" ] \
+   && [ "$(sha_of < "$dir/body.md")" != "$(cat "$dir/.body-sha")" ]; then
+  echo "body.md has unsaved edits: run 'save $1', or 'open $1 --discard' to drop them" >&2
+  exit 4
+fi
+body_of "$1" > "$dir/body.md"
+sha_of < "$dir/body.md" > "$dir/.body-sha"
+printf '%s\n' "$dir"

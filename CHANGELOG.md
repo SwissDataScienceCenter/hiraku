@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Add the `hiraku-powers` agent skills (define, plan, implement, and review a record through gated stages, with approvals pinned in a git-ignored ledger and enforced by helper scripts) and install them with `hiraku init`; skills are now discovered under `.ai/skills/` and flattened into `.claude/skills/` and `.agents/skills/`.
+- Add `hiraku init --skills-only` to install or refresh the bundled agent skills in an existing project.
+
 ## [0.1.1] - 2026-09-30
 
 ### Added

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# After the user approved the review: store result.md and decision.md in the
+# record's `result` and `decision` fields and set `status` (default reviewed).
+# Each file is plain text without a heading. Needs stage present.
+#
+# Usage: finalize RECORD_ID [STATUS]
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+[ $# -ge 1 ] && [ $# -le 2 ] || { echo "usage: finalize RECORD_ID [STATUS]" >&2; exit 2; }
+require_stage "$1" present
+dir=$(workspace_dir "$1")
+for f in result.md decision.md; do
+  grep -q '[^[:space:]]' "$dir/$f" 2>/dev/null || { echo "$f is missing or blank in $dir" >&2; exit 3; }
+done
+# JSON strings are valid YAML scalars, so any text is quoted safely.
+hk record update \
+  --set "result=$(jq -Rs 'rtrimstr("\n")' < "$dir/result.md")" \
+  --set "decision=$(jq -Rs 'rtrimstr("\n")' < "$dir/decision.md")" \
+  --set "status=$(jq -n --arg s "${2:-reviewed}" '$s')" -- "$1" >/dev/null
+ledger_append "$dir" "finalized"
+echo "finalized $1"

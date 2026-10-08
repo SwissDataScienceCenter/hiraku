@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Append a note or a marker to the record's ledger. Notes are stored as
+# "note: ..." and never count as markers.
+#
+# Usage: ledger RECORD_ID "note text"
+#        ledger RECORD_ID --marker MARKER [reason]
+# Markers (each checks its stage):
+#   implement-started   main agent, at dispatch; removes a stale implement-notes.md
+#   base                implementer, once, after switching branch; records HEAD
+#   implement-done      needs a bound commit and implement-notes.md "Status: DONE"
+#   implement-stop R    implementer, or the main agent closing a lost subagent
+#   review-started      main agent, at review dispatch
+#   review-stop R       main agent closing a reviewer that left no drafts
+#   review-drafted      needs review-notes.md, result.md and decision.md
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+usage() { sed -n '2,/^set -euo/p' "$0" | grep '^#' | sed 's/^# \{0,1\}//' >&2; exit 2; }
+[ $# -ge 2 ] || usage
+id=$1
+dir=$(workspace_dir "$id")
+if [ "$2" != --marker ]; then
+  [ $# -eq 2 ] || usage
+  ledger_append "$dir" "note: $2"
+  exit 0
+fi
+[ $# -ge 3 ] || usage
+reason() { [ -n "${1:-}" ] || { echo "this marker needs a reason" >&2; exit 2; }; }
+nonblank() {
+  local f
+  for f in "$@"; do
+    grep -q '[^[:space:]]' "$dir/$f" 2>/dev/null || { echo "$f is missing or blank in $dir" >&2; exit 3; }
+  done
+}
+case "$3" in
+  implement-started)
+    require_stage "$id" implement
+    rm -f "$dir/implement-notes.md"
+    ledger_append "$dir" "implement started" ;;
+  base)
+    require_stage "$id" implement
+    existing=$(grep -E "${LEDGER_LINE}base " "$dir/ledger.md" | head -n1 | cut -d' ' -f3 || true)
+    if [ -n "$existing" ]; then echo "base already recorded: $existing"; exit 0; fi
+    ledger_append "$dir" "base $(git rev-parse HEAD)"
+    echo "base $(git rev-parse HEAD)" ;;
+  implement-done)
+    require_stage "$id" implement
+    [ -n "$(field_of "$id" commit)" ] || { echo "no commit is bound to $id; bind it first" >&2; exit 3; }
+    [ "$(head -n1 "$dir/implement-notes.md" 2>/dev/null | tr -d '\r')" = "Status: DONE" ] \
+      || { echo "implement-notes.md must start with 'Status: DONE'" >&2; exit 3; }
+    ledger_append "$dir" "implement done"
+    set_status "$id" implemented ;;
+  implement-stop)
+    # Stage plan too: an implementer must be able to stop after the plan drifted.
+    require_stage "$id" implement plan
+    reason "${4:-}"
+    ledger_append "$dir" "implement stop: $4" ;;
+  review-started)
+    require_stage "$id" review
+    ledger_append "$dir" "review started" ;;
+  review-stop)
+    require_stage "$id" review
+    reason "${4:-}"
+    ledger_append "$dir" "review stop: $4" ;;
+  review-drafted)
+    require_stage "$id" review
+    nonblank review-notes.md result.md decision.md
+    ledger_append "$dir" "review drafted" ;;
+  *) usage ;;
+esac
+[ "$3" = base ] || echo "ledger $id: $3"

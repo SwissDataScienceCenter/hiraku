@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# List records with a workspace that are not done, with their stage.
+#
+# Usage: inprogress
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+root=$(hk status --json | jq -er '.project_root')
+found=0
+for ws in "$root"/.hiraku-powers/records/*/; do
+  [ -f "$ws/ledger.md" ] || continue
+  id=$(basename "$ws")
+  stage=$(bash "$here/state" "$id" 2>/dev/null | sed -n 's/^stage: //p') || continue
+  [ -n "$stage" ] && [ "$stage" != done ] || continue
+  printf '%s\t%s\n' "$id" "$stage"
+  found=1
+done
+[ "$found" = 1 ] || echo "no unfinished records"

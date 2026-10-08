@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Record an approval the user gave in this conversation, with their words.
+# Running it without their explicit yes fabricates an approval.
+#   proposal            needs stage define and the record fields `hypothesis`
+#                       and `success_criterion`; pins both
+#   plan                needs stage plan and a saved `## Plan` with one
+#                       "- Mode:" line (implement | implement-and-run), one
+#                       "- Auto-continue to review:" line (yes | no), at most
+#                       one "- Implement:" line (subagent | inline), and
+#                       "### Deviations" as its last ### heading; pins the plan
+#                       above that heading, ignoring ticks
+#   proposal-and-plan   both at once, for the fast path (stage define)
+#
+# Usage: approve RECORD_ID proposal|plan|proposal-and-plan --quote TEXT
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+usage() { echo "usage: approve RECORD_ID proposal|plan|proposal-and-plan --quote TEXT" >&2; exit 2; }
+[ $# -eq 4 ] && [ "$3" = --quote ] || usage
+id=$1 kind=$2
+quote=$(printf '%s' "$4" | tr '\r\n' '  ')
+printf '%s' "$quote" | grep -q '[^[:space:]]' || { echo "--quote must hold the user's words" >&2; exit 2; }
+case "$kind" in proposal|plan|proposal-and-plan) ;; *) usage ;; esac
+dir=$(workspace_dir "$id")
+
+check_proposal() {
+  local f
+  for f in hypothesis success_criterion; do
+    [ -n "$(field_of "$id" "$f")" ] \
+      || { echo "record $id has no '$f' field; set it with 'hiraku record update --set'" >&2; exit 3; }
+  done
+}
+
+check_plan() {
+  local plan h3 label
+  if [ -f "$dir/body.md" ] && [ -f "$dir/.body-sha" ] \
+     && [ "$(sha_of < "$dir/body.md")" != "$(cat "$dir/.body-sha")" ]; then
+    echo "body.md has unsaved edits; run 'save $id' first" >&2; exit 3
+  fi
+  plan=$(body_of "$id" | plan_of)
+  [ -n "$plan" ] || { echo "the record body has no '## Plan'; write it and save" >&2; exit 3; }
+  h3=$(printf '%s\n' "$plan" | awk -v mode=h3 -f "$SECTIONS")
+  [ "$(printf '%s\n' "$h3" | grep -cx '### Deviations' || true)" = 1 ] \
+    && [ "$(printf '%s\n' "$h3" | tail -n1)" = '### Deviations' ] \
+    || { echo "the plan needs one '### Deviations' heading as its last ### heading" >&2; exit 3; }
+  for label in "Mode" "Auto-continue to review"; do
+    [ "$(printf '%s\n' "$plan" | plan_field "$label" | wc -l | tr -d ' ')" = 1 ] \
+      || { echo "the plan needs exactly one '- $label:' line" >&2; exit 3; }
+  done
+  mode=$(printf '%s\n' "$plan" | plan_field Mode)
+  auto=$(printf '%s\n' "$plan" | plan_field "Auto-continue to review")
+  case "$mode" in implement|implement-and-run) ;; *)
+    echo "plan '- Mode:' must be implement or implement-and-run, not '$mode'" >&2; exit 3 ;; esac
+  case "$auto" in yes|no) ;; *)
+    echo "plan '- Auto-continue to review:' must be yes or no, not '$auto'" >&2; exit 3 ;; esac
+  impl=$(printf '%s\n' "$plan" | plan_field Implement)
+  [ "$(printf '%s\n' "$impl" | grep -c . || true)" -le 1 ] \
+    || { echo "the plan has more than one '- Implement:' line" >&2; exit 3; }
+  case "${impl:-subagent}" in subagent|inline) ;; *)
+    echo "plan '- Implement:' must be subagent or inline, not '$impl'" >&2; exit 3 ;; esac
+  psha=$(printf '%s\n' "$plan" | plan_sha)
+}
+
+case "$kind" in
+  proposal)
+    require_stage "$id" define
+    check_proposal ;;
+  plan)
+    require_stage "$id" plan
+    check_plan ;;
+  proposal-and-plan)
+    require_stage "$id" define
+    check_proposal
+    check_plan ;;
+esac
+if [ "$kind" != plan ]; then
+  ledger_append "$dir" "proposal approved: sha=$(raw_json "$id" | proposal_sha) | quote: $quote"
+  echo "approved $id proposal"
+fi
+if [ "$kind" != proposal ]; then
+  ledger_append "$dir" "plan approved: mode=$mode; auto-continue=$auto; plan-sha=$psha | quote: $quote"
+  set_status "$id" planned
+  echo "approved $id plan: mode $mode, auto-continue $auto, implement ${impl:-subagent}"
+fi
+echo "quote: $quote"

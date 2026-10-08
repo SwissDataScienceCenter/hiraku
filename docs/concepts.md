@@ -48,6 +48,7 @@ hiraku init  # initialize at the current Git repository root
 hiraku init PATH --ignore-git  # explicitly skip Git-root validation
 hiraku init --template ./path/to/template  # apply a local project overlay
 hiraku init --example <name>  # apply the src/ tree of a packaged example
+hiraku init --skills-only  # install or update only the bundled agent skills
 
 hiraku record create <root-id>
 hiraku record create <child-id> --parent <root-id> --type experiment
@@ -147,6 +148,26 @@ Dispatcher names may omit `.sh`, so `--dispatch worktree` selects `worktree.sh`.
 Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code. Other coding
 harnesses can use the same `SKILL.md` when they support compatible project-local
 skills.
+
+`hiraku init` also installs the `hiraku-powers` skills (`hiraku-powers`,
+`hiraku-powers-define`, `-plan`, `-implement`, `-review`). They take one record
+from idea to reviewed result in four stages: the user approves the proposal
+(`hypothesis` and `success_criterion` fields) and the plan (`## Plan` in the
+record body), a subagent implements and runs it, and a second subagent reviews
+the evidence before `result` and `decision` are written. Approvals and progress
+are kept in a git-ignored ledger under `.hiraku-powers/records/<record-id>/`,
+and helper scripts that need `bash` and `jq` enforce the order.
+See [Agent record cycle](guides/hiraku-powers.md) for how to use them.
+
+To install or update the bundled skills in an existing project, run:
+
+```bash
+hiraku init --skills-only
+```
+
+This replaces only the bundled skill directories under `.agents/skills/` and
+`.claude/skills/` (local edits to them are lost) and leaves the rest of the
+project untouched.
 
 ## Actions, Programs, Context
 

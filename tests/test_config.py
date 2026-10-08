@@ -53,17 +53,39 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert (config.actions_dir / "record/propose/action.md").is_file()
     for name in ("launch.sh", "worktree.sh"):
         assert (config.dispatch_dir / name).stat().st_mode & 0o111
+    source_skill = Path(__file__).parents[1] / ".ai/skills/hiraku/SKILL.md"
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
+    assert source_skill.is_file()
+    assert (root / ".agents/skills/hiraku/references").is_dir()
+    assert (root / ".claude/skills/hiraku/references").is_dir()
     assert codex_skill.is_file()
     assert claude_skill.is_file()
-    assert codex_skill.read_text() == claude_skill.read_text()
+    assert codex_skill.read_text() == source_skill.read_text()
+    assert claude_skill.read_text() == source_skill.read_text()
+    assert not (root / ".ai").exists()
+    powers = Path(__file__).parents[1] / ".ai/skills/hiraku-powers"
+    for agent_dir in (".agents/skills", ".claude/skills"):
+        installed = root / agent_dir
+        assert (installed / "hiraku-powers/SKILL.md").read_text() == (
+            powers / "SKILL.md"
+        ).read_text()
+        for stage in ("define", "plan", "implement", "review"):
+            skill = installed / f"hiraku-powers-{stage}/SKILL.md"
+            assert skill.read_text() == (powers / stage / "SKILL.md").read_text()
+            assert f"name: hiraku-powers-{stage}\n" in skill.read_text()
+            # Stages are flattened, not nested inside the group skill.
+            assert not (installed / "hiraku-powers" / stage).exists()
+        scripts = installed / "hiraku-powers/scripts"
+        assert (scripts / "state").stat().st_mode & 0o111
+        assert not (installed / "hiraku-powers-plan/scripts").exists()
     assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
     HirakuConfig.init(without_skill, install_skill=False)
     assert not (without_skill / ".agents").exists()
     assert not (without_skill / ".claude").exists()
+    assert not (without_skill / ".ai").exists()
 
     with pytest.raises(ProjectExistsError):
         HirakuConfig.init(root)
@@ -238,3 +260,65 @@ def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None
     marker.write_text("hiraku_dir: linked\n")
     with pytest.raises(ValidationError):
         HirakuConfig.load(marker)
+
+
+def test_installed_powers_skills_reference_existing_files(tmp_path: Path) -> None:
+    import re
+
+    root = tmp_path / "project"
+    HirakuConfig.init(root)
+    skills = root / ".claude/skills"
+    for skill in sorted(skills.glob("hiraku-powers*")):
+        # Every markdown file of the skill, not only SKILL.md (PROTOCOL.md and
+        # the prompt files also name other files).
+        for doc in sorted(skill.glob("*.md")):
+            text = doc.read_text()
+            targets = [(skill, t) for t in re.findall(r"\]\(([^)#]+\.md)\)", text)]
+            targets += [
+                (skill, t) for t in re.findall(r"`(\.\./[\w-]+/[\w./-]+\.md)`", text)
+            ]
+            targets += [
+                (skills, t)
+                for t in re.findall(r"<skills-dir>/([\w-]+/[\w./-]+\.md)", text)
+            ]
+            targets += [
+                (skills, t)
+                for t in re.findall(r"<skills dir>/([\w-]+/[\w./-]+\.md)", text)
+            ]
+            for base, target in targets:
+                assert (base / target).is_file(), f"{doc.name} -> {target}"
+    assert (skills / "hiraku-powers/PROTOCOL.md").is_file()
+    assert (skills / "hiraku-powers-define/grill-questions.md").stat().st_size > 0
+
+
+def test_skill_name_collisions_are_rejected(tmp_path: Path) -> None:
+    from hiraku.errors import ValidationError
+    from hiraku.project import ProjectInitializer
+
+    for name in ("group", "group-plan"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "SKILL.md").write_text("---\nname: x\n---\n")
+    (tmp_path / "group" / "plan").mkdir()
+    (tmp_path / "group" / "plan" / "SKILL.md").write_text("---\nname: x\n---\n")
+
+    with pytest.raises(ValidationError, match="group-plan"):
+        ProjectInitializer._bundled_skills(tmp_path)
+
+
+def test_editor_and_os_junk_is_not_installed(tmp_path: Path) -> None:
+    from hiraku.project import ProjectInitializer
+
+    source = tmp_path / "source"
+    (source / "__pycache__").mkdir(parents=True)
+    (source / "SKILL.md").write_text("x")
+    for junk in (".DS_Store", "a.swp", "a.pyc", "a~", "__pycache__/m.pyc"):
+        (source / junk).write_text("junk")
+    target = tmp_path / "target"
+    files: list[Path] = []
+    dirs: list[Path] = []
+
+    ProjectInitializer._copy_resource_tree(source, target, files, dirs)
+
+    assert sorted(path.name for path in target.rglob("*") if path.is_file()) == [
+        "SKILL.md"
+    ]

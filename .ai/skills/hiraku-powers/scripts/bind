@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Bind a verified commit (default HEAD) to the record. Binding the same commit
+# again is a no-op; replacing a bound commit needs --rebind and the user's
+# explicit approval. Needs stage implement.
+#
+# Usage: bind RECORD_ID [REF] [--rebind]
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+[ $# -ge 1 ] || { echo "usage: bind RECORD_ID [REF] [--rebind]" >&2; exit 2; }
+id=$1; shift
+ref=HEAD rebind=0
+for arg in "$@"; do
+  case "$arg" in --rebind) rebind=1 ;; *) ref=$arg ;; esac
+done
+require_stage "$id" implement
+current=$(field_of "$id" commit)
+sha=$(git rev-parse --verify "$ref^{commit}")
+if [ "$current" = "$sha" ]; then echo "record $id is already bound to $sha"; exit 0; fi
+if [ -n "$current" ] && [ "$rebind" = 0 ]; then
+  echo "record $id is already bound to $current; --rebind only with the user's approval" >&2
+  exit 5
+fi
+hk record update --commit "$sha" -- "$id" >/dev/null
+ledger_append "$(workspace_dir "$id")" "bound commit $sha${current:+ (replaced $current)}"
+echo "bound $id to $sha"

@@ -18,6 +18,11 @@ if TYPE_CHECKING:
     from .config import HirakuConfig
 
 
+def _is_junk(name: str) -> bool:
+    """Editor and OS leftovers that must never be installed into a project."""
+    return name in {".DS_Store", "__pycache__"} or name.endswith((".pyc", ".swp", "~"))
+
+
 @dataclass(frozen=True, slots=True)
 class _InitializationResult:
     config: HirakuConfig
@@ -130,22 +135,20 @@ class ProjectInitializer:
                     cls._ensure_directory(directory, created_dirs)
                 resource_root = files("hiraku.resources")
                 copies = [
-                    (resource_root / "programs", config.programs_dir),
-                    (resource_root / "actions", config.actions_dir),
-                    (resource_root / "dispatch", config.dispatch_dir),
+                    (resource_root / "programs", config.programs_dir, ()),
+                    (resource_root / "actions", config.actions_dir, ()),
+                    (resource_root / "dispatch", config.dispatch_dir, ()),
                 ]
                 if install_skill:
-                    copies.extend(
-                        (resource_root / "skill", target)
-                        for target in (
-                            project_root / ".agents/skills/hiraku",
-                            project_root / ".claude/skills/hiraku",
-                        )
-                    )
-                for source, target in copies:
+                    copies.extend(cls._skill_copies(project_root))
+                for source, target, exclude in copies:
                     with as_file(source) as source_path:
                         cls._copy_resource_tree(
-                            source_path, target, created_files, created_dirs
+                            source_path,
+                            target,
+                            created_files,
+                            created_dirs,
+                            exclude=exclude,
                         )
                 cls._apply_overlay(entries, project_root, created_files, created_dirs)
                 for name in ("launch.sh", "worktree.sh"):
@@ -293,9 +296,83 @@ class ProjectInitializer:
                 created_files.append(destination)
                 created.add(destination)
 
+    @classmethod
+    def install_skills(cls, root: Path | str = ".") -> list[Path]:
+        """Install or refresh the bundled agent skills in an existing directory.
+
+        Each bundled skill directory under ``.agents/skills`` and
+        ``.claude/skills`` is replaced, so local edits to those directories are
+        lost and files removed from the bundle disappear. Other skills and
+        project files are left untouched.
+
+        Returns:
+            The installed skill directories.
+        """
+        project_root = Path(root).expanduser().absolute()
+        if not project_root.is_dir():
+            raise ValidationError(f"Directory not found: {project_root}")
+        installed: list[Path] = []
+        for source, target, exclude in cls._skill_copies(project_root):
+            if target.is_symlink() or (target.exists() and not target.is_dir()):
+                raise ValidationError(f"Skill path is not a directory: {target}")
+            if target.exists():
+                shutil.rmtree(target)
+            with as_file(source) as source_path:
+                cls._copy_resource_tree(source_path, target, [], [], exclude=exclude)
+            installed.append(target)
+        return installed
+
+    @classmethod
+    def _skill_copies(
+        cls, project_root: Path
+    ) -> list[tuple[Path, Path, tuple[Path, ...]]]:
+        # Use the repository's .ai/ only in a source checkout, recognised by the
+        # bundled skill itself, never a user's own .ai/ directory.
+        ai_resources = Path(__file__).parents[2] / ".ai"
+        if not (ai_resources / "skills/hiraku/SKILL.md").is_file():
+            ai_resources = files("hiraku.resources") / ".ai"
+        return [
+            (skill, project_root / agent_dir / name, exclude)
+            for name, skill, exclude in cls._bundled_skills(ai_resources / "skills")
+            for agent_dir in (".agents/skills", ".claude/skills")
+        ]
+
+    @staticmethod
+    def _bundled_skills(
+        skills_root: Path,
+    ) -> list[tuple[str, Path, tuple[Path, ...]]]:
+        """Return ``(installed name, source, excluded subtrees)`` per skill.
+
+        Agents discover skills one directory deep, so a skill group such as
+        ``hiraku-powers`` installs its root and each stage subdirectory
+        (``hiraku-powers/plan`` -> ``hiraku-powers-plan``) as separate skills.
+        """
+        skills: list[tuple[str, Path, tuple[Path, ...]]] = []
+        for group in sorted(skills_root.iterdir()):
+            if not (group / "SKILL.md").is_file():
+                continue
+            stages = tuple(
+                sorted(
+                    path for path in group.iterdir() if (path / "SKILL.md").is_file()
+                )
+            )
+            skills.append((group.name, group, stages))
+            skills.extend((f"{group.name}-{stage.name}", stage, ()) for stage in stages)
+        names = [name for name, _, _ in skills]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValidationError(
+                f"Bundled skills install under the same name: {', '.join(duplicates)}"
+            )
+        return skills
+
     @staticmethod
     def _copy_resource_tree(
-        source: Path, target: Path, created_files: list[Path], created_dirs: list[Path]
+        source: Path,
+        target: Path,
+        created_files: list[Path],
+        created_dirs: list[Path],
+        exclude: tuple[Path, ...] = (),
     ) -> None:
         missing: list[Path] = []
         current = target
@@ -306,6 +383,10 @@ class ProjectInitializer:
             directory.mkdir()
             created_dirs.append(directory)
         for item in source.rglob("*"):
+            if any(item.is_relative_to(path) for path in exclude):
+                continue
+            if any(_is_junk(part) for part in item.relative_to(source).parts):
+                continue
             relative = item.relative_to(source)
             destination = target / relative
             if item.is_dir():

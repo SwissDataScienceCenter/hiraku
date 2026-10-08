@@ -107,6 +107,10 @@ Classify the request before acting:
   `hiraku program show <program-id>` and follow both that program and the user's
   constraints, permissions, budgets, checkpoints, and stopping condition.
 
+For the gated define, plan, implement, and review cycle of one record, use the
+`hiraku-powers` skill when it is installed; it overrides the bounded-workflow
+defaults above for that cycle.
+
 Infer routine identifiers, summaries, hypotheses, metrics, and entrypoint
 arguments from the user's request and the repository. Ask a question only when
 the missing choice would materially change the research outcome or authorized

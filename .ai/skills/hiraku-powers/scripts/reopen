@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Revoke an approval before changing what it covers. `plan` goes back from
+# implement, review or present to plan; `proposal` goes back to define. Not
+# allowed while a subagent is dispatched or once the record is done.
+#
+# Usage: reopen RECORD_ID plan|proposal
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/_lib.sh"
+[ $# -eq 2 ] && { [ "$2" = plan ] || [ "$2" = proposal ]; } \
+  || { echo "usage: reopen RECORD_ID plan|proposal" >&2; exit 2; }
+out=$(bash "$here/state" "$1")
+if printf '%s\n' "$out" | grep -qx 'dispatched: yes'; then
+  echo "a subagent is dispatched for $1; wait for it, or close it with an implement-stop or review-stop marker" >&2
+  exit 7
+fi
+if [ "$2" = plan ]; then
+  require_stage "$1" implement review present
+else
+  require_stage "$1" plan implement review present
+fi
+ledger_append "$(workspace_dir "$1")" "$2 reopened"
+echo "reopened $1 $2"
