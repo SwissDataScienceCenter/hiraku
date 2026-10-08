@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -93,6 +94,7 @@ def launch(
     commit: str | None = None,
     dispatch: str | None = None,
     env: Mapping[str, str] | None = None,
+    cpu_time_limit_seconds: int | None = None,
     capture_output: bool = False,
     check: bool = True,
     config: HirakuConfig | None = None,
@@ -108,6 +110,8 @@ def launch(
         commit: Optional Git ref supplied to the dispatcher.
         dispatch: Optional dispatcher script override.
         env: Additional environment variables.
+        cpu_time_limit_seconds: Optional per-process CPU time limit. Supported on
+            POSIX project hosts.
         capture_output: Capture child output in the result instead of streaming it.
         check: Raise on non-zero child exit when true.
         config: Project configuration; discovered when omitted.
@@ -116,9 +120,9 @@ def launch(
         The completed subprocess result.
 
     Raises:
-        hiraku.errors.ValidationError: If the entrypoint, arguments, or attribution
+        hiraku.core.errors.ValidationError: If the entrypoint, arguments, or attribution
             is invalid.
-        hiraku.errors.LaunchError: If the command cannot be started.
+        hiraku.core.errors.LaunchError: If the command cannot be started.
 
     Example:
         ``launch({"command": ["python", "evaluate.py"]}, record_id="demo")``
@@ -131,6 +135,14 @@ def launch(
 
     entrypoint = Entrypoint.model_validate(entrypoint)
     selected = config or HirakuConfig.discover()
+    if cpu_time_limit_seconds is not None and (
+        isinstance(cpu_time_limit_seconds, bool)
+        or not isinstance(cpu_time_limit_seconds, int)
+        or cpu_time_limit_seconds < 1
+    ):
+        raise ValidationError("CPU time limit must be a positive integer")
+    if cpu_time_limit_seconds is not None and os.name != "posix":
+        raise ValidationError("CPU time limits currently require a POSIX host")
     record = load_record(record_id, config=selected)
     selected_commit = commit
     if selected_commit is None:
@@ -146,6 +158,15 @@ def launch(
     if selected_commit is not None:
         dispatcher_arguments.extend(("--commit", selected_commit))
     dispatcher_arguments.extend(("--", *command))
+    process_arguments = dispatcher_arguments
+    if cpu_time_limit_seconds is not None:
+        process_arguments = [
+            sys.executable,
+            "-m",
+            "hiraku.core.cpu_limit",
+            str(cpu_time_limit_seconds),
+            *dispatcher_arguments,
+        ]
     additions = dict(env or {})
     if any(
         not isinstance(key, str) or not isinstance(value, str)
@@ -171,7 +192,7 @@ def launch(
     )
     try:
         result = subprocess.run(
-            dispatcher_arguments,
+            process_arguments,
             cwd=selected.root,
             env=process_env,
             text=True,

@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from ..config import HirakuConfig
-from ..errors import BackendError, ValidationError
+from ..core.config import HirakuConfig
+from ..core.errors import BackendError, ValidationError
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
-    from ..run import Run
+    from ..core.run import Run
 
 
 class CSVBackendConfig(BaseModel):
@@ -65,7 +65,7 @@ class CSVBackend(TrackingBackend):
             )
 
     def _read_source_runs(self, **options: Any) -> list[Run]:
-        from ..run import Run
+        from ..core.run import Run
 
         path = self.path or self.config.root / "runs.csv"
         if not path.exists():

@@ -69,9 +69,9 @@ hiraku runs --record <root-id> --params seed,lr --metrics train/accuracy,val/acc
 Hiraku data records are managed by the [Python API](api/python/index.md). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible.
 
 ```python
-from hiraku.base import BaseRecord
-from hiraku.record import Entrypoint, Metric, Record, list_records, load_record
-from hiraku.run import Run
+from hiraku.core.base import BaseRecord
+from hiraku.core.record import Entrypoint, Metric, Record, list_records, load_record
+from hiraku.core.run import Run
 ```
 
 
@@ -92,6 +92,12 @@ tracking_backend:
 ```
 
 `hiraku runs --record ID` queries the selected record's tracking source and lists its attributed runs. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
+
+The MCP `launch_experiment` operation submits a background launch and returns a
+launch ID. `get_launch_status` reports local process state and recent output;
+after completion, use the tracking backend to inspect attributed runs. This
+keeps long-running training from blocking an MCP tool call. The CLI `hiraku
+launch` command remains synchronous.
 
 ## Entrypoints
 
@@ -164,6 +170,19 @@ Hiraku manages agent integration with actions, programs, and context. *Actions* 
 | **Action** | `hiraku/actions/{entity}/{action_id}/{action.md,action.py}` | A named action that can be invoked by the hiraku-agent agent. |
 | **Program** | `hiraku/programs/{program_id}/{program.md,program.py}` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
+
+## Harness permissions and Program budgets
+
+The coding harness controls execution permissions. Hiraku does not add a
+separate campaign or experiment-approval system. Programs define the research
+workflow, iteration budget, and stopping conditions; Hiraku validates research
+records, implementation paths, commit provenance, dispatch, and run tracking.
+Launcher-level CPU limits remain available where supported.
+
+Literature reviews are stored separately as task-linked Context records. The
+MCP `save_literature_review` operation records a synthesis, candidate
+directions, limitations, and per-source verification levels. Program prompts
+include the saved review content and link to its canonical Context resource.
 
 Programs, action and context records are managed via CLI, e.g.
 

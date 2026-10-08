@@ -4,7 +4,7 @@ import sys
 import types
 from pathlib import Path
 
-from hiraku.config import HirakuConfig
+from hiraku.core.config import HirakuConfig
 from hiraku.tracking.wandb import WandbBackend, WandbBackendConfig
 
 

@@ -1,3 +1,3 @@
 # Run
 
-::: hiraku.run.Run
+::: hiraku.core.run.Run

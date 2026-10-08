@@ -12,8 +12,8 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.core.config import HirakuConfig
+from hiraku.core.record import load_record
 
 REPOSITORY = Path(__file__).parents[2]
 DOCS_EXAMPLE = REPOSITORY / "docs" / "examples" / "autoresearch"
@@ -206,7 +206,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert task.entrypoints["mock"].command[-1] == "cpu_mock.py"
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
-    assert config.default_program == "autoresearch"
+    assert "default_program" not in config.to_dict()
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111
     assert git(project, "status", "--porcelain") == ""
 

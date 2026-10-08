@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
-from hiraku.errors import ValidationError
-from hiraku.launch import launch, render_arguments
-from hiraku.record import Record
+from hiraku.core.config import HirakuConfig
+from hiraku.core.errors import ValidationError
+from hiraku.core.launch import launch, render_arguments
+from hiraku.core.record import Record
 
 
 def test_render_arguments() -> None:

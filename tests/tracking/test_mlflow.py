@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from hiraku.errors import BackendError
+from hiraku.core.errors import BackendError
 from hiraku.tracking.mlflow import MLflowBackendConfig
 
 

@@ -62,11 +62,11 @@ class ProjectInitializer:
             example: Optional packaged example name whose ``src`` tree is copied.
 
         Returns:
-            The initialized `hiraku.config.HirakuConfig`.
+            The initialized `hiraku.core.config.HirakuConfig`.
 
         Raises:
-            hiraku.errors.ProjectExistsError: If the project marker already exists.
-            hiraku.errors.ValidationError: If provisioning fails.
+            hiraku.core.errors.ProjectExistsError: If the project marker already exists.
+            hiraku.core.errors.ValidationError: If provisioning fails.
         """
         return cls.create_with_report(
             root,
@@ -139,7 +139,7 @@ class ProjectInitializer:
                 ):
                     cls._ensure_directory(directory, created_dirs)
                 resource_root = files("hiraku.resources")
-                ai_resources = Path(__file__).parents[2] / ".ai"
+                ai_resources = Path(__file__).parents[3] / ".ai"
                 if not ai_resources.is_dir():
                     ai_resources = resource_root / ".ai"
                 copies = [

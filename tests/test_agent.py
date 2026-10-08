@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hiraku.agent import Context, list_programs, load_action, load_context
-from hiraku.config import HirakuConfig
+from hiraku.core.agent import Context, list_programs, load_action, load_context
+from hiraku.core.config import HirakuConfig
 
 
 def test_agent_record_registries(tmp_path: Path) -> None:

@@ -7,22 +7,38 @@ description: Use Hiraku as the research control plane for data-science and machi
 
 Hiraku connects research goals, records, source code, execution, evidence, and conclusions.
 
-The coding harness owns reasoning, repository inspection, code editing, looping, and user interaction. Hiraku owns authoritative research state, validation, commits, launches, attribution, and recorded conclusions.
+The user's request and harness control execution scope and permissions. A
+selected Hiraku Program defines the research workflow, including its stages,
+budgets, and stopping conditions. This Skill defines how to operate Hiraku.
+Hiraku validates and persists research state, provenance, and tracking; the
+harness owns reasoning, code editing, iteration, and user interaction.
 
-Follow the user's scope and preserve existing work and provenance.
+Follow the user's scope and preserve existing work and provenance. A Program
+does not grant operating-system or harness permissions.
 
-MCP and the `hiraku` CLI are both authoritative Hiraku interfaces. Prefer the
-MCP operation when it exists; use the corresponding CLI command when it does
-not. Do not edit record files by hand to bypass Hiraku.
+## Operating contract
 
-Before creating state, inspect the project and existing records. If a create
-operation fails or its result is uncertain, inspect current state before
-retrying or switching interfaces. Never create the same record once through
-the CLI and again through MCP.
+1. Read the selected Program before executing its workflow. The Program owns
+   research steps and autonomy policy; do not recreate them in this Skill or in
+   a harness startup prompt.
+2. Use Hiraku MCP for exposed resources and validated operations. A resource
+   link may not have been read by the harness; inspect the returned prompt or
+   read the resource explicitly before relying on its content.
+3. If MCP is unavailable or lacks an operation, use the equivalent Hiraku CLI
+   command when it applies the same validation requirements. Do not use a
+   fallback to bypass a denied operation.
+4. Do not edit persisted record files by hand to bypass Hiraku. If a mutation
+   fails or its result is unclear, inspect current state before retrying or
+   switching interfaces. Never create the same record through both MCP and CLI.
+5. Use Hiraku launch and tracking mechanisms for experiments. Preserve run
+   attribution; do not disable tracking or invent provenance.
+6. Follow the selected Program's autonomy policy and budgets. The harness
+   decides whether an operation is permitted; Hiraku does not store or grant
+   execution authorization.
 
-For a named workflow, read and follow its Hiraku Program. Use `interactive` for
-guided step-by-step work and `autoresearch` for bounded autonomous
-experimentation.
+Before creating state, inspect the project and existing records. For commit
+provenance, keep research records separate from experiment implementation
+commits; see the Record model reference.
 
 Read these references only when their concepts matter to the current task:
 

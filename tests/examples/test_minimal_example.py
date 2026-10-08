@@ -7,8 +7,8 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.core.config import HirakuConfig
+from hiraku.core.record import load_record
 
 
 def git(path: Path, *arguments: str) -> str:

@@ -44,6 +44,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     git(project, "init", "-b", "main")
     git(project, "config", "user.email", "test@example.invalid")
     git(project, "config", "user.name", "Test")
+    git(project, "config", "commit.gpgsign", "false")
     runner = CliRunner()
     initialized = invoke(runner, ["init", "--example", "digits-mlflow"])
     assert initialized.exit_code == 0

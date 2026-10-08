@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
-from hiraku.errors import GitError, ValidationError
-from hiraku.git import GitRepository
+from hiraku.core.config import HirakuConfig
+from hiraku.core.errors import GitError, ValidationError
+from hiraku.core.git import GitRepository
 
 
 def _git(path: Path, *arguments: str) -> str:

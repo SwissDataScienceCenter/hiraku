@@ -1,5 +1,5 @@
 # Launch API
 
-::: hiraku.launch.launch
+::: hiraku.core.launch.launch
 
-::: hiraku.launch.render_arguments
+::: hiraku.core.launch.render_arguments

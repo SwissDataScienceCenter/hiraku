@@ -7,10 +7,10 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from ..errors import BackendError
+from ..core.errors import BackendError
 
 if TYPE_CHECKING:
-    from ..run import Run
+    from ..core.run import Run
 
 
 class TrackingBackend(ABC):

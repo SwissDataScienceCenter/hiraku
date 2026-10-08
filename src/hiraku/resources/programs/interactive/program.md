@@ -11,7 +11,8 @@ Use Hiraku as the authoritative research control plane. The coding harness owns 
 
 ## Operating rule
 
-Determine the user's immediate intent and perform only the next authorized research step.
+Determine the user's immediate intent and perform only the next requested
+research step.
 
 Do not expand a request for one operation into an entire research lifecycle.
 
@@ -75,32 +76,35 @@ Research ancestry does not imply shared execution configuration.
 
 Define an experiment-local entrypoint when the runnable implementation is already known. Otherwise determine it during implementation from the code that is actually created.
 
-Do not implement a proposal until implementation has been explicitly authorized.
+In this guided Program, present the proposed implementation and ask the user
+before proceeding to implementation. This is a harness interaction, not a
+persisted Hiraku gate. When the user selects another
+Program, follow that Program's autonomy policy within the harness's available
+permissions.
 
-## 4. Approve
+## 4. Confirm the next step
 
-Before implementation or another consequential transition, show the user what is about to happen.
+Before implementation or another consequential transition, show the user what
+is about to happen and ask for direction when the request has not already
+specified that step.
 
-Obtain explicit approval when the next step would:
+Examples of consequential transitions include:
 
-- implement an experiment,
-- commit implementation state,
-- launch nontrivial or costly execution,
-- materially change research scope, protocol, or provenance.
-
-Do not infer approval from silence, prior general interest, or approval of a different proposal.
-
-Approval authorizes the proposed action; it does not imply that the hypothesis is expected to succeed.
+- implementing an experiment,
+- committing implementation state,
+- launching nontrivial or costly execution,
+- materially changing research scope, protocol, or provenance.
 
 ## 5. Implement
 
 Before editing source code, inspect Git state and preserve existing user work.
 
-Implement only the approved proposal.
+Implement only the selected proposal.
 
 If existing staged or unstaged work overlaps the intended change and cannot be isolated safely, stop and ask the user how to proceed.
 
-When implementation is ready, bind the intended implementation state and runnable execution configuration through Hiraku.
+When implementation is ready, bind the intended implementation state and
+runnable execution configuration through Hiraku.
 
 Do not directly edit Hiraku records or run metadata to bypass authoritative operations.
 
@@ -165,13 +169,15 @@ Before handing off, ensure that the task has:
 - a baseline or meaningful comparison,
 - applicable experiment, run, time, compute, or cost limits.
 
-Do not start autonomous experimentation merely because candidate experiments exist.
+The autoresearch Program owns its session budget and autonomous iteration
+policy. Do not begin autonomous experimentation unless the user selected that
+Program or requested its workflow.
 
 ## Stop or continue
 
 After completing the requested step, report the resulting state and stop unless:
 
-- the user has clearly authorized the next stage, or
+- the user requested a sequence of guided steps, or
 - the current interaction explicitly covers a sequence of guided steps.
 
 Stop when further progress requires a new research decision, a change to the task's research contract, or resolution of a Hiraku or project constraint.

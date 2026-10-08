@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
-from hiraku.errors import BackendError
-from hiraku.record import Record, load_record
-from hiraku.run import Run
+from hiraku.core.config import HirakuConfig
+from hiraku.core.errors import BackendError
+from hiraku.core.record import Record, load_record
+from hiraku.core.run import Run
 from hiraku.tracking import CSVBackend
 
 

@@ -6,8 +6,8 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.core.config import HirakuConfig
+from hiraku.core.record import load_record
 
 
 def invoke(*args: str):
@@ -17,7 +17,7 @@ def invoke(*args: str):
 def test_mcp_cli_starts_stdio_server(monkeypatch) -> None:
     calls: list[object] = []
     monkeypatch.setattr(
-        "hiraku.cli.serve_mcp", lambda config=None: calls.append(config)
+        "hiraku.cli.cli.serve_mcp", lambda config=None: calls.append(config)
     )
 
     result = invoke("mcp")
@@ -68,6 +68,22 @@ def test_record_cli_active_and_validation(tmp_path: Path, monkeypatch) -> None:
     assert invoke("record", "create", "third", "--parent", "missing").exit_code != 0
     assert invoke("record", "create", "first").exit_code != 0
     assert invoke("record", "update", "first", "--set", "id=other").exit_code != 0
+    forged_approval = invoke(
+        "record",
+        "update",
+        "first",
+        "--set",
+        "approval_status=approved",
+    )
+    assert forged_approval.exit_code != 0
+    forged_creation = invoke(
+        "record",
+        "create",
+        "forged",
+        "--set",
+        "approved_by=matteo",
+    )
+    assert forged_creation.exit_code != 0
     invalid_link = invoke("record", "update", "second", "--set", "related_to=[missing]")
     assert invalid_link.exit_code != 0
     assert invoke("record", "update", "second", "--related-to", "first").exit_code == 0

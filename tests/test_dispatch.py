@@ -4,7 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from hiraku.config import HirakuConfig
+from hiraku.core.config import HirakuConfig
 
 
 def _git(path: Path, *arguments: str, check: bool = True) -> str:

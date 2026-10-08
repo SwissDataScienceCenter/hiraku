@@ -14,6 +14,11 @@ hiraku runs --record <record-id>
 
 `hiraku record list` includes each record's local `status` in its table.
 
+The selected Program defines experiment workflow, budgets, and stop conditions.
+The coding harness controls which operations are permitted. Hiraku validates
+records, implementation paths, commit provenance, dispatch, and run tracking;
+it does not require a separate experiment approval step.
+
 `hiraku init` requires its target to be a Git repository root. Use
 `hiraku init PATH --ignore-git` to intentionally initialize a nested or non-Git
 location. Python initialization is permissive by default; callers can request

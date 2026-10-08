@@ -1,8 +1,8 @@
 from hiraku import BaseRecord, Entrypoint, HirakuConfig, Metric, Record, Run
-from hiraku.errors import GitError, HirakuError
-from hiraku.io import atomic_write, dump_yaml, load_yaml_mapping
-from hiraku.launch import launch, render_arguments
-from hiraku.record import list_records, load_record
+from hiraku.core.errors import GitError, HirakuError
+from hiraku.core.io import atomic_write, dump_yaml, load_yaml_mapping
+from hiraku.core.launch import launch, render_arguments
+from hiraku.core.record import list_records, load_record
 from hiraku.tracking import TrackingBackend
 
 

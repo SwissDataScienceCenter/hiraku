@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from ..config import HirakuConfig
-from ..errors import BackendError
+from ..core.config import HirakuConfig
+from ..core.errors import BackendError
 from .base import TrackingBackend
 from .csv import CSVBackend, CSVBackendConfig
 from .mlflow import MLflowBackend, MLflowBackendConfig

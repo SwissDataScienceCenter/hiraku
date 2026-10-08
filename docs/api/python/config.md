@@ -2,4 +2,4 @@
 
 ## `HirakuConfig`
 
-::: hiraku.config.HirakuConfig
+::: hiraku.core.config.HirakuConfig

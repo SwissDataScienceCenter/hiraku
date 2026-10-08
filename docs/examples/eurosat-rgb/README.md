@@ -78,31 +78,30 @@ pi mcp add alphaxiv --url https://api.alphaxiv.org/mcp/v1 --bearer-token-env-var
 
 ## Run the full research workflow
 
-After initialization, give a coding agent the prompt below. The prompt defines
-the sequence across the reusable `literature-review` and `autoresearch`
-Programs: review the literature, establish the MLP baseline, then run justified
-follow-up experiments. The explicit handoff continues into autoresearch after
-the review; autoresearch establishes a missing baseline before testing
-improvements.
+After initialization, give a coding agent the prompt below. Select the reusable
+`autoresearch` Program as the top-level workflow. It runs the requested
+`literature-review` Program first when no suitable task-linked review exists,
+then establishes the MLP baseline and runs justified follow-up experiments.
+The autoresearch Program defines the experiment budget and stopping rules; the
+coding harness controls which operations are permitted.
 
 !!! info "Bounded autonomous run"
-    The prompt explicitly authorizes the complete loop, so the agent does not pause for per-experiment approval. It must stop at the experiment limit or if it needs a decision outside the authorization.
+    The Program counts every attempted experiment, including failed runs, against its session budget. The Hiraku task's `experiment_budget` value is informational.
 
 ```text
-Complete the EuroSAT RGB research workflow in this project.
+Create the Hiraku task `eurosat-rgb` if it does not already exist.
 
-Create a Hiraku task named `eurosat-rgb`, if non-existing, for investigating image-specific architectural inductive biases on EuroSAT RGB.
+Set the goal to investigate image-specific architectural inductive biases on EuroSAT RGB.
 Declare `val/accuracy` as the primary metric to maximize and `val/loss` as a supporting metric to minimize.
-Use W&B project `eurosat-rgb`.
+Set the tracking backend to be W&B with the project named `eurosat-rgb`.
+Record this protocol: EuroSAT RGB at 64x64 resolution, stratified 80/20 train/validation split, seed 42, Adam with learning rate 0.001, batch size 64, 10 epochs, CPU only, and no pretrained models.
+Set the task's informational experiment budget to five, including the baseline.
 
-Use the following protocol: EuroSAT RGB at 64x64 resolution, stratified 80/20 train/validation split, seed 42, Adam with learning rate 0.001, batch size 64, 10 epochs, CPU only, and no pretrained models.
-Record this protocol and a total experiment budget of five, including the baseline, on the task.
-
-Do a literature review to identify architectural inductive biases that have been shown to improve image classification on small datasets without pretrained models.
-Focus on approaches that train quickly on CPU and can be compared fairly with the MLP.
-Identify evidence-backed directions that may improve EuroSAT RGB classification without pretrained models.
-After delivering the review, continue directly into the autoresearch Program. If the baseline does not already exist, implement and launch the flattened-image MLP baseline first. Then use the review and baseline results to run justified follow-up experiments until the budget is reached, no justified experiment remains, a run or project constraint blocks safe progress, or continuing would require changing the research question, metrics, protocol, or authorized scope.
+Run the `autoresearch` Program for this task. As its initial phase, use the `literature-review` Program to review image-specific architectural inductive biases for small, CPU-trainable image classifiers without pretraining. Save the review as a task-linked Hiraku Context, including candidate directions, sources, verification status, and limitations. After saving and delivering the review, continue the same workflow directly into the baseline and follow-up experiment loop. Do not stop after the literature review.
+Use a maximum of five experiments for this session, including the baseline. Work on one experiment at a time.
 ```
+
+The `autoresearch` Program should establish the flattened-image MLP baseline if missing, use the saved literature Context to select justified follow-up experiments, and stop when its session budget or another Program stop condition is reached.
 
 ## Expected research flow
 

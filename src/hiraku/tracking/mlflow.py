@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ..config import HirakuConfig
-from ..errors import BackendError
+from ..core.config import HirakuConfig
+from ..core.errors import BackendError
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
-    from ..run import Run
+    from ..core.run import Run
 
 
 class MLflowBackendConfig(BaseModel):
@@ -67,7 +67,7 @@ class MLflowBackend(TrackingBackend):
             database: Optional local database path.
 
         Raises:
-            hiraku.errors.BackendError: If URI and database settings conflict.
+            hiraku.core.errors.BackendError: If URI and database settings conflict.
         """
         self.config = config
         settings = MLflowBackendConfig(
@@ -86,7 +86,7 @@ class MLflowBackend(TrackingBackend):
         experiment_name: str | None = None,
         **options: Any,
     ) -> list[Run]:
-        from ..run import Run
+        from ..core.run import Run
 
         try:
             from mlflow.tracking import MlflowClient

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hiraku.config import HirakuConfig
+from hiraku.core.config import HirakuConfig
 from hiraku.tracking import available_backends, backend_for
 from hiraku.tracking.csv import CSVBackend
 

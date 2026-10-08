@@ -21,7 +21,6 @@ class HirakuConfig(BaseModel):
         hiraku_dir_name: Relative state directory name.
         default_dispatch: Default launcher script.
         branch: Record branch template.
-        default_program: Default program identifier.
         tracking_backend: Backend configuration mapping with a required ``type``.
 
     Raises:
@@ -36,7 +35,6 @@ class HirakuConfig(BaseModel):
         "hiraku_dir": "hiraku",
         "default_dispatch": "launch.sh",
         "branch": "hiraku/records/{record_id}",
-        "default_program": "interactive",
         "tracking_backend": {"type": "csv"},
         "active_record_id": None,
     }
@@ -51,7 +49,6 @@ class HirakuConfig(BaseModel):
     )
     default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
     branch: str = Field(default=DEFAULTS["branch"], min_length=1)
-    default_program: str = Field(default=DEFAULTS["default_program"], min_length=1)
     tracking_backend: dict[str, Any] = Field(
         default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
     )
@@ -61,10 +58,11 @@ class HirakuConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def normalize_tracking_backend(cls, values: Any) -> Any:
-        """Normalize shorthand backend names to the common mapping syntax."""
+        """Normalize backend syntax and discard the retired Program default."""
         if not isinstance(values, Mapping):
             return values
         raw = dict(values)
+        raw.pop("default_program", None)
         backend = raw.get("tracking_backend")
         if isinstance(backend, str):
             raw["tracking_backend"] = {"type": backend}
@@ -116,7 +114,7 @@ class HirakuConfig(BaseModel):
             A validated project configuration.
 
         Raises:
-            hiraku.errors.ValidationError: If the file is unreadable or invalid.
+            hiraku.core.errors.ValidationError: If the file is unreadable or invalid.
         """
         marker = Path(path).expanduser().absolute()
         return cls(path=marker, root=marker.parent, **load_yaml_mapping(marker))
@@ -133,7 +131,7 @@ class HirakuConfig(BaseModel):
             The nearest validated configuration.
 
         Raises:
-            hiraku.errors.ProjectNotFoundError: If no configuration is found.
+            hiraku.core.errors.ProjectNotFoundError: If no configuration is found.
         """
         candidate = Path.cwd() if start is None else Path(start)
         candidate = candidate.expanduser().absolute()
@@ -172,8 +170,9 @@ class HirakuConfig(BaseModel):
             The initialized configuration.
 
         Raises:
-            hiraku.errors.ProjectExistsError: If the project is already initialized.
-            hiraku.errors.ValidationError: If root is not a Git repository root
+            hiraku.core.errors.ProjectExistsError: If the project is already
+                initialized.
+            hiraku.core.errors.ValidationError: If root is not a Git repository root
                 and ignore_git is false.
         """
         from .project import ProjectInitializer
@@ -191,7 +190,7 @@ class HirakuConfig(BaseModel):
         """Persist validated configuration to its YAML file.
 
         Raises:
-            hiraku.errors.ValidationError: If the configuration cannot be written.
+            hiraku.core.errors.ValidationError: If the configuration cannot be written.
 
         Example:
             ```python

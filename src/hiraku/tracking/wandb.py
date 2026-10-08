@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..config import HirakuConfig
-from ..errors import BackendError
+from ..core.config import HirakuConfig
+from ..core.errors import BackendError
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
-    from ..run import Run
+    from ..core.run import Run
 
 
 class WandbBackendConfig(BaseModel):
@@ -94,7 +94,7 @@ class WandbBackend(TrackingBackend):
             api_key: Optional W&B API key.
 
         Raises:
-            hiraku.errors.BackendError: If any settings has conflicts.
+            hiraku.core.errors.BackendError: If any settings has conflicts.
         """
         self.config = config
         settings = WandbBackendConfig(
@@ -185,7 +185,7 @@ class WandbBackend(TrackingBackend):
     @classmethod
     def _normalize_run(cls, run: Any) -> Run:
         """Convert one W&B public run object into Hiraku's normalized model."""
-        from ..run import Run
+        from ..core.run import Run
 
         config = cls._run_config(run)
         return Run(

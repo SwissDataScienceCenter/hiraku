@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
-from hiraku.errors import RecordExistsError, RecordNotFoundError, ValidationError
-from hiraku.io import atomic_write
-from hiraku.record import Record, list_records, load_record
+from hiraku.core.config import HirakuConfig
+from hiraku.core.errors import RecordExistsError, RecordNotFoundError, ValidationError
+from hiraku.core.io import atomic_write
+from hiraku.core.record import Record, list_records, load_record
 from hiraku.tracking.csv import CSVBackend
 
 
@@ -264,7 +264,7 @@ def test_reparenting_cleans_incomplete_destination_copies_after_write_failure(
             failed = True
             raise OSError("simulated write failure")
 
-    monkeypatch.setattr("hiraku.record.atomic_write", fail_after_copy)
+    monkeypatch.setattr("hiraku.core.record.atomic_write", fail_after_copy)
     with pytest.raises(OSError, match="simulated write failure"):
         source.reparent(target.id, config=config)
 
@@ -296,7 +296,7 @@ def test_reparenting_resolves_commit_journal_write_failure(
         if is_commit:
             raise OSError("simulated failure after journal commit")
 
-    monkeypatch.setattr("hiraku.record.atomic_write", fail_during_commit)
+    monkeypatch.setattr("hiraku.core.record.atomic_write", fail_during_commit)
     if failure_after_replace:
         source.reparent(target.id, config=config)
         assert load_record("source", config=config).parent_id == target.id
@@ -337,7 +337,7 @@ def test_preparing_journal_keeps_old_copies_authoritative(
             raise OSError("simulated destination cleanup failure")
         original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr("hiraku.record.atomic_write", fail_after_destination_copy)
+    monkeypatch.setattr("hiraku.core.record.atomic_write", fail_after_destination_copy)
     monkeypatch.setattr(Path, "unlink", fail_destination_cleanup)
     with pytest.raises(ExceptionGroup, match="recovery is pending"):
         source.reparent(target.id, config=config)

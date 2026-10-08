@@ -106,9 +106,11 @@ Produce a review containing:
 - citations and provenance sufficient to verify important claims,
 - limitations of the review's own coverage.
 
-If an appropriate Hiraku research context already exists and the user requested the review to be recorded there, persist the evidence through a supported Hiraku operation.
-
-Do not create or modify Hiraku research state merely because a later experimental workflow may use the review.
+If the review contributes to an explicitly requested downstream research
+workflow for a Hiraku task, persist it as a task-linked Context with
+`save_literature_review` before handing off. Record each source's verification
+level accurately; discovery summaries are not full-text evidence. For a
+standalone review, persist it only when the user requests that.
 
 ## Handoff
 
@@ -117,7 +119,8 @@ When no downstream Program is specified, the review may be handed to the
 concrete research task.
 
 If the user explicitly requested a sequence that continues with another named
-Program after the review, deliver the review and then hand off to that Program.
+Program after the review, save the review context for the selected task,
+deliver the review, and then hand off to that Program.
 In that case the review is a phase in the requested workflow, not the end of the
 workflow. Do not create experiment records or begin implementation as part of
 the review itself.
@@ -133,8 +136,9 @@ the `interactive` Program defines and obtains agreement on:
 - resource limits,
 - stopping conditions.
 
-The literature review itself does not authorize experimentation; authorization
-must come from the user's request or an applicable task-level approval.
+The review records evidence and candidate directions. It does not grant
+operating-system or harness permissions; those remain controlled by the user
+and coding harness.
 
 ## Stop
 

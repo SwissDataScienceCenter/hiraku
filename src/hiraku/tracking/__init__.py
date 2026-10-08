@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Literal
 
 from .base import TrackingBackend
-from ..errors import BackendError
+from ..core.errors import BackendError
 
 
 class WandbBackendConfig(BaseModel):

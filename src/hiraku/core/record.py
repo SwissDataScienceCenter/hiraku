@@ -74,6 +74,24 @@ class Record(BaseRecord):
     metrics: list[Any] | None = None
     tracking_backend: str | dict[str, Any] | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def discard_retired_approval_fields(cls, value: Any) -> Any:
+        """Ignore approval metadata left by older Hiraku versions."""
+        if not isinstance(value, Mapping):
+            return value
+        fields = dict(value)
+        for name in (
+            "approval_status",
+            "approved_by",
+            "approval_method",
+            "approved_at_head",
+            "campaign_authorization_id",
+            "campaign_id",
+        ):
+            fields.pop(name, None)
+        return fields
+
     @field_validator("parent_id")
     @classmethod
     def validate_parent(cls, value: str | None) -> str | None:
@@ -339,7 +357,7 @@ class Record(BaseRecord):
         config: Any = None,
         **query: Any,
     ) -> list[Any]:
-        from .tracking import MLflowBackend, TrackingBackend, select_backend
+        from ..tracking import MLflowBackend, TrackingBackend, select_backend
 
         selected = _config(config) if config is not None or backend is None else None
         if backend is not None:

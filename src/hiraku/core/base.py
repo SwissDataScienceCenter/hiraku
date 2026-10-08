@@ -40,7 +40,7 @@ class BaseRecord(BaseModel):
 
     Raises:
         pydantic.ValidationError: If the identifier or Markdown value is invalid.
-        hiraku.errors.ValidationError: If a persisted record is mutated illegally.
+        hiraku.core.errors.ValidationError: If a persisted record is mutated illegally.
 
     Note:
         Records are detached until ``save()`` is called; custom fields are
@@ -161,8 +161,9 @@ class BaseRecord(BaseModel):
             A persisted record with its path metadata attached.
 
         Raises:
-            hiraku.errors.RecordNotFoundError: If ``path`` is not a file.
-            hiraku.errors.ValidationError: If front matter or model fields are invalid.
+            hiraku.core.errors.RecordNotFoundError: If ``path`` is not a file.
+            hiraku.core.errors.ValidationError: If front matter or model fields
+                are invalid.
 
         Example:
             ``record = Record.load("hiraku/records/demo/demo.md")``
@@ -198,8 +199,10 @@ class BaseRecord(BaseModel):
             Absolute path of the persisted record.
 
         Raises:
-            hiraku.errors.RecordExistsError: If the destination exists unexpectedly.
-            hiraku.errors.ValidationError: If the record is detached without a path
+            hiraku.core.errors.RecordExistsError: If the destination exists
+                unexpectedly.
+            hiraku.core.errors.ValidationError: If the record is detached without
+                a path
                 or cannot be written.
 
         Example:
@@ -237,8 +240,9 @@ class BaseRecord(BaseModel):
         """Delete this persisted record from disk.
 
         Raises:
-            hiraku.errors.ValidationError: If the record is detached or deletion fails.
-            hiraku.errors.RecordNotFoundError: If the persisted file is missing.
+            hiraku.core.errors.ValidationError: If the record is detached or
+                deletion fails.
+            hiraku.core.errors.RecordNotFoundError: If the persisted file is missing.
         """
         if self.path is None:
             raise ValidationError(

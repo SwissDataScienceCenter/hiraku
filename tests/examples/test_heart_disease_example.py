@@ -10,8 +10,8 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.core.config import HirakuConfig
+from hiraku.core.record import load_record
 
 EXPECTED_METRICS = {
     "logistic-baseline": (0.32254890, 0.85526316),

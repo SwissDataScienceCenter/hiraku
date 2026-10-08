@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.config import HirakuConfig
-from hiraku.errors import EntrypointNotFoundError, ValidationError
-from hiraku.record import Record, load_record
-from hiraku.run import Run
+from hiraku.core.config import HirakuConfig
+from hiraku.core.errors import EntrypointNotFoundError, ValidationError
+from hiraku.core.record import Record, load_record
+from hiraku.core.run import Run
 
 
 def test_inheritance_entrypoints_and_guarded_delete(tmp_path: Path) -> None:

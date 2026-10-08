@@ -17,27 +17,33 @@ import yaml
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-from .agent import (
-    Action,
+from ..core.agent import (
     Context,
     Program,
-    list_actions,
     list_contexts,
     list_programs,
-    load_action,
     load_context,
     load_program,
 )
-from .base import BaseRecord
-from .config import HirakuConfig
-from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
-from .git import GitRepository
-from .io import dump_yaml
-from .launch import _dispatcher, launch, render_arguments
-from .mcp import serve as serve_mcp
-from .record import Record, list_records, load_record
-from .run import Run
-from .validation import validate_identifier
+from ..core.base import BaseRecord
+from ..core.config import HirakuConfig
+from ..core.errors import GitError, HirakuError, NoActiveRecordError, ValidationError
+from ..core.git import GitRepository
+from ..core.io import dump_yaml
+from ..core.launch import render_arguments
+from ..core.record import Record, list_records, load_record
+from ..core.run import Run
+from ..core.validation import validate_identifier
+from ..mcp import serve as serve_mcp
+
+_RETIRED_RECORD_FIELDS = {
+    "approval_status",
+    "approved_by",
+    "approval_method",
+    "approved_at_head",
+    "campaign_authorization_id",
+    "campaign_id",
+}
 
 
 class CLIContext:
@@ -112,6 +118,8 @@ def _fields(values: Sequence[str]) -> dict[str, Any]:
         key, separator, raw = expression.partition("=")
         if not separator or not key:
             raise ValidationError("--set requires KEY=VALUE")
+        if key in _RETIRED_RECORD_FIELDS:
+            raise ValidationError(f"Record field {key!r} is no longer supported")
         if key in fields:
             raise ValidationError(f"Field {key!r} was supplied more than once")
         try:
@@ -614,226 +622,8 @@ _install_generic("program", Program, load_program, list_programs, "programs_dir"
 _install_generic("context", Context, load_context, list_contexts, "contexts_dir")
 
 
-@main.group("action")
-def action_group() -> None:
-    """Manage agent actions."""
-
-
-@action_group.command("list")
-@click.option("--entity")
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def action_list(state: CLIContext, entity: str | None, json_output: bool) -> None:
-    records = list_actions(entity=entity, config=state.config)
-    _emit_json(records) if json_output else click.echo(
-        _table(("entity", "id"), [(r.entity, r.id) for r in records])
-    )
-
-
-@action_group.command("show")
-@click.argument("reference")
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def action_show(state: CLIContext, reference: str, json_output: bool) -> None:
-    record = _action_ref(reference, state.config)
-    _emit_json(record) if json_output else click.echo(
-        f"---\n{dump_yaml(record.to_dict())}---\n{record.markdown}", nl=False
-    )
-
-
-def _action_ref(reference: str, config: HirakuConfig) -> Action:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    return load_action(identifier, entity=entity, config=config)
-
-
-@action_group.command("create")
-@click.argument("reference")
-@click.option("--set", "set_values", multiple=True)
-@click.option("--markdown-file", type=click.Path(path_type=Path))
-@click.pass_obj
-def action_create(
-    state: CLIContext,
-    reference: str,
-    set_values: tuple[str, ...],
-    markdown_file: Path | None,
-) -> None:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    validate_identifier(entity, label="action entity")
-    validate_identifier(identifier, label="action ID")
-    record = Action(
-        id=identifier,
-        entity=entity,
-        markdown=_markdown(markdown_file),
-        **_fields(set_values),
-    )
-    path = state.config.actions_dir / entity / identifier / "action.md"
-    record.save(path)
-    click.echo(f"Created action {reference} at {path}")
-
-
-@action_group.command("update")
-@click.argument("reference")
-@click.option("--set", "set_values", multiple=True)
-@click.option("--unset", "unset_values", multiple=True)
-@click.option("--markdown-file", type=click.Path(path_type=Path))
-@click.pass_obj
-def action_update(
-    state: CLIContext,
-    reference: str,
-    set_values: tuple[str, ...],
-    unset_values: tuple[str, ...],
-    markdown_file: Path | None,
-) -> None:
-    _update_fields(
-        _action_ref(reference, state.config),
-        set_values,
-        unset_values,
-        markdown_file,
-        immutable={"id", "entity"},
-    )
-    click.echo(f"Updated action {reference}")
-
-
-@action_group.command("edit")
-@click.argument("reference")
-@click.pass_obj
-def action_edit(state: CLIContext, reference: str) -> None:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    path = state.config.actions_dir / entity / identifier / "action.md"
-    _edit_recoverable(
-        path,
-        lambda: _action_ref(reference, state.config),
-        f"Action {reference!r}",
-    )
-    click.echo(f"Validated action {reference}")
-
-
-@action_group.command("delete")
-@click.argument("reference")
-@click.pass_obj
-def action_delete(state: CLIContext, reference: str) -> None:
-    _action_ref(reference, state.config).delete()
-    click.echo(f"Deleted action {reference}")
-
-
-@main.command("launch")
-@click.argument("entrypoint_name")
-@click.argument("entrypoint_overrides", nargs=-1, type=click.UNPROCESSED)
-@click.option("--record", "record_id")
-@click.option("--commit")
-@click.option("--dispatch")
-@click.option("--dry-run", is_flag=True)
-@click.pass_obj
-def launch_command(
-    state: CLIContext,
-    entrypoint_name: str,
-    entrypoint_overrides: tuple[str, ...],
-    record_id: str | None,
-    commit: str | None,
-    dispatch: str | None,
-    dry_run: bool,
-) -> None:
-    """Launch an effective record entrypoint."""
-    record = _active(state.config, record_id)
-    entrypoint = record.entrypoint(entrypoint_name, config=state.config)
-    overrides = _overrides(entrypoint_overrides)
-    if dry_run:
-        click.echo(f"Dispatcher: {_dispatcher(state.config, dispatch)}")
-        arguments = dict(entrypoint.args)
-        arguments.update(overrides)
-        command = [*entrypoint.command, *render_arguments(arguments)]
-        click.echo(f"Command: {shlex.join(command)}")
-        return
-    result = launch(
-        entrypoint,
-        name=entrypoint_name,
-        args=overrides,
-        record_id=record.id,
-        commit=commit,
-        dispatch=dispatch,
-        check=False,
-        config=state.config,
-    )
-    if result.returncode:
-        raise click.exceptions.Exit(result.returncode)
-
-
-@main.command("runs")
-@click.argument("subcommand", required=False, type=click.Choice(["list"]))
-@click.option("--record", "record_id")
-@click.option("--metrics")
-@click.option("--params")
-@click.option("--sort")
-@click.option("--ascending", is_flag=True)
-@click.option("--descending", is_flag=True)
-@click.option("--limit", type=click.IntRange(min=0))
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def run_list(
-    state: CLIContext,
-    subcommand: str | None,
-    record_id: str | None,
-    metrics: str | None,
-    params: str | None,
-    sort: str | None,
-    ascending: bool,
-    descending: bool,
-    limit: int | None,
-    json_output: bool,
-) -> None:
-    """List runs from the selected record's tracking source."""
-    _ = subcommand
-    if ascending and descending:
-        raise ValidationError("--ascending and --descending are mutually exclusive")
-    if (ascending or descending) and sort is None:
-        raise ValidationError("A sort direction requires --sort")
-    record = _active(state.config, record_id)
-    declarations = record.resolve(config=state.config).values.get("metrics") or []
-    metric_names = (
-        _names(metrics, "metric")
-        if metrics is not None
-        else [item.name for item in declarations]
-    )
-    param_names = _names(params, "parameter")
-    query = {
-        key: value
-        for key, value in {"sort": sort, "limit": limit}.items()
-        if value is not None
-    }
-    if sort is not None:
-        directions = {item.name: item.direction for item in declarations}
-        query["ascending"] = (
-            ascending if ascending or descending else directions.get(sort) != "maximize"
-        )
-    runs = record.runs(
-        config=state.config,
-        **query,
-    )
-    if json_output:
-        _emit_json(runs)
-    else:
-        columns = ["id", "record", "timestamp", "commit"]
-        columns.extend(f"param:{name}" for name in param_names)
-        columns.extend(f"metric:{name}" for name in metric_names)
-        rows = [
-            [
-                run.id,
-                run.record_id,
-                run.timestamp or "",
-                run.commit or "",
-                *(run.params.get(name) for name in param_names),
-                *(run.metrics.get(name) for name in metric_names),
-            ]
-            for run in runs
-        ]
-        click.echo(_table(columns, rows))
-
+from . import assets as _asset_commands  # noqa: E402,F401
+from . import execution as _execution_commands  # noqa: E402,F401
 
 if __name__ == "__main__":
     main()

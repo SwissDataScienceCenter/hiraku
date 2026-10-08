@@ -21,3 +21,16 @@ Use `hiraku record show <id>` to inspect effective values and their sources;
 use `--raw` to inspect the record's own stored fields. Use Hiraku's CLI, Python
 API, or MCP operations to persist changes so validation and tree constraints
 are applied.
+
+## Git persistence and experiment commits
+
+Research records are authoritative project state, but they are not experiment
+implementation files. Whether a project versions `hiraku/records/` in Git is a
+project policy; Hiraku does not automatically stage or commit those files.
+Keep that policy separate from experiment implementation commits.
+
+An experiment implementation commit should include only its selected source
+paths. Do not use `git add .` for that commit. Untracked Hiraku records do not
+conflict with a scoped source change and should remain untouched. Unrelated
+staged paths must not be included; resolve their staging separately before
+committing the experiment.

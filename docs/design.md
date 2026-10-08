@@ -8,7 +8,9 @@ Based on what I liked from [*Agentic Design Patterns*](https://doi.org/10.1007/9
 
 ### 1. Define a clear goal
 
-> Any kind of agentic workflow should be bounded by a clear goal definition, and the system should not allow the agent to change it without explicit human approval.
+> Any kind of agentic workflow should be bounded by a clear goal definition,
+> and the harness should not let the agent change it without explicit human
+> direction.
 
 A tool such as Hiraku should define a clear **Goal** with:
 
@@ -18,8 +20,9 @@ A tool such as Hiraku should define a clear **Goal** with:
 - an evaluation protocol;
 - constraints;
 - entrypoints;
-- resource limits; and
 - stop conditions.
+
+Session resource limits belong to the selected Program or harness configuration.
 
 In auto mode, the system should **stop if the agent proposes changing any of these fields**.
 
@@ -28,7 +31,7 @@ In auto mode, the system should **stop if the agent proposes changing any of the
 The system should represent states or model transitions between research phases. Example phases include:
 
 ```text
-discover → propose → admit → implement → commit → launch
+discover → propose → implement → commit → launch
 → analyze → conclude → continue/stop
 ```
 

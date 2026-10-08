@@ -8,14 +8,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-import hiraku.project
-from hiraku.config import HirakuConfig
-from hiraku.errors import (
+import hiraku.core.project
+from hiraku.core.config import HirakuConfig
+from hiraku.core.errors import (
     ProjectExistsError,
     ProjectNotFoundError,
     ValidationError,
 )
-from hiraku.record import Record
+from hiraku.core.record import Record
 
 
 def _git(path: Path, *arguments: str) -> None:
@@ -112,6 +112,18 @@ def test_init_sets_tracking_backend(tmp_path: Path) -> None:
     assert yaml.safe_load(config.path.read_text())["tracking_backend"] == {
         "type": "mlflow"
     }
+
+
+def test_default_program_config_is_ignored(tmp_path: Path) -> None:
+    path = tmp_path / "hiraku.yml"
+    path.write_text(
+        "default_program: interactive\ntracking_backend:\n  type: csv\n",
+        encoding="utf-8",
+    )
+
+    config = HirakuConfig.load(path)
+
+    assert "default_program" not in config.to_dict()
 
 
 def test_init_adds_hiraku_to_existing_codex_config(tmp_path: Path) -> None:
@@ -249,14 +261,14 @@ def test_template_failure_rolls_back_created_paths(tmp_path: Path, monkeypatch) 
     (template / "first.txt").write_text("first")
     (template / "second.txt").write_text("second")
     root = tmp_path / "project"
-    original_copy = hiraku.project.shutil.copy2
+    original_copy = hiraku.core.project.shutil.copy2
 
     def fail_on_second(source: Path, destination: Path) -> None:
         if Path(source).parent == template and Path(source).name == "second.txt":
             raise OSError("simulated copy failure")
         original_copy(source, destination)
 
-    monkeypatch.setattr(hiraku.project.shutil, "copy2", fail_on_second)
+    monkeypatch.setattr(hiraku.core.project.shutil, "copy2", fail_on_second)
 
     with pytest.raises(ValidationError, match="simulated copy failure"):
         HirakuConfig.init(root, template=template)
@@ -274,7 +286,7 @@ def test_init_from_packaged_example_copies_only_src(
     (example / "README.md").write_text("do not copy")
     (example / "example.yml").write_text("description: Demo\n")
     (example / "src/copied.txt").write_text("copied")
-    monkeypatch.setattr(hiraku.project, "files", lambda package: resources)
+    monkeypatch.setattr(hiraku.core.project, "files", lambda package: resources)
 
     root = tmp_path / "project"
     HirakuConfig.init(root, example="demo", install_skill=False)

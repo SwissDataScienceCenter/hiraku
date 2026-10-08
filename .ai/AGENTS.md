@@ -36,7 +36,7 @@ Before finishing a code change, run the relevant full checks:
 ```bash
 uv run pytest
 uv run ruff check .
-uv run zensical build --clean
+uv run zensical build --clean --strict
 ```
 
 For packaging changes, also run:
@@ -74,16 +74,12 @@ The repository is a single `uv`-managed Python project.
 | `.ai/skills/alphaxiv/` | AlphaXiv skills for literature review |
 | `.ai/skills/hiraku/` | Hiraku usage skill |
 | `src/hiraku/` | Installed Python package |
-| `src/hiraku/base.py` | Generic Markdown record serialization and validation |
-| `src/hiraku/record.py` | Research records, entrypoints, and metrics |
-| `src/hiraku/run.py` | Normalized tracked runs |
-| `src/hiraku/config.py` | Project discovery, configuration, and active context |
-| `src/hiraku/cli.py` | Click-based command-line interface |
-| `src/hiraku/launch.py` | Entrypoint argument rendering and dispatch execution |
+| `src/hiraku/core/` | Deterministic project, record, Git, and launch APIs |
+| `src/hiraku/cli/` | Click command tree and user-facing commands |
+| `src/hiraku/mcp/` | MCP server, schemas, prompts, resources, and tools |
 | `src/hiraku/tracking/` | Tracking backend adapters and run normalization |
-| `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
-| `src/hiraku/agent.py` | Program and Action discovery/loading |
 | `src/hiraku/resources/` | Bundled programs, actions, dispatchers, and examples |
+| `src/hiraku/tui/` | Terminal user interface |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
 | `docs/` | Documentation sources |
 | `scripts/` | Development and release utilities |
@@ -97,11 +93,15 @@ Generated or transient paths:
 
 ### Architecture boundaries
 
+- `hiraku.core` owns deterministic project state, validation, persistence,
+  Git operations, and launch behavior.
+- The CLI and MCP are sibling interfaces over Core. They must not depend on
+  each other for domain behavior.
 - `BaseRecord` owns generic Markdown/YAML persistence and validation.
 - `Record` owns research hierarchy, inheritance, and record-local fields.
 - `HirakuConfig` owns project discovery and persistent active-context state.
-- The CLI should call the public record/config/launch APIs rather than duplicate
-  persistence or validation logic.
+- The CLI should call Core APIs rather than duplicate persistence or validation
+  logic.
 - Tracking backends are queried through their adapter interfaces. Keep backend-
   specific behavior inside `src/hiraku/tracking/`.
 - Launches go through the configured dispatcher and must preserve attribution
