@@ -84,15 +84,25 @@ If pre-existing changes overlap the implementation and cannot be preserved safel
 
 Implement only the approved experiment.
 
-Define the experiment's runnable entrypoint from its actual implementation rather than inheriting execution configuration from research ancestry.
+First determine whether the experiment requires a code change. A baseline may
+evaluate an implementation that is already present in the project. In that
+case, do not try to commit unchanged files or create a no-op commit. Verify
+which commit contains the implementation, then bind that commit to the record
+through Hiraku (for example, `hiraku record update <id> --commit <sha>`).
+Only use `commit_implementation` when the approved experiment actually changed
+implementation files that need a new commit.
 
-Bind the resulting implementation to the experiment through Hiraku.
+Define the experiment's runnable entrypoint from its actual implementation
+rather than inheriting execution configuration from research ancestry.
 
-If Hiraku rejects the operation, diagnose the reported constraint rather than bypassing it.
+Bind the resulting implementation to the experiment through Hiraku. If a
+Hiraku operation fails, inspect the full error and current record/Git state.
+Choose the appropriate supported operation for the state; do not retry a
+commit when there are no changes to commit, or bypass a validation constraint.
 
 ## 5. Launch
 
-Run the approved implementation through Hiraku using the experiment's declared execution configuration.
+Run the approved implementation through Hiraku using the experiment's declared execution configuration. An implementation already committed before the proposal can still be launched once that commit is bound to the approved experiment record.
 
 Require explicit experiment attribution.
 
