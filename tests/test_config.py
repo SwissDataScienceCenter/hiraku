@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import tomllib
 from pathlib import Path
@@ -61,6 +62,8 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert source_skill.is_file()
     assert (root / ".agents/skills/hiraku/references").is_dir()
     assert (root / ".claude/skills/hiraku/references").is_dir()
+    assert not (root / ".codex/skills").exists()
+    assert not (root / ".pi/skills").exists()
     assert codex_skill.is_file()
     assert claude_skill.is_file()
     assert codex_skill.read_text() == source_skill.read_text()
@@ -79,6 +82,11 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
         "command": "hiraku",
         "args": ["mcp"],
     }
+    expected_server = {"command": "hiraku", "args": ["mcp"]}
+    claude_config = json.loads((root / ".mcp.json").read_text())
+    pi_config = json.loads((root / ".pi/mcp.json").read_text())
+    assert claude_config["mcpServers"]["hiraku"] == expected_server
+    assert pi_config["mcpServers"]["hiraku"] == expected_server
     assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
@@ -86,7 +94,10 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert not (without_skill / ".agents").exists()
     assert not (without_skill / ".claude").exists()
     assert not (without_skill / ".ai").exists()
+    assert not (without_skill / ".pi/skills").exists()
     assert (without_skill / ".codex/config.toml").is_file()
+    assert (without_skill / ".mcp.json").is_file()
+    assert (without_skill / ".pi/mcp.json").is_file()
 
     with pytest.raises(ProjectExistsError):
         HirakuConfig.init(root)
@@ -117,6 +128,30 @@ def test_init_adds_hiraku_to_existing_codex_config(tmp_path: Path) -> None:
         "command": "hiraku",
         "args": ["mcp"],
     }
+
+
+@pytest.mark.parametrize("relative_path", [Path(".mcp.json"), Path(".pi/mcp.json")])
+def test_init_adds_hiraku_to_existing_json_mcp_config(
+    tmp_path: Path, relative_path: Path
+) -> None:
+    root = tmp_path / "project"
+    config_path = root / relative_path
+    config_path.parent.mkdir(parents=True)
+    original = {
+        "mcpServers": {"docs": {"command": "docs-mcp", "args": []}},
+        "custom": {"setting": True},
+    }
+    config_path.write_text(json.dumps(original))
+
+    HirakuConfig.init(root)
+
+    settings = json.loads(config_path.read_text())
+    assert settings["mcpServers"]["docs"] == original["mcpServers"]["docs"]
+    assert settings["mcpServers"]["hiraku"] == {
+        "command": "hiraku",
+        "args": ["mcp"],
+    }
+    assert settings["custom"] == original["custom"]
 
 
 def test_init_preserves_existing_hiraku_codex_server(tmp_path: Path) -> None:

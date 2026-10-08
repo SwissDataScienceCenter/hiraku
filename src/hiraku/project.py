@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tomllib
@@ -28,7 +29,7 @@ class _InitializationResult:
 
 @dataclass(frozen=True, slots=True)
 class _MCPConfigInstall:
-    """Filesystem changes made while installing Codex MCP configuration."""
+    """Filesystem changes made while installing MCP server configuration."""
 
     created_files: tuple[Path, ...] = ()
     created_dirs: tuple[Path, ...] = ()
@@ -152,7 +153,6 @@ class ProjectInitializer:
                         (skills, target)
                         for target in (
                             project_root / ".agents/skills",
-                            project_root / ".codex/skills",
                             project_root / ".claude/skills",
                         )
                     )
@@ -166,9 +166,13 @@ class ProjectInitializer:
                     dispatcher = config.dispatch_dir / name
                     if dispatcher.is_file():
                         dispatcher.chmod(dispatcher.stat().st_mode | 0o111)
-                codex_config = cls._install_codex_mcp_config(project_root)
-                created_files.extend(codex_config.created_files)
-                created_dirs.extend(codex_config.created_dirs)
+                for mcp_config in (
+                    cls._install_codex_mcp_config(project_root),
+                    cls._install_json_mcp_config(project_root, Path(".mcp.json")),
+                    cls._install_json_mcp_config(project_root, Path(".pi/mcp.json")),
+                ):
+                    created_files.extend(mcp_config.created_files)
+                    created_dirs.extend(mcp_config.created_dirs)
                 return _InitializationResult(
                     config=config,
                     created_files=tuple(dict.fromkeys(created_files)),
@@ -268,6 +272,53 @@ class ProjectInitializer:
         separator = "\n" if content.endswith("\n") or not content else "\n\n"
         atomic_write(config_path, f"{content.rstrip()}{separator}{server_config}")
         return _MCPConfigInstall()
+
+    @classmethod
+    def _install_json_mcp_config(
+        cls, project_root: Path, relative_path: Path
+    ) -> _MCPConfigInstall:
+        """Add the Hiraku stdio server to a Claude Code or Pi config file."""
+        config_path = project_root / relative_path
+        config_dir = config_path.parent
+        if config_dir.is_symlink() or config_path.is_symlink():
+            raise ValidationError(
+                f"MCP configuration path cannot be a symbolic link: {config_path}"
+            )
+
+        created_dirs: list[Path] = []
+        created_file = not config_path.exists()
+        if created_file:
+            cls._ensure_directory(config_dir, created_dirs)
+            settings: dict[str, object] = {"mcpServers": {}}
+        else:
+            if not config_path.is_file():
+                raise ValidationError(f"MCP configuration is not a file: {config_path}")
+            try:
+                settings = json.loads(config_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise ValidationError(
+                    f"Cannot add Hiraku MCP to invalid config {config_path}: {exc}"
+                ) from exc
+            if not isinstance(settings, dict):
+                raise ValidationError(
+                    f"Expected a JSON object in MCP configuration: {config_path}"
+                )
+
+        servers = settings.setdefault("mcpServers", {})
+        if not isinstance(servers, dict):
+            raise ValidationError(
+                f"Invalid mcpServers object in MCP configuration: {config_path}"
+            )
+        if "hiraku" in servers:
+            return _MCPConfigInstall()
+
+        servers["hiraku"] = {"command": "hiraku", "args": ["mcp"]}
+        atomic_write(
+            config_path,
+            json.dumps(settings, indent=2, ensure_ascii=False) + "\n",
+        )
+        files = (config_path,) if created_file else ()
+        return _MCPConfigInstall(files, tuple(created_dirs))
 
     @classmethod
     def _inventory_overlay(

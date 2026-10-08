@@ -56,23 +56,54 @@ Set `WANDB_ENTITY` when the project belongs to a specific entity.
 
 `WANDB_PROJECT` can be used to override the default project name.
 
+## Install the MCP for literature review
+
+### Claude Code
+
+```bash
+claude mcp add --transport http alphaxiv https://api.alphaxiv.org/mcp/v1
+```
+
+### Codex
+
+```bash
+codex mcp add alphaxiv --url https://api.alphaxiv.org/mcp/v1
+```
+
+### Pi
+
+Create an API Key from [alphaXiv](https://www.alphaxiv.org/settings/api-keys) and export it in your shell environment:
+
+```bash
+export ALPHAXIV_API_KEY="<key>"
+pi mcp add alphaxiv --url https://api.alphaxiv.org/mcp/v1 --bearer-token-env-var ALPHAXIV_API_KEY
+```
+
 ## Run the full research workflow
 
-After initialization, give a coding agent the prompt below. It directs the agent to create the task and baseline, conduct the literature review, then run the bounded autoresearch loop.
+After initialization, give a coding agent the prompt below. The prompt defines
+the sequence across the reusable `literature-review` and `autoresearch`
+Programs. The user's explicit instruction to continue into autoresearch is the
+handoff after the literature review.
 
 !!! info "Bounded autonomous run"
     The prompt explicitly authorizes the complete loop, so the agent does not pause for per-experiment approval. It must stop at the experiment limit or if it needs a decision outside the authorization.
 
 ```text
-Complete the EuroSAT RGB research workflow in this project. Resume existing work if the task or baseline already exists; do not create duplicates.
+Complete the EuroSAT RGB research workflow in this project.
 
-Create a Hiraku task named `eurosat-rgb` for investigating image-specific architectural inductive biases on EuroSAT RGB. Declare `val/accuracy` as the primary metric to maximize and `val/loss` as a supporting metric to minimize. Use W&B project `eurosat-rgb`.
+Create a Hiraku task named `eurosat-rgb`, if non-existing, for investigating image-specific architectural inductive biases on EuroSAT RGB.
+Declare `val/accuracy` as the primary metric to maximize and `val/loss` as a supporting metric to minimize.
+Use W&B project `eurosat-rgb`.
 
-Use the following protocol: EuroSAT RGB at 64x64 resolution, stratified 80/20 train/validation split, seed 42, Adam with learning rate 0.001, batch size 64, 10 epochs, CPU only, and no pretrained models. Record this protocol and a total experiment budget of five, including the baseline, on the task.
+Use the following protocol: EuroSAT RGB at 64x64 resolution, stratified 80/20 train/validation split, seed 42, Adam with learning rate 0.001, batch size 64, 10 epochs, CPU only, and no pretrained models.
+Record this protocol and a total experiment budget of five, including the baseline, on the task.
 
-Create and launch the flattened-image MLP baseline through Hiraku if it does not already exist. Then use the `literature-review` Program to review architectural inductive biases for small image classification models. Focus on approaches that train quickly on CPU and can be compared fairly with the MLP. Identify evidence-backed directions that may improve EuroSAT RGB classification without pretrained models. After delivering the review, continue directly to the `autoresearch` Program; do not stop after the review.
-
-I authorize the complete bounded loop: run up to five experiments total, counting the baseline. This is standing approval for each experiment that the `autoresearch` Program judges evidence-backed, within the task's question and evaluation protocol, and within the stated budget. Create, implement, commit, launch through Hiraku, and analyze one experiment at a time. Do not ask me for per-experiment approval. Do not create speculative future experiment records. Stop when the budget is reached, no justified experiment remains, a run or project constraint blocks safe progress, or continuing would require changing the research question, metrics, protocol, or authorized scope. Report the review, records, run results, and final conclusions.
+Create and launch the flattened-image MLP baseline through Hiraku if it does not already exist.
+Then do a literature review to review architectural inductive biases for small image classification models.
+Focus on approaches that train quickly on CPU and can be compared fairly with the MLP.
+Identify evidence-backed directions that may improve EuroSAT RGB classification without pretrained models.
+After delivering the review, run an autoresearch loop until the budget is reached, no justified experiment remains, a run or project constraint blocks safe progress, or continuing would require changing the research question, metrics, protocol, or authorized scope.
 ```
 
 ## Expected research flow

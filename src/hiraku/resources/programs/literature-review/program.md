@@ -112,9 +112,18 @@ Do not create or modify Hiraku research state merely because a later experimenta
 
 ## Handoff
 
-The review may be handed to the `interactive` Program to turn selected evidence and candidate directions into a concrete research task.
+When no downstream Program is specified, the review may be handed to the
+`interactive` Program to turn selected evidence and candidate directions into a
+concrete research task.
 
-The `interactive` Program is responsible for defining and obtaining agreement on:
+If the user explicitly requested a sequence that continues with another named
+Program after the review, deliver the review and then hand off to that Program.
+In that case the review is a phase in the requested workflow, not the end of the
+workflow. Do not create experiment records or begin implementation as part of
+the review itself.
+
+The next Program is responsible for any work beyond the review. For example,
+the `interactive` Program defines and obtains agreement on:
 
 - the research question,
 - metrics,
@@ -124,12 +133,16 @@ The `interactive` Program is responsible for defining and obtaining agreement on
 - resource limits,
 - stopping conditions.
 
-The literature review itself does not authorize experimentation.
+The literature review itself does not authorize experimentation; authorization
+must come from the user's request or an applicable task-level approval.
 
 ## Stop
 
-Stop after delivering the evidence synthesis and candidate research directions.
+By default, stop after delivering the evidence synthesis and candidate research
+directions. Continue only when the user explicitly requested a named next phase
+or Program, as described under Handoff.
 
-Do not proceed directly to implementation or autonomous experimentation.
+Do not begin implementation as part of the review phase. If the user explicitly
+requested a downstream Program, hand off to it after delivering the review.
 
 If the available evidence is insufficient to support a useful research direction, report that as the result rather than inventing one.

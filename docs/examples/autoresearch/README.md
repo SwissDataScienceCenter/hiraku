@@ -49,6 +49,9 @@ cat >> .gitignore <<'EOF'
 # Hiraku local files and run artifacts
 /.agents/
 /.claude/
+/.codex/
+/.pi/
+/.mcp.json
 /hiraku/*
 /hiraku.yml
 /task.md
@@ -111,7 +114,8 @@ hiraku record update baseline \
 
 Start your favourite coding agent and a reasonably powerful model in the
 initialized repository. Hiraku installs the skill for Codex at
-`.agents/skills/hiraku/` and for Claude Code at `.claude/skills/hiraku/`.
+`.agents/skills/hiraku/` for Codex and Pi, and `.claude/skills/hiraku/` for
+Claude Code.
 Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code.
 
 Currently, Hiraku records the program association but does not automatically inject its Markdown into an agent prompt. Start an agent in the repository and ask it to

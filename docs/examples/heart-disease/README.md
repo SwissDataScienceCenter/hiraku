@@ -153,10 +153,10 @@ launch that never logs a row will not appear as a run.
 ## Using the Hiraku skill
 
 `hiraku init` installs the same project-local Hiraku skill for Codex at
-`.agents/skills/hiraku/` and for Claude Code at `.claude/skills/hiraku/`. After
-completing the setup in section 1, start your coding agent from the initialized
-`heart-disease` repository so it can discover the skill, training code, data,
-and project state.
+`.agents/skills/hiraku/` for Codex and Pi, and `.claude/skills/hiraku/` for
+Claude Code. After completing the setup in section 1, start your coding agent
+from the initialized `heart-disease` repository so it can discover the skill,
+training code, data, and project state.
 
 Invoke the skill as `$hiraku` in Codex or `/hiraku` in Claude Code. The shared
 prompts below use the agent-neutral phrase "Use the Hiraku skill"; use your

@@ -14,6 +14,18 @@ def invoke(*args: str):
     return CliRunner().invoke(main, args, catch_exceptions=False)
 
 
+def test_mcp_cli_starts_stdio_server(monkeypatch) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "hiraku.cli.serve_mcp", lambda config=None: calls.append(config)
+    )
+
+    result = invoke("mcp")
+
+    assert result.exit_code == 0
+    assert calls == [None]
+
+
 def test_record_cli_lifecycle(tmp_path: Path, monkeypatch) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
@@ -71,6 +83,22 @@ def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
     assert lines[0].split() == ["id", "parent", "type", "status"]
     assert lines[2].split() == ["child", "root"]
     assert lines[3].split() == ["root", "task", "active"]
+
+
+def test_record_list_handles_empty_project(tmp_path: Path, monkeypatch) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+
+    table = invoke("record", "list")
+    assert table.exit_code == 0
+    assert table.output.splitlines() == [
+        "id  parent  type  status",
+        "--  ------  ----  ------",
+    ]
+
+    json_result = invoke("record", "list", "--json")
+    assert json_result.exit_code == 0
+    assert json.loads(json_result.output) == []
 
 
 def test_record_cli_reparents_and_makes_root(tmp_path: Path, monkeypatch) -> None:

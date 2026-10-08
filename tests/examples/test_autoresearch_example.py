@@ -64,7 +64,8 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
     gitignore.write_text(
         gitignore.read_text(encoding="utf-8")
         + "\n# Hiraku local files and run artifacts\n"
-        + "/.agents/\n/.claude/\n/.codex/\n/hiraku/*\n/hiraku.yml\n/task.md\n"
+        + "/.agents/\n/.claude/\n/.codex/\n/.pi/\n/.mcp.json\n"
+        + "/hiraku/*\n/hiraku.yml\n/task.md\n"
         + "/runs.csv\n/run.log\n",
         encoding="utf-8",
     )
@@ -127,6 +128,8 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "/hiraku/*" in readme
     assert "/.agents/" in readme
     assert "/.claude/" in readme
+    assert "/.pi/" in readme
+    assert "/.mcp.json" in readme
     assert "--markdown-file task.md" in readme
     assert "hiraku record create sep10" in readme
     assert "branch=autoresearch/sep10" in readme
@@ -176,6 +179,8 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert "/.agents/" in gitignore
     assert "/.claude/" in gitignore
     assert "/.codex/" in gitignore
+    assert "/.pi/" in gitignore
+    assert "/.mcp.json" in gitignore
     assert "/runs.csv" in gitignore
     assert (project / "program.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "program.md"

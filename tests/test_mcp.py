@@ -10,9 +10,11 @@ from hiraku.mcp import (
     Analysis,
     ExperimentProposal,
     ProposedEntrypoint,
+    ResearchTask,
     approve_experiment,
     commit_implementation,
     create_server,
+    create_task,
     launch_experiment,
     list_runs,
     program_resource,
@@ -40,18 +42,24 @@ def test_mcp_guided_heart_disease_cycle(tmp_path: Path) -> None:
     git(tmp_path, "config", "user.name", "Test")
     git(tmp_path, "add", ".")
     git(tmp_path, "commit", "-m", "initialize heart disease example")
-    Record.create(
-        "heart-disease",
-        type="task",
-        metrics=[
-            {"name": "val/log_loss", "direction": "minimize"},
-            {"name": "val/accuracy", "direction": "maximize"},
-        ],
-        config=config,
-    )
     mcp = create_server(config)
+    created_task = create_task(
+        ResearchTask(
+            id="heart-disease",
+            goal="Compare models for heart disease classification.",
+            metrics=[
+                {"name": "val/log_loss", "direction": "minimize"},
+                {"name": "val/accuracy", "direction": "maximize"},
+            ],
+            protocol="Use a fixed stratified split and seed.",
+            experiment_budget=3,
+        )
+    )
+    assert created_task["type"] == "task"
+    assert Record.load(config.records_dir / "heart-disease/heart-disease.md").goal
     expected_tools = {
         "list_runs",
+        "create_task",
         "propose_experiment",
         "approve_experiment",
         "commit_implementation",

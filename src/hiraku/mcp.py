@@ -16,7 +16,7 @@ from .config import HirakuConfig
 from .errors import ValidationError
 from .git import GitRepository
 from .launch import launch
-from .record import Record, list_records, load_record
+from .record import Metric, Record, list_records, load_record
 
 
 class ProposedEntrypoint(BaseModel):
@@ -33,6 +33,14 @@ class ExperimentProposal(BaseModel):
     implementation_plan: str = Field(min_length=1)
     evaluation_plan: str = Field(min_length=1)
     entrypoint: ProposedEntrypoint | None = None
+
+
+class ResearchTask(BaseModel):
+    id: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    metrics: list[Metric] = Field(min_length=1)
+    protocol: str = Field(min_length=1)
+    experiment_budget: int = Field(gt=0)
 
 
 class Analysis(BaseModel):
@@ -57,6 +65,25 @@ _program_prompt_names: set[str] = set()
 def _config() -> HirakuConfig:
     """Return the project config bound to this MCP server session."""
     return _active_config.get() or HirakuConfig.discover()
+
+
+@mcp.tool()
+def create_task(task: ResearchTask) -> dict[str, Any]:
+    """Create a root research task with its goal, metrics, protocol, and budget."""
+    config = _config()
+    if any(record.id == task.id for record in list_records(config=config)):
+        raise ValidationError(f"Record {task.id!r} already exists")
+    record = Record.create(
+        task.id,
+        type="task",
+        goal=task.goal,
+        metrics=[metric.model_dump() for metric in task.metrics],
+        experiment_budget=task.experiment_budget,
+        markdown=f"## Evaluation protocol\n\n{task.protocol}",
+        activate=False,
+        config=config,
+    )
+    return {"id": record.id, "type": record.type, "path": str(record.path)}
 
 
 @mcp.tool()
