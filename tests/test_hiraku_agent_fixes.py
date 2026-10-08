@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -18,7 +19,7 @@ from hiraku.record import Record, list_records
 from hiraku.run import Run
 from hiraku_agent import loop as loop_module
 from hiraku_agent import sections
-from hiraku_agent import workflows as workflows_module
+from hiraku_agent import state as state_module
 from hiraku_agent.defaults import AgentDefaults, save_defaults
 from hiraku_agent.engine import AgentRun
 from hiraku_agent.errors import AgentError, AgentTimeout
@@ -222,7 +223,7 @@ def test_analyze_refuses_a_running_node_unless_allowed(
     _implemented(config, task)
     _with_runs(monkeypatch, {"baseline": [_run("r1")]})
     monkeypatch.setattr(
-        workflows_module, "running_nodes", lambda runs, cfg: {"baseline": {}}
+        state_module, "running_nodes", lambda runs, cfg: {"baseline": {}}
     )
     with pytest.raises(Exception, match="still running"):
         run_analyze("baseline", command=stub_agent(ANALYZE_NULL), config=config)
@@ -384,9 +385,13 @@ def test_implement_timeout_stops_the_whole_group_and_keeps_the_edits(
         run_implement(
             "baseline", command=["python3", "-c", script], timeout=2, config=config
         )
-    assert "partial.py" in str(caught.value)
-    assert "not bound" in str(caught.value)
-    assert (config.root / "partial.py").exists()  # kept, not discarded
+    message = str(caught.value)
+    assert "partial.py" in message
+    assert "not bound" in message
+    # Kept, not discarded — in the agent's own worktree, never in the user's tree.
+    kept = Path(re.search(r"kept in (\S+):", message).group(1))
+    assert (kept / "partial.py").exists()
+    assert not (config.root / "partial.py").exists()
     assert load_node("baseline", task=task, config=config).is_proposal
 
     grandchild = int(pid_file.read_text())

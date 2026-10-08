@@ -24,17 +24,16 @@ only thing that changed is who can be asked to get there.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any
 
 from hiraku.config import HirakuConfig
 from hiraku.record import Record
 
 from . import sections
+from .engine import last_attempt
 from .gates import is_approved
-from .launches import running_nodes
-from .node import list_nodes
-from .state import node_state
+from .node import cached_runs, list_nodes
+from .state import tree_facts
 
 
 def _describe_marker(info: dict[str, Any]) -> str:
@@ -55,6 +54,34 @@ def suggest_next(
 ) -> dict[str, Any]:
     """The single next action for `task`, and why.
 
+    When the newest call of the suggested workflow on the same target failed or was
+    blocked, the suggestion carries it as `last_attempt` (reason, time, log directory):
+    those calls write nothing to the record, so the same suggestion would otherwise
+    come back with no sign that it just went wrong. The tracking source is read once.
+    """
+    selected = config or HirakuConfig.discover()
+    with cached_runs():
+        suggestion = _suggest(task, config=selected)
+    action = suggestion["action"]
+    if action in _AGENT_ACTIONS:
+        target = suggestion.get("node") or (
+            task.id if isinstance(task, Record) else str(task)
+        )
+        attempt = last_attempt(selected, action, target)
+        if attempt:
+            suggestion["last_attempt"] = attempt
+    return suggestion
+
+
+# Suggested actions that are agent calls, and so leave a log to look back at.
+_AGENT_ACTIONS = frozenset({"design", "implement", "analyze", "triage"})
+
+
+def _suggest(
+    task: Record | str, *, config: HirakuConfig | None = None
+) -> dict[str, Any]:
+    """`suggest_next` without the `last_attempt` lookup.
+
     Returns a dict with at least `action` and `why`; `design`/`exhausted`
     have no single `node` to name, everything else includes `node`; `wait` means only
     launches in flight remain. See the
@@ -74,22 +101,7 @@ def suggest_next(
             ],
         }
 
-    children_of: dict[str, list[str]] = defaultdict(list)
-    for node in nodes:
-        if node.parent_id:
-            children_of[node.parent_id].append(node.id)
-
-    runs_by_id = {node.id: node.runs(config=selected) for node in nodes}
-    in_flight = running_nodes(runs_by_id, selected)
-    states = {
-        node.id: node_state(
-            node,
-            runs_by_id[node.id],
-            has_children=bool(children_of[node.id]),
-            running=node.id in in_flight,
-        )
-        for node in nodes
-    }
+    runs_by_id, states, _, in_flight = tree_facts(nodes, config=selected)
     by_id = {node.id: node for node in nodes}
 
     # Priority 1 — approved and proposed: no code yet.

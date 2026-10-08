@@ -773,8 +773,11 @@ def test_run_implement_binds_the_reported_commit_and_merges_entrypoints(
         config=git_config,
     )
 
-    expected_commit = GitRepository(git_config).resolve("HEAD")
+    # The agent works in its own worktree on the node's branch, so the bound commit is
+    # that branch's head, not the user's HEAD.
     reloaded = load_node("baseline", task=git_task, config=git_config)
+    assert reloaded.branch
+    expected_commit = GitRepository(git_config).resolve(reloaded.branch)
     assert reloaded.commit == expected_commit
     assert not reloaded.is_proposal
     # The node's own pre-existing override survives the merge ...

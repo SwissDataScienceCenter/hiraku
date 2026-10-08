@@ -31,14 +31,24 @@ from .defaults import (
     merge_defaults,
     save_defaults,
 )
+from .dispatch_setup import (
+    CHECK_RECORD_ID,
+    check_dispatch,
+    describe_check,
+    run_setup_dispatch,
+    set_default_dispatch,
+)
+from .dispatch_setup import to_json as dispatch_json
 from .engine import AgentRun, Hooks
 from .engine import agent_command as resolve_agent_cmd
 from .errors import AgentError
 from .gates import approve as approve_node
+from .gates import is_approved
 from .launches import mark_done, mark_running, running_nodes
-from .loop import LoopResult, run_loop
-from .node import load_node, task_of
+from .loop import LoopFailed, LoopResult, run_loop
+from .node import list_nodes, load_node, task_of
 from .schedule import suggest_next
+from .state import node_bookkeeping
 from .workflows import (
     run_analyze,
     run_design,
@@ -83,25 +93,90 @@ def next_command(task_id: str | None, json_output: bool) -> None:
         return
     click.echo(f"{suggestion['action']}: {suggestion['why']}")
     if "node" in suggestion:
-        click.echo(f"  node: {resolved_task}:{suggestion['node']}")
+        click.echo(f"  node: {suggestion['node']}")
+    attempt = suggestion.get("last_attempt")
+    if attempt:
+        click.echo(
+            f"  last attempt {attempt['outcome']} ({attempt.get('started') or '?'}): "
+            f"{attempt['reason']}\n  log: {attempt['log']}"
+        )
     for command in suggestion.get("next_commands", []):
         click.echo(f"  {command}")
 
 
 @main.command("approve")
-@click.argument("node_id")
+@click.argument("node_ids", nargs=-1)
 @click.option("task_id", "--task")
 @click.option("--by", required=True, help="who is approving this")
-def approve_command(node_id: str, task_id: str | None, by: str) -> None:
-    """Clear the approval gate on a proposed node (a no-op in `auto` mode)."""
+@click.option(
+    "approve_all",
+    "--all",
+    is_flag=True,
+    help="every node of the task still waiting for approval",
+)
+@click.option("yes", "--yes", "-y", is_flag=True, help="with --all: don't ask first")
+def approve_command(
+    node_ids: tuple[str, ...],
+    task_id: str | None,
+    by: str,
+    approve_all: bool,
+    yes: bool,
+) -> None:
+    """Clear the approval gate on one or more nodes (a no-op in `auto` mode).
+
+    Name the nodes (`approve a b c --by you`), or pass --all to approve every node of
+    the task still waiting for approval: proposed nodes, and implemented ones whose
+    approval an update cleared. --all lists them with their expectations and asks
+    before approving. Abandoned nodes are never approved."""
+    if approve_all == bool(node_ids):
+        raise click.UsageError("Name the nodes to approve, or pass --all (not both).")
     config = HirakuConfig.discover()
     try:
         resolved_task = _resolve_task(config, task_id)
-        node = load_node(node_id, task=resolved_task, config=config)
-        approve_node(node, by=by)
+        if approve_all:
+            nodes = _waiting_for_approval(resolved_task, config)
+            if not nodes:
+                click.echo(f"Nothing in {resolved_task} is waiting for approval.")
+                return
+            click.echo(f"{len(nodes)} node(s) in {resolved_task} waiting for approval:")
+            for node, state in nodes:
+                click.echo(
+                    f"  {node.id} [{state}] {node.expectation or '(no expectation)'}"
+                )
+            if not yes:
+                click.confirm(f"Approve all {len(nodes)} as {by}?", abort=True)
+            targets = [node for node, _ in nodes]
+        else:
+            targets = [
+                load_node(node_id, task=resolved_task, config=config)
+                for node_id in node_ids
+            ]
+            abandoned = [node.id for node in targets if node.abandoned]
+            if abandoned:
+                raise AgentError(
+                    f"Not approving abandoned node(s): {', '.join(abandoned)}. "
+                    "Nothing was approved."
+                )
+        for node in targets:
+            already = node.mode == "auto" or node.approved_by is not None
+            approve_node(node, by=by)
+            note = " (already approved)" if already else ""
+            click.echo(f"Approved {resolved_task}:{node.id} (by {by}){note}")
     except HirakuError as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"Approved {resolved_task}:{node_id} (by {by})")
+
+
+def _waiting_for_approval(task_id: str, config: HirakuConfig) -> list[tuple[Any, str]]:
+    """Nodes of `task_id` that the approval gate is still holding back."""
+    nodes = list_nodes(task=task_id, config=config)
+    _, states, _ = node_bookkeeping(nodes, config=config)
+    return [
+        (node, states[node.id])
+        for node in nodes
+        if not node.abandoned
+        and not is_approved(node)
+        and states.get(node.id) in {"proposed", "implemented"}
+    ]
 
 
 def _describe(marker: dict[str, Any]) -> str:
@@ -197,7 +272,9 @@ def mark_running_command(
     """
     config = HirakuConfig.discover()
     try:
-        load_record(node_id, config=config)
+        # `check-dispatch` probes a dispatcher under a reserved id with no record.
+        if node_id != CHECK_RECORD_ID:
+            load_record(node_id, config=config)
         marker = mark_running(
             node_id,
             jobs=job_ids,
@@ -381,25 +458,50 @@ def _run_agent_command(
     else:
         if result.data.get("approvals_cleared"):
             click.echo(
-                "approval cleared (expectation changed, re-approve): "
+                "approval cleared (re-approve): "
                 + ", ".join(result.data["approvals_cleared"])
             )
         if result.data.get("skipped"):
             click.echo("skipped: " + "; ".join(result.data["skipped"]))
         if result.data.get("approval_cleared"):
             click.echo("approval cleared: the expectation changed, so re-approve it")
+        if result.data.get("injection_warning"):
+            click.echo(
+                "WARNING: a source the agent read tried to instruct it. Every record "
+                "this call wrote has an `Injection warning` section, and its proposals "
+                "need a person's approval; read them before approving anything.",
+                err=True,
+            )
+        if result.data.get("worktree_kept"):
+            click.echo(
+                f"the agent left uncommitted changes in {result.data['worktree_kept']}"
+            )
         if result.data.get("investigation_written_to"):
             click.echo(
                 f"investigation recorded in {result.data['investigation_written_to']}"
             )
         if result.data.get("changed"):
             click.echo("changed: " + ", ".join(result.data["changed"]))
+        if result.data.get("unbound"):
+            click.echo(
+                "back to proposed (commit unbound, re-implement after approval): "
+                + ", ".join(result.data["unbound"])
+            )
+        if result.data.get("synced"):
+            click.echo("experiments re-synced: " + ", ".join(result.data["synced"]))
         if result.data.get("ignored"):
             click.echo(
                 "ignored (frozen once experiments exist): "
                 + ", ".join(result.data["ignored"])
             )
-        for note_key in ("notes", "inputs_note", "missing_evidence", "blocked"):
+        for note_key in (
+            "notes",
+            "inputs_note",
+            "missing_evidence",
+            "blocked",
+            "next",
+            "hint",
+        ):
             if result.data.get(note_key):
                 click.echo(f"{note_key}: {result.data[note_key]}")
         if result.written:
@@ -456,6 +558,102 @@ def draft_command(
         json_output=json_output,
         no_apply=no_apply,
     )
+
+
+@main.command("setup-dispatch")
+@click.option(
+    "name", "--name", default=None, help="dispatcher file to write (e.g. slurm.sh)"
+)
+@click.option("force", "--force", is_flag=True, help="replace existing files")
+@_apply_agent_options
+@_repo_option
+def setup_dispatch_command(
+    name: str | None,
+    force: bool,
+    instruction: str,
+    instruction_file: str | None,
+    agent_cmd: str | None,
+    dry_run: bool,
+    no_apply: bool,
+    context_paths: tuple[str, ...],
+    repo_paths: tuple[str, ...],
+    action_id: str | None,
+    context_id: str | None,
+    timeout: int | None,
+    unset_env: list[str],
+    json_output: bool,
+) -> None:
+    """Choose and configure this project's dispatcher with the agent.
+
+    It looks at the tools on this machine (sbatch, ray, kubectl, sky, ...), at how the
+    project and its default repositories already launch work (.sbatch files, cluster
+    configs, job manifests) and at -m, then copies a template (worktree.sh, slurm.sh)
+    with its site settings, or writes a dispatcher for a backend with no template.
+    The project default is not changed: run `check-dispatch NAME --set-default`."""
+    _run_agent_command(
+        run_setup_dispatch,
+        _resolve_instruction(instruction, instruction_file),
+        name=name,
+        force=force,
+        command=resolve_agent_cmd(agent_cmd) if agent_cmd else None,
+        dry_run=dry_run,
+        apply=not no_apply,
+        repo_paths=list(repo_paths),
+        context_paths=list(context_paths),
+        context_id=context_id,
+        action=action_id,
+        unset_env=list(unset_env),
+        hooks=None if dry_run else _hooks(),
+        timeout=timeout,
+        json_output=json_output,
+        no_apply=no_apply,
+    )
+
+
+@main.command("check-dispatch")
+@click.argument("name", required=False)
+@click.option(
+    "wait",
+    "--wait",
+    type=float,
+    default=120.0,
+    help="seconds to wait for a submitted job to run the probe",
+)
+@click.option(
+    "set_default",
+    "--set-default",
+    is_flag=True,
+    help="make it the project's default_dispatch if the check passes",
+)
+@click.option("json_output", "--json", is_flag=True)
+def check_dispatch_command(
+    name: str | None, wait: float, set_default: bool, json_output: bool
+) -> None:
+    """Check that dispatcher NAME (default: the project's) keeps the launch contract.
+
+    Sends a probe through it asking for an older commit than the one checked out, and
+    checks that the probe ran that commit, saw HIRAKU_COMMIT/HIRAKU_GIT_STATE and the
+    record id, and, for a dispatcher that submits a job, that it printed the job id and
+    recorded it with mark-running. No record is touched."""
+    config = HirakuConfig.discover()
+    target = name or config.default_dispatch
+    try:
+        result = check_dispatch(target, wait=wait, config=config)
+    except HirakuError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(dispatch_json(result) if json_output else describe_check(result))
+    if set_default:
+        if result.status != "pass":
+            raise click.ClickException(
+                f"not setting {result.dispatcher} as the default: the check did not "
+                "pass"
+            )
+        set_default_dispatch(result.dispatcher, config=config)
+        click.echo(f"default_dispatch is now {result.dispatcher}")
+    if result.status == "fail":
+        raise SystemExit(1)
+    if result.status == "pending":
+        raise SystemExit(2)
 
 
 @main.command("plan")
@@ -577,10 +775,18 @@ def defaults_command(
 
 @main.command("update")
 @click.argument("record_id")
+@click.option(
+    "force",
+    "--force",
+    is_flag=True,
+    help="task with experiments that have no runs yet: update the whole task and "
+    "send its experiments back to proposed, re-synced with it",
+)
 @_apply_agent_options
 @_repo_option
 def update_command(
     record_id: str,
+    force: bool,
     instruction: str,
     instruction_file: str | None,
     agent_cmd: str | None,
@@ -596,12 +802,16 @@ def update_command(
 ) -> None:
     """Revise an existing task or experiment from an instruction.
 
-    A task can be updated only until another record refers to it; an experiment only
-    until it has runs. After that, draft a new one."""
+    An experiment can be updated until it has runs. A task can be updated freely until
+    experiments refer to it; after that only its Decision rule, unless --force, which
+    updates the whole task and sends every experiment back to proposed (commit unbound,
+    approval cleared), re-synced with the new task. --force is refused once any
+    experiment has runs, a verdict or a launch in flight: draft a new task then."""
     resolved = _resolve_instruction(instruction, instruction_file)
     _run_agent_command(
         run_update,
         record_id,
+        force=force,
         instruction=resolved,
         command=resolve_agent_cmd(agent_cmd) if agent_cmd else None,
         dry_run=dry_run,
@@ -943,6 +1153,15 @@ def loop_command(
             context_id=context_id,
             config=config,
         )
+    except LoopFailed as exc:
+        # Say what already happened before the failing step: those writes stand.
+        for step in exc.result.steps:
+            click.echo(
+                f"done before the failure: {step.action} "
+                f"{step.node or task_id} ({len(step.written)} file(s) written)",
+                err=True,
+            )
+        raise click.ClickException(str(exc)) from exc
     except HirakuError as exc:
         raise click.ClickException(str(exc)) from exc
     for notice in result.notices:

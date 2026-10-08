@@ -120,13 +120,25 @@ The project-owned dispatcher controls Git behavior:
 ```bash
 hiraku launch <entrypoint> --record <record-id>                      # current working state
 hiraku launch <entrypoint> --record <record-id> --dispatch worktree  # exact commit
+hiraku launch <entrypoint> --record <record-id> --dispatch slurm     # exact commit, Slurm job
 ```
 
 Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`,
 and `HIRAKU_ENTRYPOINT`. The
 dispatcher reports `HIRAKU_COMMIT` and `HIRAKU_GIT_STATE`: `launch.sh` reports
 the current HEAD and whether the tree is clean or dirty, while `worktree.sh`
-reports the exact checked-out commit and a clean state.
+and `slurm.sh` report the exact checked-out commit and a clean state.
+
+`slurm.sh` submits the requested commit (HEAD if none) with `sbatch` from a
+worktree under the Git directory (shared with compute nodes, outside the working
+tree) and returns once the job is queued, printing its id; the job removes the
+worktree when it ends. Site settings are the `#SBATCH` lines of
+`hiraku/dispatch/slurm.header`; `HIRAKU_SBATCH_ARGS` adds options per call and
+`HIRAKU_SLURM_WAIT=1` blocks until the job ends. When `hiraku-agent` is
+installed, the job id is recorded with `hiraku-agent mark-running`. Only
+committed files are in the job's checkout, so data and checkpoints are reached
+by absolute path and results are written under `$HIRAKU_ROOT`. To make it the
+project default, set `default_dispatch: slurm.sh` in `hiraku.yml`.
 
 The user can define custom dispatch scripts, e.g.
 

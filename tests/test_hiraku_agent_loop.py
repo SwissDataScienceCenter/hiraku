@@ -9,6 +9,7 @@ rather than the `stub_agent()` argv-list trick `test_hiraku_agent_workflows.py` 
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -247,11 +248,21 @@ def test_run_loop_calls_implement_for_an_approved_proposed_node(
     """`implement` is now in `LLM_WORKFLOWS`, so the loop must route an approved,
     not-yet-implemented node to it exactly as it already does for `design`/`analyze`.
 
-    Uses the agent's `"blocked"` reply rather than a real commit, so this test needs no
-    git repository (`run_implement` returns before ever calling `GitRepository.resolve`
-    when blocked) — the git-backed path is covered in
+    Uses the agent's `"blocked"` reply rather than a real commit. `implement` always
+    works in its own worktree, so the project must be a git repository even then; the
+    binding path is covered in
     `test_hiraku_agent_workflows.py::test_run_implement_binds_the_reported_commit`.
     """
+    for arguments in (
+        ("init", "-q"),
+        ("config", "user.email", "test@example.invalid"),
+        ("config", "user.name", "Test"),
+        ("add", "."),
+        ("commit", "-qm", "initial"),
+    ):
+        subprocess.run(
+            ["git", *arguments], cwd=config.root, capture_output=True, check=True
+        )
     node = create_node(
         "baseline", task=task, kind="baseline", expectation="x", config=config
     )

@@ -1,0 +1,14 @@
+# Site settings for slurm.sh. Every line starting with `#SBATCH` is copied into
+# the job script; everything else (like these comments) is ignored.
+# Copy the #SBATCH lines of a .sbatch file that already works on your cluster,
+# without --job-name/--output unless you want to override hiraku's defaults
+# (job name hiraku-<record>, log under .git/hiraku-worktrees/logs/).
+#
+# Examples (remove the leading `# ` to use them):
+# #SBATCH --account=<account>
+# #SBATCH --partition=normal
+# #SBATCH --time=03:00:00
+# #SBATCH --nodes=1
+# #SBATCH --gpus=1
+# #SBATCH --cpus-per-task=16
+# #SBATCH --mem=64G

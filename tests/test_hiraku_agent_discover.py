@@ -99,22 +99,29 @@ def test_investigation_entries_accumulate_rather_than_overwrite(
     assert body.count("### ") == 2
 
 
-def test_files_readable_reflects_what_the_agent_was_actually_given() -> None:
-    from hiraku_agent.engine import Bundle
+def test_files_readable_reflects_what_the_agent_was_actually_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hiraku_agent.engine import AGENT_CAPABILITIES_ENV_VAR, Bundle
 
     assert files_readable(["claude", "-p"], None) is False
     assert files_readable(["claude", "-p", "--allowedTools", "Read,Glob,Grep"], None)
     assert files_readable(["claude", "-p", "--dangerously-skip-permissions"], None)
     assert files_readable(["claude", "-p"], Bundle(files={"notes.md": "x"}))
-    assert files_readable(["some-other-agent"], None)  # not ours to second-guess
+    # Another agent's permissions cannot be read off its command line: none are
+    # assumed until declared, so its findings stay marked unverified.
+    monkeypatch.delenv(AGENT_CAPABILITIES_ENV_VAR, raising=False)
+    assert files_readable(["some-other-agent"], None) is False
+    monkeypatch.setenv(AGENT_CAPABILITIES_ENV_VAR, "web, files")
+    assert files_readable(["some-other-agent"], None)
 
 
 def test_unverified_note_is_written_when_the_agent_could_not_read_files(
     config: HirakuConfig, task: Record, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import hiraku_agent.workflows as workflows
+    import hiraku_agent.flows.discover as discover_module
 
-    monkeypatch.setattr(workflows, "files_readable", lambda *_a, **_k: False)
+    monkeypatch.setattr(discover_module, "files_readable", lambda *_a, **_k: False)
     run_discover(
         "matcher",
         findings_only=True,

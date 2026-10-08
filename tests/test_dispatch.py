@@ -145,3 +145,116 @@ def test_worktree_dispatcher_isolates_and_cleans_up(tmp_path: Path) -> None:
     )
     assert failed.returncode == 7
     assert _git(tmp_path, "worktree", "list", "--porcelain") == before
+
+
+def _fake_slurm(
+    tmp_path: Path, *, status: int = 0, agent: bool = False
+) -> dict[str, str]:
+    """A PATH with a fake `sbatch` that logs its arguments, keeps a copy of the job
+    script, runs it at once (like a job that starts immediately) and prints
+    `4242;cluster`, as `sbatch --parsable` does on a federated cluster."""
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir()
+    sbatch = bin_dir / "sbatch"
+    sbatch.write_text(
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$@" > "$FAKE_DIR/args"\n'
+        "for last; do :; done\n"
+        'cp "$last" "$FAKE_DIR/job.sh"\n'
+        f"[ {status} -eq 0 ] || exit {status}\n"
+        'SLURM_JOB_ID=4242 bash "$last" > "$FAKE_DIR/job.out" 2> "$FAKE_DIR/job.err"\n'
+        'echo "4242;cluster"\n',
+        encoding="utf-8",
+    )
+    sbatch.chmod(0o755)
+    if agent:
+        fake_agent = bin_dir / "hiraku-agent"
+        fake_agent.write_text(
+            '#!/bin/sh\nprintf "%s " "$@" > "$FAKE_DIR/agent"\n', encoding="utf-8"
+        )
+        fake_agent.chmod(0o755)
+    fake_dir = tmp_path / "fake"
+    fake_dir.mkdir()
+    return {
+        **os.environ,
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "FAKE_DIR": str(fake_dir),
+        "HIRAKU_RECORD_ID": "exp-1",
+        "HIRAKU_ROOT": str(tmp_path / "project"),
+        "HIRAKU_ENTRYPOINT": "train",
+    }
+
+
+def test_slurm_dispatcher_submits_the_exact_commit_and_cleans_up(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    config = _repository(project)
+    commit = _git(project, "rev-parse", "HEAD")
+    (project / "marker.txt").write_text("working", encoding="utf-8")
+    (config.dispatch_dir / "slurm.header").write_text(
+        "# comment\n#SBATCH --account=abc\n#SBATCH --time=01:00:00\n",
+        encoding="utf-8",
+    )
+    env = _fake_slurm(tmp_path, agent=True)
+    before = _git(project, "worktree", "list", "--porcelain")
+
+    result = _run(
+        config.dispatch_dir / "slurm.sh",
+        "--commit",
+        commit,
+        "--",
+        "/bin/sh",
+        "-c",
+        'printf "%s|%s|%s|%s" "$(cat marker.txt)" "$HIRAKU_COMMIT" '
+        '"$HIRAKU_GIT_STATE" "$HIRAKU_RECORD_ID"',
+        env=env,
+    )
+
+    fake = Path(env["FAKE_DIR"])
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "4242"
+    # The job ran the committed file, not the working copy, with provenance set.
+    assert (fake / "job.out").read_text() == f"committed|{commit}|clean|exp-1"
+    job = (fake / "job.sh").read_text()
+    assert "#SBATCH --account=abc" in job and "# comment" not in job
+    args = (fake / "args").read_text().splitlines()
+    assert "--parsable" in args
+    assert "--job-name=hiraku-exp-1" in args
+    assert any(arg.startswith("--output=") for arg in args)
+    assert any(arg.startswith("--chdir=") and "hiraku-worktrees" in arg for arg in args)
+    assert (fake / "agent").read_text().split() == [
+        "mark-running",
+        "exp-1",
+        "--job-id",
+        "4242",
+    ]
+    # The job removed its worktree when it ended.
+    assert _git(project, "worktree", "list", "--porcelain") == before
+
+
+def test_slurm_dispatcher_cleans_up_when_sbatch_fails(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    config = _repository(project)
+    env = _fake_slurm(tmp_path, status=3)
+    before = _git(project, "worktree", "list", "--porcelain")
+
+    result = _run(config.dispatch_dir / "slurm.sh", "--", "true", env=env)
+
+    assert result.returncode == 3
+    assert "sbatch failed" in result.stderr
+    assert _git(project, "worktree", "list", "--porcelain") == before
+
+
+def test_slurm_dispatcher_needs_sbatch(tmp_path: Path) -> None:
+    config = _repository(tmp_path)
+    result = _run(
+        config.dispatch_dir / "slurm.sh",
+        "--",
+        "true",
+        env={**os.environ, "PATH": "/usr/bin:/bin"},
+    )
+    assert result.returncode == 1
+    assert "sbatch was not found" in result.stderr

@@ -90,6 +90,13 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
 | `src/hiraku/agent.py` | Programs, actions, and agent-facing resources |
 | `src/hiraku/resources/` | Bundled programs, actions, dispatchers, skills, and examples |
+| `src/hiraku_agent/` | `hiraku-agent`: the LLM-driven research loop on top of `hiraku` |
+| `src/hiraku_agent/workflows.py` | Stable import surface for the workflows (`run_design`, ...) |
+| `src/hiraku_agent/flows/` | One module per workflow; `_common.py` holds the shared agent call (`AgentCall`) and prompt state |
+| `src/hiraku_agent/replies.py` | Per-workflow reply schemas, checked before anything is written |
+| `src/hiraku_agent/schedule.py`, `state.py` | Node state derivation and the next-action policy (`docs/state.md`) |
+| `src/hiraku_agent/worktree.py`, `lock.py` | `implement`'s separate git worktree; the one-writer project lock |
+| `src/hiraku_agent/prompts/` | Prompt templates; projects override them under `.agents/skills/hiraku-agent/` |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
 | `docs/` | Documentation sources |
 | `scripts/` | Development and release utilities |

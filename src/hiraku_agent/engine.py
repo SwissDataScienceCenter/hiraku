@@ -80,6 +80,7 @@ WORKFLOWS = (
     "update",
     "revise",
     "analyze_task",
+    "setup_dispatch",
 )
 
 # Failures whose message names a symptom but not the fix. Matched against the whole
@@ -132,12 +133,25 @@ WEB_DENIED_MARKERS = (
     "no web access",
 )
 UNVERIFIED_NOTE = (
-    "**[UNVERIFIED: the agent had no web access on this call — WebSearch/WebFetch "
-    "were not permitted — so every citation below is recalled from model knowledge "
-    "and has not been checked against a primary source. Verify each one, or re-run "
-    "`hiraku-agent discover` with `--agent-cmd 'claude -p --allowedTools "
+    "**[UNVERIFIED: the agent had no confirmed web access on this call — for `claude`, "
+    "WebSearch/WebFetch were not permitted; for another agent, none was declared in "
+    "`HIRAKU_AGENT_CAPABILITIES` — so every citation below may be recalled from model "
+    "knowledge rather than checked against a primary source. Verify each one, or "
+    "re-run `hiraku-agent discover` with `--agent-cmd 'claude -p --allowedTools "
     "WebSearch,WebFetch,Read,Glob,Grep'`.]**"
 )
+
+# For an agent CLI other than `claude`, hiraku-agent cannot read its permissions off
+# the command line, so it assumes none rather than all: the "unverified" notes are the
+# only thing telling a reviewer that a citation or a finding was not actually read.
+# Declare what the configured agent can do, e.g. `HIRAKU_AGENT_CAPABILITIES=web,files`.
+AGENT_CAPABILITIES_ENV_VAR = "HIRAKU_AGENT_CAPABILITIES"
+
+
+def declared_capabilities() -> set[str]:
+    """What `HIRAKU_AGENT_CAPABILITIES` declares a non-`claude` agent can do."""
+    raw = os.environ.get(AGENT_CAPABILITIES_ENV_VAR, "")
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
 
 def web_allowed(command: list[str]) -> bool:
@@ -146,12 +160,13 @@ def web_allowed(command: list[str]) -> bool:
     `claude -p` is non-interactive, so a tool it has not been given up front is
     requested and denied — silently, as far as this tool is concerned: the call
     succeeds and returns citations that were recalled rather than read. Only a
-    command that names the web tools can check them.
+    command that names the web tools can check them. Any other agent counts as having
+    web access only when `HIRAKU_AGENT_CAPABILITIES` says so.
     """
     if not command:
         return False
     if Path(command[0]).name not in {"claude", "claude.exe"}:
-        return True  # some other agent: not ours to second-guess
+        return "web" in declared_capabilities()
     text = " ".join(command).lower()
     if "--dangerously-skip-permissions" in text or "bypasspermissions" in text:
         return True
@@ -174,13 +189,14 @@ def files_readable(command: list[str] | None, bundle: Bundle | None) -> bool:
     read tool (`--allowedTools Read,...`, which is what `--repo` adds) or skips
     permissions. A plain `claude -p` can read nothing it was not given, and an
     investigation written without that access would be recalled knowledge presented as
-    reading — the same trap `web_allowed` guards against for citations.
+    reading — the same trap `web_allowed` guards against for citations. Any other agent
+    counts as able to read files only when `HIRAKU_AGENT_CAPABILITIES` says so.
     """
     if bundle:
         return True
     argv = command or agent_command()
     if Path(argv[0]).name not in {"claude", "claude.exe"}:
-        return True  # some other agent: not ours to second-guess
+        return "files" in declared_capabilities()
     text = " ".join(argv).lower()
     if "--dangerously-skip-permissions" in text or "bypasspermissions" in text:
         return True
@@ -684,6 +700,42 @@ def read_logs(config: HirakuConfig, limit: int = 20) -> list[dict[str, Any]]:
         if len(out) >= limit:
             break
     return out
+
+
+def annotate_log(directory: Path, **fields: Any) -> None:
+    """Merge `fields` into a call's `meta.json` (e.g. `blocked`, known only once the
+    reply has been parsed)."""
+    meta_path = directory / "meta.json"
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        meta = {}
+    meta.update(fields)
+    meta_path.write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
+
+
+def last_attempt(
+    config: HirakuConfig, workflow: str, target: str, *, scan: int = 200
+) -> dict[str, Any] | None:
+    """The newest logged `workflow` call on `target`, if it failed or was blocked.
+
+    A failed or blocked call writes nothing to the record, so without this the next
+    `hiraku-agent next` would suggest the identical call again with no hint that it
+    just went wrong. Returns None when the newest such call succeeded or none exists.
+    """
+    for meta in read_logs(config, limit=scan):
+        if meta.get("workflow") != workflow or meta.get("target") != target:
+            continue
+        reason = meta.get("error") or meta.get("blocked")
+        if not reason:
+            return None
+        return {
+            "outcome": "blocked" if meta.get("blocked") else "failed",
+            "reason": " ".join(str(reason).split())[:300],
+            "started": meta.get("started"),
+            "log": str(meta["path"]),
+        }
+    return None
 
 
 @dataclass

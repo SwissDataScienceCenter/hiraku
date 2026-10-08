@@ -25,6 +25,10 @@ task` by hand) — see `task_of()` below for walking back up to it from any node
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Literal
 
 from hiraku.config import HirakuConfig
@@ -150,8 +154,58 @@ class Node(Record):
         get a chance to narrow them down to `self.id`, so a future caller that needs
         them together should filter before ranking, not reuse this as-is.
         """
-        all_runs = super().runs(backend=backend, config=config, **query)
+        cache = _RUN_CACHE.get()
+        if cache is None or backend is not None or query:
+            all_runs = super().runs(backend=backend, config=config, **query)
+        else:
+            key = _source_key(self, config)
+            if key not in cache:
+                cache[key] = super().runs(config=config)
+            all_runs = cache[key]
         return [run for run in all_runs if getattr(run, "record_id", None) == self.id]
+
+
+# One tracking-source query per source within a `cached_runs()` block, instead of one
+# per `Node.runs()` call: building one prompt or one scheduling decision used to scan
+# the whole source 2N+1 times for N nodes, which a remote MLflow/W&B server feels.
+_RUN_CACHE: ContextVar[dict[str, list[Any]] | None] = ContextVar(
+    "hiraku_agent_run_cache", default=None
+)
+
+
+@contextmanager
+def cached_runs() -> Iterator[None]:
+    """Query each tracking source at most once inside this block.
+
+    Meant for one read-only pass — building the state for a prompt, or one
+    `suggest_next` decision — not across an agent call: runs that land while an agent
+    works must be seen by the write that follows it. Nested blocks share the outer
+    cache.
+    """
+    if _RUN_CACHE.get() is not None:
+        yield
+        return
+    token = _RUN_CACHE.set({})
+    try:
+        yield
+    finally:
+        _RUN_CACHE.reset(token)
+
+
+def _source_key(record: Record, config: Any) -> str:
+    """What decides which runs `Record.runs()` returns: the project, and the effective
+    `tracking_backend` and `mlflow_experiment` (both inherited down the tree)."""
+    selected = config or HirakuConfig.discover()
+    values = record.resolve(config=selected).values
+    return json.dumps(
+        [
+            str(selected.root),
+            values.get("tracking_backend"),
+            values.get("mlflow_experiment"),
+        ],
+        sort_keys=True,
+        default=str,
+    )
 
 
 def task_of(node: Record, *, config: HirakuConfig | None = None) -> Record:

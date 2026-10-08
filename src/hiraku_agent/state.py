@@ -13,10 +13,14 @@ calls. The caller passes it in (`running=`) the way it passes `runs`.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any
 
-from .node import Node
+from hiraku.config import HirakuConfig
+
+from .launches import running_nodes
+from .node import Node, cached_runs
 
 STATES = (
     "proposed",
@@ -81,3 +85,39 @@ def node_state(
     if runs:
         return "awaiting_analysis"
     return "implemented"
+
+
+def node_bookkeeping(
+    nodes: list[Node], *, config: HirakuConfig
+) -> tuple[dict[str, list[Any]], dict[str, str], dict[str, list[str]]]:
+    """Each node's runs, derived state and children — what the scheduler and every
+    workflow need before deciding anything about a tree."""
+    runs_by_id, states, children_of, _ = tree_facts(nodes, config=config)
+    return runs_by_id, states, children_of
+
+
+def tree_facts(
+    nodes: list[Node], *, config: HirakuConfig
+) -> tuple[dict[str, list[Any]], dict[str, str], dict[str, list[str]], dict[str, Any]]:
+    """`node_bookkeeping`, plus the in-flight markers behind each `running` state.
+
+    Runs are read inside one `cached_runs()` block, so the tracking source is queried
+    once per source rather than once per node.
+    """
+    children_of: dict[str, list[str]] = defaultdict(list)
+    for node in nodes:
+        if node.parent_id:
+            children_of[node.parent_id].append(node.id)
+    with cached_runs():
+        runs_by_id = {node.id: node.runs(config=config) for node in nodes}
+    in_flight = running_nodes(runs_by_id, config)
+    states = {
+        node.id: node_state(
+            node,
+            runs_by_id[node.id],
+            has_children=bool(children_of[node.id]),
+            running=node.id in in_flight,
+        )
+        for node in nodes
+    }
+    return runs_by_id, states, children_of, in_flight

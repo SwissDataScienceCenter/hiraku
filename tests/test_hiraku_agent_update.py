@@ -19,6 +19,7 @@ from hiraku.errors import RecordNotFoundError
 from hiraku.record import Record, load_record
 from hiraku_agent import sections
 from hiraku_agent.errors import AgentError
+from hiraku_agent.gates import approve
 from hiraku_agent.node import create_node, load_node
 from hiraku_agent.workflows import (
     PROTOCOL_HEADING,
@@ -599,3 +600,116 @@ def test_cli_design_revise_dry_run_uses_the_revise_prompt(
     )
     assert result.exit_code == 0, result.output
     assert "revise the experiments already designed" in result.output
+
+
+# ----------------------------------------------------------------- update --force
+
+
+def _two_step_agent(update_payload: dict, revise_payload: dict) -> list[str]:
+    """`update --force` calls the agent twice: the task update, then the re-sync."""
+    code = (
+        "import sys\n"
+        "prompt = sys.argv[3]\n"
+        "print(sys.argv[2] if 'revise the experiments already designed' in prompt "
+        "else sys.argv[1])"
+    )
+    return [
+        "python3",
+        "-c",
+        code,
+        json.dumps(update_payload),
+        json.dumps(revise_payload),
+    ]
+
+
+def test_force_updates_the_task_and_sends_experiments_back_to_proposed(
+    config: HirakuConfig, task: Record
+) -> None:
+    _three_nodes(config, task)
+    implemented = load_node("loftr", task=task, config=config)
+    implemented.commit = "a" * 40
+    implemented.save()
+    approve(load_node("roma", task=task, config=config), by="qianqian")
+
+    update = {"goal": "Pick a matcher for night images", "body": None}
+    revise = {
+        "nodes": {"roma": {"expectation": "roma wins at night", "body": None}},
+        "notes": "roma adjusted",
+    }
+    result = run_update(
+        "matcher",
+        instruction="focus on night images",
+        force=True,
+        command=_two_step_agent(update, revise),
+        config=config,
+    )
+
+    assert load_record("matcher", config=config).goal == (
+        "Pick a matcher for night images"
+    )
+    loftr = load_node("loftr", task=task, config=config)
+    assert loftr.is_proposal
+    assert ("a" * 40) in sections.read_section(
+        loftr.markdown, "Superseded implementation"
+    )
+    roma = load_node("roma", task=task, config=config)
+    assert roma.expectation == "roma wins at night"
+    assert roma.approved_by is None
+    assert result.data["unbound"] == ["loftr"]
+    assert "roma" in result.data["approvals_cleared"]
+    assert result.data["synced"]
+    assert "roma adjusted" in result.data["notes"]
+
+
+def test_without_force_the_ignored_fields_come_with_a_hint(
+    config: HirakuConfig, task: Record
+) -> None:
+    create_node("exp-1", task=task, kind="hypothesis", config=config)
+    with pytest.raises(AgentError, match="--force"):
+        run_update(
+            "matcher",
+            instruction="change the goal",
+            command=stub_agent({"goal": "new goal", "body": "no rule here"}),
+            config=config,
+        )
+    body = "Background.\n\n## Decision rule\n\nTarget recall@10."
+    result = run_update(
+        "matcher",
+        instruction="change the goal and the rule",
+        command=stub_agent({"goal": "new goal", "body": body}),
+        config=config,
+    )
+    assert "goal" in result.data["ignored"]
+    assert "--force" in result.data["hint"]
+
+
+def test_force_is_refused_once_an_experiment_has_runs(
+    config: HirakuConfig, task: Record
+) -> None:
+    create_node("exp-1", task=task, kind="hypothesis", config=config)
+    (config.root / "runs.csv").write_text(
+        "id,record_id,commit,timestamp,entrypoint,url,metric.recall@10\n"
+        "r1,exp-1,,2026-10-05T10:00:00,train,,0.5\n"
+    )
+    with pytest.raises(AgentError, match="even with --force"):
+        run_update(
+            "matcher",
+            instruction="x",
+            force=True,
+            command=["python3", "-c", "raise SystemExit('must not run')"],
+            config=config,
+        )
+
+
+def test_force_applies_to_tasks_only(config: HirakuConfig, task: Record) -> None:
+    create_node("exp-1", task=task, kind="hypothesis", config=config)
+    with pytest.raises(AgentError, match="applies to a task"):
+        run_update("exp-1", instruction="x", force=True, dry_run=True, config=config)
+
+
+def test_force_dry_run_offers_the_full_task(config: HirakuConfig, task: Record) -> None:
+    create_node("exp-1", task=task, kind="hypothesis", config=config)
+    prompt = run_update(
+        "matcher", instruction="x", force=True, dry_run=True, config=config
+    ).prompt
+    assert '"mode": "full"' in prompt

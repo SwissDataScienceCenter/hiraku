@@ -24,12 +24,12 @@ Do this in order:
 1. **Check preconditions.** If `focus_node` already has a `commit`, or is `abandoned`,
    or its `expectation` is empty, stop: set `"blocked": "reason"` and return nothing
    else. (`hiraku_agent` also checks this before calling you; do not rely on that alone.)
-2. **Protect existing work before changing anything.** Run `git status --short
-   --branch` and read it. Never discard, reset, stash, commit over, or otherwise
-   overwrite work that is not yours to touch. Put your commit on `focus_node.branch` if
-   it is set, otherwise on the task's `branch`. If reaching the right branch would
-   require moving or discarding someone else's uncommitted work, stop: set `"blocked"`
-   and explain what you found instead of forcing past it.
+2. **Stay on the branch you were given.** You are running in a separate git worktree,
+   already checked out on this node's own branch; the researcher's working tree is
+   elsewhere and is not yours to touch. Run `git status --short --branch` to confirm.
+   Do not switch branches, create other branches, rebase, reset, amend or force
+   anything: commit on top of the branch as it is. If you cannot do the work without
+   that, stop: set `"blocked"` and explain what you found.
 3. **Read before you write.** Inspect the existing code the task's current
    `entrypoints` already run, and anything `project_context` points at. Match the
    project's own conventions (naming, structure, dependencies already in use) rather

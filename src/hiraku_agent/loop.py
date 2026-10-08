@@ -32,12 +32,13 @@ from typing import Any
 
 from hiraku.agent import Program, load_action, load_program
 from hiraku.config import HirakuConfig
+from hiraku.errors import HirakuError
 from hiraku.record import load_record
 
 from .defaults import merge_defaults
 from .engine import Hooks
 from .errors import AgentError
-from .node import list_nodes
+from .node import cached_runs, list_nodes
 from .schedule import suggest_next
 from .workflows import (
     _node_bookkeeping,
@@ -85,6 +86,15 @@ class LoopResult:
     steps: list[LoopStep] = field(default_factory=list)
     stopped: str = ""
     notices: list[str] = field(default_factory=list)
+
+
+class LoopFailed(AgentError):
+    """A loop step raised. Carries the steps that completed before it, so a failure
+    late in a long unattended loop does not hide what the loop already wrote."""
+
+    def __init__(self, result: LoopResult) -> None:
+        super().__init__(result.stopped)
+        self.result = result
 
 
 def _duration_seconds(value: Any) -> float | None:
@@ -157,7 +167,8 @@ def _budget_reason(
 
     max_runs = extra.get("max_runs")
     if isinstance(max_runs, int):
-        total_runs = sum(len(node.runs(config=config)) for node in nodes)
+        with cached_runs():
+            total_runs = sum(len(node.runs(config=config)) for node in nodes)
         if total_runs >= max_runs:
             return f"max_runs ({max_runs}) reached: {total_runs} runs recorded"
 
@@ -269,10 +280,15 @@ def run_loop(
                 if key in accepted and value not in (None, [])
             },
         }
-        if next_action in {"triage", "analyze", "implement"}:
-            run = runner(suggestion["node"], task_id=task_id, **call_kwargs)
-        else:
-            run = runner(task_id, **call_kwargs)
+        try:
+            if next_action in {"triage", "analyze", "implement"}:
+                run = runner(suggestion["node"], task_id=task_id, **call_kwargs)
+            else:
+                run = runner(task_id, **call_kwargs)
+        except HirakuError as exc:
+            target = suggestion.get("node") or task_id
+            result.stopped = f"{next_action} on {target} failed: {exc}"
+            raise LoopFailed(result) from exc
 
         result.steps.append(
             LoopStep(
@@ -289,6 +305,16 @@ def run_loop(
             # would just repeat the same call forever rather than make progress.
             result.stopped = (
                 f"{next_action} step wrote nothing — stopping rather than repeating it"
+            )
+            break
+        if run.data.get("injection_warning"):
+            # A source tried to instruct the agent. The records it wrote are marked and
+            # pinned to guided mode; a person should read them before anything else
+            # runs unattended.
+            result.stopped = (
+                f"{next_action} found text in a source that tried to instruct the "
+                "agent; the records it wrote carry an `Injection warning` section — "
+                "read them before continuing"
             )
             break
     return result
