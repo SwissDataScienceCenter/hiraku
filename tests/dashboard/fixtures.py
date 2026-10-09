@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 from hiraku.config import HirakuConfig
@@ -72,5 +74,103 @@ def create_acceptance_project(root: Path) -> HirakuConfig:
         "id,record_id,timestamp,metric.acc,metric.loss\n"
         "u-1,unrelated,2026-01-05T00:00:00Z,0.5,0.5\n",
         encoding="utf-8",
+    )
+    return config
+
+
+def create_launch_project(root: Path) -> HirakuConfig:
+    """Create a committed project whose evaluate entrypoint logs CSV rows."""
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    evaluate = root / "evaluate.py"
+    evaluate.write_text(
+        "import csv\n"
+        "import os\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "\n"
+        "seed = 0\n"
+        "args = sys.argv[1:]\n"
+        "for index, arg in enumerate(args):\n"
+        "    if arg == '--seed' and index + 1 < len(args):\n"
+        "        seed = int(args[index + 1])\n"
+        "root = Path(os.environ['HIRAKU_ROOT'])\n"
+        "path = root / 'runs.csv'\n"
+        "existed = path.exists()\n"
+        "with path.open('a', newline='') as stream:\n"
+        "    writer = csv.DictWriter(\n"
+        "        stream,\n"
+        "        fieldnames=[\n"
+        "            'id', 'record_id', 'commit', 'entrypoint',\n"
+        "            'param.seed', 'metric.loss',\n"
+        "        ],\n"
+        "    )\n"
+        "    if not existed:\n"
+        "        writer.writeheader()\n"
+        "    writer.writerow({\n"
+        "        'id': f\"{os.environ['HIRAKU_RECORD_ID']}-{seed}\",\n"
+        "        'record_id': os.environ['HIRAKU_RECORD_ID'],\n"
+        "        'commit': os.environ['HIRAKU_COMMIT'],\n"
+        "        'entrypoint': os.environ['HIRAKU_ENTRYPOINT'],\n"
+        "        'param.seed': seed,\n"
+        "        'metric.loss': 0.1 + seed,\n"
+        "    })\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "add",
+            "evaluate.py",
+        ],
+        cwd=root,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "evaluate",
+        ],
+        cwd=root,
+        check=True,
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+
+    config = HirakuConfig.init(root, install_skill=False)
+    Record.create(
+        "task",
+        config=config,
+        activate=False,
+        type="task",
+        metrics=[{"name": "loss", "direction": "minimize"}],
+    )
+    Record.create(
+        "child",
+        parent_id="task",
+        config=config,
+        activate=False,
+        commit=head,
+        entrypoints={
+            "evaluate": {
+                "command": [sys.executable, "evaluate.py"],
+                "args": {"seed": 0},
+            }
+        },
     )
     return config

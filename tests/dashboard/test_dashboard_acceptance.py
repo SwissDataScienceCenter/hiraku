@@ -7,12 +7,14 @@ import time
 from pathlib import Path
 
 import pytest
-from fixtures import create_acceptance_project
+from fixtures import create_acceptance_project, create_launch_project
 
 import hiraku.dashboard.data as data
 import hiraku.dashboard.launcher as launcher
 from hiraku.config import HirakuConfig
 from hiraku.dashboard import build_snapshot
+from hiraku.dashboard.capability import DashboardCapability
+from hiraku.dashboard.jobs import LaunchController, LaunchRequest
 from hiraku.dashboard.plots import pareto_points, progress_points
 from hiraku.dashboard.session import DashboardSession
 from hiraku.dashboard.views import sorted_runs
@@ -190,6 +192,69 @@ def test_synthetic_scale_queries_source_once(tmp_path: Path, monkeypatch) -> Non
     assert len(snapshot.runs) == 10000
     assert elapsed < 30
     print(f"synthetic 1000-record/10000-run fetch took {elapsed:.2f}s")
+
+
+def test_local_and_worktree_launch_attribution(tmp_path: Path) -> None:
+    config = create_launch_project(tmp_path)
+    controller = LaunchController(config, DashboardCapability(interactive=True))
+
+    local = controller.submit(
+        LaunchRequest(
+            job_id="local-1",
+            record_id="child",
+            entrypoint="evaluate",
+            args={"seed": 1},
+        )
+    )
+    _wait_terminal(controller, local.job_id)
+
+    worktree = controller.submit(
+        LaunchRequest(
+            job_id="worktree-1",
+            record_id="child",
+            entrypoint="evaluate",
+            args={"seed": 2},
+            dispatch="worktree",
+        )
+    )
+    _wait_terminal(controller, worktree.job_id)
+
+    snapshot = build_snapshot(config, record_id="child")
+    assert {run.id for run in snapshot.runs} == {"child-1", "child-2"}
+    by_id = {run.id: run for run in snapshot.runs}
+    assert by_id["child-1"].params["seed"] == "1"
+    assert by_id["child-2"].params["seed"] == "2"
+    assert by_id["child-1"].entrypoint == "evaluate"
+    assert by_id["child-2"].entrypoint == "evaluate"
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    assert by_id["child-1"].commit == head
+    assert by_id["child-2"].commit == head
+    worktrees = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    assert worktrees.count("worktree ") == 1
+
+
+def _wait_terminal(controller: LaunchController, job_id: str) -> None:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        views = controller.poll()
+        job = next((view for view in views if view.job_id == job_id), None)
+        if job and job.state in {"succeeded", "failed"}:
+            assert job.state == "succeeded", job.error
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"Job {job_id} did not finish")
 
 
 def test_packaged_notebook_renders_with_marimo(tmp_path: Path) -> None:

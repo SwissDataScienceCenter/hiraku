@@ -127,6 +127,55 @@ def _new_browser(monkeypatch):
     return webdriver.Chrome(options=options)
 
 
+def test_interactive_browser_startup_uses_token(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    create_acceptance_project(project)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    with (tmp_path / "server.log").open("w+") as log:
+        server = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "hiraku.cli",
+                "dashboard",
+                "--interactive",
+                "--port",
+                str(port),
+                "--no-browser",
+            ],
+            cwd=project,
+            stdout=log,
+            stderr=log,
+        )
+        browser = None
+        try:
+            deadline = time.monotonic() + 30
+            token_url = None
+            while time.monotonic() < deadline:
+                log.seek(0)
+                output = log.read()
+                match = re.search(r"http://127\.0\.0\.1:\d+\S*access_token=\S+", output)
+                if match:
+                    token_url = match.group(0)
+                    break
+                assert server.poll() is None, output
+                time.sleep(0.1)
+            assert token_url is not None, log.read()
+            browser = _new_browser(monkeypatch)
+            browser.get(token_url)
+            WebDriverWait(browser, 30).until(lambda b: "Interactive" in _body(b))
+            assert "Create record" in _body(browser)
+            assert "Launch run" in _body(browser)
+        finally:
+            if browser is not None:
+                browser.quit()
+            server.send_signal(signal.SIGINT)
+            server.wait(timeout=20)
+
+
 def test_dashboard_browser_workflow(tmp_path, monkeypatch):
     project = tmp_path / "project"
     project.mkdir()
