@@ -8,6 +8,7 @@ app = marimo.App(width="wide")
 
 @app.cell
 def _():
+    import atexit
     import os
     from pathlib import Path
 
@@ -24,6 +25,7 @@ def _():
     from hiraku.dashboard.branding import logo_data_uri, theme_css
     from hiraku.dashboard.capability import DashboardCapability
     from hiraku.dashboard.graph import RecordGraph, tree_payload
+    from hiraku.dashboard.jobs import LaunchController
     from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
     from hiraku.dashboard.session import DashboardSession
     from hiraku.dashboard.tree import compute_layout, reconcile_navigation
@@ -44,6 +46,8 @@ def _():
     capability = DashboardCapability(
         interactive=os.environ.get("HIRAKU_DASHBOARD_INTERACTIVE") == "1"
     )
+    controller = LaunchController(config, capability)
+    atexit.register(controller.shutdown)
     get_record, set_record = mo.state(
         os.environ.get("HIRAKU_DASHBOARD_RECORD") or config.active_record_id
     )
@@ -63,6 +67,7 @@ def _():
         backend_action_label,
         capability,
         config,
+        controller,
         default_plot_metrics,
         metric_direction,
         metric_names,

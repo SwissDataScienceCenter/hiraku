@@ -188,6 +188,11 @@ def _preflight(config: Any) -> dict[str, Record]:
     return index
 
 
+def preflight_mutations(config: Any) -> dict[str, Record]:
+    """Return a read-only index after blocking unsafe project states."""
+    return _preflight(config)
+
+
 def _field_value(draft: RecordDraft, name: str) -> str | None:
     value = getattr(draft, name)
     return _clean(value) if isinstance(value, str) else value

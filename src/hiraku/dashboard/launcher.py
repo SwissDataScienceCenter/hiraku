@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -88,9 +89,19 @@ def validate_selection(config: HirakuConfig, record_id: str | None) -> None:
         raise RecordNotFoundError(f"Record {record_id!r} not found")
 
 
-def _stop_process(process: subprocess.Popen[Any]) -> None:
+def _stop_process(process: subprocess.Popen[Any], *, graceful: bool = False) -> None:
     if process.poll() is not None:
         return
+    if graceful and os.name == "posix":
+        # Interactive mode owns background workers in the notebook process.
+        # SIGINT lets marimo run its shutdown path (and our atexit drain)
+        # before the launcher falls back to termination.
+        process.send_signal(signal.SIGINT)
+        try:
+            process.wait(timeout=5)
+            return
+        except subprocess.TimeoutExpired:
+            pass
     process.terminate()
     try:
         process.wait(timeout=5)
@@ -154,4 +165,4 @@ def serve_dashboard(
         try:
             return process.wait()
         finally:
-            _stop_process(process)
+            _stop_process(process, graceful=interactive)
