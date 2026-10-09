@@ -63,10 +63,10 @@ hiraku launch train --record strong-l2
 ## Compare final metrics and inspect curves
 
 ```bash
-hiraku runs --record digits
+hiraku runs --record digits --all
 
 # list with additional details
-hiraku runs --record digits \
+hiraku runs --record digits --all \
   --params alpha,epochs,seed \
   --metrics train/log_loss,val/log_loss,train/accuracy,val/accuracy \
   --sort val/log_loss --ascending
@@ -86,7 +86,7 @@ value of each metric. Full epoch histories remain in MLflow and its UI.
 
 You can list the same runs using Hiraku:
 ```
-hiraku runs --record digits
+hiraku runs --record digits --all
 ```
 
 ??? info "Example run results"

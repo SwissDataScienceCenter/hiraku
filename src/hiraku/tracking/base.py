@@ -106,25 +106,23 @@ class TrackingBackend(ABC):
             result = result[:limit]
         return result
 
-    def list_runs(self, *, record_id: str, **query: Any) -> list[Run]:
-        """Return normalized runs for a record.
+    def list_runs(self, *, record_id: str | None = None, **query: Any) -> list[Run]:
+        """Return normalized runs with record attribution.
 
         Args:
-            record_id: The record ID to filter runs by.
+            record_id: Optional record ID to filter runs by; all attributed runs
+                are returned when omitted.
             query: Optional query parameters to sort, limit, or filter the results.
 
         Returns:
             A list of normalized Run objects matching the specified filters and query.
         """
-
-        self._validate_filters(record_id)
-        runs = self._read_source_runs()
-        runs = [run for run in runs if run.record_id == record_id]
+        if record_id is not None:
+            self._validate_filters(record_id)
+        runs = [run for run in self._read_source_runs() if run.record_id]
+        if record_id is not None:
+            runs = [run for run in runs if run.record_id == record_id]
         return self._apply_query(runs, query, self.backend_name)
-
-    def list_all_recorded_runs(self, **options: Any) -> list[Run]:
-        """Return all source runs that have Hiraku record attribution."""
-        return [run for run in self._read_source_runs(**options) if run.record_id]
 
     @abstractmethod
     def _read_source_runs(self, **options: Any) -> list[Run]:

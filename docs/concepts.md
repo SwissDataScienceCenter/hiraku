@@ -60,8 +60,10 @@ hiraku record delete <record-id>
 
 hiraku status  # show the active record
 
-hiraku runs --record <record-id>
-hiraku runs --record <root-id> --params seed,lr --metrics train/accuracy,val/accuracy --sort val/accuracy --descending
+hiraku runs                         # runs attributed to the active record
+hiraku runs --record <record-id>    # runs attributed to a specific record
+hiraku runs --all                   # all attributed runs in the active record's tracking source
+hiraku runs --record <root-id> --all --params seed,lr --metrics train/accuracy,val/accuracy --sort val/accuracy --descending
 ```
 
 ### Python API
@@ -91,7 +93,7 @@ tracking_backend:
   type: csv
 ```
 
-`hiraku runs --record ID` queries the selected record's tracking source and lists its attributed runs. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
+`hiraku runs` lists runs attributed to the active record, or to the record given with `--record ID`. Add `--all` to list every attributed run from the tracking source resolved for that record, for example to compare sibling records under a root. In Python, `record.runs(config=config)` returns the record's own runs, and `record.resolve_tracking_backend(config=config).list_runs()` lists the whole source. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
 
 ## Entrypoints
 
@@ -245,7 +247,7 @@ objective, branch, budget, and stopping condition with the user.
 hiraku program show autoresearch
 hiraku program show interactive
 hiraku record tree
-hiraku runs --record heart-disease --json
+hiraku runs --record heart-disease --all --json
 ```
 
 The [Autoresearch example](examples/autoresearch/README.md) shows how to use

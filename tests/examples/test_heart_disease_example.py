@@ -90,7 +90,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
 
     config = HirakuConfig.discover(project)
     root = load_record("heart-disease", config=config)
-    runs = root.runs(config=config, sort="val/log_loss")
+    runs = root.resolve_tracking_backend(config=config).list_runs(sort="val/log_loss")
     assert len(runs) == 2
     assert {run.record_id for run in runs} == set(EXPECTED_METRICS)
     for run in runs:
@@ -107,7 +107,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
     queried = json.loads(
         invoke(
             runner,
-            ["runs", "--record", "heart-disease", "--json"],
+            ["runs", "--record", "heart-disease", "--all", "--json"],
         ).output
     )
     assert len(queried) == 2

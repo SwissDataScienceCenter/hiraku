@@ -80,12 +80,7 @@ class MLflowBackend(TrackingBackend):
         )
         self.experiment_name = settings.experiment_name
 
-    def _read_source_runs(
-        self,
-        *,
-        experiment_name: str | None = None,
-        **options: Any,
-    ) -> list[Run]:
+    def _read_source_runs(self, **options: Any) -> list[Run]:
         from ..run import Run
 
         try:
@@ -96,9 +91,8 @@ class MLflowBackend(TrackingBackend):
             ) from exc
         try:
             client = MlflowClient(tracking_uri=self.tracking_uri)
-            experiment_name = experiment_name or self.experiment_name
-            if experiment_name:
-                experiment = client.get_experiment_by_name(str(experiment_name))
+            if self.experiment_name:
+                experiment = client.get_experiment_by_name(self.experiment_name)
                 if experiment is None:
                     return []
                 experiment_ids = [experiment.experiment_id]

@@ -66,7 +66,7 @@ def available_backends() -> tuple[str, ...]:
     return tuple(sorted(_BACKENDS))
 
 
-def backend_for(
+def create_backend(
     specification: str | Mapping[str, Any], config: HirakuConfig
 ) -> TrackingBackend:
     """Construct a backend from a name or validated configuration mapping."""

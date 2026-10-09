@@ -67,7 +67,7 @@ hiraku record entrypoints logistic
 
 hiraku launch train --record logistic --dry-run
 hiraku launch train --record logistic
-hiraku runs --record iris
+hiraku runs --record iris --all
 hiraku runs --record logistic
 ```
 
@@ -81,7 +81,7 @@ hiraku record create random-forest --parent iris --type experiment \
   --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: random_forest, seed: 42, test-size: 0.25}}}'
 
 hiraku launch train --record random-forest
-hiraku runs --record iris --sort test/accuracy
+hiraku runs --record iris --all --sort test/accuracy
 ```
 
 Each run stores Hiraku provenance, model and dataset configuration, seed,
