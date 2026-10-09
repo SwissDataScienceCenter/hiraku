@@ -119,10 +119,8 @@ class TrackingBackend(ABC):
         """
         if record_id is not None:
             self._validate_filters(record_id)
-        runs = self._read_source_runs()
-        if record_id is None:
-            runs = [run for run in runs if run.record_id]
-        else:
+        runs = [run for run in self._read_source_runs() if run.record_id]
+        if record_id is not None:
             runs = [run for run in runs if run.record_id == record_id]
         return self._apply_query(runs, query, self.backend_name)
 
