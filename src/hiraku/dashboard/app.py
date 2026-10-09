@@ -15,6 +15,7 @@ def _():
     import marimo as mo
 
     from hiraku.config import HirakuConfig
+    from hiraku.dashboard.branding import logo_data_uri, theme_css
     from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
     from hiraku.dashboard.session import DashboardSession
     from hiraku.dashboard.views import (
@@ -35,6 +36,7 @@ def _():
         alt,
         metric_direction,
         metric_names,
+        logo_data_uri,
         mo,
         param_names,
         pareto_points,
@@ -44,9 +46,28 @@ def _():
         session,
         sort_fields,
         sorted_runs,
+        theme_css,
         get_record,
         set_record,
     )
+
+
+@app.cell
+def _(logo_data_uri, mo, theme_css):
+    _logo = logo_data_uri()
+    _logo_white = logo_data_uri(reversed_logo=True)
+    mo.Html(
+        f"<style>{theme_css()}</style>"
+        '<header class="hk-header"><div class="hk-shell hk-header-inner">'
+        f'<img class="hk-brand-logo hk-logo-light" src="{_logo}" '
+        'alt="Swiss Data Science Center">'
+        f'<img class="hk-brand-logo hk-logo-dark" src="{_logo_white}" '
+        'alt="Swiss Data Science Center">'
+        '<div><h1 class="hk-brand-title">Hiraku dashboard</h1>'
+        '<p class="hk-brand-subtitle">Research records and tracked runs</p>'
+        "</div></div></header>"
+    )
+    return
 
 
 @app.cell
@@ -59,7 +80,7 @@ def _(mo):
         value="Selected record's runs",
         label="Run scope",
     )
-    mo.vstack([mo.md("# Hiraku dashboard"), mo.hstack([refresh, scope])])
+    mo.vstack([mo.hstack([refresh, scope])])
     return refresh, scope
 
 
@@ -376,7 +397,11 @@ def _(
             .encode(
                 x=alt.X("x_original:Q", title=x_metric.value),
                 y=alt.Y("y_original:Q", title=y_metric.value),
-                color="is_pareto:N",
+                color=alt.Color(
+                    "is_pareto:N",
+                    scale=alt.Scale(domain=[True, False], range=["#26245c", "#56b4e9"]),
+                    legend=alt.Legend(title="Pareto frontier"),
+                ),
                 tooltip=[
                     "run_id:N",
                     "record_id:N",
@@ -412,6 +437,18 @@ def _(mo, plot, plot_frame):
             mo.md("### Selected plot points"),
             mo.ui.table(plot.apply_selection(plot_frame), selection=None),
         ]
+    )
+    return
+
+
+@app.cell
+def _(logo_data_uri, mo):
+    mo.Html(
+        '<footer class="hk-footer"><div class="hk-shell hk-footer-inner">'
+        '<img src="' + logo_data_uri(reversed_logo=True) + '" '
+        'alt="Swiss Data Science Center">'
+        '<p class="hk-footer-label">Swiss Data Science Center</p>'
+        "</div></footer>"
     )
     return
 

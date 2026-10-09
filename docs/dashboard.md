@@ -5,6 +5,13 @@ research records and tracked runs. It is designed for inspection and
 provenance review; it does not edit records, launch entrypoints, or chat with
 agents.
 
+The bundled app loads a reusable SDSC theme from
+`hiraku.dashboard/theme.css`. Its CSS custom properties and `.hk-*` component
+classes can be reused by dashboard views. The app includes the supplied
+primary SDSC logo in its header and the footer branding. The provided logo
+archive did not contain the four partner logo files named in the UI kit, so
+those marks are not currently shown.
+
 ## Installation
 
 The dashboard is an optional extra so the core CLI stays lightweight:
