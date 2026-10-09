@@ -11,6 +11,7 @@ from click.testing import CliRunner
 import hiraku.dashboard.launcher as launcher
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
+from hiraku.dashboard.capability import DashboardCapability
 from hiraku.errors import RecordNotFoundError, ValidationError
 from hiraku.record import Record
 
@@ -34,6 +35,47 @@ def test_build_command_forwards_arguments() -> None:
     headless = launcher.build_command("python3", notebook, port=9000, no_browser=True)
     assert "--headless" in headless
     assert headless[-1] == str(notebook)
+
+
+def test_build_command_interactive_uses_token_auth() -> None:
+    notebook = Path("/tmp/dashboard/app.py")
+    command = launcher.build_command("python3", notebook, interactive=True)
+    assert "--token" in command
+    assert "--no-token" not in command
+
+
+def test_dashboard_environment_forwards_interactive_mode(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    default = launcher.dashboard_environment(config, record_id=None)
+    assert default["HIRAKU_DASHBOARD_INTERACTIVE"] == "0"
+    environment = launcher.dashboard_environment(
+        config, record_id="child", interactive=True
+    )
+    assert environment["HIRAKU_DASHBOARD_INTERACTIVE"] == "1"
+
+
+def test_dashboard_environment_overwrites_inherited_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = HirakuConfig.init(tmp_path)
+    monkeypatch.setenv("HIRAKU_DASHBOARD_INTERACTIVE", "1")
+    environment = launcher.dashboard_environment(config, record_id=None)
+    assert environment["HIRAKU_DASHBOARD_INTERACTIVE"] == "0"
+
+
+def test_capability_disabled_by_default() -> None:
+    capability = DashboardCapability()
+    assert capability.interactive is False
+    with pytest.raises(ValidationError, match="interactive mode"):
+        capability.ensure_can_write()
+    with pytest.raises(ValidationError, match="interactive mode"):
+        capability.ensure_can_launch()
+
+
+def test_capability_enabled_in_interactive_mode() -> None:
+    capability = DashboardCapability(interactive=True)
+    capability.ensure_can_write()
+    capability.ensure_can_launch()
 
 
 def test_dashboard_environment_preserves_project_context(tmp_path: Path) -> None:
@@ -74,6 +116,27 @@ def test_serve_dashboard_reports_missing_extra(
         launcher.serve_dashboard(config, port=0)
     with pytest.raises(ValidationError, match="Scope"):
         launcher.serve_dashboard(config, scope="invalid")
+
+
+def test_serve_dashboard_rejects_interactive_custom_notebook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = HirakuConfig.init(tmp_path)
+    monkeypatch.setattr(launcher, "find_spec", lambda name: object())
+    notebook = tmp_path / "custom.py"
+    notebook.write_text("import marimo\napp = marimo.App()\n", encoding="utf-8")
+    with pytest.raises(ValidationError, match="--interactive"):
+        launcher.serve_dashboard(config, notebook=notebook, interactive=True)
+
+
+def test_cli_dashboard_help_shows_interactive_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["dashboard", "--help"])
+    assert result.exit_code == 0
+    assert "--interactive" in result.output
 
 
 def test_cli_dashboard_prints_install_hint_without_extra(

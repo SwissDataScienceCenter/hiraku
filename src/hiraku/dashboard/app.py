@@ -16,6 +16,7 @@ def _():
 
     from hiraku.config import HirakuConfig
     from hiraku.dashboard.branding import logo_data_uri, theme_css
+    from hiraku.dashboard.capability import DashboardCapability
     from hiraku.dashboard.graph import RecordGraph, tree_payload
     from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
     from hiraku.dashboard.session import DashboardSession
@@ -34,6 +35,9 @@ def _():
 
     config = HirakuConfig.load(Path(os.environ["HIRAKU_PROJECT_ROOT"]) / "hiraku.yml")
     session = DashboardSession(config)
+    capability = DashboardCapability(
+        interactive=os.environ.get("HIRAKU_DASHBOARD_INTERACTIVE") == "1"
+    )
     get_record, set_record = mo.state(
         os.environ.get("HIRAKU_DASHBOARD_RECORD") or config.active_record_id
     )
@@ -41,6 +45,7 @@ def _():
     return (
         alt,
         backend_action_label,
+        capability,
         default_plot_metrics,
         metric_direction,
         metric_names,
@@ -68,9 +73,10 @@ def _():
 
 
 @app.cell
-def _(logo_data_uri, mo, theme_css):
+def _(capability, logo_data_uri, mo, theme_css):
     _logo = logo_data_uri()
     _logo_white = logo_data_uri(reversed_logo=True)
+    _mode = "Interactive" if capability.interactive else "Read-only"
     mo.Html(
         f"<style>{theme_css()}</style>"
         '<header class="hk-header"><div class="hk-shell hk-header-inner">'
@@ -79,7 +85,7 @@ def _(logo_data_uri, mo, theme_css):
         f'<img class="hk-brand-logo hk-logo-dark" src="{_logo_white}" '
         'alt="Swiss Data Science Center">'
         '<div><h1 class="hk-brand-title">Hiraku dashboard</h1>'
-        '<p class="hk-brand-subtitle">Research records and tracked runs</p>'
+        f'<p class="hk-brand-subtitle">Research records and tracked runs · {_mode}</p>'
         "</div></div></header>"
     )
     return

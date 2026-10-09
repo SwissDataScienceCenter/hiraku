@@ -831,6 +831,7 @@ def run_list(
 )
 @click.option("--port", type=click.IntRange(1, 65535), default=8765)
 @click.option("--no-browser", is_flag=True)
+@click.option("--interactive", is_flag=True)
 @click.option(
     "--notebook",
     "notebook",
@@ -843,9 +844,14 @@ def dashboard_command(
     scope: str,
     port: int,
     no_browser: bool,
+    interactive: bool,
     notebook: Path | None,
 ) -> None:
-    """Browse records and tracked runs in a local view-only dashboard."""
+    """Browse records and tracked runs in a local dashboard.
+
+    The dashboard is read-only by default. Pass --interactive to enable
+    authenticated record creation and entrypoint launches.
+    """
     from .dashboard.launcher import serve_dashboard
 
     exit_code = serve_dashboard(
@@ -854,6 +860,7 @@ def dashboard_command(
         scope=scope,
         port=port,
         no_browser=no_browser,
+        interactive=interactive,
         notebook=notebook,
     )
     if exit_code:
