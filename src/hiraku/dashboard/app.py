@@ -19,6 +19,7 @@ def _():
     from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
     from hiraku.dashboard.session import DashboardSession
     from hiraku.dashboard.views import (
+        default_plot_metrics,
         metric_names,
         param_names,
         records_frame,
@@ -34,6 +35,7 @@ def _():
     )
     return (
         alt,
+        default_plot_metrics,
         metric_direction,
         metric_names,
         logo_data_uri,
@@ -72,12 +74,18 @@ def _(logo_data_uri, mo, theme_css):
 
 @app.cell
 def _(mo):
+    import os as _os
+
     refresh = mo.ui.refresh(
         options=["5s", "10s", "30s", "1m"], default_interval=None, label="Refresh"
     )
     scope = mo.ui.radio(
         ["Selected record's runs", "All attributed runs in this source"],
-        value="Selected record's runs",
+        value=(
+            "All attributed runs in this source"
+            if _os.environ.get("HIRAKU_DASHBOARD_SCOPE") == "source"
+            else "Selected record's runs"
+        ),
         label="Run scope",
     )
     mo.vstack([mo.hstack([refresh, scope])])
@@ -273,24 +281,35 @@ def _(mo, runs_table, set_record, snapshot):
 
 
 @app.cell
-def _(metrics, mo, params):
+def _(default_plot_metrics, metrics, mo, params, snapshot):
     view = mo.ui.radio(["Progress", "Pareto"], value="Progress", label="Plot view")
+    _default_x, _default_y = default_plot_metrics(snapshot)
     x_metric = mo.ui.dropdown(
         metrics,
-        value=metrics[0] if metrics else None,
+        value=_default_x,
         allow_select_none=True,
         label="X / progress metric",
     )
     y_metric = mo.ui.dropdown(
         metrics,
-        value=metrics[-1] if metrics else None,
+        value=_default_y,
         allow_select_none=True,
         label="Y metric",
     )
     cohort_field = mo.ui.dropdown(
         params, allow_select_none=True, label="Filter cohort by parameter"
     )
-    mo.vstack([mo.md("## Plots"), view, mo.hstack([x_metric, y_metric, cohort_field])])
+    mo.vstack(
+        [
+            mo.md("## Plots"),
+            mo.md(
+                "Plots compare final metrics across runs. "
+                "Each point represents one run; epoch histories are in your tracker."
+            ),
+            view,
+            mo.hstack([x_metric, y_metric, cohort_field]),
+        ]
+    )
     return cohort_field, view, x_metric, y_metric
 
 
@@ -363,10 +382,10 @@ def _(
         )
         _chart = (
             alt.Chart(alt.InlineData(values=_frame.to_dict("records")))
-            .mark_point(filled=True)
+            .mark_point(filled=True, size=100)
             .encode(
                 x=_x,
-                y=alt.Y("value:Q", title=x_metric.value),
+                y=alt.Y("value:Q", title=x_metric.value, scale=alt.Scale(padding=12)),
                 tooltip=["run_id:N", "record_id:N", "commit:N", "value:Q"],
             )
         )
@@ -393,10 +412,14 @@ def _(
         )
         _chart = (
             alt.Chart(alt.InlineData(values=_data.frame.to_dict("records")))
-            .mark_point(filled=True)
+            .mark_point(filled=True, size=100)
             .encode(
-                x=alt.X("x_original:Q", title=x_metric.value),
-                y=alt.Y("y_original:Q", title=y_metric.value),
+                x=alt.X(
+                    "x_original:Q", title=x_metric.value, scale=alt.Scale(padding=12)
+                ),
+                y=alt.Y(
+                    "y_original:Q", title=y_metric.value, scale=alt.Scale(padding=12)
+                ),
                 color=alt.Color(
                     "is_pareto:N",
                     scale=alt.Scale(domain=[True, False], range=["#26245c", "#56b4e9"]),
@@ -412,6 +435,7 @@ def _(
             )
         )
     plot_frame = _data.frame
+    _chart = _chart.properties(width=600, height=320)
     # Inline records avoid browser-dependent temporal parsing in Arrow transport.
     plot = mo.ui.altair_chart(_chart, chart_selection="point", label=view.value)
     mo.vstack(
@@ -424,7 +448,7 @@ def _(
                 "evaluation protocols."
             ),
             mo.md(f"Omitted {_data.omitted} runs: {_data.omitted_reason}."),
-            plot,
+            plot.style({"max-width": "100%", "overflow-x": "auto"}),
         ]
     )
     return plot, plot_frame

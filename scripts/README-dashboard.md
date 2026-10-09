@@ -27,6 +27,12 @@ are printed and opened in the browser:
 - Hiraku dashboard: <http://127.0.0.1:8765>
 - MLflow UI: <http://127.0.0.1:5000>
 
+Hiraku starts in **All attributed runs in this source**, so both experiments
+are visible immediately. Progress defaults to `val/log_loss`; Pareto defaults
+to `val/log_loss` (minimize) against `val/accuracy` (maximize). The printed MLflow
+link opens this experiment's **Model training → Runs** view, rather than the
+GenAI overview used by MLflow 3's default homepage.
+
 Press **Ctrl-C** to stop both servers. If either server fails to start or exits,
 the script stops the other as well. The CSV demo starts only the Hiraku dashboard.
 
@@ -40,18 +46,18 @@ exercise the UI yourself.
 1. **Record details:** the initial `weak-l2` record inherits its metric directions
    and tracking backend from `digits`. Its training entrypoint uses alpha
    0.0001, 40 epochs, 64 hidden units, and seed 42.
-2. **Runs:** selected-record scope shows one real weak-L2 run. Select **All
-   attributed runs in this source** to compare both `weak-l2` and `strong-l2`.
+2. **Runs:** the initial source scope shows both `weak-l2` and `strong-l2`.
+   Switch to selected-record scope to see only the weak-L2 run.
    Selecting `digits` in selected-record scope shows no runs: the runs belong
    to its child records. Use source scope to see both.
 3. **Provenance:** select either run. Its record ID, Git commit, and `train`
    entrypoint should be populated. The Open record button navigates to the
    attributed experiment. Sort by a validation metric to compare results.
-4. **Progress:** choose `val/log_loss`. In source scope there should be two
+4. **Progress:** the default is `val/log_loss`. In source scope there should be two
    points, one per training run, with a minimize best-so-far overlay. Click a
    point and inspect **Selected plot points**.
-5. **Pareto:** choose `val/accuracy` on X and `val/log_loss` on Y. Directions
-   should resolve to maximize and minimize. Both runs should appear, with
+5. **Pareto:** switching views should immediately show `val/log_loss` on X
+   (minimize) and `val/accuracy` on Y (maximize). Both runs should appear, with
    nondominated runs identified in the legend.
 6. **Refresh:** run the command below in another terminal, using the printed
    demo path. It retrains the weak-L2 model through Hiraku and records an
@@ -69,6 +75,12 @@ training epochs. Full 40-epoch learning curves are recorded in MLflow. Open
 the printed MLflow UI URL, select `hiraku-digits`, then compare the two runs
 and their `val/log_loss`, `val/accuracy`, `train/log_loss`, and `train/accuracy`
 histories.
+
+For an easy preview, open either run's **Artifacts** tab, then
+`plots/learning-curves.png`. Each new run also logs `metrics/epoch-metrics.csv`
+and `results/final-metrics.json`. Older demos created before this change keep
+their original copy of `train.py` and do not have these artifacts; create a
+fresh demo to use the updated logging.
 
 To reopen only MLflow UI after stopping the script, run from the repository:
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import math
 import os
@@ -131,6 +132,24 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
                 assert all(point.value >= 0 for point in history)
                 assert history[-1].value < history[0].value
         assert row["metrics"]["runtime/seconds"] > 0
+        artifacts = Path(client.download_artifacts(row["id"], "plots"))
+        assert (artifacts / "learning-curves.png").read_bytes().startswith(b"\x89PNG")
+        metrics_path = Path(
+            client.download_artifacts(row["id"], "metrics/epoch-metrics.csv")
+        )
+        with metrics_path.open(newline="") as stream:
+            history_rows = list(csv.DictReader(stream))
+        assert [int(point["epoch"]) for point in history_rows] == list(range(1, 9))
+        assert float(history_rows[-1]["val/log_loss"]) == pytest.approx(
+            row["metrics"]["val/log_loss"]
+        )
+        results_path = Path(
+            client.download_artifacts(row["id"], "results/final-metrics.json")
+        )
+        results = json.loads(results_path.read_text())
+        assert results["record_id"] == row["record_id"]
+        assert results["epochs"] == 8
+        assert results["metrics"]["val/accuracy"] == row["metrics"]["val/accuracy"]
     filtered = json.loads(
         invoke(
             runner,

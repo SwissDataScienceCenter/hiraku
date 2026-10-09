@@ -8,12 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Add initial dashboard scope selection with `--scope source`, and save learning-curve images, epoch CSVs, and final-results JSON in the Digits MLflow example.
 - Add `hiraku dashboard`, a local view-only marimo application for browsing records, inspecting provenance, sorting runs, and switching between progress and Pareto plots ([issue #78](https://github.com/SwissDataScienceCenter/hiraku/issues/78)).
 - Add a read-only dashboard query layer that never mutates records and queries each selected tracking source once per refresh.
 - Paginate MLflow run search so the dashboard does not silently truncate source runs at the MLflow page size.
 
 ### Fixed
 
+- Prefer declared research metrics for plot defaults, show larger charts and markers, and open the Digits demo in comparison scope and MLflow's Model training view.
 - Make the dashboard a reactive marimo notebook with working record/run selection, cohort filtering, plot controls, and refresh status.
 - Preserve source-qualified selections and cached source queries; sort numeric metrics and namespaced parameters correctly.
 - Keep unavailable tracking sources distinguishable from empty results, retain labelled stale snapshots, and require explicit unknown Pareto directions.

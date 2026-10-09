@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import runpy
 import signal
@@ -309,6 +310,19 @@ def stop_server(process: subprocess.Popen) -> None:
         process.wait(timeout=5)
 
 
+def mlflow_training_url(base_url: str) -> str:
+    """Open the demo experiment's training runs instead of MLflow's GenAI view."""
+    endpoint = (
+        f"{base_url}/api/2.0/mlflow/experiments/get-by-name"
+        "?experiment_name=hiraku-digits"
+    )
+    with urlopen(endpoint, timeout=5) as response:
+        experiment_id = json.load(response)["experiment"]["experiment_id"]
+    return (
+        f"{base_url}/#/experiments/{experiment_id}/runs?workflowType=machine_learning"
+    )
+
+
 def serve_demo(
     directory: Path,
     *,
@@ -328,6 +342,7 @@ def serve_demo(
     uv = ["uv", "run", "--project", str(ROOT), "--locked", "--all-extras"]
     servers = []
     processes = []
+    browser_urls = []
     try:
         if mlflow_port is not None:
             servers.append(
@@ -355,6 +370,8 @@ def serve_demo(
                     "dashboard",
                     "--record",
                     record_id,
+                    "--scope",
+                    "source" if mlflow_port is not None else "record",
                     "--port",
                     str(port),
                     "--no-browser",
@@ -374,10 +391,13 @@ def serve_demo(
             )
             processes.append(process)
             wait_for_server(process, url)
+            if label == "MLflow UI":
+                url = mlflow_training_url(url)
+            browser_urls.append(url)
             print(f"{label}: {url}", flush=True)
         print("Ctrl-C stops the servers. Demo files are retained.", flush=True)
         if not no_browser:
-            for _, url, _ in servers:
+            for url in browser_urls:
                 webbrowser.open(url)
         while True:
             for process in processes:
@@ -504,10 +524,10 @@ def main() -> int:
         if args.example == "digits-mlflow":
             directory = create_digits_demo(args.project_dir, epochs=args.epochs)
             initial_record = "weak-l2"
-            print("Select All attributed runs in this source to compare both models.")
+            print("Dashboard opens in source scope to compare both models.")
             print(
                 "Use val/log_loss for Progress; "
-                "val/accuracy vs val/log_loss for Pareto."
+                "val/log_loss vs val/accuracy for Pareto."
             )
         else:
             directory = create_demo(args.project_dir)

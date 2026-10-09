@@ -33,6 +33,7 @@ Hiraku supports Python 3.11 and newer. Install the optional tracking extras
 ```bash
 hiraku dashboard
 hiraku dashboard --record child-a
+hiraku dashboard --record child-a --scope source
 hiraku dashboard --port 8765 --no-browser
 hiraku dashboard --notebook path/to/custom_notebook.py
 ```
@@ -41,6 +42,8 @@ hiraku dashboard --notebook path/to/custom_notebook.py
 - `--record` selects the initial record. Without it, the persisted active
   record is used when present; otherwise the record browser is shown and no
   tracking source is queried until you select a record.
+- `--scope source` initially compares all attributed runs in the selected
+  tracking source. The default scope remains `record`.
 - `--no-browser` starts the server without opening a browser.
 - `--notebook` runs an explicitly selected user-owned notebook instead of the
   bundled application. Default startup never discovers notebooks from the
@@ -58,6 +61,12 @@ Runs are identified by `(source identity, run ID)` so identical run IDs from
 different sources never collide.
 
 ## Plots
+
+Default plot axes prefer metrics declared by the research records, with
+unambiguous optimization directions, over incidental metrics such as runtime.
+The two axes use distinct metrics when available. Unknown or conflicting
+directions still require an explicit choice. Charts use larger point markers
+and a wider plotting area, with horizontal scrolling on narrow screens.
 
 - **Progress** plots one summary metric per run against timestamps, or a
   clearly labelled deterministic run index when timestamps are missing. A
@@ -179,8 +188,11 @@ trains the weak- and strong-L2 experiments for 40 epochs, verifies their
 tracked metrics and plot data, and opens both the dashboard (port 8765) and
 MLflow UI (port 5000). Use `--port` and `--mlflow-port` to change the ports;
 Ctrl-C stops both servers. Switch to **All
-attributed runs in this source** to compare both child records. Dashboard
-plots show final metrics per run; full epoch histories remain in MLflow.
+attributed runs in this source** to compare both child records in an ordinary
+dashboard session; the Digits demo already opens in that scope. Its plot defaults
+are `val/log_loss` and `val/accuracy`, with inherited optimization directions.
+The MLflow link opens the **Model training** view of `hiraku-digits` directly.
+Dashboard plots show final metrics per run; full epoch histories remain in MLflow.
 See `scripts/README-dashboard.md` for the walkthrough, repeat-run commands,
 and the optional `--example csv` fixture.
 

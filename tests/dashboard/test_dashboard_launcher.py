@@ -64,6 +64,8 @@ def test_serve_dashboard_reports_missing_extra(
     monkeypatch.setattr(launcher, "find_spec", lambda name: object())
     with pytest.raises(ValidationError, match="Port"):
         launcher.serve_dashboard(config, port=0)
+    with pytest.raises(ValidationError, match="Scope"):
+        launcher.serve_dashboard(config, scope="invalid")
 
 
 def test_cli_dashboard_prints_install_hint_without_extra(
@@ -124,11 +126,12 @@ def test_serve_dashboard_forwards_custom_notebook(
     monkeypatch.setattr(launcher, "find_spec", lambda name: object())
     monkeypatch.setattr(launcher.subprocess, "Popen", fake_popen)
 
-    assert launcher.serve_dashboard(config, notebook=custom) == 0
+    assert launcher.serve_dashboard(config, notebook=custom, scope="source") == 0
 
     command, cwd, env = started[0]
     assert str(custom) in command
     assert env["HIRAKU_PROJECT_ROOT"] == str(config.root)
+    assert env["HIRAKU_DASHBOARD_SCOPE"] == "source"
     assert cwd != config.root
 
 

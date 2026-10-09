@@ -87,6 +87,7 @@ def serve_dashboard(
     config: HirakuConfig,
     *,
     record_id: str | None = None,
+    scope: str = "record",
     port: int = DEFAULT_PORT,
     no_browser: bool = False,
     notebook: Path | None = None,
@@ -99,6 +100,8 @@ def serve_dashboard(
     """
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
         raise ValidationError("Port must be an integer between 1 and 65535")
+    if scope not in {"record", "source"}:
+        raise ValidationError("Scope must be 'record' or 'source'")
     validate_selection(config, record_id)
     if not _marimo_available():
         raise ValidationError(
@@ -108,7 +111,7 @@ def serve_dashboard(
     notebook_path = (notebook or default_notebook_path()).expanduser().absolute()
     if not notebook_path.is_file():
         raise ValidationError(f"Dashboard notebook not found: {notebook_path}")
-    environment = dashboard_environment(config, record_id=record_id)
+    environment = dashboard_environment(config, record_id=record_id, scope=scope)
     with tempfile.TemporaryDirectory(prefix="hiraku-dashboard-") as directory:
         temporary_dir = Path(directory)
         if notebook is None:

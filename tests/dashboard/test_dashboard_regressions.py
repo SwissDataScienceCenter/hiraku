@@ -38,6 +38,21 @@ def test_empty_notebook_keeps_record_browser(tmp_path, monkeypatch):
     assert definitions["record_select"] is not None
 
 
+def test_notebook_initial_source_scope_uses_declared_plot_defaults(
+    tmp_path, monkeypatch
+):
+    config = create_acceptance_project(tmp_path)
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(config.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "child-a")
+    monkeypatch.setenv("HIRAKU_DASHBOARD_SCOPE", "source")
+    _, definitions = app.run()
+    assert definitions["snapshot"].scope == "source"
+    assert definitions["x_metric"].value == "acc"
+    assert definitions["y_metric"].value == "loss"
+    assert definitions["x_direction"].value == "maximize"
+    assert definitions["y_direction"].value == "minimize"
+
+
 def test_selection_and_scope_share_one_source_fetch(tmp_path, monkeypatch):
     config = create_acceptance_project(tmp_path)
     original = data._list_source_runs

@@ -826,6 +826,7 @@ def run_list(
 
 @main.command("dashboard")
 @click.option("--record", "record_id")
+@click.option("--scope", type=click.Choice(["record", "source"]), default="record")
 @click.option("--port", type=click.IntRange(1, 65535), default=8765)
 @click.option("--no-browser", is_flag=True)
 @click.option(
@@ -837,6 +838,7 @@ def run_list(
 def dashboard_command(
     state: CLIContext,
     record_id: str | None,
+    scope: str,
     port: int,
     no_browser: bool,
     notebook: Path | None,
@@ -847,6 +849,7 @@ def dashboard_command(
     exit_code = serve_dashboard(
         state.config,
         record_id=record_id,
+        scope=scope,
         port=port,
         no_browser=no_browser,
         notebook=notebook,

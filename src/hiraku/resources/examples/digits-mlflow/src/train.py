@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import os
 import time
 from pathlib import Path
 
 import mlflow
 import numpy as np
+from matplotlib.figure import Figure
 from sklearn.datasets import load_digits
 from sklearn.metrics import accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
@@ -32,6 +35,37 @@ def parse_args() -> argparse.Namespace:
     if not 0 < args.validation_fraction < 1:
         parser.error("validation-fraction must be between zero and one")
     return args
+
+
+def log_learning_curves(history: list[dict[str, float | int]]) -> None:
+    """Save a directly viewable figure and the exact per-epoch values."""
+    figure = Figure(figsize=(10, 4), layout="constrained")
+    epochs = [row["epoch"] for row in history]
+    for axis, metric in zip(
+        figure.subplots(1, 2), ("log_loss", "accuracy"), strict=True
+    ):
+        for split, color, style in (
+            ("train", "#26245c", "-"),
+            ("val", "#73a235", "--"),
+        ):
+            axis.plot(
+                epochs,
+                [row[f"{split}/{metric}"] for row in history],
+                label="Training" if split == "train" else "Validation",
+                color=color,
+                linestyle=style,
+            )
+        axis.set_xlabel("Epoch")
+        axis.set_ylabel("Cross-entropy loss" if metric == "log_loss" else "Accuracy")
+        axis.set_title("Learning curve: " + metric)
+        axis.grid(alpha=0.2)
+        axis.legend()
+    mlflow.log_figure(figure, "plots/learning-curves.png")
+    with io.StringIO(newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(history[0]))
+        writer.writeheader()
+        writer.writerows(history)
+        mlflow.log_text(stream.getvalue(), "metrics/epoch-metrics.csv")
 
 
 def main() -> None:
@@ -85,6 +119,7 @@ def main() -> None:
             }
         )
         started = time.perf_counter()
+        history = []
         # Limit BLAS threads to avoid overhead on this small CPU workload.
         with threadpool_limits(limits=1):
             for epoch in tqdm(range(1, args.epochs + 1)):
@@ -102,12 +137,27 @@ def main() -> None:
                     metrics[f"{split}/accuracy"] = float(
                         accuracy_score(labels, model.classes_[probabilities.argmax(1)])
                     )
-                mlflow.log_metrics(metrics, step=epoch)
+                mlflow.log_metrics(metrics, step=epoch, synchronous=True)
+                history.append({"epoch": epoch, **metrics})
                 print(
                     f"epoch={epoch} "
                     + " ".join(f"{name}={value:.4f}" for name, value in metrics.items())
                 )
-        mlflow.log_metric("runtime/seconds", time.perf_counter() - started)
+        mlflow.log_metric(
+            "runtime/seconds",
+            time.perf_counter() - started,
+            step=args.epochs,
+            synchronous=True,
+        )
+        log_learning_curves(history)
+        mlflow.log_dict(
+            {
+                "record_id": tags["hiraku.record_id"],
+                "epochs": args.epochs,
+                "metrics": metrics,
+            },
+            "results/final-metrics.json",
+        )
 
 
 if __name__ == "__main__":

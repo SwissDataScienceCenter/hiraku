@@ -79,6 +79,14 @@ uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port
 Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs
 in the native MLflow interface.
 
+In MLflow 3, select **Model training** at the top of the sidebar, then
+**Runs**. The default GenAI overview contains trace/token charts which this
+classification example does not populate. Open a run's **Artifacts** tab and
+preview `plots/learning-curves.png` for its training and validation curves.
+`metrics/epoch-metrics.csv` contains the exact logged values and
+`results/final-metrics.json` contains the final metrics and record attribution.
+The metric histories are also available as interactive charts in MLflow.
+
 One MLflow experiment contains both Hiraku child records. Native MLflow tags
 `hiraku.record_id`, `hiraku.commit`, and `hiraku.entrypoint`
 link each run back to Hiraku. The script owns logging; Hiraku queries the latest

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -15,6 +16,7 @@ from urllib.request import urlopen
 import pytest
 from fixtures import create_acceptance_project
 from selenium import webdriver
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select, WebDriverWait
@@ -62,6 +64,31 @@ def _body(browser):
     return browser.find_element(By.TAG_NAME, "body").text
 
 
+def _rendered_canvas(browser):
+    WebDriverWait(
+        browser, 20, ignored_exceptions=(StaleElementReferenceException,)
+    ).until(
+        lambda b: b.execute_script(
+            """
+            const c = arguments[0];
+            c.scrollIntoView();
+            if (c.width < 350 || c.height < 300) return false;
+            const pixels = c.getContext('2d').getImageData(
+                0, 0, c.width, c.height).data;
+            let n = 0;
+            for (let i = 0; i < pixels.length; i += 4) {
+                if (pixels[i+2] > pixels[i] + 20
+                    && pixels[i+2] > pixels[i+1] + 15
+                    && pixels[i+3] > 50) n++;
+            }
+            return n > 50;
+            """,
+            _control(b, "marimo-vega", "canvas"),
+        )
+    )
+    return _control(browser, "marimo-vega", "canvas")
+
+
 def _select_record(browser, identifier):
     _control(browser, 'marimo-dropdown[data-label*="Record"]', "button").click()
     option = WebDriverWait(browser, 20).until(
@@ -88,7 +115,19 @@ def _files(root: Path):
     return {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
 
-def test_dashboard_browser_workflow(tmp_path):
+def _new_browser(monkeypatch):
+    if os.environ["HIRAKU_TEST_BROWSER"] == "webkit":
+        # MLflow uses navigator.language with Intl; the C locale is not a BCP-47 tag.
+        monkeypatch.setenv("LANG", "en_US.UTF-8")
+        monkeypatch.setenv("LC_ALL", "en_US.UTF-8")
+        return webdriver.WebKitGTK()
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    return webdriver.Chrome(options=options)
+
+
+def test_dashboard_browser_workflow(tmp_path, monkeypatch):
     project = tmp_path / "project"
     project.mkdir()
     create_acceptance_project(project)
@@ -126,13 +165,7 @@ def test_dashboard_browser_workflow(tmp_path):
                     assert server.poll() is None
                     assert time.monotonic() < deadline
                     time.sleep(0.1)
-            if os.environ["HIRAKU_TEST_BROWSER"] == "webkit":
-                browser = webdriver.WebKitGTK()
-            else:
-                options = webdriver.ChromeOptions()
-                options.add_argument("--headless=new")
-                options.add_argument("--no-sandbox")
-                browser = webdriver.Chrome(options=options)
+            browser = _new_browser(monkeypatch)
             browser.get(url)
             WebDriverWait(browser, 30).until(
                 lambda b: "Select a record to load" in _body(b)
@@ -145,7 +178,7 @@ def test_dashboard_browser_workflow(tmp_path):
                 '[data-testid="select-row-checkbox"]',
             ).click()
             WebDriverWait(browser, 20).until(lambda b: "Run: a-1" in _body(b))
-            canvas = _control(browser, "marimo-vega", "canvas")
+            canvas = _rendered_canvas(browser)
             browser.execute_script("arguments[0].scrollIntoView()", canvas)
             point = WebDriverWait(browser, 20).until(
                 lambda b: b.execute_script(
@@ -237,3 +270,97 @@ def test_dashboard_browser_workflow(tmp_path):
             log.seek(0)
             output = log.read()
             assert "Traceback" not in output, output
+
+
+def test_digits_demo_defaults_and_mlflow_training_ui(tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    with socket.socket() as probe, socket.socket() as mlflow_probe:
+        probe.bind(("127.0.0.1", 0))
+        mlflow_probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        mlflow_port = mlflow_probe.getsockname()[1]
+    log_path = tmp_path / "demo.log"
+    with log_path.open("w") as log:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(root / "scripts/test_dashboard.py"),
+                "--skip-tests",
+                "--epochs",
+                "2",
+                "--no-browser",
+                "--project-dir",
+                str(tmp_path / "demo"),
+                "--port",
+                str(port),
+                "--mlflow-port",
+                str(mlflow_port),
+            ],
+            cwd=root,
+            stdout=log,
+            stderr=log,
+        )
+        browser = None
+        try:
+            deadline = time.monotonic() + 90
+            while "Hiraku dashboard:" not in log_path.read_text():
+                assert process.poll() is None, log_path.read_text()
+                assert time.monotonic() < deadline, log_path.read_text()
+                time.sleep(0.1)
+            browser = _new_browser(monkeypatch)
+            browser.get(f"http://127.0.0.1:{port}")
+            WebDriverWait(browser, 30).until(lambda b: _run_rows(b) == 2)
+            assert "Scope: source" in _body(browser)
+            assert (
+                Select(
+                    _control(
+                        browser,
+                        'marimo-dropdown[data-label*="X / progress metric"]',
+                        "select",
+                    )
+                ).first_selected_option.text
+                == "val/log_loss"
+            )
+            assert (
+                Select(
+                    _control(
+                        browser, 'marimo-dropdown[data-label*="Y metric"]', "select"
+                    )
+                ).first_selected_option.text
+                == "val/accuracy"
+            )
+            _control(browser, "marimo-vega", "canvas")
+            _control(
+                browser,
+                'marimo-radio[data-label*="Plot view"]',
+                'button[value="Pareto"]',
+            ).click()
+            WebDriverWait(browser, 20).until(
+                lambda b: (
+                    "Pareto"
+                    in b.find_element(By.CSS_SELECTOR, "marimo-vega").get_attribute(
+                        "data-label"
+                    )
+                )
+            )
+            canvas = _rendered_canvas(browser)
+            browser.execute_script("arguments[0].scrollIntoView()", canvas)
+            browser.save_screenshot(str(tmp_path / "digits-pareto.png"))
+            assert "Select both metrics and explicit" not in _body(browser)
+            mlflow_url = re.search(r"MLflow UI: (\S+)", log_path.read_text()).group(1)
+            assert "workflowType=machine_learning" in mlflow_url
+            browser.get(mlflow_url)
+            WebDriverWait(browser, 30).until(
+                lambda b: (
+                    "weak-l2" in b.execute_script("return document.body.innerText")
+                    and "strong-l2"
+                    in b.execute_script("return document.body.innerText")
+                )
+            )
+            browser.save_screenshot(str(tmp_path / "mlflow-training.png"))
+        finally:
+            if browser is not None:
+                browser.quit()
+            if process.poll() is None:
+                process.send_signal(signal.SIGINT)
+                process.wait(timeout=20)

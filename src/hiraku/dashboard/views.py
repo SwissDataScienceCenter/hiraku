@@ -12,6 +12,7 @@ from collections.abc import Iterable
 import pandas as pd
 
 from .data import DashboardSnapshot, RunView
+from .plots import metric_direction
 
 
 def records_frame(snapshot: DashboardSnapshot) -> pd.DataFrame:
@@ -40,6 +41,32 @@ def metric_names(snapshot: DashboardSnapshot) -> list[str]:
                 seen.add(name)
                 names.append(name)
     return names
+
+
+def default_plot_metrics(snapshot: DashboardSnapshot) -> tuple[str | None, str | None]:
+    """Prefer recorded research objectives over incidental tracking metrics.
+
+    Preserve declaration order, with the selected record first. Metrics with
+    unambiguous directions take precedence so Pareto can render immediately.
+    Never infer optimization directions from metric names.
+    """
+    available = metric_names(snapshot)
+    records = sorted(
+        snapshot.records, key=lambda record: record.id != snapshot.selected_record_id
+    )
+    cohort = {run.record_id for run in snapshot.runs} | {snapshot.selected_record_id}
+    declared = list(
+        dict.fromkeys(
+            metric["name"]
+            for record in records
+            if record.id in cohort
+            for metric in record.metrics
+            if metric.get("name") in available
+        )
+    )
+    known = [name for name in declared if metric_direction(snapshot, name) is not None]
+    ordered = list(dict.fromkeys([*known, *declared, *available]))
+    return (ordered[0] if ordered else None, ordered[1] if len(ordered) > 1 else None)
 
 
 def param_names(snapshot: DashboardSnapshot) -> list[str]:
