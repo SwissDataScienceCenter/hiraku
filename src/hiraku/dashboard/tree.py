@@ -46,6 +46,7 @@ class TreeNode:
     selected: bool
     ancestor_of_selection: bool
     disconnected: bool
+    expanded: bool
     children: tuple[str, ...]
     ancestors: tuple[str, ...]
     search_match: bool
@@ -203,6 +204,7 @@ def build_tree(records: Iterable[RecordView]) -> TreeLayout:
             selected=False,
             ancestor_of_selection=False,
             disconnected=not connected[record_id],
+            expanded=False,
             children=tuple(children[record_id]),
             ancestors=(),
             search_match=False,
@@ -306,6 +308,7 @@ def compute_layout(
             selected=node.id == selected_id,
             ancestor_of_selection=node.id in selected_ancestors,
             disconnected=node.disconnected,
+            expanded=bool(node.children and record_id in effective_expanded),
             children=node.children,
             ancestors=ancestors[node.id],
             search_match=node.id in search_matches,

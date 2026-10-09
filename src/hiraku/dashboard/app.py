@@ -16,8 +16,10 @@ def _():
 
     from hiraku.config import HirakuConfig
     from hiraku.dashboard.branding import logo_data_uri, theme_css
+    from hiraku.dashboard.graph import RecordGraph, tree_payload
     from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
     from hiraku.dashboard.session import DashboardSession
+    from hiraku.dashboard.tree import compute_layout, reconcile_navigation
     from hiraku.dashboard.views import (
         default_plot_metrics,
         metric_names,
@@ -33,6 +35,7 @@ def _():
     get_record, set_record = mo.state(
         os.environ.get("HIRAKU_DASHBOARD_RECORD") or config.active_record_id
     )
+    get_expanded, set_expanded = mo.state([])
     return (
         alt,
         default_plot_metrics,
@@ -49,8 +52,14 @@ def _():
         sort_fields,
         sorted_runs,
         theme_css,
+        compute_layout,
+        reconcile_navigation,
+        RecordGraph,
+        tree_payload,
         get_record,
         set_record,
+        get_expanded,
+        set_expanded,
     )
 
 
@@ -153,14 +162,64 @@ def _(mo, record_select, scope, session):
 
 
 @app.cell
-def _(mo, records_frame, snapshot):
-    mo.vstack(
-        [
-            mo.md("## Records"),
-            mo.ui.table(records_frame(snapshot), selection=None, page_size=10),
-        ]
+def _(RecordGraph, get_expanded, get_record, mo):
+    graph = mo.ui.anywidget(
+        RecordGraph(
+            tree=[],
+            selected=get_record() or "",
+            expanded=list(get_expanded()),
+            height=380,
+        )
     )
+    mo.vstack([mo.md("## Records"), graph])
+    return (graph,)
+
+
+@app.cell
+def _(get_expanded, get_record, graph, set_expanded, set_record):
+    _selected = graph.value.get("selected") or None
+    if _selected and _selected != get_record():
+        set_record(_selected)
+    _expanded = list(graph.value.get("expanded") or [])
+    if _expanded != list(get_expanded()):
+        set_expanded(_expanded)
     return
+
+
+@app.cell
+def _(
+    compute_layout,
+    get_expanded,
+    get_record,
+    graph,
+    mo,
+    reconcile_navigation,
+    snapshot,
+    tree_payload,
+):
+    _ids = {record.id for record in snapshot.records}
+    _selected = get_record() if get_record() in _ids else None
+    _nav = reconcile_navigation(
+        snapshot.records,
+        selected_id=_selected,
+        expanded=get_expanded(),
+    )
+    _layout = compute_layout(
+        snapshot.records,
+        selected_id=_nav.selected_id,
+        expanded=_nav.expanded,
+        search=graph.value.get("query") or "",
+    )
+    graph.tree = tree_payload(_layout)
+    graph.selected = _nav.selected_id or ""
+    graph.expanded = sorted(_nav.expanded)
+    _message = (
+        "Previously selected record is missing or malformed."
+        if _nav.removed_selection
+        else ""
+    )
+    mo.vstack([mo.md(f"**{_message}**" if _message else "")])
+    return (_layout,)
 
 
 @app.cell
