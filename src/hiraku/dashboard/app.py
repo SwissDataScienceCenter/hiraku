@@ -9,7 +9,9 @@ app = marimo.App(width="wide")
 @app.cell
 def _():
     import atexit
+    import json
     import os
+    import uuid
     from pathlib import Path
 
     import altair as alt
@@ -25,7 +27,11 @@ def _():
     from hiraku.dashboard.branding import logo_data_uri, theme_css
     from hiraku.dashboard.capability import DashboardCapability
     from hiraku.dashboard.graph import RecordGraph, tree_payload
-    from hiraku.dashboard.jobs import LaunchController
+    from hiraku.dashboard.jobs import (
+        LaunchController,
+        LaunchRequest,
+        parse_override_yaml,
+    )
     from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
     from hiraku.dashboard.session import DashboardSession
     from hiraku.dashboard.tree import compute_layout, reconcile_navigation
@@ -62,6 +68,15 @@ def _():
     get_preview_handled, set_preview_handled = mo.state(None)
     get_preview_result, set_preview_result = mo.state(None)
     get_reset_version, set_reset_version = mo.state(0)
+    get_launch_preview_request, set_launch_preview_request = mo.state(None)
+    get_launch_preview_handled, set_launch_preview_handled = mo.state(None)
+    get_launch_preview_result, set_launch_preview_result = mo.state(None)
+    get_launch_review, set_launch_review = mo.state(None)
+    get_launch_submit, set_launch_submit = mo.state(None)
+    get_launch_handled, set_launch_handled = mo.state(None)
+    get_launch_busy, set_launch_busy = mo.state(False)
+    get_launch_error, set_launch_error = mo.state(None)
+    get_launch_result, set_launch_result = mo.state(None)
     return (
         alt,
         backend_action_label,
@@ -69,6 +84,7 @@ def _():
         config,
         controller,
         default_plot_metrics,
+        json,
         metric_direction,
         metric_names,
         logo_data_uri,
@@ -87,6 +103,8 @@ def _():
         reconcile_navigation,
         RecordGraph,
         tree_payload,
+        Path,
+        uuid,
         get_record,
         set_record,
         get_expanded,
@@ -111,10 +129,30 @@ def _():
         set_preview_result,
         get_reset_version,
         set_reset_version,
+        get_launch_preview_request,
+        set_launch_preview_request,
+        get_launch_preview_handled,
+        set_launch_preview_handled,
+        get_launch_preview_result,
+        set_launch_preview_result,
+        get_launch_review,
+        set_launch_review,
+        get_launch_submit,
+        set_launch_submit,
+        get_launch_handled,
+        set_launch_handled,
+        get_launch_busy,
+        set_launch_busy,
+        get_launch_error,
+        set_launch_error,
+        get_launch_result,
+        set_launch_result,
         RecordDraft,
         RecordDraftError,
         create_record,
         validate_record_draft,
+        LaunchRequest,
+        parse_override_yaml,
     )
 
 
@@ -201,9 +239,8 @@ def _(
     set_form_submit,
     set_preview_request,
     set_reset_version,
+    uuid,
 ):
-    import uuid as _uuid
-
     _ = get_reset_version()
     _selected = get_record()
     _parent_options = ["No parent (root)", *record_ids]
@@ -252,7 +289,7 @@ def _(
 
     def _submit(values):
         set_form_busy(True)
-        set_form_submit({"event_id": _uuid.uuid4().hex, "values": values or {}})
+        set_form_submit({"event_id": uuid.uuid4().hex, "values": values or {}})
 
     form = (
         mo.vstack(
@@ -302,7 +339,7 @@ def _(
     )
     preview_button = mo.ui.button(
         label="Preview",
-        on_click=lambda _: set_preview_request(_uuid.uuid4().hex),
+        on_click=lambda _: set_preview_request(uuid.uuid4().hex),
     )
     cancel_button = mo.ui.button(
         label="Cancel",
@@ -515,6 +552,342 @@ def _(mo, record_select, scope, session):
         ]
     )
     return (snapshot,)
+
+
+@app.cell
+def _(mo):
+    job_refresh = mo.ui.refresh(
+        options=["1s", "2s", "5s"], default_interval="1s", label="Job status"
+    )
+    mo.vstack([job_refresh])
+    return (job_refresh,)
+
+
+@app.cell
+def _(controller, job_refresh):
+    _ = job_refresh.value
+    job_views = controller.poll()
+    return (job_views,)
+
+
+@app.cell
+def _(controller, job_views):
+    job_logs = {
+        view.job_id: controller.logs(view.job_id)
+        for view in job_views
+        if view.state in {"succeeded", "failed"}
+    }
+    return (job_logs,)
+
+
+@app.cell
+def _(
+    config,
+    json,
+    mo,
+    Path,
+    set_launch_preview_request,
+    set_launch_submit,
+    snapshot,
+    uuid,
+):
+    _record = next(
+        (r for r in snapshot.records if r.id == snapshot.selected_record_id),
+        None,
+    )
+    mo.stop(
+        _record is None,
+        mo.vstack(
+            [
+                mo.md("## Launch run"),
+                mo.md("Select a record to launch an entrypoint."),
+            ]
+        ),
+    )
+    _entrypoints = _record.fields.get("entrypoints") or {}
+    mo.stop(
+        not _entrypoints,
+        mo.vstack(
+            [
+                mo.md("## Launch run"),
+                mo.md(
+                    "This record has no effective entrypoints. Create a record "
+                    "with an `entrypoints` mapping in **Create record → "
+                    "advanced YAML**, or select a record that inherits one."
+                ),
+            ]
+        ),
+    )
+    _entrypoint_names = sorted(_entrypoints)
+    entrypoint_select = mo.ui.dropdown(
+        _entrypoint_names,
+        value=_entrypoint_names[0],
+        label="Entrypoint",
+    )
+    _dispatcher_options = sorted(path.stem for path in config.dispatch_dir.glob("*.sh"))
+    if not _dispatcher_options:
+        _dispatcher_options = [Path(config.default_dispatch).stem]
+    dispatcher_select = mo.ui.dropdown(
+        _dispatcher_options,
+        value=(
+            Path(config.default_dispatch).stem
+            if Path(config.default_dispatch).stem in _dispatcher_options
+            else _dispatcher_options[0]
+        ),
+        label="Dispatcher",
+    )
+    overrides_input = mo.ui.text_area(
+        label="Argument overrides (YAML mapping)",
+        value="",
+        full_width=True,
+        rows=4,
+    )
+    commit_override = mo.ui.text(
+        label="Commit ref override (optional)",
+        value="",
+        full_width=True,
+    )
+
+    def _request_dict():
+        return {
+            "job_id": uuid.uuid4().hex,
+            "record_id": _record.id,
+            "entrypoint": entrypoint_select.value,
+            "overrides_yaml": overrides_input.value,
+            "dispatch": dispatcher_select.value,
+            "commit": commit_override.value or None,
+            "fingerprint": json.dumps(
+                [
+                    _record.id,
+                    entrypoint_select.value,
+                    overrides_input.value,
+                    dispatcher_select.value,
+                    commit_override.value or None,
+                ],
+                sort_keys=True,
+            ),
+        }
+
+    launch_preview_button = mo.ui.button(
+        label="Preview launch",
+        on_click=lambda _: set_launch_preview_request(_request_dict()),
+    )
+    launch_button = mo.ui.button(
+        label="Launch run",
+        on_click=lambda _: set_launch_submit(_request_dict()),
+    )
+    _sources = _record.sources.get("entrypoints") or {}
+    _entrypoint_rows = [
+        {
+            "entrypoint": name,
+            "command": " ".join(
+                str(token) for token in (entrypoint.get("command") or [])
+            ),
+            "defaults": str(entrypoint.get("args") or {}),
+            "defined by": str(_sources.get(name)),
+        }
+        for name, entrypoint in _entrypoints.items()
+    ]
+    mo.vstack(
+        [
+            mo.md("## Launch run"),
+            mo.md(
+                "Your entrypoint logs results to the tracking backend. "
+                "Launch execution is separate from tracker query results."
+            ),
+            mo.ui.table(_entrypoint_rows, selection=None),
+            entrypoint_select,
+            dispatcher_select,
+            overrides_input,
+            commit_override,
+            mo.hstack([launch_preview_button, launch_button]),
+        ]
+    )
+    return (
+        entrypoint_select,
+        dispatcher_select,
+        overrides_input,
+        commit_override,
+        launch_preview_button,
+        launch_button,
+    )
+
+
+@app.cell
+def _(
+    controller,
+    get_launch_preview_handled,
+    get_launch_preview_request,
+    mo,
+    LaunchRequest,
+    parse_override_yaml,
+    set_launch_preview_handled,
+    set_launch_preview_result,
+    set_launch_review,
+):
+    _event = get_launch_preview_request()
+    mo.stop(_event is None or _event["job_id"] == get_launch_preview_handled())
+    set_launch_preview_handled(_event["job_id"])
+    try:
+        _overrides = parse_override_yaml(_event["overrides_yaml"])
+        _request = LaunchRequest(
+            job_id=_event["job_id"],
+            record_id=_event["record_id"],
+            entrypoint=_event["entrypoint"],
+            args=_overrides,
+            dispatch=_event["dispatch"],
+            commit=_event["commit"],
+        )
+        _preview = controller.preview(_request)
+    except Exception as exc:
+        set_launch_preview_result({"error": str(exc), "preview": None})
+        set_launch_review(None)
+    else:
+        set_launch_preview_result(
+            {
+                "error": None,
+                "preview": {
+                    "record_id": _preview.record_id,
+                    "entrypoint": _preview.entrypoint,
+                    "argv": list(_preview.argv),
+                    "dispatcher": _preview.dispatcher,
+                    "commit": _preview.commit,
+                    "commit_source": _preview.commit_source,
+                    "query_source": _preview.query_source,
+                },
+            }
+        )
+        set_launch_review(_event["fingerprint"])
+
+
+@app.cell
+def _(
+    controller,
+    get_launch_busy,
+    get_launch_handled,
+    get_launch_review,
+    get_launch_submit,
+    mo,
+    LaunchRequest,
+    parse_override_yaml,
+    set_launch_busy,
+    set_launch_error,
+    set_launch_handled,
+    set_launch_result,
+):
+    _event = get_launch_submit()
+    mo.stop(_event is None or _event["job_id"] == get_launch_handled())
+    set_launch_handled(_event["job_id"])
+    set_launch_busy(True)
+    try:
+        if get_launch_review() != _event["fingerprint"]:
+            raise ValueError(
+                "Launch target changed since the last preview; review again."
+            )
+        _overrides = parse_override_yaml(_event["overrides_yaml"])
+        _request = LaunchRequest(
+            job_id=_event["job_id"],
+            record_id=_event["record_id"],
+            entrypoint=_event["entrypoint"],
+            args=_overrides,
+            dispatch=_event["dispatch"],
+            commit=_event["commit"],
+        )
+        _job = controller.submit(_request)
+    except Exception as exc:
+        set_launch_error(str(exc))
+        set_launch_result(None)
+    else:
+        set_launch_error(None)
+        set_launch_result(_job.job_id)
+    finally:
+        set_launch_busy(False)
+
+
+@app.cell
+def _(
+    get_action_refresh,
+    get_launch_error,
+    get_launch_preview_result,
+    get_launch_result,
+    job_logs,
+    job_views,
+    mo,
+    set_action_refresh,
+    set_record,
+):
+    _messages = []
+    _preview = get_launch_preview_result()
+    if _preview and _preview.get("error"):
+        _messages.append(mo.md(f"**Launch preview failed:** {_preview['error']}"))
+    elif _preview and _preview.get("preview"):
+        _p = _preview["preview"]
+        _messages.append(
+            mo.md(
+                "**Launch preview:**\n\n"
+                f"Record: `{_p['record_id']}` · Entrypoint: `{_p['entrypoint']}` · "
+                f"Dispatcher: `{_p['dispatcher']}`\n\n"
+                f"Commit ({_p['commit_source']}): `{_p['commit'] or '—'}` · "
+                f"Query source: {_p['query_source'] or 'unavailable'}\n\n"
+                f"Rendered argv: `{' '.join(_p['argv'])}`"
+            )
+        )
+    _error = get_launch_error()
+    if _error:
+        _messages.append(mo.md(f"**Launch failed:** {_error}"))
+    for _job_view in job_views:
+        _logs = job_logs.get(_job_view.job_id)
+        _state = (
+            f"exit {_job_view.exit_code}"
+            if _job_view.exit_code is not None
+            else _job_view.state
+        )
+        _messages.append(
+            mo.md(
+                f"**Job {_job_view.job_id[:8]}** — {_job_view.record_id} / "
+                f"{_job_view.entrypoint} — {_job_view.state} ({_state})"
+                + (f" — {_job_view.error}" if _job_view.error else "")
+            )
+        )
+        if _logs is not None:
+            _messages.append(
+                mo.md(
+                    "Launch logs (stdout/stderr), separate from tracker "
+                    "artifacts:\n\n"
+                    f"```\nstdout:\n{_logs.stdout_tail}\n"
+                    f"stderr:\n{_logs.stderr_tail}\n```"
+                )
+            )
+    _result = get_launch_result()
+    if _result:
+        _messages.append(
+            mo.md(
+                "Execution submitted. Refresh results after completion to "
+                "inspect logged runs."
+            )
+        )
+        _messages.append(
+            mo.ui.button(
+                label="Open record",
+                on_click=lambda _: set_record(
+                    next(
+                        (
+                            _job_view.record_id
+                            for _job_view in job_views
+                            if _job_view.job_id == _result
+                        ),
+                        "",
+                    )
+                ),
+            )
+        )
+        _messages.append(
+            mo.ui.button(
+                label="Refresh results",
+                on_click=lambda _: set_action_refresh(get_action_refresh() + 1),
+            )
+        )
+    mo.vstack(_messages) if _messages else mo.md("")
 
 
 @app.cell

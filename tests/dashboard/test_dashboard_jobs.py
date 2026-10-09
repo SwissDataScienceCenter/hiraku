@@ -15,8 +15,9 @@ from hiraku.dashboard.jobs import (
     JobLogs,
     LaunchController,
     LaunchRequest,
+    parse_override_yaml,
 )
-from hiraku.errors import EntrypointNotFoundError, ValidationError
+from hiraku.errors import EntrypointNotFoundError, LaunchError, ValidationError
 from hiraku.record import Record
 
 
@@ -181,6 +182,72 @@ def test_missing_entrypoint_fails_preflight(tmp_path: Path) -> None:
                 args={},
             )
         )
+
+
+def test_parse_override_yaml_preserves_types() -> None:
+    overrides = parse_override_yaml(
+        "seed: 1\nverbose: true\nnothing: null\nitems: [a, b]\n"
+    )
+    assert overrides == {
+        "seed": 1,
+        "verbose": True,
+        "nothing": None,
+        "items": ["a", "b"],
+    }
+
+
+def test_preview_renders_merged_argv(tmp_path: Path) -> None:
+    config = _project(tmp_path, [sys.executable, "evaluate.py"])
+    controller = _controller(config, tmp_path)
+    preview = controller.preview(
+        LaunchRequest(
+            job_id="preview-1",
+            record_id="root",
+            entrypoint="run",
+            args={"seed": 1, "verbose": True},
+        )
+    )
+    assert preview.record_id == "root"
+    assert preview.entrypoint == "run"
+    assert preview.argv == (
+        sys.executable,
+        "evaluate.py",
+        "--seed",
+        "1",
+        "--verbose",
+    )
+    assert preview.dispatcher == "launch.sh"
+
+
+def test_bad_override_types_cannot_start(tmp_path: Path) -> None:
+    config = _project(tmp_path, [sys.executable, "-c", "print('hi')"])
+    controller = _controller(config, tmp_path)
+    with pytest.raises(ValidationError):
+        controller.submit(
+            LaunchRequest(
+                job_id="bad-args",
+                record_id="root",
+                entrypoint="run",
+                args={"nested": {"not": "scalar"}},
+            )
+        )
+    assert controller.active_job_id is None
+
+
+def test_missing_dispatcher_cannot_start(tmp_path: Path) -> None:
+    config = _project(tmp_path, [sys.executable, "-c", "print('hi')"])
+    controller = _controller(config, tmp_path)
+    with pytest.raises(LaunchError):
+        controller.submit(
+            LaunchRequest(
+                job_id="bad-dispatch",
+                record_id="root",
+                entrypoint="run",
+                args={},
+                dispatch="missing",
+            )
+        )
+    assert controller.active_job_id is None
 
 
 def test_shutdown_drains_and_cleans_temp_dir(tmp_path: Path) -> None:

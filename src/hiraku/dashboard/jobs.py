@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from ..errors import EntrypointNotFoundError, RecordNotFoundError, ValidationError
 from ..git import GitRepository
 from ..launch import _dispatcher, render_arguments
@@ -33,6 +35,28 @@ from .data import DashboardError, _resolve_all
 
 MAX_COMPLETED_JOBS = 20
 TAIL_BYTES = 64 * 1024
+
+
+def parse_override_yaml(raw: str) -> dict[str, Any]:
+    """Parse launch argument overrides without executing a command."""
+    text = raw.strip()
+    if not text:
+        return {}
+    try:
+        value = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ValidationError(f"Invalid overrides YAML: {exc}") from exc
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValidationError("Overrides must be a YAML mapping")
+    overrides: dict[str, Any] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValidationError("Override keys must be strings")
+        overrides[key] = item
+    render_arguments(overrides)
+    return overrides
 
 
 @dataclass(frozen=True)
@@ -77,6 +101,27 @@ class JobLogs:
 
     stdout_tail: str
     stderr_tail: str
+
+
+@dataclass(frozen=True)
+class LaunchPreview:
+    """Nonmutating launch preview returned by the controller."""
+
+    record_id: str
+    entrypoint: str
+    argv: tuple[str, ...]
+    dispatcher: str
+    commit: str | None
+    commit_source: str
+    query_source: str | None
+
+
+@dataclass(frozen=True)
+class _Preflight:
+    merged_args: dict[str, Any]
+    commit: str | None
+    values: dict[str, Any]
+    sources: dict[str, Any]
 
 
 @dataclass
@@ -164,7 +209,7 @@ class LaunchController:
                     return job.request.job_id
         return None
 
-    def _preflight(self, request: LaunchRequest) -> tuple[dict[str, Any], str]:
+    def _preflight(self, request: LaunchRequest) -> _Preflight:
         self._capability.ensure_can_launch()
         index = preflight_mutations(self._config)
         if request.record_id not in index:
@@ -176,7 +221,7 @@ class LaunchController:
             raise ValidationError(
                 "Project records are not safe to launch: " + " ".join(messages)
             )
-        values, _sources = resolved[request.record_id]
+        values, sources = resolved[request.record_id]
         entrypoints = values.get("entrypoints") or {}
         if request.entrypoint not in entrypoints:
             raise EntrypointNotFoundError(
@@ -193,16 +238,45 @@ class LaunchController:
         render_arguments(request.args)
         render_arguments(merged_args)
         _dispatcher(self._config, request.dispatch)
-        if request.commit is not None and request.commit:
-            request = LaunchRequest(
-                job_id=request.job_id,
-                record_id=request.record_id,
-                entrypoint=request.entrypoint,
-                args=request.args,
-                dispatch=request.dispatch,
-                commit=GitRepository(self._config).resolve(request.commit),
-            )
-        return merged_args, request.commit
+        commit = request.commit
+        if commit is not None and commit:
+            commit = GitRepository(self._config).resolve(commit)
+        return _Preflight(
+            merged_args=merged_args,
+            commit=commit,
+            values=values,
+            sources=sources,
+        )
+
+    def preview(self, request: LaunchRequest) -> LaunchPreview:
+        """Validate and render a launch without starting a worker."""
+        preflight = self._preflight(request)
+        entrypoint = (preflight.values.get("entrypoints") or {})[request.entrypoint]
+        command = (
+            entrypoint.get("command")
+            if isinstance(entrypoint, Mapping)
+            else list(entrypoint.command)
+        )
+        dispatcher_path = _dispatcher(self._config, request.dispatch)
+        query_source = None
+        try:
+            from .data import _backend_for_values, _source_info
+
+            backend = _backend_for_values(self._config, preflight.values)
+            query_source = _source_info(
+                backend, self._config, request.record_id, "record"
+            ).label
+        except Exception:
+            query_source = None
+        return LaunchPreview(
+            record_id=request.record_id,
+            entrypoint=request.entrypoint,
+            argv=tuple(command) + render_arguments(preflight.merged_args),
+            dispatcher=dispatcher_path.name,
+            commit=preflight.commit,
+            commit_source="override" if request.commit else "record",
+            query_source=query_source,
+        )
 
     def submit(self, request: LaunchRequest) -> JobView:
         """Validate and start one launch worker."""
@@ -215,7 +289,8 @@ class LaunchController:
                 raise ValidationError(
                     "Another launch is already active; wait for it to finish"
                 )
-            _merged_args, resolved_commit = self._preflight(request)
+            preflight = self._preflight(request)
+            resolved_commit = preflight.commit
             request = LaunchRequest(
                 job_id=request.job_id,
                 record_id=request.record_id,
