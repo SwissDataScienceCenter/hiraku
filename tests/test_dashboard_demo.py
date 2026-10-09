@@ -104,6 +104,9 @@ def test_digits_demo_trains_and_exposes_real_runs(tmp_path):
     assert all(run.entrypoint == "train" and run.commit for run in snapshot.runs)
     assert len(build_snapshot(config, record_id="weak-l2").runs) == 1
     assert build_snapshot(config, record_id="digits").runs == ()
+    subtree = build_snapshot(config, record_id="digits", scope="subtree")
+    assert len(subtree.runs) == 2
+    assert all(run.url and f"/runs/{run.id}" in run.url for run in subtree.runs)
     assert config.active_record_id is None
 
     helpers["launch_digits_run"](directory, "strong-l2")

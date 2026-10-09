@@ -98,6 +98,13 @@ def verify_digits_demo(directory: Path) -> None:
     )
     if progress.omitted or pareto.omitted:
         raise ValueError("Digits runs contain missing or non-finite plot metrics")
+    if any(
+        not run.url
+        or not run.url.startswith("http://127.0.0.1:")
+        or f"/runs/{run.id}" not in run.url
+        for run in snapshot.runs
+    ):
+        raise ValueError("Digits runs must link to their native MLflow run pages")
     print(
         f"Verified {len(snapshot.runs)} real MLflow runs: "
         f"{len(progress.frame)} progress points, {len(pareto.frame)} Pareto points.",
@@ -105,7 +112,12 @@ def verify_digits_demo(directory: Path) -> None:
     )
 
 
-def create_digits_demo(directory: Path | None = None, *, epochs: int = 40) -> Path:
+def create_digits_demo(
+    directory: Path | None = None,
+    *,
+    epochs: int = 40,
+    mlflow_port: int = 5000,
+) -> Path:
     """Initialize and run the bundled Digits example with committed attribution."""
     from hiraku.config import HirakuConfig
     from hiraku.record import Record
@@ -156,6 +168,7 @@ def create_digits_demo(directory: Path | None = None, *, epochs: int = 40) -> Pa
             "type": "mlflow",
             "database": "mlflow.db",
             "experiment_name": "hiraku-digits",
+            "ui_url": f"http://127.0.0.1:{mlflow_port}",
         },
     )
     for record_id, alpha in (("weak-l2", 0.0001), ("strong-l2", 1.0)):
@@ -371,7 +384,7 @@ def serve_demo(
                     "--record",
                     record_id,
                     "--scope",
-                    "source" if mlflow_port is not None else "record",
+                    "subtree" if mlflow_port is not None else "record",
                     "--port",
                     str(port),
                     "--no-browser",
@@ -526,9 +539,13 @@ def main() -> int:
                 check=True,
             )
         if args.example == "digits-mlflow":
-            directory = create_digits_demo(args.project_dir, epochs=args.epochs)
-            initial_record = "weak-l2"
-            print("Dashboard opens in source scope to compare both models.")
+            directory = create_digits_demo(
+                args.project_dir,
+                epochs=args.epochs,
+                mlflow_port=args.mlflow_port,
+            )
+            initial_record = "digits"
+            print("Dashboard opens in subtree scope to explain the hierarchy.")
             print(
                 "Use val/log_loss for Progress; "
                 "val/log_loss vs val/accuracy for Pareto."

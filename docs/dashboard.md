@@ -33,6 +33,7 @@ Hiraku supports Python 3.11 and newer. Install the optional tracking extras
 ```bash
 hiraku dashboard
 hiraku dashboard --record child-a
+hiraku dashboard --record child-a --scope subtree
 hiraku dashboard --record child-a --scope source
 hiraku dashboard --port 8765 --no-browser
 hiraku dashboard --notebook path/to/custom_notebook.py
@@ -42,8 +43,9 @@ hiraku dashboard --notebook path/to/custom_notebook.py
 - `--record` selects the initial record. Without it, the persisted active
   record is used when present; otherwise the record browser is shown and no
   tracking source is queried until you select a record.
-- `--scope source` initially compares all attributed runs in the selected
-  tracking source. The default scope remains `record`.
+- `--scope subtree` initially shows the selected record and its descendants
+  across their effective tracking sources. `--scope source` compares all
+  attributed runs in the selected source. The default scope remains `record`.
 - `--no-browser` starts the server without opening a browser.
 - `--notebook` runs an explicitly selected user-owned notebook instead of the
   bundled application. Default startup never discovers notebooks from the
@@ -51,14 +53,18 @@ hiraku dashboard --notebook path/to/custom_notebook.py
 
 ## Run scopes
 
-- **Selected record's runs** queries the selected record's resolved tracking
-  source for runs attributed to that record ID.
-- **All attributed runs in this source** queries the same source once for
-  every run that carries Hiraku record attribution. It is not a
+- **This record** queries the selected record's resolved tracking source for
+  runs attributed to that record ID.
+- **This subtree** resolves the selected record plus its descendants, groups
+  members by their effective source identity, queries each distinct source once
+  per refresh, and keeps only runs attributed to those members.
+- **All attributed runs in this source** queries the selected record's source
+  once for every run that carries Hiraku record attribution. It is not a
   descendant-tree query.
 
 Runs are identified by `(source identity, run ID)` so identical run IDs from
-different sources never collide.
+different sources never collide. Partial subtree failures keep the successful
+sources visible and are reported explicitly.
 
 ## Plots
 
@@ -114,7 +120,7 @@ A custom notebook receives project context through environment variables:
 
 - `HIRAKU_PROJECT_ROOT` — absolute project root;
 - `HIRAKU_DASHBOARD_RECORD` — initial record ID, empty when unset;
-- `HIRAKU_DASHBOARD_SCOPE` — `record` or `source`.
+- `HIRAKU_DASHBOARD_SCOPE` — `record`, `subtree`, or `source`.
 
 Use the snapshot API for backend-agnostic rendering:
 
@@ -156,9 +162,10 @@ if __name__ == "__main__":
     app.run()
 ```
 
-Snapshot version 1 exposes `records` (effective fields and defining record IDs),
-`runs` (source-qualified keys, provenance, metrics and parameters), `source`,
-`scope`, `errors`, and `refreshed_at`. These are plain Python structures.
+Snapshot version 2 exposes `records` (effective fields and defining record IDs),
+`runs` (source-qualified keys, provenance, metrics, parameters, and adapter-owned
+URLs), `source`, `sources` (queried-source coverage), `scope`, `errors`, and
+`refreshed_at`. These are plain Python structures.
 Use `DashboardSession.refresh()` for coalescing and last-successful-data handling.
 Keep UI creation, snapshot fetching, and visual transformations in separate
 marimo cells so changes to visual controls do not trigger fetching.
@@ -189,11 +196,13 @@ tracked metrics and plot data, and opens both the dashboard (port 8765) and
 MLflow UI (port 5000). Use `--port` and `--mlflow-port` to change the ports;
 automated tests are skipped by default. Add `--run-tests` to run regression
 tests and the notebook check before starting the demo.
-Ctrl-C stops both servers. Switch to **All
-attributed runs in this source** to compare both child records in an ordinary
-dashboard session; the Digits demo already opens in that scope. Its plot defaults
-are `val/log_loss` and `val/accuracy`, with inherited optimization directions.
-The MLflow link opens the **Model training** view of `hiraku-digits` directly.
+Ctrl-C stops both servers. The Digits demo opens on the `digits` record in
+**This subtree** scope, so both child experiments are visible and the record
+graph explains the hierarchy. Its plot defaults are `val/log_loss` and
+`val/accuracy`, with inherited optimization directions. Run links use MLflow's
+native run route (`/#/experiments/<id>/runs/<run_id>`) and are built from the
+configured `ui_url`, which the demo derives from `--mlflow-port`. The printed
+MLflow link still opens the **Model training** view of `hiraku-digits` directly.
 Dashboard plots show final metrics per run; full epoch histories remain in MLflow.
 See `scripts/README-dashboard.md` for the walkthrough, repeat-run commands,
 and the optional `--example csv` fixture.

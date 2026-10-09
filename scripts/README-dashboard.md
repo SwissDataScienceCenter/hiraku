@@ -21,17 +21,19 @@ and Git commit attribution. Training writes to the demo's own `mlflow.db` and
 dataset download, tracking server, or credentials are required. Git and uv
 must be installed. The script verifies that both real runs and their metrics
 reach the dashboard's Progress and Pareto transformations before starting
-both the Hiraku dashboard (with `weak-l2` selected) and MLflow UI. Both URLs
+both the Hiraku dashboard (with `digits` selected) and MLflow UI. Both URLs
 are printed and opened in the browser:
 
 - Hiraku dashboard: <http://127.0.0.1:8765>
 - MLflow UI: <http://127.0.0.1:5000>
 
-Hiraku starts in **All attributed runs in this source**, so both experiments
-are visible immediately. Progress defaults to `val/log_loss`; Pareto defaults
-to `val/log_loss` (minimize) against `val/accuracy` (maximize). The printed MLflow
-link opens this experiment's **Model training → Runs** view, rather than the
-GenAI overview used by MLflow 3's default homepage.
+Hiraku starts in **This subtree**, so both experiments are visible immediately
+and the record graph explains that `weak-l2` and `strong-l2` are children of
+`digits`. Progress defaults to `val/log_loss`; Pareto defaults to
+`val/log_loss` (minimize) against `val/accuracy` (maximize). The dashboard's
+run links use MLflow's native run route; the printed MLflow link opens this
+experiment's **Model training → Runs** view, rather than the GenAI overview
+used by MLflow 3's default homepage.
 
 Press **Ctrl-C** to stop both servers. If either server fails to start or exits,
 the script stops the other as well. The CSV demo starts only the Hiraku dashboard.
@@ -43,25 +45,29 @@ exercise the UI yourself.
 
 ## Digits walkthrough
 
-1. **Record details:** the initial `weak-l2` record inherits its metric directions
-   and tracking backend from `digits`. Its training entrypoint uses alpha
-   0.0001, 40 epochs, 64 hidden units, and seed 42.
-2. **Runs:** the initial source scope shows both `weak-l2` and `strong-l2`.
-   Switch to selected-record scope to see only the weak-L2 run.
-   Selecting `digits` in selected-record scope shows no runs: the runs belong
-   to its child records. Use source scope to see both.
-3. **Provenance:** select either run. Its record ID, Git commit, and `train`
-   entrypoint should be populated. The Open record button navigates to the
-   attributed experiment. Sort by a validation metric to compare results.
-4. **Progress:** the default is `val/log_loss`. In source scope there should be two
-   points, one per training run, with a minimize best-so-far overlay. Click a
-   point and inspect **Selected plot points**.
-5. **Pareto:** switching views should immediately show `val/log_loss` on X
+1. **Record graph:** the initial `digits` node is selected. Expand it to reveal
+   `weak-l2` and `strong-l2`; expand a child to inspect its descendants. Search
+   reveals collapsed matches and highlights the selected ancestry.
+2. **Record details:** `digits` declares the metric directions and MLflow
+   backend. Selecting `weak-l2` shows the inherited values and its training
+   entrypoint (alpha 0.0001, 40 epochs, 64 hidden units, and seed 42).
+3. **Runs:** the initial subtree scope shows both `weak-l2` and `strong-l2`.
+   Switch to **This record** to see only the selected child's own run.
+   Selecting `digits` in **This record** shows no runs: the runs belong to its
+   child records.
+4. **Provenance:** select either run. Its record ID, Git commit, `train`
+   entrypoint, and **Open in MLflow** link should be populated. The link opens
+   the exact native run page in a new tab. The Open record button navigates
+   the graph and breadcrumb to the attributed experiment.
+5. **Progress:** the default is `val/log_loss`. In subtree scope there should be
+   two points, one per training run, with a minimize best-so-far overlay. Click
+   a point and inspect **Selected plot points**.
+6. **Pareto:** switching views should immediately show `val/log_loss` on X
    (minimize) and `val/accuracy` on Y (maximize). Both runs should appear, with
    nondominated runs identified in the legend.
-6. **Refresh:** run the command below in another terminal, using the printed
+7. **Refresh:** run the command below in another terminal, using the printed
    demo path. It retrains the weak-L2 model through Hiraku and records an
-   additional MLflow run. Press **Refresh**; source scope should then show three
+   additional MLflow run. Press **Refresh**; subtree scope should then show three
    runs and three plot points (identical deterministic scores may overlap).
 
 ```bash

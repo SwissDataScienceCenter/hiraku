@@ -178,6 +178,7 @@ def test_dashboard_browser_workflow(tmp_path, monkeypatch):
                 '[data-testid="select-row-checkbox"]',
             ).click()
             WebDriverWait(browser, 20).until(lambda b: "Run: a-1" in _body(b))
+            assert "No safe external link" in _body(browser)
             canvas = _rendered_canvas(browser)
             browser.execute_script("arguments[0].scrollIntoView()", canvas)
             point = WebDriverWait(browser, 20).until(
@@ -310,7 +311,30 @@ def test_digits_demo_defaults_and_mlflow_training_ui(tmp_path, monkeypatch):
             browser = _new_browser(monkeypatch)
             browser.get(f"http://127.0.0.1:{port}")
             WebDriverWait(browser, 30).until(lambda b: _run_rows(b) == 2)
-            assert "Scope: source" in _body(browser)
+            assert "Scope: This subtree" in _body(browser)
+            WebDriverWait(browser, 20).until(
+                lambda b: len(_elements(b, ".hk-tree-node")) >= 1
+            )
+            _toggle = _elements(browser, ".hk-tree-toggle")[0]
+            browser.execute_script(
+                "arguments[0].dispatchEvent(new MouseEvent('click', {bubbles: true}));",
+                _toggle,
+            )
+            WebDriverWait(browser, 20).until(
+                lambda b: len(_elements(b, ".hk-tree-node")) >= 3
+            )
+            _control(
+                browser,
+                'marimo-table[data-label*="Runs"]',
+                '[data-testid="select-row-checkbox"]',
+            ).click()
+            WebDriverWait(browser, 20).until(
+                lambda b: len(_elements(b, "a.hk-run-link")) == 1
+            )
+            _run_link = _elements(browser, "a.hk-run-link")[0]
+            assert _run_link.get_attribute("target") == "_blank"
+            assert _run_link.get_attribute("rel") == "noopener noreferrer"
+            assert "/runs/" in _run_link.get_attribute("href")
             assert (
                 Select(
                     _control(
