@@ -9,10 +9,17 @@ import os
 from pathlib import Path
 
 import marimo as mo
-import pandas as pd
 
 from hiraku.config import HirakuConfig
 from hiraku.dashboard import build_snapshot, read_record_index
+from hiraku.dashboard.views import (
+    metric_names,
+    param_names,
+    records_frame,
+    runs_frame,
+    sort_fields,
+    sorted_runs,
+)
 
 
 def _project_root() -> Path | None:
@@ -46,39 +53,6 @@ def _load_snapshot(record_id, scope):
         return None, str(exc)
 
 
-def _records_frame(snapshot):
-    return pd.DataFrame(
-        [
-            {
-                "id": record.id,
-                "parent": record.parent_id,
-                "depth": record.depth,
-                "type": record.type,
-                "status": record.status,
-            }
-            for record in snapshot.records
-        ]
-    )
-
-
-def _runs_frame(snapshot):
-    if not snapshot.runs:
-        return pd.DataFrame(columns=["id", "record", "timestamp", "commit"])
-    rows = []
-    for run in snapshot.runs:
-        rows.append(
-            {
-                "id": run.id,
-                "record": run.record_id,
-                "timestamp": run.timestamp.isoformat() if run.timestamp else None,
-                "commit": run.commit,
-                **{f"metric.{key}": value for key, value in run.metrics.items()},
-                **{f"param.{key}": value for key, value in run.params.items()},
-            }
-        )
-    return pd.DataFrame(rows)
-
-
 config = _load_config()
 requested_record = os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
 requested_scope = os.environ.get("HIRAKU_DASHBOARD_SCOPE") or "record"
@@ -94,6 +68,7 @@ record_select = mo.ui.dropdown(
     value=requested_record or config.active_record_id,
     allow_select_none=True,
     label="Record",
+    full_width=True,
 )
 scope_radio = mo.ui.radio(
     {
@@ -108,22 +83,65 @@ refresh_button = mo.ui.button(label="Refresh")
 _ = refresh_button.value
 snapshot, snapshot_error = _load_snapshot(record_select.value, scope_radio.value)
 
-mo.stop(
-    snapshot is None,
-    mo.md(f"**Dashboard error:** {snapshot_error}"),
-)
+mo.stop(snapshot is None, mo.md(f"**Dashboard error:** {snapshot_error}"))
 
-records_table = mo.ui.table(
-    _records_frame(snapshot),
-    selection=None,
-    page_size=10,
-    label="Records",
+backend_errors = [error for error in snapshot.errors if error.kind == "backend"]
+
+if backend_errors:
+    run_status = mo.md(
+        "**Backend unavailable:** "
+        + " ".join(error.message for error in backend_errors)
+    )
+elif snapshot.source is None:
+    run_status = mo.md("No tracking source selected; choose a record above.")
+elif not snapshot.runs:
+    run_status = mo.md("No runs found in this scope.")
+else:
+    run_status = mo.md(
+        f"Showing {len(snapshot.runs)} run(s) from **{snapshot.source.label}** "
+        f"({snapshot.scope})."
+    )
+
+all_metrics = metric_names(snapshot)
+all_params = param_names(snapshot)
+metric_select = mo.ui.multiselect(
+    options=all_metrics,
+    value=all_metrics[:4],
+    label="Metrics",
+    full_width=True,
+)
+param_select = mo.ui.multiselect(
+    options=all_params,
+    value=all_params[:2],
+    label="Parameters",
+    full_width=True,
+)
+sort_select = mo.ui.dropdown(
+    options={field: field for field in sort_fields(snapshot)},
+    value="timestamp",
+    label="Sort runs by",
+    full_width=True,
+)
+ascending_checkbox = mo.ui.checkbox(value=True, label="Ascending")
+
+ordered_runs = sorted_runs(
+    snapshot, sort_select.value, ascending=ascending_checkbox.value
 )
 runs_table = mo.ui.table(
-    _runs_frame(snapshot),
+    runs_frame(
+        ordered_runs,
+        metrics=metric_select.value,
+        params=param_select.value,
+    ),
     selection="single",
     page_size=10,
     label="Runs",
+)
+records_table = mo.ui.table(
+    records_frame(snapshot),
+    selection=None,
+    page_size=10,
+    label="Records",
 )
 
 selected_record = next(
@@ -131,7 +149,13 @@ selected_record = next(
     None,
 )
 if selected_record is None:
-    detail = mo.md("Select a record to inspect its details.")
+    if record_select.value is not None:
+        detail = mo.md(
+            f"Selected record **{record_select.value}** is no longer present "
+            "after refresh."
+        )
+    else:
+        detail = mo.md("Select a record to inspect its details.")
 else:
     inherited = [
         f"- **{key}** = `{value}` (from {source})"
@@ -160,6 +184,17 @@ else:
         ]
     )
 
+errors_block = (
+    mo.vstack(
+        [
+            mo.md("## Warnings"),
+            *[mo.md(f"- `{error.kind}`: {error.message}") for error in snapshot.errors],
+        ]
+    )
+    if snapshot.errors
+    else mo.md("")
+)
+
 mo.vstack(
     [
         mo.md("# Hiraku dashboard"),
@@ -177,7 +212,13 @@ mo.vstack(
             widths=[1, 1],
         ),
         mo.md("## Runs"),
+        mo.hstack(
+            [sort_select, ascending_checkbox, metric_select, param_select],
+            widths=[1, 0.5, 1, 1],
+        ),
+        run_status,
         runs_table,
+        errors_block,
     ]
 )
 
