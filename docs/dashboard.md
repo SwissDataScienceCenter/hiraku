@@ -166,6 +166,22 @@ marimo cells so changes to visual controls do not trigger fetching.
 
 ## Development checks
 
+To exercise the dashboard with real model training and local MLflow tracking,
+run the test script from the repository:
+
+```bash
+uv sync --all-extras
+uv run --all-extras python scripts/test_dashboard.py
+```
+
+It creates a temporary Git/Hiraku project from the bundled Digits example,
+trains the weak- and strong-L2 experiments for 40 epochs, verifies their
+tracked metrics and plot data, and opens the dashboard. Switch to **All
+attributed runs in this source** to compare both child records. Dashboard
+plots show final metrics per run; full epoch histories remain in MLflow.
+See `scripts/README-dashboard.md` for the walkthrough, repeat-run commands,
+and the optional `--example csv` fixture.
+
 Run the notebook execution, query, launcher, and plot regressions with:
 
 ```bash

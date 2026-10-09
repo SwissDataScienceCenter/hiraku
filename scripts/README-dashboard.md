@@ -8,16 +8,74 @@ uv run --all-extras python scripts/test_dashboard.py
 ```
 
 The script runs the dashboard regression tests and marimo's notebook check,
-creates a fresh temporary research project, and launches the dashboard with
-`child-a` selected. The browser opens automatically. The test data uses local
-CSV files and requires no tracking credentials.
+creates a fresh temporary Git/Hiraku project from the bundled
+[Digits MLflow example](https://swissdatasciencecenter.github.io/hiraku/examples/digits-mlflow/),
+and trains the weak-L2 and strong-L2 models for 40 epochs each. It uses the
+example's actual `train.py`, the bundled scikit-learn Digits dataset, the same
+seed (42), and regularization strengths (0.0001 and 1.0). Dependencies come from
+the checkout's uv environment, so no second virtual environment is needed.
+
+Runs are launched through Hiraku's dispatcher with real record, entrypoint,
+and Git commit attribution. Training writes to the demo's own `mlflow.db` and
+`hiraku-digits` experiment, even if your shell has MLflow overrides set. No
+dataset download, tracking server, or credentials are required. Git and uv
+must be installed. The script verifies that both real runs and their metrics
+reach the dashboard's Progress and Pareto transformations before opening it
+with `weak-l2` selected.
 
 The printed **Demo project** path is retained after shutdown. Existing
 projects are never overwritten. The normal regression run skips browser
 automation unless explicitly enabled below; follow the manual checks to
 exercise the UI yourself.
 
-## Manual walkthrough
+## Digits walkthrough
+
+1. **Record details:** the initial `weak-l2` record inherits its metric directions
+   and tracking backend from `digits`. Its training entrypoint uses alpha
+   0.0001, 40 epochs, 64 hidden units, and seed 42.
+2. **Runs:** selected-record scope shows one real weak-L2 run. Select **All
+   attributed runs in this source** to compare both `weak-l2` and `strong-l2`.
+   Selecting `digits` in selected-record scope shows no runs: the runs belong
+   to its child records. Use source scope to see both.
+3. **Provenance:** select either run. Its record ID, Git commit, and `train`
+   entrypoint should be populated. The Open record button navigates to the
+   attributed experiment. Sort by a validation metric to compare results.
+4. **Progress:** choose `val/log_loss`. In source scope there should be two
+   points, one per training run, with a minimize best-so-far overlay. Click a
+   point and inspect **Selected plot points**.
+5. **Pareto:** choose `val/accuracy` on X and `val/log_loss` on Y. Directions
+   should resolve to maximize and minimize. Both runs should appear, with
+   nondominated runs identified in the legend.
+6. **Refresh:** run the command below in another terminal, using the printed
+   demo path. It retrains the weak-L2 model through Hiraku and records an
+   additional MLflow run. Press **Refresh**; source scope should then show three
+   runs and three plot points (identical deterministic scores may overlap).
+
+```bash
+uv run --all-extras python scripts/test_dashboard.py --launch-run "<demo-path>"
+# Or repeat the strong-L2 experiment:
+uv run --all-extras python scripts/test_dashboard.py --launch-run "<demo-path>" --record strong-l2
+```
+
+Dashboard plots compare the **latest summary metric per run**, not individual
+training epochs. Full 40-epoch learning curves are recorded in MLflow. To
+inspect those, run from the repository and open <http://127.0.0.1:5000>:
+
+```bash
+uv run --all-extras mlflow ui --backend-store-uri "sqlite:///<demo-path>/mlflow.db" --host 127.0.0.1 --port 5000
+```
+
+Select `hiraku-digits`, then compare the two runs and their `val/log_loss`,
+`val/accuracy`, `train/log_loss`, and `train/accuracy` histories.
+
+## CSV edge-case walkthrough
+
+The original synthetic fixture remains available for missing metrics, empty
+sources, and repeated IDs:
+
+```bash
+uv run --all-extras python scripts/test_dashboard.py --example csv
+```
 
 1. **Record details:** select `child-a`. Its metric directions come from
    `baseline`; its tracking source is `results/a.csv`. Inspect the defining
@@ -65,6 +123,9 @@ uv run --all-extras python scripts/test_dashboard.py --skip-tests
 # Run checks and create data without starting a server.
 uv run --all-extras python scripts/test_dashboard.py --no-serve
 
+# Train a shorter Digits demo (results differ from the 40-epoch example).
+uv run --all-extras python scripts/test_dashboard.py --epochs 8 --skip-tests
+
 # Choose a new or empty directory.
 uv run --all-extras python scripts/test_dashboard.py --project-dir "<new-demo-path>"
 ```
@@ -73,8 +134,10 @@ To reopen an existing demo, change into its directory and use the repository
 path with uv. Do not rerun the creation script against a populated directory.
 
 ```bash
-uv run --project "<hiraku-repository-path>" --all-extras hiraku dashboard --record child-a
+uv run --project "<hiraku-repository-path>" --all-extras hiraku dashboard --record weak-l2
 ```
+
+For a CSV demo, use `--record child-a` instead.
 
 ## Automated browser walkthrough
 
