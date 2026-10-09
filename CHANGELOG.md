@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Start the dashboard demo without automated tests by default; use `--run-tests` to enable them.
 - Prefer declared research metrics for plot defaults, show larger charts and markers, and open the Digits demo in comparison scope and MLflow's Model training view.
 - Make the dashboard a reactive marimo notebook with working record/run selection, cohort filtering, plot controls, and refresh status.
 - Preserve source-qualified selections and cached source queries; sort numeric metrics and namespaced parameters correctly.

@@ -442,8 +442,12 @@ def main() -> int:
     parser.add_argument(
         "--no-serve", action="store_true", help="Create the demo, then exit"
     )
-    parser.add_argument(
-        "--skip-tests", action="store_true", help="Skip automated checks"
+    checks = parser.add_mutually_exclusive_group()
+    checks.add_argument(
+        "--run-tests", action="store_true", help="Run automated checks before the demo"
+    )
+    checks.add_argument(
+        "--skip-tests", action="store_true", help="Skip automated checks (the default)"
     )
     parser.add_argument(
         "--browser-tests",
@@ -498,7 +502,7 @@ def main() -> int:
         ):
             parser.error("--project-dir must be new or empty")
         uv = ["uv", "run", "--locked", "--all-extras"]
-        if not args.skip_tests:
+        if args.run_tests or args.browser_tests:
             environment = dict(os.environ)
             if args.browser_tests:
                 environment["HIRAKU_TEST_BROWSER"] = args.browser_tests

@@ -7,8 +7,8 @@ uv sync --all-extras
 uv run --all-extras python scripts/test_dashboard.py
 ```
 
-The script runs the dashboard regression tests and marimo's notebook check,
-creates a fresh temporary Git/Hiraku project from the bundled
+The script goes straight to creating a fresh temporary Git/Hiraku project from
+the bundled
 [Digits MLflow example](https://swissdatasciencecenter.github.io/hiraku/examples/digits-mlflow/),
 and trains the weak-L2 and strong-L2 models for 40 epochs each. It uses the
 example's actual `train.py`, the bundled scikit-learn Digits dataset, the same
@@ -137,14 +137,14 @@ directory afterward.
 # Choose other ports and open the printed URLs yourself.
 uv run --all-extras python scripts/test_dashboard.py --port 8766 --mlflow-port 5001 --no-browser
 
-# Skip tests that have already passed.
-uv run --all-extras python scripts/test_dashboard.py --skip-tests
+# Run regression tests and the notebook check before the demo.
+uv run --all-extras python scripts/test_dashboard.py --run-tests
 
 # Run checks and create data without starting either server.
-uv run --all-extras python scripts/test_dashboard.py --no-serve
+uv run --all-extras python scripts/test_dashboard.py --run-tests --no-serve
 
 # Train a shorter Digits demo (results differ from the 40-epoch example).
-uv run --all-extras python scripts/test_dashboard.py --epochs 8 --skip-tests
+uv run --all-extras python scripts/test_dashboard.py --epochs 8
 
 # Choose a new or empty directory.
 uv run --all-extras python scripts/test_dashboard.py --project-dir "<new-demo-path>"
@@ -183,4 +183,5 @@ If port 8765 or 5000 is occupied, choose another with `--port` or
 `--mlflow-port`. The two ports must differ. `--no-browser` suppresses both
 browser tabs. If a check fails,
 the script stops before launching the demo. See the test output for the
-failure; `--skip-tests` is intended for checks you have already run.
+failure. Automated checks are opt-in with `--run-tests`; `--browser-tests`
+also enables them. `--skip-tests` remains supported for existing commands.

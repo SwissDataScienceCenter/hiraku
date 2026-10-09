@@ -187,6 +187,8 @@ It creates a temporary Git/Hiraku project from the bundled Digits example,
 trains the weak- and strong-L2 experiments for 40 epochs, verifies their
 tracked metrics and plot data, and opens both the dashboard (port 8765) and
 MLflow UI (port 5000). Use `--port` and `--mlflow-port` to change the ports;
+automated tests are skipped by default. Add `--run-tests` to run regression
+tests and the notebook check before starting the demo.
 Ctrl-C stops both servers. Switch to **All
 attributed runs in this source** to compare both child records in an ordinary
 dashboard session; the Digits demo already opens in that scope. Its plot defaults

@@ -22,6 +22,30 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts/test_dashboard.py"
 helpers = runpy.run_path(str(SCRIPT))
 
 
+@pytest.mark.parametrize(
+    ("options", "expected_checks"),
+    [
+        ([], 0),
+        (["--skip-tests"], 0),
+        (["--run-tests"], 2),
+        (["--browser-tests", "webkit"], 2),
+    ],
+)
+def test_demo_checks_are_opt_in(monkeypatch, tmp_path, options, expected_checks):
+    main = helpers["main"]
+    calls = []
+    monkeypatch.setattr(
+        sys, "argv", [str(SCRIPT), "--example", "csv", "--no-serve", *options]
+    )
+    monkeypatch.setitem(main.__globals__, "create_demo", lambda path: tmp_path)
+    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: calls.append(args))
+    assert main() == 0
+    assert len(calls) == expected_checks
+    if expected_checks:
+        assert "pytest" in calls[0]
+        assert "marimo" in calls[1]
+
+
 def test_demo_has_distinct_scopes_and_refresh_rows(tmp_path):
     directory = helpers["create_demo"](tmp_path / "demo")
     config = HirakuConfig.load(directory / "hiraku.yml")
