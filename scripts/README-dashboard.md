@@ -156,14 +156,27 @@ uv run --all-extras python scripts/test_dashboard.py --epochs 8
 uv run --all-extras python scripts/test_dashboard.py --project-dir "<new-demo-path>"
 ```
 
-To reopen an existing demo, change into its directory and use the repository
-path with uv. Do not rerun the creation script against a populated directory.
+To reopen an existing demo from the repository without training again, use its
+printed **Demo project** path. This starts both servers for Digits, or only the
+dashboard for CSV. For Digits it updates the demo record's `ui_url` to match
+`--mlflow-port`; it does not change training results or active context.
 
 ```bash
-uv run --project "<hiraku-repository-path>" --all-extras hiraku dashboard --record weak-l2
+uv run --all-extras python scripts/test_dashboard.py --reopen "<demo-path>"
+# Choose other ports if the defaults are occupied:
+uv run --all-extras python scripts/test_dashboard.py --reopen "<demo-path>" --port 8766 --mlflow-port 5001
 ```
 
-For a CSV demo, use `--record child-a` instead.
+Do not rerun the creation script with `--project-dir` against a populated
+directory. For a dashboard alone, change into the demo directory and run:
+
+```bash
+uv run --project "<hiraku-repository-path>" --all-extras hiraku dashboard --record digits --scope subtree --port 8766
+```
+
+Start MLflow UI separately using the command above if you want backend links
+to work. Its port must match the demo record's `ui_url`. For a CSV demo, use
+`--record child-a --scope record` instead.
 
 ## Automated browser walkthrough
 
@@ -186,7 +199,8 @@ record/run selection, provenance navigation, sorting, point selection,
 Pareto switching, refresh, shutdown, and unchanged research files.
 
 If port 8765 or 5000 is occupied, choose another with `--port` or
-`--mlflow-port`. The two ports must differ. `--no-browser` suppresses both
+`--mlflow-port`. Ports are checked before training; the two ports must differ.
+`--no-browser` suppresses both
 browser tabs. If a check fails,
 the script stops before launching the demo. See the test output for the
 failure. Automated checks are opt-in with `--run-tests`; `--browser-tests`

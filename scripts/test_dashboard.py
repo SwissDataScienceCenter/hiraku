@@ -234,6 +234,39 @@ def create_demo(directory: Path | None = None) -> Path:
     return directory
 
 
+def reopen_demo(directory: Path, *, mlflow_port: int) -> tuple[Path, str, bool]:
+    """Validate a retained demo and point its run links at the chosen UI port."""
+    from hiraku.config import HirakuConfig
+    from hiraku.record import load_record
+
+    directory = directory.expanduser().resolve()
+    marker = directory / MARKER
+    if not marker.is_file():
+        raise ValueError(f"Not a dashboard demo created by this script: {directory}")
+    kind = marker.read_text(encoding="utf-8")
+    if kind not in {CSV_MARKER, DIGITS_MARKER}:
+        raise ValueError(f"Unrecognized dashboard demo marker: {directory}")
+    config = HirakuConfig.load(directory / "hiraku.yml")
+    if kind == CSV_MARKER:
+        load_record("child-a", config=config)
+        return directory, "child-a", False
+    if not (directory / "mlflow.db").is_file():
+        raise ValueError(f"MLflow database not found in {directory}")
+    record = load_record("digits", config=config)
+    backend = record.tracking_backend
+    if (
+        not isinstance(backend, dict)
+        or backend.get("type") != "mlflow"
+        or backend.get("database") != "mlflow.db"
+    ):
+        raise ValueError("Retained Digits demo must use its local mlflow.db backend")
+    updated = {**backend, "ui_url": f"http://127.0.0.1:{mlflow_port}"}
+    if updated != backend:
+        record.tracking_backend = updated
+        record.save(overwrite=True)
+    return directory, "digits", True
+
+
 def append_run(directory: Path) -> str:
     """Append a run only to a demo created by this script."""
     directory = directory.expanduser().resolve()
@@ -442,6 +475,12 @@ def main() -> int:
     parser.add_argument(
         "--project-dir", type=Path, help="Use a new or empty demo directory"
     )
+    parser.add_argument(
+        "--reopen",
+        type=Path,
+        metavar="DEMO",
+        help="Serve a retained demo without retraining (updates its MLflow UI URL)",
+    )
     parser.add_argument("--port", type=port_number, default=8765)
     parser.add_argument(
         "--mlflow-port",
@@ -489,6 +528,13 @@ def main() -> int:
     try:
         if args.append_run and args.launch_run:
             parser.error("Choose either --append-run or --launch-run")
+        if args.reopen and (
+            args.project_dir or args.append_run or args.launch_run or args.no_serve
+        ):
+            parser.error(
+                "--reopen cannot be combined with --project-dir, --append-run, "
+                "--launch-run, or --no-serve"
+            )
         if args.epochs < 1:
             parser.error("--epochs must be positive")
         if args.launch_run:
@@ -502,6 +548,7 @@ def main() -> int:
             return 0
         if (
             not args.no_serve
+            and not args.reopen
             and args.example == "digits-mlflow"
             and args.port == args.mlflow_port
         ):
@@ -538,13 +585,29 @@ def main() -> int:
                 cwd=ROOT,
                 check=True,
             )
-        if args.example == "digits-mlflow":
+        if not args.no_serve:
+            check_port(args.port)
+            if args.reopen:
+                marker = args.reopen.expanduser().resolve() / MARKER
+                _digits = marker.is_file() and marker.read_text() == DIGITS_MARKER
+            else:
+                _digits = args.example == "digits-mlflow"
+            if _digits:
+                if args.port == args.mlflow_port:
+                    parser.error("--port and --mlflow-port must be different")
+                check_port(args.mlflow_port)
+        if args.reopen:
+            directory, initial_record, has_mlflow = reopen_demo(
+                args.reopen, mlflow_port=args.mlflow_port
+            )
+        elif args.example == "digits-mlflow":
             directory = create_digits_demo(
                 args.project_dir,
                 epochs=args.epochs,
                 mlflow_port=args.mlflow_port,
             )
             initial_record = "digits"
+            has_mlflow = True
             print("Dashboard opens in subtree scope to explain the hierarchy.")
             print(
                 "Use val/log_loss for Progress; "
@@ -553,6 +616,7 @@ def main() -> int:
         else:
             directory = create_demo(args.project_dir)
             initial_record = "child-a"
+            has_mlflow = False
             print("Start with child-a: 2 record runs, 3 source runs.", flush=True)
             print("child-b reuses run ID a-1; empty has no runs.", flush=True)
         print(f"Demo project: {directory}", flush=True)
@@ -563,7 +627,7 @@ def main() -> int:
             directory,
             record_id=initial_record,
             port=args.port,
-            mlflow_port=args.mlflow_port if args.example == "digits-mlflow" else None,
+            mlflow_port=args.mlflow_port if has_mlflow else None,
             no_browser=args.no_browser,
         )
     except KeyboardInterrupt:

@@ -272,6 +272,7 @@ def compute_layout(
     effective_expanded = {
         record_id for record_id in expanded if record_id in base.nodes
     }
+    effective_expanded.update(selected_ancestors)
     effective_expanded.update(reveal_search(records, search))
     query = search.strip().casefold()
     index = _normalized_records(records)

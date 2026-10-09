@@ -323,6 +323,50 @@ def test_digits_demo_defaults_and_mlflow_training_ui(tmp_path, monkeypatch):
             WebDriverWait(browser, 20).until(
                 lambda b: len(_elements(b, ".hk-tree-node")) >= 3
             )
+            # Exercise selection, search and expansion through the actual widget.
+            _svg = _elements(browser, ".hk-tree-svg")[0]
+            browser.execute_script(
+                "arguments[0].dispatchEvent(new WheelEvent('wheel', "
+                "{deltaY: -100, clientX: 100, clientY: 100, bubbles: true}));",
+                _svg,
+            )
+            _transform = _elements(browser, ".hk-tree-viewport")[0].get_attribute(
+                "transform"
+            )
+            browser.execute_script(
+                "arguments[0].dispatchEvent(new MouseEvent('click', {bubbles: true}));",
+                _elements(browser, '.hk-tree-node[data-id="strong-l2"]')[0],
+            )
+            WebDriverWait(browser, 20).until(lambda b: _run_rows(b) == 1)
+            assert "Record detailstrong-l2" in _body(browser).replace("\n", "")
+            assert (
+                _elements(browser, ".hk-tree-viewport")[0].get_attribute("transform")
+                == _transform
+            )
+            _search = _elements(browser, ".hk-tree-search")[0]
+            browser.execute_script(
+                "arguments[0].value = 'weak'; "
+                "arguments[0].dispatchEvent(new Event('input', {bubbles: true}));",
+                _search,
+            )
+            WebDriverWait(browser, 20).until(
+                lambda b: _elements(b, '.hk-tree-node[data-id="weak-l2"]')
+            )
+            browser.execute_script(
+                "arguments[0].dispatchEvent(new MouseEvent('click', {bubbles: true}));",
+                _elements(browser, '.hk-tree-node[data-id="weak-l2"]')[0],
+            )
+            WebDriverWait(browser, 20).until(
+                lambda b: "Record detailweak-l2" in _body(b).replace("\n", "")
+            )
+            assert _elements(browser, ".hk-tree-search")[0].get_attribute("value") == (
+                "weak"
+            )
+            _select_record(browser, "digits")
+            WebDriverWait(browser, 20).until(lambda b: _run_rows(b) == 2)
+            WebDriverWait(browser, 20).until(
+                lambda b: _elements(b, '.hk-tree-node.is-selected[data-id="digits"]')
+            )
             _control(
                 browser,
                 'marimo-table[data-label*="Runs"]',
@@ -335,6 +379,9 @@ def test_digits_demo_defaults_and_mlflow_training_ui(tmp_path, monkeypatch):
             assert _run_link.get_attribute("target") == "_blank"
             assert _run_link.get_attribute("rel") == "noopener noreferrer"
             assert "/runs/" in _run_link.get_attribute("href")
+            run_url = _run_link.get_attribute("href")
+            run_id = run_url.split("/runs/", 1)[1].split("?", 1)[0]
+            assert f"Run: {run_id}" in _body(browser)
             assert (
                 Select(
                     _control(
@@ -371,6 +418,12 @@ def test_digits_demo_defaults_and_mlflow_training_ui(tmp_path, monkeypatch):
             browser.execute_script("arguments[0].scrollIntoView()", canvas)
             browser.save_screenshot(str(tmp_path / "digits-pareto.png"))
             assert "Select both metrics and explicit" not in _body(browser)
+            browser.get(run_url)
+            WebDriverWait(browser, 30).until(
+                lambda b: (
+                    "val/log_loss" in b.execute_script("return document.body.innerText")
+                )
+            )
             mlflow_url = re.search(r"MLflow UI: (\S+)", log_path.read_text()).group(1)
             assert "workflowType=machine_learning" in mlflow_url
             browser.get(mlflow_url)

@@ -17,6 +17,7 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.dashboard import build_snapshot
+from hiraku.record import Record, load_record
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/test_dashboard.py"
 helpers = runpy.run_path(str(SCRIPT))
@@ -134,6 +135,60 @@ def test_digits_refuses_invalid_epoch_budget(tmp_path):
     with pytest.raises(ValueError, match="epochs must be positive"):
         helpers["create_digits_demo"](directory, epochs=0)
     assert not directory.exists()
+
+
+def test_reopen_retained_digits_updates_only_ui_configuration(tmp_path):
+    directory = tmp_path / "digits"
+    config = HirakuConfig.init(directory, install_skill=False)
+    Record.create(
+        "digits",
+        config=config,
+        activate=False,
+        tracking_backend={"type": "mlflow", "database": "mlflow.db"},
+    )
+    (directory / helpers["MARKER"]).write_text(helpers["DIGITS_MARKER"])
+    database = directory / "mlflow.db"
+    database.write_bytes(b"retained database")
+    assert helpers["reopen_demo"](directory, mlflow_port=5001) == (
+        directory.resolve(),
+        "digits",
+        True,
+    )
+    assert load_record("digits", config=config).tracking_backend["ui_url"] == (
+        "http://127.0.0.1:5001"
+    )
+    assert database.read_bytes() == b"retained database"
+    assert HirakuConfig.load(config.path).active_record_id is None
+
+
+def test_reopen_csv_is_nonmutating_and_rejects_unmarked_projects(tmp_path):
+    directory = helpers["create_demo"](tmp_path / "csv")
+    before = {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()}
+    assert helpers["reopen_demo"](directory, mlflow_port=5001) == (
+        directory.resolve(),
+        "child-a",
+        False,
+    )
+    assert {p: p.read_bytes() for p in before} == before
+    with pytest.raises(ValueError, match="Not a dashboard demo"):
+        helpers["reopen_demo"](tmp_path, mlflow_port=5001)
+
+
+def test_busy_port_fails_before_training(monkeypatch, tmp_path):
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        probe.listen()
+        port = probe.getsockname()[1]
+        directory = tmp_path / "demo"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [str(SCRIPT), "--port", str(port), "--project-dir", str(directory)],
+        )
+        with pytest.raises(SystemExit) as exc:
+            helpers["main"]()
+        assert exc.value.code == 1
+        assert not directory.exists()
 
 
 def test_servers_reject_conflicting_and_occupied_ports(tmp_path):

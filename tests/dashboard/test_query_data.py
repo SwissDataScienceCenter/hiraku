@@ -125,6 +125,18 @@ def test_two_sources_with_identical_run_ids_get_distinct_keys(tmp_path: Path) ->
     assert first.runs[0].source != second.runs[0].source
 
 
+def test_source_scope_keeps_runs_for_missing_records(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    Record.create("root", config=config, activate=False)
+    (tmp_path / "runs.csv").write_text(
+        "id,record_id\ncurrent,root\nhistorical,removed\nunattributed,\n"
+    )
+    snapshot = data.build_snapshot(config, record_id="root", scope="source")
+    assert {run.id for run in snapshot.runs} == {"current", "historical"}
+    subtree = data.build_snapshot(config, record_id="root", scope="subtree")
+    assert [run.id for run in subtree.runs] == ["current"]
+
+
 def test_missing_metrics_and_parent_are_reported_not_repaired(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     Record.create("parent", config=config, activate=False)

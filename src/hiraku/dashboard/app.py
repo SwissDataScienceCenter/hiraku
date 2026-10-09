@@ -160,6 +160,8 @@ def _(mo, record_select, scope, session):
     _coverage = "; ".join(
         f"{source.label}: {source.run_count or 0} runs" for source in snapshot.sources
     )
+    if any(error.kind == "backend" for error in snapshot.errors):
+        _coverage = "Partial / unavailable — " + (_coverage or "no sources loaded")
     mo.vstack(
         [
             mo.md(
@@ -174,7 +176,7 @@ def _(mo, record_select, scope, session):
             mo.md(result.error or ""),
             mo.md(
                 f"Scope: {scope.value} · Coverage: {_coverage}"
-                if snapshot.sources
+                if snapshot.selected_record_id
                 else "Select a record to load its tracking source."
             ),
             *[mo.md(f"**{error.kind}:** {error.message}") for error in snapshot.errors],
@@ -184,27 +186,24 @@ def _(mo, record_select, scope, session):
 
 
 @app.cell
-def _(RecordGraph, get_expanded, get_record, mo):
+def _(RecordGraph, mo):
+    # Keep the widget alive across navigation so search, focus and zoom survive.
     graph = mo.ui.anywidget(
         RecordGraph(
             tree=[],
-            selected=get_record() or "",
-            expanded=list(get_expanded()),
             height=380,
         )
     )
-    mo.vstack([mo.md("## Records"), graph])
     return (graph,)
 
 
 @app.cell
-def _(get_expanded, get_record, graph, set_expanded, set_record):
+def _(graph, set_expanded, set_record):
     _selected = graph.value.get("selected") or None
-    if _selected and _selected != get_record():
+    if _selected:
         set_record(_selected)
     _expanded = list(graph.value.get("expanded") or [])
-    if _expanded != list(get_expanded()):
-        set_expanded(_expanded)
+    set_expanded(_expanded)
     return
 
 
@@ -219,11 +218,9 @@ def _(
     snapshot,
     tree_payload,
 ):
-    _ids = {record.id for record in snapshot.records}
-    _selected = get_record() if get_record() in _ids else None
     _nav = reconcile_navigation(
         snapshot.records,
-        selected_id=_selected,
+        selected_id=get_record(),
         expanded=get_expanded(),
     )
     _layout = compute_layout(
@@ -232,9 +229,10 @@ def _(
         expanded=_nav.expanded,
         search=graph.value.get("query") or "",
     )
-    graph.tree = tree_payload(_layout)
-    graph.selected = _nav.selected_id or ""
-    graph.expanded = sorted(_nav.expanded)
+    with graph.widget.hold_sync():
+        graph.tree = tree_payload(_layout)
+        graph.selected = _nav.selected_id or ""
+        graph.expanded = sorted(_nav.expanded)
     _message = (
         "Previously selected record is missing or malformed."
         if _nav.removed_selection
@@ -255,12 +253,11 @@ def _(mo, snapshot):
         _seen.add(_current)
         _current = _by_id[_current].parent_id
     breadcrumb = mo.md(" · ".join(reversed(_path)) if _path else "No record selected")
-    mo.vstack([breadcrumb])
     return (breadcrumb,)
 
 
 @app.cell
-def _(mo, snapshot):
+def _(breadcrumb, graph, mo, snapshot):
     _record = next(
         (r for r in snapshot.records if r.id == snapshot.selected_record_id), None
     )
@@ -291,7 +288,17 @@ def _(mo, snapshot):
         )
     else:
         _detail.append(mo.md("No record selected."))
-    mo.vstack(_detail)
+    mo.hstack(
+        [
+            mo.vstack([mo.md("## Records"), breadcrumb, graph]).style(
+                {"flex": "1 1 360px", "min-width": "0"}
+            ),
+            mo.vstack(_detail).style({"flex": "1 1 360px", "min-width": "0"}),
+        ],
+        align="start",
+        wrap=True,
+        gap=1.5,
+    )
     return
 
 

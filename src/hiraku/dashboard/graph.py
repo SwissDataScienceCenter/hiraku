@@ -46,7 +46,7 @@ function el(tag, attrs, children) {
     }
   }
   for (const child of children || []) {
-    if (child) node.appendChild(child);
+    if (child !== null && child !== undefined) node.append(child);
   }
   return node;
 }
@@ -67,6 +67,7 @@ function render({ model, el: root }) {
     class: "hk-tree-search",
     type: "search",
     placeholder: "Search records",
+    "aria-label": "Search records",
     value: model.get("query") || "",
   });
   search.addEventListener("input", () => {
@@ -235,7 +236,7 @@ function render({ model, el: root }) {
     const height = Math.max(220, (tree.length + 2) * 64);
     state.width = width;
     state.height = height;
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    const focusedId = svg.querySelector(".hk-tree-node:focus")?.getAttribute("data-id");
     viewport.innerHTML = "";
 
     const edgeGroup = el("g", { class: "hk-tree-edges" });
@@ -285,6 +286,7 @@ function render({ model, el: root }) {
         tabindex: "0",
         role: "treeitem",
         "aria-selected": item.selected ? "true" : "false",
+        "aria-expanded": item.has_children ? String(item.expanded) : null,
       });
       node.appendChild(
         el("rect", {
@@ -314,6 +316,7 @@ function render({ model, el: root }) {
       }
       bindNode(node, item);
       nodeGroup.appendChild(node);
+      if (focusedId === item.id) queueMicrotask(() => node.focus());
     }
 
     viewport.append(edgeGroup, nodeGroup);
@@ -348,7 +351,7 @@ function render({ model, el: root }) {
       row.append(toggle, label);
       list.appendChild(row);
     }
-    reset();
+    updateTransform();
   }
 
   model.on("change:tree", renderNodes);
@@ -356,6 +359,13 @@ function render({ model, el: root }) {
   model.on("change:expanded", renderNodes);
   model.on("change:query", renderNodes);
   renderNodes();
+  reset();
+  return () => {
+    model.off("change:tree", renderNodes);
+    model.off("change:selected", renderNodes);
+    model.off("change:expanded", renderNodes);
+    model.off("change:query", renderNodes);
+  };
 }
 export default { render };
 """

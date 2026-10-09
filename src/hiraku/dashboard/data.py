@@ -438,7 +438,7 @@ def _load_source_runs(
     *,
     source: SourceInfo,
     values: Mapping[str, Any],
-    member_ids: set[str],
+    member_ids: set[str] | None,
     _source_cache: dict[str, tuple[RunView, ...]] | None,
 ) -> tuple[SourceInfo, tuple[RunView, ...]]:
     """Load and retain one source, querying it at most once per cache."""
@@ -452,7 +452,12 @@ def _load_source_runs(
         cached = tuple(_run_view(run, source.identity) for run in backend_runs)
         if _source_cache is not None:
             _source_cache[source.identity] = cached
-    retained = tuple(run for run in cached if run.record_id in member_ids)
+    retained = tuple(
+        run
+        for run in cached
+        if run.record_id is not None
+        and (member_ids is None or run.record_id in member_ids)
+    )
     return replace(source, run_count=len(retained)), retained
 
 
@@ -513,13 +518,8 @@ def build_snapshot(
     if selected is not None:
         if scope == "subtree":
             members = _subtree_members(index, selected)
-            member_ids = set(members)
-        elif scope == "source":
-            members = (selected,)
-            member_ids = set(index)
         else:
             members = (selected,)
-            member_ids = {selected}
 
         grouped: dict[str, dict[str, Any]] = {}
         selected_source_info: SourceInfo | None = None
@@ -552,9 +552,7 @@ def build_snapshot(
             info: SourceInfo = entry["info"]
             member_values = resolved[next(iter(source_member_ids))][0]
             try:
-                retained_member_ids = (
-                    member_ids if scope == "source" else source_member_ids
-                )
+                retained_member_ids = None if scope == "source" else source_member_ids
                 info_with_count, retained = _load_source_runs(
                     backend,
                     source=info,

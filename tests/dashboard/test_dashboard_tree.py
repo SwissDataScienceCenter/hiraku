@@ -129,6 +129,13 @@ def test_existing_selection_and_ancestry_are_preserved() -> None:
     assert layout.nodes["child"].x == 1
 
 
+def test_selection_reveals_collapsed_ancestors() -> None:
+    records = [_record("root"), _record("child", "root")]
+    layout = compute_layout(records, selected_id="child")
+    assert layout.visible == ("root", "child")
+    assert layout.nodes["root"].ancestor_of_selection
+
+
 def test_deep_chain_uses_iterative_traversal() -> None:
     records = [
         _record(f"r{i}", parent_id=(f"r{i - 1}" if i else None)) for i in range(1000)

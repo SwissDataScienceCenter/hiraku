@@ -66,6 +66,22 @@ Runs are identified by `(source identity, run ID)` so identical run IDs from
 different sources never collide. Partial subtree failures keep the successful
 sources visible and are reported explicitly.
 
+The record graph and detail panel share selection with the record dropdown and
+run's **Open record** action. Selecting a child reveals its ancestors. Search,
+expansion and pan/zoom survive record navigation; the panels wrap vertically on
+narrow screens. Source scope also keeps historical attributed runs whose record
+files are missing; their record-navigation action is unavailable.
+
+For the retained Digits demo, run this from the repository to restart both the
+dashboard and MLflow UI without retraining:
+
+```bash
+uv run --all-extras python scripts/test_dashboard.py --reopen "<demo-path>" --port 8766 --mlflow-port 5001
+```
+
+The demo helper updates only its record's MLflow UI address to match the chosen
+port. Normal dashboard browsing remains read-only.
+
 ## Plots
 
 Default plot axes prefer metrics declared by the research records, with

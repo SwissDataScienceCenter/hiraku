@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Render record graph labels and controls correctly in the browser, preserve graph search and zoom during navigation, and reveal selected records' ancestors.
+- Check demo ports before training and support `--reopen` to restart retained demos without retraining, including MLflow links on custom ports.
+- Keep historical attributed runs visible in dashboard source scope even when their record files are missing.
 - Start the dashboard demo without automated tests by default; use `--run-tests` to enable them.
 - Prefer declared research metrics for plot defaults, show larger charts and markers, and open the Digits demo in comparison scope and MLflow's Model training view.
 - Open the Digits demo on the `digits` record in subtree scope and derive its MLflow `ui_url` from `--mlflow-port`.
