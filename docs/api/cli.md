@@ -14,7 +14,14 @@ hiraku runs --record <record-id>
 
 `hiraku record list` includes each record's local `status` in its table.
 
-There is also a TUI for browsing records and inspecting their contents. Use `hiraku tui` to launch the TUI.
+There is also a TUI for browsing the hierarchical record tree, viewing rendered
+Markdown, and editing record bodies. Select **Edit** to change Markdown, then
+save or cancel the edit. Use `hiraku tui` to launch it; the optional Textual
+dependency is installed with `uv sync --extra tui`.
+
+Use `Ctrl+B` to toggle the sidebar, `Ctrl+Left`/`Ctrl+Right` to resize it,
+`Ctrl+R` to refresh records, and `e` to edit the selected record's Markdown.
+`Ctrl+S` saves and `Esc` cancels an edit.
 
 `hiraku init` requires its target to be a Git repository root. Use
 `hiraku init PATH --ignore-git` to intentionally initialize a nested or non-Git
