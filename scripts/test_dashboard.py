@@ -376,6 +376,7 @@ def serve_demo(
     port: int,
     mlflow_port: int | None,
     no_browser: bool,
+    interactive: bool = False,
 ) -> int:
     """Serve the dashboard and optional MLflow UI until either exits or Ctrl-C."""
     if mlflow_port == port:
@@ -408,20 +409,23 @@ def serve_demo(
                     "MLflow UI",
                 )
             )
+        _dashboard_command = [
+            *uv,
+            "hiraku",
+            "dashboard",
+            "--record",
+            record_id,
+            "--scope",
+            "subtree" if mlflow_port is not None else "record",
+            "--port",
+            str(port),
+            "--no-browser",
+        ]
+        if interactive:
+            _dashboard_command.append("--interactive")
         servers.append(
             (
-                [
-                    *uv,
-                    "hiraku",
-                    "dashboard",
-                    "--record",
-                    record_id,
-                    "--scope",
-                    "subtree" if mlflow_port is not None else "record",
-                    "--port",
-                    str(port),
-                    "--no-browser",
-                ],
+                _dashboard_command,
                 f"http://127.0.0.1:{port}",
                 "Hiraku dashboard",
             )
@@ -490,6 +494,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--no-browser", action="store_true", help="Do not open a browser"
+    )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Start the dashboard in interactive mode",
     )
     parser.add_argument(
         "--no-serve", action="store_true", help="Create the demo, then exit"
@@ -629,6 +638,7 @@ def main() -> int:
             port=args.port,
             mlflow_port=args.mlflow_port if has_mlflow else None,
             no_browser=args.no_browser,
+            interactive=args.interactive,
         )
     except KeyboardInterrupt:
         print("\nStopped. Demo files are retained for inspection.")

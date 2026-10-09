@@ -154,6 +154,10 @@ uv run --all-extras python scripts/test_dashboard.py --epochs 8
 
 # Choose a new or empty directory.
 uv run --all-extras python scripts/test_dashboard.py --project-dir "<new-demo-path>"
+
+# Start the dashboard in interactive mode (record creation and launches).
+uv run --all-extras python scripts/test_dashboard.py --interactive
+uv run --all-extras python scripts/test_dashboard.py --reopen "<demo-path>" --interactive --no-browser
 ```
 
 To reopen an existing demo from the repository without training again, use its
@@ -177,6 +181,30 @@ uv run --project "<hiraku-repository-path>" --all-extras hiraku dashboard --reco
 Start MLflow UI separately using the command above if you want backend links
 to work. Its port must match the demo record's `ui_url`. For a CSV demo, use
 `--record child-a --scope record` instead.
+
+## Interactive walkthrough
+
+Start with `--interactive` and use the token URL printed by marimo to open the
+session. The header shows **Interactive**; the default header is **Read-only**.
+
+1. **Create a root:** open **Create record**, leave **No parent (root)**,
+   enter an ID and type, then press **Preview** and **Create**. The record is
+   selected without changing the CLI active record.
+2. **Create a child:** with the new root selected, create another record and
+   choose the root as parent. The graph reveals the new ancestry, and the
+   record detail shows inherited fields.
+3. **Launch:** select the child, choose an entrypoint in **Launch run**, set
+   YAML argument overrides such as `seed: 1`, press **Preview launch**, review
+   the rendered argv, then press **Launch run**. Job status and bounded launch
+   logs update without tracker polling.
+4. **Refresh results:** after completion, press **Refresh results** and inspect
+   the backend-owned run. A failed process can still log data; refresh even
+   after failures.
+
+```bash
+uv run --all-extras python scripts/test_dashboard.py --example csv --interactive
+uv run --all-extras python scripts/test_dashboard.py --reopen "<demo-path>" --interactive
+```
 
 ## Automated browser walkthrough
 

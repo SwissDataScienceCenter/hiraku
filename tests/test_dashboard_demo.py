@@ -47,6 +47,14 @@ def test_demo_checks_are_opt_in(monkeypatch, tmp_path, options, expected_checks)
         assert "marimo" in calls[1]
 
 
+def test_demo_help_advertises_interactive(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--help"])
+    with pytest.raises(SystemExit) as exc:
+        helpers["main"]()
+    assert exc.value.code == 0
+    assert "--interactive" in capsys.readouterr().out
+
+
 def test_demo_has_distinct_scopes_and_refresh_rows(tmp_path):
     directory = helpers["create_demo"](tmp_path / "demo")
     config = HirakuConfig.load(directory / "hiraku.yml")

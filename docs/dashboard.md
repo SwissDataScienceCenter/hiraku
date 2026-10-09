@@ -1,9 +1,10 @@
 # Dashboard
 
-`hiraku dashboard` serves a local, view-only marimo application for browsing
-research records and tracked runs. It is designed for inspection and
-provenance review; it does not edit records, launch entrypoints, or chat with
-agents.
+`hiraku dashboard` serves a local marimo application for browsing research
+records and tracked runs. The default mode is read-only: it does not edit
+records, launch entrypoints, or chat with agents. With `--interactive`, the
+same bundled app adds authenticated record creation and entrypoint launches
+while all default browsing behavior stays read-only.
 
 The bundled app loads a reusable SDSC theme from
 `hiraku.dashboard/theme.css`. Its CSS custom properties and `.hk-*` component
@@ -32,6 +33,7 @@ Hiraku supports Python 3.11 and newer. Install the optional tracking extras
 
 ```bash
 hiraku dashboard
+hiraku dashboard --interactive
 hiraku dashboard --record child-a
 hiraku dashboard --record child-a --scope subtree
 hiraku dashboard --record child-a --scope source
@@ -40,6 +42,14 @@ hiraku dashboard --notebook path/to/custom_notebook.py
 ```
 
 - The server binds to `127.0.0.1` only; there is no shared-host deployment.
+- `--interactive` enables the **Create record** and **Launch run** panels.
+  The launcher always forwards `HIRAKU_DASHBOARD_INTERACTIVE=1` or `0`, so an
+  inherited environment variable cannot enable writes accidentally.
+- Interactive startup uses marimo token authentication and prints the token
+  URL to the terminal. The token is never logged by Hiraku. Default startup
+  keeps `--no-token` for local read-only browsing.
+- `--interactive --notebook ...` is rejected in this increment; custom
+  notebook capability contracts are separate from the bundled interactive app.
 - `--record` selects the initial record. Without it, the persisted active
   record is used when present; otherwise the record browser is shown and no
   tracking source is queried until you select a record.
@@ -127,8 +137,70 @@ created. Other MLflow databases should be accessed through an HTTP tracking
 server; direct non-SQLite database and legacy file-store URIs are not supported
 by the dashboard's read-only path.
 
-A custom notebook is trusted executable code. The view-only guarantee applies
-to the shipped dashboard, not to arbitrary user code.
+A custom notebook is trusted executable code. The read-only guarantee applies
+to the bundled dashboard in its default mode; `--interactive` explicitly adds
+the record creation and launch services described below.
+
+## Interactive record creation
+
+In interactive mode, **Create record** is available even when no record is
+selected or no tracking source is configured. The form accepts an ID, parent
+(**No parent (root)** is an explicit option), a free-string type, summary and
+research fields, and expandable commit ref, related IDs, Markdown body, and
+advanced local YAML controls.
+
+- Preview is non-mutating; **Create** persists once through the public
+  `Record.create(..., activate=False)` API and never changes the CLI active
+  record.
+- Advanced YAML is parsed with `yaml.safe_load`. `id`, `parent_id`,
+  `related_to`, `markdown`, and `path` are rejected there; populated form
+  fields cannot be overridden silently.
+- Record IDs are project-wide unique. Child paths flatten to
+  `hiraku/records/<root>/<child>.md`; inheritance and entrypoint merging
+  follow the existing record rules. Empty local entrypoints/metrics/tracking
+  fields are never written merely because a form field was left blank.
+- Creation is blocked while a reparent recovery journal or malformed record
+  exists. The dashboard never runs implicit recovery.
+
+## Interactive launches
+
+**Launch run** lists the selected record's effective entrypoints with their
+defining record IDs. You choose the entrypoint, an installed dispatcher, and
+optional argument overrides and commit-ref override.
+
+- Overrides are a YAML mapping applied only to this launch. Booleans, numbers,
+  null, and scalar sequences are preserved; a free-form shell command is never
+  parsed.
+- **Preview launch** renders the merged argv, dispatcher, record, requested
+  commit and effective query source without starting anything. The requested
+  commit is an input to the dispatcher, not a claim about what will execute:
+  the local dispatcher reports the working tree's actual HEAD and clean/dirty
+  state, and the worktree dispatcher requires a resolvable commit.
+- Submit is explicit and pinned to the reviewed record/entrypoint. If the
+  record or entrypoint changed after preview, the launch is rejected and you
+  must preview again.
+- Launch status and tracked-run status are separate. A successful process may
+  log no run, and a failed process may log a partial run. The GUI states:
+  **Your entrypoint logs results to the tracking backend.**
+- Launch output is captured as temporary stdout/stderr log tails (64 KiB per
+  stream). These are launch logs, separate from tracker artifacts. They are
+  kept for at most the 20 most recent completed jobs and are deleted on
+  shutdown.
+- One launch runs at a time per dashboard server; duplicate events and
+  concurrent submissions are rejected. Jobs are not queued and are not
+  resumable across server restarts.
+- The dashboard is a single-user local service. If the marimo server isolates
+  browser sessions in separate processes, do not rely on one browser's
+  controller state in another process; launch from the process that owns the
+  server.
+- There is no GUI cancellation button yet. Shutting down the server drains
+  active workers, then terminates the owned process tree so dispatcher cleanup
+  can run; it never kills only the worker and leaves training behind.
+- After a job completes (success or failure), the dashboard requests exactly
+  one fresh snapshot for the currently selected record/scope. A failed script
+  may still have logged data. If no new run appears, refresh results and check
+  whether the script logs nothing, the backend sync is delayed, or the query
+  source is not the one the script wrote to.
 
 ## Custom notebook interface
 
@@ -136,7 +208,8 @@ A custom notebook receives project context through environment variables:
 
 - `HIRAKU_PROJECT_ROOT` — absolute project root;
 - `HIRAKU_DASHBOARD_RECORD` — initial record ID, empty when unset;
-- `HIRAKU_DASHBOARD_SCOPE` — `record`, `subtree`, or `source`.
+- `HIRAKU_DASHBOARD_SCOPE` — `record`, `subtree`, or `source`;
+- `HIRAKU_DASHBOARD_INTERACTIVE` — `1` or `0`.
 
 Use the snapshot API for backend-agnostic rendering:
 

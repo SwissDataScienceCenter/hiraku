@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Add `--interactive` dashboard mode with authenticated record creation and background entrypoint launches, including launch preview, job status, bounded launch logs, and one completion refresh.
 - Add subtree run scope, an interactive record graph, adapter-owned MLflow run links, and a composed dashboard workspace with breadcrumbs and source coverage.
 - Add `ui_url` configuration for MLflow backends so run links can point at an explicit deployment UI.
 - Add initial dashboard scope selection with `--scope source`, and save learning-curve images, epoch CSVs, and final-results JSON in the Digits MLflow example.
