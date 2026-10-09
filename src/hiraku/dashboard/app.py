@@ -12,8 +12,9 @@ import altair as alt
 import marimo as mo
 
 from hiraku.config import HirakuConfig
-from hiraku.dashboard import build_snapshot, read_record_index
+from hiraku.dashboard import read_record_index
 from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
+from hiraku.dashboard.session import DashboardSession
 from hiraku.dashboard.views import (
     metric_names,
     param_names,
@@ -43,19 +44,16 @@ def _load_config() -> HirakuConfig:
 
 
 def _load_snapshot(record_id, scope):
-    try:
-        snapshot = build_snapshot(
-            config,
-            record_id=record_id,
-            scope=scope,
-            use_active_record=record_id is not None,
-        )
-        return snapshot, None
-    except Exception as exc:  # pragma: no cover - boundary for broken projects
-        return None, str(exc)
+    result = session.refresh(
+        record_id,
+        scope,
+        use_active_record=record_id is not None,
+    )
+    return result.snapshot, result.error
 
 
 config = _load_config()
+session = DashboardSession(config)
 requested_record = os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
 requested_scope = os.environ.get("HIRAKU_DASHBOARD_SCOPE") or "record"
 index, index_errors = read_record_index(config)
@@ -81,11 +79,24 @@ scope_radio = mo.ui.radio(
     label="Run scope",
 )
 refresh_button = mo.ui.button(label="Refresh")
+auto_refresh = mo.ui.refresh(
+    options=["5s", "10s", "30s", "1m"],
+    default_interval=None,
+    label="Auto-refresh",
+)
 
 _ = refresh_button.value
+_ = auto_refresh.value
 snapshot, snapshot_error = _load_snapshot(record_select.value, scope_radio.value)
 
 mo.stop(snapshot is None, mo.md(f"**Dashboard error:** {snapshot_error}"))
+if snapshot.stale:
+    fetch_status = mo.md(
+        "Showing the last successful snapshot; the latest fetch failed or "
+        "was coalesced."
+    )
+else:
+    fetch_status = mo.md(f"Last fetched at {snapshot.refreshed_at.isoformat()}")
 
 backend_errors = [error for error in snapshot.errors if error.kind == "backend"]
 
@@ -322,7 +333,8 @@ plot_selection = mo.ui.table(
 mo.vstack(
     [
         mo.md("# Hiraku dashboard"),
-        mo.hstack([record_select, scope_radio, refresh_button]),
+        mo.hstack([record_select, scope_radio, refresh_button, auto_refresh]),
+        fetch_status,
         mo.md(
             f"Source: **{snapshot.source.label}** ({snapshot.scope})"
             if snapshot.source

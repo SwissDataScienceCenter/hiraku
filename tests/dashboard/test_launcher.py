@@ -89,3 +89,41 @@ def test_cli_dashboard_validates_record_id(
 
     assert result.exit_code != 0
     assert "not found" in result.output
+
+
+def test_serve_dashboard_forwards_custom_notebook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create("root", config=config, activate=False)
+    custom = tmp_path / "custom.py"
+    custom.write_text("import marimo\napp = marimo.App()\n", encoding="utf-8")
+
+    started: list[tuple[list[str], Path, dict[str, str]]] = []
+
+    class FakeProcess:
+        def poll(self) -> int | None:
+            return 0
+
+        def wait(self, timeout: int | None = None) -> int:
+            return 0
+
+        def terminate(self) -> None:
+            pass
+
+        def kill(self) -> None:
+            pass
+
+    def fake_popen(command, cwd, env):
+        started.append((command, Path(cwd), env))
+        return FakeProcess()
+
+    monkeypatch.setattr(launcher, "find_spec", lambda name: object())
+    monkeypatch.setattr(launcher.subprocess, "Popen", fake_popen)
+
+    assert launcher.serve_dashboard(config, notebook=custom) == 0
+
+    command, cwd, env = started[0]
+    assert str(custom) in command
+    assert env["HIRAKU_PROJECT_ROOT"] == str(config.root)
+    assert cwd != config.root

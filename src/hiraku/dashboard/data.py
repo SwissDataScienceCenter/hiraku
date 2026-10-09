@@ -98,6 +98,7 @@ class DashboardSnapshot:
     source: SourceInfo | None
     errors: tuple[DashboardError, ...]
     refreshed_at: datetime
+    stale: bool = False
 
 
 def _display_value(value: Any) -> Any:

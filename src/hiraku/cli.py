@@ -828,12 +828,18 @@ def run_list(
 @click.option("--record", "record_id")
 @click.option("--port", type=click.IntRange(1, 65535), default=8765)
 @click.option("--no-browser", is_flag=True)
+@click.option(
+    "--notebook",
+    "notebook",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
 @click.pass_obj
 def dashboard_command(
     state: CLIContext,
     record_id: str | None,
     port: int,
     no_browser: bool,
+    notebook: Path | None,
 ) -> None:
     """Browse records and tracked runs in a local view-only dashboard."""
     from .dashboard.launcher import serve_dashboard
@@ -843,6 +849,7 @@ def dashboard_command(
         record_id=record_id,
         port=port,
         no_browser=no_browser,
+        notebook=notebook,
     )
     if exit_code:
         raise click.exceptions.Exit(exit_code)
