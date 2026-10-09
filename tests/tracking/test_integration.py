@@ -36,10 +36,18 @@ def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
     assert backend.list_runs(sort="loss", ascending=True, limit=1)[0].id == "later"
 
 
-def test_backend_runs_rejects_empty_record_id(tmp_path: Path) -> None:
+def test_backend_runs_rejects_empty_record_id_before_reading_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config = HirakuConfig.init(tmp_path)
+    backend = CSVBackend(config)
+    monkeypatch.setattr(
+        backend,
+        "_read_source_runs",
+        lambda **options: pytest.fail("tracking source should not be read"),
+    )
     with pytest.raises(BackendError):
-        CSVBackend(config).list_runs(record_id="")
+        backend.list_runs(record_id="")
 
 
 def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
