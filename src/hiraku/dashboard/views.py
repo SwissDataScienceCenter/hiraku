@@ -8,6 +8,7 @@ can be tested without a browser or notebook runtime.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from urllib.parse import urlsplit
 
 import pandas as pd
 
@@ -134,3 +135,26 @@ def sorted_runs(
     if field == "record":
         field = "record_id"
     return sort_runs(snapshot.runs, field, ascending=ascending)
+
+
+def backend_action_label(source_name: str | None) -> str:
+    """Return the external action label for a tracking backend."""
+    return {
+        "mlflow": "Open in MLflow",
+        "wandb": "Open in W&B",
+    }.get(source_name or "", "Open in tracking backend")
+
+
+def safe_run_url(url: str | None) -> str | None:
+    """Return ``url`` only when it is safe to render as an external link."""
+    if not url:
+        return None
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+    return url

@@ -21,11 +21,13 @@ def _():
     from hiraku.dashboard.session import DashboardSession
     from hiraku.dashboard.tree import compute_layout, reconcile_navigation
     from hiraku.dashboard.views import (
+        backend_action_label,
         default_plot_metrics,
         metric_names,
         param_names,
         records_frame,
         runs_frame,
+        safe_run_url,
         sort_fields,
         sorted_runs,
     )
@@ -38,6 +40,7 @@ def _():
     get_expanded, set_expanded = mo.state([])
     return (
         alt,
+        backend_action_label,
         default_plot_metrics,
         metric_direction,
         metric_names,
@@ -48,6 +51,7 @@ def _():
         progress_points,
         records_frame,
         runs_frame,
+        safe_run_url,
         session,
         sort_fields,
         sorted_runs,
@@ -88,13 +92,19 @@ def _(mo):
     refresh = mo.ui.refresh(
         options=["5s", "10s", "30s", "1m"], default_interval=None, label="Refresh"
     )
+    scope_labels = [
+        "This record",
+        "This subtree",
+        "All attributed runs in this source",
+    ]
+    _initial_scope = _os.environ.get("HIRAKU_DASHBOARD_SCOPE") or "record"
     scope = mo.ui.radio(
-        ["Selected record's runs", "All attributed runs in this source"],
-        value=(
-            "All attributed runs in this source"
-            if _os.environ.get("HIRAKU_DASHBOARD_SCOPE") == "source"
-            else "Selected record's runs"
-        ),
+        scope_labels,
+        value={
+            "record": "This record",
+            "subtree": "This subtree",
+            "source": "All attributed runs in this source",
+        }[_initial_scope],
         label="Run scope",
     )
     mo.vstack([mo.hstack([refresh, scope])])
@@ -129,15 +139,27 @@ def _(get_record, mo, record_ids, set_record):
 
 @app.cell
 def _(mo, record_select, scope, session):
+    _scope_value = {
+        "This record": "record",
+        "This subtree": "subtree",
+        "All attributed runs in this source": "source",
+    }[scope.value]
     with mo.status.spinner(title="Fetching records and runs…"):
         result = session.refresh(
             record_select.value,
-            "record" if scope.value == "Selected record's runs" else "source",
+            _scope_value,
             use_active_record=False,
             cached=True,
         )
     mo.stop(result.snapshot is None, mo.md(f"Dashboard error: {result.error}"))
     snapshot = result.snapshot
+    if session.selected_run and session.selected_run not in {
+        run.key for run in snapshot.runs
+    }:
+        session.selected_run = None
+    _coverage = "; ".join(
+        f"{source.label}: {source.run_count or 0} runs" for source in snapshot.sources
+    )
     mo.vstack(
         [
             mo.md(
@@ -151,8 +173,8 @@ def _(mo, record_select, scope, session):
             ),
             mo.md(result.error or ""),
             mo.md(
-                f"Source: {snapshot.source.label} · Scope: {snapshot.scope}"
-                if snapshot.source
+                f"Scope: {scope.value} · Coverage: {_coverage}"
+                if snapshot.sources
                 else "Select a record to load its tracking source."
             ),
             *[mo.md(f"**{error.kind}:** {error.message}") for error in snapshot.errors],
@@ -220,6 +242,21 @@ def _(
     )
     mo.vstack([mo.md(f"**{_message}**" if _message else "")])
     return (_layout,)
+
+
+@app.cell
+def _(mo, snapshot):
+    _by_id = {record.id: record for record in snapshot.records}
+    _path: list[str] = []
+    _current = snapshot.selected_record_id
+    _seen: set[str] = set()
+    while _current and _current in _by_id and _current not in _seen:
+        _path.append(_current)
+        _seen.add(_current)
+        _current = _by_id[_current].parent_id
+    breadcrumb = mo.md(" · ".join(reversed(_path)) if _path else "No record selected")
+    mo.vstack([breadcrumb])
+    return (breadcrumb,)
 
 
 @app.cell
@@ -304,7 +341,16 @@ def _(
 
 
 @app.cell
-def _(mo, runs_table, set_record, snapshot):
+def _(
+    backend_action_label,
+    mo,
+    runs_table,
+    safe_run_url,
+    set_record,
+    snapshot,
+):
+    import html as _html
+
     _rows = runs_table.value
     _run = next(
         (r for r in snapshot.runs if len(_rows) and r.key == _rows.iloc[0]["key"]), None
@@ -317,6 +363,28 @@ def _(mo, runs_table, set_record, snapshot):
         if _run and _run.record_id in {r.id for r in snapshot.records}
         else mo.md("")
     )
+    if _run:
+        _source = next(
+            (s for s in snapshot.sources if s.identity == _run.source),
+            snapshot.source,
+        )
+        _action_label = backend_action_label(_source.name if _source else None)
+        _link_url = safe_run_url(_run.url)
+        if _link_url:
+            _action = mo.Html(
+                '<a class="hk-run-link" href="'
+                + _html.escape(_link_url, quote=True)
+                + '" target="_blank" rel="noopener noreferrer">'
+                + _html.escape(_action_label)
+                + "</a>"
+            )
+        else:
+            _action = mo.md(
+                "No safe external link is available for this run; "
+                "configure `ui_url` for MLflow or add a CSV `url` column."
+            )
+    else:
+        _action = mo.md("")
     mo.vstack(
         [
             mo.md("### Run provenance"),
@@ -327,7 +395,7 @@ def _(mo, runs_table, set_record, snapshot):
             )
             if _run
             else mo.md("Select a run to inspect its provenance."),
-            record_link,
+            mo.hstack([record_link, _action]) if _run else mo.md(""),
             mo.ui.table(
                 [{"field": k, "value": str(v)} for k, v in vars(_run).items()],
                 selection=None,

@@ -8,11 +8,13 @@ import pandas as pd
 from hiraku.config import HirakuConfig
 from hiraku.dashboard import build_snapshot
 from hiraku.dashboard.views import (
+    backend_action_label,
     default_plot_metrics,
     metric_names,
     param_names,
     records_frame,
     runs_frame,
+    safe_run_url,
     sort_fields,
     sorted_runs,
 )
@@ -128,3 +130,19 @@ def test_sort_fields_include_metrics_and_sorted_runs_are_cached(
     assert [run.id for run in ascending] == ["c", "b", "a"]
     assert [run.id for run in descending] == ["a", "b", "c"]
     assert len(snapshot.runs) == 3  # sorting did not mutate the snapshot
+
+
+def test_backend_action_labels_are_explicit() -> None:
+    assert backend_action_label("mlflow") == "Open in MLflow"
+    assert backend_action_label("wandb") == "Open in W&B"
+    assert backend_action_label("csv") == "Open in tracking backend"
+    assert backend_action_label(None) == "Open in tracking backend"
+
+
+def test_safe_run_url_accepts_http_and_rejects_unsafe_values() -> None:
+    assert safe_run_url("https://example.com/runs/1") == ("https://example.com/runs/1")
+    assert safe_run_url("http://example.com/runs/1") == "http://example.com/runs/1"
+    assert safe_run_url("https://user:secret@example.com") is None
+    assert safe_run_url("javascript:alert(1)") is None
+    assert safe_run_url("file:///etc/passwd") is None
+    assert safe_run_url(None) is None

@@ -25,6 +25,8 @@ def test_notebook_executes_reactive_cells(tmp_path, monkeypatch, record_id):
     assert definitions["snapshot"].selected_record_id == record_id
     assert definitions["record_select"] is not None
     assert definitions["runs_table"] is not None
+    assert definitions["graph"] is not None
+    assert definitions["breadcrumb"] is not None
     if record_id:
         assert definitions["plot"] is not None
 
