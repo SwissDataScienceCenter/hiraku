@@ -104,8 +104,12 @@ class DashboardSession:
             if failures:
                 with self._lock:
                     last = self._last
+                # Partial subtree snapshots keep successful sources and must
+                # not be replaced wholesale with an older unrelated snapshot.
+                partial = bool(snapshot.sources)
                 if (
-                    last is not None
+                    not partial
+                    and last is not None
                     and last.selected_record_id == snapshot.selected_record_id
                     and last.scope == snapshot.scope
                 ):

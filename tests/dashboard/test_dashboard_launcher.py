@@ -46,6 +46,14 @@ def test_dashboard_environment_preserves_project_context(tmp_path: Path) -> None
     assert environment["HIRAKU_DASHBOARD_SCOPE"] == "source"
 
 
+def test_dashboard_environment_accepts_subtree_scope(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    environment = launcher.dashboard_environment(
+        config, record_id="child", scope="subtree"
+    )
+    assert environment["HIRAKU_DASHBOARD_SCOPE"] == "subtree"
+
+
 def test_validate_selection_uses_read_only_index(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     Record.create("root", config=config, activate=False)
@@ -76,6 +84,21 @@ def test_cli_dashboard_prints_install_hint_without_extra(
     monkeypatch.setattr(launcher, "find_spec", lambda name: None)
 
     result = CliRunner().invoke(main, ["dashboard"], catch_exceptions=False)
+
+    assert result.exit_code != 0
+    assert "uv sync --extra dashboard" in result.output
+
+
+def test_cli_dashboard_accepts_subtree_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(launcher, "find_spec", lambda name: None)
+
+    result = CliRunner().invoke(
+        main, ["dashboard", "--scope", "subtree"], catch_exceptions=False
+    )
 
     assert result.exit_code != 0
     assert "uv sync --extra dashboard" in result.output

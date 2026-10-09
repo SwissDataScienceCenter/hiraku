@@ -826,7 +826,9 @@ def run_list(
 
 @main.command("dashboard")
 @click.option("--record", "record_id")
-@click.option("--scope", type=click.Choice(["record", "source"]), default="record")
+@click.option(
+    "--scope", type=click.Choice(["record", "subtree", "source"]), default="record"
+)
 @click.option("--port", type=click.IntRange(1, 65535), default=8765)
 @click.option("--no-browser", is_flag=True)
 @click.option(

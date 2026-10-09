@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -21,7 +21,7 @@ from ..record import _LOCAL_FIELDS, Record
 from ..run import Run
 from ..tracking import MLflowBackend, backend_for
 
-SNAPSHOT_VERSION = 1
+SNAPSHOT_VERSION = 2
 
 # Display metadata allowlist for tracking backend configuration. Credentials
 # such as W&B API keys and remote tracking URIs are never exposed.
@@ -77,13 +77,16 @@ class RunView:
 
 @dataclass(frozen=True)
 class SourceInfo:
-    """Identity and scope of the selected tracking source."""
+    """Identity, coverage, and scope of one queried tracking source."""
 
     name: str
     identity: str
     label: str
     record_id: str | None
     scope: str
+    status: str = "complete"
+    message: str | None = None
+    run_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,7 @@ class DashboardSnapshot:
     records: tuple[RecordView, ...]
     runs: tuple[RunView, ...]
     source: SourceInfo | None
+    sources: tuple[SourceInfo, ...]
     errors: tuple[DashboardError, ...]
     refreshed_at: datetime
     stale: bool = False
@@ -318,7 +322,11 @@ def _source_info(
         experiment = getattr(backend, "experiment_name", None)
         uri = getattr(backend, "tracking_uri", "")
         fingerprint = sha256(uri.encode()).hexdigest()
-        identity = f"mlflow:{fingerprint}:experiment={experiment or ''}"
+        ui_url = getattr(backend, "ui_url", None) or ""
+        ui_fingerprint = sha256(ui_url.encode()).hexdigest() if ui_url else ""
+        identity = (
+            f"mlflow:{fingerprint}:experiment={experiment or ''}:ui={ui_fingerprint}"
+        )
         label = f"MLflow {experiment}" if experiment else "MLflow"
     elif name == "wandb":
         entity = getattr(backend, "entity", None) or ""
@@ -326,7 +334,13 @@ def _source_info(
         identity = f"wandb:entity={entity}:project={project}"
         label = f"W&B {entity}/{project}".strip()
     else:
-        identity = f"{name}:default"
+        attributes = sorted(
+            (str(key), repr(value))
+            for key, value in vars(backend).items()
+            if key != "config"
+        )
+        fingerprint = sha256(repr(attributes).encode()).hexdigest()[:16]
+        identity = f"{name}:{fingerprint}"
         label = name
     return SourceInfo(
         name=name,
@@ -379,6 +393,69 @@ def _run_view(run: Run, source: str) -> RunView:
     )
 
 
+def _subtree_members(index: Mapping[str, Record], selected: str) -> tuple[str, ...]:
+    """Return ``selected`` and its descendants, terminating on cycles."""
+    children: dict[str, list[str]] = {record_id: [] for record_id in index}
+    for record in index.values():
+        if record.parent_id in index:
+            children[record.parent_id].append(record.id)
+    for values in children.values():
+        values.sort()
+    members: list[str] = []
+    visited = {selected}
+    stack = [selected]
+    while stack:
+        record_id = stack.pop()
+        members.append(record_id)
+        for child_id in children.get(record_id, ()):
+            if child_id not in visited:
+                visited.add(child_id)
+                stack.append(child_id)
+    return tuple(members)
+
+
+def _backend_for_values(config: HirakuConfig, values: Mapping[str, Any]) -> Any:
+    """Construct the effective backend for one resolved record."""
+    specification = values.get("tracking_backend") or config.tracking_backend
+    backend = backend_for(specification, config)
+    if isinstance(backend, MLflowBackend):
+        backend.experiment_name = backend.experiment_name or values.get(
+            "mlflow_experiment"
+        )
+    return backend
+
+
+def _source_options(backend: Any, values: Mapping[str, Any]) -> dict[str, Any]:
+    """Return read options, forcing MLflow SQLite reads to a snapshot."""
+    return {
+        **_backend_options(backend, values),
+        **({"read_only": True} if isinstance(backend, MLflowBackend) else {}),
+    }
+
+
+def _load_source_runs(
+    backend: Any,
+    *,
+    source: SourceInfo,
+    values: Mapping[str, Any],
+    member_ids: set[str],
+    _source_cache: dict[str, tuple[RunView, ...]] | None,
+) -> tuple[SourceInfo, tuple[RunView, ...]]:
+    """Load and retain one source, querying it at most once per cache."""
+    cached = (_source_cache or {}).get(source.identity)
+    if cached is None:
+        backend_runs = _list_source_runs(
+            backend,
+            record_id=None,
+            options=_source_options(backend, values),
+        )
+        cached = tuple(_run_view(run, source.identity) for run in backend_runs)
+        if _source_cache is not None:
+            _source_cache[source.identity] = cached
+    retained = tuple(run for run in cached if run.record_id in member_ids)
+    return replace(source, run_count=len(retained)), retained
+
+
 def build_snapshot(
     config: HirakuConfig,
     *,
@@ -400,8 +477,10 @@ def build_snapshot(
     ``use_active_record=False`` means "no selection": records are shown and
     runs are omitted until the user selects one.
     """
-    if scope not in {"record", "source"}:
-        raise ValidationError("Dashboard scope must be 'record' or 'source'")
+    if scope not in {"record", "source", "subtree"}:
+        raise ValidationError(
+            "Dashboard scope must be 'record', 'source', or 'subtree'"
+        )
     errors: list[DashboardError] = []
     index, index_errors = _record_data or read_record_index(config)
     # Concurrent edits can make a file disappear between glob and read. Retry
@@ -428,46 +507,80 @@ def build_snapshot(
         selected = None
 
     source: SourceInfo | None = None
-    runs: tuple[RunView, ...] = ()
+    sources: list[SourceInfo] = []
+    runs: list[RunView] = []
+    seen_run_keys: set[str] = set()
     if selected is not None:
-        values = resolved[selected][0]
-        try:
-            specification = values.get("tracking_backend") or config.tracking_backend
-            backend = backend_for(specification, config)
-            if isinstance(backend, MLflowBackend):
-                backend.experiment_name = backend.experiment_name or values.get(
-                    "mlflow_experiment"
+        if scope == "subtree":
+            members = _subtree_members(index, selected)
+            member_ids = set(members)
+        elif scope == "source":
+            members = (selected,)
+            member_ids = set(index)
+        else:
+            members = (selected,)
+            member_ids = {selected}
+
+        grouped: dict[str, dict[str, Any]] = {}
+        selected_source_info: SourceInfo | None = None
+        for member in members:
+            values = resolved[member][0]
+            try:
+                backend = _backend_for_values(config, values)
+                info = _source_info(backend, config, member, scope)
+                entry = grouped.setdefault(
+                    info.identity,
+                    {"backend": backend, "member_ids": set(), "info": info},
                 )
-            source = _source_info(backend, config, selected, scope)
-            cached = (_source_cache or {}).get(source.identity)
-            if cached is None:
-                backend_runs = _list_source_runs(
+                entry["member_ids"].add(member)
+                if member == selected:
+                    selected_source_info = info
+            except Exception as exc:
+                errors.append(
+                    DashboardError(
+                        "backend",
+                        f"Tracking source unavailable for record {member!r} "
+                        f"({type(exc).__name__}); check backend configuration "
+                        "and storage.",
+                        record_id=member,
+                    )
+                )
+
+        for entry in grouped.values():
+            backend = entry["backend"]
+            source_member_ids: set[str] = entry["member_ids"]
+            info: SourceInfo = entry["info"]
+            member_values = resolved[next(iter(source_member_ids))][0]
+            try:
+                retained_member_ids = (
+                    member_ids if scope == "source" else source_member_ids
+                )
+                info_with_count, retained = _load_source_runs(
                     backend,
-                    record_id=None,
-                    options={
-                        **_backend_options(backend, values),
-                        **(
-                            {"read_only": True}
-                            if isinstance(backend, MLflowBackend)
-                            else {}
-                        ),
-                    },
+                    source=info,
+                    values=member_values,
+                    member_ids=retained_member_ids,
+                    _source_cache=_source_cache,
                 )
-                cached = tuple(_run_view(run, source.identity) for run in backend_runs)
-                if _source_cache is not None:
-                    _source_cache[source.identity] = cached
-            runs = tuple(
-                run for run in cached if scope == "source" or run.record_id == selected
-            )
-        except Exception as exc:
-            errors.append(
-                DashboardError(
-                    "backend",
-                    f"Tracking source unavailable ({type(exc).__name__}); "
-                    "check backend configuration and storage.",
-                    record_id=selected,
+                sources.append(info_with_count)
+                for run in retained:
+                    if run.key not in seen_run_keys:
+                        seen_run_keys.add(run.key)
+                        runs.append(run)
+                if scope != "subtree" or (
+                    selected_source_info is not None
+                    and info.identity == selected_source_info.identity
+                ):
+                    source = info_with_count
+            except Exception as exc:
+                errors.append(
+                    DashboardError(
+                        "backend",
+                        f"Tracking source unavailable ({type(exc).__name__}); "
+                        "check backend configuration and storage.",
+                        record_id=info.record_id,
+                    )
                 )
-            )
 
     return DashboardSnapshot(
         version=SNAPSHOT_VERSION,
@@ -476,8 +589,9 @@ def build_snapshot(
         selected_record_id=selected,
         scope=scope,
         records=records,
-        runs=runs,
+        runs=tuple(runs),
         source=source,
+        sources=tuple(sources),
         errors=tuple(errors),
         refreshed_at=refresh_time or datetime.now(UTC),
     )

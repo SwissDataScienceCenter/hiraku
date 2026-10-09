@@ -100,8 +100,8 @@ def serve_dashboard(
     """
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
         raise ValidationError("Port must be an integer between 1 and 65535")
-    if scope not in {"record", "source"}:
-        raise ValidationError("Scope must be 'record' or 'source'")
+    if scope not in {"record", "source", "subtree"}:
+        raise ValidationError("Scope must be 'record', 'source', or 'subtree'")
     validate_selection(config, record_id)
     if not _marimo_available():
         raise ValidationError(

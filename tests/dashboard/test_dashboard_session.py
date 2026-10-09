@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import hiraku.dashboard.data as data
 import hiraku.dashboard.session as session_module
 from hiraku.config import HirakuConfig
 from hiraku.dashboard import build_snapshot
@@ -120,3 +121,87 @@ def test_run_view_helpers_do_not_mutate_snapshot(tmp_path: Path) -> None:
 
     assert list(snapshot.runs) == runs_before
     assert isinstance(snapshot.runs[0], RunView) if snapshot.runs else True
+
+
+def test_subtree_shared_source_is_queried_once_per_refresh(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create(
+        "baseline",
+        config=config,
+        activate=False,
+        tracking_backend={"type": "csv", "path": "results/shared.csv"},
+    )
+    Record.create("child-a", parent_id="baseline", config=config, activate=False)
+    Record.create("child-b", parent_id="baseline", config=config, activate=False)
+    (tmp_path / "results").mkdir()
+    (tmp_path / "results" / "shared.csv").write_text(
+        "id,record_id\nbase-1,baseline\na-1,child-a\nb-1,child-b\nu-1,unrelated\n",
+        encoding="utf-8",
+    )
+    session = DashboardSession(config)
+    session.reload_records()
+    original = data._list_source_runs
+    calls = []
+
+    def counting(backend, *, record_id, options):
+        calls.append(1)
+        return original(backend, record_id=record_id, options=options)
+
+    monkeypatch.setattr(data, "_list_source_runs", counting)
+
+    snapshot = session.refresh("baseline", "subtree", cached=True).snapshot
+
+    assert snapshot is not None
+    assert len(calls) == 1
+    assert {run.id for run in snapshot.runs} == {"base-1", "a-1", "b-1"}
+    assert len(snapshot.sources) == 1
+    assert snapshot.sources[0].run_count == 3
+
+
+def test_subtree_partial_snapshot_is_not_replaced_with_stale(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create(
+        "parent",
+        config=config,
+        activate=False,
+        tracking_backend={"type": "csv", "path": "results/a.csv"},
+    )
+    Record.create(
+        "child",
+        parent_id="parent",
+        config=config,
+        activate=False,
+        tracking_backend={"type": "csv", "path": "results/b.csv"},
+    )
+    (tmp_path / "results").mkdir()
+    (tmp_path / "results" / "a.csv").write_text(
+        "id,record_id\np-1,parent\n", encoding="utf-8"
+    )
+    (tmp_path / "results" / "b.csv").write_text(
+        "id,record_id\nc-1,child\n", encoding="utf-8"
+    )
+    session = DashboardSession(config)
+    first = session.refresh("parent", "subtree")
+    assert first.snapshot is not None and not first.snapshot.stale
+    assert {run.id for run in first.snapshot.runs} == {"p-1", "c-1"}
+
+    original = data._list_source_runs
+
+    def fail_a(backend, *, record_id, options):
+        path = getattr(backend, "path", None)
+        if path is not None and str(path).endswith("a.csv"):
+            raise RuntimeError("a.csv exploded")
+        return original(backend, record_id=record_id, options=options)
+
+    monkeypatch.setattr(data, "_list_source_runs", fail_a)
+
+    result = session.refresh("parent", "subtree")
+
+    assert result.snapshot is not None
+    assert not result.snapshot.stale
+    assert {run.id for run in result.snapshot.runs} == {"c-1"}
+    assert "Tracking source unavailable" in (result.error or "")

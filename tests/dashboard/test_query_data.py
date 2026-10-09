@@ -4,11 +4,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fixtures import create_acceptance_project
 
 import hiraku.dashboard.data as data
 import hiraku.record as record_module
 from hiraku.config import HirakuConfig
-from hiraku.errors import BackendError, RecordNotFoundError
+from hiraku.errors import BackendError, RecordNotFoundError, ValidationError
 from hiraku.record import Record
 from hiraku.run import Run
 
@@ -304,3 +305,90 @@ def test_sort_runs_timestamp_puts_missing_last() -> None:
         "early",
         "missing",
     ]
+
+
+def test_subtree_scope_includes_descendants_and_excludes_unrelated(
+    tmp_path: Path,
+) -> None:
+    config = create_acceptance_project(tmp_path)
+
+    snapshot = data.build_snapshot(config, record_id="baseline", scope="subtree")
+
+    assert snapshot.version == 2
+    assert [run.id for run in snapshot.runs].count("a-1") == 2
+    assert {run.id for run in snapshot.runs} == {"base-1", "a-1", "a-missing"}
+    assert "u-1" not in {run.id for run in snapshot.runs}
+    assert {run.source for run in snapshot.runs if run.id == "a-1"} == {
+        f"csv:{(tmp_path / 'results' / 'a.csv').resolve()}",
+        f"csv:{(tmp_path / 'results' / 'b.csv').resolve()}",
+    }
+    assert len(snapshot.sources) == 3
+    assert {source.record_id for source in snapshot.sources} == {
+        "baseline",
+        "child-a",
+        "child-b",
+    }
+    assert all(source.run_count is not None for source in snapshot.sources)
+
+
+def test_subtree_leaf_and_empty_subtree_are_complete(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create("parent", config=config, activate=False)
+    Record.create(
+        "leaf",
+        parent_id="parent",
+        config=config,
+        activate=False,
+        tracking_backend={"type": "csv", "path": "leaf.csv"},
+    )
+    (tmp_path / "leaf.csv").write_text("id,record_id\nleaf-1,leaf\n", encoding="utf-8")
+
+    snapshot = data.build_snapshot(config, record_id="leaf", scope="subtree")
+
+    assert [run.id for run in snapshot.runs] == ["leaf-1"]
+    assert len(snapshot.sources) == 1
+    assert snapshot.sources[0].run_count == 1
+    assert snapshot.sources[0].status == "complete"
+
+
+def test_subtree_invalid_scope_is_rejected(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    with pytest.raises(ValidationError, match="subtree"):
+        data.build_snapshot(config, record_id="missing", scope="subtreee")
+
+
+def test_subtree_cycle_terminates_without_hanging(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    folder = config.records_dir / "root"
+    folder.mkdir()
+    (folder / "a.md").write_text("---\nid: a\nparent_id: b\n---\n")
+    (folder / "b.md").write_text("---\nid: b\nparent_id: a\n---\n")
+    (tmp_path / "runs.csv").write_text("id,record_id\na-1,a\nb-1,b\n", encoding="utf-8")
+
+    snapshot = data.build_snapshot(config, record_id="a", scope="subtree")
+
+    assert {run.id for run in snapshot.runs} == {"a-1", "b-1"}
+    assert any(error.kind == "record" for error in snapshot.errors)
+
+
+def test_subtree_partial_failure_keeps_successful_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = create_acceptance_project(tmp_path)
+    original = data._list_source_runs
+
+    def fail_one(backend, *, record_id, options):
+        if getattr(backend, "path", None) is not None and str(backend.path).endswith(
+            "a.csv"
+        ):
+            raise BackendError("a.csv exploded")
+        return original(backend, record_id=record_id, options=options)
+
+    monkeypatch.setattr(data, "_list_source_runs", fail_one)
+
+    snapshot = data.build_snapshot(config, record_id="baseline", scope="subtree")
+
+    assert {run.id for run in snapshot.runs} == {"base-1", "a-1"}
+    assert any(error.kind == "backend" for error in snapshot.errors)
+    assert len(snapshot.sources) == 2
+    assert "a.csv" not in {source.label for source in snapshot.sources}
