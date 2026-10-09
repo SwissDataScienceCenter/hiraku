@@ -87,7 +87,7 @@ Run complete workflows with CSV, W&B, and MLflow.
 
 Set up a project, choose a tracking backend, or connect an AI agent.
 
-<a href="guides/">Read the guides</a>
+<a href="guides/">Read the guides</a> · <a href="dashboard/">Open the dashboard</a>
 </div>
 <div class="sdsc-card">
 

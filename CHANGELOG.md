@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Add `hiraku dashboard`, a local view-only marimo application for browsing records, inspecting provenance, sorting runs, and switching between progress and Pareto plots ([issue #78](https://github.com/SwissDataScienceCenter/hiraku/issues/78)).
+- Add a read-only dashboard query layer that never mutates records and queries each selected tracking source once per refresh.
+- Paginate MLflow run search so the dashboard does not silently truncate source runs at the MLflow page size.
+
 ## [0.1.1] - 2026-09-30
 
 ### Added

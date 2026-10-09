@@ -36,3 +36,15 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         packaged = set(wheel.namelist())
 
     assert expected <= packaged, f"Missing packaged examples: {expected - packaged}"
+
+    dashboard_files = {
+        "hiraku/dashboard/__init__.py",
+        "hiraku/dashboard/app.py",
+        "hiraku/dashboard/data.py",
+        "hiraku/dashboard/launcher.py",
+        "hiraku/dashboard/plots.py",
+        "hiraku/dashboard/session.py",
+        "hiraku/dashboard/views.py",
+    }
+    missing = dashboard_files - packaged
+    assert dashboard_files <= packaged, f"Missing dashboard: {missing}"
