@@ -52,6 +52,28 @@ def test_refresh_coalesces_overlapping_requests(tmp_path: Path, monkeypatch) -> 
     assert slow_result[0].snapshot is not None
 
 
+def test_reload_records_increments_action_generation(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create("root", config=config, activate=False)
+    session = DashboardSession(config)
+    assert session.action_generation == 0
+    session.reload_records()
+    assert session.action_generation == 1
+    session.reload_records()
+    assert session.action_generation == 2
+
+
+def test_reload_records_keeps_last_successful_snapshot(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create("root", config=config, activate=False)
+    session = DashboardSession(config)
+    first = session.refresh("root")
+    assert first.snapshot is not None
+    session.reload_records()
+    assert session._last is first.snapshot
+    assert session._sources == {}
+
+
 def test_refresh_falls_back_to_last_successful_snapshot(
     tmp_path: Path, monkeypatch
 ) -> None:

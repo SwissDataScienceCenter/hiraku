@@ -77,6 +77,7 @@ def _():
     get_launch_busy, set_launch_busy = mo.state(False)
     get_launch_error, set_launch_error = mo.state(None)
     get_launch_result, set_launch_result = mo.state(None)
+    get_completed_jobs, set_completed_jobs = mo.state(set())
     return (
         alt,
         backend_action_label,
@@ -147,6 +148,8 @@ def _():
         set_launch_error,
         get_launch_result,
         set_launch_result,
+        get_completed_jobs,
+        set_completed_jobs,
         RecordDraft,
         RecordDraftError,
         create_record,
@@ -507,7 +510,9 @@ def _(get_form_error, get_form_result, get_preview_result, mo):
 
 
 @app.cell
-def _(mo, record_select, scope, session):
+def _(get_action_refresh, mo, record_select, refresh, scope, session):
+    _ = refresh.value
+    _ = get_action_refresh()
     _scope_value = {
         "This record": "record",
         "This subtree": "subtree",
@@ -568,6 +573,25 @@ def _(controller, job_refresh):
     _ = job_refresh.value
     job_views = controller.poll()
     return (job_views,)
+
+
+@app.cell
+def _(
+    get_action_refresh,
+    get_completed_jobs,
+    job_views,
+    set_action_refresh,
+    set_completed_jobs,
+):
+    _terminal = {
+        _job_view.job_id
+        for _job_view in job_views
+        if _job_view.state in {"succeeded", "failed"}
+    }
+    _handled = get_completed_jobs()
+    if _terminal - _handled:
+        set_completed_jobs(_handled | _terminal)
+        set_action_refresh(get_action_refresh() + 1)
 
 
 @app.cell

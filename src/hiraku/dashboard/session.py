@@ -44,9 +44,15 @@ class DashboardSession:
         self._sources: dict[str, tuple[RunView, ...]] = {}
         self.selected_run: str | None = None
         self._refreshed_at: datetime | None = None
+        self._action_generation = 0
+
+    @property
+    def action_generation(self) -> int:
+        return self._action_generation
 
     def reload_records(self) -> list[str]:
         """Start a new refresh generation and return current record IDs."""
+        self._action_generation += 1
         self._records = read_record_index(self._config)
         self._sources.clear()
         self._refreshed_at = datetime.now(UTC)
