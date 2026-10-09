@@ -382,12 +382,18 @@ def build_snapshot(
     record_id: str | None = None,
     scope: str = "record",
     refresh_time: datetime | None = None,
+    use_active_record: bool = True,
 ) -> DashboardSnapshot:
     """Build one versioned snapshot from the current project state.
 
     Records are read once and inheritance is resolved against that in-memory
     index. The selected tracking source is queried at most once; callers are
     expected to sort, filter, and chart the returned cached snapshot.
+
+    ``record_id`` always wins. When it is ``None``, ``use_active_record=True``
+    (the default) falls back to the persisted active record, while
+    ``use_active_record=False`` means "no selection": records are shown and
+    runs are omitted until the user selects one.
     """
     if scope not in {"record", "source"}:
         raise ValidationError("Dashboard scope must be 'record' or 'source'")
@@ -401,7 +407,9 @@ def build_snapshot(
     resolved = _resolve_all(index, errors)
     records = _record_views(index, resolved, errors)
 
-    selected = record_id if record_id is not None else config.active_record_id
+    selected = record_id
+    if selected is None and use_active_record:
+        selected = config.active_record_id
     if record_id is not None and record_id not in index:
         raise RecordNotFoundError(f"Record {record_id!r} not found")
     if selected is not None and selected not in index:

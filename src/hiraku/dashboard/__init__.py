@@ -14,6 +14,7 @@ from .data import (
     RunView,
     SourceInfo,
     build_snapshot,
+    read_record_index,
     sort_runs,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "RunView",
     "SourceInfo",
     "build_snapshot",
+    "read_record_index",
     "sort_runs",
 ]
