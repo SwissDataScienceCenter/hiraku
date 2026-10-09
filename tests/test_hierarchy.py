@@ -110,8 +110,10 @@ def test_runs_list_attributed_runs_from_current_backend(tmp_path: Path) -> None:
         writer.writeheader()
         writer.writerow({"id": "one", "record_id": "root", "metric.loss": 0.5})
         writer.writerow({"id": "two", "record_id": "child", "metric.loss": 0.3})
-    assert {run.id for run in root.runs(config=config)} == {"one", "two"}
-    assert {run.id for run in child.runs(config=config)} == {"one", "two"}
+    assert {run.id for run in root.runs(config=config)} == {"one"}
+    assert {run.id for run in child.runs(config=config)} == {"two"}
+    backend = child.resolve_tracking_backend(config=config)
+    assert {run.id for run in backend.list_runs()} == {"one", "two"}
 
 
 def test_default_run_list_returns_attributed_runs_from_selected_source(
@@ -125,8 +127,8 @@ def test_default_run_list_returns_attributed_runs_from_selected_source(
         encoding="utf-8",
     )
 
-    assert {run.id for run in root.runs(config=config)} == {"one", "two", "three"}
-    assert {run.id for run in child.runs(config=config)} == {"one", "two", "three"}
+    backend = child.resolve_tracking_backend(config=config)
+    assert {run.id for run in backend.list_runs()} == {"one", "two", "three"}
 
 
 def test_run_query_scans_selected_csv_once(
@@ -149,7 +151,9 @@ def test_run_query_scans_selected_csv_once(
         "id,record_id\none,root\ntwo,child\nthree,leaf\n", encoding="utf-8"
     )
 
-    assert {run.id for run in root.runs(config=config)} == {
+    assert {
+        run.id for run in root.resolve_tracking_backend(config=config).list_runs()
+    } == {
         "one",
         "two",
         "three",
@@ -448,3 +452,21 @@ def test_committed_journal_errors_when_new_authoritative_copy_is_missing(
     assert child.path.exists()
     assert (config.records_dir / moves[0]["new"]).exists()
     assert journal_path.exists()
+
+
+def test_resolve_tracking_backend_inherits_closest_setting(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    root = Record.create(
+        "root",
+        config=config,
+        tracking_backend={"type": "csv", "path": "results/root.csv"},
+    )
+    child = Record.create("child", parent_id=root.id, config=config)
+    other = Record.create("other", config=config)
+
+    inherited = child.resolve_tracking_backend(config=config)
+    assert isinstance(inherited, CSVBackend)
+    assert inherited.path == (tmp_path / "results" / "root.csv").resolve()
+    default = other.resolve_tracking_backend(config=config)
+    assert isinstance(default, CSVBackend)
+    assert default.path is None

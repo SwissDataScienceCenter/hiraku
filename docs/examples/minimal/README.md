@@ -51,7 +51,7 @@ hiraku record create baseline --parent my-task --type experiment \
 hiraku launch evaluate --record baseline
 hiraku launch evaluate --record baseline -- --seed 1
 hiraku record list
-hiraku runs --record my-task
+hiraku runs --record baseline
 ```
 
 The entrypoint runs `uv run python evaluate.py --seed 0`. The script writes its

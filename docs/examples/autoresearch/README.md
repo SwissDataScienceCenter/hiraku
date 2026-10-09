@@ -130,5 +130,5 @@ Track the agent's progress with:
 
 ```bash
 hiraku record list --json
-hiraku runs --record sep10 --sort val_bpb --ascending
+hiraku runs --record sep10 --all --sort val_bpb --ascending
 ```

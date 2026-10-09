@@ -107,11 +107,12 @@ from hiraku.record import load_record
 
 config = HirakuConfig.discover()
 record = load_record("my-task", config=config)
-runs = record.runs(config=config, sort="val/accuracy", ascending=False)
+backend = record.resolve_tracking_backend(config=config)
+runs = backend.list_runs(sort="val/accuracy", ascending=False)
 ```
 
 When the backend is loaded by the CLI application, use:
 
 ```bash
-hiraku runs --record my-task --sort val/accuracy
+hiraku runs --record my-task --all --sort val/accuracy
 ```

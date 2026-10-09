@@ -91,6 +91,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
                 "runs",
                 "--record",
                 "digits",
+                "--all",
                 "--sort",
                 "val/log_loss",
                 "--json",
@@ -142,7 +143,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             ],
         ).output
     )
-    assert {row["record_id"] for row in filtered} == {"weak-l2", "strong-l2"}
+    assert {row["record_id"] for row in filtered} == {"strong-l2"}
 
 
 def test_digits_requires_provenance_before_creating_runs(tmp_path):

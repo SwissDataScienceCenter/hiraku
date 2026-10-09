@@ -54,17 +54,10 @@ class WandbBackend(TrackingBackend):
 from .base import TrackingBackend
 from .csv import CSVBackend, CSVBackendConfig
 from .mlflow import MLflowBackend, MLflowBackendConfig
-from .registry import available_backends, backend_for, register_backend
+from .registry import available_backends, create_backend, register_backend
 from .wandb import WandbBackend, WandbBackendConfig
 
 BackendConfig = CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig
-
-
-def select_backend(record, config):
-    """Select the configured backend for a research record."""
-    specification = record.resolve(config=config).values.get("tracking_backend")
-    specification = specification or config.tracking_backend
-    return backend_for(specification, config)
 
 
 __all__ = [
@@ -77,7 +70,6 @@ __all__ = [
     "WandbBackendConfig",
     "TrackingBackend",
     "available_backends",
-    "backend_for",
+    "create_backend",
     "register_backend",
-    "select_backend",
 ]

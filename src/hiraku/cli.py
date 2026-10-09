@@ -754,8 +754,13 @@ def launch_command(
 
 
 @main.command("runs")
-@click.argument("subcommand", required=False, type=click.Choice(["list"]))
 @click.option("--record", "record_id")
+@click.option(
+    "--all",
+    "all_records",
+    is_flag=True,
+    help="List all attributed runs from the record's tracking source.",
+)
 @click.option("--metrics")
 @click.option("--params")
 @click.option("--sort")
@@ -766,8 +771,8 @@ def launch_command(
 @click.pass_obj
 def run_list(
     state: CLIContext,
-    subcommand: str | None,
     record_id: str | None,
+    all_records: bool,
     metrics: str | None,
     params: str | None,
     sort: str | None,
@@ -776,8 +781,10 @@ def run_list(
     limit: int | None,
     json_output: bool,
 ) -> None:
-    """List runs from the selected record's tracking source."""
-    _ = subcommand
+    """List runs attributed to the selected record.
+
+    Use --all for every attributed run in the record's tracking source.
+    """
     if ascending and descending:
         raise ValidationError("--ascending and --descending are mutually exclusive")
     if (ascending or descending) and sort is None:
@@ -800,8 +807,8 @@ def run_list(
         query["ascending"] = (
             ascending if ascending or descending else directions.get(sort) != "maximize"
         )
-    runs = record.runs(
-        config=state.config,
+    runs = record.resolve_tracking_backend(config=state.config).list_runs(
+        record_id=None if all_records else record.id,
         **query,
     )
     if json_output:

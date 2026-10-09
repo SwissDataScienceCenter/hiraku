@@ -46,7 +46,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set`, `entrypoints` |
 | Launch an entrypoint | `hiraku launch ENTRYPOINT [--record ID] [--commit REF] [--dispatch NAME]` |
-| Inspect tracked evidence | `hiraku runs` |
+| Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
 | Manage program records | `hiraku program list`, `hiraku program show PROGRAM` |
 | Manage action records | `hiraku action ...` |
 | Manage context records | `hiraku context ...` |
@@ -303,7 +303,7 @@ splits, budgets, and evaluation definitions comparable, and do not infer
 record attribution when it is absent.
 
 ```bash
-hiraku runs --record <record-id> \
+hiraku runs --record <root-id> --all \
   --params seed,epochs \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending --json

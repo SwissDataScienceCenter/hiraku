@@ -14,6 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .base import BaseRecord
 from .errors import RecordExistsError, RecordNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml
+from .run import Run
+from .tracking import TrackingBackend, create_backend
 from .validation import validate_identifier
 
 ArgumentScalar: TypeAlias = str | int | float | Path
@@ -332,31 +334,17 @@ class Record(BaseRecord):
                 f"Record {self.id!r} has no entrypoint {name!r}"
             ) from exc
 
-    def runs(
-        self,
-        *,
-        backend: Any = None,
-        config: Any = None,
-        **query: Any,
-    ) -> list[Any]:
-        from .tracking import MLflowBackend, TrackingBackend, select_backend
+    def resolve_tracking_backend(self, *, config: Any = None) -> TrackingBackend:
+        """Create the tracking backend inherited by this record."""
+        selected = _config(config)
+        specification = self.resolve(config=selected).values.get("tracking_backend")
+        return create_backend(specification or selected.tracking_backend, selected)
 
-        selected = _config(config) if config is not None or backend is None else None
-        if backend is not None:
-            adapter = backend
-        else:
-            assert selected is not None
-            adapter = select_backend(self, selected)
-        options = {}
-        if isinstance(adapter, MLflowBackend):
-            values = (
-                self.resolve(config=selected).values if selected is not None else {}
-            )
-            options["experiment_name"] = adapter.experiment_name or values.get(
-                "mlflow_experiment"
-            )
-        runs = adapter.list_all_recorded_runs(**options)
-        return TrackingBackend._apply_query(runs, query, "tracking")
+    def runs(self, *, config: Any = None, **query: Any) -> list[Run]:
+        """Return runs attributed to this record."""
+        return self.resolve_tracking_backend(config=config).list_runs(
+            record_id=self.id, **query
+        )
 
     def delete(self, *, config: Any = None) -> None:
         records = list_records(config=config)
