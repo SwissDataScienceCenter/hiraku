@@ -20,8 +20,15 @@ and Git commit attribution. Training writes to the demo's own `mlflow.db` and
 `hiraku-digits` experiment, even if your shell has MLflow overrides set. No
 dataset download, tracking server, or credentials are required. Git and uv
 must be installed. The script verifies that both real runs and their metrics
-reach the dashboard's Progress and Pareto transformations before opening it
-with `weak-l2` selected.
+reach the dashboard's Progress and Pareto transformations before starting
+both the Hiraku dashboard (with `weak-l2` selected) and MLflow UI. Both URLs
+are printed and opened in the browser:
+
+- Hiraku dashboard: <http://127.0.0.1:8765>
+- MLflow UI: <http://127.0.0.1:5000>
+
+Press **Ctrl-C** to stop both servers. If either server fails to start or exits,
+the script stops the other as well. The CSV demo starts only the Hiraku dashboard.
 
 The printed **Demo project** path is retained after shutdown. Existing
 projects are never overwritten. The normal regression run skips browser
@@ -58,15 +65,16 @@ uv run --all-extras python scripts/test_dashboard.py --launch-run "<demo-path>" 
 ```
 
 Dashboard plots compare the **latest summary metric per run**, not individual
-training epochs. Full 40-epoch learning curves are recorded in MLflow. To
-inspect those, run from the repository and open <http://127.0.0.1:5000>:
+training epochs. Full 40-epoch learning curves are recorded in MLflow. Open
+the printed MLflow UI URL, select `hiraku-digits`, then compare the two runs
+and their `val/log_loss`, `val/accuracy`, `train/log_loss`, and `train/accuracy`
+histories.
+
+To reopen only MLflow UI after stopping the script, run from the repository:
 
 ```bash
 uv run --all-extras mlflow ui --backend-store-uri "sqlite:///<demo-path>/mlflow.db" --host 127.0.0.1 --port 5000
 ```
-
-Select `hiraku-digits`, then compare the two runs and their `val/log_loss`,
-`val/accuracy`, `train/log_loss`, and `train/accuracy` histories.
 
 ## CSV edge-case walkthrough
 
@@ -114,13 +122,13 @@ directory afterward.
 ## Useful options
 
 ```bash
-# Choose another port and open the printed URL yourself.
-uv run --all-extras python scripts/test_dashboard.py --port 8766 --no-browser
+# Choose other ports and open the printed URLs yourself.
+uv run --all-extras python scripts/test_dashboard.py --port 8766 --mlflow-port 5001 --no-browser
 
 # Skip tests that have already passed.
 uv run --all-extras python scripts/test_dashboard.py --skip-tests
 
-# Run checks and create data without starting a server.
+# Run checks and create data without starting either server.
 uv run --all-extras python scripts/test_dashboard.py --no-serve
 
 # Train a shorter Digits demo (results differ from the 40-epoch example).
@@ -159,6 +167,8 @@ The automated browser test uses its own temporary fixture and verifies
 record/run selection, provenance navigation, sorting, point selection,
 Pareto switching, refresh, shutdown, and unchanged research files.
 
-If port 8765 is occupied, choose another with `--port`. If a check fails,
+If port 8765 or 5000 is occupied, choose another with `--port` or
+`--mlflow-port`. The two ports must differ. `--no-browser` suppresses both
+browser tabs. If a check fails,
 the script stops before launching the demo. See the test output for the
 failure; `--skip-tests` is intended for checks you have already run.

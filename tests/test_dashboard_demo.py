@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 import csv
+import json
+import os
 import runpy
+import signal
+import socket
+import subprocess
+import sys
+import time
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -98,3 +107,109 @@ def test_digits_refuses_invalid_epoch_budget(tmp_path):
     with pytest.raises(ValueError, match="epochs must be positive"):
         helpers["create_digits_demo"](directory, epochs=0)
     assert not directory.exists()
+
+
+def test_servers_reject_conflicting_and_occupied_ports(tmp_path):
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        probe.listen()
+        port = probe.getsockname()[1]
+        with pytest.raises(ValueError, match="different ports"):
+            helpers["serve_demo"](
+                tmp_path,
+                record_id="weak-l2",
+                port=port,
+                mlflow_port=port,
+                no_browser=True,
+            )
+        with pytest.raises(ValueError, match="unavailable"):
+            helpers["serve_demo"](
+                tmp_path,
+                record_id="child-a",
+                port=port,
+                mlflow_port=None,
+                no_browser=True,
+            )
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name == "nt", reason="Uses POSIX Ctrl-C signaling")
+def test_demo_serves_mlflow_and_dashboard_and_stops_both(tmp_path):
+    pytest.importorskip("mlflow")
+    pytest.importorskip("sklearn")
+    with socket.socket() as dashboard_probe, socket.socket() as mlflow_probe:
+        dashboard_probe.bind(("127.0.0.1", 0))
+        mlflow_probe.bind(("127.0.0.1", 0))
+        port = dashboard_probe.getsockname()[1]
+        mlflow_port = mlflow_probe.getsockname()[1]
+    dashboard_url = f"http://127.0.0.1:{port}"
+    mlflow_url = f"http://127.0.0.1:{mlflow_port}"
+    log_path = tmp_path / "demo.log"
+    with log_path.open("w") as log:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--skip-tests",
+                "--epochs",
+                "2",
+                "--no-browser",
+                "--port",
+                str(port),
+                "--mlflow-port",
+                str(mlflow_port),
+                "--project-dir",
+                str(tmp_path / "demo"),
+            ],
+            cwd=SCRIPT.parent.parent,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + 90
+            while True:
+                assert process.poll() is None, log_path.read_text()
+                assert time.monotonic() < deadline, log_path.read_text()
+                try:
+                    with urlopen(dashboard_url, timeout=1):
+                        break
+                except (URLError, TimeoutError):
+                    time.sleep(0.1)
+            request = Request(
+                f"{mlflow_url}/api/2.0/mlflow/experiments/search",
+                data=b'{"max_results": 100}',
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(request, timeout=5) as response:
+                experiments = json.load(response)["experiments"]
+            experiment = next(e for e in experiments if e["name"] == "hiraku-digits")
+            request = Request(
+                f"{mlflow_url}/api/2.0/mlflow/runs/search",
+                data=json.dumps(
+                    {"experiment_ids": [experiment["experiment_id"]]}
+                ).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(request, timeout=5) as response:
+                runs = json.load(response)["runs"]
+            assert len(runs) == 2
+            assert all(run["info"]["status"] == "FINISHED" for run in runs)
+        finally:
+            if process.poll() is None:
+                process.send_signal(signal.SIGINT)
+                process.wait(timeout=20)
+        assert process.returncode == 130, log_path.read_text()
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            helpers["check_port"](port)
+            helpers["check_port"](mlflow_port)
+            break
+        except ValueError:
+            assert time.monotonic() < deadline, log_path.read_text()
+            time.sleep(0.1)
+    output = log_path.read_text()
+    assert f"Hiraku dashboard: {dashboard_url}" in output
+    assert f"MLflow UI: {mlflow_url}" in output

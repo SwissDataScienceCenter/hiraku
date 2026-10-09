@@ -176,7 +176,9 @@ uv run --all-extras python scripts/test_dashboard.py
 
 It creates a temporary Git/Hiraku project from the bundled Digits example,
 trains the weak- and strong-L2 experiments for 40 epochs, verifies their
-tracked metrics and plot data, and opens the dashboard. Switch to **All
+tracked metrics and plot data, and opens both the dashboard (port 8765) and
+MLflow UI (port 5000). Use `--port` and `--mlflow-port` to change the ports;
+Ctrl-C stops both servers. Switch to **All
 attributed runs in this source** to compare both child records. Dashboard
 plots show final metrics per run; full epoch histories remain in MLflow.
 See `scripts/README-dashboard.md` for the walkthrough, repeat-run commands,

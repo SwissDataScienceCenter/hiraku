@@ -6,10 +6,17 @@ import argparse
 import csv
 import os
 import runpy
+import signal
+import socket
 import subprocess
 import tempfile
+import time
+import webbrowser
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKER = ".hiraku-dashboard-demo"
@@ -252,6 +259,139 @@ def port_number(value: str) -> int:
     return port
 
 
+def check_port(port: int) -> None:
+    """Fail before starting a server if its local port is occupied."""
+    with socket.socket() as probe:
+        if os.name != "nt":
+            # Permit recently closed connections without permitting live listeners.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError as exc:
+            raise ValueError(
+                f"Port {port} is unavailable; choose another port"
+            ) from exc
+
+
+def wait_for_server(process: subprocess.Popen, url: str) -> None:
+    """Wait for HTTP readiness, reporting startup failures promptly."""
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        code = process.poll()
+        if code is not None:
+            raise subprocess.CalledProcessError(code or 1, process.args)
+        try:
+            with urlopen(url, timeout=1):
+                return
+        except (URLError, TimeoutError):
+            time.sleep(0.1)
+    raise ValueError(f"Server did not become ready within 60 seconds: {url}")
+
+
+def stop_server(process: subprocess.Popen) -> None:
+    """Stop the uv process and its server workers, including nested launchers."""
+    if os.name == "nt":
+        if process.poll() is None:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+            )
+            process.wait(timeout=5)
+        return
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+
+
+def serve_demo(
+    directory: Path,
+    *,
+    record_id: str,
+    port: int,
+    mlflow_port: int | None,
+    no_browser: bool,
+) -> int:
+    """Serve the dashboard and optional MLflow UI until either exits or Ctrl-C."""
+    if mlflow_port == port:
+        raise ValueError("Dashboard and MLflow UI must use different ports")
+    check_port(port)
+    if mlflow_port is not None:
+        check_port(mlflow_port)
+        if not (directory / "mlflow.db").is_file():
+            raise ValueError(f"MLflow database not found in {directory}")
+    uv = ["uv", "run", "--project", str(ROOT), "--locked", "--all-extras"]
+    servers = []
+    processes = []
+    try:
+        if mlflow_port is not None:
+            servers.append(
+                (
+                    [
+                        *uv,
+                        "mlflow",
+                        "ui",
+                        "--backend-store-uri",
+                        f"sqlite:///{directory / 'mlflow.db'}",
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        str(mlflow_port),
+                    ],
+                    f"http://127.0.0.1:{mlflow_port}",
+                    "MLflow UI",
+                )
+            )
+        servers.append(
+            (
+                [
+                    *uv,
+                    "hiraku",
+                    "dashboard",
+                    "--record",
+                    record_id,
+                    "--port",
+                    str(port),
+                    "--no-browser",
+                ],
+                f"http://127.0.0.1:{port}",
+                "Hiraku dashboard",
+            )
+        )
+        for command, url, label in servers:
+            process = subprocess.Popen(
+                command,
+                cwd=directory,
+                start_new_session=os.name != "nt",
+                creationflags=(
+                    subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+                ),
+            )
+            processes.append(process)
+            wait_for_server(process, url)
+            print(f"{label}: {url}", flush=True)
+        print("Ctrl-C stops the servers. Demo files are retained.", flush=True)
+        if not no_browser:
+            for _, url, _ in servers:
+                webbrowser.open(url)
+        while True:
+            for process in processes:
+                code = process.poll()
+                if code is not None:
+                    if code:
+                        raise subprocess.CalledProcessError(code, process.args)
+                    return 0
+            time.sleep(0.25)
+    finally:
+        for process in reversed(processes):
+            stop_server(process)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -270,6 +410,12 @@ def main() -> int:
         "--project-dir", type=Path, help="Use a new or empty demo directory"
     )
     parser.add_argument("--port", type=port_number, default=8765)
+    parser.add_argument(
+        "--mlflow-port",
+        type=port_number,
+        default=5000,
+        help="MLflow UI port for the Digits demo (default: 5000)",
+    )
     parser.add_argument(
         "--no-browser", action="store_true", help="Do not open a browser"
     )
@@ -317,6 +463,12 @@ def main() -> int:
             identifier = append_run(args.append_run)
             print(f"Added {identifier}. Press Refresh in the dashboard.", flush=True)
             return 0
+        if (
+            not args.no_serve
+            and args.example == "digits-mlflow"
+            and args.port == args.mlflow_port
+        ):
+            parser.error("--port and --mlflow-port must be different")
         if args.browser_tests and args.skip_tests:
             parser.error("--browser-tests cannot be combined with --skip-tests")
         if (
@@ -366,29 +518,13 @@ def main() -> int:
         print("See scripts/README-dashboard.md for the walkthrough.", flush=True)
         if args.no_serve:
             return 0
-        print(
-            f"Open http://127.0.0.1:{args.port} — Ctrl-C stops the server.", flush=True
+        return serve_demo(
+            directory,
+            record_id=initial_record,
+            port=args.port,
+            mlflow_port=args.mlflow_port if args.example == "digits-mlflow" else None,
+            no_browser=args.no_browser,
         )
-        subprocess.run(
-            [
-                "uv",
-                "run",
-                "--project",
-                str(ROOT),
-                "--locked",
-                "--all-extras",
-                "hiraku",
-                "dashboard",
-                "--record",
-                initial_record,
-                "--port",
-                str(args.port),
-                *(["--no-browser"] if args.no_browser else []),
-            ],
-            cwd=directory,
-            check=True,
-        )
-        return 0
     except KeyboardInterrupt:
         print("\nStopped. Demo files are retained for inspection.")
         return 130
