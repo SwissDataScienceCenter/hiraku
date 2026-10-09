@@ -52,17 +52,27 @@ def _numeric(value: Any) -> float:
 
 
 def metric_direction(snapshot: DashboardSnapshot, metric: str) -> str | None:
-    """Return the declared direction for a metric on the selected record."""
+    """Return a direction only if the comparison scope declares it unambiguously."""
+    cohort = (
+        {run.record_id for run in snapshot.runs}
+        if snapshot.scope == "source"
+        else {snapshot.selected_record_id}
+    )
+    directions = set()
+    if cohort - {record.id for record in snapshot.records}:
+        return None
     for record in snapshot.records:
-        if record.id != snapshot.selected_record_id:
+        if record.id not in cohort:
             continue
-        for item in record.metrics:
-            if item.get("name") == metric and item.get("direction") in {
-                "minimize",
-                "maximize",
-            }:
-                return str(item["direction"])
-    return None
+        declared = {
+            item.get("direction")
+            for item in record.metrics
+            if item.get("name") == metric
+        }
+        if not declared or not declared <= {"minimize", "maximize"}:
+            return None
+        directions.update(declared)
+    return directions.pop() if len(directions) == 1 else None
 
 
 def progress_points(
@@ -89,10 +99,13 @@ def progress_points(
             continue
         rows.append(
             {
+                "key": run.key,
                 "run_id": run.id,
                 "record_id": run.record_id,
                 "commit": run.commit,
-                "x": run.timestamp if use_timestamp else index,
+                # Give Vega explicit epoch-millisecond units for temporal axes.
+                "x": run.timestamp.timestamp() * 1000 if use_timestamp else index,
+                "timestamp": run.timestamp.isoformat() if run.timestamp else None,
                 "x_kind": "timestamp" if use_timestamp else "run_index",
                 "metric": metric,
                 "value": _numeric(raw),
@@ -190,6 +203,7 @@ def pareto_points(
     frame = pd.DataFrame(
         [
             {
+                "key": run.key,
                 "run_id": run.id,
                 "record_id": run.record_id,
                 "commit": run.commit,

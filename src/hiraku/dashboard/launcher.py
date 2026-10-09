@@ -20,11 +20,14 @@ DEFAULT_HOST = "127.0.0.1"
 
 
 def _marimo_available() -> bool:
-    return find_spec("marimo") is not None
+    return all(find_spec(name) is not None for name in ("marimo", "altair", "pandas"))
 
 
 def _dashboard_install_hint() -> str:
-    return "Install dashboard dependencies with: uv sync --extra dashboard"
+    return (
+        "Install dashboard dependencies with: uv sync --extra dashboard "
+        '(or uv tool install "hiraku[dashboard]" for an installed CLI)'
+    )
 
 
 def default_notebook_path() -> Path:
@@ -105,17 +108,20 @@ def serve_dashboard(
     notebook_path = (notebook or default_notebook_path()).expanduser().absolute()
     if not notebook_path.is_file():
         raise ValidationError(f"Dashboard notebook not found: {notebook_path}")
-    command = build_command(
-        sys.executable,
-        notebook_path,
-        port=port,
-        no_browser=no_browser,
-    )
     environment = dashboard_environment(config, record_id=record_id)
-    temporary_dir = Path(tempfile.mkdtemp(prefix="hiraku-dashboard-"))
-    process = subprocess.Popen(command, cwd=temporary_dir, env=environment)
-    try:
-        return process.wait()
-    finally:
-        _stop_process(process)
-        shutil.rmtree(temporary_dir, ignore_errors=True)
+    with tempfile.TemporaryDirectory(prefix="hiraku-dashboard-") as directory:
+        temporary_dir = Path(directory)
+        if notebook is None:
+            # Marimo also stores files beside the notebook, not just in cwd.
+            notebook_path = Path(shutil.copy2(notebook_path, temporary_dir / "app.py"))
+        command = build_command(
+            sys.executable,
+            notebook_path,
+            port=port,
+            no_browser=no_browser,
+        )
+        process = subprocess.Popen(command, cwd=temporary_dir, env=environment)
+        try:
+            return process.wait()
+        finally:
+            _stop_process(process)

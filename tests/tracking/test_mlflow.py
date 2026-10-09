@@ -52,10 +52,14 @@ def test_mlflow_backend_paginates_run_search(tmp_path, monkeypatch) -> None:
         def __init__(self, tracking_uri: str | None = None) -> None:
             pass
 
-        def search_experiments(self):
-            return [SimpleNamespace(experiment_id="e1")]
+        def search_experiments(self, page_token=None):
+            if page_token is None:
+                return Page([SimpleNamespace(experiment_id="e1")], "experiments-next")
+            assert page_token == "experiments-next"
+            return Page([SimpleNamespace(experiment_id="e2")], None)
 
         def search_runs(self, experiment_ids=None, max_results=1000, page_token=None):
+            assert experiment_ids == ["e1", "e2"]
             calls.append(page_token)
             if page_token is None:
                 return Page([make_run("r1")], "next")

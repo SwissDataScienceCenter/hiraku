@@ -62,6 +62,10 @@ def test_progress_uses_timestamps_when_all_present() -> None:
     )
 
     assert list(data.frame["x_kind"]) == ["timestamp", "timestamp"]
+    assert list(data.frame["x"]) == [
+        datetime(2026, 1, 1, tzinfo=UTC).timestamp() * 1000,
+        datetime(2026, 1, 2, tzinfo=UTC).timestamp() * 1000,
+    ]
     assert list(data.frame["run_id"]) == ["a", "b"]
 
 

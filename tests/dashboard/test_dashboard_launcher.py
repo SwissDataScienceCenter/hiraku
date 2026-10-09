@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import socket
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -127,3 +130,85 @@ def test_serve_dashboard_forwards_custom_notebook(
     assert str(custom) in command
     assert env["HIRAKU_PROJECT_ROOT"] == str(config.root)
     assert cwd != config.root
+
+
+def test_default_notebook_copy_is_cleaned_up_on_interrupt(tmp_path, monkeypatch):
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    seen = {}
+
+    class Process:
+        stopped = False
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            if timeout is None:
+                raise KeyboardInterrupt
+            assert self.stopped
+            return 0
+
+        def terminate(self):
+            self.stopped = True
+
+    process = Process()
+
+    def start(command, cwd, env):
+        copied = Path(command[-1])
+        assert copied.parent == cwd
+        assert copied != launcher.default_notebook_path()
+        assert copied.read_bytes() == launcher.default_notebook_path().read_bytes()
+        seen["path"] = copied
+        return process
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", start)
+    with pytest.raises(KeyboardInterrupt):
+        launcher.serve_dashboard(config)
+    assert process.stopped
+    assert not seen["path"].parent.exists()
+
+
+def test_shutdown_kills_child_that_does_not_terminate():
+    class Process:
+        killed = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            if not self.killed:
+                raise subprocess.TimeoutExpired("marimo", timeout)
+
+        def kill(self):
+            self.killed = True
+
+    process = Process()
+    launcher._stop_process(process)
+    assert process.killed
+
+
+def test_occupied_port_reports_failure(tmp_path):
+    HirakuConfig.init(tmp_path, install_skill=False)
+    with socket.socket() as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen()
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "hiraku.cli",
+                "dashboard",
+                "--no-browser",
+                "--port",
+                str(occupied.getsockname()[1]),
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    assert result.returncode != 0
+    assert "in use" in (result.stdout + result.stderr).lower()

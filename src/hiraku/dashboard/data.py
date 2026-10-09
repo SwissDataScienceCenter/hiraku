@@ -7,9 +7,11 @@ index built here never invokes reparent recovery and never writes to disk.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -156,8 +158,11 @@ def read_record_index(
     index: dict[str, Record] = {}
     if not config.records_dir.is_dir():
         return index, errors
-    for path in sorted(config.records_dir.glob("*/*.md")):
+    paths = sorted(config.records_dir.glob("*/*.md"))
+    fingerprints = {}
+    for path in paths:
         try:
+            fingerprints[path] = path.stat()
             record = Record.load(path)
         except OSError as exc:
             errors.append(
@@ -186,52 +191,27 @@ def read_record_index(
             )
             continue
         index[record.id] = record
+    try:
+        changed = paths != sorted(config.records_dir.glob("*/*.md")) or any(
+            (before.st_ino, before.st_mtime_ns, before.st_size)
+            != (after.st_ino, after.st_mtime_ns, after.st_size)
+            for path, before in fingerprints.items()
+            for after in [path.stat()]
+        )
+    except OSError:
+        changed = True
+    if changed:
+        errors.append(DashboardError("transient", "Records changed during the read"))
     return index, errors
 
 
 def _resolve_effective(
-    record_id: str,
-    index: Mapping[str, Record],
-    seen: frozenset[str],
-    errors: list[DashboardError],
+    record: Record,
+    parent: tuple[dict[str, Any], dict[str, Any]],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Resolve inheritance for one record without validating or writing."""
-    record = index[record_id]
-    if record_id in seen:
-        errors.append(
-            DashboardError(
-                "record",
-                f"Record parent cycle at {record_id!r}",
-                record_id=record_id,
-            )
-        )
-        return {}, {}
-    values: dict[str, Any] = {}
-    sources: dict[str, Any] = {}
-    if record.parent_id is not None:
-        if record.parent_id not in index:
-            errors.append(
-                DashboardError(
-                    "record",
-                    f"Parent record {record.parent_id!r} for {record_id!r} "
-                    "is missing or malformed",
-                    record_id=record_id,
-                )
-            )
-        else:
-            parent_values, parent_sources = _resolve_effective(
-                record.parent_id, index, seen | {record_id}, errors
-            )
-            values = {
-                key: value
-                for key, value in parent_values.items()
-                if key not in _LOCAL_FIELDS
-            }
-            sources = {
-                key: value
-                for key, value in parent_sources.items()
-                if key not in _LOCAL_FIELDS
-            }
+    """Merge one record with its already resolved parent."""
+    values = {k: v for k, v in parent[0].items() if k not in _LOCAL_FIELDS}
+    sources = {k: v for k, v in parent[1].items() if k not in _LOCAL_FIELDS}
     for key, value in record.to_dict().items():
         if key == "entrypoints" and isinstance(value, Mapping):
             values[key] = {**(values.get(key) or {}), **value}
@@ -251,10 +231,30 @@ def _resolve_effective(
 def _resolve_all(
     index: Mapping[str, Record], errors: list[DashboardError]
 ) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
-    return {
-        record_id: _resolve_effective(record_id, index, frozenset(), errors)
-        for record_id in sorted(index)
-    }
+    resolved: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    for record_id in sorted(index):
+        chain: list[str] = []
+        seen: set[str] = set()
+        current = record_id
+        while current is not None and current not in resolved:
+            if current in seen or current not in index:
+                problem = "parent cycle" if current in seen else "missing parent"
+                errors.append(
+                    DashboardError(
+                        "record",
+                        f"Record {record_id!r}: {problem} {current!r}",
+                        record_id,
+                    )
+                )
+                break
+            chain.append(current)
+            seen.add(current)
+            current = index[current].parent_id
+        parent = resolved.get(current, ({}, {}))
+        for identifier in reversed(chain):
+            parent = _resolve_effective(index[identifier], parent)
+            resolved[identifier] = parent
+    return resolved
 
 
 def _depth(record_id: str, index: Mapping[str, Record]) -> int:
@@ -316,7 +316,9 @@ def _source_info(
         label = f"CSV {path}"
     elif name == "mlflow":
         experiment = getattr(backend, "experiment_name", None)
-        identity = f"mlflow:experiment={experiment or ''}"
+        uri = getattr(backend, "tracking_uri", "")
+        fingerprint = sha256(uri.encode()).hexdigest()
+        identity = f"mlflow:{fingerprint}:experiment={experiment or ''}"
         label = f"MLflow {experiment}" if experiment else "MLflow"
     elif name == "wandb":
         entity = getattr(backend, "entity", None) or ""
@@ -384,6 +386,8 @@ def build_snapshot(
     scope: str = "record",
     refresh_time: datetime | None = None,
     use_active_record: bool = True,
+    _record_data: tuple[dict[str, Record], list[DashboardError]] | None = None,
+    _source_cache: dict[str, tuple[RunView, ...]] | None = None,
 ) -> DashboardSnapshot:
     """Build one versioned snapshot from the current project state.
 
@@ -399,7 +403,7 @@ def build_snapshot(
     if scope not in {"record", "source"}:
         raise ValidationError("Dashboard scope must be 'record' or 'source'")
     errors: list[DashboardError] = []
-    index, index_errors = read_record_index(config)
+    index, index_errors = _record_data or read_record_index(config)
     # Concurrent edits can make a file disappear between glob and read. Retry
     # the read once, then report whatever remains instead of looping.
     if any(error.kind == "transient" for error in index_errors):
@@ -430,18 +434,37 @@ def build_snapshot(
         try:
             specification = values.get("tracking_backend") or config.tracking_backend
             backend = backend_for(specification, config)
+            if isinstance(backend, MLflowBackend):
+                backend.experiment_name = backend.experiment_name or values.get(
+                    "mlflow_experiment"
+                )
             source = _source_info(backend, config, selected, scope)
-            backend_runs = _list_source_runs(
-                backend,
-                record_id=selected if scope == "record" else None,
-                options=_backend_options(backend, values),
+            cached = (_source_cache or {}).get(source.identity)
+            if cached is None:
+                backend_runs = _list_source_runs(
+                    backend,
+                    record_id=None,
+                    options={
+                        **_backend_options(backend, values),
+                        **(
+                            {"read_only": True}
+                            if isinstance(backend, MLflowBackend)
+                            else {}
+                        ),
+                    },
+                )
+                cached = tuple(_run_view(run, source.identity) for run in backend_runs)
+                if _source_cache is not None:
+                    _source_cache[source.identity] = cached
+            runs = tuple(
+                run for run in cached if scope == "source" or run.record_id == selected
             )
-            runs = tuple(_run_view(run, source.identity) for run in backend_runs)
         except Exception as exc:
             errors.append(
                 DashboardError(
                     "backend",
-                    f"Tracking source unavailable: {exc}",
+                    f"Tracking source unavailable ({type(exc).__name__}); "
+                    "check backend configuration and storage.",
                     record_id=selected,
                 )
             )
@@ -486,12 +509,20 @@ def sort_runs(
         present.sort(key=lambda run: run.timestamp, reverse=not ascending)  # type: ignore[arg-type]
         return [*present, *sorted(missing, key=lambda run: run.key)]
 
+    def value_for(run: RunView) -> Any:
+        if field.startswith("metric."):
+            return run.metrics.get(field.removeprefix("metric."))
+        if field.startswith("param."):
+            return run.params.get(field.removeprefix("param."))
+        return run.metrics.get(field, run.params.get(field))
+
     def numeric(run: RunView) -> float | None:
-        value = run.metrics.get(field, run.params.get(field))
+        value = value_for(run)
         if isinstance(value, bool) or value is None:
             return None
         try:
-            return float(value)
+            number = float(value)
+            return number if math.isfinite(number) else None
         except (TypeError, ValueError):
             return None
 
@@ -499,4 +530,20 @@ def sort_runs(
     unranked = [run for run in result if numeric(run) is None]
     ranked.sort(key=lambda run: run.key)
     ranked.sort(key=lambda run: numeric(run), reverse=not ascending)  # type: ignore[arg-type]
-    return [*ranked, *sorted(unranked, key=lambda run: run.key)]
+    text = [
+        run
+        for run in unranked
+        if isinstance(value_for(run), str) and not _nonfinite(value_for(run))
+    ]
+    text.sort(key=lambda run: run.key)
+    text.sort(key=lambda run: str(value_for(run)), reverse=not ascending)
+    text_keys = {run.key for run in text}
+    missing = [run for run in unranked if run.key not in text_keys]
+    return [*ranked, *text, *sorted(missing, key=lambda run: run.key)]
+
+
+def _nonfinite(value: str) -> bool:
+    try:
+        return not math.isfinite(float(value))
+    except ValueError:
+        return False

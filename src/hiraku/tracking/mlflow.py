@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -84,8 +88,17 @@ class MLflowBackend(TrackingBackend):
         self,
         *,
         experiment_name: str | None = None,
+        read_only: bool = False,
         **options: Any,
     ) -> list[Run]:
+        if read_only:
+            with self._read_only_uri() as uri:
+                reader = MLflowBackend(
+                    self.config,
+                    tracking_uri=uri,
+                    experiment_name=self.experiment_name,
+                )
+                return reader._read_source_runs(experiment_name=experiment_name)
         from ..run import Run
 
         try:
@@ -103,9 +116,16 @@ class MLflowBackend(TrackingBackend):
                     return []
                 experiment_ids = [experiment.experiment_id]
             else:
-                experiment_ids = [
-                    item.experiment_id for item in client.search_experiments()
-                ]
+                experiment_ids = []
+                experiment_token = None
+                while True:
+                    experiments = client.search_experiments(page_token=experiment_token)
+                    experiment_ids.extend(item.experiment_id for item in experiments)
+                    experiment_token = getattr(experiments, "token", None)
+                    if not experiment_token:
+                        break
+            if not experiment_ids:
+                return []
             native_runs: list[Any] = []
             page_token: str | None = None
             while True:
@@ -160,6 +180,35 @@ class MLflowBackend(TrackingBackend):
         except Exception as exc:
             raise BackendError(f"mlflow backend query failed: {exc}") from exc
         return runs
+
+    @contextmanager
+    def _read_only_uri(self) -> Iterator[str]:
+        """Isolate SQLite initialization/migrations from the inspected project."""
+        from sqlalchemy.engine import make_url
+
+        if self.tracking_uri.startswith(("http://", "https://", "databricks")):
+            yield self.tracking_uri
+            return
+        if not self.tracking_uri.startswith("sqlite:"):
+            raise BackendError(
+                "Dashboard supports SQLite snapshots or remote MLflow servers"
+            )
+        url = make_url(self.tracking_uri)
+        if not url.database or url.database == ":memory:":
+            raise BackendError("Dashboard requires an existing MLflow database")
+        path = Path(url.database).resolve()
+        if not path.is_file():
+            raise BackendError("MLflow database does not exist")
+        with tempfile.TemporaryDirectory(prefix="hiraku-mlflow-") as directory:
+            copy = Path(directory) / "snapshot.db"
+            source = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+            target = sqlite3.connect(copy)
+            try:
+                source.backup(target)
+            finally:
+                target.close()
+                source.close()
+            yield f"sqlite:///{copy}"
 
 
 def _mlflow_uri(config: HirakuConfig, database: Path | None = None) -> str:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
+
 from hiraku.config import HirakuConfig
 from hiraku.dashboard import build_snapshot
 from hiraku.dashboard.views import (
@@ -62,8 +64,8 @@ def test_runs_frame_keeps_missing_values_missing(tmp_path: Path) -> None:
     frame = runs_frame(snapshot.runs, metrics=["acc"], params=["seed"])
 
     rows = frame.set_index("id")
-    assert rows.loc["with", "metric.acc"] == "0.9"
-    assert rows.loc["without", "metric.acc"] is None
+    assert rows.loc["with", "metric.acc"] == 0.9
+    assert pd.isna(rows.loc["without", "metric.acc"])
     assert rows.loc["without", "param.seed"] is None
 
 

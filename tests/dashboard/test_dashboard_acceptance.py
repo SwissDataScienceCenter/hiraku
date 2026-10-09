@@ -122,8 +122,11 @@ def test_local_mlflow_smoke(tmp_path: Path) -> None:
         mlflow.log_metric("loss", 0.25)
     run_id = active.info.run_id
 
+    before = _files(tmp_path)
+
     snapshot = build_snapshot(config, record_id="root")
 
+    assert _files(tmp_path) == before
     assert [run.id for run in snapshot.runs] == [run_id]
     assert snapshot.runs[0].metrics["loss"] == 0.25
 

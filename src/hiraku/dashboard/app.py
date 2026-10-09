@@ -1,370 +1,420 @@
-"""Packaged Hiraku dashboard marimo application.
+"""Bundled reactive dashboard. Start with hiraku dashboard."""
 
-This notebook is served by ``hiraku dashboard`` in marimo application mode
-(code hidden). It reads project context from environment variables set by the
-launcher and never writes to research records.
-"""
+import marimo
 
-import os
-from pathlib import Path
-
-import altair as alt
-import marimo as mo
-
-from hiraku.config import HirakuConfig
-from hiraku.dashboard import read_record_index
-from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
-from hiraku.dashboard.session import DashboardSession
-from hiraku.dashboard.views import (
-    metric_names,
-    param_names,
-    records_frame,
-    runs_frame,
-    sort_fields,
-    sorted_runs,
-)
+__generated_with = "0.25.1"
+app = marimo.App(width="wide")
 
 
-def _project_root() -> Path | None:
-    value = os.environ.get("HIRAKU_PROJECT_ROOT")
-    return Path(value) if value else None
+@app.cell
+def _():
+    import os
+    from pathlib import Path
+
+    import altair as alt
+    import marimo as mo
+
+    from hiraku.config import HirakuConfig
+    from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
+    from hiraku.dashboard.session import DashboardSession
+    from hiraku.dashboard.views import (
+        metric_names,
+        param_names,
+        records_frame,
+        runs_frame,
+        sort_fields,
+        sorted_runs,
+    )
+
+    config = HirakuConfig.load(Path(os.environ["HIRAKU_PROJECT_ROOT"]) / "hiraku.yml")
+    session = DashboardSession(config)
+    get_record, set_record = mo.state(
+        os.environ.get("HIRAKU_DASHBOARD_RECORD") or config.active_record_id
+    )
+    return (
+        alt,
+        metric_direction,
+        metric_names,
+        mo,
+        param_names,
+        pareto_points,
+        progress_points,
+        records_frame,
+        runs_frame,
+        session,
+        sort_fields,
+        sorted_runs,
+        get_record,
+        set_record,
+    )
 
 
-def _load_config() -> HirakuConfig:
-    root = _project_root()
-    if root is None:
-        raise RuntimeError(
-            "HIRAKU_PROJECT_ROOT is not set; launch the dashboard with "
-            "`hiraku dashboard`."
+@app.cell
+def _(mo):
+    refresh = mo.ui.refresh(
+        options=["5s", "10s", "30s", "1m"], default_interval=None, label="Refresh"
+    )
+    scope = mo.ui.radio(
+        ["Selected record's runs", "All attributed runs in this source"],
+        value="Selected record's runs",
+        label="Run scope",
+    )
+    mo.vstack([mo.md("# Hiraku dashboard"), mo.hstack([refresh, scope])])
+    return refresh, scope
+
+
+@app.cell
+def _(refresh, session):
+    _ = refresh.value
+    record_ids = session.reload_records()
+    return (record_ids,)
+
+
+@app.cell
+def _(get_record, mo, record_ids, set_record):
+    _selected = get_record()
+    _ids = list(record_ids)
+    # Keep disappeared selections visible so they produce an explicit error.
+    if _selected and _selected not in _ids:
+        _ids.append(_selected)
+    record_select = mo.ui.dropdown(
+        _ids,
+        value=_selected,
+        allow_select_none=True,
+        searchable=True,
+        label="Record",
+        on_change=set_record,
+    )
+    mo.vstack([record_select])
+    return (record_select,)
+
+
+@app.cell
+def _(mo, record_select, scope, session):
+    with mo.status.spinner(title="Fetching records and runs…"):
+        result = session.refresh(
+            record_select.value,
+            "record" if scope.value == "Selected record's runs" else "source",
+            use_active_record=False,
+            cached=True,
         )
-    marker = root / "hiraku.yml"
-    if not marker.is_file():
-        raise RuntimeError(f"No hiraku.yml found at {marker}")
-    return HirakuConfig.load(marker)
-
-
-def _load_snapshot(record_id, scope):
-    result = session.refresh(
-        record_id,
-        scope,
-        use_active_record=record_id is not None,
-    )
-    return result.snapshot, result.error
-
-
-config = _load_config()
-session = DashboardSession(config)
-requested_record = os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
-requested_scope = os.environ.get("HIRAKU_DASHBOARD_SCOPE") or "record"
-index, index_errors = read_record_index(config)
-mo.stop(
-    not index and not index_errors,
-    mo.md("No research records found in this project."),
-)
-
-record_options = {record_id: record_id for record_id in sorted(index)}
-record_select = mo.ui.dropdown(
-    options=record_options,
-    value=requested_record or config.active_record_id,
-    allow_select_none=True,
-    label="Record",
-    full_width=True,
-)
-scope_radio = mo.ui.radio(
-    {
-        "record": "Selected record's runs",
-        "source": "All attributed runs in this source",
-    },
-    value=requested_scope,
-    label="Run scope",
-)
-refresh_button = mo.ui.button(label="Refresh")
-auto_refresh = mo.ui.refresh(
-    options=["5s", "10s", "30s", "1m"],
-    default_interval=None,
-    label="Auto-refresh",
-)
-
-_ = refresh_button.value
-_ = auto_refresh.value
-snapshot, snapshot_error = _load_snapshot(record_select.value, scope_radio.value)
-
-mo.stop(snapshot is None, mo.md(f"**Dashboard error:** {snapshot_error}"))
-if snapshot.stale:
-    fetch_status = mo.md(
-        "Showing the last successful snapshot; the latest fetch failed or "
-        "was coalesced."
-    )
-else:
-    fetch_status = mo.md(f"Last fetched at {snapshot.refreshed_at.isoformat()}")
-
-backend_errors = [error for error in snapshot.errors if error.kind == "backend"]
-
-if backend_errors:
-    run_status = mo.md(
-        "**Backend unavailable:** "
-        + " ".join(error.message for error in backend_errors)
-    )
-elif snapshot.source is None:
-    run_status = mo.md("No tracking source selected; choose a record above.")
-elif not snapshot.runs:
-    run_status = mo.md("No runs found in this scope.")
-else:
-    run_status = mo.md(
-        f"Showing {len(snapshot.runs)} run(s) from **{snapshot.source.label}** "
-        f"({snapshot.scope})."
-    )
-
-all_metrics = metric_names(snapshot)
-all_params = param_names(snapshot)
-metric_select = mo.ui.multiselect(
-    options=all_metrics,
-    value=all_metrics[:4],
-    label="Metrics",
-    full_width=True,
-)
-param_select = mo.ui.multiselect(
-    options=all_params,
-    value=all_params[:2],
-    label="Parameters",
-    full_width=True,
-)
-sort_select = mo.ui.dropdown(
-    options={field: field for field in sort_fields(snapshot)},
-    value="timestamp",
-    label="Sort runs by",
-    full_width=True,
-)
-ascending_checkbox = mo.ui.checkbox(value=True, label="Ascending")
-
-ordered_runs = sorted_runs(
-    snapshot, sort_select.value, ascending=ascending_checkbox.value
-)
-runs_table = mo.ui.table(
-    runs_frame(
-        ordered_runs,
-        metrics=metric_select.value,
-        params=param_select.value,
-    ),
-    selection="single",
-    page_size=10,
-    label="Runs",
-)
-records_table = mo.ui.table(
-    records_frame(snapshot),
-    selection=None,
-    page_size=10,
-    label="Records",
-)
-
-selected_record = next(
-    (record for record in snapshot.records if record.id == record_select.value),
-    None,
-)
-if selected_record is None:
-    if record_select.value is not None:
-        detail = mo.md(
-            f"Selected record **{record_select.value}** is no longer present "
-            "after refresh."
-        )
-    else:
-        detail = mo.md("Select a record to inspect its details.")
-else:
-    inherited = [
-        f"- **{key}** = `{value}` (from {source})"
-        for key, value in selected_record.fields.items()
-        if (source := selected_record.sources.get(key)) and source != selected_record.id
-    ]
-    local = [
-        f"- **{key}** = `{value}`"
-        for key, value in selected_record.fields.items()
-        if selected_record.sources.get(key) == selected_record.id
-    ]
-    detail = mo.vstack(
-        [
-            mo.md(
-                f"### {selected_record.id}\n"
-                f"Type: {selected_record.type or '—'} · "
-                f"Status: {selected_record.status or '—'} · "
-                f"Commit: {selected_record.commit or '—'}"
-            ),
-            mo.md(selected_record.markdown or "_No description._"),
-            mo.md("**Effective fields (explicit)**\n" + ("\n".join(local) or "_None_")),
-            mo.md(
-                "**Effective fields (inherited)**\n"
-                + ("\n".join(inherited) or "_None_")
-            ),
-        ]
-    )
-
-errors_block = (
+    mo.stop(result.snapshot is None, mo.md(f"Dashboard error: {result.error}"))
+    snapshot = result.snapshot
     mo.vstack(
         [
-            mo.md("## Warnings"),
-            *[mo.md(f"- `{error.kind}`: {error.message}") for error in snapshot.errors],
+            mo.md(
+                (
+                    "Fetch failed: "
+                    if result.error and not snapshot.stale
+                    else "Last successful fetch: "
+                )
+                + snapshot.refreshed_at.isoformat()
+                + (" — **STALE**" if snapshot.stale else "")
+            ),
+            mo.md(result.error or ""),
+            mo.md(
+                f"Source: {snapshot.source.label} · Scope: {snapshot.scope}"
+                if snapshot.source
+                else "Select a record to load its tracking source."
+            ),
+            *[mo.md(f"**{error.kind}:** {error.message}") for error in snapshot.errors],
         ]
     )
-    if snapshot.errors
-    else mo.md("")
-)
+    return (snapshot,)
 
-view_radio = mo.ui.radio(
-    {"progress": "Progress", "pareto": "Pareto"},
-    value="progress",
-    label="Plot view",
-)
-progress_metric = mo.ui.dropdown(
-    options={metric: metric for metric in all_metrics},
-    value=all_metrics[0] if all_metrics else None,
-    allow_select_none=True,
-    label="Progress metric",
-    full_width=True,
-)
-pareto_x = mo.ui.dropdown(
-    options={metric: metric for metric in all_metrics},
-    value=all_metrics[0] if all_metrics else None,
-    allow_select_none=True,
-    label="Pareto X metric",
-    full_width=True,
-)
-pareto_y_value = all_metrics[0] if all_metrics else None
-if len(all_metrics) > 1:
-    pareto_y_value = all_metrics[1]
-pareto_y = mo.ui.dropdown(
-    options={metric: metric for metric in all_metrics},
-    value=pareto_y_value,
-    allow_select_none=True,
-    label="Pareto Y metric",
-    full_width=True,
-)
-pareto_x_direction = mo.ui.radio(
-    {"minimize": "Minimize", "maximize": "Maximize"},
-    value=metric_direction(snapshot, pareto_x.value) or "minimize",
-    label="Pareto X direction",
-)
-pareto_y_direction = mo.ui.radio(
-    {"minimize": "Minimize", "maximize": "Maximize"},
-    value=metric_direction(snapshot, pareto_y.value) or "minimize",
-    label="Pareto Y direction",
-)
 
-if view_radio.value == "progress":
-    if progress_metric.value is None:
-        plot = mo.md("No metric selected for the progress plot.")
-    else:
-        progress = progress_points(
-            snapshot.runs,
-            progress_metric.value,
-            direction=metric_direction(snapshot, progress_metric.value),
-        )
-        frame = progress.frame
-        if not frame.empty:
-            x_kind = str(frame.iloc[0]["x_kind"])
-            x_encoding = (
-                alt.X("x:T", title="timestamp")
-                if x_kind == "timestamp"
-                else alt.X("x:Q", title="deterministic run index")
-            )
-            base = (
-                alt.Chart(frame)
-                .mark_line(point={"filled": True})
-                .encode(
-                    x=x_encoding,
-                    y=alt.Y("value:Q", title=progress_metric.value),
-                    tooltip=["run_id", "record_id", "commit", "value"],
-                )
-            )
-            if "best_so_far" in frame.columns:
-                overlay = (
-                    alt.Chart(frame)
-                    .mark_line(strokeDash=[4, 4], color="orange")
-                    .encode(x=x_encoding, y="best_so_far:Q")
-                )
-                chart = base + overlay
-            else:
-                chart = base
-            plot = mo.ui.altair_chart(chart, chart_selection="point", label="Progress")
-        else:
-            plot = mo.md("No plottable runs for this metric.")
-else:
-    if pareto_x.value is None or pareto_y.value is None:
-        plot = mo.md("Select two metrics for the Pareto plot.")
-    else:
-        pareto = pareto_points(
-            snapshot.runs,
-            pareto_x.value,
-            pareto_y.value,
-            direction_x=pareto_x_direction.value,
-            direction_y=pareto_y_direction.value,
-        )
-        if not pareto.frame.empty:
-            chart = (
-                alt.Chart(pareto.frame)
-                .mark_point(filled=True)
-                .encode(
-                    x=alt.X("x_original:Q", title=pareto_x.value),
-                    y=alt.Y("y_original:Q", title=pareto_y.value),
-                    color=alt.Color(
-                        "is_pareto:N",
-                        legend=alt.Legend(title="Pareto frontier"),
-                    ),
-                    tooltip=[
-                        "run_id",
-                        "record_id",
-                        "commit",
-                        "x_original",
-                        "y_original",
-                    ],
-                )
-            )
-            plot = mo.ui.altair_chart(chart, chart_selection="point", label="Pareto")
-        else:
-            plot = mo.md("No plottable runs for these metrics.")
+@app.cell
+def _(mo, records_frame, snapshot):
+    mo.vstack(
+        [
+            mo.md("## Records"),
+            mo.ui.table(records_frame(snapshot), selection=None, page_size=10),
+        ]
+    )
+    return
 
-selected_plot_rows = getattr(plot, "value", None)
-if selected_plot_rows is None:
-    selected_plot_rows = []
-plot_selection = mo.ui.table(
-    selected_plot_rows,
-    selection=None,
-    label="Selected plot points",
-)
 
-mo.vstack(
-    [
-        mo.md("# Hiraku dashboard"),
-        mo.hstack([record_select, scope_radio, refresh_button, auto_refresh]),
-        fetch_status,
-        mo.md(
-            f"Source: **{snapshot.source.label}** ({snapshot.scope})"
-            if snapshot.source
-            else "No tracking source selected."
-        ),
-        mo.hstack(
+@app.cell
+def _(mo, snapshot):
+    _record = next(
+        (r for r in snapshot.records if r.id == snapshot.selected_record_id), None
+    )
+    _detail = [mo.md("## Record detail")]
+    if _record:
+        _detail.extend(
             [
-                mo.vstack([mo.md("## Records"), records_table]),
-                mo.vstack([mo.md("## Record detail"), detail]),
-            ],
-            widths=[1, 1],
-        ),
-        mo.md("## Runs"),
-        mo.hstack(
-            [sort_select, ascending_checkbox, metric_select, param_select],
-            widths=[1, 0.5, 1, 1],
-        ),
-        run_status,
-        runs_table,
-        mo.md("## Plots"),
-        view_radio,
-        mo.hstack(
-            [progress_metric, pareto_x, pareto_y],
-            widths=[1, 1, 1],
-        ),
-        mo.hstack([pareto_x_direction, pareto_y_direction]),
-        plot,
-        plot_selection,
-        errors_block,
-    ]
-)
+                mo.md(
+                    f"### {_record.id}\nType: {_record.type or '—'} · "
+                    f"Status: {_record.status or '—'} · Commit: {_record.commit or '—'}"
+                ),
+                mo.md(_record.markdown or "_No description._"),
+                mo.ui.table(
+                    [
+                        {
+                            "field": k,
+                            "value": str(v),
+                            "defined by": str(_record.sources.get(k)),
+                            "origin": "explicit"
+                            if _record.sources.get(k) == _record.id
+                            else "inherited / merged",
+                        }
+                        for k, v in _record.fields.items()
+                    ],
+                    selection=None,
+                ),
+            ]
+        )
+    else:
+        _detail.append(mo.md("No record selected."))
+    mo.vstack(_detail)
+    return
 
-app = mo.App(width="wide")
+
+@app.cell
+def _(metric_names, mo, param_names, snapshot, sort_fields):
+    metrics = metric_names(snapshot)
+    params = param_names(snapshot)
+    metric_select = mo.ui.multiselect(metrics, value=metrics[:4], label="Metrics")
+    param_select = mo.ui.multiselect(params, value=params[:2], label="Parameters")
+    sort_select = mo.ui.dropdown(sort_fields(snapshot), value="timestamp", label="Sort")
+    ascending = mo.ui.checkbox(value=True, label="Ascending")
+    mo.vstack(
+        [
+            mo.md("## Runs"),
+            mo.hstack([metric_select, param_select, sort_select, ascending]),
+        ]
+    )
+    return ascending, metric_select, metrics, param_select, params, sort_select
+
+
+@app.cell
+def _(
+    ascending,
+    metric_select,
+    mo,
+    param_select,
+    runs_frame,
+    session,
+    snapshot,
+    sort_select,
+    sorted_runs,
+):
+    _runs = sorted_runs(snapshot, sort_select.value, ascending=ascending.value)
+    runs_table = mo.ui.table(
+        runs_frame(_runs, metrics=metric_select.value, params=param_select.value),
+        selection="single",
+        page_size=10,
+        label="Runs",
+        initial_selection=[
+            i for i, run in enumerate(_runs) if run.key == session.selected_run
+        ],
+        on_change=session.select_run,
+        hidden_columns=["key"],
+    )
+    mo.vstack([mo.md("No runs found in this scope." if not _runs else ""), runs_table])
+    return (runs_table,)
+
+
+@app.cell
+def _(mo, runs_table, set_record, snapshot):
+    _rows = runs_table.value
+    _run = next(
+        (r for r in snapshot.runs if len(_rows) and r.key == _rows.iloc[0]["key"]), None
+    )
+    record_link = (
+        mo.ui.button(
+            label=f"Open record {_run.record_id}",
+            on_click=lambda _: set_record(_run.record_id),
+        )
+        if _run and _run.record_id in {r.id for r in snapshot.records}
+        else mo.md("")
+    )
+    mo.vstack(
+        [
+            mo.md("### Run provenance"),
+            mo.md(
+                f"Run: {_run.id} · "
+                f"Record: {_run.record_id or 'metadata unavailable'} · "
+                f"Commit: {_run.commit or 'metadata unavailable'}"
+            )
+            if _run
+            else mo.md("Select a run to inspect its provenance."),
+            record_link,
+            mo.ui.table(
+                [{"field": k, "value": str(v)} for k, v in vars(_run).items()],
+                selection=None,
+            )
+            if _run
+            else mo.md(""),
+        ]
+    )
+    return (record_link,)
+
+
+@app.cell
+def _(metrics, mo, params):
+    view = mo.ui.radio(["Progress", "Pareto"], value="Progress", label="Plot view")
+    x_metric = mo.ui.dropdown(
+        metrics,
+        value=metrics[0] if metrics else None,
+        allow_select_none=True,
+        label="X / progress metric",
+    )
+    y_metric = mo.ui.dropdown(
+        metrics,
+        value=metrics[-1] if metrics else None,
+        allow_select_none=True,
+        label="Y metric",
+    )
+    cohort_field = mo.ui.dropdown(
+        params, allow_select_none=True, label="Filter cohort by parameter"
+    )
+    mo.vstack([mo.md("## Plots"), view, mo.hstack([x_metric, y_metric, cohort_field])])
+    return cohort_field, view, x_metric, y_metric
+
+
+@app.cell
+def _(cohort_field, mo, snapshot):
+    _values = sorted({str(r.params.get(cohort_field.value)) for r in snapshot.runs})
+    cohort_value = mo.ui.dropdown(_values, allow_select_none=True, label="Cohort value")
+    cohort_value if cohort_field.value else mo.md("")
+    return (cohort_value,)
+
+
+@app.cell
+def _(metric_direction, mo, snapshot, x_metric, y_metric):
+    x_direction = mo.ui.dropdown(
+        ["minimize", "maximize"],
+        value=metric_direction(snapshot, x_metric.value),
+        allow_select_none=True,
+        label="X direction",
+    )
+    y_direction = mo.ui.dropdown(
+        ["minimize", "maximize"],
+        value=metric_direction(snapshot, y_metric.value),
+        allow_select_none=True,
+        label="Y direction",
+    )
+    mo.hstack([x_direction, y_direction])
+    return x_direction, y_direction
+
+
+@app.cell
+def _(
+    alt,
+    cohort_field,
+    cohort_value,
+    mo,
+    pareto_points,
+    progress_points,
+    snapshot,
+    view,
+    x_direction,
+    x_metric,
+    y_direction,
+    y_metric,
+):
+    _runs = [
+        r
+        for r in snapshot.runs
+        if not cohort_field.value
+        or cohort_value.value is None
+        or str(r.params.get(cohort_field.value)) == cohort_value.value
+    ]
+    mo.stop(x_metric.value is None, mo.md("No metric selected."))
+    if view.value == "Progress":
+        _data = progress_points(_runs, x_metric.value, direction=x_direction.value)
+        _frame = _data.frame
+        mo.stop(_frame.empty, mo.md(f"No plottable runs; omitted {_data.omitted}."))
+        _x = (
+            alt.X(
+                "x:T",
+                title="Run timestamp",
+                scale=alt.Scale(
+                    domain=[
+                        float(_frame["x"].min()) - 1000,
+                        float(_frame["x"].max()) + 1000,
+                    ]
+                ),
+            )
+            if _frame.iloc[0]["x_kind"] == "timestamp"
+            else alt.X("x:Q", title="Deterministic run index")
+        )
+        _chart = (
+            alt.Chart(alt.InlineData(values=_frame.to_dict("records")))
+            .mark_point(filled=True)
+            .encode(
+                x=_x,
+                y=alt.Y("value:Q", title=x_metric.value),
+                tooltip=["run_id:N", "record_id:N", "commit:N", "value:Q"],
+            )
+        )
+        if "best_so_far" in _frame:
+            _chart += (
+                alt.Chart(alt.InlineData(values=_frame.to_dict("records")))
+                .mark_line(strokeDash=[4, 4])
+                .encode(x=_x, y="best_so_far:Q")
+            )
+    else:
+        mo.stop(
+            not y_metric.value or not x_direction.value or not y_direction.value,
+            mo.md("Select both metrics and explicit optimization directions."),
+        )
+        _data = pareto_points(
+            _runs,
+            x_metric.value,
+            y_metric.value,
+            direction_x=x_direction.value,
+            direction_y=y_direction.value,
+        )
+        mo.stop(
+            _data.frame.empty, mo.md(f"No plottable runs; omitted {_data.omitted}.")
+        )
+        _chart = (
+            alt.Chart(alt.InlineData(values=_data.frame.to_dict("records")))
+            .mark_point(filled=True)
+            .encode(
+                x=alt.X("x_original:Q", title=x_metric.value),
+                y=alt.Y("y_original:Q", title=y_metric.value),
+                color="is_pareto:N",
+                tooltip=[
+                    "run_id:N",
+                    "record_id:N",
+                    "commit:N",
+                    "x_original:Q",
+                    "y_original:Q",
+                ],
+            )
+        )
+    plot_frame = _data.frame
+    # Inline records avoid browser-dependent temporal parsing in Arrow transport.
+    plot = mo.ui.altair_chart(_chart, chart_selection="point", label=view.value)
+    mo.vstack(
+        [
+            mo.md(
+                f"Comparison cohort: {len(_runs)} runs · {snapshot.scope} scope · "
+                f"{cohort_field.value or 'all protocols'} = "
+                f"{cohort_value.value or 'all'}\n\n"
+                "Matching metric names do not establish comparable "
+                "evaluation protocols."
+            ),
+            mo.md(f"Omitted {_data.omitted} runs: {_data.omitted_reason}."),
+            plot,
+        ]
+    )
+    return plot, plot_frame
+
+
+@app.cell
+def _(mo, plot, plot_frame):
+    mo.vstack(
+        [
+            mo.md("### Selected plot points"),
+            mo.ui.table(plot.apply_selection(plot_frame), selection=None),
+        ]
+    )
+    return
+
+
+if __name__ == "__main__":
+    app.run()

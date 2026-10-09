@@ -12,6 +12,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Add a read-only dashboard query layer that never mutates records and queries each selected tracking source once per refresh.
 - Paginate MLflow run search so the dashboard does not silently truncate source runs at the MLflow page size.
 
+### Fixed
+
+- Make the dashboard a reactive marimo notebook with working record/run selection, cohort filtering, plot controls, and refresh status.
+- Preserve source-qualified selections and cached source queries; sort numeric metrics and namespaced parameters correctly.
+- Keep unavailable tracking sources distinguishable from empty results, retain labelled stale snapshots, and require explicit unknown Pareto directions.
+- Protect local MLflow databases from initialization and migrations while browsing; include storage identity in run keys and paginate experiment discovery.
+
 ## [0.1.1] - 2026-09-30
 
 ### Added

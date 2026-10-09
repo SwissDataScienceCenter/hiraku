@@ -65,13 +65,14 @@ def runs_frame(
     metric_columns = list(metrics)
     param_columns = list(params)
     if not run_list:
-        columns = ["id", "record", "timestamp", "commit", "entrypoint"]
+        columns = ["key", "id", "record", "timestamp", "commit", "entrypoint"]
         columns.extend(f"metric.{name}" for name in metric_columns)
         columns.extend(f"param.{name}" for name in param_columns)
         return pd.DataFrame(columns=columns)
     rows: list[dict[str, object]] = []
     for run in run_list:
         row: dict[str, object] = {
+            "key": run.key,
             "id": run.id,
             "record": run.record_id,
             "timestamp": run.timestamp.isoformat() if run.timestamp else None,
@@ -81,7 +82,12 @@ def runs_frame(
         row.update({f"metric.{name}": run.metrics.get(name) for name in metric_columns})
         row.update({f"param.{name}": run.params.get(name) for name in param_columns})
         rows.append(row)
-    return pd.DataFrame(rows)
+    frame = pd.DataFrame(rows)
+    for name in metric_columns:
+        frame[f"metric.{name}"] = pd.to_numeric(
+            frame[f"metric.{name}"], errors="coerce"
+        )
+    return frame
 
 
 def sort_fields(snapshot: DashboardSnapshot) -> list[str]:
@@ -98,8 +104,6 @@ def sorted_runs(
     """Sort cached runs without re-querying the tracking source."""
     from .data import sort_runs
 
-    if field.startswith("metric."):
-        field = field.removeprefix("metric.")
-    elif field.startswith("param."):
-        field = field.removeprefix("param.")
+    if field == "record":
+        field = "record_id"
     return sort_runs(snapshot.runs, field, ascending=ascending)

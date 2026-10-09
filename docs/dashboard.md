@@ -18,6 +18,9 @@ uv tool install "hiraku[dashboard]"
 The command prints an install hint if the extra is missing. It never installs
 packages automatically.
 
+Hiraku supports Python 3.11 and newer. Install the optional tracking extras
+(`mlflow` or `wandb`) as well when using those sources.
+
 ## Commands
 
 ```bash
@@ -53,10 +56,20 @@ different sources never collide.
   clearly labelled deterministic run index when timestamps are missing. A
   best-so-far overlay appears only when the metric direction is declared.
 - **Pareto** plots two selected metrics and highlights the nondominated
-  frontier. Directions default to the selected record's metric declarations;
-  otherwise they default to *minimize* and must be set explicitly.
+  frontier. Directions use unambiguous declarations from the comparison
+  scope; unknown or conflicting directions require an explicit choice.
 - Missing and non-finite values are excluded from calculations with a visible
   omitted-row count and are never treated as zero.
+- Filter the comparison cohort by a recorded parameter (for example an
+  evaluation protocol or dataset split). Matching metric names alone do not
+  make runs scientifically comparable.
+
+The Refresh control fetches data explicitly; periodic refresh is off by
+default. Record selection and scope changes reuse a source fetched in the
+current refresh. Visual changes do not query tracking services. A failed
+refresh retains the last successful data for the same record and scope,
+labels it **STALE**, and displays the error. Run selection is preserved by
+source and run ID when sorting or refreshing.
 
 ## Read-only guarantee
 
@@ -68,6 +81,13 @@ The bundled dashboard only reads records and tracking sources:
   without re-querying the tracker;
 - marimo session/cache files are kept in a temporary directory outside the
   research records.
+
+Local MLflow SQLite databases are inspected through a temporary snapshot, so
+MLflow initialization or schema migrations cannot change the original
+database. Missing databases produce an unavailable-source error and are not
+created. Other MLflow databases should be accessed through an HTTP tracking
+server; direct non-SQLite database and legacy file-store URIs are not supported
+by the dashboard's read-only path.
 
 A custom notebook is trusted executable code. The view-only guarantee applies
 to the shipped dashboard, not to arbitrary user code.
@@ -83,16 +103,49 @@ A custom notebook receives project context through environment variables:
 Use the snapshot API for backend-agnostic rendering:
 
 ```python
-import marimo as mo
-from hiraku.config import HirakuConfig
-from hiraku.dashboard import build_snapshot
-from hiraku.dashboard.plots import progress_points
+import marimo
 
-config = HirakuConfig.load(Path(__import__("os").environ["HIRAKU_PROJECT_ROOT"]) / "hiraku.yml")
-snapshot = build_snapshot(config)
-progress = progress_points(snapshot.runs, "loss", direction="minimize")
-mo.ui.altair_chart(progress.frame)
+app = marimo.App()
+
+
+@app.cell
+def _():
+    import os
+    from pathlib import Path
+
+    import altair as alt
+    import marimo as mo
+
+    from hiraku.config import HirakuConfig
+    from hiraku.dashboard import build_snapshot
+    from hiraku.dashboard.plots import progress_points
+
+    config = HirakuConfig.load(
+        Path(os.environ["HIRAKU_PROJECT_ROOT"]) / "hiraku.yml"
+    )
+    snapshot = build_snapshot(
+        config, record_id=os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
+    )
+    progress = progress_points(snapshot.runs, "loss", direction="minimize")
+    mo.stop(progress.frame.empty, mo.md("No loss values available."))
+    mo.ui.altair_chart(
+        alt.Chart(progress.frame).mark_point().encode(
+            x=alt.X("value:Q", title="Loss"), y="run_id:N"
+        )
+    )
+    return
+
+
+if __name__ == "__main__":
+    app.run()
 ```
+
+Snapshot version 1 exposes `records` (effective fields and defining record IDs),
+`runs` (source-qualified keys, provenance, metrics and parameters), `source`,
+`scope`, `errors`, and `refreshed_at`. These are plain Python structures.
+Use `DashboardSession.refresh()` for coalescing and last-successful-data handling.
+Keep UI creation, snapshot fetching, and visual transformations in separate
+marimo cells so changes to visual controls do not trigger fetching.
 
 ## Troubleshooting
 
@@ -103,3 +156,60 @@ mo.ui.altair_chart(progress.frame)
 - **`Port must be an integer between 1 and 65535`** — choose another `--port`.
 - **`Backend unavailable`** — the tracking source could not be read. Fix the
   backend configuration or storage, then press *Refresh*.
+
+## Development checks
+
+Run the notebook execution, query, launcher, and plot regressions with:
+
+```bash
+uv run --all-extras pytest tests/dashboard
+uv run --all-extras marimo check src/hiraku/dashboard/app.py
+```
+
+Browser acceptance uses Selenium from the development dependency group and
+a locally installed browser. It is opt-in for ordinary unit-test runs. With
+Chrome installed, set `HIRAKU_TEST_BROWSER=chrome` and run:
+
+```bash
+uv run --all-extras pytest tests/dashboard/test_dashboard_browser.py -n 0
+```
+
+On Linux, WebKitGTK is also supported: install the distribution's
+`webkitgtk-webdriver` (called `webkit2gtk-driver` on older distributions)
+and `xvfb` packages, set `HIRAKU_TEST_BROWSER=webkit`, and run the same
+command under `xvfb-run -a`. These checks create temporary fixture projects;
+they require no tracking credentials.
+
+## Implementation review validation
+
+The review began at `280e33b`. The checked-out tracking API uses
+`backend_for()` and `list_all_recorded_runs()`; the dashboard resolves fields
+against its non-mutating index before choosing that adapter. PR 77's remote
+status could not be rechecked because GitHub authentication failed. No
+upstream branch was merged or cherry-picked.
+
+| Plan tickets | Validation |
+| --- | --- |
+| HD-00/01 | Optional imports, Python 3.11–3.14 suites, marimo notebook execution and static checks |
+| HD-02 | Source caching, inherited configuration, storage identity, malformed metadata, journals, bounded rereads, deep trees, and unchanged-file assertions |
+| HD-03 | Launcher forwarding, dependency errors, occupied ports, interruption cleanup, isolated core/dashboard wheel installs |
+| HD-04/05 | Browser record/run selection, provenance, source scope, sorting, progress-point selection and Pareto switching; pure plot regressions |
+| HD-06 | Coalesced refresh, stale snapshots, explicit browser refresh, source/run selection retention and custom-notebook forwarding |
+| HD-07 | Local CSV/MLflow and mocked W&B coverage, distribution smoke checks, browser workflow and scale measurement |
+
+The browser checks used WebKitGTK on a Linux ARM64 container with eight
+reported logical CPUs, Python 3.14.4, uv 0.9.26, marimo 0.25.1, Altair 6.3.0
+and pandas 2.3.3. The synthetic 1,000-record/10,000-run case took 0.20 seconds
+to fetch, 3.75 seconds to load the notebook and chart in the browser, and
+0.74 seconds to sort and select a run. Browser load includes notebook
+execution and rendering; these measurements are not latency guarantees.
+The tracker call-count regression verifies one source query per refresh.
+
+The full suite passed on each Python version from 3.11 through 3.14:
+145 passed and four skipped. The skips are the opt-in browser workflow and
+three existing external-integration tests. The browser workflow also passed
+explicitly against both the checkout and the installed wheel. Ruff lint and
+format checks, the changelog check, documentation build, and package build passed.
+Chrome and macOS browser checks were not run in this environment. Direct
+non-SQLite MLflow database access remains outside the read-only dashboard
+path; use a tracking server for those stores.
