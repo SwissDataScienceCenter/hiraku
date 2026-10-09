@@ -8,10 +8,12 @@ launcher and never writes to research records.
 import os
 from pathlib import Path
 
+import altair as alt
 import marimo as mo
 
 from hiraku.config import HirakuConfig
 from hiraku.dashboard import build_snapshot, read_record_index
+from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
 from hiraku.dashboard.views import (
     metric_names,
     param_names,
@@ -195,6 +197,128 @@ errors_block = (
     else mo.md("")
 )
 
+view_radio = mo.ui.radio(
+    {"progress": "Progress", "pareto": "Pareto"},
+    value="progress",
+    label="Plot view",
+)
+progress_metric = mo.ui.dropdown(
+    options={metric: metric for metric in all_metrics},
+    value=all_metrics[0] if all_metrics else None,
+    allow_select_none=True,
+    label="Progress metric",
+    full_width=True,
+)
+pareto_x = mo.ui.dropdown(
+    options={metric: metric for metric in all_metrics},
+    value=all_metrics[0] if all_metrics else None,
+    allow_select_none=True,
+    label="Pareto X metric",
+    full_width=True,
+)
+pareto_y_value = all_metrics[0] if all_metrics else None
+if len(all_metrics) > 1:
+    pareto_y_value = all_metrics[1]
+pareto_y = mo.ui.dropdown(
+    options={metric: metric for metric in all_metrics},
+    value=pareto_y_value,
+    allow_select_none=True,
+    label="Pareto Y metric",
+    full_width=True,
+)
+pareto_x_direction = mo.ui.radio(
+    {"minimize": "Minimize", "maximize": "Maximize"},
+    value=metric_direction(snapshot, pareto_x.value) or "minimize",
+    label="Pareto X direction",
+)
+pareto_y_direction = mo.ui.radio(
+    {"minimize": "Minimize", "maximize": "Maximize"},
+    value=metric_direction(snapshot, pareto_y.value) or "minimize",
+    label="Pareto Y direction",
+)
+
+if view_radio.value == "progress":
+    if progress_metric.value is None:
+        plot = mo.md("No metric selected for the progress plot.")
+    else:
+        progress = progress_points(
+            snapshot.runs,
+            progress_metric.value,
+            direction=metric_direction(snapshot, progress_metric.value),
+        )
+        frame = progress.frame
+        if not frame.empty:
+            x_kind = str(frame.iloc[0]["x_kind"])
+            x_encoding = (
+                alt.X("x:T", title="timestamp")
+                if x_kind == "timestamp"
+                else alt.X("x:Q", title="deterministic run index")
+            )
+            base = (
+                alt.Chart(frame)
+                .mark_line(point={"filled": True})
+                .encode(
+                    x=x_encoding,
+                    y=alt.Y("value:Q", title=progress_metric.value),
+                    tooltip=["run_id", "record_id", "commit", "value"],
+                )
+            )
+            if "best_so_far" in frame.columns:
+                overlay = (
+                    alt.Chart(frame)
+                    .mark_line(strokeDash=[4, 4], color="orange")
+                    .encode(x=x_encoding, y="best_so_far:Q")
+                )
+                chart = base + overlay
+            else:
+                chart = base
+            plot = mo.ui.altair_chart(chart, chart_selection="point", label="Progress")
+        else:
+            plot = mo.md("No plottable runs for this metric.")
+else:
+    if pareto_x.value is None or pareto_y.value is None:
+        plot = mo.md("Select two metrics for the Pareto plot.")
+    else:
+        pareto = pareto_points(
+            snapshot.runs,
+            pareto_x.value,
+            pareto_y.value,
+            direction_x=pareto_x_direction.value,
+            direction_y=pareto_y_direction.value,
+        )
+        if not pareto.frame.empty:
+            chart = (
+                alt.Chart(pareto.frame)
+                .mark_point(filled=True)
+                .encode(
+                    x=alt.X("x_original:Q", title=pareto_x.value),
+                    y=alt.Y("y_original:Q", title=pareto_y.value),
+                    color=alt.Color(
+                        "is_pareto:N",
+                        legend=alt.Legend(title="Pareto frontier"),
+                    ),
+                    tooltip=[
+                        "run_id",
+                        "record_id",
+                        "commit",
+                        "x_original",
+                        "y_original",
+                    ],
+                )
+            )
+            plot = mo.ui.altair_chart(chart, chart_selection="point", label="Pareto")
+        else:
+            plot = mo.md("No plottable runs for these metrics.")
+
+selected_plot_rows = getattr(plot, "value", None)
+if selected_plot_rows is None:
+    selected_plot_rows = []
+plot_selection = mo.ui.table(
+    selected_plot_rows,
+    selection=None,
+    label="Selected plot points",
+)
+
 mo.vstack(
     [
         mo.md("# Hiraku dashboard"),
@@ -218,6 +342,15 @@ mo.vstack(
         ),
         run_status,
         runs_table,
+        mo.md("## Plots"),
+        view_radio,
+        mo.hstack(
+            [progress_metric, pareto_x, pareto_y],
+            widths=[1, 1, 1],
+        ),
+        mo.hstack([pareto_x_direction, pareto_y_direction]),
+        plot,
+        plot_selection,
         errors_block,
     ]
 )
