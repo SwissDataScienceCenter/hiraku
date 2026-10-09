@@ -15,6 +15,12 @@ def _():
     import marimo as mo
 
     from hiraku.config import HirakuConfig
+    from hiraku.dashboard.actions import (
+        RecordDraft,
+        RecordDraftError,
+        create_record,
+        validate_record_draft,
+    )
     from hiraku.dashboard.branding import logo_data_uri, theme_css
     from hiraku.dashboard.capability import DashboardCapability
     from hiraku.dashboard.graph import RecordGraph, tree_payload
@@ -42,10 +48,21 @@ def _():
         os.environ.get("HIRAKU_DASHBOARD_RECORD") or config.active_record_id
     )
     get_expanded, set_expanded = mo.state([])
+    get_action_refresh, set_action_refresh = mo.state(0)
+    get_form_submit, set_form_submit = mo.state(None)
+    get_form_handled, set_form_handled = mo.state(None)
+    get_form_busy, set_form_busy = mo.state(False)
+    get_form_result, set_form_result = mo.state(None)
+    get_form_error, set_form_error = mo.state(None)
+    get_preview_request, set_preview_request = mo.state(None)
+    get_preview_handled, set_preview_handled = mo.state(None)
+    get_preview_result, set_preview_result = mo.state(None)
+    get_reset_version, set_reset_version = mo.state(0)
     return (
         alt,
         backend_action_label,
         capability,
+        config,
         default_plot_metrics,
         metric_direction,
         metric_names,
@@ -69,6 +86,30 @@ def _():
         set_record,
         get_expanded,
         set_expanded,
+        get_action_refresh,
+        set_action_refresh,
+        get_form_submit,
+        set_form_submit,
+        get_form_handled,
+        set_form_handled,
+        get_form_busy,
+        set_form_busy,
+        get_form_result,
+        set_form_result,
+        get_form_error,
+        set_form_error,
+        get_preview_request,
+        set_preview_request,
+        get_preview_handled,
+        set_preview_handled,
+        get_preview_result,
+        set_preview_result,
+        get_reset_version,
+        set_reset_version,
+        RecordDraft,
+        RecordDraftError,
+        create_record,
+        validate_record_draft,
     )
 
 
@@ -118,8 +159,9 @@ def _(mo):
 
 
 @app.cell
-def _(refresh, session):
+def _(get_action_refresh, refresh, session):
     _ = refresh.value
+    _ = get_action_refresh()
     record_ids = session.reload_records()
     return (record_ids,)
 
@@ -141,6 +183,285 @@ def _(get_record, mo, record_ids, set_record):
     )
     mo.vstack([record_select])
     return (record_select,)
+
+
+@app.cell
+def _(
+    get_form_busy,
+    get_record,
+    get_reset_version,
+    mo,
+    record_ids,
+    set_form_busy,
+    set_form_submit,
+    set_preview_request,
+    set_reset_version,
+):
+    import uuid as _uuid
+
+    _ = get_reset_version()
+    _selected = get_record()
+    _parent_options = ["No parent (root)", *record_ids]
+    parent = mo.ui.dropdown(
+        _parent_options,
+        value=_selected if _selected in _parent_options else "No parent (root)",
+        label="Parent",
+        full_width=True,
+    )
+    record_id_input = mo.ui.text(label="Record ID", value="", full_width=True)
+    type_input = mo.ui.text(
+        label="Type",
+        value="",
+        placeholder="task / experiment / custom",
+        full_width=True,
+    )
+    summary_input = mo.ui.text_area(label="Summary", value="", full_width=True)
+    goal_input = mo.ui.text_area(label="Goal", value="", full_width=True)
+    question_input = mo.ui.text_area(label="Question", value="", full_width=True)
+    hypothesis_input = mo.ui.text_area(label="Hypothesis", value="", full_width=True)
+    commit_input = mo.ui.text(label="Commit ref (optional)", value="", full_width=True)
+    related_input = mo.ui.text(
+        label="Related IDs (comma separated)", value="", full_width=True
+    )
+    markdown_input = mo.ui.text_area(label="Markdown body", value="", full_width=True)
+    advanced_yaml = mo.ui.text_area(
+        label="Advanced local YAML",
+        value="",
+        full_width=True,
+        rows=6,
+    )
+    _advanced_help = mo.md(
+        "Advanced fields accept a YAML mapping of additional local fields. "
+        "Example mappings:\n\n"
+        "```yaml\n"
+        "entrypoints:\n"
+        "  train:\n"
+        "    command: [uv, run, python, train.py]\n"
+        "    args: {{epochs: 10}}\n"
+        "metrics:\n"
+        "  - name: val/accuracy\n"
+        "    direction: maximize\n"
+        "tracking_backend: {{type: csv}}\n"
+        "```"
+    )
+
+    def _submit(values):
+        set_form_busy(True)
+        set_form_submit({"event_id": _uuid.uuid4().hex, "values": values or {}})
+
+    form = (
+        mo.vstack(
+            [
+                record_id_input,
+                parent,
+                type_input,
+                summary_input,
+                goal_input,
+                question_input,
+                hypothesis_input,
+                mo.accordion(
+                    {
+                        "Commit, links, Markdown and advanced YAML": mo.vstack(
+                            [
+                                commit_input,
+                                related_input,
+                                markdown_input,
+                                _advanced_help,
+                                advanced_yaml,
+                            ]
+                        )
+                    }
+                ),
+            ],
+            align="stretch",
+            gap=0.5,
+        )
+        .batch(
+            id=record_id_input,
+            parent=parent,
+            type=type_input,
+            summary=summary_input,
+            goal=goal_input,
+            question=question_input,
+            hypothesis=hypothesis_input,
+            commit=commit_input,
+            related=related_input,
+            markdown=markdown_input,
+            advanced_yaml=advanced_yaml,
+        )
+        .form(
+            submit_button_label="Create",
+            submit_button_disabled=get_form_busy(),
+            on_change=_submit,
+        )
+    )
+    preview_button = mo.ui.button(
+        label="Preview",
+        on_click=lambda _: set_preview_request(_uuid.uuid4().hex),
+    )
+    cancel_button = mo.ui.button(
+        label="Cancel",
+        on_click=lambda _: set_reset_version(get_reset_version() + 1),
+    )
+    mo.vstack(
+        [
+            mo.md("## Create record"),
+            mo.md(
+                "Create a research root or a child experiment. No project files "
+                "are written until **Create** is pressed."
+            ),
+            mo.hstack(
+                [form, mo.vstack([preview_button, cancel_button])],
+                align="start",
+                gap=1.0,
+                wrap=True,
+            ),
+        ]
+    )
+    return form, preview_button, cancel_button
+
+
+@app.cell
+def _(
+    capability,
+    config,
+    get_action_refresh,
+    get_form_handled,
+    get_form_submit,
+    get_reset_version,
+    mo,
+    RecordDraft,
+    RecordDraftError,
+    create_record,
+    set_action_refresh,
+    set_form_busy,
+    set_form_error,
+    set_form_handled,
+    set_form_result,
+    set_record,
+    set_reset_version,
+):
+    submission = get_form_submit()
+    mo.stop(submission is None or submission["event_id"] == get_form_handled())
+    set_form_handled(submission["event_id"])
+    try:
+        values = submission["values"] or {}
+        _parent = values.get("parent") or "No parent (root)"
+        _draft = RecordDraft(
+            id=str(values.get("id") or ""),
+            parent_id=None if _parent == "No parent (root)" else _parent,
+            related_to=tuple(
+                item.strip()
+                for item in str(values.get("related") or "").split(",")
+                if item.strip()
+            ),
+            type=values.get("type") or None,
+            commit_ref=values.get("commit") or None,
+            markdown=values.get("markdown") or "",
+            summary=values.get("summary") or None,
+            goal=values.get("goal") or None,
+            question=values.get("question") or None,
+            hypothesis=values.get("hypothesis") or None,
+            advanced_yaml=values.get("advanced_yaml") or "",
+        )
+        _created = create_record(config, _draft, capability)
+    except RecordDraftError as exc:
+        set_form_error({"message": str(exc), "errors": exc.errors})
+        set_form_result(None)
+    except Exception as exc:
+        set_form_error({"message": str(exc), "errors": {"_submit": str(exc)}})
+        set_form_result(None)
+    else:
+        set_form_result({"path": str(_created.path), "id": _created.record.id})
+        set_form_error(None)
+        set_record(_created.record.id)
+        set_reset_version(get_reset_version() + 1)
+        set_action_refresh(get_action_refresh() + 1)
+    finally:
+        set_form_busy(False)
+
+
+@app.cell
+def _(
+    config,
+    form,
+    get_preview_handled,
+    get_preview_request,
+    mo,
+    RecordDraft,
+    set_preview_handled,
+    set_preview_result,
+    validate_record_draft,
+):
+    request_id = get_preview_request()
+    mo.stop(request_id is None or request_id == get_preview_handled())
+    set_preview_handled(request_id)
+    try:
+        _elements = form.element.elements
+        _values = {key: element.value for key, element in _elements.items()}
+        _parent = _values.get("parent") or "No parent (root)"
+        _draft = RecordDraft(
+            id=str(_values.get("id") or ""),
+            parent_id=None if _parent == "No parent (root)" else _parent,
+            related_to=tuple(
+                item.strip()
+                for item in str(_values.get("related") or "").split(",")
+                if item.strip()
+            ),
+            type=_values.get("type") or None,
+            commit_ref=_values.get("commit") or None,
+            markdown=_values.get("markdown") or "",
+            summary=_values.get("summary") or None,
+            goal=_values.get("goal") or None,
+            question=_values.get("question") or None,
+            hypothesis=_values.get("hypothesis") or None,
+            advanced_yaml=_values.get("advanced_yaml") or "",
+        )
+        _preview = validate_record_draft(config, _draft)
+    except Exception as exc:
+        set_preview_result(
+            {"path": None, "errors": {"_preview": str(exc)}, "fields": {}}
+        )
+    else:
+        set_preview_result(
+            {
+                "path": str(_preview.path) if _preview.path else None,
+                "errors": _preview.errors,
+                "fields": _preview.fields,
+            }
+        )
+
+
+@app.cell
+def _(get_form_error, get_form_result, get_preview_result, mo):
+    _messages = []
+    _result = get_form_result()
+    if _result:
+        _messages.append(
+            mo.md(f"Created record **{_result['id']}** at `{_result['path']}`.")
+        )
+    _error = get_form_error()
+    if _error:
+        _messages.append(mo.md(f"**Create failed:** {_error['message']}"))
+        _messages.extend(
+            mo.md(f"**{key}:** {value}") for key, value in _error["errors"].items()
+        )
+    _preview = get_preview_result()
+    if _preview:
+        if _preview["errors"]:
+            _messages.append(mo.md("**Preview failed:**"))
+            _messages.extend(
+                mo.md(f"**{key}:** {value}")
+                for key, value in _preview["errors"].items()
+            )
+        elif _preview["path"]:
+            _messages.append(
+                mo.md(
+                    f"Preview: record **{_preview['fields'].get('id') or '—'}** "
+                    f"would be written to `{_preview['path']}`."
+                )
+            )
+    mo.vstack(_messages) if _messages else mo.md("")
 
 
 @app.cell
