@@ -110,9 +110,11 @@ hiraku record update baseline \
 ## Start autoresearch
 
 Start your favourite coding agent and a reasonably powerful model in the
-initialized repository. Hiraku installs the skill for Codex at
-`.agents/skills/hiraku/` and for Claude Code at `.claude/skills/hiraku/`.
-Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code.
+initialized repository. Hiraku installs the canonical skill at
+`.agents/skills/hiraku/`, discovered directly by Codex, Pi, and Gemini CLI.
+Claude Code uses `.claude/skills/hiraku/`, which links to the canonical skill
+when directory symlinks are available. Invoke it as `$hiraku` in Codex or
+`/hiraku` in Claude Code.
 
 Currently, Hiraku records the program association but does not automatically inject its Markdown into an agent prompt. Start an agent in the repository and ask it to
 load the root record and installed program with:

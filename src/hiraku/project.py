@@ -135,18 +135,21 @@ class ProjectInitializer:
                     (resource_root / "dispatch", config.dispatch_dir),
                 ]
                 if install_skill:
-                    copies.extend(
-                        (resource_root / "skill", target)
-                        for target in (
-                            project_root / ".agents/skills/hiraku",
-                            project_root / ".claude/skills/hiraku",
-                        )
-                    )
+                    skill_source = resource_root / "skills/hiraku"
+                    canonical_skill = project_root / ".agents/skills/hiraku"
+                    copies.append((skill_source, canonical_skill))
                 for source, target in copies:
                     with as_file(source) as source_path:
                         cls._copy_resource_tree(
                             source_path, target, created_files, created_dirs
                         )
+                if install_skill:
+                    cls._link_skill_alias(
+                        canonical_skill,
+                        project_root / ".claude/skills/hiraku",
+                        created_files,
+                        created_dirs,
+                    )
                 cls._apply_overlay(entries, project_root, created_files, created_dirs)
                 for name in ("launch.sh", "worktree.sh"):
                     dispatcher = config.dispatch_dir / name
@@ -320,3 +323,27 @@ class ProjectInitializer:
             else:
                 shutil.copy2(item, destination)
                 created_files.append(destination)
+
+    @classmethod
+    def _link_skill_alias(
+        cls,
+        source: Path,
+        target: Path,
+        created_files: list[Path],
+        created_dirs: list[Path],
+    ) -> None:
+        """Link a harness-specific skill path to the canonical project skill."""
+        if target.exists() or target.is_symlink():
+            raise ValidationError(
+                f"Initialization resource would overwrite existing path: {target}"
+            )
+        cls._ensure_directory(target.parent, created_dirs)
+        link_target = Path(os.path.relpath(source, start=target.parent))
+        try:
+            target.symlink_to(link_target, target_is_directory=True)
+        except (NotImplementedError, OSError):
+            # Some Windows configurations do not allow creating directory links.
+            # Keep initialization usable there, with a generated copy as fallback.
+            cls._copy_resource_tree(source, target, created_files, created_dirs)
+        else:
+            created_files.append(target)

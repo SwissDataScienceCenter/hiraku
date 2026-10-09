@@ -144,11 +144,12 @@ Dispatcher names may omit `.sh`, so `--dispatch worktree` selects `worktree.sh`.
 
 ## Agent Skill
 
-`hiraku init` installs the project-local skill for Codex at
-`.agents/skills/hiraku/` and for Claude Code at `.claude/skills/hiraku/`.
-Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code. Other coding
-harnesses can use the same `SKILL.md` when they support compatible project-local
-skills.
+`hiraku init` installs the canonical project-local skill at
+`.agents/skills/hiraku/`. Codex, Pi, and Gemini CLI discover skills from this
+shared directory. For Claude Code, initialization creates
+`.claude/skills/hiraku/` as a symlink to the canonical skill (or a copy on
+systems that cannot create directory symlinks). Invoke it as `$hiraku` in Codex
+or `/hiraku` in Claude Code.
 
 ## Actions, Programs, Context
 

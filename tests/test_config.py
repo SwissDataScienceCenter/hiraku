@@ -57,6 +57,13 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
     assert codex_skill.is_file()
     assert claude_skill.is_file()
+    assert (root / ".claude/skills/hiraku").is_symlink()
+    assert (root / ".claude/skills/hiraku").resolve() == (
+        root / ".agents/skills/hiraku"
+    ).resolve()
+    assert not (root / ".codex/skills").exists()
+    assert not (root / ".pi/skills").exists()
+    assert not (root / ".gemini/skills").exists()
     assert codex_skill.read_text() == claude_skill.read_text()
     assert config.active_record_id is None
 
@@ -69,6 +76,23 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
         HirakuConfig.init(root)
     with pytest.raises(ProjectNotFoundError):
         HirakuConfig.discover(tmp_path / "missing")
+
+
+def test_init_falls_back_to_copy_when_skill_symlinks_are_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def reject_symlink(self: Path, target: Path, *, target_is_directory: bool = False):
+        raise OSError("symbolic links are unavailable")
+
+    monkeypatch.setattr(Path, "symlink_to", reject_symlink)
+    root = tmp_path / "project"
+    HirakuConfig.init(root)
+
+    canonical_skill = root / ".agents/skills/hiraku/SKILL.md"
+    claude_skill = root / ".claude/skills/hiraku/SKILL.md"
+    assert canonical_skill.is_file()
+    assert not (root / ".claude/skills/hiraku").is_symlink()
+    assert claude_skill.read_text() == canonical_skill.read_text()
 
 
 def test_init_sets_tracking_backend(tmp_path: Path) -> None:
