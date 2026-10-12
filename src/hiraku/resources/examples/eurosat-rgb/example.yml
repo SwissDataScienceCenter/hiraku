@@ -1,5 +1,2 @@
 id: eurosat-rgb
-description: Review evidence, establish a flattened-pixel MLP baseline, and test justified image-classification improvements on EuroSAT RGB.
-tracking_backend:
-  type: wandb
-  project: eurosat-rgb
+description: Compare two classifiers on the EuroSAT RGB dataset with Weights & Biases tracking backend.

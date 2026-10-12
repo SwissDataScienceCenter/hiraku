@@ -1,121 +1,115 @@
-# EuroSAT RGB autoresearch example
+# EuroSAT RGB with Weights & Biases
 
 ![Preview of RGB satellite imagery from the EuroSAT dataset](https://huggingface.co/datasets/blanchon/EuroSAT_RGB/resolve/main/thumbnail.jpg)
 
-*EuroSAT RGB contains 27,000 labeled 64x64 Sentinel-2 image patches across 10 land-cover classes. Source: [`blanchon/EuroSAT_RGB`](https://huggingface.co/datasets/blanchon/EuroSAT_RGB).*
+*EuroSAT RGB contains 27,000 labeled 64×64 Sentinel-2 image patches across 10 land-cover classes. Source: [blanchon/EuroSAT_RGB](https://huggingface.co/datasets/blanchon/EuroSAT_RGB).*
 
-This example demonstrates the full Hiraku research workflow on a small image-classification problem.
+This example trains a multilayer perceptron (MLP) and a convolutional neural network (CNN) on the EuroSAT RGB dataset and logs their training and validation metrics to Weights & Biases (W&B). Hiraku reads the resulting W&B runs through its tracking adapter.
 
-The research loop uses literature evidence and experimental results to decide which architectural changes are worth testing next.
+## 1. Install Hiraku and initialize the example
 
-The starter contains the data and training scaffold, but no model implementation. The workflow reviews the literature first, implements and runs the flattened-image MLP as the baseline, then uses the review and baseline results to choose follow-up experiments that may improve it.
-
-All experiments use the same dataset split, seed, optimizer settings, and training budget so architectural changes can be compared under a stable evaluation protocol.
-
-W&B records training and validation loss and accuracy after every epoch, together with model parameter count and per-epoch CPU time.
-
-!!! question "Research question"
-    Under a fixed number of training epochs, which architectural inductive biases most improve EuroSAT RGB land-cover classification over a flattened-image MLP baseline?
-
-!!! tip "Evaluation and tracking"
-    Experiments share the same dataset split, seed, optimizer settings, and training budget. W&B records validation loss and accuracy, parameter count, and per-epoch CPU time.
-
-## Initialize the example
-
-Install Hiraku with its W&B extra in your CLI environment first. From the Hiraku checkout:
+From a local Hiraku source checkout, install the Hiraku CLI:
 
 ```bash
-uv tool install --force '.[wandb]'
+git clone https://github.com/SwissDataScienceCenter/hiraku.git
+cd hiraku
+uv tool install '.[wandb]'
 ```
 
-Then create and initialize a new project:
+Then create a project and let Hiraku install the training script, model definitions, and dependencies for this example.
 
 ```bash
 mkdir eurosat-rgb
 cd eurosat-rgb
-
 git init
 
 hiraku init --example eurosat-rgb
-
 uv sync
-uv run wandb login
 
 git add .
 git commit -m "initialize EuroSAT RGB example"
 ```
 
-The first training run downloads the RGB EuroSAT dataset.
+The first training run downloads the RGB EuroSAT dataset automatically.
 
-Runs are logged to the `eurosat-rgb` W&B project.
-
-Set `WANDB_ENTITY` when the project belongs to a specific entity.
-
-`WANDB_PROJECT` can be used to override the default project name.
-
-## Install the MCP for literature review
-
-### Claude Code
+## 2. Login to W&B
 
 ```bash
-claude mcp add --transport http alphaxiv https://api.alphaxiv.org/mcp/v1
+uv run wandb login
 ```
 
-### Codex
+The example uses the `eurosat-rgb` W&B project, experiment-specific groups, and built-in tags by default.
+
+Set `WANDB_ENTITY` only if you want to log under a specific team or account.
+
+## 3. Define the research root
+
+Create a research root configured with the W&B backend:
 
 ```bash
-codex mcp add alphaxiv --url https://api.alphaxiv.org/mcp/v1
+hiraku record create eurosat --type task \
+  --set "goal=Maximize EuroSAT RGB validation accuracy" \
+  --set "question=How accurately can MLP and CNN architectures classify EuroSAT RGB land-cover images?" \
+  --set 'metrics=[{name: val/accuracy, direction: maximize}, {name: val/loss, direction: minimize}]' \
+  --set 'tracking_backend={type: wandb, project: eurosat-rgb}'
+
+hiraku record show eurosat
+hiraku status
 ```
 
-### Pi
+The research goal is to compare the ability of fully connected and convolutional architectures to classify satellite imagery under comparable training conditions.
 
-Create an API Key from [alphaXiv](https://www.alphaxiv.org/settings/api-keys) and export it in your shell environment:
+## 4. Create an MLP baseline experiment
+
+Create an experiment using a MLP with fully connected layers.
 
 ```bash
-export ALPHAXIV_API_KEY="<key>"
-pi mcp add alphaxiv --url https://api.alphaxiv.org/mcp/v1 --bearer-token-env-var ALPHAXIV_API_KEY
+hiraku record create mlp --parent eurosat --type experiment \
+  --set "summary=MLP baseline for EuroSAT RGB classification" \
+  --set "hypothesis=A fully connected neural network can learn a useful baseline from flattened RGB image pixels." \
+  --commit HEAD \
+  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: mlp, seed: 42, epochs: 10, batch-size: 64, learning-rate: 0.001, validation-fraction: 0.2}}}'
+
+hiraku record show mlp
+hiraku record entrypoints mlp
+
+hiraku launch train --record mlp --dry-run
+hiraku launch train --record mlp
+
+hiraku runs --record eurosat --all
+hiraku runs --record mlp
 ```
 
-## Run the full research workflow
+The MLP flattens the input RGB image into a vector and applies fully connected layers to predict one of the 10 land-cover classes.
 
-After initialization, give a coding agent the prompt below. Select the reusable
-`autoresearch` Program as the top-level workflow. It runs the requested
-`literature-review` Program first when no suitable task-linked review exists,
-then establishes the MLP baseline and runs justified follow-up experiments.
-The autoresearch Program defines the experiment budget and stopping rules; the
-coding harness controls which operations are permitted.
+During training, the script logs training and validation loss, accuracy, and model parameter count to W&B.
 
-!!! info "Bounded autonomous run"
-    The Program counts every attempted experiment, including failed runs, against its session budget. Experiment count and stopping rules come from the Program and session request.
+## 5. Run a CNN experiment
 
-```text
-Create the Hiraku task `eurosat-rgb` if it does not already exist.
+Create a second experiment using a CNN.
 
-Set the goal to investigate image-specific architectural inductive biases on EuroSAT RGB.
-Declare `val/accuracy` as the primary metric to maximize and `val/loss` as a supporting metric to minimize.
-Set the tracking backend to be W&B with the project named `eurosat-rgb`.
-Record this protocol: EuroSAT RGB at 64x64 resolution, stratified 80/20 train/validation split, seed 42, Adam with learning rate 0.001, batch size 64, 10 epochs, CPU only, and no pretrained models.
-Set the task's informational experiment budget to five, including the baseline.
+```bash
+hiraku record create cnn --parent eurosat --type experiment \
+  --set "summary=CNN baseline for EuroSAT RGB classification" \
+  --set "hypothesis=A convolutional neural network improves classification accuracy over the MLP by learning spatial features from satellite imagery." \
+  --commit HEAD \
+  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: cnn, seed: 42, epochs: 10, batch-size: 64, learning-rate: 0.001, validation-fraction: 0.2}}}'
 
-Run the `autoresearch` Program for this task. As its initial phase, use the `literature-review` Program to review image-specific architectural inductive biases for small, CPU-trainable image classifiers without pretraining. Save the review as a task-linked Hiraku Context, including candidate directions, sources, verification status, and limitations. After saving and delivering the review, continue the same workflow directly into the baseline and follow-up experiment loop. Do not stop after the literature review.
-Use a maximum of five experiments for this session, including the baseline. Work on one experiment at a time.
+hiraku record show cnn
+hiraku record entrypoints cnn
+
+hiraku launch train --record cnn
+hiraku runs --record eurosat --all --sort val/accuracy
 ```
 
-The `autoresearch` Program should establish the flattened-image MLP baseline if missing, use the saved literature Context to select justified follow-up experiments, and stop when its session budget or another Program stop condition is reached.
+The CNN uses convolutional layers and spatial pooling to extract image features before producing class predictions.
 
-## Expected research flow
+## 6. Compare the experiments
 
-The example exercises the complete Hiraku workflow:
+Inspect all runs associated with the research root:
 
-```mermaid
-flowchart TD
-    T[Research task] --> L[Review literature]
-    L --> B[Create and run MLP baseline]
-    B --> P[Propose next experiment]
-    P --> R[Implement, launch, and analyze]
-    R --> D{Continue?}
-    D -->|Yes| P
-    D -->|No or budget reached| F[Conclude]
+```bash
+hiraku runs --record eurosat --all --sort val/accuracy
 ```
 
-The task is the root record. The MLP baseline and each follow-up are experiment records under that task.
+Each run stores Hiraku provenance, model and dataset configuration, random seed, training hyperparameters, epoch-level metrics, model parameter count, and W&B metadata.

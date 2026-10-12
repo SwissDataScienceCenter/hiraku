@@ -11,6 +11,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
+
 IMAGE_SIZE = 64
 DEFAULT_EPOCHS = 10
 PROVENANCE_VARIABLES = (
@@ -21,12 +22,66 @@ PROVENANCE_VARIABLES = (
     "HIRAKU_ROOT",
 )
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Models
+class MLP(nn.Module):
+    """Fully connected baseline for RGB image classification."""
+
+    def __init__(self, num_classes: int) -> None:
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(3 * 64 * 64, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.network(x)
+
+
+class CNN(nn.Module):
+    """Small convolutional baseline for RGB image classification."""
+
+    def __init__(self, num_classes: int) -> None:
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # 64 -> 32
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # 32 -> 16
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # 16 -> 8
+        )
+        self.classifier = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(128, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.classifier(self.features(x))
+
 
 def build_model(model_name: str, num_classes: int) -> nn.Module:
-    """Create the architecture implemented for the current experiment."""
-    raise NotImplementedError(
-        f"Model {model_name!r} is not implemented; add it for the experiment."
-    )
+    """Create a model by name."""
+    models = {
+        "mlp": MLP,
+        "cnn": CNN,
+    }
+    try:
+        return models[model_name](num_classes)
+    except KeyError:
+        raise ValueError(
+            f"Unknown model {model_name!r}. "
+            f"Available models: {', '.join(models)}"
+        ) from None
 
 
 def stratified_indices(
@@ -68,6 +123,8 @@ def train_one_epoch(
     total = 0
 
     for images, labels in loader:
+        images = images.to(DEVICE, non_blocking=True)
+        labels = labels.to(DEVICE, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
         logits = model(images)
         loss = criterion(logits, labels)
@@ -89,6 +146,8 @@ def evaluate(
     total = 0
     with torch.inference_mode():
         for images, labels in loader:
+            images = images.to(DEVICE, non_blocking=True)
+            labels = labels.to(DEVICE, non_blocking=True)
             logits = model(images)
             total_loss += criterion(logits, labels).item() * labels.size(0)
             correct += (logits.argmax(dim=1) == labels).sum().item()
@@ -171,7 +230,7 @@ def _train_and_log(args: argparse.Namespace, run: wandb.sdk.wandb_run.Run) -> No
         shuffle=False,
     )
 
-    model = build_model(args.model, len(dataset.classes)).to("cpu")
+    model = build_model(args.model, len(dataset.classes)).to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     criterion = nn.CrossEntropyLoss()
     model_parameters = sum(parameter.numel() for parameter in model.parameters())
