@@ -263,10 +263,11 @@ The rules are deliberately small:
 - Use `self.config` and the Hiraku Python API to read and verify records and
   runs. Prefer replies that name records or runs, which the workflow loads and
   checks, over replies that carry results as free text.
-- `@resource("name")` exposes a method's returned text as the MCP resource
-  `hiraku://workflows/<workflow-id>/<name>`, and `@prompt("name")` exposes
-  one as the MCP prompt `<workflow-id>_<name>` whose `str` parameters are the
-  prompt arguments. Both are listed only while the workflow is active and
+- `@resource` exposes a method's returned text as the MCP resource
+  `hiraku://workflows/<workflow-id>/<name>`, and `@prompt` exposes one as the
+  MCP prompt `<workflow-id>_<name>` whose `str` parameters are the prompt
+  arguments. As with `@tool`, the name is the method name unless given, as in
+  `@prompt("name")`. Both are listed only while the workflow is active and
   never change sessions.
 - Workflow modules can import helpers from their own directory with relative
   imports. `hiraku.research` provides the task, run, and evidence helpers the

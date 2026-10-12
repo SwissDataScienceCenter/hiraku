@@ -189,14 +189,14 @@ class Autoresearch(Workflow):
         """Stop the loop early and summarize the results."""
         return self._finish(session, "stopped", reason)
 
-    @resource("policy")
+    @resource
     def policy(self) -> str:
         """How this workflow judges runs and decides keep, discard, or crash."""
         return self.section("evidence-policy").replace(
             "{success_status}", self.success_status
         )
 
-    @prompt("resume")
+    @prompt
     def resume(self) -> str:
         """Resume the most recent autoresearch-python session."""
         return (

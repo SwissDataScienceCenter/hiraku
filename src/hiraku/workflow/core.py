@@ -114,14 +114,15 @@ def tool(target: Any = None, /) -> Any:
 def resource(target: Any = None, /, *, mime_type: str = "text/markdown") -> Any:
     """Expose a workflow method as an MCP resource.
 
-    The resource is ``hiraku://workflows/<workflow-id>/<name>``; its text is the
-    method's return value. The method takes no parameters besides ``self`` and
+    The resource is ``hiraku://workflows/<workflow-id>/<name>``, where the name
+    is the method name unless given, as in ``@resource("name")``; its text is
+    the method's return value. The method takes no parameters besides ``self`` and
     is called with a fresh workflow instance when a client reads it. Resources
     of a workflow are listed only while the workflow is active.
 
     Example:
         ```python
-        @resource("protocol")
+        @resource
         def protocol(self) -> str:
             return self.section("protocol")
         ```
@@ -140,13 +141,15 @@ def resource(target: Any = None, /, *, mime_type: str = "text/markdown") -> Any:
 def prompt(target: Any = None, /) -> Any:
     """Expose a workflow method as an MCP prompt named ``<workflow-id>_<name>``.
 
+    The name is the method name unless given, as in ``@prompt("name")``.
+
     Clients may show MCP prompts as slash commands. The method's ``str``
     parameters become prompt arguments, and its returned text becomes the
     prompt's user message. It does not start or advance sessions.
 
     Example:
         ```python
-        @prompt("resume")
+        @prompt
         def resume(self, hint: str = "") -> str:
             return "Find the latest session with session_list and resume it."
         ```
