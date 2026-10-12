@@ -42,7 +42,13 @@ from .dispatch_setup import (
     set_default_dispatch,
 )
 from .dispatch_setup import to_json as dispatch_json
-from .engine import DEFAULT_IMPLEMENT_TIMEOUT, AgentRun, Hooks, stop_all_agents
+from .engine import (
+    DEFAULT_IMPLEMENT_ATTEMPTS,
+    DEFAULT_IMPLEMENT_TIMEOUT,
+    AgentRun,
+    Hooks,
+    stop_all_agents,
+)
 from .engine import agent_command as resolve_agent_cmd
 from .errors import AgentError
 from .flows.bind import BindPlan, run_bind
@@ -861,6 +867,14 @@ def plan_command(
     default=None,
     help="seconds an implement call may take (default 3600)",
 )
+@click.option(
+    "implement_attempts",
+    "--implement-attempts",
+    type=click.IntRange(min=1),
+    default=None,
+    help=f"attempts per implement call; a failed one is retried from where it "
+    f"stopped (default {DEFAULT_IMPLEMENT_ATTEMPTS}; 1 = no retry)",
+)
 @click.option("clear", "--clear", is_flag=True, help="remove the project defaults")
 def defaults_command(
     repos: tuple[str, ...],
@@ -870,6 +884,7 @@ def defaults_command(
     allow_write: tuple[str, ...],
     deny_write: tuple[str, ...],
     implement_timeout: int | None,
+    implement_attempts: int | None,
     clear: bool,
 ) -> None:
     """Show or set the project's agent defaults (`hiraku/agent.yaml`).
@@ -916,6 +931,9 @@ def defaults_command(
         if implement_timeout:
             current.implement_timeout = implement_timeout
             changed = True
+        if implement_attempts:
+            current.implement_attempts = implement_attempts
+            changed = True
         if changed:
             click.echo(f"wrote {save_defaults(current, config)}")
             current = load_defaults(config)
@@ -936,6 +954,11 @@ def defaults_command(
     click.echo(
         f"implement timeout: {current.implement_timeout or DEFAULT_IMPLEMENT_TIMEOUT}s"
         + ("" if current.implement_timeout else " (default)")
+    )
+    click.echo(
+        "implement attempts: "
+        f"{current.implement_attempts or DEFAULT_IMPLEMENT_ATTEMPTS}"
+        + ("" if current.implement_attempts else " (default)")
     )
     click.echo(f"sandbox: {'on' if current.sandbox else 'off'}")
     if current.sandbox:
@@ -1265,6 +1288,16 @@ def bind_command(
     help="with several nodes: how many to implement at the same time (a child still "
     "waits for its parent)",
 )
+@click.option(
+    "attempts",
+    "--attempts",
+    type=click.IntRange(min=1),
+    default=None,
+    help="how many times to try each node: an attempt that ends without a bound "
+    "commit is retried, continuing in what it left and told why it failed "
+    "(default: `defaults --implement-attempts`, else "
+    f"{DEFAULT_IMPLEMENT_ATTEMPTS}; 1 = no retry)",
+)
 @_apply_agent_options
 def implement_command(
     node_ids: tuple[str, ...],
@@ -1277,6 +1310,7 @@ def implement_command(
     keep_runs: bool,
     fast: bool,
     jobs: int,
+    attempts: int | None,
     instruction: str,
     instruction_file: str | None,
     agent_cmd: str | None,
@@ -1337,6 +1371,7 @@ def implement_command(
         "hooks": None if dry_run or interactive else _hooks(),
         "timeout": timeout,
         "interactive": interactive,
+        "attempts": attempts,
     }
     if len(node_ids) == 1:
         _run_agent_command(

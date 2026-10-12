@@ -15,6 +15,7 @@ from .. import sections
 from ..defaults import load_defaults
 from ..engine import (
     DEFAULT_IMPLEMENT_AGENT_CMD,
+    DEFAULT_IMPLEMENT_ATTEMPTS,
     DEFAULT_IMPLEMENT_TIMEOUT,
     IMPLEMENT_AGENT_CMD_ENV_VAR,
     TRANSCRIPT_NAME,
@@ -73,6 +74,7 @@ def run_implement(
     keep_runs: bool = False,
     fast: bool = False,
     interactive: bool = False,
+    attempts: int | None = None,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Write the real code for an approved proposal, then bind the resulting commit.
@@ -111,7 +113,145 @@ def run_implement(
     With `fast`, the agent runs no cluster job and no experiment code: it checks the
     change statically (syntax, imports, the rendered entrypoints' arguments, run
     recording against synthetic numbers) and says in `notes` what it left unverified.
+
+    With `attempts` above 1 (default: `implement_attempts` in `hiraku/agent.yaml`,
+    else `engine.DEFAULT_IMPLEMENT_ATTEMPTS`), an attempt that ends without a bound
+    commit is tried again, up to that many attempts in all: when the agent failed or
+    was stopped, when its reply could not be bound (a commit that is not new, an
+    entrypoint that would not run), or when it returned `blocked` but left work behind
+    (commits on the node branch or a kept worktree, as when it ran out of time). The
+    next attempt continues in what the last one left, as `--resume` (or `--revise`)
+    would, and its state carries `retry`: the attempt number and why the last one
+    failed. Everything else is passed on unchanged, `fast` included. Not retried: a
+    refusal before the agent ran (not approved, a worktree kept from an earlier call
+    without `resume`, ...), a `blocked` reply that left nothing (a precondition, a
+    revision with nothing to change), a node bound by someone else meanwhile, a call
+    without `resume` on a node an earlier call left work on (a retry would claim it),
+    and `dry_run`, `from_log`, `interactive` and `apply=False` calls. Each attempt has
+    the full timeout.
     """
+    selected = config or HirakuConfig.discover()
+    once: dict[str, Any] = {
+        "task_id": task_id,
+        "instruction": instruction,
+        "command": command,
+        "dry_run": dry_run,
+        "apply": apply,
+        "context_paths": context_paths,
+        "context_bytes": context_bytes,
+        "unset_env": unset_env,
+        "hooks": hooks,
+        "timeout": timeout,
+        "action": action,
+        "context_id": context_id,
+        "from_log": from_log,
+        "revise": revise,
+        "keep_runs": keep_runs,
+        "fast": fast,
+        "interactive": interactive,
+        "config": selected,
+    }
+    single = dry_run or from_log is not None or interactive or not apply
+    limit = 1 if single else attempt_limit(attempts, selected)
+    if (
+        limit > 1
+        and not resume
+        and not revise
+        and _left_work(selected, node_id, task_id, revise=False)
+    ):
+        # An earlier call left work on this node and this one was not asked to
+        # continue it: a retry would continue it (`resume`), and so claim commits this
+        # call did not make. Leave it to the refusal and `--resume`.
+        limit = 1
+    retry: dict[str, Any] | None = None
+    for attempt in range(1, limit + 1):
+        try:
+            result = _implement_once(node_id, resume=resume, retry=retry, **once)
+        except AgentError as exc:
+            if not getattr(exc, "retryable", False) or attempt == limit:
+                if attempt > 1:
+                    raise type(exc)(
+                        f"{exc}\n(gave up after {attempt} attempts)"
+                    ) from exc
+                raise
+            reason = str(exc)
+        else:
+            blocked = result.data.get("blocked")
+            if (
+                not blocked
+                or attempt == limit
+                or not _left_work(selected, node_id, task_id, revise=revise)
+            ):
+                if attempt > 1:
+                    result.data["attempts"] = attempt
+                return result
+            reason = f"The agent returned `blocked`: {blocked}"
+        if not revise:
+            # A revision picks up what the last one left by itself (`revise_state`).
+            resume = _left_work(selected, node_id, task_id, revise=False)
+        retry = {"attempt": attempt + 1, "of": limit, "reason": reason[-4000:]}
+        if hooks is not None and hooks.note is not None:
+            first = reason.strip().splitlines()[0] if reason.strip() else "?"
+            hooks.note(
+                f"attempt {attempt} of {limit} did not bind a commit ({first[:200]}); "
+                f"trying again"
+                + (", continuing from what it left" if resume or revise else "")
+            )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def attempt_limit(attempts: int | None, config: HirakuConfig) -> int:
+    """How many attempts one `implement` call gets."""
+    if attempts is not None:
+        if attempts < 1:
+            raise AgentError("`attempts` must be at least 1.")
+        return attempts
+    return load_defaults(config).implement_attempts or DEFAULT_IMPLEMENT_ATTEMPTS
+
+
+def _left_work(
+    config: HirakuConfig, node_id: str, task_id: str | None, *, revise: bool
+) -> bool:
+    """Whether an attempt on `node_id` left something the next one can continue:
+    commits on the node branch, or a kept worktree."""
+    node = load_node(node_id, task=task_id, config=config)
+    if revise:
+        left = revise_state(config, node)
+        return bool(left.get("commits_since_bound") or left.get("worktree"))
+    return resume_state(config, node, task_of(node, config=config)) is not None
+
+
+def _retryable(exc: AgentError) -> AgentError:
+    """Mark an error as one more attempt may fix (see `run_implement`)."""
+    exc.retryable = True  # type: ignore[attr-defined]
+    return exc
+
+
+def _implement_once(
+    node_id: str,
+    *,
+    task_id: str | None = None,
+    instruction: str = "",
+    command: list[str] | None = None,
+    dry_run: bool = False,
+    apply: bool = True,
+    context_paths: list[str] | None = None,
+    context_bytes: int | None = None,
+    unset_env: list[str] | None = None,
+    hooks: Hooks | None = None,
+    timeout: int | None = None,
+    action: str | None = None,
+    context_id: str | None = None,
+    resume: bool = False,
+    retry: dict[str, Any] | None = None,
+    from_log: str | Path | None = None,
+    revise: bool = False,
+    keep_runs: bool = False,
+    fast: bool = False,
+    interactive: bool = False,
+    config: HirakuConfig | None = None,
+) -> AgentRun:
+    """One attempt of `run_implement` (see there)."""
     selected = config or HirakuConfig.discover()
     node = load_node(node_id, task=task_id, config=selected)
     if node.abandoned:
@@ -175,6 +315,8 @@ def run_implement(
     state["tracking_backend"] = selected.tracking_backend
     if fast:
         state["fast"] = True
+    if retry:
+        state["retry"] = retry
     if revise:
         state["revise"] = revise_state(selected, node)
         if earlier_runs:
@@ -252,9 +394,9 @@ def run_implement(
                 f"{again}`."
             )
         if isinstance(exc, AgentTimeout):
-            raise AgentTimeout(message) from exc
+            raise _retryable(AgentTimeout(message)) from exc
         if isinstance(exc, AgentError):
-            raise AgentError(message) from exc
+            raise _retryable(AgentError(message)) from exc
         raise
     if watcher:
         watcher.poll()
@@ -468,7 +610,7 @@ def _refuse(
     if kept or committed:
         again = "--revise -m '...'" if revising_from else "--resume -m '...'"
         where += f" Continue with `hiraku-agent implement {node.id} {again}`."
-    return AgentError(f"{reason} '{node.id}' was not bound.{where}")
+    return _retryable(AgentError(f"{reason} '{node.id}' was not bound.{where}"))
 
 
 def _apply_logged_reply(

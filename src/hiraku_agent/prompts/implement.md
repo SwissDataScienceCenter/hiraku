@@ -67,6 +67,12 @@ Do this in order:
      their outputs, core dumps or large files.
    - Test recording the run too (see "Recording runs"), against a throwaway
      `HIRAKU_ROOT`.
+   - When a check fails, do not stop at the first error and do not commit around it:
+     read the error, find the cause in the code (not only the symptom), fix it, and
+     run the same check again, until it passes. If the same check fails twice for the
+     same reason, step back and reconsider the approach before changing more code. If
+     the cause is outside what you can change (missing data, no access, a cluster
+     problem), stop and set `blocked`, saying what you found.
    - In `notes`, say what you ran (command, job id), on which subset, what it showed,
      and what you could not verify. Never claim a check you did not run.
 6. **Keep a short progress file.** Every tool call you make is already logged, so
@@ -87,8 +93,9 @@ Do this in order:
    not work yet, leave it uncommitted and return `blocked` saying what is left, so it
    can be resumed.
 8. **Commit once, at the end.** Do not commit while you develop, test and debug.
-   When the code works and the smoke tests pass, make one commit on this branch with
-   the code and the smoke-test scripts, touching only the files this change needs,
+   When the code works and its checks pass (the smoke tests, or in fast mode the
+   static checks of "Fast mode"), make one commit on this branch with the code and
+   any smoke-test scripts, touching only the files this change needs,
    with a clear message in English saying what it adds and for which node. Never
    commit `.hiraku-progress.md`, test outputs, core dumps or large files. If the
    branch already has commits from an earlier attempt, leave them as they are and
@@ -148,7 +155,8 @@ Rules for what you declare:
    or the program take it as an optional flag, and say so in `notes`.
 3. Every file the command names (script, module) must exist in your commit, at that
    path relative to the repository root.
-4. Test the entrypoint, not only the code behind it. Render the command and `args`
+4. Test the entrypoint, not only the code behind it (in fast mode, check it
+   statically as "Fast mode" says, without running it). Render the command and `args`
    the way described above, then run that exact command on a small subset: add a
    `--limit N` (or similar) to the command line for the test only, never to the
    declared `args`, and for a cluster script use a short `--time` override on the
@@ -223,7 +231,11 @@ it on the cluster themselves. Do not submit or run any cluster job (`sbatch`, `s
 `salloc`), do not run the experiment or any GPU or large-data code, and do not wait on
 anything: this replaces the smoke tests of step 5 and the job tests under "Entrypoints"
 and "Recording runs". Check statically instead, everything that finishes in seconds on
-this machine:
+this machine. Fast mode applies in every case below as well: when revising
+("Revising implemented code" asks for a smoke test; check statically instead), when
+continuing an earlier attempt, and when retrying. If an earlier attempt submitted a
+job, do not wait for it: at most look once at what the scheduler already reports
+(`squeue`/`sacct` on its id), and say in `notes` what you found.
 
 - Syntax and imports: `python -m py_compile` on the Python files you touched,
   `bash -n` on shell and sbatch scripts, and an import of the modules you changed.
@@ -284,9 +296,9 @@ instruction says. This replaces steps 3 and 4 above; the rest still applies.
   value you found).
 - If `revise.commits_since_bound`, `revise.uncommitted` or `revise.progress` are
   present, an earlier revision was stopped: continue it rather than starting over.
-- Smoke-test what the change can affect, on a small subset; skip it only when the
-  change cannot alter what the code computes (for example a job's time limit or a
-  comment), and say so in `notes`.
+- Smoke-test what the change can affect, on a small subset (in fast mode, check it
+  statically instead); skip it only when the change cannot alter what the code
+  computes (for example a job's time limit or a comment), and say so in `notes`.
 - Commit once, on top of the branch. `notes` describes this revision only (what
   changed and why, what you ran); it is added below the existing implementation
   notes, which stay.
@@ -303,6 +315,30 @@ instruction says. This replaces steps 3 and 4 above; the rest still applies.
   makes a new run on this commit not comparable with those runs.
 - The node's children (if any) branched from the earlier commit and will not get
   this change; do not touch their branches.
+
+## Retrying after a failed attempt
+
+If the state below has a `retry` entry, `hiraku_agent` already ran this workflow on
+this node a moment ago, and that attempt ended without a bound commit. This is attempt
+`retry.attempt` of `retry.of`. `retry.reason` is why the last one failed: the agent's
+error (for example the time limit), `hiraku_agent`'s refusal of the reply (a commit
+that is not new or not the branch head, an entrypoint that would not run as
+declared), or the `blocked` reason it returned. What it left is in `resume` (or in
+`revise`), and its progress file is there too.
+
+- Start from `retry.reason`. Fix the cause it names first, then check that fix
+  as you check everything else (smoke test, or static checks in fast mode).
+- A refusal of the reply means the code is probably fine and the reply or its
+  commit is not: fix exactly what the refusal names (the entrypoint and its script
+  together; commit what was left uncommitted), commit on top of the branch (never
+  amend or rewrite it), and reply again with the new branch head.
+- If it ran out of time, find what took the time (a job on the full data, a queue)
+  and do not repeat it; continue from the progress file.
+- If the reason is something you cannot fix (it needs a person's decision, data or
+  access you do not have), return `blocked` at once, saying so, without redoing any
+  work.
+- In `notes`, say that this was a retry and what you changed because of
+  `retry.reason`.
 
 ## Current state
 

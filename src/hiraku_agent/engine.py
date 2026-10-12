@@ -67,6 +67,12 @@ INTERACTIVE_REPLY_NAME = "reply.json"
 # it gets its own, longer default (`implement_timeout` in `hiraku/agent.yaml`, or
 # `--timeout`, overrides it).
 DEFAULT_IMPLEMENT_TIMEOUT = 3600
+# How many times one `implement` call tries before giving up: an attempt that ends
+# without a bound commit (the agent failed or was stopped, its reply was refused, or it
+# returned `blocked` with work left in its worktree) is retried once more by default,
+# continuing from where it stopped (`implement_attempts` in `hiraku/agent.yaml`, or
+# `--attempts`, overrides it; 1 turns retrying off). Each attempt gets the full timeout.
+DEFAULT_IMPLEMENT_ATTEMPTS = 2
 
 # `design`/`discover`/`triage`/`analyze`/`draft`/`update` only ever need to read and
 # return one JSON object, so the plain default above is deliberately narrow —

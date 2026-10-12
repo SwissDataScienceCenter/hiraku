@@ -50,6 +50,8 @@ class AgentDefaults:
     sandbox_deny_write: list[str] = field(default_factory=list)
     # Seconds an `implement` call may take (default `engine.DEFAULT_IMPLEMENT_TIMEOUT`).
     implement_timeout: int | None = None
+    # Attempts per `implement` call (default `engine.DEFAULT_IMPLEMENT_ATTEMPTS`).
+    implement_attempts: int | None = None
 
     def is_empty(self) -> bool:
         return not (
@@ -60,6 +62,7 @@ class AgentDefaults:
             or self.sandbox_allow_write
             or self.sandbox_deny_write
             or self.implement_timeout
+            or self.implement_attempts
         )
 
 
@@ -103,6 +106,9 @@ def load_defaults(config: HirakuConfig) -> AgentDefaults:
         implement_timeout=_as_seconds(
             data.get("implement_timeout"), "implement_timeout"
         ),
+        implement_attempts=_as_count(
+            data.get("implement_attempts"), "implement_attempts"
+        ),
     )
 
 
@@ -112,6 +118,14 @@ def _as_seconds(value: Any, key: str) -> int | None:
     if isinstance(value, int) and not isinstance(value, bool) and value > 0:
         return value
     raise AgentError(f"{FILENAME}: {key!r} must be a positive number of seconds.")
+
+
+def _as_count(value: Any, key: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    raise AgentError(f"{FILENAME}: {key!r} must be a positive whole number.")
 
 
 def _as_bool(value: Any, key: str) -> bool:
@@ -144,6 +158,8 @@ def save_defaults(defaults: AgentDefaults, config: HirakuConfig) -> Path:
         data["sandbox_deny_write"] = defaults.sandbox_deny_write
     if defaults.implement_timeout:
         data["implement_timeout"] = defaults.implement_timeout
+    if defaults.implement_attempts:
+        data["implement_attempts"] = defaults.implement_attempts
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return path
