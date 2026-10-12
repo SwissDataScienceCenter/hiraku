@@ -125,6 +125,7 @@ def test_workflow_md_is_a_registry_record(tmp_path: Path) -> None:
         "autodataset",
         "autoresearch",
         "guided-research",
+        "hiraku-agent",
     ]
 
     document.summary = "Bounded research"

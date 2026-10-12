@@ -547,7 +547,10 @@ def test_malformed_session_files(config: HirakuConfig) -> None:
 @pytest.mark.parametrize(
     ("workflows", "expected"),
     [
-        (None, {"autodataset", "autoresearch", "guided-research", "toy"}),
+        (
+            None,
+            {"autodataset", "autoresearch", "guided-research", "hiraku-agent", "toy"},
+        ),
         ([], set()),
         (["toy"], {"toy"}),
     ],
@@ -563,6 +566,7 @@ def test_configured_exposure(
         "autodataset",
         "autoresearch",
         "guided-research",
+        "hiraku-agent",
         "toy",
     }
 
