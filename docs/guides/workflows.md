@@ -179,7 +179,7 @@ class Review(Workflow):
         session = ReviewSession(topic=topic)
         return self.instruction(
             session,
-            self.prompt("#search"),
+            self.section("search"),
             context={"topic": topic},
             replies=[self.propose],
         )
@@ -192,7 +192,7 @@ class Review(Workflow):
         session.questions = questions
         return self.instruction(
             session,
-            self.prompt("#choose"),
+            self.section("choose"),
             context={"questions": questions},
             requires_user_response=True,
             replies=[self.choose],
@@ -252,9 +252,9 @@ The rules are deliberately small:
   refers to evidence that has not arrived yet. Nothing is saved in either case.
   A valid alternative, such as revising, skipping, or stopping, is a normal
   reply that returns the next instruction.
-- `self.prompt("#section")` returns a section of this workflow's `workflow.md`,
-  and `self.prompt()` the whole body. Section names are lowercase heading text with punctuation removed and spaces replaced by
-  hyphens. The text before the first `##` heading is the orientation shown at
+- `self.section("name")` returns a section of this workflow's `workflow.md`,
+  and `self.text` the whole body. Section names are lowercase heading text
+  with punctuation removed and spaces replaced by hyphens. The text before the first `##` heading is the orientation shown at
   start.
 - Each call gets a fresh copy of the loaded workflow, bound to the project
   configuration as currently saved; changing `self` during a
@@ -264,7 +264,7 @@ The rules are deliberately small:
   runs. Prefer replies that name records or runs, which the workflow loads and
   checks, over replies that carry results as free text.
 - `@resource("name")` exposes a method's returned text as the MCP resource
-  `hiraku://workflows/<workflow-id>/<name>`, and `@mcp_prompt("name")` exposes
+  `hiraku://workflows/<workflow-id>/<name>`, and `@prompt("name")` exposes
   one as the MCP prompt `<workflow-id>_<name>` whose `str` parameters are the
   prompt arguments. Both are listed only while the workflow is active and
   never change sessions.

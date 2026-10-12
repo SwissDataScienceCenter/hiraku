@@ -14,7 +14,7 @@ from hiraku.workflow import (
     Instruction,
     Session,
     Workflow,
-    mcp_prompt,
+    prompt,
     resource,
     tool,
 )
@@ -142,7 +142,7 @@ class Autoresearch(Workflow):
         )
         return self.instruction(
             session,
-            self.prompt("#record"),
+            self.section("record"),
             context={
                 "record_id": result.record_id,
                 "decision": result.decision,
@@ -192,11 +192,11 @@ class Autoresearch(Workflow):
     @resource("policy")
     def policy(self) -> str:
         """How this workflow judges runs and decides keep, discard, or crash."""
-        return self.prompt("#evidence-policy").replace(
+        return self.section("evidence-policy").replace(
             "{success_status}", self.success_status
         )
 
-    @mcp_prompt("resume")
+    @prompt("resume")
     def resume(self) -> str:
         """Resume the most recent autoresearch-python session."""
         return (
@@ -208,7 +208,7 @@ class Autoresearch(Workflow):
     def _baseline(self, session: ResearchSession) -> Instruction:
         return self.instruction(
             session,
-            self.prompt("#baseline"),
+            self.section("baseline"),
             context={
                 "task": session.task,
                 "entrypoint": session.entrypoint,
@@ -221,7 +221,7 @@ class Autoresearch(Workflow):
     def _experiment(self, session: ResearchSession) -> Instruction:
         return self.instruction(
             session,
-            self.prompt("#experiment"),
+            self.section("experiment"),
             context={
                 "task": session.task,
                 "experiment": self._used(session) + 1,

@@ -59,34 +59,25 @@ def test_orientation_ends_at_first_second_level_heading() -> None:
 
 def test_section_includes_subsections_and_ignores_fenced_headings() -> None:
     workflow = research()
-    select = workflow.prompt("#select")
+    select = workflow.section("select")
     assert select.startswith("## Select")
     assert "Nested detail." in select
     assert "## Not a heading" in select
     assert "Ask first." not in select
-    details = workflow.prompt("#details")
+    details = workflow.section("details")
     assert details.startswith("### Details\n\nNested detail.")
     assert details.endswith("```")
-    assert workflow.prompt("#approve-the-launch").endswith("Ask first.")
+    assert workflow.section("approve-the-launch").endswith("Ask first.")
     assert "not-a-heading" not in Workflow(id="r", markdown=DOCUMENT).anchors
 
 
-def test_whole_document_reference() -> None:
-    assert research().prompt() == DOCUMENT.strip()
+def test_whole_document_text() -> None:
+    assert research().text == DOCUMENT.strip()
 
 
-@pytest.mark.parametrize(
-    ("reference", "message"),
-    [
-        ("#missing", "#missing not found"),
-        ("#", "must be '#section'"),
-        ("other#select", "must be '#section'"),
-        ("research", "must be '#section'"),
-    ],
-)
-def test_invalid_references(reference: str, message: str) -> None:
-    with pytest.raises(WorkflowError, match=message):
-        research().prompt(reference)
+def test_missing_section() -> None:
+    with pytest.raises(WorkflowError, match="#missing not found"):
+        research().section("missing")
 
 
 def test_anchors_that_normalize_to_the_same_name_are_rejected() -> None:

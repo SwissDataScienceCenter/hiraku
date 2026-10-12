@@ -120,7 +120,7 @@ class GuidedResearch(Workflow):
         session.feedback = None
         return self.instruction(
             session,
-            self.prompt("#choose"),
+            self.section("choose"),
             context={"candidates": [_summary(record) for record in records]},
             requires_user_response=True,
             replies=[self.select, self.revise, self.finish],
@@ -151,7 +151,7 @@ class GuidedResearch(Workflow):
         session.candidate_ids = []
         return self.instruction(
             session,
-            self.prompt("#implement"),
+            self.section("implement"),
             context={"record_id": record_id},
             replies=[self.implemented, self.skip],
         )
@@ -162,7 +162,7 @@ class GuidedResearch(Workflow):
         launch = self._launch(session)
         return self.instruction(
             session,
-            self.prompt("#approve"),
+            self.section("approve"),
             context={**launch.model_dump(), "command": _command(launch)},
             requires_user_response=True,
             replies=[self.approve, self.skip],
@@ -174,7 +174,7 @@ class GuidedResearch(Workflow):
         session.approved = self._launch(session)
         return self.instruction(
             session,
-            self.prompt("#launch"),
+            self.section("launch"),
             context={
                 **session.approved.model_dump(),
                 "command": _command(session.approved),
@@ -231,7 +231,7 @@ class GuidedResearch(Workflow):
         session.approved = None
         return self.instruction(
             session,
-            self.prompt("#discuss"),
+            self.section("discuss"),
             context={
                 "result": outcome.model_dump(),
                 "reference": session.reference.model_dump()
@@ -285,7 +285,7 @@ class GuidedResearch(Workflow):
         session.candidate_ids = []
         return self.instruction(
             session,
-            self.prompt("#propose"),
+            self.section("propose"),
             context={
                 "task": session.task,
                 "count": session.candidates,

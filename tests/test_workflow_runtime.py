@@ -92,7 +92,7 @@ class Toy(Workflow):
     def ask(self, session):
         return self.instruction(
             session,
-            self.prompt("#add"),
+            self.section("add"),
             context={"total": session.total},
             replies=[self.add, self.wait, self.boom],
         )
@@ -248,7 +248,7 @@ def test_handlers_stay_directly_callable(config: HirakuConfig) -> None:
             "    @tool\n"
             "    def start(self) -> None: ...\n"
             "    @tool\n"
-            "    def prompt(self) -> None: ...\n"
+            "    def section(self) -> None: ...\n"
             "WORKFLOW = W\n",
             "shadows a Workflow attribute",
         ),
@@ -318,8 +318,8 @@ def test_prompts_are_snapshotted_with_the_code(config: HirakuConfig) -> None:
     (config.workflows_dir / "toy" / "workflow.md").write_text(
         document("toy", "# Changed\n\n## Add\n\nNew\n")
     )
-    assert service.workflow("toy").prompt("#add") == "## Add\n\nAdd a number."
-    assert WorkflowService(config).workflow("toy").prompt("#add") == "## Add\n\nNew"
+    assert service.workflow("toy").section("add") == "## Add\n\nAdd a number."
+    assert WorkflowService(config).workflow("toy").section("add") == "## Add\n\nNew"
 
 
 def test_start_returns_orientation_and_explicit_replies(config: HirakuConfig) -> None:
@@ -752,7 +752,7 @@ def test_calls_get_isolated_copies_of_the_definition(config: HirakuConfig) -> No
     first.markdown = "# Changed\n"
     second = service.workflow("toy").bind(config)
     assert second.step == 1
-    assert second.prompt("#add") == "## Add\n\nAdd a number."
+    assert second.section("add") == "## Add\n\nAdd a number."
     assert (
         not (config.workflows_dir / "toy" / "workflow.md")
         .read_text()
@@ -808,7 +808,7 @@ def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> 
             "takes no parameters besides self",
         ),
         (
-            "    @mcp_prompt('ask')\n    def ask(self, count: int) -> str: ...\n",
+            "    @prompt('ask')\n    def ask(self, count: int) -> str: ...\n",
             "must be a str",
         ),
         (
@@ -826,7 +826,7 @@ def test_invalid_resources_and_prompts(
     config: HirakuConfig, body: str, message: str
 ) -> None:
     source = (
-        "from hiraku.workflow import Workflow, mcp_prompt, resource, tool\n"
+        "from hiraku.workflow import Workflow, prompt, resource, tool\n"
         "class W(Workflow):\n"
         "    @tool\n"
         "    def start(self) -> None: ...\n"
@@ -840,7 +840,7 @@ def test_invalid_resources_and_prompts(
 def test_workflow_resources_and_prompts(config: HirakuConfig) -> None:
     source = TOY_PY.replace(
         "from hiraku.workflow import Session, Workflow, tool",
-        "from hiraku.workflow import Session, Workflow, mcp_prompt, resource, tool",
+        "from hiraku.workflow import Session, Workflow, prompt, resource, tool",
     ).replace(
         "WORKFLOW = Toy",
         "    @resource('notes', mime_type='text/plain')\n"
@@ -848,7 +848,7 @@ def test_workflow_resources_and_prompts(config: HirakuConfig) -> None:
         '        """Step size notes."""\n'
         "        return f'step={self.step} root={self.config.root.name}'\n"
         "\n"
-        "    @mcp_prompt\n"
+        "    @prompt\n"
         "    def greet(self, name: str, mood: str | None = None) -> str:\n"
         '        """Greet someone."""\n'
         "        return f'Hello {name} ({mood})'\n"

@@ -38,7 +38,7 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 _TOOL_MARKER = "__hiraku_tool__"
 _RESOURCE_MARKER = "__hiraku_resource__"
 _MIME_MARKER = "__hiraku_resource_mime_type__"
-_PROMPT_MARKER = "__hiraku_mcp_prompt__"
+_PROMPT_MARKER = "__hiraku_prompt__"
 _TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 # No underscores: MCP names are "<workflow-id>_<name>", split at the first "_".
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
@@ -123,7 +123,7 @@ def resource(target: Any = None, /, *, mime_type: str = "text/markdown") -> Any:
         ```python
         @resource("protocol")
         def protocol(self) -> str:
-            return self.prompt("#protocol")
+            return self.section("protocol")
         ```
     """
 
@@ -137,7 +137,7 @@ def resource(target: Any = None, /, *, mime_type: str = "text/markdown") -> Any:
     return lambda function: register(function, target)
 
 
-def mcp_prompt(target: Any = None, /) -> Any:
+def prompt(target: Any = None, /) -> Any:
     """Expose a workflow method as an MCP prompt named ``<workflow-id>_<name>``.
 
     Clients may show MCP prompts as slash commands. The method's ``str``
@@ -146,7 +146,7 @@ def mcp_prompt(target: Any = None, /) -> Any:
 
     Example:
         ```python
-        @mcp_prompt("resume")
+        @prompt("resume")
         def resume(self, hint: str = "") -> str:
             return "Find the latest session with session_list and resume it."
         ```
@@ -306,26 +306,6 @@ class Workflow(BaseRecord):
                 f"available sections: {available}"
             ) from exc
         return "".join(parsed.lines[section.start : section.end]).strip()
-
-    def prompt(self, reference: str | None = None) -> str:
-        """Return this workflow's Markdown body or one of its sections.
-
-        Args:
-            reference: ``None`` for the whole body, ``"#section"`` for a section.
-
-        Raises:
-            hiraku.errors.WorkflowError: If the reference cannot be resolved.
-
-        Example:
-            ``self.prompt("#select")``
-        """
-        if not reference:
-            return self.text
-        if not reference.startswith("#") or reference == "#":
-            raise WorkflowError(
-                f"Prompt reference {reference!r} must be '#section' of this workflow"
-            )
-        return self.section(reference[1:])
 
     def _sections(self) -> ParsedMarkdown:
         if self._parsed is None:
@@ -659,20 +639,20 @@ def resources(cls: type[Workflow]) -> dict[str, WorkflowResource]:
 
 @cache
 def prompts(cls: type[Workflow]) -> dict[str, WorkflowPrompt]:
-    """Collect the `mcp_prompt` methods of a workflow class.
+    """Collect the `prompt` methods of a workflow class.
 
     Raises:
         hiraku.errors.WorkflowError: If a parameter is not a string.
     """
     collected = {}
-    for name, method, function in _marked(cls, _PROMPT_MARKER, "mcp_prompt"):
+    for name, method, function in _marked(cls, _PROMPT_MARKER, "prompt"):
         label = f"{cls.__name__}.{method}"
         hints = typing.get_type_hints(function)
         fields: dict[str, Any] = {}
         for parameter in list(inspect.signature(function).parameters.values())[1:]:
             if hints.get(parameter.name) not in (str, str | None):
                 raise WorkflowError(
-                    f"@mcp_prompt {label} parameter {parameter.name!r} must be a "
+                    f"@prompt {label} parameter {parameter.name!r} must be a "
                     "str; MCP prompt arguments are strings"
                 )
             default = (

@@ -11,7 +11,7 @@ Workflows live in `hiraku/workflows/<workflow-id>/workflow.py`. See the
 
 ::: hiraku.workflow.resource
 
-::: hiraku.workflow.mcp_prompt
+::: hiraku.workflow.prompt
 
 ::: hiraku.workflow.load_workflow
 

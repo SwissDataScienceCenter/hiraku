@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `Workflow` is a `BaseRecord`: an instance is the loaded `workflow.md`, whose front matter holds the workflow `id` (matching its directory) and typed settings declared on the class, and whose body holds the prompts. `@tool("name")` sets a tool name independent of the method name.
 - Add Markdown-only workflows: a workflow directory with only `workflow.md` sends its whole body as one instruction, with a `start` that accepts a free-text request and a single `complete` reply.
 - Add the bundled workflows: `autoresearch-python` (the autonomous autoresearch loop with checked evidence and keep/discard/crash decisions), `guided-research` (a collaborative loop in which the user chooses hypotheses, approves launches, and discusses results), and `autodataset`. The autoresearch example also ships the Markdown-only `autoresearch`, which restores its previous program.
-- Workflows can declare MCP resources (`@resource`) and prompts (`@mcp_prompt`), listed while the workflow is active. `hiraku.research` provides shared task, run, and evidence helpers.
+- Workflows can declare MCP resources (`@resource`) and prompts (`@prompt`), listed while the workflow is active. `hiraku.research` provides shared task, run, and evidence helpers.
 - Add `hiraku workflow list|activate|deactivate|call` and `hiraku session list|show|cancel`.
 - Add `hiraku.record.update_record()`, shared by the CLI and MCP server.
 - Add `Record.resolve_tracking_backend()` to build the tracking backend inherited by a record; `TrackingBackend.list_runs()` now lists all attributed runs when `record_id` is omitted.

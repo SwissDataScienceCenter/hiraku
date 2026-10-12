@@ -758,7 +758,7 @@ class ResearchTree(Workflow):
         session.action = "blocked"
         return self.instruction(
             session,
-            self.prompt("#blocked"),
+            self.section("blocked"),
             context={"step": step, "node": session.focus, "reason": reason},
             requires_user_response=True,
             replies=[self.check, self.abandon, self.finish],
@@ -1218,7 +1218,7 @@ class ResearchTree(Workflow):
             session.action, session.focus = "grow", None
             return self.instruction(
                 session,
-                self.prompt("#grow"),
+                self.section("grow"),
                 context={
                     "task": tree.task.id,
                     "why": suggestion["why"],
@@ -1243,7 +1243,7 @@ class ResearchTree(Workflow):
         if action == "approve":
             return self.instruction(
                 session,
-                self.prompt("#approve"),
+                self.section("approve"),
                 context=context,
                 requires_user_response=True,
                 replies=[self.approve, self.abandon, self.finish],
@@ -1251,7 +1251,7 @@ class ResearchTree(Workflow):
         if action == "fix":
             return self.instruction(
                 session,
-                self.prompt("#fix"),
+                self.section("fix"),
                 context={**context, "defect_runs": node.defect_runs},
                 requires_user_response=True,
                 replies=[self.fixed, self.abandon, self.finish],
@@ -1259,7 +1259,7 @@ class ResearchTree(Workflow):
         if action == "needs_evidence":
             return self.instruction(
                 session,
-                self.prompt("#needs-evidence"),
+                self.section("needs-evidence"),
                 context={
                     **context,
                     "missing_evidence": read_section(node.markdown, "Missing evidence"),
@@ -1270,7 +1270,7 @@ class ResearchTree(Workflow):
             )
         return self.instruction(
             session,
-            self.prompt("#wait"),
+            self.section("wait"),
             context=context,
             replies=[self.check, self.finish],
         )
@@ -1311,7 +1311,7 @@ class ResearchTree(Workflow):
                 context["metric_comparison"] = comparison
         return self.instruction(
             session,
-            self.prompt(f"#{action}"),
+            self.section(action),
             context=context,
             replies=[replies[action], self.blocked, self.finish],
         )
@@ -1325,7 +1325,7 @@ class ResearchTree(Workflow):
         ]
         return self.instruction(
             session,
-            self.prompt("#draft"),
+            self.section("draft"),
             context={"instruction": session.instruction, "existing_tasks": tasks},
             replies=[self.drafted, self.blocked, self.finish],
         )
@@ -1335,7 +1335,7 @@ class ResearchTree(Workflow):
         node = tree.by_id[node_id]
         return self.instruction(
             session,
-            self.prompt("#launch"),
+            self.section("launch"),
             context={
                 "node": node_id,
                 "commit": node.commit,
