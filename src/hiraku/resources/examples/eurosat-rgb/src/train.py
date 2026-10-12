@@ -95,7 +95,10 @@ def stratified_indices(
     validation_indices: list[int] = []
     for indices in grouped.values():
         rng.shuffle(indices)
-        validation_count = max(1, round(len(indices) * validation_fraction))
+        validation_count = min(
+            len(indices) - 1,
+            max(1, round(len(indices) * validation_fraction)),
+        )
         validation_indices.extend(indices[:validation_count])
         train_indices.extend(indices[validation_count:])
     rng.shuffle(train_indices)
