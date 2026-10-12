@@ -223,6 +223,49 @@ def test_servers_reject_conflicting_and_occupied_ports(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_interactive_digits_server_passes_matching_mlflow_environment(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    serve = helpers["serve_demo"]
+    (tmp_path / "mlflow.db").write_bytes(b"demo")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://other.example.invalid")
+    started = []
+
+    class Process:
+        def poll(self):
+            return None
+
+    def start(command, **kwargs):
+        started.append((command, kwargs["env"]))
+        return Process()
+
+    def interrupt(duration):
+        raise KeyboardInterrupt
+
+    monkeypatch.setitem(serve.__globals__, "check_port", lambda port: None)
+    monkeypatch.setitem(serve.__globals__, "wait_for_server", lambda *args: None)
+    monkeypatch.setitem(serve.__globals__, "stop_server", lambda process: None)
+    monkeypatch.setitem(serve.__globals__, "mlflow_training_url", lambda url: url)
+    monkeypatch.setitem(serve.__globals__, "subprocess", SimpleNamespace(Popen=start))
+    monkeypatch.setitem(serve.__globals__, "time", SimpleNamespace(sleep=interrupt))
+    with pytest.raises(KeyboardInterrupt):
+        serve(
+            tmp_path,
+            record_id="digits",
+            port=8765,
+            mlflow_port=5000,
+            no_browser=True,
+            interactive=True,
+        )
+    dashboard_command, environment = started[1]
+    assert "--interactive" in dashboard_command
+    assert environment["MLFLOW_TRACKING_URI"] == f"sqlite:///{tmp_path / 'mlflow.db'}"
+    assert environment["MLFLOW_EXPERIMENT_NAME"] == "hiraku-digits"
+    assert started[0][1]["MLFLOW_TRACKING_URI"] == "https://other.example.invalid"
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="Uses POSIX Ctrl-C signaling")
 def test_demo_serves_mlflow_and_dashboard_and_stops_both(tmp_path):

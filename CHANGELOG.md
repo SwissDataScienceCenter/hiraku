@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Point interactive Digits demo launches at the demo's local MLflow database and experiment.
+
 - Share interactive dashboard jobs across browser sessions, enforce reviewed launch configuration and worktree commit requirements, and safely display live launch logs while preserving read-only controls.
 
 - Render record graph labels and controls correctly in the browser, preserve graph search and zoom during navigation, and reveal selected records' ancestors.

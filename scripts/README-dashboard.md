@@ -186,6 +186,9 @@ to work. Its port must match the demo record's `ui_url`. For a CSV demo, use
 
 Start with `--interactive` and use the token URL printed by marimo to open the
 session. The header shows **Interactive**; the default header is **Read-only**.
+When serving the Digits demo interactively, this helper sets the dashboard
+process's MLflow URI and experiment to the demo's local database, so launches
+from **Launch run** log to the same source shown in the dashboard.
 
 1. **Create a root:** open **Create record**, leave **No parent (root)**,
    enter an ID and type, then press **Preview** and **Create**. The record is

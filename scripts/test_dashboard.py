@@ -431,9 +431,20 @@ def serve_demo(
             )
         )
         for command, url, label in servers:
+            environment = os.environ.copy()
+            if label == "Hiraku dashboard" and interactive and mlflow_port is not None:
+                # The demo explicitly aligns launched training with its query source.
+                environment.update(
+                    {
+                        "MLFLOW_TRACKING_URI": f"sqlite:///{directory / 'mlflow.db'}",
+                        "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
+                        "MLFLOW_ENABLE_ASYNC_LOGGING": "false",
+                    }
+                )
             process = subprocess.Popen(
                 command,
                 cwd=directory,
+                env=environment,
                 start_new_session=os.name != "nt",
                 creationflags=(
                     subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
