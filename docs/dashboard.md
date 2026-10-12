@@ -105,7 +105,8 @@ and a wider plotting area, with horizontal scrolling on narrow screens.
   best-so-far overlay appears only when the metric direction is declared.
 - **Pareto** plots two selected metrics and highlights the nondominated
   frontier. Directions use unambiguous declarations from the comparison
-  scope; unknown or conflicting directions require an explicit choice.
+  scope, including each record represented by runs in subtree and source
+  scopes; unknown or conflicting directions require an explicit choice.
 - Missing and non-finite values are excluded from calculations with a visible
   omitted-row count and are never treated as zero.
 - Filter the comparison cohort by a recorded parameter (for example an
@@ -325,37 +326,3 @@ On Linux, WebKitGTK is also supported: install the distribution's
 and `xvfb` packages, set `HIRAKU_TEST_BROWSER=webkit`, and run the same
 command under `xvfb-run -a`. These checks create temporary fixture projects;
 they require no tracking credentials.
-
-## Implementation review validation
-
-The review began at `280e33b`. The checked-out tracking API uses
-`backend_for()` and `list_all_recorded_runs()`; the dashboard resolves fields
-against its non-mutating index before choosing that adapter. PR 77's remote
-status could not be rechecked because GitHub authentication failed. No
-upstream branch was merged or cherry-picked.
-
-| Plan tickets | Validation |
-| --- | --- |
-| HD-00/01 | Optional imports, Python 3.11–3.14 suites, marimo notebook execution and static checks |
-| HD-02 | Source caching, inherited configuration, storage identity, malformed metadata, journals, bounded rereads, deep trees, and unchanged-file assertions |
-| HD-03 | Launcher forwarding, dependency errors, occupied ports, interruption cleanup, isolated core/dashboard wheel installs |
-| HD-04/05 | Browser record/run selection, provenance, source scope, sorting, progress-point selection and Pareto switching; pure plot regressions |
-| HD-06 | Coalesced refresh, stale snapshots, explicit browser refresh, source/run selection retention and custom-notebook forwarding |
-| HD-07 | Local CSV/MLflow and mocked W&B coverage, distribution smoke checks, browser workflow and scale measurement |
-
-The browser checks used WebKitGTK on a Linux ARM64 container with eight
-reported logical CPUs, Python 3.14.4, uv 0.9.26, marimo 0.25.1, Altair 6.3.0
-and pandas 2.3.3. The synthetic 1,000-record/10,000-run case took 0.20 seconds
-to fetch, 3.75 seconds to load the notebook and chart in the browser, and
-0.74 seconds to sort and select a run. Browser load includes notebook
-execution and rendering; these measurements are not latency guarantees.
-The tracker call-count regression verifies one source query per refresh.
-
-The full suite passed on each Python version from 3.11 through 3.14:
-145 passed and four skipped. The skips are the opt-in browser workflow and
-three existing external-integration tests. The browser workflow also passed
-explicitly against both the checkout and the installed wheel. Ruff lint and
-format checks, the changelog check, documentation build, and package build passed.
-Chrome and macOS browser checks were not run in this environment. Direct
-non-SQLite MLflow database access remains outside the read-only dashboard
-path; use a tracking server for those stores.

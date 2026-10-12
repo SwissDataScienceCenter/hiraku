@@ -54,7 +54,7 @@ reported, rather than treated as zero.
 
 1. Open **Create record**. Enter a project-unique ID, choose a parent or
    **No parent (root)**, and fill in the relevant research fields.
-2. Use **Preview** to check the proposed record and validation messages.
+2. Use **Preview** to check the current draft, proposed path, and validation messages.
    Preview writes no files.
 3. Press **Create** to save it. The new record becomes selected in the GUI;
    the CLI's active record does not change. **Cancel** resets the form.
@@ -91,8 +91,9 @@ and Iris launches.
 The job panel shows the launch state, exit code, and stdout/stderr tails.
 Those **Launch logs** are temporary and separate from tracking artifacts.
 Only one launch runs at a time per dashboard server; there is no GUI cancel
-button. After the job finishes, press **Refresh results** to query the
-backend again. A process may finish successfully without logging a run, and
+button. After the job finishes, the dashboard refreshes results once. Use
+**Refresh results** to query the backend again if needed. A process may finish
+successfully without logging a run, and
 a failed process may still leave a partial run. Use the run list and backend
 link to verify what was actually recorded.
 

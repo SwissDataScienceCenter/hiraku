@@ -323,9 +323,11 @@ def test_demo_serves_mlflow_and_dashboard_and_stops_both(tmp_path):
                 assert time.monotonic() < deadline, log_path.read_text()
                 try:
                     with urlopen(dashboard_url, timeout=1):
-                        break
+                        if f"Hiraku dashboard: {dashboard_url}" in log_path.read_text():
+                            break
                 except (URLError, TimeoutError):
-                    time.sleep(0.1)
+                    pass
+                time.sleep(0.1)
             request = Request(
                 f"{mlflow_url}/api/2.0/mlflow/experiments/search",
                 data=b'{"max_results": 100}',

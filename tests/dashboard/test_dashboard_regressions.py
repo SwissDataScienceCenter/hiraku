@@ -55,9 +55,11 @@ def test_interactive_form_binds_visible_fields_without_writing(tmp_path, monkeyp
             monkeypatch.setenv(key, value)
         _, definitions = app.run()
         form = definitions["form"]
-        for element in form.element.elements.values():
+        for element in form.elements.values():
             assert element._id in form.text
-        assert form.value is None
+        assert form.value == {
+            key: element.value for key, element in form.elements.items()
+        }
         assert definitions["job_views"] == []
     assert config.path.read_bytes() == before
     assert not list(config.records_dir.glob("*/*.md"))

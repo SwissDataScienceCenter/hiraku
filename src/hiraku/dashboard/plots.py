@@ -55,7 +55,7 @@ def metric_direction(snapshot: DashboardSnapshot, metric: str) -> str | None:
     """Return a direction only if the comparison scope declares it unambiguously."""
     cohort = (
         {run.record_id for run in snapshot.runs}
-        if snapshot.scope == "source"
+        if snapshot.scope in {"source", "subtree"}
         else {snapshot.selected_record_id}
     )
     directions = set()

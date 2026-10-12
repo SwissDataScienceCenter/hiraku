@@ -2,7 +2,7 @@
 
 Implement [Hiraku issue 78](https://github.com/SwissDataScienceCenter/hiraku/issues/78) as an optional, local, view-only marimo application. Hiraku owns research records and tracking adapters; marimo supplies presentation and interaction. Use OpenResearch only to inform interaction design, without copying its application code, components, assets, or layout wholesale.
 
-Implementation repository: `/Users/Daniel/git/hiraku`. This handoff is stored beside the assessment in OpenResearch. Ticket IDs below are local planning identifiers, not GitHub issues that have already been created. HD-00 is **Ready**; subsequent tickets are **Planned** until their dependencies pass.
+Implementation repository: `SwissDataScienceCenter/hiraku`. Ticket IDs below are local planning identifiers, not GitHub issues that have already been created. This document records the original implementation plan; see [the dashboard guide](docs/dashboard.md) for the delivered behavior.
 
 The deliverable is `hiraku dashboard`: browse records, inspect their provenance, select a tracking source, sort runs, and switch between progress and Pareto plots. Exclude record editing, experiment launching, agent chat, central authentication, shared hosting, and within-run training curves. Allocate **7–11 engineer-days plus two contingency days**; protect the remaining monthly capacity for scientific provenance work.
 

@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.dashboard import build_snapshot
@@ -213,3 +214,35 @@ def test_metric_direction_reads_selected_record_declaration(tmp_path: Path) -> N
     snapshot = build_snapshot(config, record_id="root")
     assert metric_direction(snapshot, "loss") == "minimize"
     assert metric_direction(snapshot, "unknown") is None
+
+
+@pytest.mark.parametrize(
+    ("child_metrics", "expected"),
+    [
+        (None, "minimize"),
+        ([{"name": "loss", "direction": "maximize"}], None),
+        ([], None),
+    ],
+)
+def test_subtree_metric_direction_checks_child_declarations(
+    tmp_path: Path, child_metrics, expected
+) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create(
+        "root",
+        config=config,
+        activate=False,
+        metrics=[{"name": "loss", "direction": "minimize"}],
+    )
+    Record.create("inherited", parent_id="root", config=config, activate=False)
+    fields = {} if child_metrics is None else {"metrics": child_metrics}
+    Record.create("child", parent_id="root", config=config, activate=False, **fields)
+    (tmp_path / "runs.csv").write_text(
+        "id,record_id,metric.loss\nfirst,inherited,0.1\nsecond,child,0.2\n",
+        encoding="utf-8",
+    )
+
+    snapshot = build_snapshot(config, record_id="root", scope="subtree")
+
+    assert len(snapshot.runs) == 2
+    assert metric_direction(snapshot, "loss") == expected

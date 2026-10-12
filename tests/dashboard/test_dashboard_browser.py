@@ -14,12 +14,15 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 import pytest
-from fixtures import create_acceptance_project
+from fixtures import create_acceptance_project, create_launch_project
 from selenium import webdriver
 from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select, WebDriverWait
+
+from hiraku.config import HirakuConfig
+from hiraku.record import load_record
 
 pytestmark = [
     pytest.mark.integration,
@@ -51,11 +54,19 @@ def _elements(browser, selector):
 
 def _control(browser, host, selector):
     return WebDriverWait(browser, 20).until(
-        lambda b: b.execute_script(
-            "return document.querySelector(arguments[0])?.shadowRoot"
-            "?.querySelector(arguments[1])",
-            host,
-            selector,
+        lambda b: next(
+            (
+                control
+                for element in _elements(b, host)
+                if (
+                    control := b.execute_script(
+                        "return arguments[0].shadowRoot?.querySelector(arguments[1])",
+                        element,
+                        selector,
+                    )
+                )
+            ),
+            None,
         )
     )
 
@@ -127,10 +138,11 @@ def _new_browser(monkeypatch):
     return webdriver.Chrome(options=options)
 
 
-def test_interactive_browser_startup_uses_token(tmp_path, monkeypatch):
+def test_interactive_browser_create_preview_and_launch(tmp_path, monkeypatch):
     project = tmp_path / "project"
     project.mkdir()
-    create_acceptance_project(project)
+    config = create_launch_project(project)
+    config_before = config.path.read_bytes()
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -142,6 +154,8 @@ def test_interactive_browser_startup_uses_token(tmp_path, monkeypatch):
                 "hiraku.cli",
                 "dashboard",
                 "--interactive",
+                "--record",
+                "child",
                 "--port",
                 str(port),
                 "--no-browser",
@@ -172,8 +186,39 @@ def test_interactive_browser_startup_uses_token(tmp_path, monkeypatch):
             WebDriverWait(browser, 30).until(lambda b: "Interactive" in _body(b))
             assert "Create record" in _body(browser)
             assert "Launch run" in _body(browser)
+            _control(
+                browser, 'marimo-text[data-label*="Record ID"]', "input"
+            ).send_keys("gui-child")
+            _control(browser, 'marimo-button[data-label*="Preview"]', "button").click()
+            WebDriverWait(browser, 20).until(
+                lambda b: "Preview: record gui-child" in _body(b)
+            )
+            created_path = config.records_dir / "task/gui-child.md"
+            assert not created_path.exists()
+            next(e for e in _elements(browser, "button") if e.text == "Create").click()
+            WebDriverWait(browser, 20).until(
+                lambda b: "Created record gui-child" in _body(b)
+            )
+            assert load_record("gui-child", config=config).parent_id == "child"
+            _control(
+                browser, 'marimo-button[data-label*="Preview launch"]', "button"
+            ).click()
+            WebDriverWait(browser, 20).until(
+                lambda b: "Launch preview:" in _body(b) and "gui-child" in _body(b)
+            )
+            _control(
+                browser, 'marimo-button[data-label*="Launch run"]', "button"
+            ).click()
+            WebDriverWait(browser, 30).until(
+                lambda b: "succeeded" in _body(b) and _run_rows(b) == 1
+            )
+            assert "gui-child-0" in (project / "runs.csv").read_text()
+            assert config.path.read_bytes() == config_before
+            assert HirakuConfig.load(config.path).active_record_id is None
         finally:
             if browser is not None:
+                (tmp_path / "browser.txt").write_text(_body(browser))
+                browser.save_screenshot(str(tmp_path / "interactive.png"))
                 browser.quit()
             server.send_signal(signal.SIGINT)
             server.wait(timeout=20)

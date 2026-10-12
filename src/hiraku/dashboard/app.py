@@ -295,50 +295,44 @@ def _(
         "```"
     )
 
-    def _submit(values):
+    def _submit(_):
         set_form_busy(True)
-        set_form_submit({"event_id": uuid.uuid4().hex, "values": values or {}})
+        set_form_submit({"event_id": uuid.uuid4().hex, "values": form.value})
 
-    form = (
-        mo.vstack(
-            [
-                mo.md(
-                    "{id}\n\n{parent}\n\n{type}\n\n{summary}\n\n"
-                    "{goal}\n\n{question}\n\n{hypothesis}"
-                ),
-                mo.accordion(
-                    {
-                        "Commit, links, Markdown and advanced YAML": mo.vstack(
-                            [
-                                mo.md("{commit}\n\n{related}\n\n{markdown}"),
-                                _advanced_help,
-                                mo.md("{advanced_yaml}"),
-                            ]
-                        )
-                    }
-                ),
-            ],
-            align="stretch",
-            gap=0.5,
-        )
-        .batch(
-            id=record_id_input,
-            parent=parent,
-            type=type_input,
-            summary=summary_input,
-            goal=goal_input,
-            question=question_input,
-            hypothesis=hypothesis_input,
-            commit=commit_input,
-            related=related_input,
-            markdown=markdown_input,
-            advanced_yaml=advanced_yaml,
-        )
-        .form(
-            submit_button_label="Create",
-            on_change=_submit,
-        )
+    form = mo.vstack(
+        [
+            mo.md(
+                "{id}\n\n{parent}\n\n{type}\n\n{summary}\n\n"
+                "{goal}\n\n{question}\n\n{hypothesis}"
+            ),
+            mo.accordion(
+                {
+                    "Commit, links, Markdown and advanced YAML": mo.vstack(
+                        [
+                            mo.md("{commit}\n\n{related}\n\n{markdown}"),
+                            _advanced_help,
+                            mo.md("{advanced_yaml}"),
+                        ]
+                    )
+                }
+            ),
+        ],
+        align="stretch",
+        gap=0.5,
+    ).batch(
+        id=record_id_input,
+        parent=parent,
+        type=type_input,
+        summary=summary_input,
+        goal=goal_input,
+        question=question_input,
+        hypothesis=hypothesis_input,
+        commit=commit_input,
+        related=related_input,
+        markdown=markdown_input,
+        advanced_yaml=advanced_yaml,
     )
+    create_button = mo.ui.button(label="Create", on_click=_submit)
     preview_button = mo.ui.button(
         label="Preview",
         on_click=lambda _: set_preview_request(uuid.uuid4().hex),
@@ -355,14 +349,14 @@ def _(
                 "are written until **Create** is pressed."
             ),
             mo.hstack(
-                [form, mo.vstack([preview_button, cancel_button])],
+                [form, mo.vstack([preview_button, create_button, cancel_button])],
                 align="start",
                 gap=1.0,
                 wrap=True,
             ),
         ]
     )
-    return form, preview_button, cancel_button
+    return form, preview_button, create_button, cancel_button
 
 
 @app.cell
@@ -441,8 +435,7 @@ def _(
     mo.stop(request_id is None or request_id == get_preview_handled())
     set_preview_handled(request_id)
     try:
-        _elements = form.element.elements
-        _values = {key: element.value for key, element in _elements.items()}
+        _values = form.value
         _parent = _values.get("parent") or "No parent (root)"
         _draft = RecordDraft(
             id=str(_values.get("id") or ""),
@@ -469,6 +462,7 @@ def _(
     else:
         set_preview_result(
             {
+                "id": _preview.id,
                 "path": str(_preview.path) if _preview.path else None,
                 "errors": _preview.errors,
                 "fields": _preview.fields,
@@ -501,7 +495,7 @@ def _(get_form_error, get_form_result, get_preview_result, mo):
         elif _preview["path"]:
             _messages.append(
                 mo.md(
-                    f"Preview: record **{_preview['fields'].get('id') or '—'}** "
+                    f"Preview: record **{_preview['id']}** "
                     f"would be written to `{_preview['path']}`."
                 )
             )
