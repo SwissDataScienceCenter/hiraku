@@ -129,6 +129,17 @@ dispatcher reports `HIRAKU_COMMIT` and `HIRAKU_GIT_STATE`: `launch.sh` reports
 the current HEAD and whether the tree is clean or dirty, while `worktree.sh`
 and `slurm.sh` report the exact checked-out commit and a clean state.
 
+"Dirty" means the code differs from the commit. Hiraku's own state does not count:
+`hiraku launch` passes `HIRAKU_STATE_PATHS`, the paths of `hiraku.yml`, the state
+directory (`hiraku/`) and `runs.csv`/`runs.csv.lock`, one per line relative to the
+project root, and `launch.sh` leaves them out of its `git status`. A new record, an
+approval or a run row therefore does not make a launch dirty, whether you commit those
+files (so design and analysis have a history) or not. Results and other outputs you
+write are not Hiraku's state: ignore them in Git or keep them outside the repository.
+A project created before this was added keeps its own copy of `launch.sh` under
+`hiraku/dispatch/`; refresh it with
+`python -c "from hiraku_agent.dispatch_setup import template_text; print(template_text('launch.sh'), end='')" > hiraku/dispatch/launch.sh`.
+
 `slurm.sh` submits the requested commit (HEAD if none) with `sbatch` from a
 worktree under the Git directory (shared with compute nodes, outside the working
 tree) and returns once the job is queued, printing its id; the job removes the

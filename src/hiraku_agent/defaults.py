@@ -44,9 +44,23 @@ class AgentDefaults:
     repos: list[str] = field(default_factory=list)
     context_paths: list[str] = field(default_factory=list)
     context_id: str | None = None
+    # Optional write protection for every agent call (`sandbox.py`). Off by default.
+    sandbox: bool = False
+    sandbox_allow_write: list[str] = field(default_factory=list)
+    sandbox_deny_write: list[str] = field(default_factory=list)
+    # Seconds an `implement` call may take (default `engine.DEFAULT_IMPLEMENT_TIMEOUT`).
+    implement_timeout: int | None = None
 
     def is_empty(self) -> bool:
-        return not (self.repos or self.context_paths or self.context_id)
+        return not (
+            self.repos
+            or self.context_paths
+            or self.context_id
+            or self.sandbox
+            or self.sandbox_allow_write
+            or self.sandbox_deny_write
+            or self.implement_timeout
+        )
 
 
 def defaults_path(config: HirakuConfig) -> Path:
@@ -79,7 +93,38 @@ def load_defaults(config: HirakuConfig) -> AgentDefaults:
         repos=_as_list(data.get("repo", data.get("repos")), "repo"),
         context_paths=_as_list(data.get("context"), "context"),
         context_id=str(context_id) if context_id else None,
+        sandbox=_as_bool(data.get("sandbox"), "sandbox"),
+        sandbox_allow_write=_as_list(
+            data.get("sandbox_allow_write"), "sandbox_allow_write"
+        ),
+        sandbox_deny_write=_as_list(
+            data.get("sandbox_deny_write"), "sandbox_deny_write"
+        ),
+        implement_timeout=_as_seconds(
+            data.get("implement_timeout"), "implement_timeout"
+        ),
     )
+
+
+def _as_seconds(value: Any, key: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    raise AgentError(f"{FILENAME}: {key!r} must be a positive number of seconds.")
+
+
+def _as_bool(value: Any, key: str) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"on", "true", "yes", "1"}:
+        return True
+    if text in {"off", "false", "no", "0", ""}:
+        return False
+    raise AgentError(f"{FILENAME}: {key!r} must be on or off, not {value!r}.")
 
 
 def save_defaults(defaults: AgentDefaults, config: HirakuConfig) -> Path:
@@ -91,6 +136,14 @@ def save_defaults(defaults: AgentDefaults, config: HirakuConfig) -> Path:
         data["context_id"] = defaults.context_id
     if defaults.context_paths:
         data["context"] = defaults.context_paths
+    if defaults.sandbox:
+        data["sandbox"] = "on"
+    if defaults.sandbox_allow_write:
+        data["sandbox_allow_write"] = defaults.sandbox_allow_write
+    if defaults.sandbox_deny_write:
+        data["sandbox_deny_write"] = defaults.sandbox_deny_write
+    if defaults.implement_timeout:
+        data["implement_timeout"] = defaults.implement_timeout
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return path

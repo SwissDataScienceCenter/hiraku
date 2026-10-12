@@ -21,7 +21,31 @@ _ATTRIBUTION_KEYS = {
     "HIRAKU_GIT_STATE",
     "HIRAKU_ROOT",
     "HIRAKU_ENTRYPOINT",
+    "HIRAKU_STATE_PATHS",
 }
+
+
+def state_paths(config: HirakuConfig) -> list[str]:
+    """Paths of Hiraku's own project state, relative to the project root.
+
+    The configuration file, the state directory (records, contexts, agent logs, ...)
+    and the default CSV tracking file with its lock. They record what was designed,
+    run and found, not the code that ran, so a dispatcher that reports whether the
+    tree is clean leaves them out: committing a new record does not change what a
+    launch runs, and neither does an unsaved one.
+    """
+    root = config.root.resolve()
+    paths = [config.path.resolve(), config.hiraku_dir.resolve()]
+    paths += [root / "runs.csv", root / "runs.csv.lock"]
+    out: list[str] = []
+    for path in paths:
+        try:
+            relative = path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if relative and relative != "." and relative not in out:
+            out.append(relative)
+    return out
 
 
 def render_arguments(arguments: Mapping[str, ArgumentValue]) -> tuple[str, ...]:
@@ -167,6 +191,7 @@ def launch(
             "HIRAKU_GIT_STATE": "unavailable",
             "HIRAKU_ROOT": str(selected.root.resolve()),
             "HIRAKU_ENTRYPOINT": name or "",
+            "HIRAKU_STATE_PATHS": "\n".join(state_paths(selected)),
         }
     )
     try:

@@ -239,6 +239,7 @@ def run_update(
     action: str | None = None,
     context_id: str | None = None,
     force: bool = False,
+    interactive: bool = False,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Revise the task or experiment `record_id` from `instruction`.
@@ -267,6 +268,8 @@ def run_update(
     mode = check_editable(record, config=selected, force=force)
     call = AgentCall.resolve(
         selected,
+        interactive=interactive,
+        workflow="update",
         entity=record.id,
         action=action,
         context_id=context_id,
@@ -417,6 +420,7 @@ def run_revise(
     timeout: int | None = None,
     action: str | None = None,
     context_id: str | None = None,
+    interactive: bool = False,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Revise the experiments `design` or `discover` wrote under a task, in one call.
@@ -452,6 +456,8 @@ def run_revise(
         )
     call = AgentCall.resolve(
         selected,
+        interactive=interactive,
+        workflow="revise",
         entity=task.id,
         action=action,
         context_id=context_id,

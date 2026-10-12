@@ -45,9 +45,10 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,14 @@ from .errors import AgentError, AgentTimeout
 
 DEFAULT_AGENT_CMD = "claude -p"
 DEFAULT_TIMEOUT = 900
+# `analyze --interactive` starts the agent as a conversation, not a one-shot `-p` call.
+DEFAULT_INTERACTIVE_AGENT_CMD = "claude"
+INTERACTIVE_AGENT_CMD_ENV_VAR = "HIRAKU_AGENT_INTERACTIVE_CMD"
+INTERACTIVE_REPLY_NAME = "reply.json"
+# `implement` writes code and smoke-tests it, possibly through a short cluster job, so
+# it gets its own, longer default (`implement_timeout` in `hiraku/agent.yaml`, or
+# `--timeout`, overrides it).
+DEFAULT_IMPLEMENT_TIMEOUT = 3600
 
 # `design`/`discover`/`triage`/`analyze`/`draft`/`update` only ever need to read and
 # return one JSON object, so the plain default above is deliberately narrow —
@@ -474,6 +483,193 @@ def prompt_delivery(argv: list[str], prompt: str) -> tuple[list[str], str | None
     return [*argv, prompt], None
 
 
+# ------------------------------------------------------------------ live progress
+
+# Agent processes running in this process's threads, so a Ctrl-C in the main thread
+# of `implement --jobs` can stop them all (each runs in its own process group).
+_running: set[subprocess.Popen[str]] = set()
+_running_guard = threading.Lock()
+
+
+def stop_all_agents() -> int:
+    """Stop every agent this process started that is still running; return how many."""
+    with _running_guard:
+        processes = [process for process in _running if process.poll() is None]
+    for process in processes:
+        with contextlib.suppress(Exception):
+            _stop_process_group(process)
+    return len(processes)
+
+
+STREAM_OPT_OUT_ENV = "HIRAKU_AGENT_NO_STREAM"
+TRANSCRIPT_NAME = "transcript.jsonl"
+
+
+def with_stream(argv: list[str]) -> list[str]:
+    """`argv` asking `claude -p` to report each step as it happens (stream-json).
+
+    Without it `claude -p` prints nothing until the very end, so a long call shows only
+    "still running" and a call that is stopped leaves no record of what it did. Only
+    for `claude -p` without its own `--output-format`; `HIRAKU_AGENT_NO_STREAM` turns
+    it off.
+    """
+    if os.environ.get(STREAM_OPT_OUT_ENV):
+        return list(argv)
+    if Path(argv[0]).name not in {"claude", "claude.exe"}:
+        return list(argv)
+    if not ({"-p", "--print"} & set(argv)):
+        return list(argv)
+    if any(
+        arg == "--output-format" or arg.startswith("--output-format=") for arg in argv
+    ):
+        return list(argv)
+    extra = ["--output-format", "stream-json"]
+    if "--verbose" not in argv:
+        extra.append("--verbose")  # `claude -p` requires it for stream-json
+    return [*argv, *extra]
+
+
+def _is_stream(argv: list[str]) -> bool:
+    for index, arg in enumerate(argv):
+        if arg == "--output-format" and index + 1 < len(argv):
+            return argv[index + 1] == "stream-json"
+        if arg == "--output-format=stream-json":
+            return True
+    return False
+
+
+def _short(text: str, limit: int = 160) -> str:
+    flat = " ".join(str(text).split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+_TOOL_FIELDS = {
+    "Bash": "command",
+    "Read": "file_path",
+    "Write": "file_path",
+    "Edit": "file_path",
+    "MultiEdit": "file_path",
+    "NotebookEdit": "notebook_path",
+    "Glob": "pattern",
+    "Grep": "pattern",
+    "WebFetch": "url",
+    "WebSearch": "query",
+    "Task": "description",
+    "TodoWrite": None,
+    "Monitor": "description",
+}
+
+
+def _parts(event: dict[str, Any]) -> list[dict[str, Any]]:
+    """The content blocks of an assistant event, tolerating every other shape.
+
+    Events are not all alike: some carry `message` as a string, some `content` as a
+    string, and tools added to Claude Code later bring their own. Anything unexpected
+    yields no blocks rather than an error.
+    """
+    if event.get("type") != "assistant":
+        return []
+    message = event.get("message")
+    if not isinstance(message, dict):
+        return []
+    content = message.get("content")
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    if not isinstance(content, list):
+        return []
+    return [part for part in content if isinstance(part, dict)]
+
+
+def describe_event(event: dict[str, Any]) -> list[str]:
+    """One short line per step in a stream-json event: a tool call, or what the agent
+    said. Tool results and bookkeeping events are left out."""
+    lines: list[str] = []
+    if event.get("type") == "system" and event.get("subtype") == "init":
+        model = event.get("model")
+        return [f"agent started{f' ({model})' if model else ''}"]
+    for part in _parts(event):
+        if part.get("type") == "text" and str(part.get("text", "")).strip():
+            lines.append("says: " + _short(part["text"]))
+        elif part.get("type") == "tool_use":
+            name = str(part.get("name", "tool"))
+            arguments = part.get("input")
+            if not isinstance(arguments, dict):
+                arguments = {"input": arguments} if arguments else {}
+            key = _TOOL_FIELDS.get(name, "")
+            if key is None:
+                lines.append(name)
+                continue
+            value = arguments.get(key) if key else None
+            if value is None and isinstance(arguments, dict) and arguments:
+                value = json.dumps(arguments, default=str)
+            lines.append(f"{name}: {_short(value or '')}".rstrip(": "))
+    return lines
+
+
+def transcript_steps(path: Path, *, limit: int = 60) -> list[str]:
+    """The last `limit` steps of a logged transcript, as `describe_event` lines."""
+    steps: list[str] = []
+    try:
+        handle = path.open(encoding="utf-8")
+    except OSError:
+        return steps
+    with handle:
+        for line in handle:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                with contextlib.suppress(Exception):
+                    steps.extend(describe_event(event))
+    return steps[-limit:]
+
+
+def reply_from_transcript(
+    path: Path,
+    accept: Callable[[dict[str, Any]], None],
+    fields: Iterable[str] = (),
+) -> dict[str, Any] | None:
+    """The reply an agent gave earlier in a logged call, when its last message has none.
+
+    An agent may answer correctly and then speak again (a background command finishing
+    sends it one more turn, and it comments), so the call's final text is not the
+    reply. This reads the logged transcript's assistant messages, newest first, and
+    returns the first JSON object that has at least one of `fields` and that `accept`
+    takes without raising `AgentError`. `None` when there is none (or no transcript).
+    """
+    wanted = set(fields)
+    texts: list[str] = []
+    try:
+        handle = path.open(encoding="utf-8")
+    except OSError:
+        return None
+    with handle:
+        for line in handle:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            with contextlib.suppress(Exception):
+                texts.extend(
+                    str(part.get("text", ""))
+                    for part in _parts(event)
+                    if part.get("type") == "text"
+                )
+    for text in reversed(texts):
+        try:
+            data = extract_json(text)
+            if wanted and not wanted & set(data):
+                continue
+            accept(data)
+        except AgentError:
+            continue
+        return data
+    return None
+
+
 def call_agent(
     prompt: str,
     *,
@@ -482,6 +678,8 @@ def call_agent(
     cwd: Path | None = None,
     progress: Callable[[float], None] | None = None,
     unset_env: list[str] | None = None,
+    transcript: Path | None = None,
+    on_step: Callable[[str], None] | None = None,
 ) -> str:
     """Run the agent, calling `progress(elapsed_seconds)` while waiting.
 
@@ -510,10 +708,56 @@ def call_agent(
         # (an agent CLI runs tools and shells as children), not just the CLI itself.
         start_new_session=os.name == "posix",
     )
+    with _running_guard:
+        _running.add(process)
     buffers: dict[str, str] = {"out": "", "err": ""}
+    streaming = _is_stream(full_argv)
+    stream: dict[str, Any] = {"result": None, "texts": [], "other": []}
 
-    def drain(stream: Any, key: str) -> None:
-        buffers[key] = stream.read() or ""
+    def drain(pipe: Any, key: str) -> None:
+        if key != "out" or not streaming:
+            buffers[key] = pipe.read() or ""
+            return
+        # One JSON event per line: log it as it arrives (so a stopped call still
+        # leaves a record) and report each step.
+        sink = transcript.open("a", encoding="utf-8") if transcript else None
+        try:
+            for line in pipe:
+                if sink is not None:
+                    with contextlib.suppress(OSError):
+                        sink.write(line)
+                        sink.flush()
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    event = None
+                if not isinstance(event, dict) or "type" not in event:
+                    # Not a stream event: an agent that ignored the format.
+                    stream["other"].append(line)
+                    continue
+                # Nothing about one event may stop the reading: a reader that dies
+                # loses the reply, and a pipe nobody reads can stall the agent.
+                try:
+                    if event.get("type") == "result":
+                        stream["result"] = event
+                    for part in _parts(event):
+                        if part.get("type") == "text":
+                            stream["texts"].append(str(part.get("text", "")))
+                    if on_step:
+                        for step in describe_event(event):
+                            on_step(step)
+                except Exception:  # noqa: BLE001, S112
+                    continue
+        finally:
+            if sink is not None:
+                sink.close()
+        final = stream["result"]
+        if final is not None:
+            buffers["out"] = str(final.get("result") or "")
+        elif stream["other"]:
+            buffers["out"] = "".join(stream["other"])
+        else:
+            buffers["out"] = "\n".join(stream["texts"][-3:])
 
     def feed(text: str) -> None:
         try:
@@ -555,9 +799,20 @@ def call_agent(
         if process.poll() is None:
             _stop_process_group(process)
         raise
+    finally:
+        with _running_guard:
+            _running.discard(process)
     for reader in readers:
         reader.join(timeout=5)
 
+    final = stream["result"]
+    if streaming and final is not None and final.get("is_error"):
+        message = f"Agent reported an error ({final.get('subtype') or 'error'})."
+        body = str(final.get("result") or "").strip()
+        if body:
+            message += f"\n{body[:1200]}"
+        advice = diagnose(body + "\n" + buffers["err"])
+        raise AgentError(message + (f"\n\n{advice}" if advice else ""))
     if process.returncode != 0:
         parts = [f"Agent exited {process.returncode}."]
         for label, key in (("stderr", "err"), ("stdout", "out")):
@@ -750,6 +1005,8 @@ class Hooks:
     start: Callable[[dict[str, Any]], None] | None = None
     tick: Callable[[float], None] | None = None
     done: Callable[[dict[str, Any]], None] | None = None
+    step: Callable[[str], None] | None = None  # one line per agent step (stream-json)
+    note: Callable[[str], None] | None = None  # a line the agent added to its progress
 
 
 @dataclass
@@ -784,7 +1041,12 @@ def invoke(
     the call sites, so `--agent-cmd` / `HIRAKU_AGENT_CMD` has one documented precedence
     and the resolved values land in `meta.json`.
     """
-    argv = command or agent_command()
+    shown = command or agent_command()
+    # Imported here: `sandbox` reads the project defaults, which import this module.
+    from .sandbox import apply_sandbox
+
+    argv, sandbox = apply_sandbox(shown, config)
+    argv = with_stream(argv)
     resolved_timeout = resolve_timeout(timeout)
     directory = _open_log(config, workflow, target)
     (directory / "prompt.md").write_text(prompt, encoding="utf-8")
@@ -792,7 +1054,8 @@ def invoke(
     info: dict[str, Any] = {
         "workflow": workflow,
         "target": target,
-        "command": " ".join(argv),
+        "command": " ".join(shown),
+        "sandbox": sandbox,
         "prompt_chars": len(prompt),
         "context": bundle.summary(),
         "log": str(directory.relative_to(config.root)),
@@ -801,6 +1064,7 @@ def invoke(
         "unset_env": list(unset_env or []),
         "web": web_allowed(argv),
         "cwd": str(cwd or config.root),
+        "streaming": _is_stream(argv),
     }
 
     def write_meta(extra: dict[str, Any]) -> None:
@@ -819,6 +1083,8 @@ def invoke(
             cwd=cwd or config.root,
             progress=hooks.tick if hooks else None,
             unset_env=unset_env,
+            transcript=directory / TRANSCRIPT_NAME if _is_stream(argv) else None,
+            on_step=hooks.step if hooks else None,
         )
     except Exception as exc:
         # Keep the failure beside the prompt. A run that died on authentication is the
@@ -834,4 +1100,181 @@ def invoke(
     write_meta({"seconds": seconds, "reply_chars": len(raw), "error": None})
     if hooks and hooks.done:
         hooks.done({**info, "seconds": seconds, "error": None})
+    return raw, directory, seconds
+
+
+# ------------------------------------------------------------------ interactive session
+
+_ONE_SHOT_FLAGS = {"-p", "--print"}
+
+
+# What an interactive agent may do without asking, by workflow. Everything else it asks
+# the person at the keyboard about; a workflow not listed reads files only.
+INTERACTIVE_TOOLS = {
+    "discover": "WebSearch,WebFetch,Read,Glob,Grep",
+    "implement": "Read,Write,Edit,Glob,Grep,Bash",
+}
+
+
+def interactive_command(
+    override: str | None = None, workflow: str | None = None
+) -> list[str]:
+    """The command for a conversation: `override`, then `HIRAKU_AGENT_INTERACTIVE_CMD`,
+    then `claude` with the tools `workflow` needs. A one-shot command (`-p` /
+    `--print`) cannot hold a conversation, so one is refused here rather than started
+    and left to exit at once."""
+    tools = INTERACTIVE_TOOLS.get(workflow or "", REPO_TOOLS)
+    argv = agent_command(
+        override,
+        env_var=INTERACTIVE_AGENT_CMD_ENV_VAR,
+        default=f"{DEFAULT_INTERACTIVE_AGENT_CMD} --allowedTools {tools}",
+    )
+    if _ONE_SHOT_FLAGS & set(argv):
+        raise AgentError(
+            "--interactive needs a command that opens a conversation, but this one "
+            f"runs once and exits ({' '.join(argv)!r}). Drop `-p`/`--print`, or set "
+            f"{INTERACTIVE_AGENT_CMD_ENV_VAR}."
+        )
+    return argv
+
+
+def allow_tool(argv: list[str], rule: str) -> list[str]:
+    """`argv` with `rule` added to the `claude` command's `--allowedTools` (set to just
+    the read-only tools plus `rule` when the command has none)."""
+    out = list(argv)
+    for index, arg in enumerate(out):
+        if arg in {"--allowedTools", "--allowed-tools"} and index + 1 < len(out):
+            out[index + 1] = f"{out[index + 1]},{rule}"
+            return out
+        for prefix in ("--allowedTools=", "--allowed-tools="):
+            if arg.startswith(prefix):
+                out[index] = f"{arg},{rule}"
+                return out
+    return [*out, "--allowedTools", f"{REPO_TOOLS},{rule}"]
+
+
+def interactive_brief(prompt_path: Path, reply_path: Path) -> str:
+    """The opening message of an interactive session. The full prompt is a file the
+    agent reads (it can be far longer than a command line allows)."""
+    return (
+        f"Read {prompt_path} first. It is the task and the state of this project, "
+        "written for a one-shot call. This session is a conversation instead, so:\n\n"
+        "- Do NOT answer with the JSON yet. Say in a few lines what you understand "
+        "the task to be and what you would propose, then ask me what to check or "
+        "change.\n"
+        "- Work with me: look through the project's files when it helps, and use the "
+        "tools you are allowed. A number taken from a run row is evidence as the "
+        "prompt says; a number taken from a file instead is a claim you must cite "
+        "with its path and label as not in the run rows.\n"
+        "- Keep every other rule in the prompt.\n"
+        "- When I tell you to finalise (or that I am done), write ONE JSON object that "
+        f"follows the prompt's Output contract to {reply_path} with the Write tool "
+        "(only the JSON: no code fence, no commentary), then tell me it is written. "
+        "If I ask for changes afterwards, write the whole file again.\n"
+    )
+
+
+def invoke_interactive(
+    config: HirakuConfig,
+    workflow: str,
+    target: str,
+    prompt: str,
+    *,
+    command: list[str] | None,
+    unset_env: list[str] | None = None,
+    cwd: Path | None = None,
+) -> tuple[str, Path, float]:
+    """Run an agent as a conversation on the user's terminal, then read its reply.
+
+    The agent keeps the terminal (no capture, no timeout; Claude Code asks before
+    anything outside the allowed tools, and the project's sandbox applies if it is
+    on). The reply is not parsed out of the chat: the agent writes it to `reply.json`
+    in the call's log directory, which is read once the session ends. A session that
+    ends without that file is an error that names the log, never a half-applied
+    record.
+    """
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise AgentError(
+            "--interactive needs a terminal (stdin and stdout are not a tty). Run it "
+            "from a shell you are typing in, or use the one-shot form."
+        )
+    argv = command or interactive_command(workflow=workflow)
+    if _ONE_SHOT_FLAGS & set(argv):
+        raise AgentError(
+            "--interactive cannot use a one-shot command (`-p`/`--print`): "
+            f"{' '.join(argv)!r}."
+        )
+    directory = _open_log(config, workflow, target)
+    prompt_path = (directory / "prompt.md").resolve()
+    reply_path = (directory / INTERACTIVE_REPLY_NAME).resolve()
+    prompt_path.write_text(prompt, encoding="utf-8")
+    shown = list(argv)
+    if Path(argv[0]).name in _CLAUDE_NAMES:
+        # Claude Code takes file permissions as `Edit(path)` rules only (they cover
+        # Write too; a `Write(path)` rule is refused), and an absolute path starts
+        # with `//`.
+        argv = allow_tool(argv, f"Edit(/{reply_path})")
+        # The log directory is under the project, but an agent working in a worktree
+        # (`implement`) runs elsewhere and needs it named to write the reply there.
+        if not directory.resolve().is_relative_to((cwd or config.root).resolve()):
+            argv = [*argv, "--add-dir", str(directory.resolve())]
+    # Imported here: `sandbox` reads the project defaults, which import this module.
+    from .sandbox import apply_sandbox
+
+    argv, sandbox = apply_sandbox(argv, config)
+    if sandbox and sandbox.get("enabled"):
+        print("sandbox on for this session", file=sys.stderr)
+    elif sandbox:
+        print(f"WARNING: sandbox OFF ({sandbox['reason']})", file=sys.stderr)
+    argv = [*argv, interactive_brief(prompt_path, reply_path)]
+    info: dict[str, Any] = {
+        "workflow": workflow,
+        "target": target,
+        "command": " ".join(shown),
+        "interactive": True,
+        "log": str(directory.relative_to(config.root)),
+        "started": _dt.datetime.now().isoformat(timespec="seconds"),
+        "cwd": str(cwd or config.root),
+    }
+
+    def write_meta(extra: dict[str, Any]) -> None:
+        (directory / "meta.json").write_text(
+            json.dumps({**info, **extra}, indent=2, default=str), encoding="utf-8"
+        )
+
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(  # noqa: S603 - the user's own agent command
+            argv, cwd=cwd or config.root, env=agent_env(unset_env), check=False
+        )
+    except FileNotFoundError as exc:
+        write_meta({"error": f"{argv[0]!r} was not found: {exc}"})
+        raise AgentError(
+            f"Could not start {argv[0]!r}: it is not on PATH. Install it, or point "
+            f"{INTERACTIVE_AGENT_CMD_ENV_VAR} / --agent-cmd at the agent to use."
+        ) from exc
+    seconds = round(time.monotonic() - started, 1)
+    raw = ""
+    if reply_path.is_file():
+        raw = reply_path.read_text(encoding="utf-8")
+    if not raw.strip():
+        message = (
+            "The session ended without a reply: the agent did not write "
+            f"{INTERACTIVE_REPLY_NAME}. Nothing was written to the record. Run it "
+            "again and tell the agent to finalise before you exit; the prompt it was "
+            f"given is kept in {directory / 'prompt.md'}."
+        )
+        write_meta(
+            {"seconds": seconds, "exit_code": completed.returncode, "error": message}
+        )
+        raise AgentError(message)
+    write_meta(
+        {
+            "seconds": seconds,
+            "exit_code": completed.returncode,
+            "reply_chars": len(raw),
+            "error": None,
+        }
+    )
+    (directory / "reply.txt").write_text(raw, encoding="utf-8")
     return raw, directory, seconds

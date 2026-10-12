@@ -12,6 +12,11 @@ its site settings. You do not write files: you return JSON and the tool writes i
   REF), never on whatever happens to be checked out.
 - COMMAND sees `HIRAKU_COMMIT` (the full hash it runs) and `HIRAKU_GIT_STATE`
   (`clean` or `dirty`), and inherits the four variables above.
+- `HIRAKU_STATE_PATHS` lists, one per line and relative to the project root, the paths
+  that are Hiraku's own state (its configuration, state directory and `runs.csv`). A
+  dispatcher that decides `clean` or `dirty` from `git status` leaves them out
+  (`git status --porcelain -- . ':(exclude,literal)PATH'` for each), as `launch.sh`
+  does: a new record is not a change to the code that runs.
 - A dispatcher that only *submits* the work (a scheduler, a remote cluster) returns
   once it is queued, prints the job id as the last line of stdout, and runs
   `hiraku-agent mark-running "$HIRAKU_RECORD_ID" --job-id ID` when `hiraku-agent` is on

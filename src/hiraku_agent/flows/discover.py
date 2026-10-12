@@ -61,6 +61,7 @@ def run_discover(
     timeout: int | None = None,
     action: str | None = None,
     context_id: str | None = None,
+    interactive: bool = False,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Search for candidate hypotheses, and/or investigate what already exists.
@@ -90,6 +91,8 @@ def run_discover(
     nodes = list_nodes(task=task, config=selected)
     call = AgentCall.resolve(
         selected,
+        interactive=interactive,
+        workflow="discover",
         entity=task.id,
         action=action,
         context_id=context_id,

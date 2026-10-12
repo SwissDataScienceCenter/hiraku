@@ -287,6 +287,7 @@ def run_draft(
     activate: bool = True,
     action: str | None = None,
     context_id: str | None = None,
+    interactive: bool = False,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Turn free-text instruction into a new task (a root `Record`) — the same effect
@@ -311,6 +312,8 @@ def run_draft(
         ensure_ids_free([task_id], config=selected, label="task")
     call = AgentCall.resolve(
         selected,
+        interactive=interactive,
+        workflow="draft",
         entity=task_id,
         action=action,
         context_id=context_id,
@@ -364,6 +367,7 @@ def run_plan(
     activate: bool = True,
     action: str | None = None,
     context_id: str | None = None,
+    interactive: bool = False,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """`draft` then `design` in one go: from a couple of sentences to a task and its
@@ -385,6 +389,7 @@ def run_plan(
         "hooks": hooks,
         "timeout": timeout,
         "context_id": context_id,
+        "interactive": interactive,
         "config": selected,
     }
     drafted = run_draft(

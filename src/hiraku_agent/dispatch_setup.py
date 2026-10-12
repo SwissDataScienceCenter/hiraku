@@ -47,7 +47,9 @@ from .engine import (
     build_prompt,
     extract_json,
     gather_context,
+    interactive_command,
     invoke,
+    invoke_interactive,
     with_repos,
 )
 from .errors import AgentError
@@ -184,6 +186,7 @@ def run_setup_dispatch(
     unset_env: list[str] | None = None,
     hooks: Hooks | None = None,
     timeout: int | None = None,
+    interactive: bool = False,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Have the agent choose and configure a dispatcher for this project.
@@ -205,6 +208,8 @@ def run_setup_dispatch(
     )
     bundle = gather_context(selected.root, context_paths, max_bytes=context_bytes)
     state = {"detected": detect(selected, repo_paths), "requested_name": name}
+    if interactive:
+        command = command or interactive_command(workflow="setup_dispatch")
     command = with_repos(command, repo_paths)
     prompt = build_prompt(
         "setup_dispatch",
@@ -217,17 +222,27 @@ def run_setup_dispatch(
     if dry_run:
         return result
 
-    result.raw, result.log, result.seconds = invoke(
-        selected,
-        "setup_dispatch",
-        "project",
-        prompt,
-        bundle,
-        command=command,
-        timeout=timeout,
-        hooks=hooks,
-        unset_env=unset_env,
-    )
+    if interactive:
+        result.raw, result.log, result.seconds = invoke_interactive(
+            selected,
+            "setup_dispatch",
+            "project",
+            prompt,
+            command=command,
+            unset_env=unset_env,
+        )
+    else:
+        result.raw, result.log, result.seconds = invoke(
+            selected,
+            "setup_dispatch",
+            "project",
+            prompt,
+            bundle,
+            command=command,
+            timeout=timeout,
+            hooks=hooks,
+            unset_env=unset_env,
+        )
     data = extract_json(result.raw, keys=("template", "backend"))
     result.data = data
     if not apply:

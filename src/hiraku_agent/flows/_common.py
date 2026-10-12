@@ -18,6 +18,7 @@ from hiraku.validation import validate_identifier
 from .. import sections
 from ..actions import apply_overrides
 from ..engine import (
+    TRANSCRIPT_NAME,
     AgentRun,
     Bundle,
     Hooks,
@@ -26,7 +27,10 @@ from ..engine import (
     build_prompt,
     extract_json,
     gather_context,
+    interactive_command,
     invoke,
+    invoke_interactive,
+    reply_from_transcript,
     with_repos,
 )
 from ..errors import AgentError
@@ -231,6 +235,7 @@ class AgentCall:
     repo_paths: list[str] | None = None
     hooks: Hooks | None = None
     unset_env: list[str] | None = None
+    interactive: bool = False
 
     @classmethod
     def resolve(
@@ -247,9 +252,16 @@ class AgentCall:
         repo_paths: list[str] | None = None,
         hooks: Hooks | None = None,
         unset_env: list[str] | None = None,
+        interactive: bool = False,
+        workflow: str | None = None,
     ) -> AgentCall:
         """Apply a saved `Action` (scoped to `entity`), `--repo` and the context files,
-        in that order; explicit arguments win over the Action's saved values."""
+        in that order; explicit arguments win over the Action's saved values.
+
+        With `interactive`, an unresolved command becomes the conversation command for
+        `workflow` (see `engine.interactive_command`), not the one-shot default."""
+        if interactive:
+            command = command or interactive_command(workflow=workflow)
         command, timeout, context_paths = apply_overrides(
             action,
             context_id,
@@ -267,6 +279,7 @@ class AgentCall:
             repo_paths=repo_paths,
             hooks=hooks,
             unset_env=unset_env,
+            interactive=interactive,
         )
 
     def prepare(
@@ -296,6 +309,8 @@ class AgentCall:
         An unusable or `blocked` reply is noted in the call's `meta.json`, so that
         `hiraku-agent next` can say the step it suggests just failed (`last_attempt`).
         """
+        if self.interactive:
+            return self.ask_interactive(result, target, reply=reply, cwd=cwd)
         result.raw, result.log, result.seconds = invoke(
             self.config,
             result.workflow,
@@ -308,8 +323,53 @@ class AgentCall:
             unset_env=self.unset_env,
             cwd=cwd,
         )
+        return self._parse(result, reply)
+
+    def ask_interactive(
+        self,
+        result: AgentRun,
+        target: str,
+        *,
+        reply: type[Reply] | None = None,
+        cwd: Path | None = None,
+    ) -> AgentRun:
+        """Like `ask`, but the agent is a conversation on this terminal. Its reply is
+        the `reply.json` it writes before the session ends, checked the same way."""
+        result.raw, result.log, result.seconds = invoke_interactive(
+            self.config,
+            result.workflow,
+            target,
+            result.prompt,
+            command=self.command,
+            unset_env=self.unset_env,
+            cwd=cwd,
+        )
+        return self._parse(result, reply, transcript=False)
+
+    def _parse(
+        self,
+        result: AgentRun,
+        reply: type[Reply] | None,
+        *,
+        transcript: bool = True,
+    ) -> AgentRun:
         try:
-            result.data = extract_json(result.raw)
+            try:
+                result.data = extract_json(result.raw)
+            except AgentError:
+                recovered = (
+                    reply_from_transcript(
+                        result.log / TRANSCRIPT_NAME,
+                        lambda data: reply.check(data, workflow=result.workflow),
+                        reply.model_fields,
+                    )
+                    if transcript and reply is not None and result.log
+                    else None
+                )
+                if recovered is None:
+                    raise
+                result.data = recovered
+                annotate_log(result.log, reply_from="transcript")
             if reply is not None:
                 reply.check(result.data, workflow=result.workflow)
         except AgentError as exc:

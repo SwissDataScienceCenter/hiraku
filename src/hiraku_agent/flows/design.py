@@ -44,6 +44,7 @@ def run_design(
     timeout: int | None = None,
     action: str | None = None,
     context_id: str | None = None,
+    interactive: bool = False,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Propose a tree of experiments for a task. Writes proposed `Node`s (no commit)."""
@@ -52,6 +53,8 @@ def run_design(
     nodes = list_nodes(task=task, config=selected)
     call = AgentCall.resolve(
         selected,
+        interactive=interactive,
+        workflow="design",
         entity=task.id,
         action=action,
         context_id=context_id,

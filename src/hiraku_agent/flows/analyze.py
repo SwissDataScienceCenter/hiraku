@@ -42,6 +42,7 @@ def run_analyze(
     action: str | None = None,
     context_id: str | None = None,
     allow_running: bool = False,
+    interactive: bool = False,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Judge a node's runs against its expectation and write its findings — or, given a
@@ -62,6 +63,11 @@ def run_analyze(
     comparison table and the agent is told not to use them. The run ids judged are
     recorded in `analyzed_runs`, so an analysis that reached no verdict is not repeated
     until new runs arrive.
+
+    With `interactive`, the agent is a conversation on this terminal instead of one
+    call: the researcher and the agent look through the runs and result files together,
+    and the reply is the `reply.json` the agent writes when told to finalise. It is
+    checked and written exactly like a one-shot reply.
     """
     selected = config or HirakuConfig.discover()
     record = load_record(node_id, config=selected)
@@ -83,6 +89,7 @@ def run_analyze(
             timeout=timeout,
             action=action,
             context_id=context_id,
+            interactive=interactive,
             config=selected,
         )
     node = load_node(node_id, task=task_id, config=selected)
@@ -94,6 +101,8 @@ def run_analyze(
     judged = sorted(str(run.id) for run in runs_by_id[node.id])
     call = AgentCall.resolve(
         selected,
+        interactive=interactive,
+        workflow="analyze",
         entity=task.id,
         action=action,
         context_id=context_id,
@@ -243,6 +252,7 @@ def _analyze_task(
     timeout: int | None,
     action: str | None,
     context_id: str | None,
+    interactive: bool,
     config: HirakuConfig,
 ) -> AgentRun:
     """Task-level `analyze`: what the task's nodes show, separately and together —
@@ -283,6 +293,8 @@ def _analyze_task(
     board = compare.build_leaderboard(task, nodes, runs_by_id)
     call = AgentCall.resolve(
         config,
+        interactive=interactive,
+        workflow="analyze_task",
         entity=task.id,
         action=action,
         context_id=context_id,

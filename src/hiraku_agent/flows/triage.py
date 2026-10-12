@@ -37,6 +37,7 @@ def run_triage(
     timeout: int | None = None,
     action: str | None = None,
     context_id: str | None = None,
+    interactive: bool = False,
     config: HirakuConfig | None = None,
 ) -> AgentRun:
     """Judge whether a concluded node is worth going further on, and if so, how.
@@ -60,6 +61,8 @@ def run_triage(
     nodes = list_nodes(task=task, config=selected)
     call = AgentCall.resolve(
         selected,
+        interactive=interactive,
+        workflow="triage",
         entity=task.id,
         action=action,
         context_id=context_id,

@@ -45,7 +45,9 @@ def set_section(markdown: str, heading: str, body: str) -> str:
     pattern = _pattern(heading)
     base = markdown or ""
     if pattern.search(base):
-        return pattern.sub(block, base, count=1)
+        # A function, not the string: `body` may hold backslashes (`\d`, paths)
+        # that `re.sub` would otherwise read as escapes.
+        return pattern.sub(lambda _match: block, base, count=1)
     prefix = base if base.endswith("\n") or not base.strip() else base + "\n"
     separator = "\n" if prefix.strip() else ""
     return f"{prefix}{separator}{block}"
