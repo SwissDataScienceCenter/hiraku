@@ -286,13 +286,11 @@ def test_mcp_settings_round_trip(tmp_path: Path) -> None:
 def test_init_configures_mcp_for_claude_code_and_codex(tmp_path: Path) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     claude = json.loads((tmp_path / ".mcp.json").read_text())
-    assert claude == {
-        "mcpServers": {"hiraku": {"command": "hiraku", "args": ["mcp", "serve"]}}
-    }
+    assert claude == {"mcpServers": {"hiraku": {"command": "hiraku", "args": ["mcp"]}}}
     codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
     assert codex["mcp_servers"]["hiraku"] == {
         "command": "hiraku",
-        "args": ["mcp", "serve"],
+        "args": ["mcp"],
     }
 
 

@@ -49,7 +49,7 @@ take precedence over values from a template-provided `hiraku.yml`.
 After successful initialization, the command lists every file and directory it
 created before printing the final project location.
 
-Run workflows from a coding agent through `hiraku mcp serve`, which `hiraku init`
+Run workflows from a coding agent through `hiraku mcp`, which `hiraku init`
 configures for Claude Code and Codex. `hiraku workflow` and `hiraku session`
 list, activate, call, inspect, and cancel workflows and their sessions; see the
 [Workflows guide](../guides/workflows.md).

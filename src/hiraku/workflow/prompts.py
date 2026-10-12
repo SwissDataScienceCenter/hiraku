@@ -1,16 +1,11 @@
-"""Markdown section parsing and prompt lookup across workflows."""
+"""Markdown section parsing for workflow prompts."""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
-from ..errors import ValidationError, WorkflowError
-
-if TYPE_CHECKING:
-    from .core import Workflow
+from ..errors import ValidationError
 
 _HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
@@ -96,55 +91,3 @@ def parse_markdown(markdown: str, *, label: str) -> ParsedMarkdown:
         )
         sections[anchor] = Section(level, index, end)
     return ParsedMarkdown(lines, sections, orientation_end)
-
-
-class PromptLibrary:
-    """The ``workflow.md`` records of all workflows in a project, loaded together.
-
-    Args:
-        documents: Mapping from workflow ID to its workflow record.
-    """
-
-    def __init__(self, documents: Mapping[str, Workflow]) -> None:
-        self._documents = dict(documents)
-
-    def document(self, workflow_id: str) -> Workflow:
-        """Return one workflow's document.
-
-        Raises:
-            hiraku.errors.WorkflowError: If the workflow has no loaded document.
-        """
-        try:
-            return self._documents[workflow_id]
-        except KeyError as exc:
-            raise WorkflowError(
-                f"Workflow {workflow_id!r} has no loaded workflow.md"
-            ) from exc
-
-    def resolve(self, workflow_id: str, reference: str | None = None) -> str:
-        """Resolve a prompt reference relative to a workflow.
-
-        Args:
-            workflow_id: Workflow that local references resolve against.
-            reference: ``None`` for the whole local document, ``"#section"`` for
-                a local section, ``"other"`` for another workflow's document, or
-                ``"other#section"`` for a section of another workflow.
-
-        Returns:
-            The referenced Markdown text.
-
-        Raises:
-            hiraku.errors.WorkflowError: If the reference is malformed or missing.
-        """
-        if reference is None or reference == "":
-            return self.document(workflow_id).text.strip()
-        target, separator, anchor = reference.partition("#")
-        target = target or workflow_id
-        if separator and not anchor:
-            raise WorkflowError(f"Prompt reference {reference!r} has an empty anchor")
-        if "/" in target or "\\" in target or target in {".", ".."}:
-            raise WorkflowError(
-                f"Prompt reference {reference!r} must name a project workflow"
-            )
-        document = self.document(target)
-        return document.section(anchor) if anchor else document.text.strip()

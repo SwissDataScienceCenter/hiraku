@@ -14,8 +14,19 @@ from pydantic_core import to_jsonable_python
 
 from ..config import HirakuConfig
 from ..errors import HirakuError, NotReady, ValidationError, WorkflowError
-from .catalog import Catalog, WorkflowEntry
-from .core import Completion, Handler, Instruction, Session
+from .core import (
+    Completion,
+    Handler,
+    Instruction,
+    Session,
+    Workflow,
+    discover_workflows,
+    handlers,
+    load_workflow,
+    prompts,
+    resources,
+    session_model,
+)
 from .sessions import (
     Receipt,
     SessionStore,
@@ -53,11 +64,14 @@ _CANCEL_NOTE = (
 class WorkflowService:
     """Start, continue, inspect, and cancel workflow sessions.
 
+    Every discovered workflow is loaded once, when the service is created. A
+    workflow that fails to load is logged and left out; `activate` loads it
+    again and reports the error.
+
     Args:
         config: Project configuration.
-        catalog: Loaded workflows; created from ``config`` when omitted.
         exposed: Workflow IDs to expose instead of the configured set, e.g. from
-            ``hiraku mcp serve --workflow``.
+            ``hiraku mcp --workflow``.
 
     Raises:
         hiraku.errors.WorkflowError: If the configured or requested workflow set
@@ -65,17 +79,42 @@ class WorkflowService:
     """
 
     def __init__(
-        self,
-        config: HirakuConfig,
-        catalog: Catalog | None = None,
-        *,
-        exposed: list[str] | None = None,
+        self, config: HirakuConfig, *, exposed: list[str] | None = None
     ) -> None:
         self.config = config
-        self.catalog = catalog or Catalog(config)
         self.store = SessionStore(config)
+        self.workflows: dict[str, Workflow] = {}
+        self._discovered = discover_workflows(config)
         self._override = list(exposed) if exposed is not None else None
-        self._check_known(self.exposed_ids())
+        unknown = [item for item in self.exposed_ids() if item not in self._discovered]
+        if unknown:
+            raise WorkflowError(
+                f"Unknown workflows in the MCP workflow set: {', '.join(unknown)}; "
+                f"available workflows: {', '.join(self._discovered) or 'none'}. "
+                f"Fix mcp.workflows in {self.config.path}."
+            )
+        for workflow_id in self._discovered:
+            try:
+                self.workflow(workflow_id)
+            except Exception as exc:
+                logger.warning("Workflow %s is unavailable: %s", workflow_id, exc)
+
+    def workflow(self, workflow_id: str) -> Workflow:
+        """Return a loaded workflow, loading it if it is not loaded yet.
+
+        Raises:
+            hiraku.errors.HirakuError: If the workflow does not exist or fails
+                to load.
+        """
+        if workflow_id not in self.workflows:
+            available = discover_workflows(self.config)
+            if workflow_id not in available:
+                raise WorkflowError(
+                    f"Unknown workflow {workflow_id!r}; available workflows: "
+                    f"{', '.join(available) or 'none'}"
+                )
+            self.workflows[workflow_id] = load_workflow(workflow_id, config=self.config)
+        return self.workflows[workflow_id]
 
     # Exposure -----------------------------------------------------------------
 
@@ -85,22 +124,20 @@ class WorkflowService:
             return list(self._override)
         configured = self.config.mcp.workflows if self.config.mcp else None
         if configured is None:
-            return list(self.catalog.entries)
+            return list(self._discovered)
         return list(configured)
 
-    def _check_known(self, identifiers: list[str]) -> None:
-        unknown = [item for item in identifiers if item not in self.catalog.entries]
-        if unknown:
-            available = ", ".join(self.catalog.entries) or "none"
-            raise WorkflowError(
-                f"Unknown workflows in the MCP workflow set: {', '.join(unknown)}; "
-                f"available workflows: {available}. Fix mcp.workflows in "
-                f"{self.config.path}."
-            )
+    def _exposed(self) -> list[Workflow]:
+        exposed = set(self.exposed_ids())
+        return [
+            workflow
+            for workflow_id, workflow in sorted(self.workflows.items())
+            if workflow_id in exposed
+        ]
 
     def activate(self, workflow_id: str) -> dict[str, Any]:
-        """Expose a workflow's tools and persist the workflow set."""
-        self.catalog.entry(workflow_id)
+        """Load a workflow, expose its tools, and persist the workflow set."""
+        self.workflow(workflow_id)
         current = self.exposed_ids()
         if workflow_id in current:
             return self._activation_result(current, changed=False)
@@ -111,7 +148,6 @@ class WorkflowService:
 
         Sessions are never modified; they can be inspected while inactive.
         """
-        self.catalog.entry(workflow_id)
         current = self.exposed_ids()
         if workflow_id not in current:
             return self._activation_result(current, changed=False)
@@ -155,61 +191,59 @@ class WorkflowService:
     # Discovery ----------------------------------------------------------------
 
     def list_workflows(self) -> list[dict[str, Any]]:
-        """Describe every discovered workflow, active or not."""
-        exposed = set(self.exposed_ids())
-        result = []
-        for entry in self.catalog.entries.values():
-            item: dict[str, Any] = {
-                "id": entry.id,
-                "active": entry.id in exposed,
-                "description": entry.description,
-            }
-            if entry.error is not None:
-                item["error"] = entry.error
-            else:
-                start = entry.handlers["start"]
-                item["start_tool"] = entry.tool_name("start")
-                item["start_arguments"] = start.arguments.model_json_schema()
-            result.append(item)
-        return result
-
-    def tool_definitions(self, *, exposed_only: bool = True) -> list[dict[str, Any]]:
-        """Return MCP tool definitions of workflow handlers."""
-        exposed = set(self.exposed_ids())
-        definitions = []
-        for name, entry, handler in self.catalog.tools():
-            if exposed_only and entry.id not in exposed:
-                continue
-            definitions.append(
-                {
-                    "name": name,
-                    "description": _tool_description(entry, handler),
-                    "input_schema": input_schema(handler),
-                }
-            )
-        return definitions
-
-    def is_exposed_tool(self, name: str) -> bool:
-        """Return whether a workflow tool belongs to an exposed workflow."""
-        try:
-            entry, _ = self.catalog.tool(name)
-        except WorkflowError:
-            return False
-        return entry.id in self.exposed_ids()
-
-    def resource_definitions(self) -> list[dict[str, Any]]:
-        """Return the MCP resources declared by exposed workflows."""
+        """Describe every loaded workflow, active or not."""
         exposed = set(self.exposed_ids())
         return [
             {
-                "uri": f"hiraku://workflows/{entry.id}/{item.name}",
-                "name": f"{entry.id}-{item.name}",
+                "id": workflow_id,
+                "active": workflow_id in exposed,
+                "description": workflow_description(workflow),
+                "start_tool": tool_name(workflow_id, "start"),
+                "start_arguments": handlers(type(workflow))[
+                    "start"
+                ].arguments.model_json_schema(),
+            }
+            for workflow_id, workflow in sorted(self.workflows.items())
+        ]
+
+    def tool_definitions(self) -> list[dict[str, Any]]:
+        """Return MCP tool definitions of the exposed workflows' handlers."""
+        return [
+            {
+                "name": tool_name(workflow.id, handler.name),
+                "description": _tool_description(workflow, handler),
+                "input_schema": input_schema(handler),
+            }
+            for workflow in self._exposed()
+            for handler in sorted(
+                handlers(type(workflow)).values(), key=lambda item: item.name
+            )
+        ]
+
+    def tool(self, name: str) -> tuple[Workflow, Handler]:
+        """Return the loaded workflow and handler behind an MCP tool name.
+
+        Raises:
+            hiraku.errors.WorkflowError: If no loaded workflow defines the tool.
+        """
+        workflow_id, _, handler_name = name.partition("_")
+        workflow = self.workflows.get(workflow_id)
+        handler = handlers(type(workflow)).get(handler_name) if workflow else None
+        if workflow is None or handler is None:
+            raise WorkflowError(f"Unknown workflow tool {name!r}")
+        return workflow, handler
+
+    def resource_definitions(self) -> list[dict[str, Any]]:
+        """Return the MCP resources declared by exposed workflows."""
+        return [
+            {
+                "uri": f"hiraku://workflows/{workflow.id}/{item.name}",
+                "name": f"{workflow.id}-{item.name}",
                 "description": _summary(item.description),
                 "mime_type": item.mime_type,
             }
-            for entry in self.catalog.entries.values()
-            if entry.loaded and entry.id in exposed
-            for item in entry.resources.values()
+            for workflow in self._exposed()
+            for item in resources(type(workflow)).values()
         ]
 
     def read_resource(self, workflow_id: str, name: str) -> tuple[str, str]:
@@ -219,11 +253,11 @@ class WorkflowService:
             hiraku.errors.WorkflowError: If the workflow is inactive or the
                 resource does not exist or returns non-text.
         """
-        entry = self._exposed_entry(workflow_id)
-        item = entry.resources.get(name)
+        workflow = self._exposed_workflow(workflow_id)
+        item = resources(type(workflow)).get(name)
         if item is None:
             raise WorkflowError(f"Workflow {workflow_id!r} has no resource {name!r}")
-        text = item.function(self.catalog.instantiate(entry.id, self.current_config()))
+        text = item.function(workflow.bind(self.current_config()))
         if not isinstance(text, str):
             raise WorkflowError(
                 f"Resource {name!r} of {workflow_id!r} must return text"
@@ -232,17 +266,14 @@ class WorkflowService:
 
     def prompt_definitions(self) -> list[dict[str, Any]]:
         """Return the MCP prompts declared by exposed workflows."""
-        exposed = set(self.exposed_ids())
         definitions = []
-        for entry in self.catalog.entries.values():
-            if not entry.loaded or entry.id not in exposed:
-                continue
-            for item in entry.prompts.values():
+        for workflow in self._exposed():
+            for item in prompts(type(workflow)).values():
                 schema = item.arguments.model_json_schema()
                 required = set(schema.get("required", []))
                 definitions.append(
                     {
-                        "name": entry.tool_name(item.name),
+                        "name": tool_name(workflow.id, item.name),
                         "description": _summary(item.description),
                         "arguments": [
                             {
@@ -263,33 +294,34 @@ class WorkflowService:
             hiraku.errors.WorkflowError: If the prompt does not exist or is
                 inactive, or its arguments are invalid.
         """
-        for entry in self.catalog.entries.values():
-            for item in entry.prompts.values():
-                if entry.tool_name(item.name) != name:
-                    continue
-                self._exposed_entry(entry.id)
-                try:
-                    validated = item.arguments.model_validate(dict(arguments or {}))
-                except PydanticValidationError as exc:
-                    raise WorkflowError(_validation_message(exc)) from exc
-                workflow = self.catalog.instantiate(entry.id, self.current_config())
-                text = item.function(workflow, **_keywords(validated))
-                if not isinstance(text, str):
-                    raise WorkflowError(f"Prompt {name!r} must return text")
-                return text
-        raise WorkflowError(f"Unknown workflow prompt {name!r}")
+        workflow_id, _, prompt_name = name.partition("_")
+        workflow = self.workflows.get(workflow_id)
+        item = prompts(type(workflow)).get(prompt_name) if workflow else None
+        if item is None:
+            raise WorkflowError(f"Unknown workflow prompt {name!r}")
+        workflow = self._exposed_workflow(workflow_id)
+        try:
+            validated = item.arguments.model_validate(dict(arguments or {}))
+        except PydanticValidationError as exc:
+            raise WorkflowError(_validation_message(exc)) from exc
+        text = item.function(
+            workflow.bind(self.current_config()), **_keywords(validated)
+        )
+        if not isinstance(text, str):
+            raise WorkflowError(f"Prompt {name!r} must return text")
+        return text
 
-    def _exposed_entry(self, workflow_id: str) -> WorkflowEntry:
-        entry = self.catalog.loaded_entry(workflow_id)
-        if entry.id not in self.exposed_ids():
+    def _exposed_workflow(self, workflow_id: str) -> Workflow:
+        workflow = self.workflow(workflow_id)
+        if workflow_id not in self.exposed_ids():
             raise WorkflowError(
                 f"Workflow {workflow_id!r} is not active; call workflow_activate first"
             )
-        return entry
+        return workflow
 
     # Invocation ---------------------------------------------------------------
 
-    def call(self, tool_name: str, arguments: Mapping[str, Any] | None) -> Any:
+    def call(self, name: str, arguments: Mapping[str, Any] | None) -> Any:
         """Invoke a workflow tool by name.
 
         Returns:
@@ -297,58 +329,58 @@ class WorkflowService:
             ``status`` of ``accepted``, ``duplicate``, ``conflict``, ``stale``,
             ``rejected``, ``not_ready``, ``blocked``, or ``error``.
         """
-        entry, handler = self.catalog.tool(tool_name)
+        workflow, handler = self.tool(name)
         if arguments is not None and not isinstance(arguments, Mapping):
             raise ValidationError("Tool arguments must be a JSON object")
         values = dict(arguments or {})
         if handler.kind == "start":
-            return self._start(entry, handler, values)
+            return self._start(workflow, handler, values)
         if handler.kind == "continuation":
-            return self._continue(entry, handler, values)
-        return self._ordinary(entry, handler, values)
+            return self._continue(workflow, handler, values)
+        return self._ordinary(workflow, handler, values)
 
     def _ordinary(
-        self, entry: WorkflowEntry, handler: Handler, values: dict[str, Any]
+        self, workflow: Workflow, handler: Handler, values: dict[str, Any]
     ) -> Any:
         try:
             validated = handler.arguments.model_validate(values)
         except PydanticValidationError as exc:
             return {"status": "rejected", "message": _validation_message(exc)}
-        workflow = self.catalog.instantiate(entry.id, self.current_config())
+        bound = workflow.bind(self.current_config())
         try:
-            result = handler.function(workflow, **_keywords(validated))
+            result = handler.function(bound, **_keywords(validated))
         except (HirakuError, PydanticValidationError) as exc:
             return {"status": "rejected", "message": str(exc)}
         except Exception as exc:
-            return _unexpected(entry, handler, exc)
+            return _unexpected(workflow, handler, exc)
         return {"status": "ok", "result": _jsonable(result)}
 
     def _start(
-        self, entry: WorkflowEntry, handler: Handler, values: dict[str, Any]
+        self, workflow: Workflow, handler: Handler, values: dict[str, Any]
     ) -> dict[str, Any]:
         try:
             validated = handler.arguments.model_validate(values)
         except PydanticValidationError as exc:
             return {"status": "rejected", "message": _validation_message(exc)}
-        workflow = self.catalog.instantiate(entry.id, self.current_config())
+        bound = workflow.bind(self.current_config())
         try:
-            response = handler.function(workflow, **_keywords(validated))
+            response = handler.function(bound, **_keywords(validated))
         except NotReady as exc:
             return {"status": "not_ready", "message": str(exc)}
         except (HirakuError, PydanticValidationError) as exc:
             return {"status": "rejected", "message": str(exc)}
         except Exception as exc:
-            return _unexpected(entry, handler, exc)
+            return _unexpected(workflow, handler, exc)
         try:
-            session = _checked_response(entry, response)
+            session = _checked_response(workflow, response)
         except WorkflowError as exc:
             return {"status": "error", "message": str(exc)}
-        session_id = self.store.new_id(entry.id)
+        session_id = self.store.new_id(workflow.id)
         now = datetime.now(UTC)
-        orientation = self.catalog.prompts.document(entry.id).orientation
+        orientation = workflow.orientation
         stored = StoredSession(
             session_id=session_id,
-            workflow=entry.id,
+            workflow=workflow.id,
             status="active",
             instruction_id=0,
             data={},
@@ -357,7 +389,7 @@ class WorkflowService:
             created_at=now,
             updated_at=now,
         )
-        self._apply(entry, stored, response, session)
+        self._apply(workflow, stored, response, session)
         with self.store.lock(session_id):
             self.store.save(stored)
         return {
@@ -368,7 +400,7 @@ class WorkflowService:
         }
 
     def _continue(
-        self, entry: WorkflowEntry, handler: Handler, values: dict[str, Any]
+        self, workflow: Workflow, handler: Handler, values: dict[str, Any]
     ) -> dict[str, Any]:
         session_id = validate_session_id(values.pop("session_id", None))
         instruction_id = values.pop("instruction_id", None)
@@ -378,25 +410,25 @@ class WorkflowService:
             with self.store.lock(session_id):
                 stored = self.store.load(session_id)
                 return self._continue_locked(
-                    entry, handler, stored, instruction_id, values
+                    workflow, handler, stored, instruction_id, values
                 )
         except Timeout:
             return {"status": "busy", "message": lock_timeout_message(session_id)}
 
     def _continue_locked(
         self,
-        entry: WorkflowEntry,
+        workflow: Workflow,
         handler: Handler,
         stored: StoredSession,
         instruction_id: int,
         values: dict[str, Any],
     ) -> dict[str, Any]:
-        if stored.workflow != entry.id:
+        if stored.workflow != workflow.id:
             return _outcome(
                 stored,
                 "rejected",
                 f"Session {stored.session_id!r} belongs to workflow "
-                f"{stored.workflow!r}, not {entry.id!r}",
+                f"{stored.workflow!r}, not {workflow.id!r}",
             )
         try:
             validated = handler.arguments.model_validate(values)
@@ -416,7 +448,7 @@ class WorkflowService:
                 stored,
                 "conflict",
                 f"Instruction {instruction_id} was already answered by "
-                f"{entry.tool_name(receipt.handler)} with "
+                f"{tool_name(workflow.id, receipt.handler)} with "
                 f"{receipt.arguments}; this call was not applied.",
             )
         if stored.status != "active":
@@ -440,34 +472,34 @@ class WorkflowService:
             )
         if handler.name not in stored.pending_replies:
             offered = ", ".join(
-                entry.tool_name(name) for name in stored.pending_replies
+                tool_name(workflow.id, name) for name in stored.pending_replies
             )
             return _outcome(
                 stored,
                 "rejected",
-                f"{entry.tool_name(handler.name)} is not a reply to the pending "
+                f"{tool_name(workflow.id, handler.name)} is not a reply to the pending "
                 f"instruction; use one of: {offered}",
             )
-        problem = compatibility_problem(entry, stored)
+        problem = compatibility_problem(workflow, stored)
         if problem is not None:
             return _outcome(stored, "blocked", problem)
         assert handler.session_model is not None
         session = handler.session_model.model_validate(stored.data)
         session._session_id = stored.session_id
-        workflow = self.catalog.instantiate(entry.id, self.current_config())
+        bound = workflow.bind(self.current_config())
         keywords = _keywords(validated)
         assert handler.session_parameter is not None
         keywords[handler.session_parameter] = session
         try:
-            response = handler.function(workflow, **keywords)
+            response = handler.function(bound, **keywords)
         except NotReady as exc:
             return _outcome(stored, "not_ready", str(exc))
         except (HirakuError, PydanticValidationError) as exc:
             return _outcome(stored, "rejected", str(exc))
         except Exception as exc:
-            return {**_unexpected(entry, handler, exc), **stored.last_response}
+            return {**_unexpected(workflow, handler, exc), **stored.last_response}
         try:
-            result_session = _checked_response(entry, response)
+            result_session = _checked_response(workflow, response)
         except WorkflowError as exc:
             return _outcome(stored, "error", str(exc))
         stored.last_receipt = Receipt(
@@ -475,13 +507,13 @@ class WorkflowService:
             handler=handler.name,
             arguments=call_arguments,
         )
-        self._apply(entry, stored, response, result_session)
+        self._apply(workflow, stored, response, result_session)
         self.store.save(stored)
         return {"status": "accepted", **stored.last_response}
 
     def _apply(
         self,
-        entry: WorkflowEntry,
+        workflow: Workflow,
         stored: StoredSession,
         response: Instruction | Completion,
         session: Session,
@@ -500,10 +532,10 @@ class WorkflowService:
         stored.pending_replies = list(response.replies)
         replies = []
         for name in response.replies:
-            reply = entry.handlers[name]
+            reply = handlers(type(workflow))[name]
             replies.append(
                 {
-                    "tool": entry.tool_name(name),
+                    "tool": tool_name(workflow.id, name),
                     "arguments": {
                         "session_id": stored.session_id,
                         "instruction_id": stored.instruction_id,
@@ -552,7 +584,7 @@ class WorkflowService:
         stored data.
         """
         stored = self.store.load(validate_session_id(session_id))
-        entry = self.catalog.entries.get(stored.workflow)
+        workflow = self.workflows.get(stored.workflow)
         result: dict[str, Any] = {
             "session_id": stored.session_id,
             "workflow": stored.workflow,
@@ -564,7 +596,7 @@ class WorkflowService:
             "orientation": stored.orientation,
             "data": stored.data,
             "last_response": stored.last_response,
-            "workflow_available": entry is not None and entry.loaded,
+            "workflow_available": workflow is not None,
             "workflow_active": stored.workflow in self.exposed_ids(),
         }
         if stored.status == "cancelled":
@@ -573,14 +605,14 @@ class WorkflowService:
                 "actionable."
             )
         elif stored.status == "active":
-            if entry is None or not entry.loaded:
-                reason = entry.error if entry is not None else "it is not installed"
+            if workflow is None:
                 result["note"] = (
-                    f"Workflow {stored.workflow!r} is unavailable ({reason}); the "
-                    "session cannot continue until it loads again."
+                    f"Workflow {stored.workflow!r} is unavailable; the session "
+                    "cannot continue until it loads. workflow_activate loads it "
+                    "or reports why it fails."
                 )
             else:
-                problem = compatibility_problem(entry, stored)
+                problem = compatibility_problem(workflow, stored)
                 if problem is not None:
                     result["compatibility"] = problem
                 elif stored.workflow not in self.exposed_ids():
@@ -620,7 +652,7 @@ class WorkflowService:
             return False
 
 
-def compatibility_problem(entry: WorkflowEntry, stored: StoredSession) -> str | None:
+def compatibility_problem(workflow: Workflow, stored: StoredSession) -> str | None:
     """Check a stored session against the loaded workflow implementation.
 
     Returns:
@@ -628,20 +660,22 @@ def compatibility_problem(entry: WorkflowEntry, stored: StoredSession) -> str | 
         continue. Continuation uses the currently loaded implementation; authors
         are responsible for keeping it compatible with existing sessions.
     """
+    registered = handlers(type(workflow))
     missing = [
         name
         for name in stored.pending_replies
-        if name not in entry.handlers or entry.handlers[name].kind != "continuation"
+        if name not in registered or registered[name].kind != "continuation"
     ]
     if missing:
         return (
             "The loaded workflow no longer defines the pending replies "
             f"{', '.join(missing)}. Inspect the session and start a new one."
         )
-    if entry.session_model is None:
+    model = session_model(type(workflow))
+    if model is None:
         return "The loaded workflow defines no continuation handlers."
     try:
-        entry.session_model.model_validate(stored.data)
+        model.model_validate(stored.data)
     except PydanticValidationError as exc:
         return (
             "The stored session data no longer matches the loaded workflow's "
@@ -676,18 +710,29 @@ def input_schema(handler: Handler) -> dict[str, Any]:
     }
 
 
-def _tool_description(entry: WorkflowEntry, handler: Handler) -> str:
-    description = handler.description or f"{handler.name} of workflow {entry.id}"
+def tool_name(workflow_id: str, name: str) -> str:
+    """Return the MCP name of a workflow tool or prompt."""
+    return f"{workflow_id}_{name}"
+
+
+def workflow_description(workflow: Workflow) -> str:
+    """Return the ``description`` setting of a workflow, or its class docstring."""
+    described = workflow.to_dict().get("description")
+    return str(described or type(workflow).__doc__ or "").strip()
+
+
+def _tool_description(workflow: Workflow, handler: Handler) -> str:
+    description = handler.description or f"{handler.name} of workflow {workflow.id}"
     if handler.kind == "start":
-        workflow = _summary(entry.description)
-        prefix = f"Start a {entry.id} workflow session."
-        if workflow:
-            prefix += f" {workflow}"
+        summary = _summary(workflow_description(workflow))
+        prefix = f"Start a {workflow.id} workflow session."
+        if summary:
+            prefix += f" {summary}"
         return f"{prefix}\n\n{description}"
     if handler.kind == "continuation":
         return (
-            f"{description}\n\nReply to a pending {entry.id} instruction. Call only "
-            "when the pending instruction lists this tool."
+            f"{description}\n\nReply to a pending {workflow.id} instruction. Call "
+            "only when the pending instruction lists this tool."
         )
     return description
 
@@ -700,28 +745,29 @@ def _keywords(validated: BaseModel) -> dict[str, Any]:
     return {name: getattr(validated, name) for name in type(validated).model_fields}
 
 
-def _checked_response(entry: WorkflowEntry, response: Any) -> Session:
+def _checked_response(workflow: Workflow, response: Any) -> Session:
     if not isinstance(response, Instruction | Completion):
         raise WorkflowError(
-            f"Workflow {entry.id!r} returned {type(response).__name__}; handlers "
+            f"Workflow {workflow.id!r} returned {type(response).__name__}; handlers "
             "must return self.instruction(...) or self.completion(...)"
         )
     session = response.session
-    model = entry.session_model
+    model = session_model(type(workflow))
     if model is not None and type(session) is not model:
         raise WorkflowError(
-            f"Workflow {entry.id!r} returned a {type(session).__name__} session; "
+            f"Workflow {workflow.id!r} returned a {type(session).__name__} session; "
             f"expected {model.__name__}"
         )
     if isinstance(response, Instruction):
-        unknown = [name for name in response.replies if name not in entry.handlers]
+        registered = handlers(type(workflow))
+        unknown = [name for name in response.replies if name not in registered]
         if unknown:
             raise WorkflowError(f"Unknown replies: {', '.join(unknown)}")
     try:
         type(session).model_validate(session.model_dump(mode="json"))
     except PydanticValidationError as exc:
         raise WorkflowError(
-            f"Session of workflow {entry.id!r} does not round-trip through JSON: "
+            f"Session of workflow {workflow.id!r} does not round-trip through JSON: "
             f"{_validation_message(exc)}"
         ) from exc
     return session
@@ -731,14 +777,12 @@ def _outcome(stored: StoredSession, status: str, message: str) -> dict[str, Any]
     return {"status": status, "message": message, **stored.last_response}
 
 
-def _unexpected(
-    entry: WorkflowEntry, handler: Handler, exc: Exception
-) -> dict[str, Any]:
-    logger.exception("Workflow %s handler %s failed", entry.id, handler.name)
+def _unexpected(workflow: Workflow, handler: Handler, exc: Exception) -> dict[str, Any]:
+    logger.exception("Workflow %s handler %s failed", workflow.id, handler.name)
     return {
         "status": "error",
         "message": (
-            f"{entry.tool_name(handler.name)} failed unexpectedly with "
+            f"{tool_name(workflow.id, handler.name)} failed unexpectedly with "
             f"{type(exc).__name__}: {exc}. No session progress was saved."
         ),
     }
@@ -761,4 +805,6 @@ __all__ = [
     "WorkflowService",
     "compatibility_problem",
     "input_schema",
+    "tool_name",
+    "workflow_description",
 ]

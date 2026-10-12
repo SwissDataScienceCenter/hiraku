@@ -23,7 +23,7 @@ A workflow consists of three concepts:
 
 `hiraku init` installs the bundled workflows and registers the Hiraku MCP
 server for Claude Code (`.mcp.json`) and Codex (`.codex/config.toml`). The
-server runs `hiraku mcp serve`, so the `hiraku` command must be on the agent's
+server runs `hiraku mcp`, so the `hiraku` command must be on the agent's
 `PATH`. Start your agent in the project and ask it to start a workflow:
 
 > What Hiraku workflows are available here? Start guided research on the
@@ -105,7 +105,7 @@ Leave out `mcp.workflows` to expose all workflows, or use `[]` to expose none.
 the agent can do the same with `workflow_activate` and `workflow_deactivate`.
 Hiraku then notifies the agent that its tools changed. Depending on the agent,
 new tools appear in the next message or only after reconnecting the MCP server
-or restarting the agent. `hiraku mcp serve --workflow ID` overrides the list
+or restarting the agent. `hiraku mcp --workflow ID` overrides the list
 for one connection. Inactive workflows still appear in `workflow_list`, and
 their sessions can be inspected.
 
@@ -230,7 +230,9 @@ Present the questions and ask the user which one to pursue.
 The rules are deliberately small:
 
 - A `Workflow` instance is the loaded `workflow.md` record. Its front matter
-  needs the workflow `id`, matching the directory name. Annotated class
+  needs the workflow `id`, matching the directory name. Workflow IDs use
+  letters, digits, and `-`, but not `_`, which separates the workflow ID from
+  the tool name in MCP names. Annotated class
   attributes, like `min_questions` above, are settings validated from the front
   matter; other front-matter fields are kept as metadata. The class body
   follows Pydantic rules: constants need `ClassVar[...]`, and `__init__` is not
@@ -250,15 +252,14 @@ The rules are deliberately small:
   refers to evidence that has not arrived yet. Nothing is saved in either case.
   A valid alternative, such as revising, skipping, or stopping, is a normal
   reply that returns the next instruction.
-- `self.prompt("#section")` returns a section of this workflow's `workflow.md`;
-  `self.prompt("other#section")` reads another project workflow. Section names
-  are lowercase heading text with punctuation removed and spaces replaced by
+- `self.prompt("#section")` returns a section of this workflow's `workflow.md`,
+  and `self.prompt()` the whole body. Section names are lowercase heading text with punctuation removed and spaces replaced by
   hyphens. The text before the first `##` heading is the orientation shown at
   start.
 - Each call gets a fresh copy of the loaded workflow, bound to the project
   configuration as currently saved; changing `self` during a
-  call is not persisted. `hiraku.workflow.load_workflow()` reads a
-  `workflow.md` with the base class without importing any project code.
+  call is not persisted. `hiraku.workflow.load_workflow()` loads a workflow
+  from Python, for example to test it.
 - Use `self.config` and the Hiraku Python API to read and verify records and
   runs. Prefer replies that name records or runs, which the workflow loads and
   checks, over replies that carry results as free text.
@@ -271,8 +272,10 @@ The rules are deliberately small:
   imports. `hiraku.research` provides the task, run, and evidence helpers the
   bundled research workflows share.
 
-The MCP server loads workflow code and prompts when it starts. After editing a
-workflow, reconnect the MCP server. Existing sessions continue with the new
+The MCP server loads workflow code and prompts when it starts. A workflow that
+fails to load is logged to the server's stderr and left out; activating it with
+`workflow_activate` loads it again and returns the error. After editing a
+workflow that already loaded, reconnect the MCP server. Existing sessions continue with the new
 code if their stored data still validates against the session model and their
 pending replies still exist; otherwise they are blocked and remain inspectable.
 Keep workflows compatible with existing sessions, or start new ones.

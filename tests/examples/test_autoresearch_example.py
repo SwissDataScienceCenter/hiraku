@@ -15,7 +15,7 @@ from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
 from hiraku.workflow import PromptWorkflow
-from hiraku.workflow.catalog import Catalog
+from hiraku.workflow.service import WorkflowService
 
 REPOSITORY = Path(__file__).parents[2]
 DOCS_EXAMPLE = REPOSITORY / "docs" / "examples" / "autoresearch"
@@ -215,9 +215,9 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
         "guided-research",
         "autoresearch-loop",
     ]
-    catalog = Catalog(config)
-    assert catalog.loaded_entry("autoresearch-loop").cls is PromptWorkflow
-    assert catalog.loaded_entry("autoresearch").loaded
+    workflows = WorkflowService(config).workflows
+    assert type(workflows["autoresearch-loop"]) is PromptWorkflow
+    assert "autoresearch" in workflows
     assert json.loads((project / ".mcp.json").read_text())["mcpServers"]["hiraku"]
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111
     assert git(project, "status", "--porcelain") == ""

@@ -379,4 +379,4 @@ The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
 `BaseRecord` in `hiraku.base`; `Run` in `hiraku.run`;
 and `hiraku.launch.launch` for scripted use. `hiraku context` manages
 supporting material. Workflows run in the current coding agent through the
-Hiraku MCP server (`hiraku mcp serve`); there is no separate agent runner.
+Hiraku MCP server (`hiraku mcp`); there is no separate agent runner.

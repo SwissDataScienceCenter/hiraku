@@ -551,12 +551,7 @@ def _install_generic(
 _install_generic("context", Context, load_context, list_contexts, "contexts_dir")
 
 
-@main.group("mcp")
-def mcp_group() -> None:
-    """Run the Hiraku MCP server for coding harnesses."""
-
-
-@mcp_group.command("serve")
+@main.command("mcp")
 @click.option(
     "--project",
     "project",
@@ -569,9 +564,9 @@ def mcp_group() -> None:
     multiple=True,
     help="Expose only this workflow for this connection; repeatable.",
 )
-def mcp_serve(project: Path | None, workflows: tuple[str, ...]) -> None:
-    """Serve records, runs, and workflows over stdio."""
-    from .mcp_server import serve
+def mcp_command(project: Path | None, workflows: tuple[str, ...]) -> None:
+    """Run the Hiraku MCP server: records, runs, and workflows over stdio."""
+    from .mcp import serve
 
     config = HirakuConfig.discover(project)
     serve(config, exposed=list(workflows) or None)
@@ -592,7 +587,7 @@ def workflow_group() -> None:
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def workflow_list(state: CLIContext, json_output: bool) -> None:
-    """List workflows, whether the MCP server exposes them, and load errors."""
+    """List loaded workflows and whether the MCP server exposes them."""
     workflows = _service(state).list_workflows()
     if json_output:
         _emit_json(workflows)
@@ -604,9 +599,7 @@ def workflow_list(state: CLIContext, json_output: bool) -> None:
                 (
                     item["id"],
                     "yes" if item["active"] else "no",
-                    f"ERROR: {item['error']}"
-                    if "error" in item
-                    else item["description"].split("\n", 1)[0],
+                    item["description"].split("\n", 1)[0],
                 )
                 for item in workflows
             ],

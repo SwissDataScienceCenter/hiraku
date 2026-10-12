@@ -9,10 +9,15 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.errors import SessionNotFoundError, ValidationError, WorkflowError
-from hiraku.workflow import Completion, Instruction, PromptWorkflow
-from hiraku.workflow.catalog import Catalog
-from hiraku.workflow.service import WorkflowService
+from hiraku.errors import (
+    HirakuError,
+    SessionNotFoundError,
+    ValidationError,
+    WorkflowError,
+)
+from hiraku.workflow import Completion, Instruction, PromptWorkflow, load_workflow
+from hiraku.workflow.core import handlers, session_model
+from hiraku.workflow.service import WorkflowService, workflow_description
 
 TOY_PY = '''\
 from __future__ import annotations
@@ -122,6 +127,12 @@ def config(tmp_path: Path) -> HirakuConfig:
     return selected
 
 
+def load_error(config: HirakuConfig, workflow_id: str) -> str:
+    with pytest.raises(HirakuError) as info:
+        load_workflow(workflow_id, config=config)
+    return str(info.value)
+
+
 def started(service: WorkflowService, target: int = 3) -> dict:
     response = service.call("toy_start", {"target": target})
     assert response["status"] == "accepted", response
@@ -140,23 +151,21 @@ def reply(service: WorkflowService, tool: str, response: dict, **arguments) -> d
 
 
 def test_discovery_schemas_and_relative_imports(config: HirakuConfig) -> None:
-    catalog = Catalog(config)
-    entry = catalog.loaded_entry("toy")
-    assert {name for name, _, _ in catalog.tools()} >= {
+    service = WorkflowService(config)
+    workflow = service.workflow("toy")
+    definitions = {item["name"]: item for item in service.tool_definitions()}
+    assert set(definitions) >= {
         "toy_start",
         "toy_add",
         "toy_peek",
         "autoresearch_start",
         "autodataset_start",
     }
-    assert entry.description.startswith("Add numbers until a target")
-    kinds = {name: handler.kind for name, handler in entry.handlers.items()}
+    assert workflow_description(workflow).startswith("Add numbers until a target")
+    kinds = {name: item.kind for name, item in handlers(type(workflow)).items()}
     assert kinds["start"] == "start"
     assert kinds["add"] == "continuation"
     assert kinds["peek"] == "tool"
-    definitions = {
-        item["name"]: item for item in WorkflowService(config).tool_definitions()
-    }
     start = definitions["toy_start"]["input_schema"]
     assert start["properties"]["target"]["default"] == 3
     assert start["properties"]["target"]["description"] == "Sum to reach."
@@ -166,15 +175,14 @@ def test_discovery_schemas_and_relative_imports(config: HirakuConfig) -> None:
 
 
 def test_handlers_stay_directly_callable(config: HirakuConfig) -> None:
-    catalog = Catalog(config)
-    workflow = catalog.instantiate("toy")
-    session_model = catalog.loaded_entry("toy").session_model
-    assert session_model is not None
-    response = workflow.add(session_model(target=5), amount=2)
+    workflow = load_workflow("toy", config=config).bind(config)
+    model = session_model(type(workflow))
+    assert model is not None
+    response = workflow.add(model(target=5), amount=2)
     assert isinstance(response, Instruction)
     assert response.replies == ("add", "wait", "boom")
     assert response.context == {"total": 2}
-    assert isinstance(workflow.add(session_model(target=1), amount=2), Completion)
+    assert isinstance(workflow.add(model(target=1), amount=2), Completion)
     assert workflow.peek(4) == {"value": 4}
 
 
@@ -247,21 +255,40 @@ def test_handlers_stay_directly_callable(config: HirakuConfig) -> None:
         ("raise ImportError('broken helper')\n", "broken helper"),
     ],
 )
-def test_invalid_workflows_are_reported_not_registered(
-    config: HirakuConfig, source: str, message: str
+def test_invalid_workflows_are_logged_and_left_out(
+    config: HirakuConfig,
+    source: str,
+    message: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     write_workflow(config, "bad", source)
-    catalog = Catalog(config)
-    entry = catalog.entry("bad")
-    assert not entry.loaded
-    assert message in (entry.error or "")
-    assert not any(name.startswith("bad_") for name, _, _ in catalog.tools())
-    assert catalog.loaded_entry("toy").loaded
-    with pytest.raises(WorkflowError, match="failed to load"):
-        catalog.instantiate("bad")
+    service = WorkflowService(config)
+    assert "Workflow bad is unavailable" in caplog.text
+    assert message in caplog.text
+    assert "bad" not in service.workflows
+    assert "toy" in service.workflows
+    assert not any(
+        item["name"].startswith("bad_") for item in service.tool_definitions()
+    )
+    with pytest.raises(HirakuError) as info:
+        service.activate("bad")
+    assert message in str(info.value)
 
 
-def test_invalid_workflow_ids_and_tool_name_collisions(config: HirakuConfig) -> None:
+def test_activation_retries_a_fixed_workflow(config: HirakuConfig) -> None:
+    write_workflow(config, "late", "raise RuntimeError('not yet')\n")
+    service = WorkflowService(config)
+    with pytest.raises(WorkflowError, match="not yet"):
+        service.activate("late")
+    write_workflow(config, "late", TOY_PY, TOY_MD)
+    (config.workflows_dir / "late" / "helpers.py").write_text(
+        "def scale(value):\n    return value\n"
+    )
+    service.activate("late")
+    assert "late_start" in {item["name"] for item in service.tool_definitions()}
+
+
+def test_workflow_ids_cannot_make_tool_names_ambiguous(config: HirakuConfig) -> None:
     simple = (
         "from hiraku.workflow import Workflow, tool\n"
         "class W(Workflow):\n"
@@ -277,23 +304,22 @@ def test_invalid_workflow_ids_and_tool_name_collisions(config: HirakuConfig) -> 
         "x",
         simple.format(extra="    @tool\n    def y_start(self) -> None: ...\n"),
     )
-    catalog = Catalog(config)
-    assert "Invalid workflow ID" in (catalog.entry("bad.name").error or "")
-    for identifier in ("x", "x_y"):
-        assert "is defined by workflows x, x_y" in (
-            catalog.entry(identifier).error or ""
-        )
+    service = WorkflowService(config)
+    for identifier in ("bad.name", "x_y"):
+        assert "Invalid workflow ID" in load_error(config, identifier)
+        assert identifier not in service.workflows
+    assert service.tool("x_y_start")[1].name == "y_start"
     with pytest.raises(WorkflowError, match="Unknown workflow tool"):
-        catalog.tool("x_y_start")
+        service.tool("x_missing")
 
 
 def test_prompts_are_snapshotted_with_the_code(config: HirakuConfig) -> None:
-    catalog = Catalog(config)
+    service = WorkflowService(config)
     (config.workflows_dir / "toy" / "workflow.md").write_text(
         document("toy", "# Changed\n\n## Add\n\nNew\n")
     )
-    assert catalog.instantiate("toy").prompt("#add") == "## Add\n\nAdd a number."
-    assert Catalog(config).instantiate("toy").prompt("#add") == "## Add\n\nNew"
+    assert service.workflow("toy").prompt("#add") == "## Add\n\nAdd a number."
+    assert WorkflowService(config).workflow("toy").prompt("#add") == "## Add\n\nNew"
 
 
 def test_start_returns_orientation_and_explicit_replies(config: HirakuConfig) -> None:
@@ -640,12 +666,13 @@ def test_cli_matches_service(config: HirakuConfig, monkeypatch, tmp_path: Path) 
 
 
 def test_tool_names_can_differ_from_method_names(config: HirakuConfig) -> None:
-    catalog = Catalog(config)
-    entry = catalog.loaded_entry("toy")
-    assert entry.handlers["save"].method == "save_total"
-    assert catalog.tool("toy_save")[1].method == "save_total"
-    workflow = catalog.instantiate("toy")
-    session = entry.session_model(target=3)
+    service = WorkflowService(config)
+    workflow = service.workflow("toy").bind(config)
+    assert handlers(type(workflow))["save"].method == "save_total"
+    assert service.tool("toy_save")[1].method == "save_total"
+    model = session_model(type(workflow))
+    assert model is not None
+    session = model(target=3)
     instruction = workflow.instruction(
         session, "Done?", replies=[workflow.save_total, workflow.add]
     )
@@ -684,9 +711,7 @@ def test_invalid_method_and_tool_names(
         "WORKFLOW = W\n"
     )
     write_workflow(config, "named", source)
-    entry = Catalog(config).entry("named")
-    assert not entry.loaded
-    assert message in (entry.error or "")
+    assert message in load_error(config, "named")
 
 
 def test_front_matter_settings_are_typed(config: HirakuConfig) -> None:
@@ -697,24 +722,22 @@ def test_front_matter_settings_are_typed(config: HirakuConfig) -> None:
     assert reply(service, "toy_add", first, amount=3)["instruction"]["context"] == {
         "total": 6
     }
-    assert service.catalog.instantiate("toy").to_dict()["note"] == "kept"
+    assert service.workflow("toy").to_dict()["note"] == "kept"
 
     path.write_text("---\nid: toy\nstep: many\n---\n" + TOY_MD)
-    catalog = Catalog(config)
-    error = catalog.entry("toy").error or ""
+    error = load_error(config, "toy")
     assert "Invalid workflow settings" in error
     assert "step" in error
-    assert catalog.prompts.document("toy").orientation == "# Toy\n\nAdd numbers."
 
 
 def test_calls_get_isolated_copies_of_the_definition(config: HirakuConfig) -> None:
-    catalog = Catalog(config)
-    first = catalog.instantiate("toy")
+    service = WorkflowService(config)
+    first = service.workflow("toy").bind(config)
     assert first.id == "toy"
     assert first.config is config
     first.step = 5
     first.markdown = "# Changed\n"
-    second = catalog.instantiate("toy")
+    second = service.workflow("toy").bind(config)
     assert second.step == 1
     assert second.prompt("#add") == "## Add\n\nAdd a number."
     assert (
@@ -722,18 +745,6 @@ def test_calls_get_isolated_copies_of_the_definition(config: HirakuConfig) -> No
         .read_text()
         .startswith("# Changed")
     )
-
-
-def test_prompts_load_without_importing_workflow_code(config: HirakuConfig) -> None:
-    write_workflow(config, "shared", "raise RuntimeError('broken')\n", "## Tip\n\nHi\n")
-    toy = config.workflows_dir / "toy" / "workflow.py"
-    toy.write_text(TOY_PY.replace('self.prompt("#add")', 'self.prompt("shared#tip")'))
-    catalog = Catalog(config)
-    assert not catalog.entry("shared").loaded
-    workflow = catalog.instantiate("toy")
-    assert workflow.prompt("shared#tip") == "## Tip\n\nHi"
-    response = WorkflowService(config, catalog).call("toy_start", {})
-    assert response["instruction"]["text"] == "## Tip\n\nHi"
 
 
 def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> None:
@@ -744,10 +755,11 @@ def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> 
         "---\nid: loop\ndescription: Run the loop.\n---\n" + body
     )
     service = WorkflowService(config)
-    entry = service.catalog.loaded_entry("loop")
-    assert entry.cls is PromptWorkflow
-    assert entry.description == "Run the loop."
-    assert {name for name, item, _ in service.catalog.tools() if item is entry} == {
+    workflow = service.workflows["loop"]
+    assert type(workflow) is PromptWorkflow
+    assert workflow_description(workflow) == "Run the loop."
+    names = {item["name"] for item in service.tool_definitions()}
+    assert {name for name in names if name.startswith("loop_")} == {
         "loop_start",
         "loop_complete",
     }
@@ -772,7 +784,7 @@ def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> 
     assert without_request["instruction"]["context"] is None
 
     (directory / "workflow.md").write_text(body)
-    assert "front matter" in (Catalog(config).entry("loop").error or "")
+    assert "front matter" in load_error(config, "loop")
 
 
 @pytest.mark.parametrize(
@@ -809,9 +821,7 @@ def test_invalid_resources_and_prompts(
         "WORKFLOW = W\n"
     )
     write_workflow(config, "exposed", source)
-    entry = Catalog(config).entry("exposed")
-    assert not entry.loaded
-    assert message in (entry.error or "")
+    assert message in load_error(config, "exposed")
 
 
 def test_workflow_resources_and_prompts(config: HirakuConfig) -> None:

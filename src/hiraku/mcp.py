@@ -39,7 +39,8 @@ from .errors import (
 from .git import GitRepository
 from .io import json_value
 from .record import Record, list_records, load_record, update_record
-from .workflow.service import WorkflowService
+from .workflow.core import Workflow, handlers
+from .workflow.service import WorkflowService, tool_name, workflow_description
 
 logger = logging.getLogger(__name__)
 
@@ -321,15 +322,15 @@ class HirakuMCPServer:
         builtin = self.builtins.get(name)
         if builtin is not None:
             return builtin.function(builtin.arguments.model_validate(arguments))
-        if self.service.is_exposed_tool(name):
-            return self.service.call(name, arguments)
         try:
-            entry, _ = self.service.catalog.tool(name)
+            workflow, _ = self.service.tool(name)
         except WorkflowError as exc:
             raise WorkflowError(f"Unknown tool {name!r}") from exc
-        raise WorkflowError(
-            f"Workflow {entry.id!r} is not active; call workflow_activate first"
-        )
+        if workflow.id not in self.service.exposed_ids():
+            raise WorkflowError(
+                f"Workflow {workflow.id!r} is not active; call workflow_activate first"
+            )
+        return self.service.call(name, arguments)
 
     async def _notify_lists_changed(self, ctx: Any) -> None:
         try:
@@ -468,12 +469,12 @@ class HirakuMCPServer:
 
     async def _list_resources(self, ctx: Any, params: Any) -> types.ListResourcesResult:
         resources: list[types.Resource] = []
-        for entry in self.service.catalog.entries.values():
+        for workflow_id in sorted(self.service.workflows):
             resources.append(
                 types.Resource(
-                    name=f"workflow-{entry.id}",
-                    uri=f"hiraku://workflows/{entry.id}",
-                    description=f"Prompt document of workflow {entry.id}",
+                    name=f"workflow-{workflow_id}",
+                    uri=f"hiraku://workflows/{workflow_id}",
+                    description=f"Prompt document of workflow {workflow_id}",
                     mime_type="text/markdown",
                 )
             )
@@ -549,8 +550,7 @@ class HirakuMCPServer:
             workflow_id, _, name = identifier.partition("/")
             if name:
                 return self.service.read_resource(workflow_id, name)
-            document = self.service.catalog.prompts.document(workflow_id)
-            return document.text, "text/markdown"
+            return self.service.workflow(workflow_id).text, "text/markdown"
         if kind == "contexts":
             context = load_context(identifier, config=self.config)
             assert context.path is not None
@@ -565,28 +565,26 @@ class HirakuMCPServer:
 
     # Prompts ------------------------------------------------------------------
 
-    def _prompt_entries(self) -> list[Any]:
+    def _start_prompts(self) -> dict[str, Workflow]:
         exposed = set(self.service.exposed_ids())
-        return [
-            entry
-            for entry in self.service.catalog.entries.values()
-            if entry.loaded and entry.id in exposed
-        ]
+        return {
+            workflow_id: workflow
+            for workflow_id, workflow in sorted(self.service.workflows.items())
+            if workflow_id in exposed
+        }
 
     async def _list_prompts(self, ctx: Any, params: Any) -> types.ListPromptsResult:
         prompts = []
-        for entry in self._prompt_entries():
-            schema = entry.handlers["start"].arguments.model_json_schema()
+        for workflow_id, workflow in self._start_prompts().items():
+            start = handlers(type(workflow))["start"]
+            schema = start.arguments.model_json_schema()
             required = set(schema.get("required", []))
+            description = workflow_description(workflow)
             prompts.append(
                 types.Prompt(
-                    name=entry.id,
-                    description=f"Start the {entry.id} workflow. "
-                    + (
-                        entry.description.split("\n\n", 1)[0]
-                        if entry.description
-                        else ""
-                    ),
+                    name=workflow_id,
+                    description=f"Start the {workflow_id} workflow. "
+                    + description.split("\n\n", 1)[0],
                     arguments=[
                         types.PromptArgument(
                             name=name,
@@ -623,16 +621,14 @@ class HirakuMCPServer:
                     )
                 ],
             )
-        entries = {entry.id: entry for entry in self._prompt_entries()}
-        entry = entries.get(params.name)
-        if entry is None:
+        if params.name not in self._start_prompts():
             raise WorkflowError(f"Unknown or inactive workflow prompt {params.name!r}")
         provided = {
             key: value for key, value in (params.arguments or {}).items() if value
         }
         text = (
-            f"Start the Hiraku workflow `{entry.id}` by calling the "
-            f"`{entry.tool_name('start')}` tool."
+            f"Start the Hiraku workflow `{params.name}` by calling the "
+            f"`{tool_name(params.name, 'start')}` tool."
         )
         if provided:
             text += (
@@ -644,7 +640,7 @@ class HirakuMCPServer:
             "ambiguous, then follow the returned instructions."
         )
         return types.GetPromptResult(
-            description=f"Start the {entry.id} workflow",
+            description=f"Start the {params.name} workflow",
             messages=[
                 types.PromptMessage(
                     role="user", content=types.TextContent(type="text", text=text)
@@ -664,9 +660,6 @@ def serve(config: HirakuConfig, *, exposed: list[str] | None = None) -> None:
         stream=sys.stderr, level=logging.INFO, format="hiraku: %(message)s"
     )
     server = HirakuMCPServer(config, exposed=exposed)
-    for entry in server.service.catalog.entries.values():
-        if entry.error is not None:
-            logger.warning("Workflow %s is unavailable: %s", entry.id, entry.error)
     anyio.run(server.run_stdio)
 
 

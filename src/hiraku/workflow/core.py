@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+import importlib.machinery
+import importlib.util
 import inspect
 import json
 import re
+import sys
 import typing
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import cache
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeVar, overload
 
 from pydantic import (
@@ -24,12 +29,10 @@ from pydantic_core import to_jsonable_python
 
 from ..base import BaseRecord
 from ..errors import SubmissionRejected, ValidationError, WorkflowError
-from ..validation import validate_identifier
 from .prompts import ParsedMarkdown, parse_markdown
 
 if TYPE_CHECKING:
     from ..config import HirakuConfig
-    from .prompts import PromptLibrary
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 _TOOL_MARKER = "__hiraku_tool__"
@@ -37,6 +40,9 @@ _RESOURCE_MARKER = "__hiraku_resource__"
 _MIME_MARKER = "__hiraku_resource_mime_type__"
 _PROMPT_MARKER = "__hiraku_mcp_prompt__"
 _TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
+# No underscores: MCP names are "<workflow-id>_<name>", split at the first "_".
+_WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
+_MAX_TOOL_NAME = 64
 RESERVED_PARAMETERS = frozenset({"session_id", "instruction_id"})
 
 HandlerKind = Literal["start", "continuation", "tool"]
@@ -249,18 +255,16 @@ class Workflow(BaseRecord):
 
     _parsed: ParsedMarkdown | None = PrivateAttr(default=None)
     _config: HirakuConfig | None = PrivateAttr(default=None)
-    _library: PromptLibrary | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def parse_sections(self) -> Self:
         self._parsed = parse_markdown(self.markdown, label=f"workflow {self.id!r}")
         return self
 
-    def bind(self, config: HirakuConfig, library: PromptLibrary | None = None) -> Self:
-        """Return a copy bound to a project and the prompts of its workflows."""
+    def bind(self, config: HirakuConfig) -> Self:
+        """Return a copy bound to a project."""
         bound = self.model_copy(deep=True)
         bound._config = config
-        bound._library = library
         return bound
 
     @property
@@ -304,12 +308,10 @@ class Workflow(BaseRecord):
         return "".join(parsed.lines[section.start : section.end]).strip()
 
     def prompt(self, reference: str | None = None) -> str:
-        """Return Markdown from this or another project workflow.
+        """Return this workflow's Markdown body or one of its sections.
 
         Args:
-            reference: ``None`` for this workflow's whole body, ``"#section"``
-                for a section of it, ``"other"`` or ``"other#section"`` for
-                another project workflow.
+            reference: ``None`` for the whole body, ``"#section"`` for a section.
 
         Raises:
             hiraku.errors.WorkflowError: If the reference cannot be resolved.
@@ -317,18 +319,13 @@ class Workflow(BaseRecord):
         Example:
             ``self.prompt("#select")``
         """
-        target, _, anchor = (reference or "").partition("#")
-        if target in {"", self.id}:
-            if reference and "#" in reference and not anchor:
-                raise WorkflowError(
-                    f"Prompt reference {reference!r} has an empty anchor"
-                )
-            return self.section(anchor) if anchor else self.text
-        if self._library is None:
+        if not reference:
+            return self.text
+        if not reference.startswith("#") or reference == "#":
             raise WorkflowError(
-                f"Workflow {self.id!r} is not bound to the project's workflows"
+                f"Prompt reference {reference!r} must be '#section' of this workflow"
             )
-        return self._library.resolve(self.id, reference)
+        return self.section(reference[1:])
 
     def _sections(self) -> ParsedMarkdown:
         if self._parsed is None:
@@ -452,30 +449,64 @@ class PromptWorkflow(Workflow):
         return self.completion(session, {"summary": session.summary})
 
 
-def load_workflow(
-    workflow_id: str,
-    *,
-    config: HirakuConfig | None = None,
-    cls: type[Workflow] = Workflow,
-) -> Workflow:
-    """Load a workflow's ``workflow.md`` record.
+def discover_workflows(config: HirakuConfig) -> list[str]:
+    """Return the IDs of workflow directories, without importing them.
+
+    A workflow directory contains ``workflow.py``, ``workflow.md``, or both.
+    """
+    root = config.workflows_dir
+    if not root.is_dir():
+        return []
+    return [
+        path.name
+        for path in sorted(root.iterdir())
+        if path.is_dir()
+        and not path.name.startswith((".", "_"))
+        and any((path / name).is_file() for name in ("workflow.py", "workflow.md"))
+    ]
+
+
+def load_workflow(workflow_id: str, *, config: HirakuConfig | None = None) -> Workflow:
+    """Load a project workflow: its class and its ``workflow.md`` record.
+
+    Imports ``workflow.py`` when present; it must export ``WORKFLOW``, a
+    `Workflow` subclass. A directory with only ``workflow.md`` loads as a
+    `PromptWorkflow`. Each call imports the code again.
 
     Args:
         workflow_id: Workflow directory name.
         config: Project configuration; discovered when omitted.
-        cls: Record class; the base `Workflow` reads any workflow without
-            importing project code, a subclass also validates its settings.
 
     Raises:
+        hiraku.errors.WorkflowError: If the ID is invalid, the code cannot be
+            imported, or its tools are invalid.
         hiraku.errors.RecordNotFoundError: If the workflow has no workflow.md.
         hiraku.errors.ValidationError: If the record is invalid or its ID does
             not match the workflow directory.
+
+    Note:
+        Importing a workflow executes trusted project Python code.
     """
     from ..config import HirakuConfig
 
     selected = config or HirakuConfig.discover()
-    validate_identifier(workflow_id, label="workflow ID")
-    path = selected.workflows_dir / workflow_id / "workflow.md"
+    if not isinstance(workflow_id, str) or not _WORKFLOW_ID.fullmatch(workflow_id):
+        raise WorkflowError(
+            f"Invalid workflow ID {workflow_id!r}: use letters, digits and '-', "
+            "starting with a letter or digit"
+        )
+    directory = selected.workflows_dir / workflow_id
+    cls = (
+        _import_workflow(directory)
+        if (directory / "workflow.py").is_file()
+        else PromptWorkflow
+    )
+    for name in [*handlers(cls), *resources(cls), *prompts(cls)]:
+        if len(f"{workflow_id}_{name}") > _MAX_TOOL_NAME:
+            raise WorkflowError(
+                f"Name {workflow_id}_{name!r} exceeds {_MAX_TOOL_NAME} characters"
+            )
+    path = directory / "workflow.md"
     try:
         workflow = cls.load(path)
     except PydanticValidationError as exc:
@@ -488,18 +519,40 @@ def load_workflow(
     return workflow
 
 
-def list_workflows(*, config: HirakuConfig | None = None) -> list[Workflow]:
-    """Load the ``workflow.md`` records of all project workflows.
-
-    Uses the base `Workflow` class, so no project code is imported.
-    """
-    from ..config import HirakuConfig
-
-    selected = config or HirakuConfig.discover()
-    return [
-        load_workflow(path.parent.name, config=selected)
-        for path in sorted(selected.workflows_dir.glob("*/workflow.md"))
-    ]
+def _import_workflow(directory: Path) -> type[Workflow]:
+    # Each workflow directory becomes a package below a project-specific root
+    # package, so relative imports work without changing sys.path.
+    digest = hashlib.sha256(str(directory.parent.resolve()).encode()).hexdigest()
+    package = f"_hiraku_workflows_{digest[:16]}.{directory.name}"
+    root = package.split(".")[0]
+    for name in [
+        key for key in sys.modules if key == package or key.startswith(f"{package}.")
+    ]:
+        del sys.modules[name]
+    for name, location in ((root, directory.parent), (package, directory)):
+        if name not in sys.modules:
+            spec = importlib.machinery.ModuleSpec(name, None, is_package=True)
+            spec.submodule_search_locations = [str(location)]
+            sys.modules[name] = importlib.util.module_from_spec(spec)
+    path = directory / "workflow.py"
+    spec = importlib.util.spec_from_file_location(f"{package}.workflow", path)
+    if spec is None or spec.loader is None:
+        raise WorkflowError(f"Cannot import {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        sys.modules.pop(spec.name, None)
+        raise WorkflowError(
+            f"Cannot import {path}: {type(exc).__name__}: {exc}"
+        ) from exc
+    cls = getattr(module, "WORKFLOW", None)
+    if not (isinstance(cls, type) and issubclass(cls, Workflow)):
+        raise WorkflowError(
+            f"{path} must export WORKFLOW, a subclass of hiraku.workflow.Workflow"
+        )
+    return cls
 
 
 def _ensure_json(value: Any, label: str) -> Any:

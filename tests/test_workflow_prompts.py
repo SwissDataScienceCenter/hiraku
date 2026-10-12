@@ -6,9 +6,9 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.errors import RecordNotFoundError, ValidationError, WorkflowError
-from hiraku.workflow import Workflow, list_workflows, load_workflow
-from hiraku.workflow.catalog import Catalog
-from hiraku.workflow.prompts import PromptLibrary, normalize_anchor
+from hiraku.workflow import Workflow, discover_workflows, load_workflow
+from hiraku.workflow.prompts import normalize_anchor
+from hiraku.workflow.service import WorkflowService
 
 DOCUMENT = """\
 # Research
@@ -37,15 +37,8 @@ Ask first.
 """
 
 
-def library() -> PromptLibrary:
-    return PromptLibrary(
-        {
-            "research": Workflow(id="research", markdown=DOCUMENT),
-            "other": Workflow(
-                id="other", markdown="# Other\n\n## Shared\n\nShared text.\n"
-            ),
-        }
-    )
+def research() -> Workflow:
+    return Workflow(id="research", markdown=DOCUMENT)
 
 
 def test_normalize_anchor() -> None:
@@ -65,38 +58,35 @@ def test_orientation_ends_at_first_second_level_heading() -> None:
 
 
 def test_section_includes_subsections_and_ignores_fenced_headings() -> None:
-    prompts = library()
-    select = prompts.resolve("research", "#select")
+    workflow = research()
+    select = workflow.prompt("#select")
     assert select.startswith("## Select")
     assert "Nested detail." in select
     assert "## Not a heading" in select
     assert "Ask first." not in select
-    details = prompts.resolve("research", "#details")
+    details = workflow.prompt("#details")
     assert details.startswith("### Details\n\nNested detail.")
     assert details.endswith("```")
-    assert prompts.resolve("research", "#approve-the-launch").endswith("Ask first.")
+    assert workflow.prompt("#approve-the-launch").endswith("Ask first.")
     assert "not-a-heading" not in Workflow(id="r", markdown=DOCUMENT).anchors
 
 
-def test_whole_and_cross_workflow_references() -> None:
-    prompts = library()
-    assert prompts.resolve("research") == DOCUMENT.strip()
-    assert prompts.resolve("research", "other#shared").endswith("Shared text.")
-    assert prompts.resolve("research", "other").startswith("# Other")
+def test_whole_document_reference() -> None:
+    assert research().prompt() == DOCUMENT.strip()
 
 
 @pytest.mark.parametrize(
     ("reference", "message"),
     [
         ("#missing", "#missing not found"),
-        ("unknown#select", "no loaded workflow.md"),
-        ("research#", "empty anchor"),
-        ("../research#select", "must name a project workflow"),
+        ("#", "must be '#section'"),
+        ("other#select", "must be '#section'"),
+        ("research", "must be '#section'"),
     ],
 )
 def test_invalid_references(reference: str, message: str) -> None:
     with pytest.raises(WorkflowError, match=message):
-        library().resolve("research", reference)
+        research().prompt(reference)
 
 
 def test_anchors_that_normalize_to_the_same_name_are_rejected() -> None:
@@ -121,7 +111,7 @@ def test_workflow_md_is_a_registry_record(tmp_path: Path) -> None:
     assert document.path == config.workflows_dir / "autoresearch" / "workflow.md"
     assert document.text.startswith("# Autoresearch")
     assert "id: autoresearch" not in document.text
-    assert [item.id for item in list_workflows(config=config)] == [
+    assert discover_workflows(config) == [
         "autodataset",
         "autoresearch",
         "guided-research",
@@ -158,6 +148,8 @@ def test_invalid_workflow_documents_disable_the_workflow(
         path.write_text(content)
     with pytest.raises(error, match=message):
         load_workflow("autodataset", config=config)
-    catalog = Catalog(config)
-    assert message in (catalog.entry("autodataset").error or "")
-    assert catalog.loaded_entry("autoresearch").loaded
+    service = WorkflowService(config)
+    assert "autodataset" not in service.workflows
+    assert "autoresearch" in service.workflows
+    with pytest.raises(error, match=message):
+        service.activate("autodataset")

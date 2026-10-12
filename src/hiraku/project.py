@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .config import HirakuConfig
 
 
-MCP_SERVER = {"command": "hiraku", "args": ["mcp", "serve"]}
+MCP_SERVER = {"command": "hiraku", "args": ["mcp"]}
 
 
 @dataclass(frozen=True, slots=True)

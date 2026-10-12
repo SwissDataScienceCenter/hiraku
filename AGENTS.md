@@ -90,7 +90,7 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
 | `src/hiraku/agent.py` | Curated context records |
 | `src/hiraku/workflow/` | Workflow authoring, discovery, sessions, and the workflow service |
-| `src/hiraku/mcp_server.py` | Stdio MCP server exposing records, runs, and workflows |
+| `src/hiraku/mcp.py` | Stdio MCP server exposing records, runs, and workflows |
 | `src/hiraku/resources/` | Bundled workflows, dispatchers, skills, and examples |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
 | `docs/` | Documentation sources |
@@ -115,7 +115,7 @@ Generated or transient paths:
 - Launches go through the configured dispatcher and must preserve attribution
   such as record, entrypoint, and commit metadata.
 - Workflow semantics live in `src/hiraku/workflow/` and are transport
-  independent; `mcp_server.py` and the CLI are thin adapters over
+  independent; `mcp.py` and the CLI are thin adapters over
   `WorkflowService`.
 - Bundled resources under `src/hiraku/resources/` are installed by
   `hiraku init`; changes to them may affect newly initialized projects and

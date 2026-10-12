@@ -10,7 +10,7 @@ import pytest
 from mcp import Client, StdioServerParameters
 
 from hiraku.config import HirakuConfig
-from hiraku.mcp_server import HirakuMCPServer
+from hiraku.mcp import HirakuMCPServer
 from hiraku.record import Record
 
 BUILTINS = {
@@ -288,7 +288,7 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     async def main() -> Any:
         parameters = StdioServerParameters(
             command=sys.executable,
-            args=["-m", "hiraku.cli", "mcp", "serve", "--project", str(config.root)],
+            args=["-m", "hiraku.cli", "mcp", "--project", str(config.root)],
         )
         async with Client(parameters) as client:
             tools = await client.list_tools()
