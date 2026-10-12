@@ -148,7 +148,7 @@ class ProjectInitializer:
                             source_path, target, created_files, created_dirs
                         )
                 cls._apply_overlay(entries, project_root, created_files, created_dirs)
-                for name in ("launch.sh", "worktree.sh"):
+                for name in ("launch.sh", "worktree.sh", "slurm.sh"):
                     dispatcher = config.dispatch_dir / name
                     if dispatcher.is_file():
                         dispatcher.chmod(dispatcher.stat().st_mode | 0o111)

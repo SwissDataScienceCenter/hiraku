@@ -73,6 +73,20 @@ def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
     assert lines[3].split() == ["root", "task", "active"]
 
 
+def test_record_list_on_an_empty_project(tmp_path: Path, monkeypatch) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    listed = invoke("record", "list")
+    assert listed.exit_code == 0
+    assert listed.output.strip() == "no records"
+
+
+def test_table_with_no_rows_keeps_the_header() -> None:
+    from hiraku.cli import _table
+
+    assert _table(("id", "parent"), []).splitlines()[0].split() == ["id", "parent"]
+
+
 def test_record_cli_reparents_and_makes_root(tmp_path: Path, monkeypatch) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)

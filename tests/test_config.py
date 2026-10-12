@@ -51,8 +51,9 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert (config.programs_dir / "interactive/program.md").is_file()
     assert (config.programs_dir / "autoresearch/program.md").is_file()
     assert (config.actions_dir / "record/propose/action.md").is_file()
-    for name in ("launch.sh", "worktree.sh"):
+    for name in ("launch.sh", "worktree.sh", "slurm.sh"):
         assert (config.dispatch_dir / name).stat().st_mode & 0o111
+    assert (config.dispatch_dir / "slurm.header").is_file()
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
     assert codex_skill.is_file()

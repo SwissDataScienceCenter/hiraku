@@ -93,7 +93,7 @@ def _emit_json(value: Any) -> None:
 def _table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
     rendered = [["" if item is None else str(item) for item in row] for row in rows]
     widths = [
-        max(len(name), *(len(row[index]) for row in rendered))
+        max([len(name), *(len(row[index]) for row in rendered)])
         for index, name in enumerate(columns)
     ]
     lines = ["  ".join(name.ljust(widths[i]) for i, name in enumerate(columns))]
@@ -336,6 +336,8 @@ def record_list(state: CLIContext, json_output: bool) -> None:
     records = list_records(config=state.config)
     if json_output:
         _emit_json(records)
+    elif not records:
+        click.echo("no records")
     else:
         click.echo(
             _table(

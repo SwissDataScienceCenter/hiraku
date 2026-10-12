@@ -30,8 +30,10 @@ through an existing record lifecycle.
   can override or extend them. Select a record explicitly for run attribution.
 - **Dispatch script:** A project-owned script under `hiraku/dispatch/` that
   decides where and how an entrypoint runs. The default `launch.sh` uses the
-  current checkout; `worktree.sh` runs an exact commit in an isolated worktree.
-  Projects may provide additional local or remote dispatchers.
+  current checkout; `worktree.sh` runs an exact commit in an isolated worktree;
+  `slurm.sh` submits an exact commit as a Slurm batch job, with site settings in
+  `hiraku/dispatch/slurm.header`. Projects may provide additional local or remote
+  dispatchers.
 
 The usual relationship is: a root contains child records; a child can bind
 source and expose one or more effective entrypoints; a dispatch script launches
@@ -339,7 +341,10 @@ the run to that record; the active record is used when no ID is supplied.
 `--dispatch NAME` selects `hiraku/dispatch/NAME.sh`; the configured default is
 `launch.sh`. The default dispatcher reports the current commit and clean/dirty
 state. The `worktree` dispatcher runs the requested commit in a temporary
-worktree. Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`,
+worktree. The `slurm` dispatcher submits the requested commit (HEAD if none) as
+a batch job from a worktree under the Git directory, copies the `#SBATCH` lines of
+`hiraku/dispatch/slurm.header` into the job, returns at submission and prints
+the job id; set `HIRAKU_SLURM_WAIT=1` to block until the job ends. Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`,
 `HIRAKU_ROOT`, and `HIRAKU_ENTRYPOINT`. Dispatchers report `HIRAKU_COMMIT`
 and `HIRAKU_GIT_STATE`.
 

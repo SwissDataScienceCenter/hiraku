@@ -122,13 +122,36 @@ The project-owned dispatcher controls Git behavior:
 ```bash
 hiraku launch <entrypoint> --record <record-id>                      # current working state
 hiraku launch <entrypoint> --record <record-id> --dispatch worktree  # exact commit
+hiraku launch <entrypoint> --record <record-id> --dispatch slurm     # exact commit, Slurm job
 ```
 
 Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`,
 and `HIRAKU_ENTRYPOINT`. The
 dispatcher reports `HIRAKU_COMMIT` and `HIRAKU_GIT_STATE`: `launch.sh` reports
 the current HEAD and whether the tree is clean or dirty, while `worktree.sh`
-reports the exact checked-out commit and a clean state.
+and `slurm.sh` report the exact checked-out commit and a clean state.
+
+"Dirty" means the code differs from the commit. Hiraku's own state does not count:
+`hiraku launch` passes `HIRAKU_STATE_PATHS`, the paths of `hiraku.yml`, the state
+directory (`hiraku/`) and `runs.csv`/`runs.csv.lock`, one per line relative to the
+project root, and `launch.sh` leaves them out of its `git status`. A new record, an
+approval or a run row therefore does not make a launch dirty, whether you commit those
+files (so design and analysis have a history) or not. Results and other outputs you
+write are not Hiraku's state: ignore them in Git or keep them outside the repository.
+A project created before this was added keeps its own copy of `launch.sh` under
+`hiraku/dispatch/`; refresh it with
+`python -c "from hiraku_agent.dispatch_setup import template_text; print(template_text('launch.sh'), end='')" > hiraku/dispatch/launch.sh`.
+
+`slurm.sh` submits the requested commit (HEAD if none) with `sbatch` from a
+worktree under the Git directory (shared with compute nodes, outside the working
+tree) and returns once the job is queued, printing its id; the job removes the
+worktree when it ends. Site settings are the `#SBATCH` lines of
+`hiraku/dispatch/slurm.header`; `HIRAKU_SBATCH_ARGS` adds options per call and
+`HIRAKU_SLURM_WAIT=1` blocks until the job ends. When `hiraku-agent` is
+installed, the job id is recorded with `hiraku-agent mark-running`. Only
+committed files are in the job's checkout, so data and checkpoints are reached
+by absolute path and results are written under `$HIRAKU_ROOT`. To make it the
+project default, set `default_dispatch: slurm.sh` in `hiraku.yml`.
 
 The user can define custom dispatch scripts, e.g.
 
@@ -208,14 +231,21 @@ hiraku record create heart-disease --type task \
 hiraku record show heart-disease --json
 hiraku status
 
-# 3. create a child proposal and implement it
+# 3. create a child proposal
 hiraku record create logistic-baseline --parent heart-disease \
   --type experiment \
   --set 'summary=Logistic regression baseline' \
   --set 'hypothesis=Regularized logistic regression provides a calibrated baseline'
-# alternatively, use the agent skill to implement the proposal
+
+# 3. a) implement it with the agent — requires approval first in guided mode
+# (the default); the agent writes and commits the code, hiraku-agent binds the commit
+hiraku-agent approve logistic-baseline --task heart-disease --by <you>
+hiraku-agent implement logistic-baseline --task heart-disease
+# 3. b) implement it with the agent skill inside a coding harness (e.g. Claude, Codex, ...)
 # /hiraku "implement the logistic baseline record"
-# implement and commit the code change, then bind the resulting commit
+
+# commit code change (only needed for 3.b — hiraku-agent implement in 3.a already
+# committed and bound it for you), then bind the resulting commit
 git commit -m "implement logistic baseline"
 hiraku record update logistic-baseline --commit HEAD \
   --set 'entrypoints={train: {command: [uv, run, python, train.py]}}'
