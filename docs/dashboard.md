@@ -189,13 +189,13 @@ optional argument overrides and commit-ref override.
 - One launch runs at a time per dashboard server; duplicate events and
   concurrent submissions are rejected. Jobs are not queued and are not
   resumable across server restarts.
-- The dashboard is a single-user local service. If the marimo server isolates
-  browser sessions in separate processes, do not rely on one browser's
-  controller state in another process; launch from the process that owns the
-  server.
+- The dashboard is a single-user local service. A launcher-owned controller
+  shares job status and the one-launch limit across browser sessions, including
+  reconnects and isolated marimo kernels. Disconnecting does not stop a launch.
 - There is no GUI cancellation button yet. Shutting down the server drains
-  active workers, then terminates the owned process tree so dispatcher cleanup
-  can run; it never kills only the worker and leaves training behind.
+  active workers for up to 30 seconds, then terminates the owned process tree
+  so dispatcher cleanup can run; it never kills only the worker and leaves
+  training behind.
 - After a job completes (success or failure), the dashboard requests exactly
   one fresh snapshot for the currently selected record/scope. A failed script
   may still have logged data. If no new run appears, refresh results and check

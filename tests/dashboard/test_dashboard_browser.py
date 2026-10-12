@@ -157,7 +157,10 @@ def test_interactive_browser_startup_uses_token(tmp_path, monkeypatch):
             while time.monotonic() < deadline:
                 log.seek(0)
                 output = log.read()
-                match = re.search(r"http://127\.0\.0\.1:\d+\S*access_token=\S+", output)
+                match = re.search(
+                    r"http://(?:127\.0\.0\.1|localhost):\d+\S*access_token=\S+",
+                    output,
+                )
                 if match:
                     token_url = match.group(0)
                     break

@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Share interactive dashboard jobs across browser sessions, enforce reviewed launch configuration and worktree commit requirements, and safely display live launch logs while preserving read-only controls.
+
 - Render record graph labels and controls correctly in the browser, preserve graph search and zoom during navigation, and reveal selected records' ancestors.
 - Check demo ports before training and support `--reopen` to restart retained demos without retraining, including MLflow links on custom ports.
 - Keep historical attributed runs visible in dashboard source scope even when their record files are missing.

@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -219,6 +220,67 @@ def test_preview_renders_merged_argv(tmp_path: Path) -> None:
     assert preview.dispatcher == "launch.sh"
 
 
+def test_changed_entrypoint_requires_another_preview(tmp_path: Path) -> None:
+    config = _project(tmp_path, [sys.executable, "evaluate.py"])
+    controller = _controller(config, tmp_path)
+    request = _request()
+    preview = controller.preview(request)
+    path = config.records_dir / "root" / "root.md"
+    path.write_text(path.read_text().replace("evaluate.py", "changed.py"))
+    with pytest.raises(ValidationError, match="preview again"):
+        controller.submit(replace(request, reviewed=preview))
+    assert controller.active_job_id is None
+
+
+def test_worktree_requires_commit_before_spawning(tmp_path: Path) -> None:
+    config = _project(tmp_path, [sys.executable, "evaluate.py"])
+    controller = _controller(config, tmp_path)
+    with pytest.raises(ValidationError, match="requires a resolvable commit"):
+        controller.submit(replace(_request(), dispatch="worktree"))
+    assert controller.active_job_id is None
+
+
+def test_preview_resolves_record_local_commit(tmp_path, monkeypatch):
+    from hiraku.dashboard.jobs import GitRepository
+
+    config = _project(tmp_path, [sys.executable, "evaluate.py"])
+    path = config.records_dir / "root" / "root.md"
+    path.write_text(
+        path.read_text().replace("id: root", "id: root\ncommit: " + "b" * 40)
+    )
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.setattr(GitRepository, "resolve", lambda self, ref: "a" * 40)
+    preview = _controller(config, tmp_path).preview(_request())
+    assert preview.commit == "a" * 40
+    assert preview.commit_source == "record"
+
+
+def test_log_tail_is_bounded_with_multibyte_text(tmp_path: Path) -> None:
+    from hiraku.dashboard.jobs import TAIL_BYTES, _tail
+
+    path = tmp_path / "stdout.log"
+    path.write_bytes(("é" * TAIL_BYTES).encode())
+    assert len(_tail(path).encode()) == TAIL_BYTES
+
+
+def test_shared_controller_survives_client_reconnect(tmp_path, monkeypatch):
+    from hiraku.dashboard.supervisor import connect_controller, supervise
+
+    config = _project(tmp_path, [sys.executable, "-c", "import time; time.sleep(1)"])
+    environment = {}
+    with supervise(config, environment) as owner:
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        first = connect_controller()
+        first.submit(_request("shared"))
+        second = connect_controller()
+        assert second.poll()[0].job_id == "shared"
+        with pytest.raises(ValidationError, match="already active"):
+            second.submit(_request("other"))
+        directory = owner._temp_dir
+    assert not directory.exists()
+
+
 def test_bad_override_types_cannot_start(tmp_path: Path) -> None:
     config = _project(tmp_path, [sys.executable, "-c", "print('hi')"])
     controller = _controller(config, tmp_path)
@@ -278,3 +340,5 @@ def test_completed_jobs_are_trimmed(tmp_path: Path) -> None:
     assert len(kept) == MAX_COMPLETED_JOBS
     assert job_ids[0] not in kept
     assert job_ids[-1] in kept
+    with pytest.raises(ValidationError, match="Duplicate"):
+        controller.submit(_request(job_ids[0]))

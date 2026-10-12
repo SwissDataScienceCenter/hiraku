@@ -38,6 +38,29 @@ def test_empty_notebook_keeps_record_browser(tmp_path, monkeypatch):
     _, definitions = app.run()
     assert definitions["snapshot"].records == ()
     assert definitions["record_select"] is not None
+    assert "form" not in definitions
+    assert "launch_button" not in definitions
+
+
+def test_interactive_form_binds_visible_fields_without_writing(tmp_path, monkeypatch):
+    from hiraku.dashboard.supervisor import supervise
+
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(config.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_INTERACTIVE", "1")
+    before = config.path.read_bytes()
+    environment = {}
+    with supervise(config, environment):
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        _, definitions = app.run()
+        form = definitions["form"]
+        for element in form.element.elements.values():
+            assert element._id in form.text
+        assert form.value is None
+        assert definitions["job_views"] == []
+    assert config.path.read_bytes() == before
+    assert not list(config.records_dir.glob("*/*.md"))
 
 
 def test_notebook_initial_source_scope_uses_declared_plot_defaults(

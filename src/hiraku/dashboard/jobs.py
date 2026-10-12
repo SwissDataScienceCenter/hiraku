@@ -8,6 +8,7 @@ blocks on a running launch and never invokes entrypoint commands directly.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -69,6 +70,7 @@ class LaunchRequest:
     args: Mapping[str, Any]
     dispatch: str | None = None
     commit: str | None = None
+    reviewed: LaunchPreview | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +81,7 @@ class LaunchRequest:
             "args": dict(self.args),
             "dispatch": self.dispatch,
             "commit": self.commit,
+            "fingerprint": self.reviewed.fingerprint if self.reviewed else None,
         }
 
 
@@ -114,6 +117,7 @@ class LaunchPreview:
     commit: str | None
     commit_source: str
     query_source: str | None
+    fingerprint: str
 
 
 @dataclass(frozen=True)
@@ -156,9 +160,9 @@ def _tail(path: Path, limit: int = TAIL_BYTES) -> str:
         return ""
     offset = max(0, size - limit)
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
+        with path.open("rb") as handle:
             handle.seek(offset)
-            return handle.read()
+            return handle.read(limit).decode("utf-8", errors="replace")
     except OSError:
         return ""
 
@@ -187,6 +191,7 @@ class LaunchController:
         self._lock = threading.RLock()
         self._accepting = True
         self._jobs: dict[str, _Job] = {}
+        self._submitted_ids: set[str] = set()
         self._completed_order: list[str] = []
         if temp_dir is not None:
             self._temp_dir = temp_dir
@@ -237,9 +242,15 @@ class LaunchController:
         merged_args.update(request.args)
         render_arguments(request.args)
         render_arguments(merged_args)
-        _dispatcher(self._config, request.dispatch)
-        commit = request.commit
-        if commit is not None and commit:
+        dispatcher = _dispatcher(self._config, request.dispatch)
+        commit = (
+            request.commit
+            if request.commit is not None
+            else index[request.record_id].commit
+        )
+        if dispatcher.name == "worktree.sh" and not commit:
+            raise ValidationError("Worktree dispatcher requires a resolvable commit")
+        if commit:
             commit = GitRepository(self._config).resolve(commit)
         return _Preflight(
             merged_args=merged_args,
@@ -276,6 +287,9 @@ class LaunchController:
             commit=preflight.commit,
             commit_source="override" if request.commit else "record",
             query_source=query_source,
+            fingerprint=hashlib.sha256(
+                json.dumps(preflight.values, sort_keys=True, default=str).encode()
+            ).hexdigest(),
         )
 
     def submit(self, request: LaunchRequest) -> JobView:
@@ -283,13 +297,24 @@ class LaunchController:
         with self._lock:
             if not self._accepting:
                 raise ValidationError("Launch controller is shutting down")
-            if request.job_id in self._jobs:
+            if request.job_id in self._submitted_ids:
                 raise ValidationError(f"Duplicate launch event {request.job_id!r}")
             if self.active_job_id is not None:
                 raise ValidationError(
                     "Another launch is already active; wait for it to finish"
                 )
             preflight = self._preflight(request)
+            if (
+                request.reviewed is not None
+                and self.preview(request) != request.reviewed
+            ):
+                raise ValidationError("Record or entrypoint changed; preview again")
+            if (
+                not request.job_id
+                or Path(request.job_id).name != request.job_id
+                or request.job_id in {".", ".."}
+            ):
+                raise ValidationError("Invalid launch event ID")
             resolved_commit = preflight.commit
             request = LaunchRequest(
                 job_id=request.job_id,
@@ -298,6 +323,7 @@ class LaunchController:
                 args=request.args,
                 dispatch=request.dispatch,
                 commit=resolved_commit,
+                reviewed=request.reviewed,
             )
             job_dir = self._temp_dir / request.job_id
             job_dir.mkdir()
@@ -319,12 +345,15 @@ class LaunchController:
                 kwargs: dict[str, Any] = {}
                 if os.name == "posix":
                     kwargs["start_new_session"] = True
+                environment = os.environ.copy()
+                environment.pop("HIRAKU_DASHBOARD_CONTROLLER_PORT", None)
+                environment.pop("HIRAKU_DASHBOARD_CONTROLLER_KEY", None)
                 process = subprocess.Popen(
                     command,
                     cwd=self._config.root,
                     stdout=stdout_handle,
                     stderr=stderr_handle,
-                    env=os.environ.copy(),
+                    env=environment,
                     **kwargs,
                 )
             except Exception:
@@ -345,6 +374,7 @@ class LaunchController:
                 state="running",
             )
             self._jobs[request.job_id] = job
+            self._submitted_ids.add(request.job_id)
             return job.view()
 
     def poll(self) -> list[JobView]:

@@ -34,6 +34,7 @@ def _():
     )
     from hiraku.dashboard.plots import metric_direction, pareto_points, progress_points
     from hiraku.dashboard.session import DashboardSession
+    from hiraku.dashboard.supervisor import connect_controller
     from hiraku.dashboard.tree import compute_layout, reconcile_navigation
     from hiraku.dashboard.views import (
         backend_action_label,
@@ -52,8 +53,11 @@ def _():
     capability = DashboardCapability(
         interactive=os.environ.get("HIRAKU_DASHBOARD_INTERACTIVE") == "1"
     )
-    controller = LaunchController(config, capability)
-    atexit.register(controller.shutdown)
+    if capability.interactive:
+        controller = connect_controller()
+    else:
+        controller = LaunchController(config, capability)
+        atexit.register(controller.shutdown)
     get_record, set_record = mo.state(
         os.environ.get("HIRAKU_DASHBOARD_RECORD") or config.active_record_id
     )
@@ -233,7 +237,7 @@ def _(get_record, mo, record_ids, set_record):
 
 @app.cell
 def _(
-    get_form_busy,
+    capability,
     get_record,
     get_reset_version,
     mo,
@@ -244,6 +248,7 @@ def _(
     set_reset_version,
     uuid,
 ):
+    mo.stop(not capability.interactive)
     _ = get_reset_version()
     _selected = get_record()
     _parent_options = ["No parent (root)", *record_ids]
@@ -297,22 +302,17 @@ def _(
     form = (
         mo.vstack(
             [
-                record_id_input,
-                parent,
-                type_input,
-                summary_input,
-                goal_input,
-                question_input,
-                hypothesis_input,
+                mo.md(
+                    "{id}\n\n{parent}\n\n{type}\n\n{summary}\n\n"
+                    "{goal}\n\n{question}\n\n{hypothesis}"
+                ),
                 mo.accordion(
                     {
                         "Commit, links, Markdown and advanced YAML": mo.vstack(
                             [
-                                commit_input,
-                                related_input,
-                                markdown_input,
+                                mo.md("{commit}\n\n{related}\n\n{markdown}"),
                                 _advanced_help,
-                                advanced_yaml,
+                                mo.md("{advanced_yaml}"),
                             ]
                         )
                     }
@@ -336,7 +336,6 @@ def _(
         )
         .form(
             submit_button_label="Create",
-            submit_button_disabled=get_form_busy(),
             on_change=_submit,
         )
     )
@@ -596,17 +595,14 @@ def _(
 
 @app.cell
 def _(controller, job_views):
-    job_logs = {
-        view.job_id: controller.logs(view.job_id)
-        for view in job_views
-        if view.state in {"succeeded", "failed"}
-    }
+    job_logs = {view.job_id: controller.logs(view.job_id) for view in job_views}
     return (job_logs,)
 
 
 @app.cell
 def _(
     config,
+    capability,
     json,
     mo,
     Path,
@@ -615,6 +611,7 @@ def _(
     snapshot,
     uuid,
 ):
+    mo.stop(not capability.interactive)
     _record = next(
         (r for r in snapshot.records if r.id == snapshot.selected_record_id),
         None,
@@ -717,7 +714,8 @@ def _(
             mo.md("## Launch run"),
             mo.md(
                 "Your entrypoint logs results to the tracking backend. "
-                "Launch execution is separate from tracker query results."
+                "Backend query settings do not configure your script's "
+                "MLFLOW or WANDB environment."
             ),
             mo.ui.table(_entrypoint_rows, selection=None),
             entrypoint_select,
@@ -781,7 +779,7 @@ def _(
                 },
             }
         )
-        set_launch_review(_event["fingerprint"])
+        set_launch_review((_event["fingerprint"], _preview))
 
 
 @app.cell
@@ -804,7 +802,8 @@ def _(
     set_launch_handled(_event["job_id"])
     set_launch_busy(True)
     try:
-        if get_launch_review() != _event["fingerprint"]:
+        _review = get_launch_review()
+        if _review is None or _review[0] != _event["fingerprint"]:
             raise ValueError(
                 "Launch target changed since the last preview; review again."
             )
@@ -816,6 +815,7 @@ def _(
             args=_overrides,
             dispatch=_event["dispatch"],
             commit=_event["commit"],
+            reviewed=_review[1],
         )
         _job = controller.submit(_request)
     except Exception as exc:
@@ -854,6 +854,12 @@ def _(
                 f"Commit ({_p['commit_source']}): `{_p['commit'] or '—'}` · "
                 f"Query source: {_p['query_source'] or 'unavailable'}\n\n"
                 f"Rendered argv: `{' '.join(_p['argv'])}`"
+                + (
+                    "\n\nLocal launch uses the working tree and reports actual "
+                    "HEAD, even when a requested commit is bound to the record."
+                    if _p["dispatcher"] == "launch.sh"
+                    else ""
+                )
             )
         )
     _error = get_launch_error()
@@ -875,11 +881,12 @@ def _(
         )
         if _logs is not None:
             _messages.append(
-                mo.md(
-                    "Launch logs (stdout/stderr), separate from tracker "
-                    "artifacts:\n\n"
-                    f"```\nstdout:\n{_logs.stdout_tail}\n"
-                    f"stderr:\n{_logs.stderr_tail}\n```"
+                mo.vstack(
+                    [
+                        mo.md("Launch logs, separate from tracker artifacts:"),
+                        mo.plain_text("stdout:\n" + _logs.stdout_tail),
+                        mo.plain_text("stderr:\n" + _logs.stderr_tail),
+                    ]
                 )
             )
     _result = get_launch_result()

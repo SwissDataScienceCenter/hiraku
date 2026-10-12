@@ -279,6 +279,59 @@ def test_shutdown_kills_child_that_does_not_terminate():
     assert process.killed
 
 
+def test_interactive_interrupt_drains_launcher_owned_worker(tmp_path, monkeypatch):
+    from hiraku.dashboard.jobs import LaunchRequest
+    from hiraku.dashboard.supervisor import connect_controller
+
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    marker = tmp_path / "finished.txt"
+    Record.create(
+        "root",
+        entrypoints={
+            "run": {
+                "command": [
+                    sys.executable,
+                    "-c",
+                    "import time; from pathlib import Path; time.sleep(0.2); "
+                    "Path('finished.txt').write_text('done')",
+                ]
+            }
+        },
+        activate=False,
+        config=config,
+    )
+    real_popen = subprocess.Popen
+
+    class Process:
+        stopped = False
+
+        def poll(self):
+            return 0 if self.stopped else None
+
+        def wait(self, timeout=None):
+            if timeout is None:
+                raise KeyboardInterrupt
+            return 0
+
+        def terminate(self):
+            self.stopped = True
+
+    def start(command, **kwargs):
+        if "hiraku.dashboard.worker" in command:
+            return real_popen(command, **kwargs)
+        for key, value in kwargs["env"].items():
+            if key.startswith("HIRAKU_DASHBOARD_CONTROLLER_"):
+                monkeypatch.setenv(key, value)
+        client = connect_controller()
+        client.submit(LaunchRequest("interrupt", "root", "run", {}))
+        return Process()
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", start)
+    with pytest.raises(KeyboardInterrupt):
+        launcher.serve_dashboard(config, interactive=True)
+    assert marker.read_text() == "done"
+
+
 def test_occupied_port_reports_failure(tmp_path):
     HirakuConfig.init(tmp_path, install_skill=False)
     with socket.socket() as occupied:

@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from contextlib import nullcontext
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from typing import Any
 from ..config import HirakuConfig
 from ..errors import RecordNotFoundError, ValidationError
 from .data import read_record_index
+from .supervisor import supervise
 
 DEFAULT_PORT = 8765
 DEFAULT_HOST = "127.0.0.1"
@@ -73,6 +75,8 @@ def dashboard_environment(
     inherited environment value cannot enable writes accidentally.
     """
     environment = dict(os.environ)
+    environment.pop("HIRAKU_DASHBOARD_CONTROLLER_PORT", None)
+    environment.pop("HIRAKU_DASHBOARD_CONTROLLER_KEY", None)
     environment["HIRAKU_PROJECT_ROOT"] = str(config.root)
     environment["HIRAKU_DASHBOARD_RECORD"] = record_id or ""
     environment["HIRAKU_DASHBOARD_SCOPE"] = scope
@@ -161,8 +165,9 @@ def serve_dashboard(
             no_browser=no_browser,
             interactive=interactive,
         )
-        process = subprocess.Popen(command, cwd=temporary_dir, env=environment)
-        try:
-            return process.wait()
-        finally:
-            _stop_process(process, graceful=interactive)
+        with supervise(config, environment) if interactive else nullcontext():
+            process = subprocess.Popen(command, cwd=temporary_dir, env=environment)
+            try:
+                return process.wait()
+            finally:
+                _stop_process(process)

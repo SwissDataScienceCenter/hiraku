@@ -24,11 +24,34 @@ def run(request_path: Path) -> int:
     from ..config import HirakuConfig
     from ..launch import launch
     from ..record import load_record
+    from .actions import preflight_mutations
+    from .capability import DashboardCapability
+    from .jobs import LaunchController, LaunchRequest
 
     try:
         request: dict[str, Any] = json.loads(request_path.read_text(encoding="utf-8"))
         project_root = Path(request["project_root"])
         config = HirakuConfig.load(project_root / "hiraku.yml")
+        preflight_mutations(config)
+        controller = LaunchController(config, DashboardCapability(interactive=True))
+        try:
+            preview = controller.preview(
+                LaunchRequest(
+                    job_id=request.get("job_id", "worker"),
+                    record_id=request["record_id"],
+                    entrypoint=request["entrypoint"],
+                    args=request.get("args") or {},
+                    dispatch=request.get("dispatch"),
+                    commit=request.get("commit"),
+                )
+            )
+            if (
+                request.get("fingerprint")
+                and request["fingerprint"] != preview.fingerprint
+            ):
+                return _fail("Record or entrypoint changed; preview again")
+        finally:
+            controller.shutdown()
         record = load_record(request["record_id"], config=config)
         entrypoint = record.entrypoint(request["entrypoint"], config=config)
         result = launch(
