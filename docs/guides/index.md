@@ -4,6 +4,7 @@ Practical workflows for setting up Hiraku, choosing a tracking backend, and
 working with research records.
 
 - [Start from scratch](../examples/minimal/README.md)
+- [Interactive dashboard manual](dashboard-manual.md)
 - Tracking backends:
     - [CSV](tracking-csv.md)
     - [Weights &amp; Biases](tracking-wandb.md)

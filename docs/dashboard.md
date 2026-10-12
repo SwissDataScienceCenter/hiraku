@@ -277,7 +277,8 @@ the repository root. Choose `minimal`, `heart-disease`, `digits-mlflow`,
 `iris-wandb`, or `autoresearch`. The helper prints the authenticated GUI URL,
 tracking location, and access token. Iris needs W&B access to log runs; the
 standalone Autoresearch demo runs its Linux CPU mock. See the
-[examples index](examples/index.md) for each command.
+[examples index](examples/index.md) for each command, and the
+[interactive dashboard manual](guides/dashboard-manual.md) for GUI steps.
 
 To exercise the dashboard with real model training and local MLflow tracking,
 run the test script from the repository:

@@ -32,6 +32,8 @@ Check the examples for a more complete walkthrough:
 
 ## Documentation
 
+- [Interactive dashboard demos](scripts/README-use-case-dashboard.md) and
+  [GUI manual](docs/guides/dashboard-manual.md)
 - [Get Started](https://swissdatasciencecenter.github.io/hiraku/)
 - [Examples](https://swissdatasciencecenter.github.io/hiraku/examples/)
 - [Guides](https://swissdatasciencecenter.github.io/hiraku/guides/)
