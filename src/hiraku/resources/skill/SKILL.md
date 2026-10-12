@@ -102,8 +102,8 @@ Classify the request before acting:
 - **Bounded workflow:** Complete every requested stage in order, such as creating
   a research root, defining child records, running them, and comparing results.
   Do not add stages the user did not request.
-- **Hiraku workflow:** Start or continue a workflow, such as `autoresearch`, only
-  when the user explicitly requests it. Discover workflows and their arguments
+- **Hiraku workflow:** Start or continue a workflow, such as
+  `autoresearch-python`, only when the user explicitly requests it. Discover workflows and their arguments
   with the `workflow_list` MCP tool, start one with its `<workflow>_start` tool,
   and follow the user's constraints, permissions, budgets, and stopping
   condition in addition to the workflow's instructions.

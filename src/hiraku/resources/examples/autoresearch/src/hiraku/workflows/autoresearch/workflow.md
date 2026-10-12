@@ -1,5 +1,5 @@
 ---
-id: autoresearch-loop
+id: autoresearch
 description: >-
   The upstream autoresearch loop as one prompt: experiment autonomously until
   the user stops you.

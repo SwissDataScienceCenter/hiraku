@@ -115,13 +115,17 @@ def recorded(config: HirakuConfig, record_id: str, decision: str) -> None:
 
 def test_start_resolves_task_entrypoint_and_metric(config: HirakuConfig) -> None:
     harness = Harness(config)
-    ambiguous = harness.start("autoresearch")
+    ambiguous = harness.start("autoresearch-python")
     assert ambiguous["status"] == "rejected"
     assert "several entrypoints (mock, train); pass entrypoint" in ambiguous["message"]
-    assert harness.start("autoresearch", entrypoint="nope")["status"] == "rejected"
-    assert harness.start("autoresearch", iterations=0)["status"] == "rejected"
+    assert (
+        harness.start("autoresearch-python", entrypoint="nope")["status"] == "rejected"
+    )
+    assert harness.start("autoresearch-python", iterations=0)["status"] == "rejected"
     config.set_active_record("base")
-    started = harness.start("autoresearch", entrypoint="train", baseline_run="r0")
+    started = harness.start(
+        "autoresearch-python", entrypoint="train", baseline_run="r0"
+    )
     assert started["status"] == "accepted"
     assert harness.section() == "## Experiment"
     assert harness.instruction["requires_user_response"] is False
@@ -129,43 +133,46 @@ def test_start_resolves_task_entrypoint_and_metric(config: HirakuConfig) -> None
     assert context["task"] == "task"
     assert context["reference"]["run_id"] == "r0"
     assert context["experiment"] == 1
-    rejected = harness.start("autoresearch", task="base", entrypoint="train")
+    rejected = harness.start("autoresearch-python", task="base", entrypoint="train")
     assert "not a task record" in rejected["message"]
 
 
 def test_autoresearch_loop_keeps_discards_and_crashes(config: HirakuConfig) -> None:
     harness = Harness(config)
-    harness.start("autoresearch", task="task", entrypoint="train", iterations=3)
+    harness.start("autoresearch-python", task="task", entrypoint="train", iterations=3)
     assert harness.section() == "## Baseline"
-    assert harness.replies == ["autoresearch_submit_run", "autoresearch_stop"]
+    assert harness.replies == [
+        "autoresearch-python_submit_run",
+        "autoresearch-python_stop",
+    ]
 
     experiment(config, "fresh-base", COMMIT_A)
-    assert harness.reply("autoresearch_submit_run", run_id="rb")["status"] == (
+    assert harness.reply("autoresearch-python_submit_run", run_id="rb")["status"] == (
         "not_ready"
     )
     add_run(config, "rb", "fresh-base", "", status="crashed")
-    harness.reply("autoresearch_submit_run", run_id="rb")
+    harness.reply("autoresearch-python_submit_run", run_id="rb")
     assert harness.section() == "## Record"
     assert harness.instruction["context"]["decision"] == "crash"
     assert harness.instruction["context"]["restore_command"] is None
     recorded(config, "fresh-base", "crash")
-    harness.reply("autoresearch_recorded")
+    harness.reply("autoresearch-python_recorded")
     assert harness.section() == "## Baseline"
 
     experiment(config, "base-2", COMMIT_A)
     add_run(config, "rb2", "base-2", "1.0")
-    harness.reply("autoresearch_submit_run", run_id="rb2")
+    harness.reply("autoresearch-python_submit_run", run_id="rb2")
     assert harness.instruction["context"]["decision"] == "keep"
-    unrecorded = harness.reply("autoresearch_recorded")
+    unrecorded = harness.reply("autoresearch-python_recorded")
     assert "decision: keep" in unrecorded["message"]
     recorded(config, "base-2", "keep")
-    harness.reply("autoresearch_recorded")
+    harness.reply("autoresearch-python_recorded")
     assert harness.section() == "## Experiment"
     assert harness.instruction["context"]["experiment"] == 1
 
     experiment(config, "e1", COMMIT_B)
     add_run(config, "r1", "e1", "0.8", commit=COMMIT_B)
-    harness.reply("autoresearch_submit_run", run_id="r1")
+    harness.reply("autoresearch-python_submit_run", run_id="r1")
     context = harness.instruction["context"]
     assert context["decision"] == "keep"
     assert context["restore_command"] is None
@@ -173,30 +180,30 @@ def test_autoresearch_loop_keeps_discards_and_crashes(config: HirakuConfig) -> N
     assert assessment["reference_run"] == "rb2"
     assert assessment["value"] == 0.8
     recorded(config, "e1", "keep")
-    harness.reply("autoresearch_recorded")
+    harness.reply("autoresearch-python_recorded")
     assert harness.instruction["context"]["reference"]["run_id"] == "r1"
 
     experiment(config, "e2", COMMIT_A)
     add_run(config, "r2", "e2", "0.8")
-    harness.reply("autoresearch_submit_run", run_id="r2")
+    harness.reply("autoresearch-python_submit_run", run_id="r2")
     assert harness.instruction["context"]["decision"] == "discard"
     assert harness.instruction["context"]["restore_command"] == (
         f"git reset --hard {COMMIT_B}"
     )
     recorded(config, "e2", "discard")
-    harness.reply("autoresearch_recorded")
+    harness.reply("autoresearch-python_recorded")
 
-    reused = harness.reply("autoresearch_submit_run", run_id="r2")
+    reused = harness.reply("autoresearch-python_submit_run", run_id="r2")
     assert "already assessed" in reused["message"]
     experiment(config, "e3", COMMIT_A)
     add_run(config, "r3", "e3", "", status="timeout")
-    harness.reply("autoresearch_submit_run", run_id="r3")
+    harness.reply("autoresearch-python_submit_run", run_id="r3")
     assert harness.instruction["context"]["decision"] == "crash"
     assert harness.instruction["context"]["restore_command"] == (
         f"git reset --hard {COMMIT_B}"
     )
     recorded(config, "e3", "crash")
-    done = harness.reply("autoresearch_recorded")
+    done = harness.reply("autoresearch-python_recorded")
     result = done["result"]
     assert result["outcome"] == "completed"
     assert result["experiments"] == 3
@@ -224,10 +231,12 @@ def test_autoresearch_rejects_invalid_evidence(
     config: HirakuConfig, run: dict[str, str], issue: str
 ) -> None:
     harness = Harness(config)
-    harness.start("autoresearch", task="task", entrypoint="train", baseline_run="r0")
+    harness.start(
+        "autoresearch-python", task="task", entrypoint="train", baseline_run="r0"
+    )
     experiment(config, "e1", COMMIT_A)
     add_run(config, "r1", "e1", **{"value": "0.5", **run})
-    rejected = harness.reply("autoresearch_submit_run", run_id="r1")
+    rejected = harness.reply("autoresearch-python_submit_run", run_id="r1")
     assert rejected["status"] == "rejected"
     assert issue in rejected["message"]
     assert harness.section() == "## Experiment"
@@ -235,24 +244,28 @@ def test_autoresearch_rejects_invalid_evidence(
 
 def test_autoresearch_rejects_runs_outside_the_task(config: HirakuConfig) -> None:
     harness = Harness(config)
-    harness.start("autoresearch", task="task", entrypoint="train", baseline_run="r0")
+    harness.start(
+        "autoresearch-python", task="task", entrypoint="train", baseline_run="r0"
+    )
     Record.create("elsewhere", type="experiment", activate=False, config=config)
     add_run(config, "r1", "elsewhere", "0.5")
-    rejected = harness.reply("autoresearch_submit_run", run_id="r1")
+    rejected = harness.reply("autoresearch-python_submit_run", run_id="r1")
     assert "not an experiment record under task" in rejected["message"]
 
 
 def test_autoresearch_stop_and_registered_mcp_items(config: HirakuConfig) -> None:
     harness = Harness(config)
-    harness.start("autoresearch", task="task", entrypoint="train", baseline_run="r0")
-    done = harness.reply("autoresearch_stop", reason="Out of time")
+    harness.start(
+        "autoresearch-python", task="task", entrypoint="train", baseline_run="r0"
+    )
+    done = harness.reply("autoresearch-python_stop", reason="Out of time")
     assert done["result"]["outcome"] == "stopped"
     assert done["result"]["experiments"] == 0
     service = harness.service
-    policy, mime_type = service.read_resource("autoresearch", "policy")
+    policy, mime_type = service.read_resource("autoresearch-python", "policy")
     assert mime_type == "text/markdown"
     assert "must be `finished`" in policy
-    assert "session_list" in service.get_prompt("autoresearch_resume", {})
+    assert "session_list" in service.get_prompt("autoresearch-python_resume", {})
 
 
 def guided(harness: Harness, config: HirakuConfig) -> None:

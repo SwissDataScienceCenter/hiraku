@@ -34,7 +34,7 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         for path in directory.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts
     }
-    assert any(path.endswith("autoresearch/workflow.md") for path in expected)
+    assert any(path.endswith("autoresearch-python/workflow.md") for path in expected)
     with ZipFile(wheels[0]) as wheel:
         packaged = set(wheel.namelist())
 

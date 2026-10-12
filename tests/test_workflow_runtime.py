@@ -158,7 +158,7 @@ def test_discovery_schemas_and_relative_imports(config: HirakuConfig) -> None:
         "toy_start",
         "toy_add",
         "toy_peek",
-        "autoresearch_start",
+        "autoresearch-python_start",
         "autodataset_start",
     }
     assert workflow_description(workflow).startswith("Add numbers until a target")
@@ -575,7 +575,13 @@ def test_malformed_session_files(config: HirakuConfig) -> None:
     [
         (
             None,
-            {"autodataset", "autoresearch", "guided-research", "hiraku-agent", "toy"},
+            {
+                "autodataset",
+                "autoresearch-python",
+                "guided-research",
+                "hiraku-agent",
+                "toy",
+            },
         ),
         ([], set()),
         (["toy"], {"toy"}),
@@ -590,7 +596,7 @@ def test_configured_exposure(
     assert exposed == expected
     assert {item["id"] for item in service.list_workflows()} == {
         "autodataset",
-        "autoresearch",
+        "autoresearch-python",
         "guided-research",
         "hiraku-agent",
         "toy",
@@ -606,17 +612,24 @@ def test_unknown_configured_workflows_are_errors(config: HirakuConfig) -> None:
 
 
 def test_activation_persists_and_keeps_sessions(config: HirakuConfig) -> None:
-    config.set_mcp_workflows(["autoresearch"])
+    config.set_mcp_workflows(["autoresearch-python"])
     service = WorkflowService(HirakuConfig.discover(config.root))
     first = started(service)
     result = service.deactivate("toy")
-    assert result == {"active": ["autoresearch"], "changed": False, "saved": False}
+    assert result == {
+        "active": ["autoresearch-python"],
+        "changed": False,
+        "saved": False,
+    }
     result = service.activate("toy")
     assert result["changed"] is True
     assert "reconnect" in result["note"]
-    assert HirakuConfig.discover(config.root).mcp.workflows == ["autoresearch", "toy"]
+    assert HirakuConfig.discover(config.root).mcp.workflows == [
+        "autoresearch-python",
+        "toy",
+    ]
     service.deactivate("toy")
-    assert HirakuConfig.discover(config.root).mcp.workflows == ["autoresearch"]
+    assert HirakuConfig.discover(config.root).mcp.workflows == ["autoresearch-python"]
     shown = service.show(first["session_id"])
     assert shown["status"] == "active"
     assert "not active" in shown["note"]

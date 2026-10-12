@@ -198,10 +198,10 @@ class Autoresearch(Workflow):
 
     @mcp_prompt("resume")
     def resume(self) -> str:
-        """Resume the most recent autoresearch session."""
+        """Resume the most recent autoresearch-python session."""
         return (
-            "Call session_list, pick the most recent active autoresearch session, "
-            "read its pending instruction with session_show, and continue it. "
+            "Call session_list, pick the most recent active autoresearch-python "
+            "session, read its pending instruction with session_show, and continue it. "
             "Check for records and runs that already exist before repeating work."
         )
 

@@ -1,7 +1,7 @@
 # Karpathy's LLM autoresearch example with Hiraku
 
 This example adds Hiraku research records, attributed CSV runs, and
-the bundled autoresearch workflow to Andrej Karpathy's original
+Hiraku's autoresearch workflows to Andrej Karpathy's original
 [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch) repository.
 It does not vendor or modify the upstream training implementation.
 
@@ -12,16 +12,16 @@ The overlay contains:
 
 - `task.md` — the Markdown body used to create the research root.
 - `cpu_mock.py` — a fast CPU-only check with the same summary format as training.
-- `hiraku/workflows/autoresearch-loop/workflow.md` — the upstream research loop
+- `hiraku/workflows/autoresearch/workflow.md` — the upstream research loop
   adapted to Hiraku records and runs, as a Markdown-only workflow.
 - `hiraku/dispatch/autoresearch.sh` — timeout, output parsing, and CSV tracking.
   It records an explicit run `status` (`finished`, `crashed`, or `timeout`),
-  which the autoresearch workflow uses as success evidence.
+  which the `autoresearch-python` workflow uses as success evidence.
 
 `hiraku init` also installs the bundled workflows under `hiraku/workflows/` and
 configures the Hiraku MCP server for Claude Code (`.mcp.json`) and Codex
 (`.codex/config.toml`). The example exposes the `autoresearch`,
-`guided-research`, and `autoresearch-loop` workflows.
+`autoresearch-python`, and `guided-research` workflows.
 
 ## Setup
 
@@ -42,7 +42,8 @@ uv run train.py
 ## Initialize the Hiraku project
 
 From the root of the autoresearch repository, install the example. Initialization copies root `task.md` as a bootstrap template and installs the
-autoresearch workflow at `hiraku/workflows/autoresearch/`.
+autoresearch workflows at `hiraku/workflows/autoresearch/` and
+`hiraku/workflows/autoresearch-python/`.
 
 ```bash
 hiraku init --example autoresearch
@@ -126,11 +127,11 @@ installs its skill for Codex at `.agents/skills/hiraku/` and for Claude Code at
 Ask the agent to start the workflow, for example:
 
 ```text
-Start Hiraku autoresearch on task sep10 with the train entrypoint for ten
-experiments, using the baseline run as reference.
+Start Hiraku autoresearch-python on task sep10 with the train entrypoint for
+ten experiments, using the baseline run as reference.
 ```
 
-The agent calls `autoresearch_start` and follows the upstream loop step by
+The agent calls `autoresearch-python_start` and follows the upstream loop step by
 step without asking you: for each experiment it commits one idea, creates an
 experiment record bound to the commit, launches it with `hiraku launch`, and
 submits the tracked run. Hiraku checks the run's attribution, its `status`, and
@@ -142,7 +143,7 @@ upstream loop, the session ends after the requested number of experiments.
 To decide each step yourself, start `guided-research` instead: you choose among
 proposed hypotheses, approve each launch, and discuss each result.
 
-To run the upstream procedure instead, start `autoresearch-loop`. It sends the
+To run the upstream procedure instead, start `autoresearch`. It sends the
 whole loop as one instruction: the agent experiments, advances or resets the
 branch, and continues until you stop it, then reports a summary. Hiraku does
 not check budgets or evidence in this mode. To continue an interrupted session,

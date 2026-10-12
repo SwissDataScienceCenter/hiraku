@@ -106,23 +106,23 @@ def test_sections_follow_markdown_changes() -> None:
 
 def test_workflow_md_is_a_registry_record(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False, install_mcp=False)
-    document = load_workflow("autoresearch", config=config)
-    assert document.id == "autoresearch"
-    assert document.path == config.workflows_dir / "autoresearch" / "workflow.md"
+    document = load_workflow("autoresearch-python", config=config)
+    assert document.id == "autoresearch-python"
+    assert document.path == config.workflows_dir / "autoresearch-python" / "workflow.md"
     assert document.text.startswith("# Autoresearch")
-    assert "id: autoresearch" not in document.text
+    assert "id: autoresearch-python" not in document.text
     assert discover_workflows(config) == [
         "autodataset",
-        "autoresearch",
+        "autoresearch-python",
         "guided-research",
         "hiraku-agent",
     ]
 
     document.summary = "Bounded research"
     document.save()
-    reloaded = load_workflow("autoresearch", config=config)
+    reloaded = load_workflow("autoresearch-python", config=config)
     assert reloaded.to_dict() == {
-        "id": "autoresearch",
+        "id": "autoresearch-python",
         "success_status": "finished",
         "summary": "Bounded research",
     }
@@ -150,6 +150,6 @@ def test_invalid_workflow_documents_disable_the_workflow(
         load_workflow("autodataset", config=config)
     service = WorkflowService(config)
     assert "autodataset" not in service.workflows
-    assert "autoresearch" in service.workflows
+    assert "autoresearch-python" in service.workflows
     with pytest.raises(error, match=message):
         service.activate("autodataset")

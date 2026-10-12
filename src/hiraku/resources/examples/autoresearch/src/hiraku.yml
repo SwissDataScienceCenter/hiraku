@@ -1,6 +1,6 @@
 default_dispatch: autoresearch.sh
 mcp:
   workflows:
-  - autoresearch
+  - autoresearch-python
   - guided-research
-  - autoresearch-loop
+  - autoresearch

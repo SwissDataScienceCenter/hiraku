@@ -21,8 +21,10 @@ REPOSITORY = Path(__file__).parents[2]
 DOCS_EXAMPLE = REPOSITORY / "docs" / "examples" / "autoresearch"
 EXAMPLE = REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "autoresearch"
 OVERLAY = EXAMPLE / "src"
-WORKFLOW = REPOSITORY / "src" / "hiraku" / "resources" / "workflows" / "autoresearch"
-LOOP = OVERLAY / "hiraku" / "workflows" / "autoresearch-loop" / "workflow.md"
+WORKFLOW = (
+    REPOSITORY / "src" / "hiraku" / "resources" / "workflows" / "autoresearch-python"
+)
+LOOP = OVERLAY / "hiraku" / "workflows" / "autoresearch" / "workflow.md"
 DISPATCHER = OVERLAY / "hiraku" / "dispatch" / "autoresearch.sh"
 LINUX_ONLY = pytest.mark.skipif(
     sys.platform != "linux",
@@ -113,7 +115,7 @@ def test_autoresearch_is_an_overlay() -> None:
         "src/task.md",
         "src/cpu_mock.py",
         "src/hiraku/dispatch/autoresearch.sh",
-        "src/hiraku/workflows/autoresearch-loop/workflow.md",
+        "src/hiraku/workflows/autoresearch/workflow.md",
     }
     actual = {
         str(path.relative_to(EXAMPLE))
@@ -131,7 +133,7 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "/.claude/" in readme
     assert "/.mcp.json" in readme
     assert "/.codex/" in readme
-    assert "autoresearch_start" in readme
+    assert "autoresearch-python_start" in readme
     assert "hiraku program" not in readme
     assert "--markdown-file task.md" in readme
     assert "hiraku record create sep10" in readme
@@ -157,7 +159,7 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "results.tsv" not in prompts
 
     loop = LOOP.read_text(encoding="utf-8")
-    assert loop.startswith("---\nid: autoresearch-loop\n")
+    assert loop.startswith("---\nid: autoresearch\n")
     assert "hiraku status --json" in loop
     assert "hiraku record tree" in loop
     assert "hiraku runs --record <id> --json" in loop
@@ -190,7 +192,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert (project / "program.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "program.md"
     ]
-    installed = project / "hiraku/workflows/autoresearch"
+    installed = project / "hiraku/workflows/autoresearch-python"
     assert (installed / "workflow.py").read_text(encoding="utf-8") == (
         WORKFLOW / "workflow.py"
     ).read_text(encoding="utf-8")
@@ -211,13 +213,13 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert config.default_dispatch == "autoresearch.sh"
     assert config.mcp is not None
     assert config.mcp.workflows == [
-        "autoresearch",
+        "autoresearch-python",
         "guided-research",
-        "autoresearch-loop",
+        "autoresearch",
     ]
     workflows = WorkflowService(config).workflows
-    assert type(workflows["autoresearch-loop"]) is PromptWorkflow
-    assert "autoresearch" in workflows
+    assert type(workflows["autoresearch"]) is PromptWorkflow
+    assert "autoresearch-python" in workflows
     assert json.loads((project / ".mcp.json").read_text())["mcpServers"]["hiraku"]
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111
     assert git(project, "status", "--porcelain") == ""

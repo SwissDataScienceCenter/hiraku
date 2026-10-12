@@ -165,7 +165,7 @@ project-relevant information to the agent.
 | **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its arguments, progress, and pending instruction. Sessions are local and not committed. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
-Hiraku ships the `autoresearch`, `guided-research`, and `autodataset`
+Hiraku ships the `autoresearch-python`, `guided-research`, and `autodataset`
 workflows as editable copies in your project. See the [Workflows guide](guides/workflows.md) for how
 sessions work and how to write your own.
 
@@ -240,10 +240,10 @@ shows prompts for both a complete investigation and individual steps.
 
 ### Autoresearch workflow
 
-The bundled `autoresearch` workflow runs the autoresearch loop autonomously
+The bundled `autoresearch-python` workflow runs the autoresearch loop autonomously
 for a fixed number of experiments on a task record. Ask your coding agent to
-start it, for example "start Hiraku autoresearch on heart-disease for five
-experiments". The agent calls the `autoresearch_start` MCP tool and follows the
+start it, for example "start Hiraku autoresearch-python on heart-disease for
+five experiments". The agent calls the `autoresearch-python_start` MCP tool and follows the
 instructions it returns: one idea, one commit, one experiment record, and one
 launch per experiment. Hiraku checks each tracked run, decides keep, discard,
 or crash against the retained result, and records its assessment on the

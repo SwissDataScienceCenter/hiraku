@@ -97,7 +97,7 @@ The MCP server exposes tools only for the workflows listed in `hiraku.yml`:
 
 ```yaml
 mcp:
-  workflows: [autoresearch, autodataset]
+  workflows: [autoresearch-python, autodataset]
 ```
 
 Leave out `mcp.workflows` to expose all workflows, or use `[]` to expose none.
@@ -290,20 +290,20 @@ echo '{"topic": "protein folding"}' | hiraku workflow call review_start --argume
 ## Bundled workflows
 
 The [autoresearch example](../examples/autoresearch/README.md) also installs
-`autoresearch-loop`, a Markdown-only workflow with the upstream
+`autoresearch`, a Markdown-only workflow with the upstream
 "experiment until stopped" procedure.
 
-- **autoresearch** follows the autoresearch loop autonomously, without
+- **autoresearch-python** follows the autoresearch loop autonomously, without
   asking you: establish a baseline, then for each of `iterations` experiments
   choose one idea, commit it, create a bound experiment record, launch it, and
   submit the run. Hiraku checks the run and decides `keep`, `discard`, or
   `crash`; the agent records the decision and, for discard and crash, resets the
   branch to the retained commit, as in the upstream loop. Its evidence policy
-  (resource `hiraku://workflows/autoresearch/policy`) requires a run attributed
+  (resource `hiraku://workflows/autoresearch-python/policy`) requires a run attributed
   to an experiment record under the task, its bound commit, and the
   entrypoint; an explicit success status (setting `success_status`, default
   `finished`); a clean working tree when recorded; and a finite metric. The
-  `autoresearch_resume` prompt resumes the latest session.
+  `autoresearch-python_resume` prompt resumes the latest session.
 - **guided-research** is the collaborative counterpart: the agent proposes
   hypotheses, you choose one, approve its exact launch, and discuss each
   result before deciding to continue. A run counts only if it matches the

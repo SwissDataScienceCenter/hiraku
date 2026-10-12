@@ -1,5 +1,5 @@
 ---
-id: autoresearch
+id: autoresearch-python
 success_status: finished
 ---
 # Autoresearch
