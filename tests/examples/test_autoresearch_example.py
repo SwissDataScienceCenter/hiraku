@@ -152,8 +152,8 @@ def test_autoresearch_is_an_overlay() -> None:
 
     prompts = (WORKFLOW / "workflow.md").read_text(encoding="utf-8")
     assert "record_update" in prompts
-    assert "Never reset or rewrite Git history" in prompts
-    assert "git reset" not in prompts
+    assert "## Experiment" in prompts
+    assert "restore_command" in prompts
     assert "results.tsv" not in prompts
 
     loop = LOOP.read_text(encoding="utf-8")
@@ -210,7 +210,11 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
     assert config.mcp is not None
-    assert config.mcp.workflows == ["autoresearch", "autoresearch-loop"]
+    assert config.mcp.workflows == [
+        "autoresearch",
+        "guided-research",
+        "autoresearch-loop",
+    ]
     catalog = Catalog(config)
     assert catalog.loaded_entry("autoresearch-loop").cls is PromptWorkflow
     assert catalog.loaded_entry("autoresearch").loaded

@@ -20,8 +20,8 @@ The overlay contains:
 
 `hiraku init` also installs the bundled workflows under `hiraku/workflows/` and
 configures the Hiraku MCP server for Claude Code (`.mcp.json`) and Codex
-(`.codex/config.toml`). The example exposes the `autoresearch` and
-`autoresearch-loop` workflows.
+(`.codex/config.toml`). The example exposes the `autoresearch`,
+`guided-research`, and `autoresearch-loop` workflows.
 
 ## Setup
 
@@ -126,21 +126,21 @@ installs its skill for Codex at `.agents/skills/hiraku/` and for Claude Code at
 Ask the agent to start the workflow, for example:
 
 ```text
-Start Hiraku autoresearch on task sep10 with the train entrypoint, five
-iterations of three hypotheses each, and use the baseline run as reference.
-Work autonomously.
+Start Hiraku autoresearch on task sep10 with the train entrypoint for ten
+experiments, using the baseline run as reference.
 ```
 
-The agent calls `autoresearch_start` and then follows the instructions the
-workflow returns: it proposes hypotheses as experiment records, selects one,
-commits and binds the change, launches it with `hiraku launch`, and submits the
-tracked run. Hiraku checks the run's attribution, its `status`, and its
-`val_bpb`, compares it with the retained reference, and stores the assessment
-on the experiment record. In collaborative mode (the default) the agent asks
-you to choose candidates and to approve each launch.
+The agent calls `autoresearch_start` and follows the upstream loop step by
+step without asking you: for each experiment it commits one idea, creates an
+experiment record bound to the commit, launches it with `hiraku launch`, and
+submits the tracked run. Hiraku checks the run's attribution, its `status`, and
+its `val_bpb`, decides keep, discard, or crash against the retained result, and
+stores the assessment on the record. The agent records the decision and, for
+discard or crash, resets the branch to the retained commit. Unlike the
+upstream loop, the session ends after the requested number of experiments.
 
-Unlike the upstream loop, the workflow never resets Git history, and it stops
-after the requested number of iterations.
+To decide each step yourself, start `guided-research` instead: you choose among
+proposed hypotheses, approve each launch, and discuss each result.
 
 To run the upstream procedure instead, start `autoresearch-loop`. It sends the
 whole loop as one instruction: the agent experiments, advances or resets the

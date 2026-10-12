@@ -26,27 +26,28 @@ server for Claude Code (`.mcp.json`) and Codex (`.codex/config.toml`). The
 server runs `hiraku mcp serve`, so the `hiraku` command must be on the agent's
 `PATH`. Start your agent in the project and ask it to start a workflow:
 
-> What Hiraku workflows are available here? Start collaborative autoresearch on
-> the active task for two iterations with four hypotheses each.
+> What Hiraku workflows are available here? Start guided research on the
+> active task with three hypotheses per round.
 
 The agent calls `workflow_list` to explain the workflows and their arguments,
-then `autoresearch_start`. Every response names the reply tools that continue
-the session, for example:
+then `guided-research_start`. Every response names the reply tools that
+continue the session, for example:
 
 ```json
 {
   "status": "accepted",
-  "session_id": "autoresearch-3f9a1c2b4d5e",
-  "instruction_id": 4,
+  "session_id": "guided-research-3f9a1c2b4d5e",
+  "instruction_id": 2,
   "instruction": {
-    "text": "## Select\n\nChoose one candidate ...",
+    "text": "## Choose\n\nPresent the candidates briefly ...",
     "context": {"candidates": [{"id": "exp-reg"}, {"id": "exp-lr"}]},
     "requires_user_response": true,
     "replies": [
-      {"tool": "autoresearch_select",
-       "arguments": {"session_id": "autoresearch-3f9a1c2b4d5e", "instruction_id": 4}},
-      {"tool": "autoresearch_revise", "arguments": {"...": "..."}},
-      {"tool": "autoresearch_stop", "arguments": {"...": "..."}}
+      {"tool": "guided-research_select",
+       "arguments": {"session_id": "guided-research-3f9a1c2b4d5e",
+                     "instruction_id": 2}},
+      {"tool": "guided-research_revise", "arguments": {"...": "..."}},
+      {"tool": "guided-research_finish", "arguments": {"...": "..."}}
     ]
   }
 }
@@ -115,7 +116,7 @@ Besides the workflow tools, the server offers `project_status`, `record_list`,
 workflow prompts (`hiraku://workflows/<id>`), records
 (`hiraku://records/<id>`), sessions (`hiraku://sessions/<id>`), and contexts.
 Each active workflow is also offered as an MCP prompt, which some agents show
-as a slash command.
+as a slash command, and workflows can declare their own resources and prompts.
 
 Experiments are launched with the `hiraku launch` CLI. MCP clients limit how
 long a tool call may run and how much output it may return, so long launches
@@ -254,14 +255,21 @@ The rules are deliberately small:
   are lowercase heading text with punctuation removed and spaces replaced by
   hyphens. The text before the first `##` heading is the orientation shown at
   start.
-- Each call gets a fresh copy of the loaded workflow; changing `self` during a
+- Each call gets a fresh copy of the loaded workflow, bound to the project
+  configuration as currently saved; changing `self` during a
   call is not persisted. `hiraku.workflow.load_workflow()` reads a
   `workflow.md` with the base class without importing any project code.
 - Use `self.config` and the Hiraku Python API to read and verify records and
   runs. Prefer replies that name records or runs, which the workflow loads and
   checks, over replies that carry results as free text.
+- `@resource("name")` exposes a method's returned text as the MCP resource
+  `hiraku://workflows/<workflow-id>/<name>`, and `@mcp_prompt("name")` exposes
+  one as the MCP prompt `<workflow-id>_<name>` whose `str` parameters are the
+  prompt arguments. Both are listed only while the workflow is active and
+  never change sessions.
 - Workflow modules can import helpers from their own directory with relative
-  imports.
+  imports. `hiraku.research` provides the task, run, and evidence helpers the
+  bundled research workflows share.
 
 The MCP server loads workflow code and prompts when it starts. After editing a
 workflow, reconnect the MCP server. Existing sessions continue with the new
@@ -282,14 +290,22 @@ The [autoresearch example](../examples/autoresearch/README.md) also installs
 `autoresearch-loop`, a Markdown-only workflow with the upstream
 "experiment until stopped" procedure.
 
-- **autoresearch** runs a bounded number of iterations on a task record:
-  propose hypotheses as experiment records, select one, implement and launch it,
-  and compare the tracked metric with the retained reference result. It
-  establishes a baseline first if none is given. Its evidence policy requires
-  attributed runs that match the approved record, commit, and entrypoint, an
-  explicit success status (setting `success_status`, default `finished`), a
-  clean working tree when recorded, and a finite metric value. Collaborative sessions ask you to choose candidates and approve
-  launches. It never resets Git history or deletes records.
+- **autoresearch** follows the autoresearch loop autonomously, without
+  asking you: establish a baseline, then for each of `iterations` experiments
+  choose one idea, commit it, create a bound experiment record, launch it, and
+  submit the run. Hiraku checks the run and decides `keep`, `discard`, or
+  `crash`; the agent records the decision and, for discard and crash, resets the
+  branch to the retained commit, as in the upstream loop. Its evidence policy
+  (resource `hiraku://workflows/autoresearch/policy`) requires a run attributed
+  to an experiment record under the task, its bound commit, and the
+  entrypoint; an explicit success status (setting `success_status`, default
+  `finished`); a clean working tree when recorded; and a finite metric. The
+  `autoresearch_resume` prompt resumes the latest session.
+- **guided-research** is the collaborative counterpart: the agent proposes
+  hypotheses, you choose one, approve its exact launch, and discuss each
+  result before deciding to continue. A run counts only if it matches the
+  approved record, commit, entrypoint, and arguments; a changed configuration
+  needs a new approval.
 - **autodataset** sends one complete instruction to find datasets for a task
   and document each as a `type: dataset` record with `sources`. A shortfall is
   a valid reply: you decide whether to keep searching or accept a partial

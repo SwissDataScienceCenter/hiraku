@@ -124,6 +124,7 @@ def test_workflow_md_is_a_registry_record(tmp_path: Path) -> None:
     assert [item.id for item in list_workflows(config=config)] == [
         "autodataset",
         "autoresearch",
+        "guided-research",
     ]
 
     document.summary = "Bounded research"
@@ -134,7 +135,7 @@ def test_workflow_md_is_a_registry_record(tmp_path: Path) -> None:
         "success_status": "finished",
         "summary": "Bounded research",
     }
-    assert reloaded.section("select") == document.section("select")
+    assert reloaded.section("record") == document.section("record")
 
 
 @pytest.mark.parametrize(

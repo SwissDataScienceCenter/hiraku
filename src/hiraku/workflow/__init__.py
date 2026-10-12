@@ -11,6 +11,8 @@ from .core import (
     Workflow,
     list_workflows,
     load_workflow,
+    mcp_prompt,
+    resource,
     tool,
 )
 
@@ -26,5 +28,7 @@ __all__ = [
     "Workflow",
     "list_workflows",
     "load_workflow",
+    "mcp_prompt",
+    "resource",
     "tool",
 ]

@@ -21,6 +21,7 @@ from mcp.server.subscriptions import (
     InMemorySubscriptionBus,
     ListenHandler,
     PromptsListChanged,
+    ResourcesListChanged,
     ToolsListChanged,
 )
 from pydantic import BaseModel, ConfigDict, Field
@@ -161,7 +162,6 @@ class HirakuMCPServer:
     """
 
     def __init__(self, config: HirakuConfig, *, exposed: list[str] | None = None):
-        self.config = config
         self.service = WorkflowService(config, exposed=exposed)
         self.bus = InMemorySubscriptionBus()
         self.builtins: dict[str, _BuiltinTool] = {
@@ -250,6 +250,11 @@ class HirakuMCPServer:
             on_subscriptions_listen=ListenHandler(self.bus),
         )
 
+    @property
+    def config(self) -> HirakuConfig:
+        """Return the project configuration as currently saved on disk."""
+        return self.service.current_config()
+
     def initialization_options(self) -> Any:
         """Return initialization options advertising list-change notifications."""
         return self.server.create_initialization_options(
@@ -331,24 +336,27 @@ class HirakuMCPServer:
             if getattr(ctx, "protocol_version", None) in MODERN_PROTOCOL_VERSIONS:
                 await self.bus.publish(ToolsListChanged())
                 await self.bus.publish(PromptsListChanged())
+                await self.bus.publish(ResourcesListChanged())
             else:
                 await ctx.session.send_tool_list_changed()
                 await ctx.session.send_prompt_list_changed()
+                await ctx.session.send_resource_list_changed()
         except Exception:
             logger.warning("Could not send list-changed notifications", exc_info=True)
 
     # Built-in tool implementations --------------------------------------------
 
     def _project_status(self) -> dict[str, Any]:
+        config = self.config
         try:
-            branch = GitRepository(self.config).current_branch
+            branch = GitRepository(config).current_branch
         except GitError:
             branch = None
         return json_value(
             {
-                "project_root": self.config.root,
-                "active_record_id": self.config.active_record_id,
-                "tracking_backend": self.config.tracking_backend,
+                "project_root": config.root,
+                "active_record_id": config.active_record_id,
+                "tracking_backend": config.tracking_backend,
                 "git_branch": branch,
                 "active_workflows": self.service.exposed_ids(),
             }
@@ -469,6 +477,15 @@ class HirakuMCPServer:
                     mime_type="text/markdown",
                 )
             )
+        resources.extend(
+            types.Resource(
+                name=item["name"],
+                uri=item["uri"],
+                description=item["description"],
+                mime_type=item["mime_type"],
+            )
+            for item in self.service.resource_definitions()
+        )
         try:
             contexts = await anyio.to_thread.run_sync(
                 partial(list_contexts, config=self.config)
@@ -529,7 +546,10 @@ class HirakuMCPServer:
         if not uri.startswith(prefix) or not identifier:
             raise ValidationError(f"Unknown resource {uri!r}")
         if kind == "workflows":
-            document = self.service.catalog.prompts.document(identifier)
+            workflow_id, _, name = identifier.partition("/")
+            if name:
+                return self.service.read_resource(workflow_id, name)
+            document = self.service.catalog.prompts.document(workflow_id)
             return document.text, "text/markdown"
         if kind == "contexts":
             context = load_context(identifier, config=self.config)
@@ -577,9 +597,32 @@ class HirakuMCPServer:
                     ],
                 )
             )
+        prompts.extend(
+            types.Prompt(
+                name=item["name"],
+                description=item["description"],
+                arguments=[
+                    types.PromptArgument(**argument) for argument in item["arguments"]
+                ],
+            )
+            for item in self.service.prompt_definitions()
+        )
         return types.ListPromptsResult(prompts=prompts)
 
     async def _get_prompt(self, ctx: Any, params: Any) -> types.GetPromptResult:
+        declared = {item["name"] for item in self.service.prompt_definitions()}
+        if params.name in declared:
+            text = await anyio.to_thread.run_sync(
+                partial(self.service.get_prompt, params.name, params.arguments)
+            )
+            return types.GetPromptResult(
+                description=params.name,
+                messages=[
+                    types.PromptMessage(
+                        role="user", content=types.TextContent(type="text", text=text)
+                    )
+                ],
+            )
         entries = {entry.id: entry for entry in self._prompt_entries()}
         entry = entries.get(params.name)
         if entry is None:

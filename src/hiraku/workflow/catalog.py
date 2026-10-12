@@ -19,8 +19,12 @@ from .core import (
     PromptWorkflow,
     Session,
     Workflow,
+    WorkflowPrompt,
+    WorkflowResource,
     handlers,
     load_workflow,
+    prompts,
+    resources,
     session_model,
 )
 from .prompts import PromptLibrary
@@ -51,6 +55,8 @@ class WorkflowEntry:
     cls: type[Workflow] | None = None
     definition: Workflow | None = None
     handlers: dict[str, Handler] = field(default_factory=dict)
+    resources: dict[str, WorkflowResource] = field(default_factory=dict)
+    prompts: dict[str, WorkflowPrompt] = field(default_factory=dict)
     session_model: type[Session] | None = None
     description: str = ""
     error: str | None = None
@@ -133,11 +139,13 @@ class Catalog:
             else:
                 cls = PromptWorkflow
             entry.handlers = handlers(cls)
+            entry.resources = resources(cls)
+            entry.prompts = prompts(cls)
             entry.definition = load_workflow(entry.id, config=self.config, cls=cls)
             entry.session_model = session_model(cls)
             described = entry.definition.to_dict().get("description")
             entry.description = str(described or cls.__doc__ or "").strip()
-            for name in entry.handlers:
+            for name in [*entry.handlers, *entry.prompts]:
                 tool_name = entry.tool_name(name)
                 if len(tool_name) > _MAX_TOOL_NAME:
                     raise WorkflowError(
@@ -148,6 +156,8 @@ class Catalog:
             logger.exception("Could not load workflow %s", entry.id)
             entry.error = f"{type(exc).__name__}: {exc}"
             entry.handlers = {}
+            entry.resources = {}
+            entry.prompts = {}
             entry.cls = None
             entry.definition = None
 
@@ -213,11 +223,18 @@ class Catalog:
             for name, (entry, handler) in sorted(self._tools.items())
         ]
 
-    def instantiate(self, workflow_id: str) -> Workflow:
-        """Create a workflow instance bound to this project and its prompts."""
+    def instantiate(
+        self, workflow_id: str, config: HirakuConfig | None = None
+    ) -> Workflow:
+        """Create a workflow instance bound to the project and its prompts.
+
+        Args:
+            workflow_id: Loaded workflow to instantiate.
+            config: Current project configuration; defaults to the catalog's.
+        """
         entry = self.loaded_entry(workflow_id)
         assert entry.definition is not None
-        return entry.definition.bind(self.config, self.prompts)
+        return entry.definition.bind(config or self.config, self.prompts)
 
 
 def _root_package(config: HirakuConfig) -> str:

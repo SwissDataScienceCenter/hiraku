@@ -33,6 +33,9 @@ if TYPE_CHECKING:
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 _TOOL_MARKER = "__hiraku_tool__"
+_RESOURCE_MARKER = "__hiraku_resource__"
+_MIME_MARKER = "__hiraku_resource_mime_type__"
+_PROMPT_MARKER = "__hiraku_mcp_prompt__"
 _TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 RESERVED_PARAMETERS = frozenset({"session_id", "instruction_id"})
 
@@ -102,6 +105,56 @@ def tool(target: Any = None, /) -> Any:
     return lambda function: register(function, target)
 
 
+def resource(target: Any = None, /, *, mime_type: str = "text/markdown") -> Any:
+    """Expose a workflow method as an MCP resource.
+
+    The resource is ``hiraku://workflows/<workflow-id>/<name>``; its text is the
+    method's return value. The method takes no parameters besides ``self`` and
+    is called with a fresh workflow instance when a client reads it. Resources
+    of a workflow are listed only while the workflow is active.
+
+    Example:
+        ```python
+        @resource("protocol")
+        def protocol(self) -> str:
+            return self.prompt("#protocol")
+        ```
+    """
+
+    def register(function: _F, name: str | None) -> _F:
+        setattr(function, _RESOURCE_MARKER, name or getattr(function, "__name__", ""))
+        setattr(function, _MIME_MARKER, mime_type)
+        return function
+
+    if callable(target):
+        return register(target, None)
+    return lambda function: register(function, target)
+
+
+def mcp_prompt(target: Any = None, /) -> Any:
+    """Expose a workflow method as an MCP prompt named ``<workflow-id>_<name>``.
+
+    Clients may show MCP prompts as slash commands. The method's ``str``
+    parameters become prompt arguments, and its returned text becomes the
+    prompt's user message. It does not start or advance sessions.
+
+    Example:
+        ```python
+        @mcp_prompt("resume")
+        def resume(self, hint: str = "") -> str:
+            return "Find the latest session with session_list and resume it."
+        ```
+    """
+
+    def register(function: _F, name: str | None) -> _F:
+        setattr(function, _PROMPT_MARKER, name or getattr(function, "__name__", ""))
+        return function
+
+    if callable(target):
+        return register(target, None)
+    return lambda function: register(function, target)
+
+
 @dataclass(frozen=True)
 class Instruction:
     """The next request to the harness, returned by a workflow handler.
@@ -151,6 +204,28 @@ class Handler:
     session_parameter: str | None
     session_model: type[Session] | None
     description: str
+
+
+@dataclass(frozen=True)
+class WorkflowResource:
+    """A workflow method exposed as an MCP resource."""
+
+    name: str
+    method: str
+    function: Callable[..., Any]
+    description: str
+    mime_type: str
+
+
+@dataclass(frozen=True)
+class WorkflowPrompt:
+    """A workflow method exposed as an MCP prompt."""
+
+    name: str
+    method: str
+    function: Callable[..., Any]
+    description: str
+    arguments: type[BaseModel]
 
 
 class Workflow(BaseRecord):
@@ -446,31 +521,10 @@ def handlers(cls: type[Workflow]) -> dict[str, Handler]:
     """
     if not (isinstance(cls, type) and issubclass(cls, Workflow)):
         raise WorkflowError(f"{cls!r} is not a Workflow subclass")
-    collected: dict[str, Handler] = {}
-    for method in sorted(dir(cls)):
-        value = inspect.getattr_static(cls, method, None)
-        name = getattr(value, _TOOL_MARKER, None)
-        if not isinstance(name, str):
-            continue
-        if hasattr(Workflow, method):
-            raise WorkflowError(
-                f"@tool method {cls.__name__}.{method} shadows a Workflow attribute; "
-                f"rename the method and keep the tool name with "
-                f'@tool("{name}")'
-            )
-        if not _TOOL_NAME.fullmatch(name):
-            raise WorkflowError(
-                f"Invalid tool name {name!r} on {cls.__name__}.{method}: use "
-                "letters, digits, '-' and '_'"
-            )
-        if name in collected:
-            raise WorkflowError(
-                f"Tool name {name!r} is used by both {cls.__name__}."
-                f"{collected[name].method} and {cls.__name__}.{method}"
-            )
-        if not inspect.isfunction(value):
-            raise WorkflowError(f"@tool {cls.__name__}.{method} must be a plain method")
-        collected[name] = _handler(cls, name, method, value)
+    collected = {
+        name: _handler(cls, name, method, function)
+        for name, method, function in _marked(cls, _TOOL_MARKER, "tool")
+    }
     if "start" not in collected:
         raise WorkflowError(f"Workflow {cls.__name__} must define a @tool start")
     models = {
@@ -483,6 +537,107 @@ def handlers(cls: type[Workflow]) -> dict[str, Handler]:
         raise WorkflowError(
             f"Continuation handlers of {cls.__name__} use different session "
             f"models: {names}"
+        )
+    return collected
+
+
+def _marked(
+    cls: type[Workflow], marker: str, label: str
+) -> list[tuple[str, str, Callable[..., Any]]]:
+    """Return ``(name, method, function)`` for methods carrying a marker."""
+    markers = (_TOOL_MARKER, _RESOURCE_MARKER, _PROMPT_MARKER)
+    result: list[tuple[str, str, Callable[..., Any]]] = []
+    seen: dict[str, str] = {}
+    for method in sorted(dir(cls)):
+        value = inspect.getattr_static(cls, method, None)
+        name = getattr(value, marker, None)
+        if not isinstance(name, str):
+            continue
+        if hasattr(Workflow, method):
+            raise WorkflowError(
+                f"@{label} method {cls.__name__}.{method} shadows a Workflow "
+                f'attribute; rename the method and keep the name with @{label}("'
+                f'{name}")'
+            )
+        if sum(isinstance(getattr(value, item, None), str) for item in markers) > 1:
+            raise WorkflowError(
+                f"{cls.__name__}.{method} can be only one of a tool, resource, "
+                "or MCP prompt"
+            )
+        if not _TOOL_NAME.fullmatch(name):
+            raise WorkflowError(
+                f"Invalid {label} name {name!r} on {cls.__name__}.{method}: use "
+                "letters, digits, '-' and '_'"
+            )
+        if name in seen:
+            raise WorkflowError(
+                f"{label.capitalize()} name {name!r} is used by both "
+                f"{cls.__name__}.{seen[name]} and {cls.__name__}.{method}"
+            )
+        if not inspect.isfunction(value):
+            raise WorkflowError(f"@{label} {cls.__name__}.{method} must be a method")
+        seen[name] = method
+        result.append((name, method, value))
+    return result
+
+
+@cache
+def resources(cls: type[Workflow]) -> dict[str, WorkflowResource]:
+    """Collect the `resource` methods of a workflow class.
+
+    Raises:
+        hiraku.errors.WorkflowError: If a resource method takes parameters.
+    """
+    collected = {}
+    for name, method, function in _marked(cls, _RESOURCE_MARKER, "resource"):
+        if len(inspect.signature(function).parameters) != 1:
+            raise WorkflowError(
+                f"@resource {cls.__name__}.{method} takes no parameters besides self"
+            )
+        collected[name] = WorkflowResource(
+            name=name,
+            method=method,
+            function=function,
+            description=inspect.getdoc(function) or "",
+            mime_type=getattr(function, _MIME_MARKER),
+        )
+    return collected
+
+
+@cache
+def prompts(cls: type[Workflow]) -> dict[str, WorkflowPrompt]:
+    """Collect the `mcp_prompt` methods of a workflow class.
+
+    Raises:
+        hiraku.errors.WorkflowError: If a parameter is not a string.
+    """
+    collected = {}
+    for name, method, function in _marked(cls, _PROMPT_MARKER, "mcp_prompt"):
+        label = f"{cls.__name__}.{method}"
+        hints = typing.get_type_hints(function)
+        fields: dict[str, Any] = {}
+        for parameter in list(inspect.signature(function).parameters.values())[1:]:
+            if hints.get(parameter.name) not in (str, str | None):
+                raise WorkflowError(
+                    f"@mcp_prompt {label} parameter {parameter.name!r} must be a "
+                    "str; MCP prompt arguments are strings"
+                )
+            default = (
+                ...
+                if parameter.default is inspect.Parameter.empty
+                else parameter.default
+            )
+            fields[parameter.name] = (hints[parameter.name], default)
+        collected[name] = WorkflowPrompt(
+            name=name,
+            method=method,
+            function=function,
+            description=inspect.getdoc(function) or "",
+            arguments=create_model(
+                f"{cls.__name__}_{method}_prompt",
+                __config__=ConfigDict(extra="forbid"),
+                **fields,
+            ),
         )
     return collected
 

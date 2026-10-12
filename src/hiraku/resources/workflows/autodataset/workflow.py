@@ -7,7 +7,8 @@ from typing import Annotated
 from pydantic import Field
 
 from hiraku.errors import SubmissionRejected
-from hiraku.record import Record, load_record
+from hiraku.record import load_record
+from hiraku.research import resolve_task
 from hiraku.workflow import Completion, Instruction, Session, Workflow, tool
 
 
@@ -38,7 +39,7 @@ class Autodataset(Workflow):
         ] = 5,
     ) -> Instruction:
         """Start dataset discovery for a task record."""
-        record = self._task(task)
+        record = resolve_task(self.config, task)
         session = DatasetSession(task=record.id, count=count)
         return self._search(session)
 
@@ -127,25 +128,6 @@ class Autodataset(Workflow):
                 "already_found": session.found,
             },
             replies=[self.complete, self.report_shortfall],
-        )
-
-    def _task(self, task: str | None) -> Record:
-        if task is not None:
-            record = load_record(task, config=self.config)
-            if record.type != "task":
-                raise SubmissionRejected(f"Record {task!r} is not a task record")
-            return record
-        active = self.config.active_record_id
-        if active is None:
-            raise SubmissionRejected("No active record; pass the task record ID")
-        record: Record | None = load_record(active, config=self.config)
-        while record is not None:
-            if record.type == "task":
-                return record
-            parent = record.parent_id
-            record = load_record(parent, config=self.config) if parent else None
-        raise SubmissionRejected(
-            f"Active record {active!r} has no task ancestor; pass the task record ID"
         )
 
     def _check_datasets(self, session: DatasetSession, record_ids: list[str]) -> None:

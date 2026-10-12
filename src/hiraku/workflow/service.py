@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from filelock import FileLock
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
@@ -119,8 +120,21 @@ class WorkflowService:
     def _set_exposed(self, workflows: list[str]) -> dict[str, Any]:
         if self._override is not None:
             self._override = list(workflows)
-        self.config.set_mcp_workflows(list(workflows))
+        # Reload under a lock so concurrent CLI edits, such as a new active
+        # record, are not overwritten by the server's startup snapshot.
+        with FileLock(str(self.config.hiraku_dir / ".config.lock"), timeout=30):
+            current = self.current_config()
+            current.set_mcp_workflows(list(workflows))
+        self.config.mcp = current.mcp
         return self._activation_result(workflows, changed=True)
+
+    def current_config(self) -> HirakuConfig:
+        """Reload the project configuration from disk.
+
+        Long-running servers use this instead of their startup snapshot, so
+        changes made elsewhere, such as the active record, are visible.
+        """
+        return HirakuConfig.load(self.config.path)
 
     def _activation_result(
         self, workflows: list[str], *, changed: bool
@@ -183,6 +197,96 @@ class WorkflowService:
             return False
         return entry.id in self.exposed_ids()
 
+    def resource_definitions(self) -> list[dict[str, Any]]:
+        """Return the MCP resources declared by exposed workflows."""
+        exposed = set(self.exposed_ids())
+        return [
+            {
+                "uri": f"hiraku://workflows/{entry.id}/{item.name}",
+                "name": f"{entry.id}-{item.name}",
+                "description": _summary(item.description),
+                "mime_type": item.mime_type,
+            }
+            for entry in self.catalog.entries.values()
+            if entry.loaded and entry.id in exposed
+            for item in entry.resources.values()
+        ]
+
+    def read_resource(self, workflow_id: str, name: str) -> tuple[str, str]:
+        """Return the text and MIME type of a workflow-declared resource.
+
+        Raises:
+            hiraku.errors.WorkflowError: If the workflow is inactive or the
+                resource does not exist or returns non-text.
+        """
+        entry = self._exposed_entry(workflow_id)
+        item = entry.resources.get(name)
+        if item is None:
+            raise WorkflowError(f"Workflow {workflow_id!r} has no resource {name!r}")
+        text = item.function(self.catalog.instantiate(entry.id, self.current_config()))
+        if not isinstance(text, str):
+            raise WorkflowError(
+                f"Resource {name!r} of {workflow_id!r} must return text"
+            )
+        return text, item.mime_type
+
+    def prompt_definitions(self) -> list[dict[str, Any]]:
+        """Return the MCP prompts declared by exposed workflows."""
+        exposed = set(self.exposed_ids())
+        definitions = []
+        for entry in self.catalog.entries.values():
+            if not entry.loaded or entry.id not in exposed:
+                continue
+            for item in entry.prompts.values():
+                schema = item.arguments.model_json_schema()
+                required = set(schema.get("required", []))
+                definitions.append(
+                    {
+                        "name": entry.tool_name(item.name),
+                        "description": _summary(item.description),
+                        "arguments": [
+                            {
+                                "name": key,
+                                "description": spec.get("description"),
+                                "required": key in required,
+                            }
+                            for key, spec in schema.get("properties", {}).items()
+                        ],
+                    }
+                )
+        return definitions
+
+    def get_prompt(self, name: str, arguments: Mapping[str, Any] | None) -> str:
+        """Render a workflow-declared MCP prompt.
+
+        Raises:
+            hiraku.errors.WorkflowError: If the prompt does not exist or is
+                inactive, or its arguments are invalid.
+        """
+        for entry in self.catalog.entries.values():
+            for item in entry.prompts.values():
+                if entry.tool_name(item.name) != name:
+                    continue
+                self._exposed_entry(entry.id)
+                try:
+                    validated = item.arguments.model_validate(dict(arguments or {}))
+                except PydanticValidationError as exc:
+                    raise WorkflowError(_validation_message(exc)) from exc
+                workflow = self.catalog.instantiate(entry.id, self.current_config())
+                text = item.function(workflow, **_keywords(validated))
+                if not isinstance(text, str):
+                    raise WorkflowError(f"Prompt {name!r} must return text")
+                return text
+        raise WorkflowError(f"Unknown workflow prompt {name!r}")
+
+    def _exposed_entry(self, workflow_id: str) -> WorkflowEntry:
+        entry = self.catalog.loaded_entry(workflow_id)
+        if entry.id not in self.exposed_ids():
+            raise WorkflowError(
+                f"Workflow {workflow_id!r} is not active; call workflow_activate first"
+            )
+        return entry
+
     # Invocation ---------------------------------------------------------------
 
     def call(self, tool_name: str, arguments: Mapping[str, Any] | None) -> Any:
@@ -210,7 +314,7 @@ class WorkflowService:
             validated = handler.arguments.model_validate(values)
         except PydanticValidationError as exc:
             return {"status": "rejected", "message": _validation_message(exc)}
-        workflow = self.catalog.instantiate(entry.id)
+        workflow = self.catalog.instantiate(entry.id, self.current_config())
         try:
             result = handler.function(workflow, **_keywords(validated))
         except (HirakuError, PydanticValidationError) as exc:
@@ -226,7 +330,7 @@ class WorkflowService:
             validated = handler.arguments.model_validate(values)
         except PydanticValidationError as exc:
             return {"status": "rejected", "message": _validation_message(exc)}
-        workflow = self.catalog.instantiate(entry.id)
+        workflow = self.catalog.instantiate(entry.id, self.current_config())
         try:
             response = handler.function(workflow, **_keywords(validated))
         except NotReady as exc:
@@ -350,7 +454,7 @@ class WorkflowService:
         assert handler.session_model is not None
         session = handler.session_model.model_validate(stored.data)
         session._session_id = stored.session_id
-        workflow = self.catalog.instantiate(entry.id)
+        workflow = self.catalog.instantiate(entry.id, self.current_config())
         keywords = _keywords(validated)
         assert handler.session_parameter is not None
         keywords[handler.session_parameter] = session

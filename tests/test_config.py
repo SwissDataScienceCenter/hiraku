@@ -50,11 +50,11 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
 
     assert HirakuConfig.discover(root).root == root
     assert HirakuConfig.discover(nested).root == root
-    for workflow in ("autoresearch", "autodataset"):
+    for workflow in ("autoresearch", "autodataset", "guided-research"):
         assert (config.workflows_dir / workflow / "workflow.py").is_file()
         assert (config.workflows_dir / workflow / "workflow.md").is_file()
     assert config.mcp is not None
-    assert config.mcp.workflows == ["autodataset", "autoresearch"]
+    assert config.mcp.workflows == ["autodataset", "autoresearch", "guided-research"]
     assert not (config.hiraku_dir / "programs").exists()
     assert not (config.hiraku_dir / "actions").exists()
     for name in ("launch.sh", "worktree.sh"):

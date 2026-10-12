@@ -165,8 +165,8 @@ project-relevant information to the agent.
 | **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its arguments, progress, and pending instruction. Sessions are local and not committed. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
-Hiraku ships the `autoresearch` and `autodataset` workflows; both are editable
-copies in your project. See the [Workflows guide](guides/workflows.md) for how
+Hiraku ships the `autoresearch`, `guided-research`, and `autodataset`
+workflows as editable copies in your project. See the [Workflows guide](guides/workflows.md) for how
 sessions work and how to write your own.
 
 ```bash
@@ -240,14 +240,15 @@ shows prompts for both a complete investigation and individual steps.
 
 ### Autoresearch workflow
 
-The bundled `autoresearch` workflow runs a bounded number of research
-iterations on a task record. Ask your coding agent to start it, for example
-"start Hiraku autoresearch on heart-disease for three iterations, working
-collaboratively". The agent calls the `autoresearch_start` MCP tool and follows
-the instructions it returns: it proposes hypotheses as experiment records, lets
-you choose one, implements and launches it after your approval, and submits the
-tracked run. Hiraku checks the evidence, compares the metric with the retained
-reference result, and records its assessment on the experiment record.
+The bundled `autoresearch` workflow runs the autoresearch loop autonomously
+for a fixed number of experiments on a task record. Ask your coding agent to
+start it, for example "start Hiraku autoresearch on heart-disease for five
+experiments". The agent calls the `autoresearch_start` MCP tool and follows the
+instructions it returns: one idea, one commit, one experiment record, and one
+launch per experiment. Hiraku checks each tracked run, decides keep, discard,
+or crash against the retained result, and records its assessment on the
+experiment record. For a collaborative investigation in which you choose
+hypotheses, approve launches, and discuss results, start `guided-research`.
 
 ```bash
 hiraku session list

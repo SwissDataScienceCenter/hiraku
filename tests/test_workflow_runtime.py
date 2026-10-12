@@ -547,7 +547,7 @@ def test_malformed_session_files(config: HirakuConfig) -> None:
 @pytest.mark.parametrize(
     ("workflows", "expected"),
     [
-        (None, {"autodataset", "autoresearch", "toy"}),
+        (None, {"autodataset", "autoresearch", "guided-research", "toy"}),
         ([], set()),
         (["toy"], {"toy"}),
     ],
@@ -562,6 +562,7 @@ def test_configured_exposure(
     assert {item["id"] for item in service.list_workflows()} == {
         "autodataset",
         "autoresearch",
+        "guided-research",
         "toy",
     }
 
@@ -652,8 +653,8 @@ def test_tool_names_can_differ_from_method_names(config: HirakuConfig) -> None:
     [
         (
             "    @tool\n    def save(self) -> None: ...\n",
-            "shadows a Workflow attribute; rename the method and keep the tool "
-            'name with @tool("save")',
+            "shadows a Workflow attribute; rename the method and keep the name "
+            'with @tool("save")',
         ),
         (
             "    @tool('peek')\n    def a(self) -> None: ...\n"
@@ -768,3 +769,92 @@ def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> 
 
     (directory / "workflow.md").write_text(body)
     assert "front matter" in (Catalog(config).entry("loop").error or "")
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        (
+            "    @resource('notes')\n    def notes(self, x: str) -> str: ...\n",
+            "takes no parameters besides self",
+        ),
+        (
+            "    @mcp_prompt('ask')\n    def ask(self, count: int) -> str: ...\n",
+            "must be a str",
+        ),
+        (
+            "    @tool\n    @resource\n    def both(self) -> str: ...\n",
+            "only one of a tool, resource, or MCP prompt",
+        ),
+        (
+            "    @resource('a')\n    def one(self) -> str: ...\n"
+            "    @resource('a')\n    def two(self) -> str: ...\n",
+            "Resource name 'a' is used by both",
+        ),
+    ],
+)
+def test_invalid_resources_and_prompts(
+    config: HirakuConfig, body: str, message: str
+) -> None:
+    source = (
+        "from hiraku.workflow import Workflow, mcp_prompt, resource, tool\n"
+        "class W(Workflow):\n"
+        "    @tool\n"
+        "    def start(self) -> None: ...\n"
+        f"{body}"
+        "WORKFLOW = W\n"
+    )
+    write_workflow(config, "exposed", source)
+    entry = Catalog(config).entry("exposed")
+    assert not entry.loaded
+    assert message in (entry.error or "")
+
+
+def test_workflow_resources_and_prompts(config: HirakuConfig) -> None:
+    source = TOY_PY.replace(
+        "from hiraku.workflow import Session, Workflow, tool",
+        "from hiraku.workflow import Session, Workflow, mcp_prompt, resource, tool",
+    ).replace(
+        "WORKFLOW = Toy",
+        "    @resource('notes', mime_type='text/plain')\n"
+        "    def notes_text(self) -> str:\n"
+        '        """Step size notes."""\n'
+        "        return f'step={self.step} root={self.config.root.name}'\n"
+        "\n"
+        "    @mcp_prompt\n"
+        "    def greet(self, name: str, mood: str | None = None) -> str:\n"
+        '        """Greet someone."""\n'
+        "        return f'Hello {name} ({mood})'\n"
+        "\n"
+        "\n"
+        "WORKFLOW = Toy",
+    )
+    (config.workflows_dir / "toy" / "workflow.py").write_text(source)
+    service = WorkflowService(config)
+    resources = {item["uri"]: item for item in service.resource_definitions()}
+    notes = resources["hiraku://workflows/toy/notes"]
+    assert notes["mime_type"] == "text/plain"
+    assert notes["description"] == "Step size notes."
+    assert service.read_resource("toy", "notes") == (
+        f"step=1 root={config.root.name}",
+        "text/plain",
+    )
+    prompts = {item["name"]: item for item in service.prompt_definitions()}
+    assert prompts["toy_greet"]["arguments"] == [
+        {"name": "name", "description": None, "required": True},
+        {"name": "mood", "description": None, "required": False},
+    ]
+    assert service.get_prompt("toy_greet", {"name": "Ada"}) == "Hello Ada (None)"
+    with pytest.raises(WorkflowError, match="name"):
+        service.get_prompt("toy_greet", {})
+    with pytest.raises(WorkflowError, match="no resource"):
+        service.read_resource("toy", "missing")
+
+    service.deactivate("toy")
+    assert "hiraku://workflows/toy/notes" not in {
+        item["uri"] for item in service.resource_definitions()
+    }
+    with pytest.raises(WorkflowError, match="not active"):
+        service.read_resource("toy", "notes")
+    with pytest.raises(WorkflowError, match="not active"):
+        service.get_prompt("toy_greet", {"name": "Ada"})
