@@ -300,11 +300,10 @@ The [autoresearch example](../examples/autoresearch/README.md) also installs
   submit the run. Hiraku checks the run and decides `keep`, `discard`, or
   `crash`; the agent records the decision and, for discard and crash, resets the
   branch to the retained commit, as in the upstream loop. Its evidence policy
-  (resource `hiraku://workflows/autoresearch-python/policy`) requires a run attributed
-  to an experiment record under the task, its bound commit, and the
-  entrypoint; an explicit success status (setting `success_status`, default
-  `finished`); a clean working tree when recorded; and a finite metric. The
-  `autoresearch-python_resume` prompt resumes the latest session.
+  requires a run attributed to an experiment record under the task, its bound
+  commit, and the entrypoint; an explicit success status (setting
+  `success_status`, default `finished`); a clean working tree when recorded;
+  and a finite metric.
 - **guided-research** is the collaborative counterpart: the agent proposes
   hypotheses, you choose one, approve its exact launch, and discuss each
   result before deciding to continue. A run counts only if it matches the

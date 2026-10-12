@@ -14,8 +14,6 @@ from hiraku.workflow import (
     Instruction,
     Session,
     Workflow,
-    prompt,
-    resource,
     tool,
 )
 
@@ -188,22 +186,6 @@ class Autoresearch(Workflow):
     ) -> Completion:
         """Stop the loop early and summarize the results."""
         return self._finish(session, "stopped", reason)
-
-    @resource
-    def policy(self) -> str:
-        """How this workflow judges runs and decides keep, discard, or crash."""
-        return self.section("evidence-policy").replace(
-            "{success_status}", self.success_status
-        )
-
-    @prompt
-    def resume(self) -> str:
-        """Resume the most recent autoresearch-python session."""
-        return (
-            "Call session_list, pick the most recent active autoresearch-python "
-            "session, read its pending instruction with session_show, and continue it. "
-            "Check for records and runs that already exist before repeating work."
-        )
 
     def _baseline(self, session: ResearchSession) -> Instruction:
         return self.instruction(

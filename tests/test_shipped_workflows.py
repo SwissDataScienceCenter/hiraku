@@ -253,7 +253,7 @@ def test_autoresearch_rejects_runs_outside_the_task(config: HirakuConfig) -> Non
     assert "not an experiment record under task" in rejected["message"]
 
 
-def test_autoresearch_stop_and_registered_mcp_items(config: HirakuConfig) -> None:
+def test_autoresearch_stop(config: HirakuConfig) -> None:
     harness = Harness(config)
     harness.start(
         "autoresearch-python", task="task", entrypoint="train", baseline_run="r0"
@@ -261,11 +261,6 @@ def test_autoresearch_stop_and_registered_mcp_items(config: HirakuConfig) -> Non
     done = harness.reply("autoresearch-python_stop", reason="Out of time")
     assert done["result"]["outcome"] == "stopped"
     assert done["result"]["experiments"] == 0
-    service = harness.service
-    policy, mime_type = service.read_resource("autoresearch-python", "policy")
-    assert mime_type == "text/markdown"
-    assert "must be `finished`" in policy
-    assert "session_list" in service.get_prompt("autoresearch-python_resume", {})
 
 
 def guided(harness: Harness, config: HirakuConfig) -> None:

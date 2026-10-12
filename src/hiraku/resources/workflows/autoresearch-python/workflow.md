@@ -71,7 +71,8 @@ Then reply with `recorded`.
 
 A run counts only when it is attributed to an experiment record under the
 task, to that record's bound commit, and to the session's entrypoint. Its
-tracked status must be `{success_status}`; any other status is a crash. A
+tracked status must be the `success_status` setting above; any other status
+is a crash. A
 recorded working-tree state must be clean, and the metric must have a finite
 value. The first successful run is the baseline. Later runs are kept only when
 they are strictly better than the retained result; equal or worse runs are

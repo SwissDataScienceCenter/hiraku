@@ -184,10 +184,7 @@ def test_prompts_start_active_workflows(config: HirakuConfig) -> None:
         return prompts, prompt
 
     prompts, prompt = run(server, scenario)
-    assert [item.name for item in prompts.prompts] == [
-        "autoresearch-python",
-        "autoresearch-python_resume",
-    ]
+    assert [item.name for item in prompts.prompts] == ["autoresearch-python"]
     arguments = {item.name: item for item in prompts.prompts[0].arguments}
     assert arguments["iterations"].required is False
     assert "default 10" in arguments["iterations"].description
@@ -301,20 +298,35 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
 
 
 def test_workflow_resources_and_prompts_follow_activation(config: HirakuConfig) -> None:
+    notes = config.workflows_dir / "notes"
+    notes.mkdir()
+    (notes / "workflow.py").write_text(
+        "from hiraku.workflow import Workflow, prompt, resource, tool\n"
+        "class Notes(Workflow):\n"
+        "    @tool\n"
+        "    def start(self) -> None: ...\n"
+        "    @resource\n"
+        "    def policy(self) -> str:\n"
+        "        return self.section('policy')\n"
+        "    @prompt\n"
+        "    def resume(self) -> str:\n"
+        "        return 'Call session_list.'\n"
+        "WORKFLOW = Notes\n",
+        encoding="utf-8",
+    )
+    (notes / "workflow.md").write_text(
+        "---\nid: notes\n---\n# Notes\n\n## Policy\n\nRuns must be `finished`.\n"
+    )
     config.set_mcp_workflows(["autodataset"])
     server = HirakuMCPServer(HirakuConfig.discover(config.root))
 
     async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
         before = {item.uri for item in (await client.list_resources()).resources}
-        await client.call_tool(
-            "workflow_activate", {"workflow_id": "autoresearch-python"}
-        )
+        await client.call_tool("workflow_activate", {"workflow_id": "notes"})
         after = {item.uri for item in (await client.list_resources()).resources}
-        policy = await client.read_resource(
-            "hiraku://workflows/autoresearch-python/policy"
-        )
+        policy = await client.read_resource("hiraku://workflows/notes/policy")
         prompts = {item.name for item in (await client.list_prompts()).prompts}
-        resume = await client.get_prompt("autoresearch-python_resume", {})
+        resume = await client.get_prompt("notes_resume", {})
         await anyio.sleep(0.05)
         return {
             "before": before,
@@ -326,10 +338,10 @@ def test_workflow_resources_and_prompts_follow_activation(config: HirakuConfig) 
         }
 
     result = run(server, scenario)
-    assert "hiraku://workflows/autoresearch-python/policy" not in result["before"]
-    assert "hiraku://workflows/autoresearch-python/policy" in result["after"]
+    assert "hiraku://workflows/notes/policy" not in result["before"]
+    assert "hiraku://workflows/notes/policy" in result["after"]
     assert "must be `finished`" in result["policy"]
-    assert "autoresearch-python_resume" in result["prompts"]
+    assert "notes_resume" in result["prompts"]
     assert "session_list" in result["resume"]
     assert "notifications/resources/list_changed" in result["notifications"]
 
