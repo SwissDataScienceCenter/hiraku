@@ -11,7 +11,6 @@ from torch import nn
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
-
 IMAGE_SIZE = 64
 DEFAULT_EPOCHS = 10
 PROVENANCE_VARIABLES = (
@@ -23,6 +22,7 @@ PROVENANCE_VARIABLES = (
 )
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 # Models
 class MLP(nn.Module):
@@ -79,8 +79,7 @@ def build_model(model_name: str, num_classes: int) -> nn.Module:
         return models[model_name](num_classes)
     except KeyError:
         raise ValueError(
-            f"Unknown model {model_name!r}. "
-            f"Available models: {', '.join(models)}"
+            f"Unknown model {model_name!r}. Available models: {', '.join(models)}"
         ) from None
 
 
