@@ -271,6 +271,14 @@ marimo cells so changes to visual controls do not trigger fetching.
 
 ## Development checks
 
+For an interactive demo of each documented example, run
+`uv run --all-extras python scripts/use_case_dashboard.py --example NAME` from
+the repository root. Choose `minimal`, `heart-disease`, `digits-mlflow`,
+`iris-wandb`, or `autoresearch`. The helper prints the authenticated GUI URL,
+tracking location, and access token. Iris needs W&B access to log runs; the
+standalone Autoresearch demo runs its Linux CPU mock. See the
+[examples index](examples/index.md) for each command.
+
 To exercise the dashboard with real model training and local MLflow tracking,
 run the test script from the repository:
 

@@ -7,6 +7,7 @@ import csv
 import json
 import os
 import runpy
+import secrets
 import signal
 import socket
 import subprocess
@@ -346,14 +347,20 @@ def stop_server(process: subprocess.Popen) -> None:
             )
             process.wait(timeout=5)
         return
+    interactive = "--interactive" in process.args
     with suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(process.pid, signal.SIGINT if interactive else signal.SIGTERM)
     try:
-        process.wait(timeout=5)
+        process.wait(timeout=40 if interactive else 5)
     except subprocess.TimeoutExpired:
         with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=5)
+            os.killpg(process.pid, signal.SIGTERM)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
 
 
 def mlflow_training_url(base_url: str) -> str:
@@ -377,6 +384,8 @@ def serve_demo(
     mlflow_port: int | None,
     no_browser: bool,
     interactive: bool = False,
+    tracking_label: str | None = None,
+    launch_environment: dict[str, str] | None = None,
 ) -> int:
     """Serve the dashboard and optional MLflow UI until either exits or Ctrl-C."""
     if mlflow_port == port:
@@ -390,6 +399,16 @@ def serve_demo(
     servers = []
     processes = []
     browser_urls = []
+    token_dir = (
+        tempfile.TemporaryDirectory(prefix="hiraku-dashboard-token-")
+        if interactive
+        else None
+    )
+    token = secrets.token_urlsafe(32) if interactive else None
+    token_path = Path(token_dir.name) / "token" if token_dir else None
+    if token_path is not None and token is not None:
+        token_path.write_text(token, encoding="utf-8")
+        token_path.chmod(0o600)
     try:
         if mlflow_port is not None:
             servers.append(
@@ -432,6 +451,10 @@ def serve_demo(
         )
         for command, url, label in servers:
             environment = os.environ.copy()
+            if label == "Hiraku dashboard" and token_path is not None:
+                environment["HIRAKU_DASHBOARD_TOKEN_FILE"] = str(token_path)
+            if label == "Hiraku dashboard" and launch_environment:
+                environment.update(launch_environment)
             if label == "Hiraku dashboard" and interactive and mlflow_port is not None:
                 # The demo explicitly aligns launched training with its query source.
                 environment.update(
@@ -455,7 +478,25 @@ def serve_demo(
             if label == "MLflow UI":
                 url = mlflow_training_url(url)
             browser_urls.append(url)
-            print(f"{label}: {url}", flush=True)
+            if label == "Hiraku dashboard" and token is not None:
+                authenticated_url = f"{url}?access_token={token}"
+                browser_urls[-1] = authenticated_url
+                print(f"Hiraku GUI is now running on: {authenticated_url}", flush=True)
+                print(
+                    "Tracking backend on: "
+                    + (
+                        tracking_label
+                        or (
+                            f"http://127.0.0.1:{mlflow_port}"
+                            if mlflow_port
+                            else str(directory / "runs.csv")
+                        )
+                    ),
+                    flush=True,
+                )
+                print(f"Hiraku token is: {token}", flush=True)
+            else:
+                print(f"{label}: {url}", flush=True)
         print("Ctrl-C stops the servers. Demo files are retained.", flush=True)
         if not no_browser:
             for url in browser_urls:
@@ -471,6 +512,8 @@ def serve_demo(
     finally:
         for process in reversed(processes):
             stop_server(process)
+        if token_dir is not None:
+            token_dir.cleanup()
 
 
 def main() -> int:

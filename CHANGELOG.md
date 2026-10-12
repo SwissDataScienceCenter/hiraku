@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Add interactive dashboard demos for all five documented examples, with printed authenticated GUI URLs, access tokens, and tracking locations.
+
 - Add `--interactive` dashboard mode with authenticated record creation and background entrypoint launches, including launch preview, job status, bounded launch logs, and one completion refresh.
 - Add subtree run scope, an interactive record graph, adapter-owned MLflow run links, and a composed dashboard workspace with breadcrumbs and source coverage.
 - Add `ui_url` configuration for MLflow backends so run links can point at an explicit deployment UI.

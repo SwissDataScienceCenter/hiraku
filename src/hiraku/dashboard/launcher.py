@@ -46,6 +46,7 @@ def build_command(
     port: int = DEFAULT_PORT,
     no_browser: bool = False,
     interactive: bool = False,
+    token_password_file: Path | None = None,
 ) -> list[str]:
     """Build the argument-list marimo command used to serve the notebook.
 
@@ -56,6 +57,8 @@ def build_command(
     command = [python, "-m", "marimo", "run"]
     command.extend(["--host", host, "--port", str(port)])
     command.append("--token" if interactive else "--no-token")
+    if interactive and token_password_file is not None:
+        command.extend(["--token-password-file", str(token_password_file)])
     if no_browser:
         command.append("--headless")
     command.append(str(notebook))
@@ -81,6 +84,8 @@ def dashboard_environment(
     environment["HIRAKU_DASHBOARD_RECORD"] = record_id or ""
     environment["HIRAKU_DASHBOARD_SCOPE"] = scope
     environment["HIRAKU_DASHBOARD_INTERACTIVE"] = "1" if interactive else "0"
+    if not interactive:
+        environment.pop("HIRAKU_DASHBOARD_TOKEN_FILE", None)
     return environment
 
 
@@ -164,6 +169,11 @@ def serve_dashboard(
             port=port,
             no_browser=no_browser,
             interactive=interactive,
+            token_password_file=(
+                Path(environment["HIRAKU_DASHBOARD_TOKEN_FILE"])
+                if interactive and environment.get("HIRAKU_DASHBOARD_TOKEN_FILE")
+                else None
+            ),
         )
         with supervise(config, environment) if interactive else nullcontext():
             process = subprocess.Popen(command, cwd=temporary_dir, env=environment)

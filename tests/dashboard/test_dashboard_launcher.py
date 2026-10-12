@@ -42,6 +42,16 @@ def test_build_command_interactive_uses_token_auth() -> None:
     command = launcher.build_command("python3", notebook, interactive=True)
     assert "--token" in command
     assert "--no-token" not in command
+    password_file = Path("/tmp/dashboard/token")
+    configured = launcher.build_command(
+        "python3", notebook, interactive=True, token_password_file=password_file
+    )
+    assert configured[configured.index("--token-password-file") + 1] == str(
+        password_file
+    )
+    assert "--token-password-file" not in launcher.build_command(
+        "python3", notebook, token_password_file=password_file
+    )
 
 
 def test_dashboard_environment_forwards_interactive_mode(tmp_path: Path) -> None:

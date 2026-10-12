@@ -223,6 +223,22 @@ def test_servers_reject_conflicting_and_occupied_ports(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_interactive_server_shutdown_sends_interrupt(monkeypatch):
+    signals = []
+
+    class Process:
+        pid = 123
+        args = ["uv", "run", "hiraku", "dashboard", "--interactive"]
+
+        def wait(self, timeout):
+            assert timeout == 40
+            return 0
+
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: signals.append((pid, sig)))
+    helpers["stop_server"](Process())
+    assert signals == [(123, signal.SIGINT)]
+
+
 def test_interactive_digits_server_passes_matching_mlflow_environment(
     tmp_path, monkeypatch
 ):

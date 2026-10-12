@@ -1,5 +1,44 @@
 # Test the Hiraku dashboard
 
+## Interactive use-case demos
+
+`scripts/use_case_dashboard.py` starts the interactive dashboard for every
+example in the [examples index](../docs/examples/index.md):
+
+```bash
+uv sync --all-extras
+uv run --all-extras python scripts/use_case_dashboard.py --example minimal
+uv run --all-extras python scripts/use_case_dashboard.py --example heart-disease
+uv run --all-extras python scripts/use_case_dashboard.py --example digits-mlflow
+uv run --all-extras python scripts/use_case_dashboard.py --example iris-wandb
+uv run --all-extras python scripts/use_case_dashboard.py --example autoresearch
+```
+
+Each command creates a new retained project and starts the authenticated GUI.
+The terminal prints **Hiraku GUI is now running on**, **Tracking backend on**,
+and **Hiraku token is**. Open the full GUI URL containing `access_token`. Use
+`--port` and `--mlflow-port` if the defaults (8765 and 5000) are occupied;
+`--no-browser` keeps the URLs in the terminal. Reopen a retained project with:
+
+```bash
+uv run --all-extras python scripts/use_case_dashboard.py --reopen "<demo-path>"
+```
+
+Minimal and Heart Disease create and log local CSV runs. Digits creates two
+short MLflow runs and starts its MLflow UI; adjust its epoch budget with
+`--epochs` (default 8). Iris prepares the documented records without calling
+W&B. To log its runs, log in to W&B first and use
+`--example iris-wandb --wandb-entity <account-or-team> --run-iris`.
+The helper passes that entity and the `hiraku-iris` project to both initial
+training and later GUI launches, matching the dashboard's query source.
+Autoresearch runs the bundled CPU mock on Linux with `timeout` and `flock`;
+the full upstream workflow needs the original checkout and a suitable GPU.
+Use `--no-serve` to create and run a demo without starting either UI.
+
+The existing `scripts/test_dashboard.py` remains the detailed Digits and CSV
+dashboard walkthrough below. With `--interactive`, it prints the same GUI URL,
+tracking location and token reminder.
+
 Run these commands from the Hiraku repository using Python 3.11+ and uv:
 
 ```bash
