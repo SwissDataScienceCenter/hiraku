@@ -2,9 +2,9 @@
 
 Complete design system for building modern data science and research applications. Based on datascience.ch visual identity.
 
-**Version:** 2.1  
-**Last Updated:** June 1, 2026  
-**Tech Stack:** React + Tailwind CSS  
+**Version:** 2.1
+**Last Updated:** June 1, 2026
+**Tech Stack:** React + Tailwind CSS
 **Fonts:** Space Grotesk + Switzer
 
 ---
@@ -890,8 +890,8 @@ Complete design system for modern data science applications
 
 ## Credits
 
-**Design System:** Swiss Data Science Center  
-**Website:** [datascience.ch](https://datascience.ch)  
+**Design System:** Swiss Data Science Center
+**Website:** [datascience.ch](https://datascience.ch)
 **Main Partners:** ETH Zürich, EPFL, PSI, Biopôle Lausanne
 
 ---
