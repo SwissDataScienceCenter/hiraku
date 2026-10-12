@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import tomllib
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from importlib.resources import as_file, files
@@ -16,6 +18,9 @@ from .validation import validate_identifier
 
 if TYPE_CHECKING:
     from .config import HirakuConfig
+
+
+MCP_SERVER = {"command": "hiraku", "args": ["mcp", "serve"]}
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +39,7 @@ class ProjectInitializer:
         root: Path | str = ".",
         *,
         install_skill: bool = True,
+        install_mcp: bool = True,
         tracking_backend: str | None = None,
         ignore_git: bool = True,
         template: Path | str | None = None,
@@ -45,6 +51,8 @@ class ProjectInitializer:
             root: Root directory where the project will be created.
             install_skill: Whether to install repository-local skill resources for
                 supported coding agents.
+            install_mcp: Whether to configure the Hiraku MCP server for Claude
+                Code (``.mcp.json``) and Codex (``.codex/config.toml``).
             tracking_backend: Optional default tracking backend name.
             ignore_git: Skip validation that root is a Git repository root.
                 Defaults to true for programmatic initialization.
@@ -61,6 +69,7 @@ class ProjectInitializer:
         return cls.create_with_report(
             root,
             install_skill=install_skill,
+            install_mcp=install_mcp,
             tracking_backend=tracking_backend,
             ignore_git=ignore_git,
             template=template,
@@ -73,6 +82,7 @@ class ProjectInitializer:
         root: Path | str = ".",
         *,
         install_skill: bool = True,
+        install_mcp: bool = True,
         tracking_backend: str | None = None,
         ignore_git: bool = True,
         template: Path | str | None = None,
@@ -103,6 +113,7 @@ class ProjectInitializer:
             raise ProjectExistsError(f"Hiraku project already exists at {marker}")
         created_files: list[Path] = []
         created_dirs: list[Path] = []
+        modified_files: list[tuple[Path, bytes]] = []
         root_existed = project_root.exists()
         with ExitStack() as stack:
             overlay = cls._resolve_overlay(template, example, stack)
@@ -113,6 +124,8 @@ class ProjectInitializer:
                 data = load_yaml_mapping(overlay_marker)
             if tracking_backend is not None:
                 data["tracking_backend"] = {"type": tracking_backend}
+            if "mcp" not in data:
+                data["mcp"] = {"workflows": cls._bundled_workflows()}
             config = HirakuConfig(path=marker, root=project_root, **data)
             try:
                 project_root.mkdir(parents=True, exist_ok=True)
@@ -122,16 +135,14 @@ class ProjectInitializer:
                 created_files.append(marker)
                 for directory in (
                     config.records_dir,
-                    config.programs_dir,
-                    config.actions_dir,
+                    config.workflows_dir,
                     config.contexts_dir,
                     config.dispatch_dir,
                 ):
                     cls._ensure_directory(directory, created_dirs)
                 resource_root = files("hiraku.resources")
                 copies = [
-                    (resource_root / "programs", config.programs_dir),
-                    (resource_root / "actions", config.actions_dir),
+                    (resource_root / "workflows", config.workflows_dir),
                     (resource_root / "dispatch", config.dispatch_dir),
                 ]
                 if install_skill:
@@ -148,6 +159,10 @@ class ProjectInitializer:
                             source_path, target, created_files, created_dirs
                         )
                 cls._apply_overlay(entries, project_root, created_files, created_dirs)
+                if install_mcp:
+                    cls._configure_mcp(
+                        project_root, created_files, created_dirs, modified_files
+                    )
                 for name in ("launch.sh", "worktree.sh"):
                     dispatcher = config.dispatch_dir / name
                     if dispatcher.is_file():
@@ -158,6 +173,9 @@ class ProjectInitializer:
                     created_dirs=tuple(dict.fromkeys(created_dirs)),
                 )
             except Exception as exc:
+                for path, content in reversed(modified_files):
+                    with suppress(OSError):
+                        path.write_bytes(content)
                 for path in reversed(created_files):
                     path.unlink(missing_ok=True)
                 for path in sorted(
@@ -170,6 +188,66 @@ class ProjectInitializer:
                 raise ValidationError(
                     f"Could not initialize Hiraku project at {project_root}: {exc}"
                 ) from exc
+
+    @staticmethod
+    def _bundled_workflows() -> list[str]:
+        workflows = files("hiraku.resources") / "workflows"
+        return sorted(
+            item.name
+            for item in workflows.iterdir()
+            if item.is_dir() and (item / "workflow.py").is_file()
+        )
+
+    @classmethod
+    def _configure_mcp(
+        cls,
+        project_root: Path,
+        created_files: list[Path],
+        created_dirs: list[Path],
+        modified_files: list[tuple[Path, bytes]],
+    ) -> None:
+        """Register the Hiraku MCP server for Claude Code and Codex.
+
+        Existing harness configuration is kept; the ``hiraku`` server is only
+        added when it is not configured yet.
+        """
+        claude = project_root / ".mcp.json"
+        if claude.exists():
+            try:
+                document = json.loads(claude.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise ValidationError(f"Cannot read {claude}: {exc}") from exc
+            servers = document.get("mcpServers") if isinstance(document, dict) else None
+            if not isinstance(servers, dict):
+                raise ValidationError(f"{claude} has no mcpServers mapping")
+            if "hiraku" not in servers:
+                modified_files.append((claude, claude.read_bytes()))
+                servers["hiraku"] = dict(MCP_SERVER)
+                atomic_write(claude, json.dumps(document, indent=2) + "\n")
+        else:
+            document = {"mcpServers": {"hiraku": dict(MCP_SERVER)}}
+            atomic_write(claude, json.dumps(document, indent=2) + "\n")
+            created_files.append(claude)
+        codex = project_root / ".codex" / "config.toml"
+        table = (
+            "[mcp_servers.hiraku]\n"
+            f"command = {json.dumps(MCP_SERVER['command'])}\n"
+            f"args = {json.dumps(MCP_SERVER['args'])}\n"
+        )
+        if codex.exists():
+            try:
+                existing = codex.read_text(encoding="utf-8")
+                parsed = tomllib.loads(existing)
+            except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+                raise ValidationError(f"Cannot read {codex}: {exc}") from exc
+            if "hiraku" not in parsed.get("mcp_servers", {}):
+                modified_files.append((codex, codex.read_bytes()))
+                separator = "" if existing.endswith("\n") or not existing else "\n"
+                atomic_write(codex, f"{existing}{separator}\n{table}")
+        else:
+            cls._ensure_directory(codex.parent, created_dirs)
+            atomic_write(codex, table)
+            created_files.append(codex)
 
     @staticmethod
     def _resolve_overlay(

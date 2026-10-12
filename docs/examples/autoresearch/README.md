@@ -1,7 +1,7 @@
 # Karpathy's LLM autoresearch example with Hiraku
 
 This example adds Hiraku research records, attributed CSV runs, and
-an autonomous research program to Andrej Karpathy's original
+the bundled autoresearch workflow to Andrej Karpathy's original
 [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch) repository.
 It does not vendor or modify the upstream training implementation.
 
@@ -12,9 +12,16 @@ The overlay contains:
 
 - `task.md` — the Markdown body used to create the research root.
 - `cpu_mock.py` — a fast CPU-only check with the same summary format as training.
-- `hiraku/programs/autoresearch/program.md` — the upstream research loop adapted
-  to Hiraku records and runs.
+- `hiraku/workflows/autoresearch-loop/workflow.md` — the upstream research loop
+  adapted to Hiraku records and runs, as a Markdown-only workflow.
 - `hiraku/dispatch/autoresearch.sh` — timeout, output parsing, and CSV tracking.
+  It records an explicit run `status` (`finished`, `crashed`, or `timeout`),
+  which the autoresearch workflow uses as success evidence.
+
+`hiraku init` also installs the bundled workflows under `hiraku/workflows/` and
+configures the Hiraku MCP server for Claude Code (`.mcp.json`) and Codex
+(`.codex/config.toml`). The example exposes the `autoresearch` and
+`autoresearch-loop` workflows.
 
 ## Setup
 
@@ -35,7 +42,7 @@ uv run train.py
 ## Initialize the Hiraku project
 
 From the root of the autoresearch repository, install the example. Initialization copies root `task.md` as a bootstrap template and installs the
-separate program at `hiraku/programs/autoresearch/program.md`.
+autoresearch workflow at `hiraku/workflows/autoresearch/`.
 
 ```bash
 hiraku init --example autoresearch
@@ -49,6 +56,8 @@ cat >> .gitignore <<'EOF'
 # Hiraku local files and run artifacts
 /.agents/
 /.claude/
+/.codex/
+/.mcp.json
 /hiraku/*
 /hiraku.yml
 /task.md
@@ -67,7 +76,6 @@ hiraku record create sep10 --type task \
   --set 'branch=autoresearch/sep10' \
   --set "goal=Find the best architecture, optimizer, and hyperparameters to minimize `val_bpb` within the fixed 5-minute training budget." \
   --markdown-file task.md \
-  --set 'program=autoresearch' \
   --set 'metrics=[{name: val_bpb, direction: minimize}]' \
   --set 'entrypoints={train: {command: [uv, run, python, train.py]}, mock: {command: [uv, run, python, cpu_mock.py], args: {val-bpb: 1.0}}}'
 
@@ -109,21 +117,41 @@ hiraku record update baseline \
 
 ## Start autoresearch
 
-Start your favourite coding agent and a reasonably powerful model in the
-initialized repository. Hiraku installs the skill for Codex at
-`.agents/skills/hiraku/` and for Claude Code at `.claude/skills/hiraku/`.
-Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code.
+Start your favourite coding agent with a reasonably powerful model in the
+initialized repository. It connects to the Hiraku MCP server configured by
+`hiraku init`; the `hiraku` command must be on the agent's `PATH`. Hiraku also
+installs its skill for Codex at `.agents/skills/hiraku/` and for Claude Code at
+`.claude/skills/hiraku/`.
 
-Currently, Hiraku records the program association but does not automatically inject its Markdown into an agent prompt. Start an agent in the repository and ask it to
-load the root record and installed program with:
+Ask the agent to start the workflow, for example:
 
+```text
+Start Hiraku autoresearch on task sep10 with the train entrypoint, five
+iterations of three hypotheses each, and use the baseline run as reference.
+Work autonomously.
+```
+
+The agent calls `autoresearch_start` and then follows the instructions the
+workflow returns: it proposes hypotheses as experiment records, selects one,
+commits and binds the change, launches it with `hiraku launch`, and submits the
+tracked run. Hiraku checks the run's attribution, its `status`, and its
+`val_bpb`, compares it with the retained reference, and stores the assessment
+on the experiment record. In collaborative mode (the default) the agent asks
+you to choose candidates and to approve each launch.
+
+Unlike the upstream loop, the workflow never resets Git history, and it stops
+after the requested number of iterations.
+
+To run the upstream procedure instead, start `autoresearch-loop`. It sends the
+whole loop as one instruction: the agent experiments, advances or resets the
+branch, and continues until you stop it, then reports a summary. Hiraku does
+not check budgets or evidence in this mode. To continue an interrupted session,
+ask the agent to resume it; it uses `session_list` and `session_show`. Inspect
+sessions from a terminal with:
 
 ```bash
-Use the Hiraku skill and start the autoresearch program.
-
-To read the root record and program, run:
-hiraku record show sep10 --json
-hiraku program show autoresearch
+hiraku session list
+hiraku session show <session-id>
 ```
 
 Track the agent's progress with:

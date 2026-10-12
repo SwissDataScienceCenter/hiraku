@@ -150,29 +150,30 @@ Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code. Other coding
 harnesses can use the same `SKILL.md` when they support compatible project-local
 skills.
 
-## Actions, Programs, Context
+## Workflows and context
 
-!!! info
-    Version 0.1.0 only implements the data model and not yet the agent integration. See github issues for the planned features.
-
-Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state.  A *program* defines complex research workflows and loops end-to-end, with defined permissions and limits. Actions and programs are executed by the `hiraku-agent`. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to provide project-relevant information to the agent.
-
+A *workflow* is a project-defined research procedure that runs inside your
+coding agent. Its Python code decides what happens next and validates what the
+agent reports; its Markdown holds the guidance the agent follows. The agent
+starts a workflow and continues it through the Hiraku MCP server, which
+`hiraku init` configures for Claude Code and Codex. *Context* files provide
+project-relevant information to the agent.
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Action** | `hiraku/actions/{entity}/{action_id}/{action.md,action.py}` | A named action that can be invoked by the hiraku-agent agent. |
-| **Program** | `hiraku/programs/{program_id}/{program.md,program.py}` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
+| **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A record with an `id`, settings, and prompts (`workflow.md`) whose class adds the operations (`workflow.py`). |
+| **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its arguments, progress, and pending instruction. Sessions are local and not committed. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
-Programs, action and context records are managed via CLI, e.g.
+Hiraku ships the `autoresearch` and `autodataset` workflows; both are editable
+copies in your project. See the [Workflows guide](guides/workflows.md) for how
+sessions work and how to write your own.
 
 ```bash
-hiraku program create <program-id>
-hiraku program list
+hiraku workflow list
+hiraku session list
 hiraku context create <context-id>
 hiraku context list
-hiraku action create <entity>/<action-id>
-hiraku action list
 ```
 
 
@@ -239,17 +240,20 @@ shows prompts for both a complete investigation and individual steps.
 
 ### Autoresearch workflow
 
-The packaged program describes an autonomous loop. Read its instructions and
-the research history before starting it in a coding agent; agree on the
-objective, branch, budget, and stopping condition with the user.
+The bundled `autoresearch` workflow runs a bounded number of research
+iterations on a task record. Ask your coding agent to start it, for example
+"start Hiraku autoresearch on heart-disease for three iterations, working
+collaboratively". The agent calls the `autoresearch_start` MCP tool and follows
+the instructions it returns: it proposes hypotheses as experiment records, lets
+you choose one, implements and launches it after your approval, and submits the
+tracked run. Hiraku checks the evidence, compares the metric with the retained
+reference result, and records its assessment on the experiment record.
 
 ```bash
-hiraku program show autoresearch
-hiraku program show interactive
-hiraku record tree
+hiraku session list
+hiraku session show <session-id>
 hiraku runs --record heart-disease --all --json
 ```
 
-The [Autoresearch example](examples/autoresearch/README.md) shows how to use
-the program with the project-local skill and a bounded dispatcher. The skill
-can be invoked with `/hiraku "run the autoresearch program for heart-disease"`.
+The [Autoresearch example](examples/autoresearch/README.md) runs the workflow on
+Karpathy's autoresearch repository with a bounded dispatcher.

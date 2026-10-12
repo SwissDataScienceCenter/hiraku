@@ -12,3 +12,4 @@ validate their input immediately; persistence is handled through explicit paths.
     - [Entrypoint](entrypoint.md)
 - [Tracking](tracking.md) — configure and query tracking backends.
 - [Launching](launch.md) — resolve and execute entrypoints.
+- [Workflows](workflows.md) — author workflows and drive their sessions.

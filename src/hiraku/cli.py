@@ -6,36 +6,23 @@ import json
 import os
 import shlex
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import suppress
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import click
 import yaml
-from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-from .agent import (
-    Action,
-    Context,
-    Program,
-    list_actions,
-    list_contexts,
-    list_programs,
-    load_action,
-    load_context,
-    load_program,
-)
+from .agent import Context, list_contexts, load_context
 from .base import BaseRecord
 from .config import HirakuConfig
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .git import GitRepository
-from .io import dump_yaml
+from .io import dump_yaml, json_value
 from .launch import _dispatcher, launch, render_arguments
-from .record import Record, list_records, load_record
-from .run import Run
+from .record import Record, list_records, load_record, update_record
 from .validation import validate_identifier
 
 
@@ -58,32 +45,7 @@ class HirakuGroup(click.Group):
             raise click.ClickException(str(exc)) from exc
 
 
-def _json_value(value: Any) -> Any:
-    if isinstance(value, BaseRecord):
-        return {**_json_value(value.to_dict()), "markdown": value.markdown}
-    if isinstance(value, Run):
-        return {
-            "id": value.id,
-            "metrics": _json_value(value.metrics),
-            "params": _json_value(value.params),
-            "record_id": value.record_id,
-            "commit": value.commit,
-            "timestamp": _json_value(value.timestamp),
-            "entrypoint": value.entrypoint,
-            "url": value.url,
-            "raw": _json_value(value.raw),
-        }
-    if isinstance(value, BaseModel):
-        return _json_value(value.model_dump())
-    if isinstance(value, datetime):
-        return (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
-        return [_json_value(item) for item in value]
-    if isinstance(value, Path):
-        return str(value)
-    return value
+_json_value = json_value
 
 
 def _emit_json(value: Any) -> None:
@@ -393,35 +355,22 @@ def record_update(
     markdown_file: Path | None,
 ) -> None:
     """Update stored fields; --unset removes an override."""
-    record = load_record(record_id, config=state.config)
     if parent_id is not None and make_root:
         raise ValidationError("--parent and --root are mutually exclusive")
     changes = _fields(set_values)
-    if any(key in changes for key in ("id", "parent_id")):
-        raise ValidationError("id and parent_id require dedicated operations")
     if related_to:
         changes["related_to"] = list(related_to)
     if commit is not None:
         changes["commit"] = GitRepository(state.config).resolve(commit)
-    fields = record.to_dict()
-    fields.update(changes)
-    for key in unset_values:
-        if key in {"id", "parent_id"}:
-            raise ValidationError(f"Cannot unset {key}")
-        if key in changes:
-            raise ValidationError(f"Cannot set and unset {key!r} together")
-        fields.pop(key, None)
-    new_parent = None if make_root else parent_id
-    if make_root or parent_id is not None:
-        fields["parent_id"] = new_parent
-    body = _markdown(markdown_file) if markdown_file is not None else record.markdown
-    candidate = Record.model_validate({**fields, "markdown": body})
-    candidate.path = record.path
-    candidate._persisted_id = record.id
-    if make_root or parent_id is not None:
-        candidate.reparent(new_parent, config=state.config)
-    else:
-        candidate.save()
+    update_record(
+        record_id,
+        changes=changes,
+        unset=unset_values,
+        parent_id=parent_id,
+        make_root=make_root,
+        markdown=_markdown(markdown_file) if markdown_file is not None else None,
+        config=state.config,
+    )
     click.echo(f"Updated record {record_id}")
 
 
@@ -599,116 +548,176 @@ def _install_generic(
         click.echo(f"Deleted {name} {identifier}")
 
 
-_install_generic("program", Program, load_program, list_programs, "programs_dir")
 _install_generic("context", Context, load_context, list_contexts, "contexts_dir")
 
 
-@main.group("action")
-def action_group() -> None:
-    """Manage agent actions."""
+@main.group("mcp")
+def mcp_group() -> None:
+    """Run the Hiraku MCP server for coding harnesses."""
 
 
-@action_group.command("list")
-@click.option("--entity")
+@mcp_group.command("serve")
+@click.option(
+    "--project",
+    "project",
+    type=click.Path(path_type=Path),
+    help="Project directory; discovered from the working directory by default.",
+)
+@click.option(
+    "--workflow",
+    "workflows",
+    multiple=True,
+    help="Expose only this workflow for this connection; repeatable.",
+)
+def mcp_serve(project: Path | None, workflows: tuple[str, ...]) -> None:
+    """Serve records, runs, and workflows over stdio."""
+    from .mcp_server import serve
+
+    config = HirakuConfig.discover(project)
+    serve(config, exposed=list(workflows) or None)
+
+
+def _service(state: CLIContext) -> Any:
+    from .workflow.service import WorkflowService
+
+    return WorkflowService(state.config)
+
+
+@main.group("workflow")
+def workflow_group() -> None:
+    """List, activate, and call project workflows."""
+
+
+@workflow_group.command("list")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def action_list(state: CLIContext, entity: str | None, json_output: bool) -> None:
-    records = list_actions(entity=entity, config=state.config)
-    _emit_json(records) if json_output else click.echo(
-        _table(("entity", "id"), [(r.entity, r.id) for r in records])
+def workflow_list(state: CLIContext, json_output: bool) -> None:
+    """List workflows, whether the MCP server exposes them, and load errors."""
+    workflows = _service(state).list_workflows()
+    if json_output:
+        _emit_json(workflows)
+        return
+    click.echo(
+        _table(
+            ("id", "active", "description"),
+            [
+                (
+                    item["id"],
+                    "yes" if item["active"] else "no",
+                    f"ERROR: {item['error']}"
+                    if "error" in item
+                    else item["description"].split("\n", 1)[0],
+                )
+                for item in workflows
+            ],
+        )
     )
 
 
-@action_group.command("show")
-@click.argument("reference")
+@workflow_group.command("activate")
+@click.argument("workflow_id")
+@click.pass_obj
+def workflow_activate(state: CLIContext, workflow_id: str) -> None:
+    """Expose a workflow's tools through the MCP server."""
+    result = _service(state).activate(workflow_id)
+    click.echo(f"Active workflows: {', '.join(result['active']) or 'none'}")
+
+
+@workflow_group.command("deactivate")
+@click.argument("workflow_id")
+@click.pass_obj
+def workflow_deactivate(state: CLIContext, workflow_id: str) -> None:
+    """Hide a workflow's tools from the MCP server; sessions are kept."""
+    result = _service(state).deactivate(workflow_id)
+    click.echo(f"Active workflows: {', '.join(result['active']) or 'none'}")
+
+
+@workflow_group.command("call")
+@click.argument("tool_name")
+@click.option(
+    "--arguments-file",
+    type=click.File("r", encoding="utf-8"),
+    help="JSON object with the tool arguments; use - for standard input.",
+)
+@click.pass_obj
+def workflow_call(state: CLIContext, tool_name: str, arguments_file: Any) -> None:
+    """Call a workflow tool as the MCP server would and print its JSON result."""
+    arguments: Any = {}
+    if arguments_file is not None:
+        try:
+            arguments = json.load(arguments_file)
+        except ValueError as exc:
+            raise ValidationError(f"Cannot read tool arguments: {exc}") from exc
+    if not isinstance(arguments, dict):
+        raise ValidationError("Tool arguments must be a JSON object")
+    _emit_json(_service(state).call(tool_name, arguments))
+
+
+@main.group("session")
+def session_group() -> None:
+    """Inspect and cancel workflow sessions."""
+
+
+@session_group.command("list")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def action_show(state: CLIContext, reference: str, json_output: bool) -> None:
-    record = _action_ref(reference, state.config)
-    _emit_json(record) if json_output else click.echo(
-        f"---\n{dump_yaml(record.to_dict())}---\n{record.markdown}", nl=False
+def session_list(state: CLIContext, json_output: bool) -> None:
+    """List workflow sessions, newest first."""
+    sessions = _service(state).list_sessions()
+    if json_output:
+        _emit_json(sessions)
+        return
+    click.echo(
+        _table(
+            ("session", "workflow", "status", "updated"),
+            [
+                (
+                    item["session_id"],
+                    item.get("workflow"),
+                    item.get("status", f"ERROR: {item.get('error')}"),
+                    item.get("updated_at"),
+                )
+                for item in sessions
+            ],
+        )
     )
 
 
-def _action_ref(reference: str, config: HirakuConfig) -> Action:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    return load_action(identifier, entity=entity, config=config)
-
-
-@action_group.command("create")
-@click.argument("reference")
-@click.option("--set", "set_values", multiple=True)
-@click.option("--markdown-file", type=click.Path(path_type=Path))
+@session_group.command("show")
+@click.argument("session_id")
+@click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def action_create(
-    state: CLIContext,
-    reference: str,
-    set_values: tuple[str, ...],
-    markdown_file: Path | None,
-) -> None:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    validate_identifier(entity, label="action entity")
-    validate_identifier(identifier, label="action ID")
-    record = Action(
-        id=identifier,
-        entity=entity,
-        markdown=_markdown(markdown_file),
-        **_fields(set_values),
-    )
-    path = state.config.actions_dir / entity / identifier / "action.md"
-    record.save(path)
-    click.echo(f"Created action {reference} at {path}")
+def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
+    """Show a session's status, pending instruction or result, and data."""
+    result = _service(state).show(session_id)
+    if json_output:
+        _emit_json(result)
+        return
+    click.echo(f"Session:  {result['session_id']}")
+    click.echo(f"Workflow: {result['workflow']}")
+    click.echo(f"Status:   {result['status']}")
+    for key in ("note", "compatibility"):
+        if key in result:
+            click.echo(f"Note:     {result[key]}")
+    response = result["last_response"]
+    if "instruction" in response:
+        instruction = response["instruction"]
+        click.echo(f"\nPending instruction {response['instruction_id']}:\n")
+        click.echo(instruction["text"])
+        replies = ", ".join(reply["tool"] for reply in instruction["replies"])
+        click.echo(f"\nReplies: {replies}")
+    elif response.get("completed"):
+        click.echo("\nResult:")
+        click.echo(json.dumps(response.get("result"), indent=2, sort_keys=True))
 
 
-@action_group.command("update")
-@click.argument("reference")
-@click.option("--set", "set_values", multiple=True)
-@click.option("--unset", "unset_values", multiple=True)
-@click.option("--markdown-file", type=click.Path(path_type=Path))
+@session_group.command("cancel")
+@click.argument("session_id")
 @click.pass_obj
-def action_update(
-    state: CLIContext,
-    reference: str,
-    set_values: tuple[str, ...],
-    unset_values: tuple[str, ...],
-    markdown_file: Path | None,
-) -> None:
-    _update_fields(
-        _action_ref(reference, state.config),
-        set_values,
-        unset_values,
-        markdown_file,
-        immutable={"id", "entity"},
-    )
-    click.echo(f"Updated action {reference}")
-
-
-@action_group.command("edit")
-@click.argument("reference")
-@click.pass_obj
-def action_edit(state: CLIContext, reference: str) -> None:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    path = state.config.actions_dir / entity / identifier / "action.md"
-    _edit_recoverable(
-        path,
-        lambda: _action_ref(reference, state.config),
-        f"Action {reference!r}",
-    )
-    click.echo(f"Validated action {reference}")
-
-
-@action_group.command("delete")
-@click.argument("reference")
-@click.pass_obj
-def action_delete(state: CLIContext, reference: str) -> None:
-    _action_ref(reference, state.config).delete()
-    click.echo(f"Deleted action {reference}")
+def session_cancel(state: CLIContext, session_id: str) -> None:
+    """Cancel a session; records, code, and runs are kept."""
+    result = _service(state).cancel(session_id)
+    click.echo(f"Session {session_id} is {result['status']}. {result['note']}")
 
 
 @main.command("launch")

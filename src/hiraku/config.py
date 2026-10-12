@@ -6,10 +6,41 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from .errors import ProjectNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
+from .validation import validate_identifier
+
+
+class MCPSettings(BaseModel):
+    """Settings for the Hiraku MCP server.
+
+    Attributes:
+        workflows: Workflow IDs whose tools the server exposes. ``None`` exposes
+            every discovered workflow; an empty list exposes none.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    workflows: list[str] | None = None
+
+    @field_validator("workflows")
+    @classmethod
+    def validate_workflows(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return value
+        for identifier in value:
+            validate_identifier(identifier, label="workflow ID")
+        if len(value) != len(set(value)):
+            raise ValidationError("mcp.workflows contains duplicate IDs")
+        return value
 
 
 class HirakuConfig(BaseModel):
@@ -21,8 +52,8 @@ class HirakuConfig(BaseModel):
         hiraku_dir_name: Relative state directory name.
         default_dispatch: Default launcher script.
         branch: Record branch template.
-        default_program: Default program identifier.
         tracking_backend: Backend configuration mapping with a required ``type``.
+        mcp: MCP server settings, including the workflows it exposes.
 
     Raises:
         pydantic.ValidationError: If configuration values are invalid or inconsistent.
@@ -36,7 +67,6 @@ class HirakuConfig(BaseModel):
         "hiraku_dir": "hiraku",
         "default_dispatch": "launch.sh",
         "branch": "hiraku/records/{record_id}",
-        "default_program": "interactive",
         "tracking_backend": {"type": "csv"},
         "active_record_id": None,
     }
@@ -51,11 +81,11 @@ class HirakuConfig(BaseModel):
     )
     default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
     branch: str = Field(default=DEFAULTS["branch"], min_length=1)
-    default_program: str = Field(default=DEFAULTS["default_program"], min_length=1)
     tracking_backend: dict[str, Any] = Field(
         default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
     )
     active_record_id: str | None = DEFAULTS["active_record_id"]
+    mcp: MCPSettings | None = None
     _hiraku_dir: Path = PrivateAttr()
 
     @model_validator(mode="before")
@@ -65,6 +95,13 @@ class HirakuConfig(BaseModel):
         if not isinstance(values, Mapping):
             return values
         raw = dict(values)
+        if "default_program" in raw:
+            raise ValidationError(
+                "Configuration key 'default_program' is no longer supported: "
+                "programs were replaced by workflows. Remove the key from "
+                "hiraku.yml and start a workflow explicitly through its "
+                "'<workflow>_start' MCP tool or 'hiraku workflow call'."
+            )
         backend = raw.get("tracking_backend")
         if isinstance(backend, str):
             raw["tracking_backend"] = {"type": backend}
@@ -151,6 +188,7 @@ class HirakuConfig(BaseModel):
         root: Path | str = ".",
         *,
         install_skill: bool = True,
+        install_mcp: bool = True,
         tracking_backend: str | None = None,
         ignore_git: bool = True,
         template: Path | str | None = None,
@@ -162,6 +200,8 @@ class HirakuConfig(BaseModel):
             root: Directory to initialize.
             install_skill: Whether to install the repository-local skill for
                 supported coding agents.
+            install_mcp: Whether to configure the Hiraku MCP server for Claude
+                Code and Codex.
             tracking_backend: Optional default tracking backend name.
             ignore_git: Skip validation that root is a Git repository root.
                 Defaults to true for programmatic initialization.
@@ -181,6 +221,7 @@ class HirakuConfig(BaseModel):
         return ProjectInitializer.create(
             root,
             install_skill=install_skill,
+            install_mcp=install_mcp,
             tracking_backend=tracking_backend,
             ignore_git=ignore_git,
             template=template,
@@ -232,14 +273,14 @@ class HirakuConfig(BaseModel):
         return self.hiraku_dir / "records"
 
     @property
-    def programs_dir(self) -> Path:
-        """Return the directory containing agent program records."""
-        return self.hiraku_dir / "programs"
+    def workflows_dir(self) -> Path:
+        """Return the directory containing project workflows."""
+        return self.hiraku_dir / "workflows"
 
     @property
-    def actions_dir(self) -> Path:
-        """Return the directory containing agent action records."""
-        return self.hiraku_dir / "actions"
+    def sessions_dir(self) -> Path:
+        """Return the directory containing persisted workflow sessions."""
+        return self.hiraku_dir / "sessions"
 
     @property
     def contexts_dir(self) -> Path:
@@ -263,6 +304,21 @@ class HirakuConfig(BaseModel):
             self.save()
         except Exception:
             self.active_record_id = old
+            raise
+
+    def set_mcp_workflows(self, workflows: list[str] | None) -> None:
+        """Persist the workflows exposed by the MCP server.
+
+        Args:
+            workflows: Workflow IDs to expose, or ``None`` to expose all
+                discovered workflows.
+        """
+        old = self.mcp
+        try:
+            self.mcp = MCPSettings(workflows=workflows)
+            self.save()
+        except Exception:
+            self.mcp = old
             raise
 
     def clear_active_record(self) -> None:

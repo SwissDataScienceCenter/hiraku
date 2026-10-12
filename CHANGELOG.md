@@ -12,11 +12,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Add Python workflows: project-defined `hiraku/workflows/<id>/{workflow.py,workflow.md}` that guide a coding agent step by step through typed MCP tools, with persistent sessions under `hiraku/sessions/`, explicit replies per instruction, retry-safe continuation, inspection, and cancellation. See the Workflows guide.
+- Add the `hiraku mcp serve` stdio MCP server with workflow, session, record, and run tools, plus workflow, record, session, and context resources. `hiraku init` registers it for Claude Code (`.mcp.json`) and Codex (`.codex/config.toml`), and the `mcp.workflows` setting selects the exposed workflows.
+- `Workflow` is a `BaseRecord`: an instance is the loaded `workflow.md`, whose front matter holds the workflow `id` (matching its directory) and typed settings declared on the class, and whose body holds the prompts. `@tool("name")` sets a tool name independent of the method name.
+- Add Markdown-only workflows: a workflow directory with only `workflow.md` sends its whole body as one instruction, with a `start` that accepts a free-text request and a single `complete` reply.
+- Add the bundled `autoresearch` and `autodataset` workflows, and the Markdown-only `autoresearch-loop` workflow in the autoresearch example, which restores its previous program.
+- Add `hiraku workflow list|activate|deactivate|call` and `hiraku session list|show|cancel`.
+- Add `hiraku.record.update_record()`, shared by the CLI and MCP server.
 - Add `Record.resolve_tracking_backend()` to build the tracking backend inherited by a record; `TrackingBackend.list_runs()` now lists all attributed runs when `record_id` is omitted.
 - Add `hiraku runs --all` to list all attributed runs from the tracking source resolved for a record ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 
 ### Removed
 
+- **Breaking:** Remove Programs and Actions, including `hiraku program`, `hiraku action`, `hiraku.agent.Program`, `hiraku.agent.Action`, and their bundled resources; use workflows instead. Contexts are unchanged. An existing Markdown program becomes a Markdown-only workflow: move it to `hiraku/workflows/<id>/workflow.md` and keep its `id` front matter.
+- **Breaking:** Remove the `default_program` configuration key; `hiraku.yml` files that still contain it are rejected with a migration message. Start workflows explicitly through their `<workflow>_start` tool.
 - **Breaking:** Remove the `hiraku runs list` subcommand; use `hiraku runs` ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 - **Breaking:** Remove `TrackingBackend.list_all_recorded_runs()` and the `backend` argument of `Record.runs()`; use `record.resolve_tracking_backend().list_runs()`. Replace `select_backend` with `Record.resolve_tracking_backend()` and rename `backend_for` to `create_backend`.
 - **Breaking:** Remove the undocumented `mlflow_experiment` record field fallback; set `experiment_name` in the MLflow `tracking_backend` mapping instead.

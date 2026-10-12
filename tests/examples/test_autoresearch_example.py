@@ -14,12 +14,15 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
+from hiraku.workflow import PromptWorkflow
+from hiraku.workflow.catalog import Catalog
 
 REPOSITORY = Path(__file__).parents[2]
 DOCS_EXAMPLE = REPOSITORY / "docs" / "examples" / "autoresearch"
 EXAMPLE = REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "autoresearch"
 OVERLAY = EXAMPLE / "src"
-PROGRAM = OVERLAY / "hiraku" / "programs" / "autoresearch" / "program.md"
+WORKFLOW = REPOSITORY / "src" / "hiraku" / "resources" / "workflows" / "autoresearch"
+LOOP = OVERLAY / "hiraku" / "workflows" / "autoresearch-loop" / "workflow.md"
 DISPATCHER = OVERLAY / "hiraku" / "dispatch" / "autoresearch.sh"
 LINUX_ONLY = pytest.mark.skipif(
     sys.platform != "linux",
@@ -64,7 +67,8 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
     gitignore.write_text(
         gitignore.read_text(encoding="utf-8")
         + "\n# Hiraku local files and run artifacts\n"
-        + "/.agents/\n/.claude/\n/hiraku/*\n/hiraku.yml\n/task.md\n"
+        + "/.agents/\n/.claude/\n/.codex/\n/.mcp.json\n/hiraku/*\n/hiraku.yml\n"
+        + "/task.md\n"
         + "/runs.csv\n/run.log\n",
         encoding="utf-8",
     )
@@ -91,8 +95,6 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
             "--markdown-file",
             "task.md",
             "--set",
-            "program=autoresearch",
-            "--set",
             "metrics=[{name: val_bpb, direction: minimize}]",
             "--set",
             f"entrypoints={{train: {{command: [uv, run, python, train.py]}}, "
@@ -111,7 +113,7 @@ def test_autoresearch_is_an_overlay() -> None:
         "src/task.md",
         "src/cpu_mock.py",
         "src/hiraku/dispatch/autoresearch.sh",
-        "src/hiraku/programs/autoresearch/program.md",
+        "src/hiraku/workflows/autoresearch-loop/workflow.md",
     }
     actual = {
         str(path.relative_to(EXAMPLE))
@@ -127,10 +129,14 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "/hiraku/*" in readme
     assert "/.agents/" in readme
     assert "/.claude/" in readme
+    assert "/.mcp.json" in readme
+    assert "/.codex/" in readme
+    assert "autoresearch_start" in readme
+    assert "hiraku program" not in readme
     assert "--markdown-file task.md" in readme
     assert "hiraku record create sep10" in readme
     assert "branch=autoresearch/sep10" in readme
-    assert "hiraku record show sep10 --json" in readme
+    assert "hiraku session show" in readme
     assert "hiraku record update cpu-test" in readme
     assert "--set decision=discard" in readme
 
@@ -144,17 +150,22 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "run.log" not in task_template
     assert "Changelog" not in task_template
 
-    program = PROGRAM.read_text(encoding="utf-8")
-    assert "hiraku status --json" in program
-    assert "hiraku record tree" in program
-    assert "hiraku runs --record <id> --json" in program
-    assert "--commit HEAD" in program
-    assert "Never rebind a completed attempt" in program
-    assert "results.tsv" not in program
-    assert "grep " not in program
-    assert "Choose the history mode" not in program
-    assert "hiraku experiment" not in program
-    assert "Changelog" not in program
+    prompts = (WORKFLOW / "workflow.md").read_text(encoding="utf-8")
+    assert "record_update" in prompts
+    assert "Never reset or rewrite Git history" in prompts
+    assert "git reset" not in prompts
+    assert "results.tsv" not in prompts
+
+    loop = LOOP.read_text(encoding="utf-8")
+    assert loop.startswith("---\nid: autoresearch-loop\n")
+    assert "hiraku status --json" in loop
+    assert "hiraku record tree" in loop
+    assert "hiraku runs --record <id> --json" in loop
+    assert "--commit HEAD" in loop
+    assert "Never rebind a completed attempt" in loop
+    assert "## Finishing" in loop
+    assert "results.tsv" not in loop
+    assert "hiraku program" not in loop
 
 
 def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
@@ -179,28 +190,31 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert (project / "program.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "program.md"
     ]
-    installed_program = (project / "hiraku/programs/autoresearch/program.md").read_text(
-        encoding="utf-8"
-    )
+    installed = project / "hiraku/workflows/autoresearch"
+    assert (installed / "workflow.py").read_text(encoding="utf-8") == (
+        WORKFLOW / "workflow.py"
+    ).read_text(encoding="utf-8")
+    assert not (project / "hiraku/programs").exists()
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
-    assert installed_program == PROGRAM.read_text(encoding="utf-8")
     assert (project / "task.md").read_text(encoding="utf-8") == task_template
     assert task.markdown == task_template
     assert task.path == project / "hiraku/records/sep10/sep10.md"
-    assert task.markdown not in installed_program
-    assert installed_program not in task.markdown
     assert task.branch == "autoresearch/sep10"
     assert task.goal == (
         "Find the best architecture, optimizer, and hyperparameters to minimize "
         "`val_bpb` within the fixed 5-minute training budget."
     )
     assert task.type == "task"
-    assert task.program == "autoresearch"
     assert task.entrypoints["train"].command == ["uv", "run", "python", "train.py"]
     assert task.entrypoints["mock"].command[-1] == "cpu_mock.py"
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
-    assert config.default_program == "autoresearch"
+    assert config.mcp is not None
+    assert config.mcp.workflows == ["autoresearch", "autoresearch-loop"]
+    catalog = Catalog(config)
+    assert catalog.loaded_entry("autoresearch-loop").cls is PromptWorkflow
+    assert catalog.loaded_entry("autoresearch").loaded
+    assert json.loads((project / ".mcp.json").read_text())["mcpServers"]["hiraku"]
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111
     assert git(project, "status", "--porcelain") == ""
 

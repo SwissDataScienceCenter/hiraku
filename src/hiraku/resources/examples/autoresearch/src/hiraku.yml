@@ -1,2 +1,5 @@
 default_dispatch: autoresearch.sh
-default_program: autoresearch
+mcp:
+  workflows:
+  - autoresearch
+  - autoresearch-loop

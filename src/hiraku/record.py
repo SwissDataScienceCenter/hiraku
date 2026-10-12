@@ -588,3 +588,61 @@ def list_records(*, config: Any = None) -> list[Record]:
     index = _record_index(selected)
     _validate_tree(index, selected.records_dir)
     return [index[key] for key in sorted(index)]
+
+
+def update_record(
+    record_id: str,
+    *,
+    changes: Mapping[str, Any] | None = None,
+    unset: Sequence[str] = (),
+    parent_id: str | None = None,
+    make_root: bool = False,
+    markdown: str | None = None,
+    config: Any = None,
+) -> Record:
+    """Validate and persist changes to a stored record.
+
+    Args:
+        record_id: Record to update.
+        changes: Stored fields to set. ``id`` and ``parent_id`` are rejected;
+            use ``parent_id`` or ``make_root`` to move a record.
+        unset: Stored fields to remove so that inherited values apply again.
+        parent_id: New parent; relocates the record's subtree when needed.
+        make_root: Turn the record into a root record.
+        markdown: Replacement Markdown body.
+        config: Project configuration; discovered when omitted.
+
+    Returns:
+        The persisted record.
+
+    Raises:
+        hiraku.errors.ValidationError: If the changes are inconsistent or invalid.
+        hiraku.errors.RecordNotFoundError: If a referenced record does not exist.
+    """
+    selected = _config(config)
+    record = load_record(record_id, config=selected)
+    if parent_id is not None and make_root:
+        raise ValidationError("parent_id and make_root are mutually exclusive")
+    requested = dict(changes or {})
+    if any(key in requested for key in ("id", "parent_id")):
+        raise ValidationError("id and parent_id require dedicated operations")
+    fields = record.to_dict()
+    fields.update(requested)
+    for key in unset:
+        if key in {"id", "parent_id"}:
+            raise ValidationError(f"Cannot unset {key}")
+        if key in requested:
+            raise ValidationError(f"Cannot set and unset {key!r} together")
+        fields.pop(key, None)
+    moving = make_root or parent_id is not None
+    if moving:
+        fields["parent_id"] = parent_id
+    body = record.markdown if markdown is None else markdown
+    candidate = Record.model_validate({**fields, "markdown": body})
+    candidate.path = record.path
+    candidate._persisted_id = record.id
+    if moving:
+        candidate.reparent(parent_id, config=selected)
+    else:
+        candidate.save()
+    return candidate

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -86,3 +87,45 @@ def atomic_write(path: Path, content: str, *, mode: int | None = None) -> None:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
         raise
+
+
+def json_value(value: Any) -> Any:
+    """
+    Convert Hiraku models and common Python values into JSON-compatible data.
+
+    Args:
+        value: Records, runs, Pydantic models, mappings, sequences, or scalars.
+
+    Returns:
+        A structure of dictionaries, lists, and JSON scalars.
+    """
+    from pydantic import BaseModel
+
+    from .base import BaseRecord
+    from .run import Run
+
+    if isinstance(value, BaseRecord):
+        return {**json_value(value.to_dict()), "markdown": value.markdown}
+    if isinstance(value, Run):
+        return {
+            "id": value.id,
+            "metrics": json_value(value.metrics),
+            "params": json_value(value.params),
+            "record_id": value.record_id,
+            "commit": value.commit,
+            "timestamp": json_value(value.timestamp),
+            "entrypoint": value.entrypoint,
+            "url": value.url,
+            "raw": json_value(value.raw),
+        }
+    if isinstance(value, BaseModel):
+        return json_value(value.model_dump())
+    if isinstance(value, datetime):
+        return (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
+    if isinstance(value, Mapping):
+        return {str(key): json_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
+        return [json_value(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    return value

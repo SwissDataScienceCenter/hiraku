@@ -154,26 +154,15 @@ def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> Non
 def test_generic_agent_commands_still_work(tmp_path: Path, monkeypatch) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    assert invoke("program", "create", "test", "--set", "purpose=review").exit_code == 0
+    assert invoke("context", "create", "literature", "--set", "x=1").exit_code == 0
     assert (
-        json.loads(invoke("program", "show", "test", "--json").output)["purpose"]
-        == "review"
+        json.loads(invoke("context", "show", "literature", "--json").output)["x"] == 1
     )
-    assert (
-        invoke("program", "update", "test", "--set", "purpose=inspect").exit_code == 0
-    )
-    assert invoke("context", "create", "literature").exit_code == 0
-    assert invoke("action", "create", "record/review").exit_code == 0
-    assert (
-        json.loads(invoke("action", "show", "record/review", "--json").output)["id"]
-        == "review"
-    )
-    assert invoke("action", "list", "--entity", "record").exit_code == 0
-    assert (
-        invoke("action", "update", "record/review", "--set", "status=ready").exit_code
-        == 0
-    )
-    assert invoke("action", "delete", "record/review").exit_code == 0
+    assert invoke("context", "update", "literature", "--set", "x=2").exit_code == 0
+    for removed in ("program", "action"):
+        result = invoke(removed, "list")
+        assert result.exit_code != 0
+        assert "No such command" in result.output
 
 
 def test_edit_uses_stored_file(tmp_path: Path, monkeypatch) -> None:

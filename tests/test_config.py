@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -48,9 +50,13 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
 
     assert HirakuConfig.discover(root).root == root
     assert HirakuConfig.discover(nested).root == root
-    assert (config.programs_dir / "interactive/program.md").is_file()
-    assert (config.programs_dir / "autoresearch/program.md").is_file()
-    assert (config.actions_dir / "record/propose/action.md").is_file()
+    for workflow in ("autoresearch", "autodataset"):
+        assert (config.workflows_dir / workflow / "workflow.py").is_file()
+        assert (config.workflows_dir / workflow / "workflow.md").is_file()
+    assert config.mcp is not None
+    assert config.mcp.workflows == ["autodataset", "autoresearch"]
+    assert not (config.hiraku_dir / "programs").exists()
+    assert not (config.hiraku_dir / "actions").exists()
     for name in ("launch.sh", "worktree.sh"):
         assert (config.dispatch_dir / name).stat().st_mode & 0o111
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
@@ -181,7 +187,7 @@ def test_init_from_packaged_example_copies_only_src(
     tmp_path: Path, monkeypatch
 ) -> None:
     resources = tmp_path / "resources"
-    for name in ("programs", "actions", "dispatch"):
+    for name in ("workflows", "dispatch"):
         (resources / name).mkdir(parents=True)
     example = resources / "examples/demo"
     (example / "src").mkdir(parents=True)
@@ -238,3 +244,83 @@ def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None
     marker.write_text("hiraku_dir: linked\n")
     with pytest.raises(ValidationError):
         HirakuConfig.load(marker)
+
+
+def test_legacy_default_program_is_rejected_with_migration_message(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "hiraku.yml").write_text("default_program: interactive\n")
+    with pytest.raises(ValidationError, match="default_program.*replaced by workflows"):
+        HirakuConfig.discover(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("mcp:\n  workflows: [a, a]\n", "duplicate"),
+        ("mcp:\n  workflows: ['bad/id']\n", "Invalid workflow ID"),
+        ("mcp:\n  unknown: true\n", "Extra inputs"),
+    ],
+)
+def test_mcp_settings_are_validated(tmp_path: Path, content: str, message: str) -> None:
+    (tmp_path / "hiraku.yml").write_text(content)
+    with pytest.raises(Exception, match=message):
+        HirakuConfig.discover(tmp_path)
+
+
+def test_mcp_settings_round_trip(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False, install_mcp=False)
+    config.set_mcp_workflows([])
+    assert HirakuConfig.discover(tmp_path).mcp.workflows == []
+    config.set_mcp_workflows(None)
+    reloaded = HirakuConfig.discover(tmp_path)
+    assert reloaded.mcp is not None
+    assert reloaded.mcp.workflows is None
+
+
+def test_init_configures_mcp_for_claude_code_and_codex(tmp_path: Path) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    claude = json.loads((tmp_path / ".mcp.json").read_text())
+    assert claude == {
+        "mcpServers": {"hiraku": {"command": "hiraku", "args": ["mcp", "serve"]}}
+    }
+    codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
+    assert codex["mcp_servers"]["hiraku"] == {
+        "command": "hiraku",
+        "args": ["mcp", "serve"],
+    }
+
+
+def test_init_keeps_existing_harness_configuration(tmp_path: Path) -> None:
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"other": {"command": "other"}}})
+    )
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex/config.toml").write_text('model = "x"\n')
+    HirakuConfig.init(tmp_path, install_skill=False)
+    claude = json.loads((tmp_path / ".mcp.json").read_text())
+    assert set(claude["mcpServers"]) == {"other", "hiraku"}
+    codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
+    assert codex["model"] == "x"
+    assert codex["mcp_servers"]["hiraku"]["command"] == "hiraku"
+
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    custom = {"mcpServers": {"hiraku": {"command": "uv", "args": ["run", "hiraku"]}}}
+    (existing / ".mcp.json").write_text(json.dumps(custom))
+    HirakuConfig.init(existing, install_skill=False)
+    assert json.loads((existing / ".mcp.json").read_text()) == custom
+
+
+def test_init_rolls_back_modified_harness_configuration(
+    tmp_path: Path, monkeypatch
+) -> None:
+    original = json.dumps({"mcpServers": {"other": {"command": "other"}}})
+    (tmp_path / ".mcp.json").write_text(original)
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex/config.toml").write_text("not = [valid\n")
+    with pytest.raises(ValidationError, match="Cannot read"):
+        HirakuConfig.init(tmp_path, install_skill=False)
+    assert (tmp_path / ".mcp.json").read_text() == original
+    assert not (tmp_path / "hiraku.yml").exists()
+    assert not (tmp_path / "hiraku").exists()
