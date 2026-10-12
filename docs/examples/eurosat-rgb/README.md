@@ -25,7 +25,7 @@ W&B records training and validation loss and accuracy after every epoch, togethe
 Install Hiraku with its W&B extra in your CLI environment first. From the Hiraku checkout:
 
 ```bash
-uv tool install --force .
+uv tool install --force '.[wandb]'
 ```
 
 Then create and initialize a new project:
