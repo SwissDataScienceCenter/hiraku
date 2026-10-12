@@ -176,7 +176,7 @@ def main() -> None:
         raise ValueError("--epochs must be positive")
     if not 0 < args.validation_fraction < 1:
         raise ValueError("--validation-fraction must be between 0 and 1")
-    if args.batch_size < 1 or args.learning_rate <= 0:
+    if args.batch_size < 1 or not 0 < args.learning_rate < float("inf"):
         raise ValueError("batch size and learning rate must be positive")
 
     attribution = provenance()
