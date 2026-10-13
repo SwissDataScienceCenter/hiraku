@@ -95,12 +95,7 @@ def test_tools_and_prompts_are_fixed_per_workflow(config: HirakuConfig) -> None:
         return tools, prompts
 
     tools, prompts = run(server, scenario)
-    workflows = {
-        "autodataset",
-        "autoresearch-python",
-        "guided-research",
-        "loop",
-    }
+    workflows = {"autodataset", "collaborative", "loop"}
     assert set(tools) == BUILTINS | workflows
     assert set(prompts) == workflows
     loop = tools["loop"].input_schema
@@ -352,7 +347,7 @@ def test_server_reads_current_project_state(config: HirakuConfig) -> None:
         status = payload(await client.call_tool("project_status", {}))
         shown = payload(await client.call_tool("record_show", {}))
         started = payload(
-            await client.call_tool("autoresearch-python", {"entrypoint": "train"})
+            await client.call_tool("collaborative", {"entrypoint": "train"})
         )
         return {"status": status, "shown": shown, "started": started}
 
@@ -362,5 +357,5 @@ def test_server_reads_current_project_state(config: HirakuConfig) -> None:
     saved = HirakuConfig.discover(config.root)
     assert saved.active_record_id == "other-task"
     assert result["started"]["status"] == "rejected"
-    assert "several entrypoints" not in result["started"]["message"]
     assert "train" in result["started"]["message"]
+    assert "other-task" in result["started"]["message"]

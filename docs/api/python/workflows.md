@@ -24,7 +24,3 @@ Workflows live in `hiraku/workflows/<workflow-id>/workflow.py`. See the
 ::: hiraku.errors.SubmissionRejected
 
 ::: hiraku.errors.NotReady
-
-## Research helpers
-
-::: hiraku.research

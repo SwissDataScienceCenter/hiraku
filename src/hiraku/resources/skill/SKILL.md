@@ -103,7 +103,7 @@ Classify the request before acting:
   a research root, defining child records, running them, and comparing results.
   Do not add stages the user did not request.
 - **Hiraku workflow:** Start or continue a workflow, such as
-  `autoresearch-python`, only when the user explicitly requests it. Discover
+  `collaborative`, only when the user explicitly requests it. Discover
   workflows with the `workflow_list` MCP tool, start one with the tool named
   after it, and follow the user's constraints, permissions, budgets, and
   stopping condition in addition to the workflow's instructions.

@@ -27,38 +27,39 @@ server runs `hiraku mcp`, so the `hiraku` command must be on the agent's
 `PATH`. Each workflow is available in two ways under its ID:
 
 - as an **MCP prompt** that you invoke yourself, which agents such as Claude
-  Code show as a slash command, e.g. `/mcp__hiraku__guided-research`. Its
+  Code show as a slash command, e.g. `/mcp__hiraku__collaborative`. Its
   arguments are typed in the command; the prompt starts a session and hands its
   first instruction to the agent.
 - as an **MCP tool** that the agent calls when you ask for the workflow, e.g.:
 
-  > What Hiraku workflows are available here? Start guided research on the
-  > active task with three hypotheses per round.
+  > What Hiraku workflows are available here? Start collaborative research on
+  > the active task, at most two experiments.
 
   The agent calls `workflow_list` to explain the workflows, then the
-  `guided-research` tool. Codex has no MCP prompts, so this is how it starts
+  `collaborative` tool. Codex has no MCP prompts, so this is how it starts
   workflows.
 
 Every response names the replies that continue the session. The agent answers
 with the `workflow_reply` tool, for example
-`workflow_reply(reply="select", arguments={"record_id": "exp-reg"}, ...)`:
+`workflow_reply(reply="revise", arguments={"feedback": "Try dropout"}, ...)`:
 
 ```json
 {
   "status": "accepted",
-  "session_id": "guided-research-3f9a1c2b4d5e",
+  "session_id": "collaborative-3f9a1c2b4d5e",
   "instruction_id": 2,
   "instruction": {
-    "text": "## Choose\n\nPresent the candidates briefly ...",
-    "context": {"candidates": [{"id": "exp-reg"}, {"id": "exp-lr"}]},
+    "text": "## Approve\n\nPresent the experiment to the user ...",
+    "context": {"record_id": "exp-reg", "hypothesis": "Regularization helps"},
     "requires_user_response": true,
     "reply_with": "workflow_reply",
     "replies": [
-      {"reply": "select", "description": "Pursue the experiment the user chose.",
-       "arguments": {"properties": {"record_id": {"type": "string"}},
-                     "required": ["record_id"]}},
-      {"reply": "revise", "arguments": {"...": "..."}},
-      {"reply": "finish", "arguments": {"...": "..."}}
+      {"reply": "approve", "description": "Record the user's approval ...",
+       "arguments": {"properties": {}}},
+      {"reply": "revise", "description": "Propose a different experiment ...",
+       "arguments": {"properties": {"feedback": {"type": "string"}},
+                     "required": ["feedback"]}},
+      {"reply": "finish", "arguments": {"properties": {}}}
     ]
   }
 }
@@ -285,8 +286,7 @@ The rules are deliberately small:
   runs. Prefer replies that name records or runs, which the workflow loads and
   checks, over replies that carry results as free text.
 - Workflow modules can import helpers from their own directory with relative
-  imports. `hiraku.research` provides the task, run, and evidence helpers the
-  bundled research workflows share.
+  imports.
 
 The MCP server loads workflow code and prompts when it starts. A workflow that
 fails to load is logged to the server's stderr and left out;
@@ -310,21 +310,12 @@ The [autoresearch example](../examples/autoresearch/README.md) also installs
 `autoresearch`, a Markdown-only workflow with the upstream
 "experiment until stopped" procedure.
 
-- **autoresearch-python** follows the autoresearch loop autonomously, without
-  asking you: establish a baseline, then for each of `iterations` experiments
-  choose one idea, commit it, create a bound experiment record, launch it, and
-  submit the run. Hiraku checks the run and decides `keep`, `discard`, or
-  `crash`; the agent records the decision and, for discard and crash, resets the
-  branch to the retained commit, as in the upstream loop. Its evidence policy
-  requires a run attributed to an experiment record under the task, its bound
-  commit, and the entrypoint; an explicit success status (setting
-  `success_status`, default `finished`); a clean working tree when recorded;
-  and a finite metric.
-- **guided-research** is the collaborative counterpart: the agent proposes
-  hypotheses, you choose one, approve its exact launch, and discuss each
-  result before deciding to continue. A run counts only if it matches the
-  approved record, commit, entrypoint, and arguments; a changed configuration
-  needs a new approval.
+- **collaborative** shows a gated flow in a few lines of code: the agent
+  proposes one experiment record at a time, you approve it before any work
+  (or ask for a revision), the agent implements and launches it, and you
+  discuss each result before deciding to continue. Hiraku checks that the
+  proposal is an experiment under the task and that the submitted run is
+  attributed to it, and stops after the `rounds` budget.
 - **autodataset** sends one complete instruction to find datasets for a task
   and document each as a `type: dataset` record with `sources`. A shortfall is
   a valid reply: you decide whether to keep searching or accept a partial

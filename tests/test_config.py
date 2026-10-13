@@ -50,11 +50,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
 
     assert HirakuConfig.discover(root).root == root
     assert HirakuConfig.discover(nested).root == root
-    for workflow in (
-        "autoresearch-python",
-        "autodataset",
-        "guided-research",
-    ):
+    for workflow in ("autodataset", "collaborative"):
         assert (config.workflows_dir / workflow / "workflow.py").is_file()
         assert (config.workflows_dir / workflow / "workflow.md").is_file()
     assert "mcp" not in config.to_dict()

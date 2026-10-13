@@ -8,7 +8,6 @@ from pydantic import Field
 
 from hiraku.errors import SubmissionRejected
 from hiraku.record import load_record
-from hiraku.research import resolve_task
 from hiraku.workflow import Completion, Instruction, Session, Workflow, tool
 
 
@@ -32,14 +31,17 @@ class Autodataset(Workflow):
         self,
         task: Annotated[
             str | None,
-            Field(description="Task record ID; defaults to the active record's task."),
+            Field(description="Task record ID; defaults to the active record."),
         ] = None,
         count: Annotated[
             int, Field(gt=0, description="Number of datasets to find.")
         ] = 5,
     ) -> Instruction:
         """Start dataset discovery for a task record."""
-        record = resolve_task(self.config, task)
+        task = task or self.config.active_record_id
+        if task is None:
+            raise SubmissionRejected("No active record; pass the task record ID")
+        record = load_record(task, config=self.config)
         session = DatasetSession(task=record.id, count=count)
         return self._search(session)
 

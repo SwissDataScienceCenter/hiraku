@@ -20,9 +20,7 @@ REPOSITORY = Path(__file__).parents[2]
 DOCS_EXAMPLE = REPOSITORY / "docs" / "examples" / "autoresearch"
 EXAMPLE = REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "autoresearch"
 OVERLAY = EXAMPLE / "src"
-WORKFLOW = (
-    REPOSITORY / "src" / "hiraku" / "resources" / "workflows" / "autoresearch-python"
-)
+WORKFLOW = REPOSITORY / "src" / "hiraku" / "resources" / "workflows" / "collaborative"
 LOOP = OVERLAY / "hiraku" / "workflows" / "autoresearch" / "workflow.md"
 DISPATCHER = OVERLAY / "hiraku" / "dispatch" / "autoresearch.sh"
 LINUX_ONLY = pytest.mark.skipif(
@@ -132,7 +130,8 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "/.claude/" in readme
     assert "/.mcp.json" in readme
     assert "/.codex/" in readme
-    assert "the `autoresearch-python` tool" in readme
+    assert "`/mcp__hiraku__autoresearch`" in readme
+    assert "`collaborative`" in readme
     assert "hiraku program" not in readme
     assert "--markdown-file task.md" in readme
     assert "hiraku record create sep10" in readme
@@ -150,12 +149,6 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "git reset" not in task_template
     assert "run.log" not in task_template
     assert "Changelog" not in task_template
-
-    prompts = (WORKFLOW / "workflow.md").read_text(encoding="utf-8")
-    assert "record_update" in prompts
-    assert "## Experiment" in prompts
-    assert "restore_command" in prompts
-    assert "results.tsv" not in prompts
 
     loop = LOOP.read_text(encoding="utf-8")
     assert loop.startswith("---\nid: autoresearch\n")
@@ -191,7 +184,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert (project / "program.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "program.md"
     ]
-    installed = project / "hiraku/workflows/autoresearch-python"
+    installed = project / "hiraku/workflows/collaborative"
     assert (installed / "workflow.py").read_text(encoding="utf-8") == (
         WORKFLOW / "workflow.py"
     ).read_text(encoding="utf-8")
@@ -212,7 +205,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert config.default_dispatch == "autoresearch.sh"
     workflows = load_workflows(config)
     assert type(workflows["autoresearch"]) is PromptWorkflow
-    assert "autoresearch-python" in workflows
+    assert "collaborative" in workflows
     assert json.loads((project / ".mcp.json").read_text())["mcpServers"]["hiraku"]
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111
     assert git(project, "status", "--porcelain") == ""

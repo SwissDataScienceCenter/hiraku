@@ -611,8 +611,7 @@ def test_workflow_list_describes_every_loaded_workflow(config: HirakuConfig) -> 
     listed = list_workflows(load_workflows(config))
     assert [item["id"] for item in listed] == [
         "autodataset",
-        "autoresearch-python",
-        "guided-research",
+        "collaborative",
         "toy",
     ]
     assert listed[-1]["description"].startswith("Add numbers until a target")

@@ -165,7 +165,7 @@ project-relevant information to the agent.
 | **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its arguments, progress, and pending instruction. Sessions are local and not committed. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
-Hiraku ships the `autoresearch-python`, `guided-research`, and `autodataset`
+Hiraku ships the `collaborative` and `autodataset`
 workflows as editable copies in your project. See the [Workflows guide](guides/workflows.md) for how
 sessions work and how to write your own.
 
@@ -238,17 +238,14 @@ The same workflow can be carried out through the installed Hiraku skill in a
 coding agent. The [Heart Disease example](examples/heart-disease/README.md)
 shows prompts for both a complete investigation and individual steps.
 
-### Autoresearch workflow
+### Collaborative workflow
 
-The bundled `autoresearch-python` workflow runs the autoresearch loop autonomously
-for a fixed number of experiments on a task record. Ask your coding agent to
-start it, for example "start Hiraku autoresearch-python on heart-disease for
-five experiments", or invoke its prompt `/mcp__hiraku__autoresearch-python`. The agent calls the `autoresearch-python` MCP tool and follows the
-instructions it returns: one idea, one commit, one experiment record, and one
-launch per experiment. Hiraku checks each tracked run, decides keep, discard,
-or crash against the retained result, and records its assessment on the
-experiment record. For a collaborative investigation in which you choose
-hypotheses, approve launches, and discuss results, start `guided-research`.
+The bundled `collaborative` workflow runs experiments on a task record together
+with you. Invoke its prompt `/mcp__hiraku__collaborative`, or ask your coding
+agent, for example "start Hiraku collaborative research on heart-disease for
+two experiments"; the agent then calls the `collaborative` MCP tool. The agent
+proposes one experiment at a time, you approve it before any work, and you
+discuss each result before deciding to continue.
 
 ```bash
 hiraku session list
@@ -256,5 +253,6 @@ hiraku session show <session-id>
 hiraku runs --record heart-disease --all --json
 ```
 
-The [Autoresearch example](examples/autoresearch/README.md) runs the workflow on
-Karpathy's autoresearch repository with a bounded dispatcher.
+The [Autoresearch example](examples/autoresearch/README.md) runs an autonomous
+Markdown-only workflow on Karpathy's autoresearch repository with a bounded
+dispatcher.
