@@ -386,6 +386,7 @@ def serve_demo(
     interactive: bool = False,
     tracking_label: str | None = None,
     launch_environment: dict[str, str] | None = None,
+    scope: str | None = None,
 ) -> int:
     """Serve the dashboard and optional MLflow UI until either exits or Ctrl-C."""
     if mlflow_port == port:
@@ -435,7 +436,7 @@ def serve_demo(
             "--record",
             record_id,
             "--scope",
-            "subtree" if mlflow_port is not None else "record",
+            scope or ("subtree" if mlflow_port is not None else "record"),
             "--port",
             str(port),
             "--no-browser",

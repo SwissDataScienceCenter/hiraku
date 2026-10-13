@@ -46,6 +46,16 @@ directory. Press **Ctrl-C** to stop the servers. Replace `digits-mlflow` with
 documented example. See the [dashboard demo guide](scripts/README-use-case-dashboard.md)
 for requirements, options, and reopen instructions.
 
+For Autoresearch-style plots on macOS or Linux, run:
+
+```bash
+uv run --all-extras python scripts/use_case_dashboard.py --example autoresearch
+```
+
+This CPU demo opens with three simulated results for validation loss and memory
+usage. It requires no GPU; actual Autoresearch training is described in its
+example guide.
+
 ## Documentation
 
 - [Interactive dashboard demos](scripts/README-use-case-dashboard.md) and

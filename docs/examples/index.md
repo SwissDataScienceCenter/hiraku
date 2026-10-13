@@ -25,7 +25,7 @@ retained demo directory. It opens the GUI and any local tracking UI. Use
 `--reopen "<demo-path>"` to revisit a demo without creating or training it
 again. Iris creates records without contacting W&B; use `--wandb-entity` and
 `--run-iris` to log remote runs with your existing W&B login. The Autoresearch
-demo exercises its Linux CPU mock; full training still requires the upstream
-checkout and GPU described in its guide. Details and options are in the
+demo creates three simulated CPU runs on macOS or Linux; full training requires
+the upstream checkout and GPU described in its guide. Details and options are in the
 [interactive dashboard manual](../guides/dashboard-manual.md) and
 [dashboard reference](../dashboard.md).

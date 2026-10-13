@@ -6,7 +6,6 @@ import argparse
 import os
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -123,6 +122,18 @@ def create_use_case(
         )
     project = demo_directory(directory)
     config = HirakuConfig.init(project, example=example, install_skill=False)
+    if example == "autoresearch":
+        # Keep the upstream Linux dispatcher intact; this demo logs its own metrics.
+        shutil.copyfile(
+            ROOT / "scripts/autoresearch_cpu_demo.py", project / "cpu_dashboard.py"
+        )
+        shutil.copyfile(
+            ROOT / "src/hiraku/resources/dispatch/launch.sh",
+            config.dispatch_dir / "launch.sh",
+        )
+        (config.dispatch_dir / "launch.sh").chmod(0o755)
+        config.default_dispatch = "launch.sh"
+        config.save()
     commit = _commit_example(project, example)
     (project / MARKER).write_text(example + "\n", encoding="utf-8")
     csv_label = str(project / "runs.csv")
@@ -250,26 +261,39 @@ def create_use_case(
         activate=False,
         goal="Minimize val_bpb in a fixed training budget",
         program="autoresearch",
-        metrics=[{"name": "val_bpb", "direction": "minimize"}],
+        metrics=[
+            {"name": "val_bpb", "direction": "minimize"},
+            {"name": "peak_vram_mb", "direction": "minimize"},
+        ],
         entrypoints={
-            "mock": {"command": _command("cpu_mock.py"), "args": {"val-bpb": 1.0}}
+            "mock": {
+                "command": _command("cpu_dashboard.py"),
+                "args": {"val-bpb": 1.0, "peak-vram-mb": 1024.0},
+            }
         },
     )
-    Record.create(
-        "cpu-test",
-        parent_id="autoresearch",
-        type="experiment",
-        commit=commit,
-        config=config,
-        activate=False,
-        summary="CPU-only dispatcher check",
-    )
-    if sys.platform == "linux" and all(
-        shutil.which(name) for name in ("timeout", "flock")
+    for record_id, loss, memory in (
+        ("cpu-test", 1.0, 1024.0),
+        ("lower-loss", 0.85, 1536.0),
+        ("lower-memory", 0.95, 768.0),
     ):
-        _launch(config, "cpu-test", "mock")
-    else:
-        print("Autoresearch mock needs Linux, timeout and flock; records are ready.")
+        Record.create(
+            record_id,
+            parent_id="autoresearch",
+            type="experiment",
+            commit=commit,
+            config=config,
+            activate=False,
+            summary="Simulated CPU demo: validation loss and memory tradeoff",
+            entrypoints={
+                "mock": {
+                    "command": _command("cpu_dashboard.py"),
+                    "args": {"val-bpb": loss, "peak-vram-mb": memory},
+                }
+            },
+        )
+        _launch(config, record_id, "mock")
+    print("Portable CPU demo: three simulated runs, with no GPU or model training.")
     print("Full Autoresearch training needs the upstream checkout and a suitable GPU.")
     return Demo(project, example, "autoresearch", csv_label)
 
@@ -377,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
             mlflow_port=demo.mlflow_port,
             no_browser=args.no_browser,
             interactive=True,
+            scope="subtree",
             tracking_label=demo.tracking_label,
             launch_environment=launch_environment,
         )

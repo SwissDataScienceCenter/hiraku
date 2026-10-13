@@ -71,7 +71,7 @@ prints only the demo path; it does not print a GUI URL or token.
 | `heart-disease` | Logistic and random-forest runs | Local `runs.csv` |
 | `digits-mlflow` | Two short training runs | Local MLflow database and UI |
 | `iris-wandb` | Records ready; no remote runs by default | W&B `hiraku-iris` project |
-| `autoresearch` | CPU mock run on supported Linux hosts | Local `runs.csv` |
+| `autoresearch` | Three simulated CPU runs on macOS or Linux | Local `runs.csv` |
 
 To log Iris runs, first authenticate with W&B, then run:
 
@@ -81,9 +81,16 @@ uv run --all-extras python scripts/use_case_dashboard.py --example iris-wandb --
 
 `WANDB_ENTITY` can supply the entity instead. The helper passes the chosen
 entity and project to later GUI launches. Without `--run-iris`, it does not
-contact W&B; run lists may be empty. The Autoresearch mock requires Linux with
-`timeout` and `flock`; other systems get prepared records only. Full
-Autoresearch training requires the upstream checkout and a suitable GPU.
+contact W&B; run lists may be empty.
+
+The Autoresearch dashboard demo works on macOS and Linux without a GPU,
+`timeout`, or `flock`. It generates three simulated runs and opens in
+**Subtree** scope so the results are visible immediately. Use **Progress**
+with `val_bpb`, or **Pareto** with `val_bpb` and `peak_vram_mb`, to inspect
+the sample loss and memory tradeoffs. These values demonstrate the dashboard;
+they are not measurements from model training. You can launch the `mock`
+entrypoint again from the interactive dashboard to add another result.
+Full Autoresearch training requires the upstream checkout and a suitable GPU.
 
 ## More help
 

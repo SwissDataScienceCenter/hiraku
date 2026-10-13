@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import os
-import shutil
 import signal
 import socket
 import subprocess
@@ -16,6 +15,7 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.dashboard import build_snapshot
+from hiraku.dashboard.plots import pareto_points, progress_points
 from hiraku.record import load_record
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/use_case_dashboard.py"
@@ -33,15 +33,10 @@ reopen_use_case = _demo.reopen_use_case
     [
         ("minimal", "my-task", 1),
         ("heart-disease", "heart-disease", 2),
-        ("autoresearch", "autoresearch", 1),
+        ("autoresearch", "autoresearch", 3),
     ],
 )
 def test_local_use_cases_log_attributed_runs(tmp_path, example, root, count):
-    if example == "autoresearch" and (
-        sys.platform != "linux"
-        or not all(shutil.which(name) for name in ("timeout", "flock"))
-    ):
-        pytest.skip("Autoresearch mock needs Linux, timeout and flock")
     demo = create_use_case(example, tmp_path / example)
     config = HirakuConfig.load(demo.directory / "hiraku.yml")
     snapshot = build_snapshot(config, record_id=root, scope="subtree")
@@ -51,6 +46,19 @@ def test_local_use_cases_log_attributed_runs(tmp_path, example, root, count):
         run.record_id != root and run.commit and run.entrypoint for run in snapshot.runs
     )
     assert reopen_use_case(demo.directory, mlflow_port=5000) == demo
+    if example == "autoresearch":
+        assert config.default_dispatch == "launch.sh"
+        progress = progress_points(snapshot.runs, "val_bpb", direction="minimize")
+        assert progress.omitted == 0
+        assert set(progress.frame["value"]) == {1.0, 0.85, 0.95}
+        pareto = pareto_points(snapshot.runs, "val_bpb", "peak_vram_mb")
+        assert pareto.omitted == 0
+        assert set(pareto.frame["y"]) == {1024.0, 1536.0, 768.0}
+        assert pareto.frame["is_pareto"].sum() == 2
+        _demo._launch(config, "lower-loss", "mock")
+        refreshed = build_snapshot(config, record_id=root, scope="subtree")
+        assert not refreshed.errors
+        assert len(refreshed.runs) == 4
 
 
 def test_iris_use_case_prepares_records_without_network_or_credentials(
@@ -93,6 +101,7 @@ def test_iris_entity_is_shared_by_initial_and_gui_launches(tmp_path, monkeypatch
         "WANDB_ENTITY": "research-team",
         "WANDB_PROJECT": "hiraku-iris",
     }
+    assert served[0]["scope"] == "subtree"
 
 
 def test_demo_requires_an_empty_directory(tmp_path):

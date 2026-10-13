@@ -114,8 +114,9 @@ error and marks retained results as **STALE** for that selection.
 - **Iris:** Explore the `iris` records and inherited W&B source. Runs appear
   only after W&B authentication and training with `--run-iris`, or after a
   later GUI launch that logs to the same entity and project.
-- **Autoresearch:** Inspect `autoresearch` and `cpu-test`. On Linux with
-  `timeout` and `flock`, the local CPU mock creates a run; full training is
+- **Autoresearch:** The portable CPU demo works on macOS and Linux and opens
+  `autoresearch` in subtree scope with three simulated runs. Inspect `val_bpb`
+  in Progress or compare it with `peak_vram_mb` in Pareto. Full training is
   documented in the [Autoresearch example](../examples/autoresearch/README.md).
 
 ## Stop and reopen
