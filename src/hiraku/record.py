@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_core import to_jsonable_python
 
 from .base import BaseRecord
 from .errors import (
@@ -19,7 +20,7 @@ from .errors import (
     ValidationError,
 )
 from .git import GitRepository
-from .io import atomic_write, dump_yaml, json_value
+from .io import atomic_write, dump_yaml
 from .run import Run
 from .tracking import TrackingBackend, create_backend
 from .validation import validate_identifier
@@ -422,8 +423,8 @@ class Record(BaseRecord):
                 values, sources = resolved.values, resolved.sources
             result: dict[str, Any] = {
                 "id": record.id,
-                "values": json_value(values),
-                "sources": json_value(sources),
+                "values": to_jsonable_python(values, fallback=dict),
+                "sources": to_jsonable_python(sources, fallback=dict),
                 "markdown": record.markdown[:MARKDOWN_LIMIT],
             }
             if len(record.markdown) > MARKDOWN_LIMIT:
@@ -558,7 +559,8 @@ class Record(BaseRecord):
             found = record.resolve_tracking_backend(config=config).list_runs(
                 record_id=None if all else record.id, **query
             )
-            return json_value(found)
+            # Runs keep their fields in read-only mappings.
+            return to_jsonable_python(found, fallback=dict)
 
         return [
             Tool.from_function(

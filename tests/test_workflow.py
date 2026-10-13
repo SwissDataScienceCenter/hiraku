@@ -12,16 +12,19 @@ from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.errors import (
     HirakuError,
+    RecordNotFoundError,
     SessionNotFoundError,
     ValidationError,
     WorkflowError,
 )
+from hiraku.markdown import normalize_anchor
 from hiraku.session import Session
 from hiraku.workflow import (
     Completion,
     Instruction,
     PromptWorkflow,
     Workflow,
+    discover_workflows,
     handlers,
     list_workflows,
     load_workflow,
@@ -169,7 +172,8 @@ def stored(config: HirakuConfig, session_id: str) -> dict:
 
 
 def tool_names(config: HirakuConfig) -> dict[str, Any]:
-    return {tool.name: tool for tool in Workflow.tools(lambda: config)}
+    workflows = load_workflows(config)
+    return {tool.name: tool for tool in Workflow.tools(lambda: config, workflows)}
 
 
 def test_handlers_schemas_and_relative_imports(config: HirakuConfig) -> None:
@@ -395,23 +399,28 @@ def test_correlation_table(config: HirakuConfig) -> None:
     assert stored(config, first["session_id"])["total"] == 3
 
 
-def test_replies_find_the_active_session(config: HirakuConfig) -> None:
-    workflow = toy(config)
-    first = started(workflow, target=5)
-    response = workflow.call("add", {"instruction_id": 1, "amount": 2})
+def test_workflow_reply_finds_the_only_active_session(config: HirakuConfig) -> None:
+    tools = {
+        tool.name: tool for tool in Workflow.tools(lambda: config, {"toy": toy(config)})
+    }
+    send = tools["workflow_reply"].fn
+    first = started(toy(config), target=5)
+    response = send(reply="add", instruction_id=1, arguments={"amount": 2})
     assert response["status"] == "accepted"
     assert response["session_id"] == first["session_id"]
 
-    second = started(workflow)
-    several = workflow.call("add", {"instruction_id": 2, "amount": 1})
+    second = started(toy(config))
+    several = send(reply="add", instruction_id=2, arguments={"amount": 1})
     assert several["status"] == "rejected"
     assert "pass session_id" in several["message"]
 
     Session.load(first["session_id"], config=config).cancel()
     Session.load(second["session_id"], config=config).cancel()
-    none = workflow.call("add", {"instruction_id": 1, "amount": 1})
+    none = send(reply="add", instruction_id=1, arguments={"amount": 1})
     assert none["status"] == "rejected"
-    assert "start one with the toy tool" in none["message"]
+    assert "No session is active" in none["message"]
+    with pytest.raises(ValidationError, match="Invalid session ID"):
+        toy(config).call("add", {"instruction_id": 1, "amount": 1})
 
 
 def test_completion_and_retried_completion(config: HirakuConfig) -> None:
@@ -812,8 +821,142 @@ def test_workflows_and_sessions_provide_their_tools(config: HirakuConfig) -> Non
     assert done["result"] == {"total": 2}
     assert tools["workflow_list"].fn()[0]["id"] == "toy"
 
-    sessions = {tool.name: tool for tool in Session.tools(lambda: config)}
+    sessions = {
+        tool.name: tool for tool in Session.tools(lambda: config, {"toy": toy(config)})
+    }
     assert set(sessions) == {"session_list", "session_show", "session_cancel"}
     shown = sessions["session_show"].fn(session_id=first["session_id"])
     assert shown["status"] == "completed"
     assert shown["orientation"] == "# Toy\n\nAdd numbers."
+
+
+# workflow.md: sections, placeholders, and the record -----------------------
+
+
+DOCUMENT = """\
+# Research
+
+Introduction text.
+
+### Not a section boundary
+
+Still orientation.
+
+## Select
+
+Pick one.
+
+### Details
+
+Nested detail.
+
+```markdown
+## Not a heading
+```
+
+## Approve the Launch!
+
+Ask first.
+"""
+
+
+def research() -> Workflow:
+    return Workflow(id="research", markdown=DOCUMENT)
+
+
+def test_normalize_anchor() -> None:
+    assert normalize_anchor("Approve the Launch!") == "approve-the-launch"
+    assert normalize_anchor("  Step  1:  Select ") == "step-1-select"
+    assert normalize_anchor("keep-hyphens") == "keep-hyphens"
+
+
+def test_orientation_ends_at_first_second_level_heading() -> None:
+    document = Workflow(id="research", markdown=DOCUMENT)
+    assert document.orientation.startswith("# Research")
+    assert "Still orientation." in document.orientation
+    assert "Pick one." not in document.orientation
+    assert Workflow(id="x", markdown="# Only\n\nText\n").orientation == (
+        "# Only\n\nText"
+    )
+
+
+def test_section_includes_subsections_and_ignores_fenced_headings() -> None:
+    workflow = research()
+    select = workflow.section("select")
+    assert select.startswith("## Select")
+    assert "Nested detail." in select
+    assert "## Not a heading" in select
+    assert "Ask first." not in select
+    details = workflow.section("details")
+    assert details.startswith("### Details\n\nNested detail.")
+    assert details.endswith("```")
+    assert workflow.section("approve-the-launch").endswith("Ask first.")
+    assert "not-a-heading" not in Workflow(id="r", markdown=DOCUMENT).anchors
+
+
+def test_whole_document_text() -> None:
+    assert research().text == DOCUMENT.strip()
+
+
+def test_missing_section() -> None:
+    with pytest.raises(WorkflowError, match="#missing not found"):
+        research().section("missing")
+
+
+def test_anchors_that_normalize_to_the_same_name_are_rejected() -> None:
+    with pytest.raises(ValidationError, match="share the anchor #select"):
+        Workflow(id="dup", markdown="## Select\n\n## select!\n")
+    document = Workflow(id="ok", markdown="## Select\n")
+    with pytest.raises(ValidationError, match="share the anchor"):
+        document.markdown = "## A\n\n## a\n"
+
+
+def test_sections_follow_markdown_changes() -> None:
+    document = Workflow(id="doc", markdown="## Old\n\nText\n")
+    document.markdown = "# Intro\n\n## New\n\nText\n"
+    assert document.anchors == ["intro", "new"]
+    assert document.orientation == "# Intro"
+
+
+def test_workflow_md_is_a_registry_record(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False, install_mcp=False)
+    document = load_workflow("collaborative", config=config)
+    assert document.id == "collaborative"
+    assert document.path == config.workflows_dir / "collaborative" / "workflow.md"
+    assert document.text.startswith("# Collaborative research")
+    assert "id: collaborative" not in document.text
+    assert discover_workflows(config) == ["autodataset", "collaborative"]
+
+    document.summary = "Bounded research"
+    document.save()
+    reloaded = load_workflow("collaborative", config=config)
+    assert reloaded.to_dict() == {
+        "id": "collaborative",
+        "description": document.to_dict()["description"],
+        "summary": "Bounded research",
+    }
+    assert reloaded.section("approve") == document.section("approve")
+
+
+@pytest.mark.parametrize(
+    ("content", "error", "message"),
+    [
+        ("---\nid: other\n---\n# X\n", ValidationError, "must match the workflow"),
+        ("# No front matter\n", ValidationError, "front matter"),
+        (None, RecordNotFoundError, "not found"),
+    ],
+)
+def test_invalid_workflow_documents_disable_the_workflow(
+    tmp_path: Path, content: str | None, error: type[Exception], message: str
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False, install_mcp=False)
+    path = config.workflows_dir / "autodataset" / "workflow.md"
+    if content is None:
+        path.unlink()
+    else:
+        path.write_text(content)
+    with pytest.raises(error, match=message):
+        load_workflow("autodataset", config=config)
+    workflows = load_workflows(config)
+    assert "autodataset" not in workflows
+    assert "collaborative" in workflows

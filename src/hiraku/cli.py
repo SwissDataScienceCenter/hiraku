@@ -6,13 +6,15 @@ import json
 import os
 import shlex
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import click
 import yaml
+from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
 from .agent import Context, list_contexts, load_context
@@ -26,9 +28,10 @@ from .errors import (
     WorkflowError,
 )
 from .git import GitRepository
-from .io import dump_yaml, json_value
+from .io import dump_yaml
 from .launch import _dispatcher, launch, render_arguments
 from .record import Record, list_records, load_record, update_record
+from .run import Run
 from .validation import validate_identifier
 
 
@@ -51,7 +54,32 @@ class HirakuGroup(click.Group):
             raise click.ClickException(str(exc)) from exc
 
 
-_json_value = json_value
+def _json_value(value: Any) -> Any:
+    if isinstance(value, BaseRecord):
+        return {**_json_value(value.to_dict()), "markdown": value.markdown}
+    if isinstance(value, Run):
+        return {
+            "id": value.id,
+            "metrics": _json_value(value.metrics),
+            "params": _json_value(value.params),
+            "record_id": value.record_id,
+            "commit": value.commit,
+            "timestamp": _json_value(value.timestamp),
+            "entrypoint": value.entrypoint,
+            "url": value.url,
+            "raw": _json_value(value.raw),
+        }
+    if isinstance(value, BaseModel):
+        return _json_value(value.model_dump())
+    if isinstance(value, datetime):
+        return (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
+        return [_json_value(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    return value
 
 
 def _emit_json(value: Any) -> None:

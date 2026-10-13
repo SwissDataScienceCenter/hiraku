@@ -16,7 +16,7 @@ from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from pydantic import ValidationError as PydanticValidationError
 
-from .errors import HirakuError, SessionNotFoundError, ValidationError
+from .errors import SessionNotFoundError, ValidationError
 from .io import atomic_write
 
 if TYPE_CHECKING:
@@ -196,14 +196,14 @@ class Session(BaseModel):
     def tools(
         cls,
         project: Callable[[], HirakuConfig],
-        workflows: Mapping[str, Workflow] | None = None,
+        workflows: Mapping[str, Workflow],
     ) -> list[Tool]:
         """Return the agent tools to list, show, and cancel sessions.
 
         Args:
             project: Returns the project configuration as currently saved.
             workflows: Loaded workflows by ID, used to describe a session with
-                its workflow; without it, the workflow is loaded on demand.
+                its workflow.
         """
         from mcp.server.mcpserver.tools import Tool
         from mcp.types import ToolAnnotations
@@ -212,17 +212,8 @@ class Session(BaseModel):
             return Session.list_all(config=project())
 
         def session_show(session_id: SessionId) -> dict[str, Any]:
-            config = project()
-            session = Session.load(session_id, config=config)
-            if workflows is not None:
-                return session.show(workflows.get(session.workflow))
-            from .workflow import load_workflow
-
-            try:
-                workflow = load_workflow(session.workflow, config=config)
-            except HirakuError:
-                workflow = None
-            return session.show(workflow)
+            session = Session.load(session_id, config=project())
+            return session.show(workflows.get(session.workflow))
 
         def session_cancel(session_id: SessionId) -> dict[str, Any]:
             return Session.load(session_id, config=project()).cancel()

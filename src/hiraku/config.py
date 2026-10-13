@@ -6,13 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    PrivateAttr,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from .errors import ProjectNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping

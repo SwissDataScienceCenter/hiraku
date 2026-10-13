@@ -50,7 +50,7 @@ class BackendError(HirakuError):
 
 
 class WorkflowError(HirakuError):
-    """A workflow definition, catalog, or configuration is invalid."""
+    """A workflow, its code, or one of its tools is invalid."""
 
 
 class SessionNotFoundError(HirakuError):

@@ -20,7 +20,6 @@ from pydantic import (
 
 from .errors import RecordExistsError, RecordNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml
-from .markdown import render
 from .validation import validate_identifier
 
 _FRONT_MATTER = re.compile(
@@ -102,14 +101,6 @@ class BaseRecord(BaseModel):
             exclude_none=False,
             exclude_unset=True,
         )
-
-    def render(self, values: Mapping[str, Any]) -> str:
-        """Return the Markdown body with ``{{name}}`` placeholders filled in.
-
-        Raises:
-            hiraku.errors.ValidationError: If a placeholder has no value.
-        """
-        return render(self.markdown, values)
 
     @classmethod
     def _validate_yaml_value(cls, value: Any, path: str = "field") -> None:

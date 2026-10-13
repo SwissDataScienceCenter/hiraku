@@ -172,9 +172,9 @@ class Workflow(BaseRecord):
         Args:
             tool: Tool name without the workflow prefix, e.g. ``"start"`` or
                 ``"submit_run"``.
-            arguments: JSON-compatible tool arguments. Replies also take
-                ``instruction_id`` and, optionally, ``session_id``; without it,
-                the reply goes to the one active session of this workflow.
+            arguments: JSON-compatible tool arguments. Replies also take the
+                ``session_id`` and ``instruction_id`` of the pending
+                instruction.
 
         Returns:
             A JSON-compatible response whose ``status`` is ``accepted``,
@@ -233,7 +233,7 @@ class Workflow(BaseRecord):
     def tools(
         cls,
         project: Callable[[], HirakuConfig],
-        workflows: Mapping[str, Workflow] | None = None,
+        workflows: Mapping[str, Workflow],
     ) -> list[Tool]:
         """Return the agent tools for running workflows, e.g. over MCP.
 
@@ -244,16 +244,13 @@ class Workflow(BaseRecord):
 
         Args:
             project: Returns the project configuration as currently saved.
-            workflows: Loaded workflows by ID; loaded from the project if
-                omitted.
+            workflows: Loaded workflows by ID.
         """
         from mcp.server.mcpserver.tools import Tool
         from mcp.types import ToolAnnotations
 
-        loaded = load_workflows(project()) if workflows is None else workflows
-
         def workflow_list() -> list[dict[str, Any]]:
-            return list_workflows(loaded)
+            return list_workflows(workflows)
 
         def workflow_reply(
             reply: Annotated[
@@ -275,7 +272,7 @@ class Workflow(BaseRecord):
             ] = None,
         ) -> dict[str, Any]:
             return _workflow_reply(
-                loaded, project(), reply, instruction_id, arguments, session_id
+                workflows, project(), reply, instruction_id, arguments, session_id
             )
 
         tools = [
@@ -292,7 +289,7 @@ class Workflow(BaseRecord):
                 annotations=ToolAnnotations(read_only_hint=False),
             ),
         ]
-        for workflow_id, workflow in sorted(loaded.items()):
+        for workflow_id, workflow in sorted(workflows.items()):
             for handler in sorted(
                 handlers(type(workflow)).values(), key=lambda item: item.name
             ):
@@ -316,7 +313,7 @@ class Workflow(BaseRecord):
     def prompts(
         cls,
         project: Callable[[], HirakuConfig],
-        workflows: Mapping[str, Workflow] | None = None,
+        workflows: Mapping[str, Workflow],
     ) -> list[Prompt]:
         """Return one prompt per workflow that starts it for the user.
 
@@ -326,12 +323,10 @@ class Workflow(BaseRecord):
 
         Args:
             project: Returns the project configuration as currently saved.
-            workflows: Loaded workflows by ID; loaded from the project if
-                omitted.
+            workflows: Loaded workflows by ID.
         """
         from mcp.server.mcpserver.prompts import Prompt
 
-        loaded = load_workflows(project()) if workflows is None else workflows
         return [
             Prompt.from_function(
                 _prompt_function(workflow, project),
@@ -339,7 +334,7 @@ class Workflow(BaseRecord):
                 description=summary(workflow_description(workflow))
                 or f"Start the {workflow_id} workflow.",
             )
-            for workflow_id, workflow in sorted(loaded.items())
+            for workflow_id, workflow in sorted(workflows.items())
         ]
 
     def _start_model(self) -> type[BaseModel]:
@@ -673,18 +668,6 @@ def tool_name(workflow_id: str, name: str) -> str:
     return f"{workflow_id}_{name}"
 
 
-def split_tool_name(name: str) -> tuple[str, str]:
-    """Split a full tool name into workflow ID and tool name.
-
-    Raises:
-        hiraku.errors.WorkflowError: If the name has no workflow prefix.
-    """
-    workflow_id, separator, tool = name.partition("_")
-    if not separator or not workflow_id or not tool:
-        raise WorkflowError(f"Unknown workflow tool {name!r}")
-    return workflow_id, tool
-
-
 def _import_workflow(directory: Path) -> type[Workflow]:
     # Each workflow directory becomes a package below a project-specific root
     # package, so relative imports work without changing sys.path.
@@ -887,12 +870,7 @@ def _reply(
     instruction_id = values.pop("instruction_id", None)
     if isinstance(instruction_id, bool) or not isinstance(instruction_id, int):
         raise ValidationError("instruction_id must be an integer")
-    session_id = values.pop("session_id", None)
-    if session_id is None:
-        session_id, failure = _active_session(workflow)
-        if failure is not None:
-            return failure
-    validate_session_id(session_id)
+    session_id = validate_session_id(values.pop("session_id", None))
     try:
         with locked(session_id, config=workflow.config):
             return _reply_locked(workflow, handler, session_id, instruction_id, values)
@@ -952,26 +930,6 @@ def _reply_locked(
     result.advance(response, _reply_specs(workflow), call)
     result.save(config=workflow.config)
     return {"status": "accepted", **result.response}
-
-
-def _active_session(workflow: Workflow) -> tuple[str, dict[str, Any] | None]:
-    active = [
-        item["session_id"]
-        for item in Session.list_all(config=workflow.config)
-        if item.get("workflow") == workflow.id and item.get("status") == "active"
-    ]
-    if len(active) == 1:
-        return active[0], None
-    if active:
-        message = (
-            f"Several {workflow.id} sessions are active ({', '.join(active)}); "
-            "pass session_id"
-        )
-    else:
-        message = (
-            f"No active {workflow.id} session; start one with the {workflow.id} tool"
-        )
-    return "", {"status": "rejected", "message": message}
 
 
 def _validate(

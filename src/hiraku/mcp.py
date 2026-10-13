@@ -23,12 +23,12 @@ from mcp.server.mcpserver.exceptions import ResourceError
 from mcp.server.mcpserver.tools import Tool
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import ValidationError as PydanticValidationError
+from pydantic_core import to_jsonable_python
 
 from .agent import load_context
 from .config import HirakuConfig
 from .errors import GitError, HirakuError
 from .git import GitRepository
-from .io import json_value
 from .record import Record, load_record
 from .session import Session
 from .workflow import Workflow, load_workflows
@@ -95,7 +95,7 @@ def _project_status(project: Callable[[], HirakuConfig]) -> Tool:
             branch = GitRepository(config).current_branch
         except GitError:
             branch = None
-        return json_value(
+        return to_jsonable_python(
             {
                 "project_root": config.root,
                 "active_record_id": config.active_record_id,
