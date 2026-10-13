@@ -1,0 +1,10 @@
+id,record_id,timestamp,entrypoint,metric.val/log_loss,metric.val/accuracy,metric.duration,param.model,param.seed,param.max_depth
+forest-3,random-forest,2026-01-01T05:00:00Z,train,0.36,0.85,22,random_forest,3,8
+logistic-1,logistic-baseline,2026-01-01T00:00:00Z,train,0.48,0.78,3,logistic,1,
+tuning-3,forest-tuning,2026-01-01T08:00:00Z,train,0.28,0.90,26,random_forest,3,6
+logistic-3,logistic-baseline,2026-01-01T02:00:00Z,train,0.47,0.79,4,logistic,3,
+forest-1,random-forest,2026-01-01T03:00:00Z,train,0.38,0.84,20,random_forest,1,8
+tuning-1,forest-tuning,2026-01-01T06:00:00Z,train,0.32,0.88,24,random_forest,1,6
+logistic-2,logistic-baseline,2026-01-01T01:00:00Z,train,0.45,0.80,3,logistic,2,
+tuning-2,forest-tuning,2026-01-01T07:00:00Z,train,0.34,0.87,25,random_forest,2,6
+forest-2,random-forest,2026-01-01T04:00:00Z,train,0.35,0.86,21,random_forest,2,8

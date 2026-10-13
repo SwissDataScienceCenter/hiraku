@@ -239,12 +239,18 @@ def main(ctx: click.Context) -> None:
 @click.option("--tracking-backend")
 @click.option("--template", type=click.Path(path_type=Path))
 @click.option("--example")
+@click.option(
+    "--results",
+    is_flag=True,
+    help="Include sample research records and synthetic tracked runs.",
+)
 @click.option("--ignore-git", is_flag=True)
 def init_command(
     path: Path | None,
     tracking_backend: str | None,
     template: Path | None,
     example: str | None,
+    results: bool,
     ignore_git: bool,
 ) -> None:
     """Initialize a project."""
@@ -255,6 +261,7 @@ def init_command(
         tracking_backend=tracking_backend,
         template=template,
         example=example,
+        results=results,
         ignore_git=ignore_git,
     )
     click.echo(f"Initialized Hiraku project at {config.path}")

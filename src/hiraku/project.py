@@ -38,6 +38,7 @@ class ProjectInitializer:
         ignore_git: bool = True,
         template: Path | str | None = None,
         example: str | None = None,
+        results: bool = False,
     ) -> HirakuConfig:
         """Create and initialize a project directory.
 
@@ -50,6 +51,7 @@ class ProjectInitializer:
                 Defaults to true for programmatic initialization.
             template: Optional local directory copied over the initialized project.
             example: Optional packaged example name whose ``src`` tree is copied.
+            results: Include the example's prepared records and tracked runs.
 
         Returns:
             The initialized `hiraku.config.HirakuConfig`.
@@ -65,6 +67,7 @@ class ProjectInitializer:
             ignore_git=ignore_git,
             template=template,
             example=example,
+            results=results,
         ).config
 
     @classmethod
@@ -77,6 +80,7 @@ class ProjectInitializer:
         ignore_git: bool = True,
         template: Path | str | None = None,
         example: str | None = None,
+        results: bool = False,
     ) -> _InitializationResult:
         """Initialize a project and report paths created by the operation."""
         from .config import HirakuConfig
@@ -84,6 +88,8 @@ class ProjectInitializer:
 
         if template is not None and example is not None:
             raise ValidationError("template and example are mutually exclusive")
+        if results and example is None:
+            raise ValidationError("results requires a packaged example")
         project_root = Path(root).expanduser().absolute()
         if not ignore_git:
             try:
@@ -107,10 +113,21 @@ class ProjectInitializer:
         with ExitStack() as stack:
             overlay = cls._resolve_overlay(template, example, stack)
             entries = cls._inventory_overlay(overlay, project_root)
+            result_overlay = None
+            if results:
+                source = files("hiraku.resources") / "examples" / example / "results"
+                if not source.is_dir():
+                    raise ValidationError(f"Example {example!r} has no results")
+                result_overlay = stack.enter_context(as_file(source))
+                entries.extend(cls._inventory_overlay(result_overlay, project_root))
             data = dict(HirakuConfig.DEFAULTS)
             overlay_marker = overlay / "hiraku.yml" if overlay is not None else None
             if overlay_marker is not None and overlay_marker.is_file():
                 data = load_yaml_mapping(overlay_marker)
+            if result_overlay is not None:
+                result_marker = result_overlay / "hiraku.yml"
+                if result_marker.is_file():
+                    data.update(load_yaml_mapping(result_marker))
             if tracking_backend is not None:
                 data["tracking_backend"] = {"type": tracking_backend}
             config = HirakuConfig(path=marker, root=project_root, **data)
