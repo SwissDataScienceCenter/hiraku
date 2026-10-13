@@ -103,10 +103,13 @@ and a wider plotting area, with horizontal scrolling on narrow screens.
 - **Progress** plots one summary metric per run against timestamps, or a
   clearly labelled deterministic run index when timestamps are missing. A
   best-so-far overlay appears only when the metric direction is declared.
+  **Progress metric (Y axis)** selects the vertical metric; the horizontal
+  axis always uses time or run order. Only that metric's goal is shown.
 - **Pareto** plots two selected metrics and highlights the nondominated
   frontier. Directions use unambiguous declarations from the comparison
   scope, including each record represented by runs in subtree and source
   scopes; unknown or conflicting directions require an explicit choice.
+  Separate **X metric** and **Y metric** selectors and goals appear in this view.
 - Missing and non-finite values are excluded from calculations with a visible
   omitted-row count and are never treated as zero.
 - Filter the comparison cohort by a recorded parameter (for example an

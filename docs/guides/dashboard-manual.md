@@ -46,8 +46,11 @@ For example, selecting the `digits` task with **This record** may show no
 runs; choose **This subtree** to compare its `weak-l2` and `strong-l2`
 experiments. **Progress** shows one summary metric per run over time (or run
 order when timestamps are absent). **Pareto** compares two metrics using
-their declared maximize/minimize directions. Select axes and parameters that
-make the runs comparable. Missing metric values are omitted from plots and
+their declared maximize/minimize directions. In Progress, **Progress metric
+(Y axis)** selects the vertical metric; the horizontal axis is time or run
+order. Pareto shows separate **X metric** and **Y metric** selectors and goals.
+Select axes and parameters that make the runs comparable. Missing metric
+values are omitted from plots and
 reported, rather than treated as zero.
 
 ## Create a record

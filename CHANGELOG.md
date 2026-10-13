@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Label plot controls by view, explain the Progress time axis, and hide Pareto-only metric and goal controls in Progress.
 - Generate three simulated Autoresearch dashboard runs on macOS and Linux, and open use-case demos in subtree scope so child results are visible.
 - Preview the current record draft before creation and show its ID in the preview.
 - Require consistent optimization directions across records represented in subtree plots before selecting a default direction.

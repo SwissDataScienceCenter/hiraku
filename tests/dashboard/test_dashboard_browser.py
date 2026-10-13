@@ -483,20 +483,17 @@ def test_digits_demo_defaults_and_mlflow_training_ui(tmp_path, monkeypatch):
                 Select(
                     _control(
                         browser,
-                        'marimo-dropdown[data-label*="X / progress metric"]',
+                        'marimo-dropdown[data-label*="Progress metric (Y axis)"]',
                         "select",
                     )
                 ).first_selected_option.text
                 == "val/log_loss"
             )
-            assert (
-                Select(
-                    _control(
-                        browser, 'marimo-dropdown[data-label*="Y metric"]', "select"
-                    )
-                ).first_selected_option.text
-                == "val/accuracy"
+            assert not _elements(browser, 'marimo-dropdown[data-label*="Y metric"]')
+            assert not _elements(
+                browser, 'marimo-dropdown[data-label*="Y metric goal"]'
             )
+            assert "X axis: Run timestamp" in _body(browser)
             _control(browser, "marimo-vega", "canvas")
             _control(
                 browser,
@@ -510,6 +507,22 @@ def test_digits_demo_defaults_and_mlflow_training_ui(tmp_path, monkeypatch):
                         "data-label"
                     )
                 )
+            )
+            assert (
+                Select(
+                    _control(
+                        browser, 'marimo-dropdown[data-label*="X metric"]', "select"
+                    )
+                ).first_selected_option.text
+                == "val/log_loss"
+            )
+            assert (
+                Select(
+                    _control(
+                        browser, 'marimo-dropdown[data-label*="Y metric"]', "select"
+                    )
+                ).first_selected_option.text
+                == "val/accuracy"
             )
             canvas = _rendered_canvas(browser)
             browser.execute_script("arguments[0].scrollIntoView()", canvas)

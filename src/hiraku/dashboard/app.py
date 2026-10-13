@@ -1145,14 +1145,20 @@ def _(
 
 
 @app.cell
-def _(default_plot_metrics, metrics, mo, params, snapshot):
+def _(mo):
     view = mo.ui.radio(["Progress", "Pareto"], value="Progress", label="Plot view")
+    mo.vstack([mo.md("## Plots"), view])
+    return (view,)
+
+
+@app.cell
+def _(default_plot_metrics, metrics, mo, params, snapshot, view):
     _default_x, _default_y = default_plot_metrics(snapshot)
     x_metric = mo.ui.dropdown(
         metrics,
         value=_default_x,
         allow_select_none=True,
-        label="X / progress metric",
+        label="Progress metric (Y axis)" if view.value == "Progress" else "X metric",
     )
     y_metric = mo.ui.dropdown(
         metrics,
@@ -1165,16 +1171,24 @@ def _(default_plot_metrics, metrics, mo, params, snapshot):
     )
     mo.vstack(
         [
-            mo.md("## Plots"),
             mo.md(
                 "Plots compare final metrics across runs. "
                 "Each point represents one run; epoch histories are in your tracker."
             ),
-            view,
-            mo.hstack([x_metric, y_metric, cohort_field]),
+            mo.md(
+                "**X axis:** Run timestamp, or run index when timestamps are missing. "
+                "**Y axis:** The selected progress metric."
+                if view.value == "Progress"
+                else "**X and Y axes:** The two selected metrics."
+            ),
+            mo.hstack(
+                [x_metric, cohort_field]
+                if view.value == "Progress"
+                else [x_metric, y_metric, cohort_field]
+            ),
         ]
     )
-    return cohort_field, view, x_metric, y_metric
+    return cohort_field, x_metric, y_metric
 
 
 @app.cell
@@ -1186,20 +1200,20 @@ def _(cohort_field, mo, snapshot):
 
 
 @app.cell
-def _(metric_direction, mo, snapshot, x_metric, y_metric):
+def _(metric_direction, mo, snapshot, view, x_metric, y_metric):
     x_direction = mo.ui.dropdown(
         ["minimize", "maximize"],
         value=metric_direction(snapshot, x_metric.value),
         allow_select_none=True,
-        label="X direction",
+        label=("Progress metric goal" if view.value == "Progress" else "X metric goal"),
     )
     y_direction = mo.ui.dropdown(
         ["minimize", "maximize"],
         value=metric_direction(snapshot, y_metric.value),
         allow_select_none=True,
-        label="Y direction",
+        label="Y metric goal",
     )
-    mo.hstack([x_direction, y_direction])
+    mo.hstack([x_direction] if view.value == "Progress" else [x_direction, y_direction])
     return x_direction, y_direction
 
 
