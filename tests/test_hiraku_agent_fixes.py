@@ -404,3 +404,74 @@ def test_implement_timeout_stops_the_whole_group_and_keeps_the_edits(
         time.sleep(0.1)
     else:
         pytest.fail("the agent's own child process survived the timeout")
+
+
+# ------------------------------------------- implement worktrees live outside .git
+
+
+def test_implement_worktree_is_outside_git_and_out_of_git_status(
+    config: HirakuConfig, task: Record, tmp_path: Path
+) -> None:
+    _approved_proposal(config, task)
+    seen = tmp_path / "cwd.txt"
+    script = f"import os, json; open({str(seen)!r}, 'w').write(os.getcwd()); " + (
+        "print(json.dumps({'blocked': 'just looking', 'commit': None}))"
+    )
+    for _ in range(2):  # twice: the exclude entry is added once
+        run_implement("baseline", command=["python3", "-c", script], config=config)
+    cwd = Path(seen.read_text())
+    assert ".hiraku-worktrees" in cwd.parts
+    assert ".git" not in cwd.parts
+    exclude = (config.root / ".git" / "info" / "exclude").read_text()
+    assert exclude.count("/.hiraku-worktrees/") == 1
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=config.root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert ".hiraku-worktrees" not in status
+
+
+def test_a_worktree_dir_under_git_is_refused(
+    config: HirakuConfig, task: Record, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _approved_proposal(config, task)
+    monkeypatch.setenv("HIRAKU_AGENT_WORKTREE_DIR", str(config.root / ".git" / "wt"))
+    with pytest.raises(AgentError, match="inside a .git directory"):
+        run_implement(
+            "baseline",
+            command=["python3", "-c", "raise SystemExit('must not run')"],
+            config=config,
+        )
+
+
+# ------------------------------------------- implement: time budget and smoke tests
+
+
+def _budget(prompt: str) -> int:
+    state = json.loads(prompt.split("```json")[1].split("```")[0])
+    return state["time_budget_minutes"]
+
+
+def test_implement_gets_its_own_longer_timeout_and_is_told_it(
+    config: HirakuConfig, task: Record
+) -> None:
+    _approved_proposal(config, task)
+    dry = run_implement("baseline", dry_run=True, config=config)
+    assert _budget(dry.prompt) == 60
+    assert "Smoke-test as you build" in dry.prompt
+    assert "HIRAKU_RECORD_ID" in dry.prompt
+    assert "Commit once, at the end" in dry.prompt
+    assert ".hiraku-progress.md" in dry.prompt
+
+    save_defaults(AgentDefaults(implement_timeout=1800), config)
+    assert _budget(run_implement("baseline", dry_run=True, config=config).prompt) == 30
+    explicit = run_implement("baseline", dry_run=True, timeout=600, config=config)
+    assert _budget(explicit.prompt) == 10
+
+    blocked = {"blocked": "just checking", "commit": None}
+    result = run_implement("baseline", command=stub_agent(blocked), config=config)
+    meta = json.loads((result.log / "meta.json").read_text())
+    assert meta["timeout"] == 1800

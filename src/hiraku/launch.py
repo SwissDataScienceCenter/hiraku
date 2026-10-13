@@ -25,6 +25,97 @@ _ATTRIBUTION_KEYS = {
 }
 
 
+# Exit status of a launch refused because the dispatcher would run another commit than
+# the one asked for (the record's own, or `--commit`).
+COMMIT_MISMATCH_EXIT = 86
+COMMIT_CHECK_OPT_OUT_ENV = "HIRAKU_NO_COMMIT_CHECK"
+
+# Runs inside whatever the dispatcher prepared (its checkout, its job, its host), just
+# before the command, so it sees the commit that would really run: the dispatcher's
+# `HIRAKU_COMMIT` (the launch contract), else `git rev-parse HEAD` where it runs. A
+# dispatcher that ignores `--commit` (`launch.sh` runs the current checkout) is caught
+# here instead of silently running, and attributing to the record, other code.
+# Arguments: expected commit, then the command.
+_COMMIT_GUARD = r"""
+expected=$1
+shift
+actual=${HIRAKU_COMMIT:-}
+source="the dispatcher's HIRAKU_COMMIT"
+if [ -z "$actual" ] && command -v git >/dev/null 2>&1; then
+  actual=$(git rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null || true)
+  source="git HEAD in $(pwd)"
+fi
+if [ -z "$actual" ]; then
+  echo "hiraku: warning: cannot tell which commit runs here" \
+    "(no HIRAKU_COMMIT, no git checkout); expected $expected" >&2
+else
+  case "$expected" in
+    "$actual"*) ;;
+    *)
+      case "$actual" in
+        "$expected"*) ;;
+        *)
+          echo "hiraku: refusing to run: the launch asks for commit $expected," \
+            "but this would run $actual ($source)." >&2
+          echo "hiraku: the dispatcher does not check out the requested commit" \
+            "(launch.sh runs the current checkout). Use a dispatcher that does" \
+            "(--dispatch worktree or slurm; see hiraku-agent check-dispatch)," \
+            "check out $expected first, or pass --no-commit-check to run this" \
+            "checkout anyway." >&2
+          exit 86
+          ;;
+      esac
+      ;;
+  esac
+  if [ "${HIRAKU_GIT_STATE:-}" = dirty ]; then
+    echo "hiraku: warning: the checkout has uncommitted changes," \
+      "so the code that runs is not exactly $expected." >&2
+  fi
+fi
+exec "$@"
+"""
+
+
+def resolve_commit(config: HirakuConfig, ref: str) -> str:
+    """`ref` as a full commit hash in the project's repository.
+
+    Outside a Git repository (or without Git) `ref` is returned unchanged and the guard
+    compares it as given. Inside one, a ref that does not resolve is an error: no
+    dispatcher can run it.
+    """
+    try:
+        inside = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=config.root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return ref
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return ref
+    resolved = subprocess.run(
+        ["git", "rev-parse", "--verify", "-q", f"{ref}^{{commit}}"],
+        cwd=config.root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if resolved.returncode != 0 or not resolved.stdout.strip():
+        raise LaunchError(
+            f"Commit {ref!r} is not in this repository, so it cannot be launched "
+            f"here. Fetch it (the record's branch) first."
+        )
+    return resolved.stdout.strip()
+
+
+def guarded(command: Sequence[str], expected: str) -> list[str]:
+    """`command` preceded by the commit guard: it runs only if the commit the
+    dispatcher prepared is `expected`."""
+    return ["/bin/sh", "-c", _COMMIT_GUARD, "hiraku-commit-check", expected, *command]
+
+
 def state_paths(config: HirakuConfig) -> list[str]:
     """Paths of Hiraku's own project state, relative to the project root.
 
@@ -119,6 +210,7 @@ def launch(
     env: Mapping[str, str] | None = None,
     capture_output: bool = False,
     check: bool = True,
+    verify_commit: bool = True,
     config: HirakuConfig | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """
@@ -134,6 +226,14 @@ def launch(
         env: Additional environment variables.
         capture_output: Capture child output in the result instead of streaming it.
         check: Raise on non-zero child exit when true.
+        verify_commit: When a commit is launched (the record's own, or ``commit``),
+            refuse to run the command unless the dispatcher really prepared that
+            commit: a guard runs just before the command, where the dispatcher put
+            it, and compares ``HIRAKU_COMMIT`` (else ``git rev-parse HEAD`` there)
+            with it, exiting with ``COMMIT_MISMATCH_EXIT`` on a mismatch. So a
+            dispatcher that ignores ``--commit`` (``launch.sh``) cannot run, and
+            attribute to the record, other code. ``HIRAKU_NO_COMMIT_CHECK=1`` also
+            turns it off.
         config: Project configuration; discovered when omitted.
 
     Returns:
@@ -166,6 +266,10 @@ def launch(
         defaults.update(args)
     command = [*entrypoint.command, *render_arguments(defaults)]
     dispatcher = _dispatcher(selected, dispatch)
+    if selected_commit is not None:
+        selected_commit = resolve_commit(selected, selected_commit)
+        if verify_commit and not os.environ.get(COMMIT_CHECK_OPT_OUT_ENV):
+            command = guarded(command, selected_commit)
     dispatcher_arguments: list[str] = [str(dispatcher)]
     if selected_commit is not None:
         dispatcher_arguments.extend(("--commit", selected_commit))
@@ -215,6 +319,11 @@ def launch(
             result.returncode, result.args, output=result.stdout, stderr=result.stderr
         )
         message = f"Dispatcher {dispatcher} exited with status {result.returncode}"
+        if result.returncode == COMMIT_MISMATCH_EXIT:
+            message = (
+                f"Not launched: dispatcher {dispatcher} would not run commit "
+                f"{selected_commit}"
+            )
         if detail:
             message += f": {detail}"
         raise LaunchError(message) from error

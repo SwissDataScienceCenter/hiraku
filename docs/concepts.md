@@ -123,6 +123,18 @@ hiraku launch <entrypoint> --record <record-id> --dispatch worktree  # exact com
 hiraku launch <entrypoint> --record <record-id> --dispatch slurm     # exact commit, Slurm job
 ```
 
+When the record has a commit (or `--commit` names one), `hiraku launch` checks that
+the dispatcher really runs it: a short check runs just before the command, inside
+whatever the dispatcher prepared (its worktree, its Slurm job), and compares the
+commit the dispatcher reports (`HIRAKU_COMMIT`, else `git rev-parse HEAD` where the
+command runs) with the requested one. On a mismatch the command does not run and the
+launch exits with status 86. So `launch.sh`, which runs the current checkout, launches
+a record only while that record's commit is checked out; anything else would run other
+code and attribute its results to the record. A checkout with uncommitted changes
+still runs, with a warning. `--no-commit-check` (or `HIRAKU_NO_COMMIT_CHECK=1`) skips
+the check. A commit that is not in the repository is refused before the dispatcher is
+called. Records without a commit are not checked.
+
 Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`,
 and `HIRAKU_ENTRYPOINT`. The
 dispatcher reports `HIRAKU_COMMIT` and `HIRAKU_GIT_STATE`: `launch.sh` reports

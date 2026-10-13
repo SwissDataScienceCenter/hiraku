@@ -123,7 +123,7 @@ implements the data model and not yet the agent integration." Concretely:
 
 | Command | Does |
 | --- | --- |
-| `hiraku launch ENTRYPOINT_NAME [-- ENTRYPOINT_OVERRIDES...] [--record ID] [--commit REF] [--dispatch NAME] [--dry-run]` | Resolve `ENTRYPOINT_NAME` on `--record` (defaults to the active record; inheritance means a node can launch an entrypoint declared on an ancestor) and launch it. `--dry-run` prints the resolved dispatcher and command instead of running them. |
+| `hiraku launch ENTRYPOINT_NAME [-- ENTRYPOINT_OVERRIDES...] [--record ID] [--commit REF] [--dispatch NAME] [--dry-run] [--no-commit-check]` | Resolve `ENTRYPOINT_NAME` on `--record` (defaults to the active record; inheritance means a node can launch an entrypoint declared on an ancestor) and launch it. When the record has a commit (or `--commit` names one), the command runs only if the dispatcher really checked that commit out (`HIRAKU_COMMIT`, else HEAD where the command runs); otherwise nothing runs and the exit status is 86, e.g. `launch.sh` while another branch is checked out. `--no-commit-check` runs it anyway. `--dry-run` prints the resolved dispatcher, the command and the commit it will check instead of running them. |
 | `hiraku runs [list] [--record ID] [--metrics a,b] [--params a,b] [--sort NAME] [--ascending \| --descending] [--limit N] [--json]` | List normalized tracked runs from `--record`'s resolved tracking source. **Scopes to the tracking source, not to `--record` itself**: it returns every run with any record attribution in that source, siblings and descendants included — see `hiraku_agent.node.Node.runs`'s docstring for why `hiraku_agent`'s own scheduler cannot use this call directly and instead filters by `record_id` itself. |
 
 ## `hiraku-agent`

@@ -754,7 +754,7 @@ def test_run_implement_binds_the_reported_commit_and_merges_entrypoints(
         task=git_task,
         kind="baseline",
         expectation="Reaches 0.80 val_accuracy.",
-        entrypoints={"train": {"command": ["python", "train_baseline.py"], "args": {}}},
+        entrypoints={"train": {"command": ["python", "implemented.py"], "args": {}}},
         config=git_config,
     )
     approve(node, by="qianqian")
@@ -762,7 +762,7 @@ def test_run_implement_binds_the_reported_commit_and_merges_entrypoints(
     payload = {
         "blocked": None,
         "commit": "HEAD",
-        "entrypoints": {"eval": {"command": ["python", "eval.py"], "args": {}}},
+        "entrypoints": {"eval": {"command": ["python", "implemented.py"], "args": {}}},
         "files_changed": ["implemented.py"],
         "notes": "Added a minimal training script matching the proposal's scope.",
     }
@@ -781,7 +781,7 @@ def test_run_implement_binds_the_reported_commit_and_merges_entrypoints(
     assert reloaded.commit == expected_commit
     assert not reloaded.is_proposal
     # The node's own pre-existing override survives the merge ...
-    assert reloaded.entrypoints["train"].command == ["python", "train_baseline.py"]
+    assert reloaded.entrypoints["train"].command == ["python", "implemented.py"]
     # ... alongside the new one the agent reported.
     assert "eval" in reloaded.entrypoints
     assert "minimal training script" in sections.read_section(

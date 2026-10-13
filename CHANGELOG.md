@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- `hiraku launch` now refuses to run a record's entrypoint unless the dispatcher really checked out the record's commit (or `--commit`): a check just before the command compares `HIRAKU_COMMIT` (else HEAD where it runs) with it and exits with status 86 on a mismatch. Previously `launch.sh` ignored `--commit` and ran, and attributed to the record, whatever was checked out. `--no-commit-check` / `HIRAKU_NO_COMMIT_CHECK=1` skip it.
+
 ## [0.1.1] - 2026-09-30
 
 ### Added

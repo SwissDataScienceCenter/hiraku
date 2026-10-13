@@ -388,3 +388,19 @@ def test_a_failing_step_keeps_the_steps_done_before_it(
     assert [step.action for step in caught.value.result.steps] == ["analyze"]
     assert "triage on baseline failed" in str(caught.value)
     assert load_node("baseline", task=task, config=config).verdict == "supports"
+
+
+def test_implement_adds_entrypoints_to_a_node_that_had_none_of_its_own(
+    config: HirakuConfig, task: Record
+) -> None:
+    _approved(config, task)  # inherits the task's entrypoints, stores none itself
+    assert load_node("baseline", task=task, config=config).entrypoints is None
+    payload = {
+        "commit": "HEAD",
+        "entrypoints": {"eval": {"command": ["python", "implemented.py"], "args": {}}},
+        "notes": "done",
+    }
+    run_implement("baseline", command=committing_agent(payload), config=config)
+    node = load_node("baseline", task=task, config=config)
+    assert "eval" in node.entrypoints
+    assert node.commit is not None

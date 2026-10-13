@@ -258,3 +258,81 @@ def test_slurm_dispatcher_needs_sbatch(tmp_path: Path) -> None:
     )
     assert result.returncode == 1
     assert "sbatch was not found" in result.stderr
+
+
+def _git_state(script: Path, env: dict[str, str]) -> str:
+    result = _run(
+        script, "--", "/bin/sh", "-c", 'printf "%s" "$HIRAKU_GIT_STATE"', env=env
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+def test_launch_dispatcher_leaves_hiraku_state_out_of_the_dirty_check(
+    tmp_path: Path,
+) -> None:
+    config = _repository(tmp_path)
+    script = config.dispatch_dir / "launch.sh"
+    state = "hiraku.yml\nhiraku\nruns.csv\nruns.csv.lock"
+    with_state = {**os.environ, "HIRAKU_STATE_PATHS": state}
+    without = {k: v for k, v in os.environ.items() if k != "HIRAKU_STATE_PATHS"}
+
+    # A new record, a run row and a lock file (untracked), and an edit to a file that is
+    # committed (the configuration, the dispatch script's own directory).
+    records = config.hiraku_dir / "records"
+    records.mkdir(parents=True, exist_ok=True)
+    (records / "node.md").write_text("approved", encoding="utf-8")
+    (tmp_path / "runs.csv").write_text("id,record_id\n", encoding="utf-8")
+    (tmp_path / "runs.csv.lock").write_text("", encoding="utf-8")
+    with (tmp_path / "hiraku.yml").open("a", encoding="utf-8") as handle:
+        handle.write("\n# edited\n")
+
+    assert _git_state(script, with_state) == "clean"
+    # Without the list (an older `hiraku`, a hand-run script) nothing is left out.
+    assert _git_state(script, without) == "dirty"
+
+    # Code is still code: an uncommitted change to a tracked file, or a new source
+    # file, makes the launch dirty however much state is also around.
+    (tmp_path / "marker.txt").write_text("changed", encoding="utf-8")
+    assert _git_state(script, with_state) == "dirty"
+    _git(tmp_path, "checkout", "--", "marker.txt")
+    assert _git_state(script, with_state) == "clean"
+    (tmp_path / "train.py").write_text("print(1)", encoding="utf-8")
+    assert _git_state(script, with_state) == "dirty"
+
+
+def test_launch_dispatcher_handles_state_paths_with_spaces_and_glob_characters(
+    tmp_path: Path,
+) -> None:
+    config = _repository(tmp_path)
+    script = config.dispatch_dir / "launch.sh"
+    odd = tmp_path / "my state [x]"
+    odd.mkdir()
+    (odd / "a.txt").write_text("a", encoding="utf-8")
+    env = {**os.environ, "HIRAKU_STATE_PATHS": "my state [x]"}
+
+    assert _git_state(script, env) == "clean"
+    (tmp_path / "my state x").write_text("code", encoding="utf-8")
+    assert _git_state(script, env) == "dirty"
+
+
+def test_hiraku_launch_tells_the_dispatcher_which_paths_are_its_own_state(
+    tmp_path: Path,
+) -> None:
+    from hiraku.launch import launch, state_paths
+    from hiraku.record import Record
+
+    config = _repository(tmp_path)
+    Record.create("baseline", config=config)
+    assert state_paths(config) == ["hiraku.yml", "hiraku", "runs.csv", "runs.csv.lock"]
+    (config.hiraku_dir / "records" / "more.md").write_text("x", encoding="utf-8")
+    (tmp_path / "runs.csv").write_text("id,record_id\n", encoding="utf-8")
+
+    result = launch(
+        {"command": ["/bin/sh", "-c", 'printf "%s" "$HIRAKU_GIT_STATE"']},
+        record_id="baseline",
+        dispatch="launch.sh",
+        capture_output=True,
+        config=config,
+    )
+    assert result.stdout == "clean"

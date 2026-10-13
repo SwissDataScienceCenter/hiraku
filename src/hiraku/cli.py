@@ -33,7 +33,7 @@ from .config import HirakuConfig
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .git import GitRepository
 from .io import dump_yaml
-from .launch import _dispatcher, launch, render_arguments
+from .launch import _dispatcher, launch, render_arguments, resolve_commit
 from .record import Record, list_records, load_record
 from .run import Run
 from .validation import validate_identifier
@@ -720,6 +720,14 @@ def action_delete(state: CLIContext, reference: str) -> None:
 @click.option("--commit")
 @click.option("--dispatch")
 @click.option("--dry-run", is_flag=True)
+@click.option(
+    "no_commit_check",
+    "--no-commit-check",
+    is_flag=True,
+    help="run even if the dispatcher does not check out the record's commit "
+    "(e.g. launch.sh on another checkout); the run is then attributed to code "
+    "that is not the record's",
+)
 @click.pass_obj
 def launch_command(
     state: CLIContext,
@@ -729,8 +737,15 @@ def launch_command(
     commit: str | None,
     dispatch: str | None,
     dry_run: bool,
+    no_commit_check: bool,
 ) -> None:
-    """Launch an effective record entrypoint."""
+    """Launch an effective record entrypoint.
+
+    When the record has a commit (or `--commit` names one), the command runs only if
+    the dispatcher really checked that commit out: a check just before the command
+    compares the commit the dispatcher reports (`HIRAKU_COMMIT`, else the checkout's
+    HEAD) with it, and refuses (exit status 86) on a mismatch, as with `launch.sh`
+    on another branch. `--no-commit-check` skips it."""
     record = _active(state.config, record_id)
     entrypoint = record.entrypoint(entrypoint_name, config=state.config)
     overrides = _overrides(entrypoint_overrides)
@@ -740,6 +755,12 @@ def launch_command(
         arguments.update(overrides)
         command = [*entrypoint.command, *render_arguments(arguments)]
         click.echo(f"Command: {shlex.join(command)}")
+        wanted = commit or record.commit
+        if wanted and not no_commit_check:
+            click.echo(
+                f"Commit check: runs only if the dispatcher checks out "
+                f"{resolve_commit(state.config, wanted)}"
+            )
         return
     result = launch(
         entrypoint,
@@ -749,6 +770,7 @@ def launch_command(
         commit=commit,
         dispatch=dispatch,
         check=False,
+        verify_commit=not no_commit_check,
         config=state.config,
     )
     if result.returncode:
