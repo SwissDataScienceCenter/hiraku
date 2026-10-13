@@ -24,7 +24,12 @@ def _():
         create_record,
         validate_record_draft,
     )
-    from hiraku.dashboard.branding import logo_data_uri, theme_css
+    from hiraku.dashboard.branding import (
+        logo_data_uri,
+        section_body,
+        section_heading,
+        theme_css,
+    )
     from hiraku.dashboard.capability import DashboardCapability
     from hiraku.dashboard.graph import RecordGraph, tree_payload
     from hiraku.dashboard.jobs import (
@@ -104,6 +109,8 @@ def _():
         sort_fields,
         sorted_runs,
         theme_css,
+        section_body,
+        section_heading,
         compute_layout,
         reconcile_navigation,
         RecordGraph,
@@ -236,6 +243,62 @@ def _(get_record, mo, record_ids, set_record):
 
 
 @app.cell
+def _(breadcrumb, graph, mo):
+    mo.vstack([mo.md("## Records"), breadcrumb, graph])
+    return
+
+
+@app.cell
+def _(section_heading):
+    section_heading("detail", "Record detail")
+    return
+
+
+@app.cell
+def _(mo, section_body, snapshot):
+    _record = next(
+        (r for r in snapshot.records if r.id == snapshot.selected_record_id), None
+    )
+    _detail = []
+    if _record:
+        _detail.extend(
+            [
+                mo.md(
+                    f"### {_record.id}\nType: {_record.type or '—'} · "
+                    f"Status: {_record.status or '—'} · Commit: {_record.commit or '—'}"
+                ),
+                mo.md(_record.markdown or "_No description._"),
+                mo.ui.table(
+                    [
+                        {
+                            "field": k,
+                            "value": str(v),
+                            "defined by": str(_record.sources.get(k)),
+                            "origin": "explicit"
+                            if _record.sources.get(k) == _record.id
+                            else "inherited / merged",
+                        }
+                        for k, v in _record.fields.items()
+                    ],
+                    selection=None,
+                ),
+            ]
+        )
+    else:
+        _detail.append(mo.md("No record selected."))
+    _section_content = mo.vstack(_detail)
+    section_body("detail", _section_content)
+    return
+
+
+@app.cell
+def _(capability, mo, section_heading):
+    mo.stop(not capability.interactive)
+    section_heading("create", "Create record")
+    return
+
+
+@app.cell
 def _(
     capability,
     get_record,
@@ -246,6 +309,7 @@ def _(
     set_form_submit,
     set_preview_request,
     set_reset_version,
+    section_body,
     uuid,
 ):
     mo.stop(not capability.interactive)
@@ -341,9 +405,8 @@ def _(
         label="Cancel",
         on_click=lambda _: set_reset_version(get_reset_version() + 1),
     )
-    mo.vstack(
+    _section_content = mo.vstack(
         [
-            mo.md("## Create record"),
             mo.md(
                 "Create a research root or a child experiment. No project files "
                 "are written until **Create** is pressed."
@@ -356,6 +419,7 @@ def _(
             ),
         ]
     )
+    section_body("create", _section_content)
     return form, preview_button, create_button, cancel_button
 
 
@@ -471,7 +535,7 @@ def _(
 
 
 @app.cell
-def _(get_form_error, get_form_result, get_preview_result, mo):
+def _(get_form_error, get_form_result, get_preview_result, mo, section_body):
     _messages = []
     _result = get_form_result()
     if _result:
@@ -499,7 +563,7 @@ def _(get_form_error, get_form_result, get_preview_result, mo):
                     f"would be written to `{_preview['path']}`."
                 )
             )
-    mo.vstack(_messages) if _messages else mo.md("")
+    section_body("create", mo.vstack(_messages) if _messages else mo.md(""))
 
 
 @app.cell
@@ -553,11 +617,18 @@ def _(get_action_refresh, mo, record_select, refresh, scope, session):
 
 
 @app.cell
-def _(mo):
+def _(capability, mo, section_heading):
+    mo.stop(not capability.interactive)
+    section_heading("launch", "Launch run")
+    return
+
+
+@app.cell
+def _(capability, mo, section_body):
     job_refresh = mo.ui.refresh(
         options=["1s", "2s", "5s"], default_interval="1s", label="Job status"
     )
-    mo.vstack([job_refresh])
+    section_body("launch", job_refresh) if capability.interactive else mo.md("")
     return (job_refresh,)
 
 
@@ -602,6 +673,7 @@ def _(
     Path,
     set_launch_preview_request,
     set_launch_submit,
+    section_body,
     snapshot,
     uuid,
 ):
@@ -612,25 +684,21 @@ def _(
     )
     mo.stop(
         _record is None,
-        mo.vstack(
-            [
-                mo.md("## Launch run"),
-                mo.md("Select a record to launch an entrypoint."),
-            ]
+        section_body(
+            "launch",
+            mo.md("Select a record to launch an entrypoint."),
         ),
     )
     _entrypoints = _record.fields.get("entrypoints") or {}
     mo.stop(
         not _entrypoints,
-        mo.vstack(
-            [
-                mo.md("## Launch run"),
-                mo.md(
-                    "This record has no effective entrypoints. Create a record "
-                    "with an `entrypoints` mapping in **Create record → "
-                    "advanced YAML**, or select a record that inherits one."
-                ),
-            ]
+        section_body(
+            "launch",
+            mo.md(
+                "This record has no effective entrypoints. Create a record "
+                "with an `entrypoints` mapping in **Create record → "
+                "advanced YAML**, or select a record that inherits one."
+            ),
         ),
     )
     _entrypoint_names = sorted(_entrypoints)
@@ -703,9 +771,8 @@ def _(
         }
         for name, entrypoint in _entrypoints.items()
     ]
-    mo.vstack(
+    _section_content = mo.vstack(
         [
-            mo.md("## Launch run"),
             mo.md(
                 "Your entrypoint logs results to the tracking backend. "
                 "Backend query settings do not configure your script's "
@@ -719,6 +786,7 @@ def _(
             mo.hstack([launch_preview_button, launch_button]),
         ]
     )
+    section_body("launch", _section_content)
     return (
         entrypoint_select,
         dispatcher_select,
@@ -833,6 +901,7 @@ def _(
     mo,
     set_action_refresh,
     set_record,
+    section_body,
 ):
     _messages = []
     _preview = get_launch_preview_result()
@@ -912,7 +981,7 @@ def _(
                 on_click=lambda _: set_action_refresh(get_action_refresh() + 1),
             )
         )
-    mo.vstack(_messages) if _messages else mo.md("")
+    section_body("launch", mo.vstack(_messages) if _messages else mo.md(""))
 
 
 @app.cell
@@ -987,65 +1056,25 @@ def _(mo, snapshot):
 
 
 @app.cell
-def _(breadcrumb, graph, mo, snapshot):
-    _record = next(
-        (r for r in snapshot.records if r.id == snapshot.selected_record_id), None
-    )
-    _detail = [mo.md("## Record detail")]
-    if _record:
-        _detail.extend(
-            [
-                mo.md(
-                    f"### {_record.id}\nType: {_record.type or '—'} · "
-                    f"Status: {_record.status or '—'} · Commit: {_record.commit or '—'}"
-                ),
-                mo.md(_record.markdown or "_No description._"),
-                mo.ui.table(
-                    [
-                        {
-                            "field": k,
-                            "value": str(v),
-                            "defined by": str(_record.sources.get(k)),
-                            "origin": "explicit"
-                            if _record.sources.get(k) == _record.id
-                            else "inherited / merged",
-                        }
-                        for k, v in _record.fields.items()
-                    ],
-                    selection=None,
-                ),
-            ]
-        )
-    else:
-        _detail.append(mo.md("No record selected."))
-    mo.hstack(
-        [
-            mo.vstack([mo.md("## Records"), breadcrumb, graph]).style(
-                {"flex": "1 1 360px", "min-width": "0"}
-            ),
-            mo.vstack(_detail).style({"flex": "1 1 360px", "min-width": "0"}),
-        ],
-        align="start",
-        wrap=True,
-        gap=1.5,
-    )
+def _(section_heading):
+    section_heading("runs", "Runs")
     return
 
 
 @app.cell
-def _(metric_names, mo, param_names, snapshot, sort_fields):
+def _(metric_names, mo, param_names, section_body, snapshot, sort_fields):
     metrics = metric_names(snapshot)
     params = param_names(snapshot)
     metric_select = mo.ui.multiselect(metrics, value=metrics[:4], label="Metrics")
     param_select = mo.ui.multiselect(params, value=params[:2], label="Parameters")
     sort_select = mo.ui.dropdown(sort_fields(snapshot), value="timestamp", label="Sort")
     ascending = mo.ui.checkbox(value=True, label="Ascending")
-    mo.vstack(
+    _section_content = mo.vstack(
         [
-            mo.md("## Runs"),
             mo.hstack([metric_select, param_select, sort_select, ascending]),
         ]
     )
+    section_body("runs", _section_content)
     return ascending, metric_select, metrics, param_select, params, sort_select
 
 
@@ -1060,6 +1089,7 @@ def _(
     snapshot,
     sort_select,
     sorted_runs,
+    section_body,
 ):
     _runs = sorted_runs(snapshot, sort_select.value, ascending=ascending.value)
     runs_table = mo.ui.table(
@@ -1073,7 +1103,10 @@ def _(
         on_change=session.select_run,
         hidden_columns=["key"],
     )
-    mo.vstack([mo.md("No runs found in this scope." if not _runs else ""), runs_table])
+    _section_content = mo.vstack(
+        [mo.md("No runs found in this scope." if not _runs else ""), runs_table]
+    )
+    section_body("runs", _section_content)
     return (runs_table,)
 
 
@@ -1085,6 +1118,7 @@ def _(
     safe_run_url,
     set_record,
     snapshot,
+    section_body,
 ):
     import html as _html
 
@@ -1122,7 +1156,7 @@ def _(
             )
     else:
         _action = mo.md("")
-    mo.vstack(
+    _section_content = mo.vstack(
         [
             mo.md("### Run provenance"),
             mo.md(
@@ -1141,18 +1175,19 @@ def _(
             else mo.md(""),
         ]
     )
+    section_body("runs", _section_content)
     return (record_link,)
 
 
 @app.cell
-def _(mo):
+def _(mo, section_heading):
     view = mo.ui.radio(["Progress", "Pareto"], value="Progress", label="Plot view")
-    mo.vstack([mo.md("## Plots"), view])
+    section_heading("plots", "Plots")
     return (view,)
 
 
 @app.cell
-def _(default_plot_metrics, metrics, mo, params, snapshot, view):
+def _(default_plot_metrics, metrics, mo, params, section_body, snapshot, view):
     _default_x, _default_y = default_plot_metrics(snapshot)
     x_metric = mo.ui.dropdown(
         metrics,
@@ -1169,14 +1204,17 @@ def _(default_plot_metrics, metrics, mo, params, snapshot, view):
     cohort_field = mo.ui.dropdown(
         params, allow_select_none=True, label="Filter cohort by parameter"
     )
-    mo.vstack(
+    _section_content = mo.vstack(
         [
+            view,
             mo.md(
                 "Plots compare final metrics across runs. "
-                "Each point represents one run; epoch histories are in your tracker."
+                "Each point represents one run; "
+                "epoch histories are in your tracker."
             ),
             mo.md(
-                "**X axis:** Run timestamp, or run index when timestamps are missing. "
+                "**X axis:** Run timestamp, "
+                "or run index when timestamps are missing. "
                 "**Y axis:** The selected progress metric."
                 if view.value == "Progress"
                 else "**X and Y axes:** The two selected metrics."
@@ -1188,19 +1226,20 @@ def _(default_plot_metrics, metrics, mo, params, snapshot, view):
             ),
         ]
     )
+    section_body("plots", _section_content)
     return cohort_field, x_metric, y_metric
 
 
 @app.cell
-def _(cohort_field, mo, snapshot):
+def _(cohort_field, mo, section_body, snapshot):
     _values = sorted({str(r.params.get(cohort_field.value)) for r in snapshot.runs})
     cohort_value = mo.ui.dropdown(_values, allow_select_none=True, label="Cohort value")
-    cohort_value if cohort_field.value else mo.md("")
+    section_body("plots", cohort_value if cohort_field.value else mo.md(""))
     return (cohort_value,)
 
 
 @app.cell
-def _(metric_direction, mo, snapshot, view, x_metric, y_metric):
+def _(metric_direction, mo, section_body, snapshot, view, x_metric, y_metric):
     x_direction = mo.ui.dropdown(
         ["minimize", "maximize"],
         value=metric_direction(snapshot, x_metric.value),
@@ -1213,7 +1252,10 @@ def _(metric_direction, mo, snapshot, view, x_metric, y_metric):
         allow_select_none=True,
         label="Y metric goal",
     )
-    mo.hstack([x_direction] if view.value == "Progress" else [x_direction, y_direction])
+    _section_content = mo.hstack(
+        [x_direction] if view.value == "Progress" else [x_direction, y_direction]
+    )
+    section_body("plots", _section_content)
     return x_direction, y_direction
 
 
@@ -1225,6 +1267,7 @@ def _(
     mo,
     pareto_points,
     progress_points,
+    section_body,
     snapshot,
     view,
     x_direction,
@@ -1239,11 +1282,16 @@ def _(
         or cohort_value.value is None
         or str(r.params.get(cohort_field.value)) == cohort_value.value
     ]
-    mo.stop(x_metric.value is None, mo.md("No metric selected."))
+    mo.stop(x_metric.value is None, section_body("plots", mo.md("No metric selected.")))
     if view.value == "Progress":
         _data = progress_points(_runs, x_metric.value, direction=x_direction.value)
         _frame = _data.frame
-        mo.stop(_frame.empty, mo.md(f"No plottable runs; omitted {_data.omitted}."))
+        mo.stop(
+            _frame.empty,
+            section_body(
+                "plots", mo.md(f"No plottable runs; omitted {_data.omitted}.")
+            ),
+        )
         _x = (
             alt.X(
                 "x:T",
@@ -1276,7 +1324,10 @@ def _(
     else:
         mo.stop(
             not y_metric.value or not x_direction.value or not y_direction.value,
-            mo.md("Select both metrics and explicit optimization directions."),
+            section_body(
+                "plots",
+                mo.md("Select both metrics and explicit optimization directions."),
+            ),
         )
         _data = pareto_points(
             _runs,
@@ -1286,7 +1337,10 @@ def _(
             direction_y=y_direction.value,
         )
         mo.stop(
-            _data.frame.empty, mo.md(f"No plottable runs; omitted {_data.omitted}.")
+            _data.frame.empty,
+            section_body(
+                "plots", mo.md(f"No plottable runs; omitted {_data.omitted}.")
+            ),
         )
         _chart = (
             alt.Chart(alt.InlineData(values=_data.frame.to_dict("records")))
@@ -1316,7 +1370,7 @@ def _(
     _chart = _chart.properties(width=600, height=320)
     # Inline records avoid browser-dependent temporal parsing in Arrow transport.
     plot = mo.ui.altair_chart(_chart, chart_selection="point", label=view.value)
-    mo.vstack(
+    _section_content = mo.vstack(
         [
             mo.md(
                 f"Comparison cohort: {len(_runs)} runs · {snapshot.scope} scope · "
@@ -1329,17 +1383,19 @@ def _(
             plot.style({"max-width": "100%", "overflow-x": "auto"}),
         ]
     )
+    section_body("plots", _section_content)
     return plot, plot_frame
 
 
 @app.cell
-def _(mo, plot, plot_frame):
-    mo.vstack(
+def _(mo, plot, plot_frame, section_body):
+    _section_content = mo.vstack(
         [
             mo.md("### Selected plot points"),
             mo.ui.table(plot.apply_selection(plot_frame), selection=None),
         ]
     )
+    section_body("plots", _section_content)
     return
 
 

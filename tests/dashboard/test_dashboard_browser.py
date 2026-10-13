@@ -39,9 +39,13 @@ def _elements(browser, selector):
         """
         const found = [];
         function visit(root) {
-            found.push(...root.querySelectorAll(argumentsSelector));
-            for (const node of root.querySelectorAll('*')) {
-                if (node.shadowRoot) visit(node.shadowRoot);
+            if (root.matches?.(argumentsSelector)) found.push(root);
+            if (root.shadowRoot) {
+                visit(root.shadowRoot);
+            } else if (root.tagName === 'SLOT' && root.assignedElements().length) {
+                root.assignedElements().forEach(visit);
+            } else {
+                for (const node of root.children) visit(node);
             }
         }
         const argumentsSelector = arguments[0];
@@ -65,6 +69,7 @@ def _control(browser, host, selector):
                         selector,
                     )
                 )
+                and control.is_displayed()
             ),
             None,
         )
@@ -73,6 +78,29 @@ def _control(browser, host, selector):
 
 def _body(browser):
     return browser.find_element(By.TAG_NAME, "body").text
+
+
+def _section_button(browser, title):
+    return next(
+        (
+            button
+            for button in _elements(browser, ".hk-section-heading summary")
+            if button.get_attribute("textContent").strip() == title
+            and button.is_displayed()
+        ),
+        None,
+    )
+
+
+def _open_section(browser, title):
+    button = WebDriverWait(browser, 20).until(lambda b: _section_button(b, title))
+    if not button.find_element(By.XPATH, "..").get_attribute("open"):
+        button.click()
+    WebDriverWait(browser, 20).until(
+        lambda b: (
+            _section_button(b, title).find_element(By.XPATH, "..").get_attribute("open")
+        )
+    )
 
 
 def _rendered_canvas(browser):
@@ -109,17 +137,19 @@ def _select_record(browser, identifier):
         )
     )
     option.click()
+    _open_section(browser, "Record detail")
     WebDriverWait(browser, 20).until(
         lambda b: f"Record detail{identifier}" in _body(b).replace("\n", "")
     )
 
 
 def _run_rows(browser):
-    return int(
-        browser.find_element(
+    tables = _elements(browser, 'marimo-table[data-label*="Runs"]')
+    if not tables:
+        tables = browser.find_elements(
             By.CSS_SELECTOR, 'marimo-table[data-label*="Runs"]'
-        ).get_attribute("data-total-rows")
-    )
+        )
+    return int(tables[0].get_attribute("data-total-rows")) if tables else -1
 
 
 def _files(root: Path):
@@ -186,6 +216,20 @@ def test_interactive_browser_create_preview_and_launch(tmp_path, monkeypatch):
             WebDriverWait(browser, 30).until(lambda b: "Interactive" in _body(b))
             assert "Create record" in _body(browser)
             assert "Launch run" in _body(browser)
+            for title in (
+                "Record detail",
+                "Create record",
+                "Launch run",
+                "Runs",
+                "Plots",
+            ):
+                button = WebDriverWait(browser, 20).until(
+                    lambda b, title=title: _section_button(b, title)
+                )
+                assert not button.find_element(By.XPATH, "..").get_attribute("open")
+            assert _elements(browser, ".hk-tree-svg")[0].is_displayed()
+            _open_section(browser, "Runs")
+            _open_section(browser, "Create record")
             _control(
                 browser, 'marimo-text[data-label*="Record ID"]', "input"
             ).send_keys("gui-child")
@@ -200,6 +244,7 @@ def test_interactive_browser_create_preview_and_launch(tmp_path, monkeypatch):
                 lambda b: "Created record gui-child" in _body(b)
             )
             assert load_record("gui-child", config=config).parent_id == "child"
+            _open_section(browser, "Launch run")
             _control(
                 browser, 'marimo-button[data-label*="Preview launch"]', "button"
             ).click()
@@ -268,6 +313,8 @@ def test_dashboard_browser_workflow(tmp_path, monkeypatch):
                 lambda b: "Select a record to load" in _body(b)
             )
             _select_record(browser, "child-a")
+            _open_section(browser, "Runs")
+            _open_section(browser, "Plots")
             WebDriverWait(browser, 20).until(lambda b: _run_rows(b) == 2)
             _control(
                 browser,
@@ -407,8 +454,19 @@ def test_digits_demo_defaults_and_mlflow_training_ui(tmp_path, monkeypatch):
                 time.sleep(0.1)
             browser = _new_browser(monkeypatch)
             browser.get(f"http://127.0.0.1:{port}")
-            WebDriverWait(browser, 30).until(lambda b: _run_rows(b) == 2)
+            WebDriverWait(browser, 30).until(
+                lambda b: _section_button(b, "Runs") is not None
+            )
             assert "Scope: This subtree" in _body(browser)
+            for title in ("Record detail", "Runs", "Plots"):
+                button = WebDriverWait(browser, 20).until(
+                    lambda b, title=title: _section_button(b, title)
+                )
+                assert not button.find_element(By.XPATH, "..").get_attribute("open")
+            _open_section(browser, "Record detail")
+            _open_section(browser, "Runs")
+            WebDriverWait(browser, 30).until(lambda b: _run_rows(b) == 2)
+            _open_section(browser, "Plots")
             WebDriverWait(browser, 20).until(
                 lambda b: len(_elements(b, ".hk-tree-node")) >= 1
             )

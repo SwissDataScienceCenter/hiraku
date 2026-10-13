@@ -27,8 +27,14 @@ The demo defaults to `127.0.0.1:8765`. Digits also starts MLflow at
 
 ## Browse records and runs
 
+The dashboard opens with the full-width record tree visible. **Record detail**,
+**Create record**, **Launch run**, **Runs**, and **Plots** start collapsed;
+click a section title to expand or collapse it. Create and launch sections
+appear only in interactive mode. Run provenance is inside **Runs**, and selected
+plot points are inside **Plots**. Expanded sections stay open during refreshes.
+
 The record graph shows the selected task and its child experiments. Click a
-node or use the record selector to open details, including effective fields,
+node or use the record selector, then expand **Record detail** for effective fields,
 inherited entrypoints, and their defining records. Search the graph to find a
 record. Selecting a run exposes its record, entrypoint, commit attribution,
 metrics, and any link to its tracking backend. **Open record** takes you to

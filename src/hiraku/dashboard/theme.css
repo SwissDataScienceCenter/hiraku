@@ -53,6 +53,33 @@ a { color: var(--hk-brand); }
 a:hover { color: var(--hk-brand-dark); }
 
 .hk-card { background: var(--hk-surface); border: 1px solid var(--hk-border); padding: 1.5rem; }
+/* Native disclosure headers keep their state while reactive content refreshes. */
+.hk-section-heading {
+  margin: 0;
+  background: var(--hk-surface);
+  border: 1px solid var(--hk-border);
+  border-radius: 4px;
+}
+.hk-section-heading summary {
+  padding: .75rem 1rem;
+  cursor: pointer;
+  color: var(--hk-ink);
+  font: 600 1.125rem/1.4 var(--hk-font-heading);
+}
+.hk-section-heading summary:hover {
+  background: color-mix(in srgb, var(--hk-brand) 12%, var(--hk-surface));
+}
+.hk-section-heading summary:focus-visible {
+  outline: 3px solid var(--hk-brand);
+  outline-offset: 2px;
+}
+.marimo-cell:has(.hk-section-heading[data-section="detail"]:not([open])) ~ .marimo-cell:has(.hk-section-body[data-section="detail"]),
+.marimo-cell:has(.hk-section-heading[data-section="create"]:not([open])) ~ .marimo-cell:has(.hk-section-body[data-section="create"]),
+.marimo-cell:has(.hk-section-heading[data-section="launch"]:not([open])) ~ .marimo-cell:has(.hk-section-body[data-section="launch"]),
+.marimo-cell:has(.hk-section-heading[data-section="runs"]:not([open])) ~ .marimo-cell:has(.hk-section-body[data-section="runs"]),
+.marimo-cell:has(.hk-section-heading[data-section="plots"]:not([open])) ~ .marimo-cell:has(.hk-section-body[data-section="plots"]) {
+  display: none;
+}
 .hk-button, button.hk-button { min-height: 44px; padding: .75rem 1.5rem; border: 1px solid var(--hk-brand); border-radius: 0; background: var(--hk-brand); color: var(--hk-white); font: 400 .875rem/1.4 var(--hk-font-body); text-transform: uppercase; cursor: pointer; transition: background 200ms, color 200ms; }
 .hk-button:hover { background: var(--hk-brand-dark); border-color: var(--hk-brand-dark); }
 .hk-button:focus-visible, .hk-input:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgb(84 97 166 / 35%); outline-offset: 2px; }

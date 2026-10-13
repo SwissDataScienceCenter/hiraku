@@ -3,7 +3,32 @@
 from __future__ import annotations
 
 import base64
+import html
 from importlib.resources import files
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from marimo import Html
+
+
+def section_heading(section: str, title: str) -> Html:
+    """Render a native disclosure header independent of reactive section content."""
+    import marimo as mo
+
+    return mo.Html(
+        f'<details class="hk-section-heading" data-section="{html.escape(section)}">'
+        f"<summary>{html.escape(title)}</summary></details>"
+    )
+
+
+def section_body(section: str, content: object) -> Html:
+    """Mark a cell's output for the corresponding disclosure header's CSS rules."""
+    import marimo as mo
+
+    return mo.Html(
+        f'<div class="hk-section-body" data-section="{html.escape(section)}">'
+        f"{mo.as_html(content).text}</div>"
+    )
 
 
 def theme_css() -> str:
