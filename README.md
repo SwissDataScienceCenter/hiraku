@@ -30,6 +30,22 @@ Check the examples for a more complete walkthrough:
 - [Digits dataset using MLFlow](docs/examples/digits-mlflow/README.md)
 - [Karpathy's LLM autoresearch example](docs/examples/autoresearch/README.md)
 
+## Dashboard demos
+
+From a Hiraku source checkout, install the development environment and start a
+standalone Digits demo with its dashboard and MLflow UI:
+
+```bash
+uv sync --all-extras
+uv run --all-extras python scripts/use_case_dashboard.py --example digits-mlflow
+```
+
+The helper prints the dashboard URL, access token, tracking location, and demo
+directory. Press **Ctrl-C** to stop the servers. Replace `digits-mlflow` with
+`minimal`, `heart-disease`, `iris-wandb`, or `autoresearch` to run another
+documented example. See the [dashboard demo guide](scripts/README-use-case-dashboard.md)
+for requirements, options, and reopen instructions.
+
 ## Documentation
 
 - [Interactive dashboard demos](scripts/README-use-case-dashboard.md) and
