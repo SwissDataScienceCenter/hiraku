@@ -124,8 +124,6 @@ class ProjectInitializer:
                 data = load_yaml_mapping(overlay_marker)
             if tracking_backend is not None:
                 data["tracking_backend"] = {"type": tracking_backend}
-            if "mcp" not in data:
-                data["mcp"] = {"workflows": cls._bundled_workflows()}
             config = HirakuConfig(path=marker, root=project_root, **data)
             try:
                 project_root.mkdir(parents=True, exist_ok=True)
@@ -188,15 +186,6 @@ class ProjectInitializer:
                 raise ValidationError(
                     f"Could not initialize Hiraku project at {project_root}: {exc}"
                 ) from exc
-
-    @staticmethod
-    def _bundled_workflows() -> list[str]:
-        workflows = files("hiraku.resources") / "workflows"
-        return sorted(
-            item.name
-            for item in workflows.iterdir()
-            if item.is_dir() and (item / "workflow.py").is_file()
-        )
 
     @classmethod
     def _configure_mcp(

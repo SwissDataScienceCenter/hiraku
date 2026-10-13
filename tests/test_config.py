@@ -58,13 +58,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     ):
         assert (config.workflows_dir / workflow / "workflow.py").is_file()
         assert (config.workflows_dir / workflow / "workflow.md").is_file()
-    assert config.mcp is not None
-    assert config.mcp.workflows == [
-        "autodataset",
-        "autoresearch-python",
-        "guided-research",
-        "hiraku-agent",
-    ]
+    assert "mcp" not in config.to_dict()
     assert not (config.hiraku_dir / "programs").exists()
     assert not (config.hiraku_dir / "actions").exists()
     for name in ("launch.sh", "worktree.sh"):
@@ -262,30 +256,6 @@ def test_legacy_default_program_is_rejected_with_migration_message(
     (tmp_path / "hiraku.yml").write_text("default_program: interactive\n")
     with pytest.raises(ValidationError, match="default_program.*replaced by workflows"):
         HirakuConfig.discover(tmp_path)
-
-
-@pytest.mark.parametrize(
-    ("content", "message"),
-    [
-        ("mcp:\n  workflows: [a, a]\n", "duplicate"),
-        ("mcp:\n  workflows: ['bad/id']\n", "Invalid workflow ID"),
-        ("mcp:\n  unknown: true\n", "Extra inputs"),
-    ],
-)
-def test_mcp_settings_are_validated(tmp_path: Path, content: str, message: str) -> None:
-    (tmp_path / "hiraku.yml").write_text(content)
-    with pytest.raises(Exception, match=message):
-        HirakuConfig.discover(tmp_path)
-
-
-def test_mcp_settings_round_trip(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False, install_mcp=False)
-    config.set_mcp_workflows([])
-    assert HirakuConfig.discover(tmp_path).mcp.workflows == []
-    config.set_mcp_workflows(None)
-    reloaded = HirakuConfig.discover(tmp_path)
-    assert reloaded.mcp is not None
-    assert reloaded.mcp.workflows is None
 
 
 def test_init_configures_mcp_for_claude_code_and_codex(tmp_path: Path) -> None:

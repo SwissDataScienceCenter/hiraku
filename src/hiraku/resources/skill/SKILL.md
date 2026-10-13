@@ -47,7 +47,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set`, `entrypoints` |
 | Launch an entrypoint | `hiraku launch ENTRYPOINT [--record ID] [--commit REF] [--dispatch NAME]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
-| Run a workflow | MCP tools `workflow_list` and `<workflow>_start`; terminal: `hiraku workflow list`, `hiraku workflow call TOOL` |
+| Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_reply`; terminal: `hiraku workflow list`, `hiraku workflow call TOOL` |
 | Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
 | Manage context records | `hiraku context ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
@@ -103,10 +103,10 @@ Classify the request before acting:
   a research root, defining child records, running them, and comparing results.
   Do not add stages the user did not request.
 - **Hiraku workflow:** Start or continue a workflow, such as
-  `autoresearch-python`, only when the user explicitly requests it. Discover workflows and their arguments
-  with the `workflow_list` MCP tool, start one with its `<workflow>_start` tool,
-  and follow the user's constraints, permissions, budgets, and stopping
-  condition in addition to the workflow's instructions.
+  `autoresearch-python`, only when the user explicitly requests it. Discover
+  workflows with the `workflow_list` MCP tool, start one with the tool named
+  after it, and follow the user's constraints, permissions, budgets, and
+  stopping condition in addition to the workflow's instructions.
 
 Infer routine identifiers, summaries, hypotheses, metrics, and entrypoint
 arguments from the user's request and the repository. Ask a question only when
@@ -320,15 +320,18 @@ cost, or hardware budget.
 ## Hiraku workflows
 
 Workflows are project-defined procedures under `hiraku/workflows/` that guide
-you step by step through the Hiraku MCP server. Each response contains one
-instruction and the reply tools that continue it:
+you step by step through the Hiraku MCP server. The user may start one with
+its prompt, which shows the first instruction directly, or you start it with
+the tool named after it. Each response contains one instruction and the replies
+that continue it:
 
 1. Carry out the instruction, using its `context`.
 2. If `requires_user_response` is true, ask the user and wait for their answer
    before replying. Otherwise decide yourself.
-3. Reply with exactly one listed tool, passing its fixed `session_id` and
-   `instruction_id` unchanged. Repeating an identical reply is safe; a `stale`
-   status means the instruction moved on, so continue from the one returned.
+3. Reply with the `workflow_reply` tool: one listed reply, its arguments as the
+   reply's schema describes, and the `session_id` and `instruction_id`
+   unchanged. Repeating an identical reply is safe; a `stale` status means the
+   instruction moved on, so continue from the one returned.
 4. A `rejected` or `not_ready` response keeps the same instruction pending; fix
    the input or check again later. Stop when a response has `completed: true`.
 
@@ -337,8 +340,8 @@ instruction with `session_show`; do not start a new session. Before repeating
 consequential work such as creating records or launching experiments, check
 whether it already exists. User instructions override workflow defaults; if
 they conflict with the workflow, explain the conflict, or stop the session with
-its `stop` reply when it has one. If a workflow's tools are missing, it may be
-inactive: use `workflow_activate`, then continue in the next message or ask the
+its `stop` reply when it has one. If a workflow's tool is missing, the workflow
+may have failed to load or been added after the MCP server started; ask the
 user to reconnect the MCP server.
 
 ## Entrypoints, dispatch, and tracking details

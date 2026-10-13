@@ -51,7 +51,7 @@ created before printing the final project location.
 
 Run workflows from a coding agent through `hiraku mcp`, which `hiraku init`
 configures for Claude Code and Codex. `hiraku workflow` and `hiraku session`
-list, activate, call, inspect, and cancel workflows and their sessions; see the
+list, call, inspect, and cancel workflows and their sessions; see the
 [Workflows guide](../guides/workflows.md).
 
 Use `hiraku --help` or the generated command sections below for all options.

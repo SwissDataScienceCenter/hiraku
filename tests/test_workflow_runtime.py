@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -15,7 +16,6 @@ from hiraku.errors import (
     ValidationError,
     WorkflowError,
 )
-from hiraku.mcp import HirakuMCPServer
 from hiraku.session import Session
 from hiraku.workflow import (
     Completion,
@@ -23,6 +23,7 @@ from hiraku.workflow import (
     PromptWorkflow,
     Workflow,
     handlers,
+    list_workflows,
     load_workflow,
     load_workflows,
     session_model,
@@ -133,7 +134,6 @@ def config(tmp_path: Path) -> HirakuConfig:
     selected = HirakuConfig.init(tmp_path, install_skill=False, install_mcp=False)
     directory = write_workflow(selected, "toy", TOY_PY, TOY_MD)
     (directory / "helpers.py").write_text("def scale(value):\n    return value\n")
-    selected.set_mcp_workflows(None)
     return selected
 
 
@@ -168,12 +168,8 @@ def stored(config: HirakuConfig, session_id: str) -> dict:
     return json.loads((config.sessions_dir / f"{session_id}.json").read_text())
 
 
-def tool_names(server: HirakuMCPServer) -> set[str]:
-    return {
-        f"{workflow.id}_{name}"
-        for workflow in server.exposed()
-        for name in handlers(type(workflow))
-    }
+def tool_names(config: HirakuConfig) -> dict[str, Any]:
+    return {tool.name: tool for tool in Workflow.tools(lambda: config)}
 
 
 def test_handlers_schemas_and_relative_imports(config: HirakuConfig) -> None:
@@ -184,12 +180,14 @@ def test_handlers_schemas_and_relative_imports(config: HirakuConfig) -> None:
     assert kinds["start"] == "start"
     assert kinds["add"] == "continuation"
     assert kinds["peek"] == "tool"
-    start = registered["start"].input_schema
+    tools = tool_names(config)
+    start = tools["toy"].parameters
     assert start["properties"]["target"]["default"] == 3
     assert start["properties"]["target"]["description"] == "Sum to reach."
-    add = registered["add"].input_schema
-    assert add["required"] == ["instruction_id", "amount"]
-    assert "session_id" in add["properties"]
+    assert start["properties"]["target"]["exclusiveMinimum"] == 0
+    assert tools["toy"].description.startswith("Start a toy workflow session.")
+    assert "toy_peek" in tools
+    assert not any(name.startswith("toy_add") for name in tools)
 
 
 def test_handlers_stay_directly_callable(config: HirakuConfig) -> None:
@@ -289,28 +287,12 @@ def test_invalid_workflows_are_logged_and_left_out(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     write_workflow(config, "bad", source)
-    server = HirakuMCPServer(config)
+    tools = tool_names(config)
     assert "Workflow bad is unavailable" in caplog.text
     assert message in caplog.text
-    assert "bad" not in server.workflows
-    assert "toy" in server.workflows
-    assert not any(name.startswith("bad_") for name in tool_names(server))
-    with pytest.raises(HirakuError) as info:
-        server.activate("bad")
-    assert message in str(info.value)
-
-
-def test_activation_retries_a_fixed_workflow(config: HirakuConfig) -> None:
-    write_workflow(config, "late", "raise RuntimeError('not yet')\n")
-    server = HirakuMCPServer(config)
-    with pytest.raises(WorkflowError, match="not yet"):
-        server.activate("late")
-    write_workflow(config, "late", TOY_PY, TOY_MD)
-    (config.workflows_dir / "late" / "helpers.py").write_text(
-        "def scale(value):\n    return value\n"
-    )
-    server.activate("late")
-    assert "late_start" in tool_names(server)
+    assert "toy" in tools
+    assert not any(name == "bad" or name.startswith("bad_") for name in tools)
+    assert message in load_error(config, "bad")
 
 
 def test_workflow_ids_cannot_make_tool_names_ambiguous(config: HirakuConfig) -> None:
@@ -329,13 +311,11 @@ def test_workflow_ids_cannot_make_tool_names_ambiguous(config: HirakuConfig) -> 
         "x",
         simple.format(extra="    @tool\n    def y_start(self) -> None: ...\n"),
     )
-    server = HirakuMCPServer(config)
+    tools = tool_names(config)
     for identifier in ("bad.name", "x_y"):
         assert "Invalid workflow ID" in load_error(config, identifier)
-        assert identifier not in server.workflows
-    assert "x_y_start" in tool_names(server)
-    with pytest.raises(WorkflowError, match="Unknown tool"):
-        server.call_tool("x_missing", {})
+        assert identifier not in tools
+    assert {"x", "x_y_start"} <= set(tools)
     with pytest.raises(WorkflowError, match="Unknown workflow tool"):
         toy(config).call("missing", {})
 
@@ -352,22 +332,19 @@ def test_prompts_are_snapshotted_with_the_code(config: HirakuConfig) -> None:
 def test_start_returns_orientation_and_explicit_replies(config: HirakuConfig) -> None:
     response = started(toy(config))
     assert response["orientation"] == "# Toy\n\nAdd numbers."
-    assert "reply tools" in response["guide"]
+    assert "workflow_reply" in response["guide"]
     assert response["instruction_id"] == 1
     instruction = response["instruction"]
     assert instruction["text"] == "## Add\n\nAdd a number."
     assert instruction["context"] == {"total": 0}
     assert instruction["requires_user_response"] is False
-    assert [item["tool"] for item in instruction["replies"]] == [
-        "toy_add",
-        "toy_wait",
-        "toy_boom",
-    ]
-    assert instruction["replies"][0]["arguments"] == {
-        "session_id": response["session_id"],
-        "instruction_id": 1,
-    }
+    assert instruction["reply_with"] == "workflow_reply"
+    assert [item["reply"] for item in instruction["replies"]] == ["add", "wait", "boom"]
     assert instruction["replies"][0]["description"] == "Add an amount."
+    assert instruction["replies"][0]["arguments"] == {
+        "properties": {"amount": {"type": "integer"}},
+        "required": ["amount"],
+    }
     saved = stored(config, response["session_id"])
     assert saved["target"] == 3
     assert saved["total"] == 0
@@ -434,7 +411,7 @@ def test_replies_find_the_active_session(config: HirakuConfig) -> None:
     Session.load(second["session_id"], config=config).cancel()
     none = workflow.call("add", {"instruction_id": 1, "amount": 1})
     assert none["status"] == "rejected"
-    assert "start one with toy_start" in none["message"]
+    assert "start one with the toy tool" in none["message"]
 
 
 def test_completion_and_retried_completion(config: HirakuConfig) -> None:
@@ -630,70 +607,16 @@ def test_malformed_session_files(config: HirakuConfig) -> None:
         Session.load("broken", config=config).show()
 
 
-@pytest.mark.parametrize(
-    ("workflows", "expected"),
-    [
-        (
-            None,
-            {
-                "autodataset",
-                "autoresearch-python",
-                "guided-research",
-                "hiraku-agent",
-                "toy",
-            },
-        ),
-        ([], set()),
-        (["toy"], {"toy"}),
-    ],
-)
-def test_configured_exposure(
-    config: HirakuConfig, workflows: list[str] | None, expected: set[str]
-) -> None:
-    config.set_mcp_workflows(workflows)
-    server = HirakuMCPServer(HirakuConfig.discover(config.root))
-    assert {workflow.id for workflow in server.exposed()} == expected
-    listed = server.call_tool("workflow_list", {})
-    assert {item["id"] for item in listed} == {
+def test_workflow_list_describes_every_loaded_workflow(config: HirakuConfig) -> None:
+    listed = list_workflows(load_workflows(config))
+    assert [item["id"] for item in listed] == [
         "autodataset",
         "autoresearch-python",
         "guided-research",
         "hiraku-agent",
         "toy",
-    }
-    assert {item["id"] for item in listed if item["active"]} == expected
-
-
-def test_unknown_configured_workflows_are_errors(config: HirakuConfig) -> None:
-    config.set_mcp_workflows(["toy", "ghost"])
-    with pytest.raises(WorkflowError, match="Unknown workflows in the MCP workflow"):
-        HirakuMCPServer(HirakuConfig.discover(config.root))
-    with pytest.raises(WorkflowError, match="ghost"):
-        HirakuMCPServer(config, exposed=["ghost"])
-
-
-def test_activation_persists_and_keeps_sessions(config: HirakuConfig) -> None:
-    config.set_mcp_workflows(["autoresearch-python"])
-    server = HirakuMCPServer(HirakuConfig.discover(config.root))
-    first = started(toy(config))
-    assert server.deactivate("toy") == {
-        "active": ["autoresearch-python"],
-        "changed": False,
-    }
-    result = server.activate("toy")
-    assert result["changed"] is True
-    assert "reconnect" in result["note"]
-    assert HirakuConfig.discover(config.root).mcp.workflows == [
-        "autoresearch-python",
-        "toy",
     ]
-    server.deactivate("toy")
-    assert HirakuConfig.discover(config.root).mcp.workflows == ["autoresearch-python"]
-    shown = server.show_session(first["session_id"])
-    assert shown["status"] == "active"
-    assert "not active" in shown["note"]
-    with pytest.raises(WorkflowError, match="Unknown workflow"):
-        server.activate("ghost")
+    assert listed[-1]["description"].startswith("Add numbers until a target")
 
 
 def test_cli_matches_the_runtime(
@@ -704,7 +627,7 @@ def test_cli_matches_the_runtime(
     arguments = tmp_path / "arguments.json"
     arguments.write_text(json.dumps({"target": 2}))
     result = runner.invoke(
-        main, ["workflow", "call", "toy_start", "--arguments-file", str(arguments)]
+        main, ["workflow", "call", "toy", "--arguments-file", str(arguments)]
     )
     assert result.exit_code == 0, result.output
     response = json.loads(result.output)
@@ -717,9 +640,13 @@ def test_cli_matches_the_runtime(
         "orientation": "# Toy\n\nAdd numbers.",
     }
 
-    follow = json.dumps({"instruction_id": 1, "amount": 1})
+    follow = json.dumps(
+        {"reply": "add", "instruction_id": 1, "arguments": {"amount": 1}}
+    )
     result = runner.invoke(
-        main, ["workflow", "call", "toy_add", "--arguments-file", "-"], input=follow
+        main,
+        ["workflow", "call", "workflow_reply", "--arguments-file", "-"],
+        input=follow,
     )
     assert json.loads(result.output)["status"] == "accepted"
 
@@ -727,15 +654,11 @@ def test_cli_matches_the_runtime(
     assert {item["id"] for item in json.loads(listing.output)} >= {"toy"}
     shown = runner.invoke(main, ["session", "show", session_id])
     assert "Pending instruction 2" in shown.output
-    assert "toy_add" in shown.output
+    assert "Replies: add, wait, boom" in shown.output
     sessions = json.loads(runner.invoke(main, ["session", "list", "--json"]).output)
     assert sessions[0]["session_id"] == session_id
     cancelled = runner.invoke(main, ["session", "cancel", session_id])
     assert "cancelled" in cancelled.output
-    assert runner.invoke(main, ["workflow", "deactivate", "toy"]).exit_code == 0
-    assert "toy" not in HirakuConfig.discover(config.root).mcp.workflows
-    assert runner.invoke(main, ["workflow", "activate", "toy"]).exit_code == 0
-    assert "toy" in HirakuConfig.discover(config.root).mcp.workflows
     unknown = runner.invoke(main, ["workflow", "call", "nope_start"])
     assert unknown.exit_code != 0
     assert "Unknown workflow" in unknown.output
@@ -827,9 +750,16 @@ def test_bound_copies_are_isolated(config: HirakuConfig) -> None:
 def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> None:
     directory = config.workflows_dir / "loop"
     directory.mkdir()
-    body = "# Loop\n\nRun until stopped.\n\n## Steps\n\nDo things.\n"
+    body = (
+        "# Loop\n\nRun {{iterations}} experiments on {{task}} (quick: {{quick}}).\n"
+        "\n## Steps\n\nDo things.\n"
+    )
     (directory / "workflow.md").write_text(
-        "---\nid: loop\ndescription: Run the loop.\n---\n" + body
+        "---\nid: loop\ndescription: Run the loop.\narguments:\n"
+        "  task: {required: true}\n"
+        "  iterations: {type: integer, default: 5}\n"
+        "  quick: {type: boolean, default: false}\n"
+        "---\n" + body
     )
     loaded = load_workflows(config)["loop"]
     assert type(loaded) is PromptWorkflow
@@ -837,21 +767,55 @@ def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> 
     assert set(handlers(type(loaded))) == {"start", "complete"}
 
     workflow = loaded.bind(config)
-    first = workflow.call("start", {"request": "Five experiments"})
+    first = workflow.call("start", {"task": "sep10", "iterations": "3"})
     assert first["status"] == "accepted"
-    assert first["orientation"] == "# Loop\n\nRun until stopped."
-    assert first["instruction"]["text"] == body.strip()
-    assert first["instruction"]["context"] == {"request": "Five experiments"}
-    assert [item["tool"] for item in first["instruction"]["replies"]] == [
-        "loop_complete"
-    ]
+    assert first["orientation"] == ""
+    assert first["instruction"]["text"].startswith(
+        "# Loop\n\nRun 3 experiments on sep10 (quick: false)."
+    )
+    assert first["instruction"]["context"] == {
+        "task": "sep10",
+        "iterations": 3,
+        "quick": False,
+    }
+    assert [item["reply"] for item in first["instruction"]["replies"]] == ["complete"]
     assert reply(workflow, "complete", first, summary=" ")["status"] == "rejected"
     done = reply(workflow, "complete", first, summary="Tried three ideas")
     assert done["result"] == {"summary": "Tried three ideas"}
-    assert Session.load(first["session_id"], config=config).show()["data"] == {}
+    stored = Session.load(first["session_id"], config=config)
+    assert stored.show()["data"] == {}
+    assert [(item.reply, item.instruction_id) for item in stored.history] == [
+        ("start", 0),
+        ("complete", 1),
+    ]
 
-    without_request = workflow.call("start", {})
-    assert without_request["instruction"]["context"] is None
+    missing = workflow.call("start", {})
+    assert missing["status"] == "rejected"
+    assert "task" in missing["message"]
+    unknown = workflow.call("start", {"task": "x", "other": 1})
+    assert unknown["status"] == "rejected"
 
+    (directory / "workflow.md").write_text("---\nid: loop\n---\nUse {{nope}}.\n")
+    assert "placeholders without declared arguments: nope" in load_error(config, "loop")
     (directory / "workflow.md").write_text(body)
     assert "front matter" in load_error(config, "loop")
+
+
+def test_workflows_and_sessions_provide_their_tools(config: HirakuConfig) -> None:
+    tools = {
+        tool.name: tool for tool in Workflow.tools(lambda: config, {"toy": toy(config)})
+    }
+    assert set(tools) == {"workflow_list", "workflow_reply", "toy", "toy_peek"}
+    first = tools["toy"].fn(target=2)
+    assert first["status"] == "accepted"
+    done = tools["workflow_reply"].fn(
+        reply="add", instruction_id=1, arguments={"amount": 2}
+    )
+    assert done["result"] == {"total": 2}
+    assert tools["workflow_list"].fn()[0]["id"] == "toy"
+
+    sessions = {tool.name: tool for tool in Session.tools(lambda: config)}
+    assert set(sessions) == {"session_list", "session_show", "session_cancel"}
+    shown = sessions["session_show"].fn(session_id=first["session_id"])
+    assert shown["status"] == "completed"
+    assert shown["orientation"] == "# Toy\n\nAdd numbers."

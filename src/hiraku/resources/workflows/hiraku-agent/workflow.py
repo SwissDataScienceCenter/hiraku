@@ -612,7 +612,7 @@ class TreeSession(Session):
     action: str | None = None
     focus: str | None = None
     base_commit: str | None = None
-    history: list[dict[str, Any]] = Field(default_factory=list)
+    completed_steps: list[dict[str, Any]] = Field(default_factory=list)
 
 
 Text = Annotated[str | None, Field(description="Markdown, or null.")]
@@ -1346,7 +1346,7 @@ class ResearchTree(Workflow):
         )
 
     def _after_agent_step(self, session: TreeSession) -> Instruction | Completion:
-        session.history.append({"step": session.action, "node": session.focus})
+        session.completed_steps.append({"step": session.action, "node": session.focus})
         session.steps += 1
         return self._advance(session)
 
@@ -1376,7 +1376,7 @@ class ResearchTree(Workflow):
                 "outcome": outcome,
                 "reason": reason,
                 "task": session.task,
-                "steps": session.history,
+                "steps": session.completed_steps,
                 "experiments_implemented": session.experiments,
                 "runs_submitted": session.runs,
                 "states": states,

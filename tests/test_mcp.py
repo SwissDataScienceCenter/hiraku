@@ -10,13 +10,12 @@ import pytest
 from mcp import Client, StdioServerParameters
 
 from hiraku.config import HirakuConfig
-from hiraku.mcp import HirakuMCPServer
+from hiraku.mcp import create_server
 from hiraku.record import Record
 
 BUILTINS = {
     "workflow_list",
-    "workflow_activate",
-    "workflow_deactivate",
+    "workflow_reply",
     "session_list",
     "session_show",
     "session_cancel",
@@ -48,16 +47,14 @@ def config(tmp_path: Path) -> HirakuConfig:
     return selected
 
 
-def run(server: HirakuMCPServer, scenario: Any) -> Any:
+def run(server: Any, scenario: Any) -> Any:
     async def main() -> Any:
         notifications: list[str] = []
 
         async def handler(message: Any) -> None:
             notifications.append(getattr(message, "method", type(message).__name__))
 
-        async with Client(
-            server.server, mode="legacy", message_handler=handler
-        ) as client:
+        async with Client(server, mode="legacy", message_handler=handler) as client:
             return await scenario(client, notifications)
 
     return anyio.run(main)
@@ -68,68 +65,136 @@ def payload(result: Any) -> Any:
     return json.loads(result.content[0].text)
 
 
-def test_tools_reflect_the_configured_workflows(config: HirakuConfig) -> None:
-    config.set_mcp_workflows(["autodataset"])
-    server = HirakuMCPServer(HirakuConfig.discover(config.root))
+LOOP = """\
+---
+id: loop
+description: Run a loop.
+arguments:
+  task: {required: true, description: Task record}
+  iterations: {type: integer, default: 5, description: Experiments to run}
+---
+# Loop
 
-    async def scenario(client: Client, notifications: list[str]) -> set[str]:
-        return {tool.name for tool in (await client.list_tools()).tools}
-
-    names = run(server, scenario)
-    assert names >= BUILTINS
-    assert "autodataset_start" in names
-    assert not any(name.startswith("autoresearch-python_") for name in names)
-
-
-def test_command_line_override_exposes_one_workflow(config: HirakuConfig) -> None:
-    server = HirakuMCPServer(config, exposed=["autoresearch-python"])
-
-    async def scenario(client: Client, notifications: list[str]) -> set[str]:
-        return {tool.name for tool in (await client.list_tools()).tools}
-
-    names = run(server, scenario)
-    assert "autoresearch-python_start" in names
-    assert "autodataset_start" not in names
+Run {{iterations}} experiments on {{task}}.
+"""
 
 
-def test_activation_notifies_and_changes_tools(config: HirakuConfig) -> None:
-    config.set_mcp_workflows(["autoresearch-python"])
-    server = HirakuMCPServer(HirakuConfig.discover(config.root))
+def write_loop(config: HirakuConfig) -> None:
+    directory = config.workflows_dir / "loop"
+    directory.mkdir()
+    (directory / "workflow.md").write_text(LOOP, encoding="utf-8")
+
+
+def test_tools_and_prompts_are_fixed_per_workflow(config: HirakuConfig) -> None:
+    write_loop(config)
+    server = create_server(config)
+
+    async def scenario(client: Client, notifications: list[str]) -> Any:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+        prompts = {item.name: item for item in (await client.list_prompts()).prompts}
+        return tools, prompts
+
+    tools, prompts = run(server, scenario)
+    workflows = {
+        "autodataset",
+        "autoresearch-python",
+        "guided-research",
+        "hiraku-agent",
+        "loop",
+    }
+    assert set(tools) == BUILTINS | workflows | {"hiraku-agent_next_step"}
+    assert set(prompts) == workflows
+    loop = tools["loop"].input_schema
+    assert loop["required"] == ["task"]
+    assert loop["properties"]["iterations"]["default"] == 5
+    arguments = {item.name: item.required for item in prompts["loop"].arguments}
+    assert arguments == {"task": True, "iterations": False}
+    assert tools["autodataset"].description.startswith("Start a autodataset")
+
+
+def test_prompts_start_sessions(config: HirakuConfig) -> None:
+    write_loop(config)
+    server = create_server(config)
+
+    async def scenario(client: Client, notifications: list[str]) -> Any:
+        started = await client.get_prompt("loop", {"task": "sep10", "iterations": "3"})
+        invalid = await client.get_prompt("loop", {"task": "x", "iterations": "many"})
+        listing = payload(await client.call_tool("session_list", {}))
+        return started, invalid, listing
+
+    started, invalid, listing = run(server, scenario)
+    text = started.messages[0].content.text
+    assert text.startswith("# Loop\n\nRun 3 experiments on sep10.")
+    assert '"reply": "complete"' in text
+    assert f"session `{listing[0]['session_id']}`" in text
+    assert len(listing) == 1
+    assert "did not start" in invalid.messages[0].content.text
+    assert "iterations" in invalid.messages[0].content.text
+
+
+def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
+    write_loop(config)
+    server = create_server(config)
 
     async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
-        inactive = await client.call_tool("autodataset_start", {"task": "task"})
-        activated = payload(
-            await client.call_tool("workflow_activate", {"workflow_id": "autodataset"})
+        first = payload(await client.call_tool("loop", {"task": "a"}))
+        wrong = payload(
+            await client.call_tool(
+                "workflow_reply", {"reply": "submit_run", "instruction_id": 1}
+            )
         )
-        tools = {tool.name for tool in (await client.list_tools()).tools}
-        started = payload(await client.call_tool("autodataset_start", {"task": "task"}))
-        await anyio.sleep(0.05)
+        invalid = payload(
+            await client.call_tool(
+                "workflow_reply",
+                {"reply": "complete", "instruction_id": 1, "arguments": {}},
+            )
+        )
+        done = payload(
+            await client.call_tool(
+                "workflow_reply",
+                {
+                    "reply": "complete",
+                    "instruction_id": 1,
+                    "arguments": {"summary": "Tried three ideas"},
+                },
+            )
+        )
+        payload(await client.call_tool("loop", {"task": "b"}))
+        payload(await client.call_tool("loop", {"task": "c"}))
+        ambiguous = payload(
+            await client.call_tool(
+                "workflow_reply",
+                {"reply": "complete", "instruction_id": 1, "arguments": {}},
+            )
+        )
         return {
-            "inactive": inactive,
-            "activated": activated,
-            "tools": tools,
-            "started": started,
-            "notifications": list(notifications),
+            "first": first,
+            "wrong": wrong,
+            "invalid": invalid,
+            "done": done,
+            "ambiguous": ambiguous,
         }
 
     result = run(server, scenario)
-    assert result["inactive"].is_error
-    assert "call workflow_activate first" in result["inactive"].content[0].text
-    assert result["activated"]["changed"] is True
-    assert "autodataset_start" in result["tools"]
-    assert result["started"]["status"] == "accepted"
-    assert "notifications/tools/list_changed" in result["notifications"]
-    persisted = HirakuConfig.discover(config.root).mcp
-    assert persisted is not None
-    assert persisted.workflows == ["autoresearch-python", "autodataset"]
+    replies = result["first"]["instruction"]["replies"]
+    assert result["first"]["instruction"]["reply_with"] == "workflow_reply"
+    assert replies[0]["reply"] == "complete"
+    assert replies[0]["arguments"]["required"] == ["summary"]
+    assert result["wrong"]["status"] == "rejected"
+    assert "accepts: complete" in result["wrong"]["message"]
+    assert result["invalid"]["status"] == "rejected"
+    assert "summary" in result["invalid"]["message"]
+    assert result["done"]["result"] == {"summary": "Tried three ideas"}
+    assert result["ambiguous"]["status"] == "rejected"
+    assert "pass session_id" in result["ambiguous"]["message"]
 
 
 def test_session_tools_and_resources(config: HirakuConfig) -> None:
-    server = HirakuMCPServer(config)
+    server = create_server(config)
 
     async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
         started = payload(
-            await client.call_tool("autodataset_start", {"task": "task", "count": 1})
+            await client.call_tool("autodataset", {"task": "task", "count": 1})
         )
         session_id = started["session_id"]
         listing = payload(await client.call_tool("session_list", {}))
@@ -165,17 +230,19 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
     assert result["resource"]["session_id"] == session_id
     assert result["workflow"].startswith("# Autodataset")
     assert result["record"].startswith("---\n")
-    assert "hiraku://workflows/autoresearch-python" in result["resources"]
+    assert result["resources"] == set()
     assert result["templates"] == {
         "hiraku://records/{record_id}",
         "hiraku://sessions/{session_id}",
+        "hiraku://workflows/{workflow_id}",
+        "hiraku://contexts/{context_id}",
     }
     assert result["cancelled"]["status"] == "cancelled"
     assert result["missing"].is_error
 
 
 def test_record_and_run_tools(config: HirakuConfig) -> None:
-    server = HirakuMCPServer(config)
+    server = create_server(config)
 
     async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
         created = payload(
@@ -261,7 +328,6 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
         encoding="utf-8",
     )
     (noisy / "workflow.md").write_text("---\nid: noisy\n---\n# Noisy\n")
-    config.set_mcp_workflows(["noisy"])
 
     async def main() -> Any:
         parameters = StdioServerParameters(
@@ -270,25 +336,24 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
         )
         async with Client(parameters) as client:
             tools = await client.list_tools()
-            result = await client.call_tool("noisy_start", {})
+            result = await client.call_tool("noisy", {})
             return {tool.name for tool in tools.tools}, result
 
     names, result = anyio.run(main)
-    assert "noisy_start" in names
+    assert "noisy" in names
     assert json.loads(result.content[0].text)["result"] == {"ok": True}
 
 
 def test_server_reads_current_project_state(config: HirakuConfig) -> None:
-    server = HirakuMCPServer(config)
+    server = create_server(config)
     Record.create("other-task", type="task", config=HirakuConfig.discover(config.root))
     assert HirakuConfig.discover(config.root).active_record_id == "other-task"
 
     async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
         status = payload(await client.call_tool("project_status", {}))
         shown = payload(await client.call_tool("record_show", {}))
-        await client.call_tool("workflow_deactivate", {"workflow_id": "autodataset"})
         started = payload(
-            await client.call_tool("autoresearch-python_start", {"entrypoint": "train"})
+            await client.call_tool("autoresearch-python", {"entrypoint": "train"})
         )
         return {"status": status, "shown": shown, "started": started}
 
@@ -297,7 +362,6 @@ def test_server_reads_current_project_state(config: HirakuConfig) -> None:
     assert result["shown"]["id"] == "other-task"
     saved = HirakuConfig.discover(config.root)
     assert saved.active_record_id == "other-task"
-    assert "autodataset" not in saved.mcp.workflows
     assert result["started"]["status"] == "rejected"
     assert "several entrypoints" not in result["started"]["message"]
     assert "train" in result["started"]["message"]

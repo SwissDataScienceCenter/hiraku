@@ -11,14 +11,13 @@ import logging
 import re
 import sys
 import typing
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeVar, overload
 
-from filelock import FileLock
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -38,22 +37,24 @@ from .errors import (
     ValidationError,
     WorkflowError,
 )
-from .markdown import ParsedMarkdown, parse_markdown
+from .markdown import ParsedMarkdown, parse_markdown, placeholders, render
 from .session import (
     GUIDE,
     Completion,
+    HistoryEntry,
     Instruction,
-    Receipt,
     Response,
     Session,
     Timeout,
     locked,
     new_session_id,
-    tool_name,
     validate_session_id,
 )
 
 if TYPE_CHECKING:
+    from mcp.server.mcpserver.prompts import Prompt
+    from mcp.server.mcpserver.tools import Tool
+
     from .config import HirakuConfig
 
 logger = logging.getLogger(__name__)
@@ -82,14 +83,15 @@ def tool(target: Any = None, /) -> Any:
 
     Use ``@tool`` to name the tool after the method, or ``@tool("name")`` to
     choose the tool name separately, e.g. when the method name is taken by a
-    `Workflow` attribute such as ``save``. The MCP tool is called
-    ``<workflow-id>_<name>``.
+    `Workflow` attribute such as ``save``.
 
-    The method's signature and docstring define the tool schema and description.
-    The tool named ``start`` creates sessions. A method with one parameter
-    annotated as a `Session` subclass is a continuation handler, invoked only as
-    a reply to its session's pending instruction. Any other method is an
-    ordinary tool that does not touch session state.
+    The method's signature and docstring define the arguments and description.
+    The tool named ``start`` creates sessions; agents call it as the tool named
+    after the workflow, and users as the prompt of the same name. A method with
+    one parameter annotated as a `Session` subclass is a reply, sent through the
+    ``workflow_reply`` tool only while its session's pending instruction lists
+    it. Any other method is an ordinary tool, ``<workflow-id>_<name>``, that does
+    not touch session state.
 
     The decorated method stays directly callable from Python.
 
@@ -123,34 +125,6 @@ class Handler:
     session_parameter: str | None
     session_model: type[Session] | None
     description: str
-
-    @property
-    def input_schema(self) -> dict[str, Any]:
-        """Return the tool's JSON schema, including reply correlation fields."""
-        schema = self.arguments.model_json_schema()
-        schema.pop("title", None)
-        if self.kind != "continuation":
-            return schema
-        properties = {
-            "instruction_id": {
-                "type": "integer",
-                "description": "Fixed argument from the pending instruction.",
-            },
-            "session_id": {
-                "type": "string",
-                "description": (
-                    "Fixed argument from the pending instruction; may be omitted "
-                    "when only one session of this workflow is active."
-                ),
-            },
-            **schema.get("properties", {}),
-        }
-        return {
-            **schema,
-            "type": "object",
-            "properties": properties,
-            "required": ["instruction_id", *schema.get("required", [])],
-        }
 
 
 class Workflow(BaseRecord):
@@ -196,7 +170,8 @@ class Workflow(BaseRecord):
         workflow must be bound to a project with `bind`.
 
         Args:
-            tool: Tool name without the workflow prefix, e.g. ``"start"``.
+            tool: Tool name without the workflow prefix, e.g. ``"start"`` or
+                ``"submit_run"``.
             arguments: JSON-compatible tool arguments. Replies also take
                 ``instruction_id`` and, optionally, ``session_id``; without it,
                 the reply goes to the one active session of this workflow.
@@ -218,9 +193,15 @@ class Workflow(BaseRecord):
         values = dict(arguments or {})
         if handler.kind == "continuation":
             return _reply(self, handler, values)
-        validated, failure = _validate(handler, values)
+        model = self._start_model() if handler.kind == "start" else handler.arguments
+        validated, failure = _validate(model, values)
         if failure is None:
-            response, failure = _invoke(self, handler, _keywords(validated))
+            keywords = (
+                self._start_keywords(validated)
+                if handler.kind == "start"
+                else _keywords(validated)
+            )
+            response, failure = _invoke(self, handler, keywords)
         if failure is not None:
             return failure
         if handler.kind == "tool":
@@ -229,10 +210,17 @@ class Workflow(BaseRecord):
             session = _checked_response(self, response)
         except WorkflowError as exc:
             return {"status": "error", "message": str(exc)}
+        now = datetime.now(UTC)
         session.id = new_session_id(self.id)
         session.workflow = self.id
-        session.created_at = datetime.now(UTC)
-        session.advance(response, _descriptions(self))
+        session.created_at = now
+        call = HistoryEntry(
+            instruction_id=0,
+            reply="start",
+            arguments=validated.model_dump(mode="json"),
+            at=now,
+        )
+        session.advance(response, _reply_specs(self), call)
         session.save(config=self.config)
         return {
             "status": "accepted",
@@ -240,6 +228,127 @@ class Workflow(BaseRecord):
             "orientation": self.orientation,
             **session.response,
         }
+
+    @classmethod
+    def tools(
+        cls,
+        project: Callable[[], HirakuConfig],
+        workflows: Mapping[str, Workflow] | None = None,
+    ) -> list[Tool]:
+        """Return the agent tools for running workflows, e.g. over MCP.
+
+        Each workflow is started by a tool named after it, which takes the
+        workflow's start arguments. Every reply of every workflow goes through
+        one ``workflow_reply`` tool; instructions describe their replies'
+        arguments. Other workflow tools are named ``<workflow-id>_<name>``.
+
+        Args:
+            project: Returns the project configuration as currently saved.
+            workflows: Loaded workflows by ID; loaded from the project if
+                omitted.
+        """
+        from mcp.server.mcpserver.tools import Tool
+        from mcp.types import ToolAnnotations
+
+        loaded = load_workflows(project()) if workflows is None else workflows
+
+        def workflow_list() -> list[dict[str, Any]]:
+            return list_workflows(loaded)
+
+        def workflow_reply(
+            reply: Annotated[
+                str, Field(description="One of the replies the instruction lists.")
+            ],
+            instruction_id: Annotated[
+                int, Field(description="instruction_id of the pending instruction.")
+            ],
+            arguments: Annotated[
+                dict[str, Any] | None,
+                Field(description="The reply's arguments, as its schema describes."),
+            ] = None,
+            session_id: Annotated[
+                str | None,
+                Field(
+                    description="session_id of the instruction; may be omitted "
+                    "when only one session is active."
+                ),
+            ] = None,
+        ) -> dict[str, Any]:
+            return _workflow_reply(
+                loaded, project(), reply, instruction_id, arguments, session_id
+            )
+
+        tools = [
+            Tool.from_function(
+                workflow_list,
+                description="List the project's workflows. Start one with the tool "
+                "named after it.",
+                annotations=ToolAnnotations(read_only_hint=True),
+            ),
+            Tool.from_function(
+                workflow_reply,
+                description="Reply to the pending instruction of a workflow "
+                "session with one of the replies it lists.",
+                annotations=ToolAnnotations(read_only_hint=False),
+            ),
+        ]
+        for workflow_id, workflow in sorted(loaded.items()):
+            for handler in sorted(
+                handlers(type(workflow)).values(), key=lambda item: item.name
+            ):
+                if handler.kind == "continuation":
+                    continue
+                name = (
+                    workflow_id
+                    if handler.kind == "start"
+                    else tool_name(workflow_id, handler.name)
+                )
+                tools.append(
+                    Tool.from_function(
+                        _tool_function(workflow, handler, project),
+                        name=name,
+                        description=_tool_description(workflow, handler),
+                    )
+                )
+        return tools
+
+    @classmethod
+    def prompts(
+        cls,
+        project: Callable[[], HirakuConfig],
+        workflows: Mapping[str, Workflow] | None = None,
+    ) -> list[Prompt]:
+        """Return one prompt per workflow that starts it for the user.
+
+        Getting the prompt starts a session and returns its first instruction
+        as the user message. Prompt arguments are strings and are converted to
+        the workflow's start arguments.
+
+        Args:
+            project: Returns the project configuration as currently saved.
+            workflows: Loaded workflows by ID; loaded from the project if
+                omitted.
+        """
+        from mcp.server.mcpserver.prompts import Prompt
+
+        loaded = load_workflows(project()) if workflows is None else workflows
+        return [
+            Prompt.from_function(
+                _prompt_function(workflow, project),
+                name=workflow_id,
+                description=summary(workflow_description(workflow))
+                or f"Start the {workflow_id} workflow.",
+            )
+            for workflow_id, workflow in sorted(loaded.items())
+        ]
+
+    def _start_model(self) -> type[BaseModel]:
+        """Return the model of the start arguments."""
+        return handlers(type(self))["start"].arguments
+
+    def _start_keywords(self, validated: BaseModel) -> dict[str, Any]:
+        """Return the keyword arguments of ``start`` for validated arguments."""
+        return _keywords(validated)
 
     @property
     def config(self) -> HirakuConfig:
@@ -356,27 +465,75 @@ class Workflow(BaseRecord):
         )
 
 
+_ARGUMENT_TYPES: dict[str, type] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+}
+
+
+class Argument(BaseModel):
+    """A start argument declared in the front matter of a Markdown workflow.
+
+    Attributes:
+        type: ``string``, ``integer``, ``number``, or ``boolean``.
+        description: What the argument means, shown to the user and the agent.
+        required: Whether the argument must be given.
+        default: Value used when the argument is not given.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["string", "integer", "number", "boolean"] = "string"
+    description: str | None = None
+    required: bool = False
+    default: str | int | float | bool | None = None
+
+
 class PromptWorkflow(Workflow):
     """Send the whole workflow.md as one instruction and finish on the reply.
 
-    Used for workflow directories that contain only ``workflow.md``. Hiraku
-    checks nothing about the work itself; the agent follows the prompt and
-    reports when it is done.
+    Used for workflow directories that contain only ``workflow.md``. Its front
+    matter may declare start ``arguments``, which fill ``{{name}}``
+    placeholders in the body. Hiraku checks nothing about the work itself; the
+    agent follows the prompt and may report a summary when it is done.
+
+    Example:
+        ```markdown
+        ---
+        id: loop
+        arguments:
+          iterations: {type: integer, default: 5, description: Experiments to run}
+        ---
+        Run {{iterations}} experiments.
+        ```
     """
 
+    arguments: dict[str, Argument] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def check_placeholders(self) -> Self:
+        undeclared = sorted(placeholders(self.markdown) - set(self.arguments))
+        if undeclared:
+            raise ValidationError(
+                f"Workflow {self.id!r} uses placeholders without declared "
+                f"arguments: {', '.join(undeclared)}"
+            )
+        return self
+
+    @property
+    def orientation(self) -> str:
+        """Return nothing: the whole body is the first instruction."""
+        return ""
+
     @tool
-    def start(
-        self,
-        request: Annotated[
-            str | None,
-            Field(description="The user's request, goals, or limits for this run."),
-        ] = None,
-    ) -> Instruction:
+    def start(self, arguments: dict[str, Any] | None = None) -> Instruction:
         """Start the workflow; its whole prompt arrives as one instruction."""
+        values = dict(arguments or {})
         return self.instruction(
             Session(),
-            self.text,
-            context={"request": request} if request else None,
+            render(self.text, values),
+            context=values or None,
             replies=[self.complete],
         )
 
@@ -392,6 +549,23 @@ class PromptWorkflow(Workflow):
         if not summary.strip():
             raise SubmissionRejected("Summarize what was done")
         return self.completion(session, {"summary": summary.strip()})
+
+    def _start_model(self) -> type[BaseModel]:
+        fields: dict[str, Any] = {}
+        for name, argument in self.arguments.items():
+            kind = _ARGUMENT_TYPES[argument.type]
+            info = Field(description=argument.description)
+            if argument.required:
+                fields[name] = (Annotated[kind, info], ...)  # ty: ignore[invalid-type-form]
+            else:
+                optional = Annotated[kind | None, info]  # ty: ignore[invalid-type-form]
+                fields[name] = (optional, argument.default)
+        return create_model(
+            f"{self.id}_arguments", __config__=ConfigDict(extra="forbid"), **fields
+        )
+
+    def _start_keywords(self, validated: BaseModel) -> dict[str, Any]:
+        return {"arguments": validated.model_dump(mode="json")}
 
 
 def discover_workflows(config: HirakuConfig) -> list[str]:
@@ -480,56 +654,10 @@ def load_workflows(config: HirakuConfig) -> dict[str, Workflow]:
     return loaded
 
 
-def active_workflows(config: HirakuConfig) -> list[str]:
-    """Return the IDs of the workflows the MCP server exposes.
-
-    Without ``mcp.workflows`` in ``hiraku.yml``, every workflow is active.
-    """
-    configured = config.mcp.workflows if config.mcp else None
-    return discover_workflows(config) if configured is None else list(configured)
-
-
-def set_workflow_active(
-    workflow_id: str, active: bool, *, config: HirakuConfig
-) -> list[str]:
-    """Add a workflow to or remove it from ``mcp.workflows`` and save it.
-
-    Returns:
-        The active workflow IDs afterwards.
-
-    Raises:
-        hiraku.errors.WorkflowError: If the workflow does not exist.
-    """
-    from .config import HirakuConfig
-
-    available = discover_workflows(config)
-    if workflow_id not in available:
-        raise WorkflowError(
-            f"Unknown workflow {workflow_id!r}; available workflows: "
-            f"{', '.join(available) or 'none'}"
-        )
-    # Reload under a lock so concurrent edits, such as a new active record, are
-    # not overwritten by a stale configuration.
-    with FileLock(str(config.hiraku_dir / ".config.lock"), timeout=30):
-        current = HirakuConfig.load(config.path)
-        selected = [item for item in active_workflows(current) if item != workflow_id]
-        if active:
-            selected.append(workflow_id)
-        current.set_mcp_workflows(selected)
-    config.mcp = current.mcp
-    return selected
-
-
-def list_workflows(
-    workflows: Mapping[str, Workflow], active: Collection[str]
-) -> list[dict[str, Any]]:
-    """Describe loaded workflows: ID, whether active, and description."""
+def list_workflows(workflows: Mapping[str, Workflow]) -> list[dict[str, Any]]:
+    """Describe loaded workflows: ID and description."""
     return [
-        {
-            "id": workflow_id,
-            "active": workflow_id in active,
-            "description": workflow_description(workflow),
-        }
+        {"id": workflow_id, "description": workflow_description(workflow)}
         for workflow_id, workflow in sorted(workflows.items())
     ]
 
@@ -538,6 +666,11 @@ def workflow_description(workflow: Workflow) -> str:
     """Return the ``description`` setting of a workflow, or its class docstring."""
     described = workflow.to_dict().get("description")
     return str(described or type(workflow).__doc__ or "").strip()
+
+
+def tool_name(workflow_id: str, name: str) -> str:
+    """Return the full name of a workflow tool, ``<workflow-id>_<name>``."""
+    return f"{workflow_id}_{name}"
 
 
 def split_tool_name(name: str) -> tuple[str, str]:
@@ -785,7 +918,7 @@ def _reply_locked(
             f"Session {session_id!r} belongs to workflow {stored.workflow!r}, "
             f"not {workflow.id!r}",
         )
-    validated, failure = _validate(handler, values)
+    validated, failure = _validate(handler.arguments, values)
     if failure is not None:
         return {**failure, **stored.response}
     arguments = validated.model_dump(mode="json")
@@ -810,10 +943,13 @@ def _reply_locked(
     # The runtime owns the base fields; discard any changes the tool made.
     for name in Session.model_fields:
         setattr(result, name, getattr(stored, name))
-    result.receipt = Receipt(
-        instruction_id=instruction_id, reply=handler.name, arguments=arguments
+    call = HistoryEntry(
+        instruction_id=instruction_id,
+        reply=handler.name,
+        arguments=arguments,
+        at=datetime.now(UTC),
     )
-    result.advance(response, _descriptions(workflow))
+    result.advance(response, _reply_specs(workflow), call)
     result.save(config=workflow.config)
     return {"status": "accepted", **result.response}
 
@@ -833,18 +969,17 @@ def _active_session(workflow: Workflow) -> tuple[str, dict[str, Any] | None]:
         )
     else:
         message = (
-            f"No active {workflow.id} session; start one with "
-            f"{tool_name(workflow.id, 'start')}"
+            f"No active {workflow.id} session; start one with the {workflow.id} tool"
         )
     return "", {"status": "rejected", "message": message}
 
 
 def _validate(
-    handler: Handler, values: dict[str, Any]
+    model: type[BaseModel], values: dict[str, Any]
 ) -> tuple[Any, dict[str, Any] | None]:
     """Return the validated arguments, or a failure status."""
     try:
-        return handler.arguments.model_validate(values), None
+        return model.model_validate(values), None
     except PydanticValidationError as exc:
         return None, {"status": "rejected", "message": validation_message(exc)}
 
@@ -915,7 +1050,7 @@ def compatibility_problem(workflow: Workflow, session: Session) -> str | None:
         )
     model = session_model(type(workflow))
     if model is None:
-        return "The loaded workflow defines no reply tools."
+        return "The loaded workflow defines no replies."
     try:
         model.load(session.id, config=session.config)
     except ValidationError as exc:
@@ -930,11 +1065,37 @@ def _incompatible(exc: ValidationError) -> str:
     )
 
 
-def _descriptions(workflow: Workflow) -> dict[str, str]:
+def _reply_specs(workflow: Workflow) -> dict[str, dict[str, Any]]:
+    """Return the description and argument schema of each reply, by name."""
     return {
-        name: summary(handler.description)
+        name: {
+            "description": summary(handler.description),
+            "arguments": _compact_schema(handler.arguments),
+        }
         for name, handler in handlers(type(workflow)).items()
+        if handler.kind == "continuation"
     }
+
+
+def _compact_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Return a model's JSON schema without titles, for instructions."""
+
+    def strip(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: strip(item)
+                for key, item in value.items()
+                if not (key == "title" and isinstance(item, str))
+                and key != "additionalProperties"
+            }
+        if isinstance(value, list):
+            return [strip(item) for item in value]
+        return value
+
+    schema = strip(model.model_json_schema())
+    schema.pop("type", None)
+    schema.setdefault("properties", {})
+    return schema
 
 
 def _keywords(validated: BaseModel) -> dict[str, Any]:
@@ -970,3 +1131,165 @@ __all__ = [
     "load_workflows",
     "tool",
 ]
+
+
+def _tool_function(
+    workflow: Workflow, handler: Handler, project: Callable[[], HirakuConfig]
+) -> Callable[..., Any]:
+    """Return a function whose signature is a start or plain tool's schema."""
+    model = workflow._start_model() if handler.kind == "start" else handler.arguments
+
+    def run(**arguments: Any) -> dict[str, Any]:
+        return workflow.bind(project()).call(handler.name, arguments)
+
+    parameters = []
+    for name, field in model.model_fields.items():
+        default = (
+            inspect.Parameter.empty
+            if field.is_required()
+            else field.get_default(call_default_factory=True)
+        )
+        parameters.append(
+            inspect.Parameter(
+                name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=default,
+                annotation=Annotated[
+                    (
+                        field.annotation,
+                        *field.metadata,
+                        Field(description=field.description),
+                    )
+                ],
+            )
+        )
+    return _with_signature(run, workflow.id, handler.name, parameters)
+
+
+def _prompt_function(
+    workflow: Workflow, project: Callable[[], HirakuConfig]
+) -> Callable[..., str]:
+    """Return a function that starts a session and renders its instruction.
+
+    Prompt arguments are strings; the start arguments' model converts them.
+    """
+
+    def run(**arguments: Any) -> str:
+        values = {key: value for key, value in arguments.items() if value is not None}
+        response = workflow.bind(project()).call("start", values)
+        if response.get("status") != "accepted":
+            # The SDK hides exception messages from prompts, so explain in text.
+            return (
+                f"The Hiraku workflow `{workflow.id}` did not start: "
+                f"{response.get('message')}. Tell the user and ask for corrected "
+                "arguments."
+            )
+        return _prompt_text(response)
+
+    parameters = [
+        inspect.Parameter(
+            name,
+            inspect.Parameter.KEYWORD_ONLY,
+            default=inspect.Parameter.empty if field.is_required() else None,
+            annotation=Annotated[
+                str if field.is_required() else str | None,  # ty: ignore[invalid-type-form]
+                Field(description=field.description),
+            ],
+        )
+        for name, field in workflow._start_model().model_fields.items()
+    ]
+    return _with_signature(run, workflow.id, "prompt", parameters)
+
+
+def _with_signature(
+    function: Callable[..., Any],
+    workflow_id: str,
+    name: str,
+    parameters: list[inspect.Parameter],
+) -> Callable[..., Any]:
+    function.__name__ = tool_name(workflow_id, name).replace("-", "_")  # ty: ignore[unresolved-attribute]
+    function.__signature__ = inspect.Signature(parameters)  # ty: ignore[unresolved-attribute]
+    # Pydantic's validate_call, used for prompts, reads the annotations.
+    function.__annotations__ = {item.name: item.annotation for item in parameters}
+    return function
+
+
+def _prompt_text(response: Mapping[str, Any]) -> str:
+    """Render a start response as a user message for the agent."""
+    instruction = response["instruction"]
+    parts = []
+    orientation = response.get("orientation") or ""
+    if orientation and not instruction["text"].startswith(orientation):
+        parts.append(orientation)
+    parts.append(instruction["text"])
+    if instruction.get("context") is not None:
+        context = json.dumps(instruction["context"], indent=1, ensure_ascii=False)
+        parts.append(f"Context:\n```json\n{context}\n```")
+    replies = json.dumps(instruction["replies"], indent=1, ensure_ascii=False)
+    parts.append(
+        f"---\nThis is Hiraku workflow session `{response['session_id']}`, "
+        f"instruction {response['instruction_id']}. Reply with the workflow_reply "
+        f"tool, passing session_id `{response['session_id']}`, instruction_id "
+        f"{response['instruction_id']}, one of these replies, and its "
+        f"arguments:\n```json\n{replies}\n```\n\n{response['guide']}"
+    )
+    return "\n\n".join(parts)
+
+
+def _workflow_reply(
+    workflows: Mapping[str, Workflow],
+    config: HirakuConfig,
+    reply: str,
+    instruction_id: int,
+    arguments: Mapping[str, Any] | None,
+    session_id: str | None,
+) -> dict[str, Any]:
+    """Send a reply to the pending instruction of a session of any workflow."""
+    if session_id is None:
+        active = [
+            item["session_id"]
+            for item in Session.list_all(config=config)
+            if item.get("status") == "active"
+        ]
+        if len(active) != 1:
+            return {
+                "status": "rejected",
+                "message": (
+                    f"Several sessions are active ({', '.join(active)}); pass "
+                    "session_id"
+                    if active
+                    else "No session is active; start a workflow first"
+                ),
+            }
+        session_id = active[0]
+    session = Session.load(session_id, config=config)
+    workflow = workflows.get(session.workflow)
+    if workflow is None:
+        return session.outcome(
+            "rejected",
+            f"Workflow {session.workflow!r} is unavailable; the session cannot "
+            "continue until it loads.",
+        )
+    handler = handlers(type(workflow)).get(reply)
+    if handler is None or handler.kind != "continuation":
+        return session.outcome(
+            "rejected",
+            f"{reply!r} is not a reply of workflow {workflow.id!r}; the pending "
+            f"instruction accepts: {', '.join(session.replies) or 'none'}",
+        )
+    values = {
+        **dict(arguments or {}),
+        "instruction_id": instruction_id,
+        "session_id": session_id,
+    }
+    return workflow.bind(config).call(reply, values)
+
+
+def _tool_description(workflow: Workflow, handler: Handler) -> str:
+    description = handler.description or f"{handler.name} of workflow {workflow.id}"
+    if handler.kind == "start":
+        prefix = f"Start a {workflow.id} workflow session."
+        if text := summary(workflow_description(workflow)):
+            prefix += f" {text}"
+        return f"{prefix}\n\n{description}"
+    return description

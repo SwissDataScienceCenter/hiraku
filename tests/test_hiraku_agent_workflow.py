@@ -54,10 +54,7 @@ class Harness:
 
     @property
     def replies(self) -> list[str]:
-        return [
-            item["tool"].removeprefix("hiraku-agent_")
-            for item in self.response["instruction"]["replies"]
-        ]
+        return [item["reply"] for item in self.response["instruction"]["replies"]]
 
 
 @pytest.fixture

@@ -18,7 +18,13 @@ from pydantic import ValidationError as PydanticValidationError
 from .agent import Context, list_contexts, load_context
 from .base import BaseRecord
 from .config import HirakuConfig
-from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
+from .errors import (
+    GitError,
+    HirakuError,
+    NoActiveRecordError,
+    ValidationError,
+    WorkflowError,
+)
 from .git import GitRepository
 from .io import dump_yaml, json_value
 from .launch import _dispatcher, launch, render_arguments
@@ -558,73 +564,35 @@ _install_generic("context", Context, load_context, list_contexts, "contexts_dir"
     type=click.Path(path_type=Path),
     help="Project directory; discovered from the working directory by default.",
 )
-@click.option(
-    "--workflow",
-    "workflows",
-    multiple=True,
-    help="Expose only this workflow for this connection; repeatable.",
-)
-def mcp_command(project: Path | None, workflows: tuple[str, ...]) -> None:
+def mcp_command(project: Path | None) -> None:
     """Run the Hiraku MCP server: records, runs, and workflows over stdio."""
     from .mcp import serve
 
-    config = HirakuConfig.discover(project)
-    serve(config, exposed=list(workflows) or None)
+    serve(HirakuConfig.discover(project))
 
 
 @main.group("workflow")
 def workflow_group() -> None:
-    """List, activate, and call project workflows."""
+    """List and call project workflows."""
 
 
 @workflow_group.command("list")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def workflow_list(state: CLIContext, json_output: bool) -> None:
-    """List workflows and whether the MCP server exposes them."""
-    from .workflow import active_workflows, list_workflows, load_workflows
+    """List the project's workflows."""
+    from .workflow import list_workflows, load_workflows
 
-    config = state.config
-    workflows = list_workflows(load_workflows(config), active_workflows(config))
+    workflows = list_workflows(load_workflows(state.config))
     if json_output:
         _emit_json(workflows)
         return
     click.echo(
         _table(
-            ("id", "active", "description"),
-            [
-                (
-                    item["id"],
-                    "yes" if item["active"] else "no",
-                    item["description"].split("\n", 1)[0],
-                )
-                for item in workflows
-            ],
+            ("id", "description"),
+            [(item["id"], item["description"].split("\n", 1)[0]) for item in workflows],
         )
     )
-
-
-@workflow_group.command("activate")
-@click.argument("workflow_id")
-@click.pass_obj
-def workflow_activate(state: CLIContext, workflow_id: str) -> None:
-    """Expose a workflow's tools through the MCP server."""
-    from .workflow import load_workflow, set_workflow_active
-
-    load_workflow(workflow_id, config=state.config)
-    active = set_workflow_active(workflow_id, True, config=state.config)
-    click.echo(f"Active workflows: {', '.join(active) or 'none'}")
-
-
-@workflow_group.command("deactivate")
-@click.argument("workflow_id")
-@click.pass_obj
-def workflow_deactivate(state: CLIContext, workflow_id: str) -> None:
-    """Hide a workflow's tools from the MCP server; sessions are kept."""
-    from .workflow import set_workflow_active
-
-    active = set_workflow_active(workflow_id, False, config=state.config)
-    click.echo(f"Active workflows: {', '.join(active) or 'none'}")
 
 
 @workflow_group.command("call")
@@ -636,7 +604,11 @@ def workflow_deactivate(state: CLIContext, workflow_id: str) -> None:
 )
 @click.pass_obj
 def workflow_call(state: CLIContext, tool_name: str, arguments_file: Any) -> None:
-    """Call a workflow tool as the MCP server would and print its JSON result."""
+    """Call a workflow tool as the MCP server would and print its JSON result.
+
+    TOOL_NAME is a workflow ID to start it, workflow_reply to answer an
+    instruction, or another workflow tool such as hiraku-agent_next_step.
+    """
     arguments: Any = {}
     if arguments_file is not None:
         try:
@@ -645,11 +617,20 @@ def workflow_call(state: CLIContext, tool_name: str, arguments_file: Any) -> Non
             raise ValidationError(f"Cannot read tool arguments: {exc}") from exc
     if not isinstance(arguments, dict):
         raise ValidationError("Tool arguments must be a JSON object")
-    from .workflow import load_workflow, split_tool_name
+    from .workflow import Workflow, load_workflows
 
-    workflow_id, tool = split_tool_name(tool_name)
-    workflow = load_workflow(workflow_id, config=state.config)
-    _emit_json(workflow.bind(state.config).call(tool, arguments))
+    config = state.config
+    tools = {
+        tool.name: tool
+        for tool in Workflow.tools(lambda: config, load_workflows(config))
+    }
+    if tool_name not in tools:
+        raise WorkflowError(f"Unknown workflow tool {tool_name!r}")
+    try:
+        result = tools[tool_name].fn(**arguments)
+    except TypeError as exc:
+        raise ValidationError(f"Invalid arguments for {tool_name}: {exc}") from exc
+    _emit_json(result)
 
 
 @main.group("session")
@@ -713,7 +694,7 @@ def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
         instruction = response["instruction"]
         click.echo(f"\nPending instruction {response['instruction_id']}:\n")
         click.echo(instruction["text"])
-        replies = ", ".join(reply["tool"] for reply in instruction["replies"])
+        replies = ", ".join(reply["reply"] for reply in instruction["replies"])
         click.echo(f"\nReplies: {replies}")
     elif response.get("completed"):
         click.echo("\nResult:")

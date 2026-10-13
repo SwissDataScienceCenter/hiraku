@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from .errors import ValidationError
 
@@ -91,3 +93,33 @@ def parse_markdown(markdown: str, *, label: str) -> ParsedMarkdown:
         )
         sections[anchor] = Section(level, index, end)
     return ParsedMarkdown(lines, sections, orientation_end)
+
+
+_PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+
+
+def placeholders(markdown: str) -> set[str]:
+    """Return the names of the ``{{name}}`` placeholders in a Markdown text."""
+    return set(_PLACEHOLDER.findall(markdown))
+
+
+def render(markdown: str, values: Mapping[str, Any]) -> str:
+    """Replace each ``{{name}}`` placeholder with its value.
+
+    Booleans render as ``true`` and ``false``, ``None`` as an empty string,
+    and other values with ``str``.
+
+    Raises:
+        hiraku.errors.ValidationError: If a placeholder has no value.
+    """
+    missing = sorted(placeholders(markdown) - set(values))
+    if missing:
+        raise ValidationError(f"No value for placeholders: {', '.join(missing)}")
+
+    def replace(match: re.Match[str]) -> str:
+        value = values[match.group(1)]
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return "" if value is None else str(value)
+
+    return _PLACEHOLDER.sub(replace, markdown)

@@ -10,7 +10,7 @@ description: >-
 You are helping run a bounded research loop over a task's tree of experiments.
 Hiraku's scheduler picks one step at a time from the tree's evidence and sends it
 to you; you do the step in this conversation and reply with its result. The
-records are the source of truth: you report results through the reply tools,
+records are the source of truth: you report results through the replies,
 and Hiraku writes them into the records, which keeps every change auditable.
 
 ### The tree
@@ -134,7 +134,7 @@ sending something outside the project.
 
 ### How to reply
 
-Each instruction lists its reply tools; their parameters are the step's output
+Each instruction lists its replies; their arguments are the step's output
 contract. Use null or an empty list where you have nothing to say. If a step
 cannot be done, reply with `blocked` and the reason. When an instruction
 requires a user response, ask the researcher and wait for the answer.

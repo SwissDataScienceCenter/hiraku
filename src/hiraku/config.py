@@ -11,36 +11,11 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
-    field_validator,
     model_validator,
 )
 
 from .errors import ProjectNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
-from .validation import validate_identifier
-
-
-class MCPSettings(BaseModel):
-    """Settings for the Hiraku MCP server.
-
-    Attributes:
-        workflows: Workflow IDs whose tools the server exposes. ``None`` exposes
-            every discovered workflow; an empty list exposes none.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    workflows: list[str] | None = None
-
-    @field_validator("workflows")
-    @classmethod
-    def validate_workflows(cls, value: list[str] | None) -> list[str] | None:
-        if value is None:
-            return value
-        for identifier in value:
-            validate_identifier(identifier, label="workflow ID")
-        if len(value) != len(set(value)):
-            raise ValidationError("mcp.workflows contains duplicate IDs")
-        return value
 
 
 class HirakuConfig(BaseModel):
@@ -53,7 +28,6 @@ class HirakuConfig(BaseModel):
         default_dispatch: Default launcher script.
         branch: Record branch template.
         tracking_backend: Backend configuration mapping with a required ``type``.
-        mcp: MCP server settings, including the workflows it exposes.
 
     Raises:
         pydantic.ValidationError: If configuration values are invalid or inconsistent.
@@ -85,7 +59,6 @@ class HirakuConfig(BaseModel):
         default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
     )
     active_record_id: str | None = DEFAULTS["active_record_id"]
-    mcp: MCPSettings | None = None
     _hiraku_dir: Path = PrivateAttr()
 
     @model_validator(mode="before")
@@ -99,8 +72,8 @@ class HirakuConfig(BaseModel):
             raise ValidationError(
                 "Configuration key 'default_program' is no longer supported: "
                 "programs were replaced by workflows. Remove the key from "
-                "hiraku.yml and start a workflow explicitly through its "
-                "'<workflow>_start' MCP tool or 'hiraku workflow call'."
+                "hiraku.yml and start a workflow explicitly through its MCP "
+                "tool or prompt, or 'hiraku workflow call'."
             )
         backend = raw.get("tracking_backend")
         if isinstance(backend, str):
@@ -304,21 +277,6 @@ class HirakuConfig(BaseModel):
             self.save()
         except Exception:
             self.active_record_id = old
-            raise
-
-    def set_mcp_workflows(self, workflows: list[str] | None) -> None:
-        """Persist the workflows exposed by the MCP server.
-
-        Args:
-            workflows: Workflow IDs to expose, or ``None`` to expose all
-                discovered workflows.
-        """
-        old = self.mcp
-        try:
-            self.mcp = MCPSettings(workflows=workflows)
-            self.save()
-        except Exception:
-            self.mcp = old
             raise
 
     def clear_active_record(self) -> None:

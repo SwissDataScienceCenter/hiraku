@@ -16,22 +16,32 @@ A workflow consists of three concepts:
   workflow's progress, and the pending instruction, so work continues after a
   restart.
 - **Instruction**: the next request to the agent. It contains guidance,
-  concise context, whether the user must answer first, and the reply tools that
-  may continue the session.
+  concise context, whether the user must answer first, and the replies that
+  may continue the session, each with its argument schema.
 
 ## Use a workflow
 
 `hiraku init` installs the bundled workflows and registers the Hiraku MCP
 server for Claude Code (`.mcp.json`) and Codex (`.codex/config.toml`). The
 server runs `hiraku mcp`, so the `hiraku` command must be on the agent's
-`PATH`. Start your agent in the project and ask it to start a workflow:
+`PATH`. Each workflow is available in two ways under its ID:
 
-> What Hiraku workflows are available here? Start guided research on the
-> active task with three hypotheses per round.
+- as an **MCP prompt** that you invoke yourself, which agents such as Claude
+  Code show as a slash command, e.g. `/mcp__hiraku__guided-research`. Its
+  arguments are typed in the command; the prompt starts a session and hands its
+  first instruction to the agent.
+- as an **MCP tool** that the agent calls when you ask for the workflow, e.g.:
 
-The agent calls `workflow_list` to explain the workflows, then
-`guided-research_start`. Every response names the reply tools that
-continue the session, for example:
+  > What Hiraku workflows are available here? Start guided research on the
+  > active task with three hypotheses per round.
+
+  The agent calls `workflow_list` to explain the workflows, then the
+  `guided-research` tool. Codex has no MCP prompts, so this is how it starts
+  workflows.
+
+Every response names the replies that continue the session. The agent answers
+with the `workflow_reply` tool, for example
+`workflow_reply(reply="select", arguments={"record_id": "exp-reg"}, ...)`:
 
 ```json
 {
@@ -42,12 +52,13 @@ continue the session, for example:
     "text": "## Choose\n\nPresent the candidates briefly ...",
     "context": {"candidates": [{"id": "exp-reg"}, {"id": "exp-lr"}]},
     "requires_user_response": true,
+    "reply_with": "workflow_reply",
     "replies": [
-      {"tool": "guided-research_select",
-       "arguments": {"session_id": "guided-research-3f9a1c2b4d5e",
-                     "instruction_id": 2}},
-      {"tool": "guided-research_revise", "arguments": {"...": "..."}},
-      {"tool": "guided-research_finish", "arguments": {"...": "..."}}
+      {"reply": "select", "description": "Pursue the experiment the user chose.",
+       "arguments": {"properties": {"record_id": {"type": "string"}},
+                     "required": ["record_id"]}},
+      {"reply": "revise", "arguments": {"...": "..."}},
+      {"reply": "finish", "arguments": {"...": "..."}}
     ]
   }
 }
@@ -58,7 +69,8 @@ is a conversational contract; it does not authenticate approval.
 
 A reply passes the `instruction_id` of the instruction it answers, so a late or
 repeated call cannot be applied to a later step. `session_id` may be left out
-while only one session of the workflow is active.
+while only one session is active. Hiraku checks the reply's arguments against
+its schema and keeps each accepted call in the session's history.
 
 A reply has one of these outcomes:
 
@@ -96,30 +108,22 @@ twice. Work the agent did before replying, such as creating records or
 launching runs, is not rolled back; workflows tell the agent to check for
 existing outputs before repeating such work.
 
-### Choose which workflows are exposed
+### Tools and prompts are fixed
 
-The MCP server exposes tools only for the workflows listed in `hiraku.yml`:
-
-```yaml
-mcp:
-  workflows: [autoresearch-python, autodataset]
-```
-
-Leave out `mcp.workflows` to expose all workflows, or use `[]` to expose none.
-`hiraku workflow activate ID` and `hiraku workflow deactivate ID` edit the list;
-the agent can do the same with `workflow_activate` and `workflow_deactivate`.
-Hiraku then notifies the agent that its tools changed. Depending on the agent,
-new tools appear in the next message or only after reconnecting the MCP server
-or restarting the agent. `hiraku mcp --workflow ID` overrides the list
-for one connection. Inactive workflows still appear in `workflow_list`, and
-their sessions can be inspected.
+The MCP server offers one tool and one prompt per workflow, the generic
+`workflow_reply`, and the tools below, all fixed when it starts: coding agents
+do not reliably pick up tools that change during a session. A workflow added or
+edited later appears after you reconnect the Hiraku MCP server or restart the
+agent.
 
 ### MCP server tools
 
-Besides the workflow tools, the server offers `project_status`, `record_list`,
+Besides the workflow tools, the server offers `workflow_list`, `session_list`,
+`session_show`, `session_cancel`, `project_status`, `record_list`,
 `record_show`, `record_create`, `record_update`, and `runs`, and resources for
-workflow prompts (`hiraku://workflows/<id>`), records
-(`hiraku://records/<id>`), sessions (`hiraku://sessions/<id>`), and contexts.
+workflow documents (`hiraku://workflows/<id>`), records
+(`hiraku://records/<id>`), sessions (`hiraku://sessions/<id>`), and contexts
+(`hiraku://contexts/<id>`).
 
 Experiments are launched with the `hiraku launch` CLI. MCP clients limit how
 long a tool call may run and how much output it may return, so long launches
@@ -128,22 +132,30 @@ from the agent's MCP configuration, not from the agent's shell.
 
 ## Write a Markdown-only workflow
 
-The simplest workflow is a directory with only `workflow.md`:
+The simplest workflow is a directory with only `workflow.md`. Its front matter
+may declare arguments, which fill `{{name}}` placeholders in the body:
 
 ```markdown
 ---
 id: literature-scan
 description: Scan recent papers on the task and summarize them in a context.
+arguments:
+  topic: {required: true, description: What to search for}
+  years: {type: integer, default: 2, description: How far back to search}
 ---
 # Literature scan
 
-Search for papers from the last two years on the active task ...
+Search for papers on {{topic}} from the last {{years}} years ...
 ```
 
-Hiraku sends the whole body as one instruction. `literature-scan_start` takes an
-optional free-text `request` with the user's goals or limits, and the single
-reply `literature-scan_complete` ends the session with the agent's summary.
-Sessions can be resumed, inspected, and cancelled like any other.
+Argument types are `string` (the default), `integer`, `number`, and `boolean`.
+A placeholder without a declared argument is an error when the workflow loads.
+
+`/mcp__hiraku__literature-scan topic=diffusion years=3` and the
+`literature-scan` tool both start a session whose only instruction is the
+rendered body. Prompt arguments arrive as text and are converted to the
+declared types. The single reply `complete` ends the session with the agent's
+summary; sessions can be resumed, inspected, and cancelled like any other.
 
 Hiraku checks nothing about the work in a Markdown-only workflow: there are no
 budgets, approvals, or evidence checks, and `complete` only means the agent
@@ -235,24 +247,25 @@ The rules are deliberately small:
 - A `Workflow` instance is the loaded `workflow.md` record. Its front matter
   needs the workflow `id`, matching the directory name. Workflow IDs use
   letters, digits, and `-`, but not `_`, which separates the workflow ID from
-  the tool name in MCP names. Annotated class
+  the tool name in names such as `hiraku-agent_next_step`. Annotated class
   attributes, like `min_questions` above, are settings validated from the front
   matter; other front-matter fields are kept as metadata. The class body
   follows Pydantic rules: constants need `ClassVar[...]`, and `__init__` is not
   overridden.
-- `@tool` registers a method as an MCP tool named `<workflow-id>_<method>`; use
-  `@tool("name")` to choose the tool name separately, for example when the
+- `@tool` registers a method as a workflow operation named after the method;
+  use `@tool("name")` to choose the name separately, for example when the
   method name is taken by a record attribute such as `save`, `load`, or
-  `delete`. The signature and docstring define the tool schema; use
-  `Annotated[..., Field()]` for parameter descriptions and constraints.
-- `start` creates sessions. A method with one parameter annotated as a `Session`
-  subclass is a **reply**: Hiraku loads the session, checks that the reply
-  answers the pending instruction, calls the method, and saves the result
-  atomically. Any other `@tool` method is an ordinary tool that does not change
-  sessions.
+  `delete`. The signature and docstring define the arguments and description;
+  use `Annotated[..., Field()]` for parameter descriptions and constraints.
+- `start` creates sessions; it becomes the MCP tool and prompt named after the
+  workflow. A method with one parameter annotated as a `Session` subclass is a
+  **reply**, sent through `workflow_reply`: Hiraku loads the session, checks
+  that the reply answers the pending instruction and that its arguments match,
+  calls the method, and saves the result atomically. Any other `@tool` method
+  is an ordinary tool, `<workflow-id>_<name>`, that does not change sessions.
 - A `Session` subclass declares the workflow's own data. The base fields, such
-  as `id`, `status`, and `instruction_id`, belong to the runtime and cannot be
-  redefined.
+  as `id`, `status`, `instruction_id`, and `history`, belong to the runtime and
+  cannot be redefined.
 - Replies return `self.instruction(...)` or `self.completion(...)`. An
   instruction lists the replies that may answer it.
 - Raise `SubmissionRejected` for invalid input and `NotReady` when valid input
@@ -276,9 +289,9 @@ The rules are deliberately small:
   bundled research workflows share.
 
 The MCP server loads workflow code and prompts when it starts. A workflow that
-fails to load is logged to the server's stderr and left out; activating it with
-`workflow_activate` loads it again and returns the error. After editing a
-workflow that already loaded, reconnect the MCP server. Existing sessions
+fails to load is logged to the server's stderr and left out;
+`hiraku workflow list` in a terminal shows the error. After editing a workflow,
+reconnect the MCP server. Existing sessions
 continue with the new code if their stored data still validates against the
 session model and their pending replies still exist; otherwise their replies
 are rejected, and they remain inspectable.
@@ -288,7 +301,7 @@ Workflow code is trusted project code: loading it executes it.
 Test a workflow without an agent with `hiraku workflow call`:
 
 ```bash
-echo '{"topic": "protein folding"}' | hiraku workflow call review_start --arguments-file -
+echo '{"topic": "protein folding"}' | hiraku workflow call review --arguments-file -
 ```
 
 ## Bundled workflows

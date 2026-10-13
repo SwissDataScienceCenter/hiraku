@@ -27,6 +27,7 @@ class Harness:
         return self.workflows[workflow_id].bind(self.config).call(tool, arguments)
 
     def start(self, workflow: str, **arguments: Any) -> dict[str, Any]:
+        self.workflow = workflow
         self.response = self.call(f"{workflow}_start", arguments)
         return self.response
 
@@ -49,7 +50,9 @@ class Harness:
 
     @property
     def replies(self) -> list[str]:
-        return [item["tool"] for item in self.instruction["replies"]]
+        return [
+            f"{self.workflow}_{item['reply']}" for item in self.instruction["replies"]
+        ]
 
     def section(self) -> str:
         return self.instruction["text"].splitlines()[0]

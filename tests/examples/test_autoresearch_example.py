@@ -132,7 +132,7 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "/.claude/" in readme
     assert "/.mcp.json" in readme
     assert "/.codex/" in readme
-    assert "autoresearch-python_start" in readme
+    assert "the `autoresearch-python` tool" in readme
     assert "hiraku program" not in readme
     assert "--markdown-file task.md" in readme
     assert "hiraku record create sep10" in readme
@@ -210,12 +210,6 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert task.entrypoints["mock"].command[-1] == "cpu_mock.py"
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
-    assert config.mcp is not None
-    assert config.mcp.workflows == [
-        "autoresearch-python",
-        "guided-research",
-        "autoresearch",
-    ]
     workflows = load_workflows(config)
     assert type(workflows["autoresearch"]) is PromptWorkflow
     assert "autoresearch-python" in workflows

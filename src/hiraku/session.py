@@ -6,20 +6,22 @@ import inspect
 import json
 import re
 import secrets
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from pydantic import ValidationError as PydanticValidationError
 
-from .errors import SessionNotFoundError, ValidationError
+from .errors import HirakuError, SessionNotFoundError, ValidationError
 from .io import atomic_write
 
 if TYPE_CHECKING:
+    from mcp.server.mcpserver.tools import Tool
+
     from .config import HirakuConfig
     from .workflow import Workflow
 
@@ -33,8 +35,9 @@ How to follow a Hiraku workflow session:
 1. Carry out the instruction. Its context holds the data it refers to.
 2. If requires_user_response is true, ask the user and wait for their answer
    before replying; otherwise decide yourself.
-3. Continue by calling exactly one of the listed reply tools. Pass its fixed
-   arguments unchanged and supply the parameters its schema asks for.
+3. Continue with the workflow_reply tool: pass one of the listed replies as
+   reply, its arguments as described by the reply's schema, and the
+   instruction_id and session_id of the response unchanged.
 4. Each accepted reply returns the next instruction. Stop when a response has
    completed: true.
 5. A response with status rejected or not_ready keeps the same instruction
@@ -54,18 +57,14 @@ CANCEL_NOTE = (
 )
 
 
-def tool_name(workflow_id: str, name: str) -> str:
-    """Return the full name of a workflow tool, ``<workflow-id>_<name>``."""
-    return f"{workflow_id}_{name}"
-
-
-class Receipt(BaseModel):
-    """The last accepted reply of a session, used to recognize retries."""
+class HistoryEntry(BaseModel):
+    """One accepted call of a session: its start or a reply."""
 
     model_config = ConfigDict(extra="forbid")
     instruction_id: int
     reply: str
     arguments: dict[str, Any]
+    at: datetime
 
 
 class Session(BaseModel):
@@ -86,7 +85,8 @@ class Session(BaseModel):
         instruction_id: Number of the pending instruction; replies must name it.
         replies: Reply tools allowed for the pending instruction.
         response: The last response, returned again for retries and by `show`.
-        receipt: The last accepted reply, used to recognize retries.
+        history: Accepted calls, oldest first: the start, then each reply. The
+            last entry recognizes retries.
     """
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
@@ -97,7 +97,7 @@ class Session(BaseModel):
     instruction_id: int = Field(default=0, ge=0)
     replies: list[str] = Field(default_factory=list)
     response: dict[str, Any] = Field(default_factory=dict)
-    receipt: Receipt | None = None
+    history: list[HistoryEntry] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -190,6 +190,64 @@ class Session(BaseModel):
         _write(self.id, data, self.config)
         self._stored = data
 
+    # Tools ------------------------------------------------------------------------
+
+    @classmethod
+    def tools(
+        cls,
+        project: Callable[[], HirakuConfig],
+        workflows: Mapping[str, Workflow] | None = None,
+    ) -> list[Tool]:
+        """Return the agent tools to list, show, and cancel sessions.
+
+        Args:
+            project: Returns the project configuration as currently saved.
+            workflows: Loaded workflows by ID, used to describe a session with
+                its workflow; without it, the workflow is loaded on demand.
+        """
+        from mcp.server.mcpserver.tools import Tool
+        from mcp.types import ToolAnnotations
+
+        def session_list() -> list[dict[str, Any]]:
+            return Session.list_all(config=project())
+
+        def session_show(session_id: SessionId) -> dict[str, Any]:
+            config = project()
+            session = Session.load(session_id, config=config)
+            if workflows is not None:
+                return session.show(workflows.get(session.workflow))
+            from .workflow import load_workflow
+
+            try:
+                workflow = load_workflow(session.workflow, config=config)
+            except HirakuError:
+                workflow = None
+            return session.show(workflow)
+
+        def session_cancel(session_id: SessionId) -> dict[str, Any]:
+            return Session.load(session_id, config=project()).cancel()
+
+        return [
+            Tool.from_function(
+                session_list,
+                description="List workflow sessions with their status, newest first.",
+                annotations=ToolAnnotations(read_only_hint=True),
+            ),
+            Tool.from_function(
+                session_show,
+                description="Show a workflow session: orientation, pending "
+                "instruction or result, and stored data. Use it to resume a "
+                "session.",
+                annotations=ToolAnnotations(read_only_hint=True),
+            ),
+            Tool.from_function(
+                session_cancel,
+                description="Cancel a workflow session. Records, code, and runs are "
+                "kept.",
+                annotations=ToolAnnotations(read_only_hint=False),
+            ),
+        ]
+
     # Inspection and cancellation --------------------------------------------------
 
     def show(self, workflow: Workflow | None = None) -> dict[str, Any]:
@@ -229,8 +287,8 @@ class Session(BaseModel):
         elif self.status == "active":
             result["note"] = (
                 f"Workflow {self.workflow!r} is unavailable; the session cannot "
-                "continue until it loads. workflow_activate loads it or reports "
-                "why it fails."
+                "continue until it loads. Fix the workflow and reconnect the Hiraku "
+                "MCP server."
             )
         return result
 
@@ -273,15 +331,15 @@ class Session(BaseModel):
             response to return instead: the stored response for an identical
             retry, or a ``stale`` or ``rejected`` status.
         """
-        receipt = self.receipt
-        if receipt is not None and receipt.instruction_id == instruction_id:
-            if receipt.reply == reply and receipt.arguments == arguments:
+        last = self.history[-1] if self.history else None
+        if last is not None and last.instruction_id == instruction_id:
+            if last.reply == reply and last.arguments == arguments:
                 return {"status": "accepted", **self.response}
             return self.outcome(
                 "stale",
-                f"Instruction {instruction_id} was already answered by "
-                f"{tool_name(self.workflow, receipt.reply)} with "
-                f"{receipt.arguments}; this call was not applied.",
+                f"Instruction {instruction_id} was already answered with reply "
+                f"{last.reply!r} and arguments {last.arguments}; this call was not "
+                "applied.",
             )
         if self.status != "active":
             return self.outcome(
@@ -294,23 +352,28 @@ class Session(BaseModel):
                 f"applied. The pending instruction is {self.instruction_id}.",
             )
         if reply not in self.replies:
-            offered = ", ".join(tool_name(self.workflow, name) for name in self.replies)
             return self.outcome(
                 "rejected",
-                f"{tool_name(self.workflow, reply)} is not a reply to the pending "
-                f"instruction; use one of: {offered}",
+                f"{reply!r} is not a reply to the pending instruction; use one of: "
+                f"{', '.join(self.replies)}",
             )
         return None
 
     def advance(
-        self, response: Instruction | Completion, descriptions: Mapping[str, str]
+        self,
+        response: Instruction | Completion,
+        replies: Mapping[str, dict[str, Any]],
+        call: HistoryEntry,
     ) -> None:
-        """Record a tool's response as the session's next step.
+        """Record an accepted call and the response it led to.
 
         Args:
             response: The instruction or completion a tool returned.
-            descriptions: One-line descriptions of the workflow's reply tools.
+            replies: Description and argument schema of each of the workflow's
+                replies, by name.
+            call: The accepted call, appended to the history.
         """
+        self.history = [*self.history, call]
         self.instruction_id += 1
         if isinstance(response, Completion):
             self.status = "completed"
@@ -329,15 +392,9 @@ class Session(BaseModel):
                 "text": response.text,
                 "context": response.context,
                 "requires_user_response": response.requires_user_response,
+                "reply_with": "workflow_reply",
                 "replies": [
-                    {
-                        "tool": tool_name(self.workflow, name),
-                        "arguments": {
-                            "session_id": self.id,
-                            "instruction_id": self.instruction_id,
-                        },
-                        "description": descriptions.get(name, ""),
-                    }
+                    {"reply": name, **replies.get(name, {})}
                     for name in response.replies
                 ],
             },
@@ -361,8 +418,11 @@ RESERVED = frozenset(
         "check",
         "advance",
         "outcome",
+        "tools",
     }
 )
+
+SessionId = Annotated[str, Field(description="Session ID from session_list.")]
 
 
 @dataclass(frozen=True)
@@ -372,7 +432,7 @@ class Instruction:
     Attributes:
         session: Session whose state accompanies the instruction.
         text: Actionable guidance, usually taken from ``workflow.md``.
-        replies: Names of the reply tools that may answer it.
+        replies: Names of the replies that may answer it.
         context: Concise JSON-compatible data for the harness.
         requires_user_response: Whether the harness must obtain a user answer
             before replying. This is a conversational contract only.
@@ -481,12 +541,11 @@ __all__ = [
     "GUIDE",
     "Completion",
     "Instruction",
-    "Receipt",
+    "HistoryEntry",
     "Response",
     "Session",
     "Timeout",
     "locked",
     "new_session_id",
-    "tool_name",
     "validate_session_id",
 ]

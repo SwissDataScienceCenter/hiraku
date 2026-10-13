@@ -20,8 +20,8 @@ The overlay contains:
 
 `hiraku init` also installs the bundled workflows under `hiraku/workflows/` and
 configures the Hiraku MCP server for Claude Code (`.mcp.json`) and Codex
-(`.codex/config.toml`). The example exposes the `autoresearch`,
-`autoresearch-python`, and `guided-research` workflows.
+(`.codex/config.toml`). Each workflow, including the example's `autoresearch`,
+is available as an MCP tool and as a prompt named after it.
 
 ## Setup
 
@@ -131,7 +131,7 @@ Start Hiraku autoresearch-python on task sep10 with the train entrypoint for
 ten experiments, using the baseline run as reference.
 ```
 
-The agent calls `autoresearch-python_start` and follows the upstream loop step by
+The agent calls the `autoresearch-python` tool and follows the upstream loop step by
 step without asking you: for each experiment it commits one idea, creates an
 experiment record bound to the commit, launches it with `hiraku launch`, and
 submits the tracked run. Hiraku checks the run's attribution, its `status`, and

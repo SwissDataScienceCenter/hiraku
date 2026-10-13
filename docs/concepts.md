@@ -243,7 +243,7 @@ shows prompts for both a complete investigation and individual steps.
 The bundled `autoresearch-python` workflow runs the autoresearch loop autonomously
 for a fixed number of experiments on a task record. Ask your coding agent to
 start it, for example "start Hiraku autoresearch-python on heart-disease for
-five experiments". The agent calls the `autoresearch-python_start` MCP tool and follows the
+five experiments", or invoke its prompt `/mcp__hiraku__autoresearch-python`. The agent calls the `autoresearch-python` MCP tool and follows the
 instructions it returns: one idea, one commit, one experiment record, and one
 launch per experiment. Hiraku checks each tracked run, decides keep, discard,
 or crash against the retained result, and records its assessment on the
