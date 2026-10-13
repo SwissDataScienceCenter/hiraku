@@ -572,12 +572,6 @@ def mcp_command(project: Path | None, workflows: tuple[str, ...]) -> None:
     serve(config, exposed=list(workflows) or None)
 
 
-def _service(state: CLIContext) -> Any:
-    from .workflow.service import WorkflowService
-
-    return WorkflowService(state.config)
-
-
 @main.group("workflow")
 def workflow_group() -> None:
     """List, activate, and call project workflows."""
@@ -587,8 +581,11 @@ def workflow_group() -> None:
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def workflow_list(state: CLIContext, json_output: bool) -> None:
-    """List loaded workflows and whether the MCP server exposes them."""
-    workflows = _service(state).list_workflows()
+    """List workflows and whether the MCP server exposes them."""
+    from .workflow import active_workflows, list_workflows, load_workflows
+
+    config = state.config
+    workflows = list_workflows(load_workflows(config), active_workflows(config))
     if json_output:
         _emit_json(workflows)
         return
@@ -612,8 +609,11 @@ def workflow_list(state: CLIContext, json_output: bool) -> None:
 @click.pass_obj
 def workflow_activate(state: CLIContext, workflow_id: str) -> None:
     """Expose a workflow's tools through the MCP server."""
-    result = _service(state).activate(workflow_id)
-    click.echo(f"Active workflows: {', '.join(result['active']) or 'none'}")
+    from .workflow import load_workflow, set_workflow_active
+
+    load_workflow(workflow_id, config=state.config)
+    active = set_workflow_active(workflow_id, True, config=state.config)
+    click.echo(f"Active workflows: {', '.join(active) or 'none'}")
 
 
 @workflow_group.command("deactivate")
@@ -621,8 +621,10 @@ def workflow_activate(state: CLIContext, workflow_id: str) -> None:
 @click.pass_obj
 def workflow_deactivate(state: CLIContext, workflow_id: str) -> None:
     """Hide a workflow's tools from the MCP server; sessions are kept."""
-    result = _service(state).deactivate(workflow_id)
-    click.echo(f"Active workflows: {', '.join(result['active']) or 'none'}")
+    from .workflow import set_workflow_active
+
+    active = set_workflow_active(workflow_id, False, config=state.config)
+    click.echo(f"Active workflows: {', '.join(active) or 'none'}")
 
 
 @workflow_group.command("call")
@@ -643,7 +645,11 @@ def workflow_call(state: CLIContext, tool_name: str, arguments_file: Any) -> Non
             raise ValidationError(f"Cannot read tool arguments: {exc}") from exc
     if not isinstance(arguments, dict):
         raise ValidationError("Tool arguments must be a JSON object")
-    _emit_json(_service(state).call(tool_name, arguments))
+    from .workflow import load_workflow, split_tool_name
+
+    workflow_id, tool = split_tool_name(tool_name)
+    workflow = load_workflow(workflow_id, config=state.config)
+    _emit_json(workflow.bind(state.config).call(tool, arguments))
 
 
 @main.group("session")
@@ -656,7 +662,9 @@ def session_group() -> None:
 @click.pass_obj
 def session_list(state: CLIContext, json_output: bool) -> None:
     """List workflow sessions, newest first."""
-    sessions = _service(state).list_sessions()
+    from .session import Session
+
+    sessions = Session.list_all(config=state.config)
     if json_output:
         _emit_json(sessions)
         return
@@ -682,7 +690,15 @@ def session_list(state: CLIContext, json_output: bool) -> None:
 @click.pass_obj
 def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
     """Show a session's status, pending instruction or result, and data."""
-    result = _service(state).show(session_id)
+    from .session import Session
+    from .workflow import load_workflow
+
+    session = Session.load(session_id, config=state.config)
+    try:
+        workflow = load_workflow(session.workflow, config=state.config)
+    except HirakuError:
+        workflow = None
+    result = session.show(workflow)
     if json_output:
         _emit_json(result)
         return
@@ -692,7 +708,7 @@ def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
     for key in ("note", "compatibility"):
         if key in result:
             click.echo(f"Note:     {result[key]}")
-    response = result["last_response"]
+    response = result["response"]
     if "instruction" in response:
         instruction = response["instruction"]
         click.echo(f"\nPending instruction {response['instruction_id']}:\n")
@@ -709,7 +725,9 @@ def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
 @click.pass_obj
 def session_cancel(state: CLIContext, session_id: str) -> None:
     """Cancel a session; records, code, and runs are kept."""
-    result = _service(state).cancel(session_id)
+    from .session import Session
+
+    result = Session.load(session_id, config=state.config).cancel()
     click.echo(f"Session {session_id} is {result['status']}. {result['note']}")
 
 

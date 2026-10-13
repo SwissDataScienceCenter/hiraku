@@ -119,7 +119,6 @@ def test_activation_notifies_and_changes_tools(config: HirakuConfig) -> None:
     assert "autodataset_start" in result["tools"]
     assert result["started"]["status"] == "accepted"
     assert "notifications/tools/list_changed" in result["notifications"]
-    assert "notifications/prompts/list_changed" in result["notifications"]
     persisted = HirakuConfig.discover(config.root).mcp
     assert persisted is not None
     assert persisted.workflows == ["autoresearch-python", "autodataset"]
@@ -162,7 +161,7 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
     result = run(server, scenario)
     session_id = result["started"]["session_id"]
     assert result["listing"][0]["session_id"] == session_id
-    assert result["shown"]["last_response"]["instruction_id"] == 1
+    assert result["shown"]["response"]["instruction_id"] == 1
     assert result["resource"]["session_id"] == session_id
     assert result["workflow"].startswith("# Autodataset")
     assert result["record"].startswith("---\n")
@@ -173,24 +172,6 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
     }
     assert result["cancelled"]["status"] == "cancelled"
     assert result["missing"].is_error
-
-
-def test_prompts_start_active_workflows(config: HirakuConfig) -> None:
-    server = HirakuMCPServer(config, exposed=["autoresearch-python"])
-
-    async def scenario(client: Client, notifications: list[str]) -> Any:
-        prompts = await client.list_prompts()
-        prompt = await client.get_prompt("autoresearch-python", {"iterations": "2"})
-        return prompts, prompt
-
-    prompts, prompt = run(server, scenario)
-    assert [item.name for item in prompts.prompts] == ["autoresearch-python"]
-    arguments = {item.name: item for item in prompts.prompts[0].arguments}
-    assert arguments["iterations"].required is False
-    assert "default 10" in arguments["iterations"].description
-    text = prompt.messages[0].content.text
-    assert "autoresearch-python_start" in text
-    assert '"iterations": "2"' in text
 
 
 def test_record_and_run_tools(config: HirakuConfig) -> None:
@@ -295,55 +276,6 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     names, result = anyio.run(main)
     assert "noisy_start" in names
     assert json.loads(result.content[0].text)["result"] == {"ok": True}
-
-
-def test_workflow_resources_and_prompts_follow_activation(config: HirakuConfig) -> None:
-    notes = config.workflows_dir / "notes"
-    notes.mkdir()
-    (notes / "workflow.py").write_text(
-        "from hiraku.workflow import Workflow, prompt, resource, tool\n"
-        "class Notes(Workflow):\n"
-        "    @tool\n"
-        "    def start(self) -> None: ...\n"
-        "    @resource\n"
-        "    def policy(self) -> str:\n"
-        "        return self.section('policy')\n"
-        "    @prompt\n"
-        "    def resume(self) -> str:\n"
-        "        return 'Call session_list.'\n"
-        "WORKFLOW = Notes\n",
-        encoding="utf-8",
-    )
-    (notes / "workflow.md").write_text(
-        "---\nid: notes\n---\n# Notes\n\n## Policy\n\nRuns must be `finished`.\n"
-    )
-    config.set_mcp_workflows(["autodataset"])
-    server = HirakuMCPServer(HirakuConfig.discover(config.root))
-
-    async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
-        before = {item.uri for item in (await client.list_resources()).resources}
-        await client.call_tool("workflow_activate", {"workflow_id": "notes"})
-        after = {item.uri for item in (await client.list_resources()).resources}
-        policy = await client.read_resource("hiraku://workflows/notes/policy")
-        prompts = {item.name for item in (await client.list_prompts()).prompts}
-        resume = await client.get_prompt("notes_resume", {})
-        await anyio.sleep(0.05)
-        return {
-            "before": before,
-            "after": after,
-            "policy": policy.contents[0].text,
-            "prompts": prompts,
-            "resume": resume.messages[0].content.text,
-            "notifications": list(notifications),
-        }
-
-    result = run(server, scenario)
-    assert "hiraku://workflows/notes/policy" not in result["before"]
-    assert "hiraku://workflows/notes/policy" in result["after"]
-    assert "must be `finished`" in result["policy"]
-    assert "notes_resume" in result["prompts"]
-    assert "session_list" in result["resume"]
-    assert "notifications/resources/list_changed" in result["notifications"]
 
 
 def test_server_reads_current_project_state(config: HirakuConfig) -> None:

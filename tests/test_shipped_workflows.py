@@ -7,7 +7,7 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.record import Record, load_record, update_record
-from hiraku.workflow.service import WorkflowService
+from hiraku.workflow import load_workflows, split_tool_name
 
 COMMIT_A = "a" * 40
 COMMIT_B = "b" * 40
@@ -19,15 +19,19 @@ class Harness:
 
     def __init__(self, config: HirakuConfig) -> None:
         self.config = config
-        self.service = WorkflowService(config)
+        self.workflows = load_workflows(config)
         self.response: dict[str, Any] = {}
 
+    def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        workflow_id, tool = split_tool_name(name)
+        return self.workflows[workflow_id].bind(self.config).call(tool, arguments)
+
     def start(self, workflow: str, **arguments: Any) -> dict[str, Any]:
-        self.response = self.service.call(f"{workflow}_start", arguments)
+        self.response = self.call(f"{workflow}_start", arguments)
         return self.response
 
     def reply(self, tool: str, **arguments: Any) -> dict[str, Any]:
-        result = self.service.call(
+        result = self.call(
             tool,
             {
                 "session_id": self.response["session_id"],

@@ -9,13 +9,13 @@ Workflows live in `hiraku/workflows/<workflow-id>/workflow.py`. See the
 
 ::: hiraku.workflow.tool
 
-::: hiraku.workflow.resource
-
-::: hiraku.workflow.prompt
-
 ::: hiraku.workflow.load_workflow
 
+::: hiraku.workflow.load_workflows
+
 ::: hiraku.workflow.discover_workflows
+
+::: hiraku.workflow.list_workflows
 
 ::: hiraku.workflow.Instruction
 
@@ -24,8 +24,6 @@ Workflows live in `hiraku/workflows/<workflow-id>/workflow.py`. See the
 ::: hiraku.errors.SubmissionRejected
 
 ::: hiraku.errors.NotReady
-
-::: hiraku.workflow.service.WorkflowService
 
 ## Research helpers
 

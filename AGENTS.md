@@ -81,6 +81,7 @@ The repository is a single `uv`-managed Python project.
 | --- | --- |
 | `src/hiraku/` | Installed Python package |
 | `src/hiraku/base.py` | Generic Markdown record serialization and validation |
+| `src/hiraku/markdown.py` | Markdown section parsing for record bodies |
 | `src/hiraku/record.py` | Research records, entrypoints, and metrics |
 | `src/hiraku/run.py` | Normalized tracked runs |
 | `src/hiraku/config.py` | Project discovery, configuration, and active context |
@@ -89,7 +90,8 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/tracking/` | Tracking backend adapters and run normalization |
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
 | `src/hiraku/agent.py` | Curated context records |
-| `src/hiraku/workflow/` | Workflow authoring, discovery, sessions, and the workflow service |
+| `src/hiraku/workflow.py` | Workflows: `workflow.md` records whose tools run on sessions |
+| `src/hiraku/session.py` | Workflow sessions: stored state and reply correlation |
 | `src/hiraku/mcp.py` | Stdio MCP server exposing records, runs, and workflows |
 | `src/hiraku/resources/` | Bundled workflows, dispatchers, skills, and examples |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
@@ -114,9 +116,10 @@ Generated or transient paths:
   specific behavior inside `src/hiraku/tracking/`.
 - Launches go through the configured dispatcher and must preserve attribution
   such as record, entrypoint, and commit metadata.
-- Workflow semantics live in `src/hiraku/workflow/` and are transport
-  independent; `mcp.py` and the CLI are thin adapters over
-  `WorkflowService`.
+- Workflow semantics live in `workflow.py` and `session.py` and are transport
+  independent: a `Workflow` runs its tools on its `Session`s through
+  `Workflow.call`. `mcp.py` and the CLI are thin adapters that load workflows
+  and call it.
 - Bundled resources under `src/hiraku/resources/` are installed by
   `hiraku init`; changes to them may affect newly initialized projects and
   should include appropriate example or integration coverage.

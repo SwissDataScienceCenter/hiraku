@@ -29,8 +29,8 @@ server runs `hiraku mcp`, so the `hiraku` command must be on the agent's
 > What Hiraku workflows are available here? Start guided research on the
 > active task with three hypotheses per round.
 
-The agent calls `workflow_list` to explain the workflows and their arguments,
-then `guided-research_start`. Every response names the reply tools that
+The agent calls `workflow_list` to explain the workflows, then
+`guided-research_start`. Every response names the reply tools that
 continue the session, for example:
 
 ```json
@@ -56,6 +56,10 @@ continue the session, for example:
 When `requires_user_response` is true, the agent asks you before replying. This
 is a conversational contract; it does not authenticate approval.
 
+A reply passes the `instruction_id` of the instruction it answers, so a late or
+repeated call cannot be applied to a later step. `session_id` may be left out
+while only one session of the workflow is active.
+
 A reply has one of these outcomes:
 
 | Status | Meaning |
@@ -63,9 +67,10 @@ A reply has one of these outcomes:
 | `accepted` | The reply was applied; the response holds the next instruction or `completed: true` and a result. |
 | `rejected` | The input was invalid; the same instruction stays pending. |
 | `not_ready` | The input was valid, but the evidence it refers to has not arrived yet; check again later. |
-| `duplicate` | The same reply was already applied; the current response is returned. |
-| `conflict`, `stale` | An earlier instruction was already answered differently; the call was not applied. |
-| `blocked` | The loaded workflow code no longer matches the session; inspect it and start a new one. |
+| `stale` | The reply answers an instruction that is no longer pending; the call was not applied, and the response holds the current instruction. |
+
+Repeating an identical reply is safe: it returns the same response without
+applying the reply again.
 
 Completion means the session ended, not necessarily that every objective was
 met: results distinguish, for example, completed, partial, and stopped.
@@ -115,8 +120,6 @@ Besides the workflow tools, the server offers `project_status`, `record_list`,
 `record_show`, `record_create`, `record_update`, and `runs`, and resources for
 workflow prompts (`hiraku://workflows/<id>`), records
 (`hiraku://records/<id>`), sessions (`hiraku://sessions/<id>`), and contexts.
-Each active workflow is also offered as an MCP prompt, which some agents show
-as a slash command, and workflows can declare their own resources and prompts.
 
 Experiments are launched with the `hiraku launch` CLI. MCP clients limit how
 long a tool call may run and how much output it may return, so long launches
@@ -243,9 +246,13 @@ The rules are deliberately small:
   `delete`. The signature and docstring define the tool schema; use
   `Annotated[..., Field()]` for parameter descriptions and constraints.
 - `start` creates sessions. A method with one parameter annotated as a `Session`
-  subclass is a **reply**: Hiraku loads the session, calls the method, and saves
-  the result atomically. Any other `@tool` method is an ordinary tool that does
-  not change sessions.
+  subclass is a **reply**: Hiraku loads the session, checks that the reply
+  answers the pending instruction, calls the method, and saves the result
+  atomically. Any other `@tool` method is an ordinary tool that does not change
+  sessions.
+- A `Session` subclass declares the workflow's own data. The base fields, such
+  as `id`, `status`, and `instruction_id`, belong to the runtime and cannot be
+  redefined.
 - Replies return `self.instruction(...)` or `self.completion(...)`. An
   instruction lists the replies that may answer it.
 - Raise `SubmissionRejected` for invalid input and `NotReady` when valid input
@@ -254,21 +261,16 @@ The rules are deliberately small:
   reply that returns the next instruction.
 - `self.section("name")` returns a section of this workflow's `workflow.md`,
   and `self.text` the whole body. Section names are lowercase heading text
-  with punctuation removed and spaces replaced by hyphens. The text before the first `##` heading is the orientation shown at
-  start.
+  with punctuation removed and spaces replaced by hyphens. The text before the
+  first `##` heading is the orientation shown at start.
 - Each call gets a fresh copy of the loaded workflow, bound to the project
   configuration as currently saved; changing `self` during a
-  call is not persisted. `hiraku.workflow.load_workflow()` loads a workflow
-  from Python, for example to test it.
+  call is not persisted. To run a workflow from Python, for example in a
+  test, load it with `hiraku.workflow.load_workflow()` and call
+  `workflow.bind(config).call("start", {...})`.
 - Use `self.config` and the Hiraku Python API to read and verify records and
   runs. Prefer replies that name records or runs, which the workflow loads and
   checks, over replies that carry results as free text.
-- `@resource` exposes a method's returned text as the MCP resource
-  `hiraku://workflows/<workflow-id>/<name>`, and `@prompt` exposes one as the
-  MCP prompt `<workflow-id>_<name>` whose `str` parameters are the prompt
-  arguments. As with `@tool`, the name is the method name unless given, as in
-  `@prompt("name")`. Both are listed only while the workflow is active and
-  never change sessions.
 - Workflow modules can import helpers from their own directory with relative
   imports. `hiraku.research` provides the task, run, and evidence helpers the
   bundled research workflows share.
@@ -276,9 +278,10 @@ The rules are deliberately small:
 The MCP server loads workflow code and prompts when it starts. A workflow that
 fails to load is logged to the server's stderr and left out; activating it with
 `workflow_activate` loads it again and returns the error. After editing a
-workflow that already loaded, reconnect the MCP server. Existing sessions continue with the new
-code if their stored data still validates against the session model and their
-pending replies still exist; otherwise they are blocked and remain inspectable.
+workflow that already loaded, reconnect the MCP server. Existing sessions
+continue with the new code if their stored data still validates against the
+session model and their pending replies still exist; otherwise their replies
+are rejected, and they remain inspectable.
 Keep workflows compatible with existing sessions, or start new ones.
 Workflow code is trusted project code: loading it executes it.
 

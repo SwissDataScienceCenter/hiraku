@@ -117,7 +117,7 @@ class Autoresearch(Workflow):
             result.record_id,
             changes={
                 "assessment": {
-                    "session": session.session_id,
+                    "session": session.id,
                     "run": result.run_id,
                     "metric": session.metric,
                     "value": result.value,

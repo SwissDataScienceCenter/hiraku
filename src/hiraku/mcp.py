@@ -20,7 +20,6 @@ from mcp.server.stdio import stdio_server
 from mcp.server.subscriptions import (
     InMemorySubscriptionBus,
     ListenHandler,
-    PromptsListChanged,
     ResourcesListChanged,
     ToolsListChanged,
 )
@@ -39,8 +38,21 @@ from .errors import (
 from .git import GitRepository
 from .io import json_value
 from .record import Record, list_records, load_record, update_record
-from .workflow.core import Workflow, handlers
-from .workflow.service import WorkflowService, tool_name, workflow_description
+from .session import Session, tool_name
+from .workflow import (
+    Handler,
+    Workflow,
+    active_workflows,
+    discover_workflows,
+    handlers,
+    list_workflows,
+    load_workflow,
+    load_workflows,
+    set_workflow_active,
+    split_tool_name,
+    summary,
+    workflow_description,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +67,8 @@ DEFAULT_RUN_LIMIT = 20
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, and runs workflows that guide you step by step.
-Use workflow_list to see the workflows and their arguments, and the
-<workflow>_start tool to begin one. Every workflow response names the reply tools
+Use workflow_list to see the workflows, and the <workflow>_start tool to begin
+one. Every workflow response names the reply tools
 that continue it. Use session_list and session_show to resume earlier sessions.
 Launch experiments with the `hiraku launch` CLI.\
 """
@@ -163,43 +175,53 @@ class HirakuMCPServer:
     """
 
     def __init__(self, config: HirakuConfig, *, exposed: list[str] | None = None):
-        self.service = WorkflowService(config, exposed=exposed)
+        self._path = config.path
+        self._override = list(exposed) if exposed is not None else None
+        available = discover_workflows(config)
+        unknown = [item for item in self.exposed_ids() if item not in available]
+        if unknown:
+            raise WorkflowError(
+                f"Unknown workflows in the MCP workflow set: {', '.join(unknown)}; "
+                f"available workflows: {', '.join(available) or 'none'}. Fix "
+                f"mcp.workflows in {config.path}."
+            )
+        self.workflows = load_workflows(config)
         self.bus = InMemorySubscriptionBus()
         self.builtins: dict[str, _BuiltinTool] = {
             "workflow_list": _BuiltinTool(
-                "List all project workflows, whether they are active, and their "
-                "start arguments.",
+                "List the project workflows and whether they are active. Active "
+                "workflows are started with their <workflow>_start tool.",
                 _NoArguments,
-                lambda _: self.service.list_workflows(),
+                lambda _: list_workflows(self.workflows, self.exposed_ids()),
             ),
             "workflow_activate": _BuiltinTool(
                 "Expose a workflow's tools and save the workflow set in hiraku.yml.",
                 _WorkflowArguments,
-                lambda args: self.service.activate(args.workflow_id),
+                lambda args: self.activate(args.workflow_id),
                 read_only=False,
             ),
             "workflow_deactivate": _BuiltinTool(
                 "Hide a workflow's tools and save the workflow set in hiraku.yml. "
                 "Sessions are not affected.",
                 _WorkflowArguments,
-                lambda args: self.service.deactivate(args.workflow_id),
+                lambda args: self.deactivate(args.workflow_id),
                 read_only=False,
             ),
             "session_list": _BuiltinTool(
                 "List workflow sessions with their status, newest first.",
                 _NoArguments,
-                lambda _: self.service.list_sessions(),
+                lambda _: Session.list_all(config=self.config),
             ),
             "session_show": _BuiltinTool(
                 "Show a workflow session: orientation, pending instruction or "
                 "result, and stored data. Use it to resume a session.",
                 _SessionArguments,
-                lambda args: self.service.show(args.session_id),
+                lambda args: self.show_session(args.session_id),
             ),
             "session_cancel": _BuiltinTool(
                 "Cancel a workflow session. Records, code, and runs are kept.",
                 _SessionArguments,
-                lambda args: self.service.cancel(args.session_id),
+                lambda args: Session.load(args.session_id, config=self.config).cancel(),
                 read_only=False,
             ),
             "project_status": _BuiltinTool(
@@ -246,21 +268,91 @@ class HirakuMCPServer:
             on_list_resources=self._list_resources,
             on_list_resource_templates=self._list_resource_templates,
             on_read_resource=self._read_resource,
-            on_list_prompts=self._list_prompts,
-            on_get_prompt=self._get_prompt,
             on_subscriptions_listen=ListenHandler(self.bus),
         )
 
     @property
     def config(self) -> HirakuConfig:
-        """Return the project configuration as currently saved on disk."""
-        return self.service.current_config()
+        """Return the project configuration as currently saved on disk.
+
+        The server runs for a long time, so changes made elsewhere, such as a
+        new active record, must be visible.
+        """
+        return HirakuConfig.load(self._path)
 
     def initialization_options(self) -> Any:
         """Return initialization options advertising list-change notifications."""
         return self.server.create_initialization_options(
-            NotificationOptions(tools_changed=True, prompts_changed=True)
+            NotificationOptions(tools_changed=True)
         )
+
+    # Workflows ----------------------------------------------------------------
+
+    def exposed_ids(self) -> list[str]:
+        """Return the IDs of the workflows whose tools are exposed."""
+        if self._override is not None:
+            return list(self._override)
+        return active_workflows(self.config)
+
+    def exposed(self) -> list[Workflow]:
+        """Return the loaded workflows whose tools are exposed."""
+        exposed = set(self.exposed_ids())
+        return [
+            workflow
+            for workflow_id, workflow in sorted(self.workflows.items())
+            if workflow_id in exposed
+        ]
+
+    def activate(self, workflow_id: str) -> dict[str, Any]:
+        """Load a workflow if needed, expose its tools, and save the set.
+
+        Raises:
+            hiraku.errors.HirakuError: If the workflow does not exist or fails
+                to load.
+        """
+        if workflow_id not in self.workflows:
+            self.workflows[workflow_id] = load_workflow(workflow_id, config=self.config)
+        return self._set_active(workflow_id, True)
+
+    def deactivate(self, workflow_id: str) -> dict[str, Any]:
+        """Hide a workflow's tools and save the set; sessions are kept."""
+        return self._set_active(workflow_id, False)
+
+    def _set_active(self, workflow_id: str, active: bool) -> dict[str, Any]:
+        current = self.exposed_ids()
+        if (workflow_id in current) == active:
+            return {"active": current, "changed": False}
+        selected = set_workflow_active(workflow_id, active, config=self.config)
+        if self._override is not None:
+            self._override = [item for item in current if item != workflow_id]
+            if active:
+                self._override.append(workflow_id)
+            selected = self._override
+        return {
+            "active": selected,
+            "changed": True,
+            "note": (
+                "The workflow set was saved to hiraku.yml. New tools may only "
+                "appear in your next message; if they do not appear, reconnect "
+                "the Hiraku MCP server or restart the harness."
+            ),
+        }
+
+    def show_session(self, session_id: str) -> dict[str, Any]:
+        """Describe a session, noting when its workflow is not active."""
+        session = Session.load(session_id, config=self.config)
+        workflow_id = session.workflow
+        result = session.show(self.workflows.get(workflow_id))
+        if (
+            result["status"] == "active"
+            and workflow_id in self.workflows
+            and workflow_id not in self.exposed_ids()
+        ):
+            result["note"] = (
+                f"Workflow {workflow_id!r} is not active. Activate it with "
+                "workflow_activate to continue this session."
+            )
+        return result
 
     async def run_stdio(self) -> None:
         """Serve the protocol over stdin and stdout until the client disconnects."""
@@ -283,11 +375,14 @@ class HirakuMCPServer:
         ]
         tools.extend(
             types.Tool(
-                name=definition["name"],
-                description=definition["description"],
-                input_schema=definition["input_schema"],
+                name=tool_name(workflow.id, handler.name),
+                description=_tool_description(workflow, handler),
+                input_schema=handler.input_schema,
             )
-            for definition in self.service.tool_definitions()
+            for workflow in self.exposed()
+            for handler in sorted(
+                handlers(type(workflow)).values(), key=lambda item: item.name
+            )
         )
         return types.ListToolsResult(tools=tools)
 
@@ -322,25 +417,23 @@ class HirakuMCPServer:
         builtin = self.builtins.get(name)
         if builtin is not None:
             return builtin.function(builtin.arguments.model_validate(arguments))
-        try:
-            workflow, _ = self.service.tool(name)
-        except WorkflowError as exc:
-            raise WorkflowError(f"Unknown tool {name!r}") from exc
-        if workflow.id not in self.service.exposed_ids():
+        workflow_id, tool = split_tool_name(name)
+        workflow = self.workflows.get(workflow_id)
+        if workflow is None or tool not in handlers(type(workflow)):
+            raise WorkflowError(f"Unknown tool {name!r}")
+        if workflow_id not in self.exposed_ids():
             raise WorkflowError(
-                f"Workflow {workflow.id!r} is not active; call workflow_activate first"
+                f"Workflow {workflow_id!r} is not active; call workflow_activate first"
             )
-        return self.service.call(name, arguments)
+        return workflow.bind(self.config).call(tool, arguments)
 
     async def _notify_lists_changed(self, ctx: Any) -> None:
         try:
             if getattr(ctx, "protocol_version", None) in MODERN_PROTOCOL_VERSIONS:
                 await self.bus.publish(ToolsListChanged())
-                await self.bus.publish(PromptsListChanged())
                 await self.bus.publish(ResourcesListChanged())
             else:
                 await ctx.session.send_tool_list_changed()
-                await ctx.session.send_prompt_list_changed()
                 await ctx.session.send_resource_list_changed()
         except Exception:
             logger.warning("Could not send list-changed notifications", exc_info=True)
@@ -359,7 +452,7 @@ class HirakuMCPServer:
                 "active_record_id": config.active_record_id,
                 "tracking_backend": config.tracking_backend,
                 "git_branch": branch,
-                "active_workflows": self.service.exposed_ids(),
+                "active_workflows": self.exposed_ids(),
             }
         )
 
@@ -469,7 +562,7 @@ class HirakuMCPServer:
 
     async def _list_resources(self, ctx: Any, params: Any) -> types.ListResourcesResult:
         resources: list[types.Resource] = []
-        for workflow_id in sorted(self.service.workflows):
+        for workflow_id in sorted(self.workflows):
             resources.append(
                 types.Resource(
                     name=f"workflow-{workflow_id}",
@@ -478,15 +571,6 @@ class HirakuMCPServer:
                     mime_type="text/markdown",
                 )
             )
-        resources.extend(
-            types.Resource(
-                name=item["name"],
-                uri=item["uri"],
-                description=item["description"],
-                mime_type=item["mime_type"],
-            )
-            for item in self.service.resource_definitions()
-        )
         try:
             contexts = await anyio.to_thread.run_sync(
                 partial(list_contexts, config=self.config)
@@ -546,11 +630,8 @@ class HirakuMCPServer:
         identifier = unquote(identifier)
         if not uri.startswith(prefix) or not identifier:
             raise ValidationError(f"Unknown resource {uri!r}")
-        if kind == "workflows":
-            workflow_id, _, name = identifier.partition("/")
-            if name:
-                return self.service.read_resource(workflow_id, name)
-            return self.service.workflow(workflow_id).text, "text/markdown"
+        if kind == "workflows" and identifier in self.workflows:
+            return self.workflows[identifier].text, "text/markdown"
         if kind == "contexts":
             context = load_context(identifier, config=self.config)
             assert context.path is not None
@@ -560,93 +641,8 @@ class HirakuMCPServer:
             assert record.path is not None
             return record.path.read_text(encoding="utf-8"), "text/markdown"
         if kind == "sessions":
-            return _dumps(self.service.show(identifier)), "application/json"
+            return _dumps(self.show_session(identifier)), "application/json"
         raise ValidationError(f"Unknown resource {uri!r}")
-
-    # Prompts ------------------------------------------------------------------
-
-    def _start_prompts(self) -> dict[str, Workflow]:
-        exposed = set(self.service.exposed_ids())
-        return {
-            workflow_id: workflow
-            for workflow_id, workflow in sorted(self.service.workflows.items())
-            if workflow_id in exposed
-        }
-
-    async def _list_prompts(self, ctx: Any, params: Any) -> types.ListPromptsResult:
-        prompts = []
-        for workflow_id, workflow in self._start_prompts().items():
-            start = handlers(type(workflow))["start"]
-            schema = start.arguments.model_json_schema()
-            required = set(schema.get("required", []))
-            description = workflow_description(workflow)
-            prompts.append(
-                types.Prompt(
-                    name=workflow_id,
-                    description=f"Start the {workflow_id} workflow. "
-                    + description.split("\n\n", 1)[0],
-                    arguments=[
-                        types.PromptArgument(
-                            name=name,
-                            description=_property_description(spec),
-                            required=name in required,
-                        )
-                        for name, spec in schema.get("properties", {}).items()
-                    ],
-                )
-            )
-        prompts.extend(
-            types.Prompt(
-                name=item["name"],
-                description=item["description"],
-                arguments=[
-                    types.PromptArgument(**argument) for argument in item["arguments"]
-                ],
-            )
-            for item in self.service.prompt_definitions()
-        )
-        return types.ListPromptsResult(prompts=prompts)
-
-    async def _get_prompt(self, ctx: Any, params: Any) -> types.GetPromptResult:
-        declared = {item["name"] for item in self.service.prompt_definitions()}
-        if params.name in declared:
-            text = await anyio.to_thread.run_sync(
-                partial(self.service.get_prompt, params.name, params.arguments)
-            )
-            return types.GetPromptResult(
-                description=params.name,
-                messages=[
-                    types.PromptMessage(
-                        role="user", content=types.TextContent(type="text", text=text)
-                    )
-                ],
-            )
-        if params.name not in self._start_prompts():
-            raise WorkflowError(f"Unknown or inactive workflow prompt {params.name!r}")
-        provided = {
-            key: value for key, value in (params.arguments or {}).items() if value
-        }
-        text = (
-            f"Start the Hiraku workflow `{params.name}` by calling the "
-            f"`{tool_name(params.name, 'start')}` tool."
-        )
-        if provided:
-            text += (
-                " Use these arguments, converting them to the types the tool "
-                f"schema expects: {json.dumps(provided)}."
-            )
-        text += (
-            " Confirm the resolved arguments with the user if anything is "
-            "ambiguous, then follow the returned instructions."
-        )
-        return types.GetPromptResult(
-            description=f"Start the {params.name} workflow",
-            messages=[
-                types.PromptMessage(
-                    role="user", content=types.TextContent(type="text", text=text)
-                )
-            ],
-        )
 
 
 def serve(config: HirakuConfig, *, exposed: list[str] | None = None) -> None:
@@ -670,14 +666,17 @@ def _schema(model: type[BaseModel]) -> dict[str, Any]:
     return schema
 
 
-def _property_description(spec: dict[str, Any]) -> str | None:
-    description = spec.get("description")
-    if "default" in spec:
-        default = json.dumps(spec["default"])
-        description = (
-            f"{description} (default {default})"
-            if description
-            else (f"Default {default}")
+def _tool_description(workflow: Workflow, handler: Handler) -> str:
+    description = handler.description or f"{handler.name} of workflow {workflow.id}"
+    if handler.kind == "start":
+        prefix = f"Start a {workflow.id} workflow session."
+        if text := summary(workflow_description(workflow)):
+            prefix += f" {text}"
+        return f"{prefix}\n\n{description}"
+    if handler.kind == "continuation":
+        return (
+            f"{description}\n\nReply to a pending {workflow.id} instruction. Call "
+            "only when the pending instruction lists this tool."
         )
     return description
 

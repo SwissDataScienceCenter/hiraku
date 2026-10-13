@@ -327,7 +327,8 @@ instruction and the reply tools that continue it:
 2. If `requires_user_response` is true, ask the user and wait for their answer
    before replying. Otherwise decide yourself.
 3. Reply with exactly one listed tool, passing its fixed `session_id` and
-   `instruction_id` unchanged.
+   `instruction_id` unchanged. Repeating an identical reply is safe; a `stale`
+   status means the instruction moved on, so continue from the one returned.
 4. A `rejected` or `not_ready` response keeps the same instruction pending; fix
    the input or check again later. Stop when a response has `completed: true`.
 

@@ -6,9 +6,8 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.errors import RecordNotFoundError, ValidationError, WorkflowError
-from hiraku.workflow import Workflow, discover_workflows, load_workflow
-from hiraku.workflow.prompts import normalize_anchor
-from hiraku.workflow.service import WorkflowService
+from hiraku.markdown import normalize_anchor
+from hiraku.workflow import Workflow, discover_workflows, load_workflow, load_workflows
 
 DOCUMENT = """\
 # Research
@@ -139,8 +138,6 @@ def test_invalid_workflow_documents_disable_the_workflow(
         path.write_text(content)
     with pytest.raises(error, match=message):
         load_workflow("autodataset", config=config)
-    service = WorkflowService(config)
-    assert "autodataset" not in service.workflows
-    assert "autoresearch-python" in service.workflows
-    with pytest.raises(error, match=message):
-        service.activate("autodataset")
+    workflows = load_workflows(config)
+    assert "autodataset" not in workflows
+    assert "autoresearch-python" in workflows

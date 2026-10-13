@@ -1,11 +1,11 @@
-"""Markdown section parsing for workflow prompts."""
+"""Markdown section parsing for record bodies."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 
-from ..errors import ValidationError
+from .errors import ValidationError
 
 _HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")

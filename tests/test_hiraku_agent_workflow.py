@@ -8,7 +8,7 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.record import Record, load_record
-from hiraku.workflow.service import WorkflowService
+from hiraku.workflow import load_workflow
 
 HEADER = "id,record_id,commit,entrypoint,status,metric.acc\n"
 
@@ -21,16 +21,19 @@ def git(root: Path, *arguments: str) -> str:
 
 class Harness:
     def __init__(self, config: HirakuConfig) -> None:
-        self.service = WorkflowService(config)
+        self.workflow = load_workflow("hiraku-agent", config=config).bind(config)
         self.response: dict[str, Any] = {}
 
+    def call(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self.workflow.call(tool, arguments)
+
     def start(self, **arguments: Any) -> dict[str, Any]:
-        self.response = self.service.call("hiraku-agent_start", arguments)
+        self.response = self.call("start", arguments)
         return self.response
 
     def reply(self, tool: str, **arguments: Any) -> dict[str, Any]:
-        result = self.service.call(
-            f"hiraku-agent_{tool}",
+        result = self.call(
+            tool,
             {
                 "session_id": self.response["session_id"],
                 "instruction_id": self.response["instruction_id"],
@@ -418,7 +421,7 @@ def test_draft_limits_and_next_step(project: HirakuConfig) -> None:
     assert done["result"]["outcome"] == "limit"
     assert "max_steps (2)" in done["result"]["reason"]
 
-    nxt = harness.service.call("hiraku-agent_next_step", {"task": "dropout"})
+    nxt = harness.call("next_step", {"task": "dropout"})
     assert nxt["result"]["action"] == "approve"
     assert nxt["result"]["states"] == {"drop-base": "proposed"}
 
@@ -450,5 +453,5 @@ def test_a_node_with_children_is_completed_without_triage(
     harness.reply("analyzed", verdict="supports", findings="b1")
     assert harness.step == "## Analyze"
     assert harness.context["state"]["focus_node"] == "child"
-    states = harness.service.call("hiraku-agent_next_step", {"task": "task"})
+    states = harness.call("next_step", {"task": "task"})
     assert states["result"]["states"]["baseline"] == "completed"
