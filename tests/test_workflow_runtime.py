@@ -613,7 +613,6 @@ def test_workflow_list_describes_every_loaded_workflow(config: HirakuConfig) -> 
         "autodataset",
         "autoresearch-python",
         "guided-research",
-        "hiraku-agent",
         "toy",
     ]
     assert listed[-1]["description"].startswith("Add numbers until a target")

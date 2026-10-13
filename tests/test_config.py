@@ -54,7 +54,6 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
         "autoresearch-python",
         "autodataset",
         "guided-research",
-        "hiraku-agent",
     ):
         assert (config.workflows_dir / workflow / "workflow.py").is_file()
         assert (config.workflows_dir / workflow / "workflow.md").is_file()

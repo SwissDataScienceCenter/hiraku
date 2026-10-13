@@ -247,7 +247,7 @@ The rules are deliberately small:
 - A `Workflow` instance is the loaded `workflow.md` record. Its front matter
   needs the workflow `id`, matching the directory name. Workflow IDs use
   letters, digits, and `-`, but not `_`, which separates the workflow ID from
-  the tool name in names such as `hiraku-agent_next_step`. Annotated class
+  the tool name in names such as `<workflow-id>_<name>`. Annotated class
   attributes, like `min_questions` above, are settings validated from the front
   matter; other front-matter fields are kept as metadata. The class body
   follows Pydantic rules: constants need `ClassVar[...]`, and `__init__` is not

@@ -607,7 +607,7 @@ def workflow_call(state: CLIContext, tool_name: str, arguments_file: Any) -> Non
     """Call a workflow tool as the MCP server would and print its JSON result.
 
     TOOL_NAME is a workflow ID to start it, workflow_reply to answer an
-    instruction, or another workflow tool such as hiraku-agent_next_step.
+    instruction, or another workflow tool named <workflow-id>_<name>.
     """
     arguments: Any = {}
     if arguments_file is not None:

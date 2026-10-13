@@ -99,10 +99,9 @@ def test_tools_and_prompts_are_fixed_per_workflow(config: HirakuConfig) -> None:
         "autodataset",
         "autoresearch-python",
         "guided-research",
-        "hiraku-agent",
         "loop",
     }
-    assert set(tools) == BUILTINS | workflows | {"hiraku-agent_next_step"}
+    assert set(tools) == BUILTINS | workflows
     assert set(prompts) == workflows
     loop = tools["loop"].input_schema
     assert loop["required"] == ["task"]
