@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -232,6 +235,61 @@ def _update_fields(
 def main(ctx: click.Context) -> None:
     """Manage research records, launches, and tracked runs."""
     ctx.ensure_object(CLIContext)
+
+
+@main.command("dashboard")
+@click.option(
+    "--init",
+    "initialize",
+    is_flag=True,
+    help="Copy the dashboard into the project for customization, then exit.",
+)
+@click.option(
+    "--port",
+    type=click.IntRange(1, 65535),
+    help="Use this port; otherwise automatically choose a free port from 2718.",
+)
+@click.pass_obj
+def dashboard_command(state: CLIContext, initialize: bool, port: int | None) -> None:
+    """Serve the read-only dashboard for the current project."""
+    bundled = Path(__file__).parent / "dashboard"
+    local = state.config.hiraku_dir / "dashboard"
+    if initialize:
+        if local.exists():
+            raise click.ClickException(f"Dashboard already exists: {local}")
+        for relative in (
+            "app.py",
+            ".gitignore",
+            "views/dashboard/index.html",
+            "views/dashboard/view.toml",
+        ):
+            target = local / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(bundled / relative, target)
+        click.echo(f"Created dashboard: {local}")
+        return
+    notebook = (local if local.exists() else bundled) / "app.py"
+    if not notebook.is_file():
+        raise click.ClickException(f"Dashboard notebook not found: {notebook}")
+    if any(
+        find_spec(name) is None
+        for name in ("marimo", "marimo_studio", "altair", "pandas")
+    ):
+        raise click.ClickException(
+            "Install dashboard dependencies with `uv sync --extra dashboard` "
+            "or `pip install 'hiraku[dashboard]'`."
+        )
+    command = [
+        sys.executable,
+        "-m",
+        "marimo",
+        "run",
+        str(notebook),
+        "--no-sandbox",
+    ]
+    if port is not None:
+        command.extend(["--port", str(port)])
+    raise SystemExit(subprocess.call(command))
 
 
 @main.command("init")

@@ -17,8 +17,11 @@ The results overlay includes four records and nine runs in `runs.csv`.
 These are synthetic dashboard fixtures, not measured model results.
 Browsing them requires no training, credentials, or network access.
 
-Query the prepared runs locally:
+From that directory, launch the dashboard using the repository's uv environment:
 
 ```bash
-uv run hiraku runs --record random-forest --all
+uv run --project /path/to/hiraku --extra dashboard hiraku dashboard
 ```
+
+Select `val/log_loss` for a running minimum, `val/accuracy` for a running maximum,
+or `duration` for dots without a best line. Click a dot to select its record.

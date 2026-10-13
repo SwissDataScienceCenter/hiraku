@@ -25,6 +25,12 @@ dependencies = [
 hiraku = "hiraku.cli:main"
 
 [project.optional-dependencies]
+dashboard = [
+    "marimo==0.25.1",
+    "marimo-studio==0.3.0",
+    "altair>=5,<7",
+    "pandas>=2,<3",
+]
 mlflow = ["mlflow==3.16.0"]
 wandb = ["wandb>=0.29.0"]
 

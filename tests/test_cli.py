@@ -14,6 +14,60 @@ def invoke(*args: str):
     return CliRunner().invoke(main, args, catch_exceptions=False)
 
 
+def test_dashboard_launch(tmp_path, monkeypatch) -> None:
+    from hiraku import cli
+
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "find_spec", lambda name: object())
+    calls = []
+    monkeypatch.setattr(cli.subprocess, "call", lambda args: calls.append(args) or 3)
+    result = invoke("dashboard", "--port", "2721")
+    assert result.exit_code == 3
+    command = calls[0]
+    assert command[:4] == [cli.sys.executable, "-m", "marimo", "run"]
+    notebook = Path(command[4])
+    assert notebook.is_file()
+    assert notebook.parent.joinpath("views/dashboard/index.html").is_file()
+    assert command[5:] == ["--no-sandbox", "--port", "2721"]
+    assert invoke("dashboard").exit_code == 3
+    assert calls[-1][5:] == ["--no-sandbox"]
+    assert invoke("dashboard", "--port", "0").exit_code == 2
+
+
+def test_dashboard_missing_dependencies(tmp_path, monkeypatch) -> None:
+    from hiraku import cli
+
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "find_spec", lambda name: None)
+    result = invoke("dashboard")
+    assert result.exit_code == 1
+    assert "uv sync --extra dashboard" in result.output
+
+
+def test_project_owned_dashboard(tmp_path, monkeypatch) -> None:
+    from hiraku import cli
+
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "find_spec", lambda name: None)
+    assert invoke("dashboard", "--init").exit_code == 0
+    local = config.hiraku_dir / "dashboard"
+    notebook = local / "app.py"
+    notebook.write_text("# Custom dashboard\n")
+    assert invoke("dashboard", "--init").exit_code == 1
+    assert notebook.read_text() == "# Custom dashboard\n"
+    assert local.joinpath("views/dashboard/index.html").is_file()
+    monkeypatch.setattr(cli, "find_spec", lambda name: object())
+    calls = []
+    monkeypatch.setattr(cli.subprocess, "call", lambda args: calls.append(args) or 0)
+    assert invoke("dashboard").exit_code == 0
+    assert calls[0][4] == str(notebook)
+    notebook.unlink()
+    assert "not found" in invoke("dashboard").output
+
+
 def test_record_cli_lifecycle(tmp_path: Path, monkeypatch) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
