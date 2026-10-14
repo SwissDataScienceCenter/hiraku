@@ -4,7 +4,6 @@ import asyncio
 import base64
 import json
 import sys
-from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -14,7 +13,7 @@ pytest.importorskip("mcp")
 
 from mcp import ClientSession, StdioServerParameters  # noqa: E402
 from mcp.client.stdio import stdio_client  # noqa: E402
-from mcp.server.fastmcp.exceptions import ToolError  # noqa: E402
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E402
 
 from hiraku.agent import load_context  # noqa: E402
 from hiraku.cli import main  # noqa: E402
@@ -109,7 +108,10 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
         assert content.content == pdf
         assert content.mime_type == "application/pdf"
         for path in ["outside.txt", "%2E%2E%2F%2E%2E%2Fprivate.txt", "%2Fetc%2Fpasswd"]:
-            with pytest.raises(ValueError, match="Source must be a file"):
+            # Encoded traversal may already fail to match the URI template.
+            with pytest.raises(
+                ResourceError, match="Source must be a file|Unknown resource"
+            ):
                 await server.read_resource(f"hiraku://sources/literature/{path}")
         for uri in [
             "hiraku://records/demo",
@@ -150,7 +152,7 @@ def test_launch_capture_and_attribution(tmp_path: Path) -> None:
                 },
             },
         )
-        _, preview = await server.call_tool(
+        preview = await server.call_tool(
             "launch_entrypoint",
             {
                 "record_id": "demo",
@@ -159,8 +161,8 @@ def test_launch_capture_and_attribution(tmp_path: Path) -> None:
                 "args": {"n": 2},
             },
         )
-        assert preview["command"] == ["echo", "--n", "2"]
-        _, result = await server.call_tool(
+        assert preview.structured_content["command"] == ["echo", "--n", "2"]
+        result = await server.call_tool(
             "launch_entrypoint",
             {
                 "record_id": "demo",
@@ -168,7 +170,7 @@ def test_launch_capture_and_attribution(tmp_path: Path) -> None:
                 "dispatch": "test.sh",
             },
         )
-        assert result == {
+        assert result.structured_content == {
             "returncode": 7,
             "stdout": "demo:train\n",
             "stderr": "diagnostic\n",
@@ -201,9 +203,7 @@ def test_stdio_session(tmp_path: Path) -> None:
             cwd=str(tmp_path),
         )
         async with stdio_client(params) as (read, write):  # noqa: SIM117
-            async with ClientSession(
-                read, write, read_timeout_seconds=timedelta(seconds=10)
-            ) as client:
+            async with ClientSession(read, write, read_timeout_seconds=10) as client:
                 await client.initialize()
                 tools = await client.list_tools()
                 assert "record_create" in {tool.name for tool in tools.tools}
@@ -212,7 +212,8 @@ def test_stdio_session(tmp_path: Path) -> None:
                     == "hiraku://catalog"
                 )
                 assert (
-                    len((await client.list_resource_templates()).resourceTemplates) == 5
+                    len((await client.list_resource_templates()).resource_templates)
+                    == 5
                 )
                 assert (await client.list_prompts()).prompts[
                     0
@@ -225,14 +226,15 @@ def test_stdio_session(tmp_path: Path) -> None:
                             "markdown": "Literature",
                         },
                     )
-                ).isError
+                ).is_error
                 pdf = b"%PDF-test"
                 (source / "paper.pdf").write_bytes(pdf)
                 result = await client.read_resource("hiraku://sources/papers/paper.pdf")
-                assert result.contents[0].mimeType == "application/pdf"
+                assert result.contents[0].mime_type == "application/pdf"
                 assert base64.b64decode(result.contents[0].blob) == pdf
                 error = await client.call_tool("record_show", {"record_id": "missing"})
-                assert error.isError
+                assert error.is_error
+                assert "missing" in error.content[0].text
 
     asyncio.run(exercise())
 

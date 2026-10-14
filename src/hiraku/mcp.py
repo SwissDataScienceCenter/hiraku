@@ -7,6 +7,8 @@ import mimetypes
 from typing import Any
 from urllib.parse import quote, unquote
 
+from pydantic import ValidationError as PydanticValidationError
+
 from .agent import (
     Context,
     list_actions,
@@ -18,7 +20,7 @@ from .agent import (
 )
 from .base import BaseRecord
 from .config import HirakuConfig
-from .errors import ValidationError
+from .errors import HirakuError, ValidationError
 from .launch import launch, render_arguments
 from .record import Record, list_records, load_record
 
@@ -50,13 +52,31 @@ def create_server(config: HirakuConfig | None = None) -> Any:
     The MCP SDK is a regular Hiraku dependency. Resources are read afresh on
     each request so external edits and tool mutations remain visible.
     """
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import (
+        ResourceError,
+        ToolError,
+        UnexpectedToolError,
+    )
 
     selected = config or HirakuConfig.discover()
 
-    class ProjectMCP(FastMCP):
-        async def read_resource(self, uri: Any) -> Any:
-            contents = await super().read_resource(uri)
+    class ProjectMCP(MCPServer):
+        async def call_tool(
+            self, name: str, arguments: dict[str, Any], context: Any = None
+        ) -> Any:
+            try:
+                return await super().call_tool(name, arguments, context)
+            except UnexpectedToolError as exc:
+                # The SDK hides unexpected messages; Hiraku's validation errors
+                # tell the agent how to correct its call.
+                cause = exc.__cause__
+                if isinstance(cause, HirakuError | PydanticValidationError):
+                    raise ToolError(str(cause)) from cause
+                raise
+
+        async def read_resource(self, uri: Any, context: Any = None) -> Any:
+            contents = await super().read_resource(uri, context)
             # Source templates contain many file types; MIME depends on the URI.
             if str(uri).startswith("hiraku://sources/"):
                 mime = mimetypes.guess_type(unquote(str(uri)))[0]
@@ -257,7 +277,7 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         root = (selected.contexts_dir / context_id).resolve()
         path = (root / unquote(source_path)).resolve()
         if not path.is_relative_to(root) or not path.is_file():
-            raise ValidationError("Source must be a file inside its context directory")
+            raise ResourceError("Source must be a file inside its context directory")
         return path.read_bytes()
 
     @server.prompt()

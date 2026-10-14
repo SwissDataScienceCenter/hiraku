@@ -19,7 +19,7 @@ def invoke(*args: str):
 def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", None)
+    monkeypatch.setitem(sys.modules, "mcp.server.mcpserver", None)
     result = invoke("mcp")
     assert result.exit_code == 1
     assert "MCP SDK dependency" in result.output
