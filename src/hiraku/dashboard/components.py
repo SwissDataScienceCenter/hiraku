@@ -82,7 +82,14 @@ def load_runs(
         return [], [], ""
     try:
         declarations = record.resolve(config=config).values.get("metrics") or []
-        runs = record.resolve_tracking_backend(config=config).list_runs()
+        from hiraku.tracking.mlflow import MLflowBackend
+
+        backend = record.resolve_tracking_backend(config=config)
+        runs = (
+            backend.list_runs(read_only=True)
+            if isinstance(backend, MLflowBackend)
+            else backend.list_runs()
+        )
     except (*_ERRORS, ImportError) as exc:
         return [], [], str(exc)
     return declarations, runs, ""

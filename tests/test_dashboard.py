@@ -133,6 +133,24 @@ def test_load_runs_uses_record_tracking_source(project) -> None:
     assert hd.load_runs(alternate, project)[2]
 
 
+def test_dashboard_mlflow_browsing_does_not_create_database(project):
+    pytest.importorskip("sqlalchemy")
+    record = load_record("random-forest", config=project)
+    record.tracking_backend = {"type": "mlflow", "database": "missing.db"}
+    before = {
+        p.relative_to(project.root): p.read_bytes()
+        for p in project.root.rglob("*")
+        if p.is_file()
+    }
+    _, runs, error = hd.load_runs(record, project)
+    assert runs == [] and error == ""
+    assert {
+        p.relative_to(project.root): p.read_bytes()
+        for p in project.root.rglob("*")
+        if p.is_file()
+    } == before
+
+
 def test_load_project_outside_project(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     config, records, initial_id, error = hd.load_project()
