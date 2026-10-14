@@ -17,10 +17,12 @@ The results overlay includes four records and nine runs in `runs.csv`.
 These are synthetic dashboard fixtures, not measured model results.
 Browsing them requires no training, credentials, or network access.
 
-From that directory, launch the dashboard using the repository's uv environment:
+From that directory, launch the dashboard. It runs in Hiraku's environment, so
+install Hiraku with the dashboard extra first
+(`uv tool install --force '.[dashboard]'` from a Hiraku checkout):
 
 ```bash
-uv run --project /path/to/hiraku --extra dashboard hiraku dashboard
+hiraku dashboard
 ```
 
 Select `val/log_loss` for a running minimum or `val/accuracy` for a running maximum.

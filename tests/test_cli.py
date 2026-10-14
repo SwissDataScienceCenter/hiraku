@@ -43,7 +43,34 @@ def test_dashboard_missing_dependencies(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cli, "find_spec", lambda name: None)
     result = invoke("dashboard")
     assert result.exit_code == 1
-    assert "uv sync --extra dashboard" in result.output
+    assert "missing from" in result.output
+    assert "[dashboard]" in result.output
+
+
+def test_dashboard_edit(tmp_path, monkeypatch) -> None:
+    from hiraku import cli
+
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "find_spec", lambda name: object())
+    calls = []
+    monkeypatch.setattr(cli.subprocess, "call", lambda args: calls.append(args) or 0)
+    result = invoke("dashboard", "--edit")
+    assert result.exit_code == 1
+    assert "hiraku dashboard --init" in result.output
+    assert calls == []
+    assert invoke("dashboard", "--init", "--edit", "--port", "2721").exit_code == 0
+    notebook = config.hiraku_dir / "dashboard" / "app.py"
+    assert calls[0][3:] == [
+        "edit",
+        str(notebook),
+        "--no-sandbox",
+        "--watch",
+        "--port",
+        "2721",
+    ]
+    assert invoke("dashboard", "--edit").exit_code == 0
+    assert calls[1][3:5] == ["edit", str(notebook)]
 
 
 def test_project_owned_dashboard(tmp_path, monkeypatch) -> None:
