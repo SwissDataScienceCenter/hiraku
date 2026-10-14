@@ -69,7 +69,7 @@ installs one `hiraku` for all projects. This is sufficient for CSV tracking and
 for initializing projects. Avoid it when Hiraku reads data written by a project
 SDK: a tool environment with a different MLflow version may reject the
 project's database. If you use it anyway, add the tracking SDK to the tool
-environment, e.g. `uv tool install --with mlflow git+https://…/hiraku`.
+environment, e.g. `uv tool install --with mlflow git+https://github.com/SwissDataScienceCenter/hiraku`.
 
 **Hiraku development.** Install a local checkout in editable mode:
 
