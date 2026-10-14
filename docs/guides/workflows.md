@@ -1,7 +1,8 @@
 # Workflows
 
 Workflows turn a research procedure into a sequence of explicit steps that your
-coding agent carries out in your normal conversation. Python code in your
+coding agent carries out, in your normal conversation over MCP or from a
+terminal with `hiraku-agent`. Python code in your
 project decides what happens next and checks what the agent reports, so
 budgets, candidate lists, launch approvals, and evidence are enforced instead
 of left to the agent's memory.
@@ -41,7 +42,7 @@ server runs `hiraku mcp`, so the `hiraku` command must be on the agent's
 
 Every response names the replies that continue the session. The agent answers
 with the `workflow_reply` tool, for example
-`workflow_reply(reply="revise", arguments={"feedback": "Try dropout"}, ...)`:
+`workflow_reply(reply="revise", arguments={"feedback": "Keep SGD"}, ...)`:
 
 ```json
 {
@@ -49,16 +50,21 @@ with the `workflow_reply` tool, for example
   "session_id": "collaborative-3f9a1c2b4d5e",
   "instruction_id": 2,
   "instruction": {
-    "text": "## Approve\n\nPresent the experiment to the user ...",
-    "context": {"record_id": "exp-reg", "hypothesis": "Regularization helps"},
+    "text": "## Review\n\nPresent the result of the step in the context ...",
+    "context": {
+      "step": "draft",
+      "result": {"record_id": "exp-wd", "summary": "Add weight decay", ...},
+      "rounds_left": 3
+    },
     "requires_user_response": true,
     "replies": [
-      {"reply": "approve", "description": "Record the user's approval ...",
+      {"reply": "implement", "description": "Implement the drafted experiment.",
        "arguments": {"properties": {}}},
-      {"reply": "revise", "description": "Propose a different experiment ...",
+      {"reply": "revise", "description": "Redo the reviewed step with ...",
        "arguments": {"properties": {"feedback": {"type": "string"}},
                      "required": ["feedback"]}},
-      {"reply": "finish", "arguments": {"properties": {}}}
+      {"reply": "finish", "description": "End the session and summarize ...",
+       "arguments": {"properties": {}}}
     ]
   }
 }
@@ -128,6 +134,64 @@ The bundled workflows launch experiments with the `hiraku launch` CLI rather
 than the `launch_entrypoint` tool: MCP clients limit how long a tool call may
 run and how much output it may return. The server's environment and working directory come
 from the agent's MCP configuration, not from the agent's shell.
+
+## Run a workflow from the terminal
+
+`hiraku-agent` runs the same sessions from a terminal. It hands each pending
+instruction to a coding agent and stops whenever you decide:
+
+```bash
+hiraku-agent collaborative --task cifar --rounds 2   # start; the agent drafts
+hiraku-agent collaborative revise --feedback "Keep SGD"
+hiraku-agent collaborative implement                 # the agent implements
+hiraku-agent collaborative launch
+hiraku-agent collaborative finish
+```
+
+Each workflow is a command whose options are its start arguments, and each
+reply is a subcommand whose options are the reply's arguments; see
+`hiraku-agent collaborative --help`. Text arguments are passed as given, other
+values are parsed as JSON, and the workflow validates them.
+
+- `hiraku-agent WORKFLOW` starts a session, or resumes the workflow's active
+  session. Pass `--new` to start another one and `--session` to choose one.
+- `hiraku-agent WORKFLOW REPLY` answers the pending instruction of the active
+  session that accepts `REPLY`, then continues.
+- For every other instruction, the driver writes a prompt to
+  `hiraku/sessions/<session-id>/<instruction-id>/<attempt>/prompt.md` and runs
+  the agent. The agent writes its reply as JSON to the `reply.json` named in
+  the prompt. A rejected reply goes back to the agent with the error, up to
+  `--retries` times.
+- At an instruction that requires your response, the driver prints its context
+  and the reply commands and exits with status 3. A reply that is not ready,
+  such as a launch whose run is not tracked yet, is kept: the next
+  `hiraku-agent WORKFLOW` sends it again without the agent, and exits with
+  status 4 while it still waits. A completed session exits with 0.
+- With `--interactive`, each agent step runs as a conversation with you in the
+  terminal instead of headless: the agent first says what it would do and
+  waits; discuss the step, and once you tell it to go ahead it carries out the
+  step and writes the reply. The driver still stops where you decide, so
+  `hiraku-agent count-steps step --interactive` is exactly one conversational
+  step. Exit the agent without a reply to stop; the instruction stays pending.
+
+| Mode | Default command | Override |
+| --- | --- | --- |
+| Headless | `claude -p --allowedTools ...` | `HIRAKU_AGENT_CMD` or `--agent-cmd` |
+| Interactive | `claude --allowedTools ... --` | `HIRAKU_AGENT_INTERACTIVE_CMD` or `--agent-cmd` |
+
+The default commands let the agent read, write, and edit files and run shell
+commands, which steps such as implementing or launching need; an override is
+used as given. The
+prompt arrives on standard input, or with `--interactive` as an opening
+message appended as the last argument, so an interactive command must accept a
+prompt there (the default ends its options with `--`), and the environment holds `HIRAKU_REPLY_FILE`,
+`HIRAKU_PROMPT_FILE`, `HIRAKU_SESSION_ID`, and `HIRAKU_INSTRUCTION_FILE`, the
+pending instruction as JSON. A script can therefore stand in for the agent.
+
+Sessions are shared with the MCP server: draft an experiment in Claude Code
+and launch it later with `hiraku-agent collaborative launch` from a terminal.
+The instruction ID and a per-session lock keep the two from applying
+conflicting replies.
 
 ## Write a Markdown-only workflow
 
@@ -311,12 +375,14 @@ The [autoresearch example](../examples/autoresearch/README.md) also installs
 `autoresearch`, a Markdown-only workflow with the upstream
 "experiment until stopped" procedure.
 
-- **collaborative** shows a gated flow in a few lines of code: the agent
-  proposes one experiment record at a time, you approve it before any work
-  (or ask for a revision), the agent implements and launches it, and you
-  discuss each result before deciding to continue. Hiraku checks that the
-  proposal is an experiment under the task and that the submitted run is
-  attributed to it, and stops after the `rounds` budget.
+- **collaborative** runs experiments on a task in four steps: draft,
+  implement, launch, and analyze. The agent does each step and reports it with
+  a reply such as `drafted` or `implemented`; Hiraku writes the experiment
+  record, binds the resolved commit, checks that the runs are attributed to the
+  experiment and its commit, and records the verdict. After each step you
+  review the result and choose the next step, `revise` with feedback, or
+  `finish`. A new experiment is offered only within the `rounds` budget. The
+  same session runs over MCP or step by step with `hiraku-agent`.
 - **autodataset** sends one complete instruction to find datasets for a task
   and document each as a `type: dataset` record with `sources`. A shortfall is
   a valid reply: you decide whether to keep searching or accept a partial

@@ -1,41 +1,44 @@
 ---
 id: collaborative
-description: Run experiments on a task together with the user, one at a time.
+description: Draft, implement, launch, and analyze experiments with the user, step by step.
 ---
 # Collaborative research
 
-You run experiments on a task together with the user. You propose each
-experiment and do the work; the user approves it before you start and decides
-after each result whether to continue.
+You run experiments on a task together with the user, one step at a time:
+draft, implement, launch, and analyze. You do the work of each step; the user
+reviews its result and chooses the next step.
 
-Read the task record (`record_show`) and its earlier experiments
-(`record_list`, `runs`) before proposing anything. Never delete records or
-rewrite Git history. When an instruction requires a user response, ask and wait
-for the answer before replying.
+Use Hiraku's record and run tools, or the `hiraku` CLI (`hiraku record show`,
+`hiraku record list`, `hiraku runs`), to read the task and earlier experiments.
+Never delete records or rewrite Git history.
 
-## Propose
+## Draft
 
-Propose one new experiment for the task. Build on the previous results in the
-context, and address the user's `feedback` if there is any. Create it with
-`record_create`: parent is the task, `type: experiment`, and fields `summary`
-and `hypothesis`. Do not implement anything yet. Reply with `proposed` and the
-record ID.
+Draft one experiment for the task. Read the task record and its earlier
+experiments first, build on the previous results in the context, and address
+the user's `feedback` if there is any. Do not change code yet. Reply `drafted`
+with a short record ID, a one-line summary, the hypothesis, and the change you
+plan to make.
 
-## Approve
+## Implement
 
-Present the experiment to the user: its summary, hypothesis, and the change you
-plan to make. Ask whether to go ahead. Reply with `approve` if the user agrees,
-`revise` with the user's feedback for a different experiment, or `finish` to
-stop.
+Implement the drafted experiment in the context, following the user's
+`feedback` if there is any. Commit the change and reply `implemented` with the
+commit and a short note on what changed.
 
-## Run
+## Launch
 
-Implement the experiment, commit the change, and bind the commit to the record
-with `hiraku record update <record-id> --commit HEAD`. Then launch it with the
-command from the context, find the run with `runs`, and reply with `submit_run`.
+Run the launch command from the context. Reply `launched` once the run is
+tracked; check with `hiraku runs --record <experiment>`.
 
-## Discuss
+## Analyze
 
-Present the result to the user and agree on a conclusion. Write it on the
-record with `record_update` (`conclusion`). Then ask whether to run another
-experiment (`next_round`) or to stop (`finish`).
+Compare the runs in the context with the task's metrics, earlier results, and
+the experiment's hypothesis. Reply `analyzed` with a verdict and a conclusion of
+a few sentences.
+
+## Review
+
+Present the result of the step in the context to the user. Ask how to continue
+and wait for the answer: the next step, `revise` with the user's feedback to
+redo this step, or `finish` to stop.

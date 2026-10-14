@@ -245,10 +245,15 @@ The bundled `collaborative` workflow runs experiments on a task record together
 with you. Invoke its prompt `/mcp__hiraku__collaborative`, or ask your coding
 agent, for example "start Hiraku collaborative research on heart-disease for
 two experiments"; the agent then calls the `collaborative` MCP tool. The agent
-proposes one experiment at a time, you approve it before any work, and you
-discuss each result before deciding to continue.
+drafts, implements, launches, and analyzes each experiment, and you review the
+result of every step before choosing the next one.
+
+From a terminal, `hiraku-agent` runs the same workflow step by step with a
+headless agent, or in a conversation with `--interactive`:
 
 ```bash
+hiraku-agent collaborative --task heart-disease --rounds 2
+hiraku-agent collaborative implement
 hiraku session list
 hiraku session show <session-id>
 hiraku runs --record heart-disease --all --json

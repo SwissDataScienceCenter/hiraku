@@ -1,4 +1,4 @@
-"""Count steps: numbered steps with tokens and one approval gate."""
+"""Count steps: numbered steps with tokens, each started by the user."""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ from pydantic import Field
 from hiraku.errors import SubmissionRejected
 from hiraku.workflow import Completion, Instruction, Session, Workflow, reply
 
-GATE_STEP = 5
-
 
 class CountStepsSession(Session):
     count: int
@@ -20,18 +18,24 @@ class CountStepsSession(Session):
 
 
 class CountSteps(Workflow):
-    """Check that the harness follows numbered instructions and gates.
+    """Check that the harness follows numbered instructions and stops for the user.
 
     Each step sends a fresh random token that the harness must echo back, so a
-    skipped, repeated, or invented step is rejected. Step 5 is a user gate.
+    skipped, repeated, or invented step is rejected. After each step the user
+    decides whether to run the next one.
     """
 
     def start(
         self,
-        count: Annotated[int, Field(gt=0, description="Number of steps.")] = 10,
-    ) -> Instruction | Completion:
-        """Start counting steps to check the harness."""
-        return self._next(CountStepsSession(count=count))
+        count: Annotated[int, Field(gt=0, description="Number of steps.")] = 5,
+    ) -> Instruction:
+        """Start counting steps to check the harness; runs the first step."""
+        return self._step(CountStepsSession(count=count))
+
+    @reply
+    def step(self, session: CountStepsSession) -> Instruction:
+        """Run the next step."""
+        return self._step(session)
 
     @reply
     def ack(
@@ -40,54 +44,41 @@ class CountSteps(Workflow):
         token: Annotated[str, Field(description="Token of the current step.")],
     ) -> Instruction | Completion:
         """Acknowledge the current step with its token."""
-        self._check(session, token)
-        return self._next(session)
-
-    @reply
-    def proceed(
-        self,
-        session: CountStepsSession,
-        token: Annotated[str, Field(description="Token of the gate step.")],
-    ) -> Instruction | Completion:
-        """Continue after the user approved the plan at the gate."""
-        self._check(session, token)
-        return self._next(session)
+        if token != session.token:
+            raise SubmissionRejected(
+                f"Token {token!r} does not match step {session.step}; reply with "
+                "the token from the current instruction"
+            )
+        if session.step >= session.count:
+            return self._done(session)
+        return self.instruction(
+            session,
+            self.section("next"),
+            context={
+                "done": session.step,
+                "remaining": session.count - session.step,
+            },
+            requires_user_response=True,
+            replies=[self.step, self.finish],
+        )
 
     @reply
     def finish(self, session: CountStepsSession) -> Completion:
         """End the session early."""
         return self._done(session)
 
-    def _check(self, session: CountStepsSession, token: str) -> None:
-        if token != session.token:
-            raise SubmissionRejected(
-                f"Token {token!r} does not match step {session.step}; reply with "
-                "the token from the current instruction"
-            )
-
-    def _next(self, session: CountStepsSession) -> Instruction | Completion:
-        if session.step >= session.count:
-            return self._done(session)
+    def _step(self, session: CountStepsSession) -> Instruction:
         session.step += 1
         session.token = secrets.token_hex(4)
-        context = {
-            "step": session.step,
-            "count": session.count,
-            "token": session.token,
-            "line": f"Step {session.step}/{session.count}: token {session.token}",
-        }
-        if session.step == GATE_STEP:
-            return self.instruction(
-                session,
-                self.section("gate"),
-                context={**context, "remaining": session.count - session.step},
-                requires_user_response=True,
-                replies=[self.proceed, self.finish],
-            )
         return self.instruction(
             session,
             self.section("step"),
-            context=context,
+            context={
+                "step": session.step,
+                "count": session.count,
+                "token": session.token,
+                "line": f"Step {session.step}/{session.count}: token {session.token}",
+            },
             replies=[self.ack, self.finish],
         )
 

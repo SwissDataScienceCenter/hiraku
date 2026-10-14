@@ -131,8 +131,8 @@ experiments, advances or resets the branch, and continues until you stop it,
 then reports a summary. Hiraku does not check budgets or evidence in this mode.
 
 To decide each step yourself, start the bundled `collaborative` workflow
-instead: the agent proposes one experiment at a time, you approve it before any
-work, and you decide after each result whether to continue.
+instead: the agent drafts, implements, launches, and analyzes one experiment at
+a time, and you review each step before choosing the next one.
 
 To continue an interrupted session, ask the agent to resume it; it uses
 `session_list` and `session_show`. Inspect sessions from a terminal with:

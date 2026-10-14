@@ -839,7 +839,7 @@ def test_workflow_md_is_a_registry_record(tmp_path: Path) -> None:
         "description": document.to_dict()["description"],
         "summary": "Bounded research",
     }
-    assert reloaded.section("approve") == document.section("approve")
+    assert reloaded.section("review") == document.section("review")
 
 
 @pytest.mark.parametrize(

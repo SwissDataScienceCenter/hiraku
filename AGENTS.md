@@ -58,6 +58,7 @@ Useful project commands include:
 
 ```bash
 uv run hiraku --help
+uv run hiraku-agent --help
 uv run zensical serve
 uv run python scripts/check_changelog.py
 ```
@@ -91,6 +92,7 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
 | `src/hiraku/context.py` | Curated context records |
 | `src/hiraku/workflow.py` | Workflows: `workflow.md` records whose `start` and replies run on sessions |
+| `src/hiraku/agent.py` | `hiraku-agent`: runs workflow sessions with a coding agent from the terminal |
 | `src/hiraku/session.py` | Workflow sessions: stored state and reply correlation |
 | `src/hiraku/mcp.py` | Stdio MCP server (`MCPServer`); `add_workflow_tools` adds the workflow and session tools, prompts, and resources |
 | `src/hiraku/resources/` | Bundled workflows, dispatchers, skills, and examples |

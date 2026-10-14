@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from hiraku.config import HirakuConfig
-from hiraku.record import Record
+from hiraku.record import Record, load_record
 from hiraku.workflow import load_workflows
 
 HEADER = "id,record_id,entrypoint,metric.val\n"
@@ -81,55 +82,120 @@ def config(tmp_path: Path) -> HirakuConfig:
     return selected
 
 
-def test_collaborative_gates_and_budget(config: HirakuConfig) -> None:
+def commit(config: HirakuConfig, message: str) -> str:
+    def git(*arguments: str) -> str:
+        return subprocess.run(
+            ["git", *arguments],
+            cwd=config.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    if not (config.root / ".git").exists():
+        git("init", "-b", "main")
+        git("config", "user.email", "test@example.org")
+        git("config", "user.name", "Test")
+    (config.root / "train.py").write_text(f"# {message}\n")
+    git("add", "train.py")
+    git("commit", "-m", message)
+    return git("rev-parse", "HEAD")
+
+
+def draft(harness: Harness, record_id: str, summary: str = "Add dropout") -> dict:
+    return harness.reply(
+        "drafted",
+        record_id=record_id,
+        summary=summary,
+        hypothesis="Dropout reduces overfitting",
+        change="Add dropout 0.3 before the head",
+    )
+
+
+def run_experiment(harness: Harness, config: HirakuConfig, record_id: str) -> str:
+    """Take a drafted experiment through implement, launch, and analyze."""
+    harness.reply("implement")
+    sha = commit(config, record_id)
+    harness.reply("implemented", commit="HEAD", notes="One line")
+    harness.reply("launch")
+    add_run(config, f"r-{record_id}", record_id, "0.8")
+    harness.reply("launched")
+    harness.reply("analyze")
+    harness.reply("analyzed", verdict="supports", conclusion="Better")
+    return sha
+
+
+def test_collaborative_steps_reviews_and_budget(config: HirakuConfig) -> None:
     harness = Harness(config)
     started = harness.start("collaborative", task="task", rounds=2)
     assert started["status"] == "accepted"
-    assert harness.section() == "## Propose"
-    assert harness.replies == ["proposed", "finish"]
+    assert harness.section() == "## Draft"
+    assert harness.replies == ["drafted", "finish"]
 
-    experiment(config, "c1")
-    harness.reply("proposed", record_id="c1")
-    assert harness.section() == "## Approve"
+    draft(harness, "c1")
+    assert harness.section() == "## Review"
     assert harness.instruction["requires_user_response"] is True
-    assert harness.instruction["context"]["record_id"] == "c1"
-    assert harness.replies == [
-        "approve",
-        "revise",
-        "finish",
-    ]
+    assert harness.instruction["context"]["result"]["record_id"] == "c1"
+    assert harness.replies == ["implement", "revise", "finish"]
+    assert load_record("c1", config=config).status == "drafted"
 
-    harness.reply("revise", feedback="Try a smaller model")
-    assert harness.section() == "## Propose"
-    assert harness.instruction["context"]["feedback"] == "Try a smaller model"
-    experiment(config, "c2")
-    harness.reply("proposed", record_id="c2")
-    harness.reply("approve")
-    assert harness.section() == "## Run"
-    assert harness.instruction["context"]["command"] == (
-        "hiraku launch train --record c2"
+    harness.reply("revise", feedback="Try weight decay instead")
+    assert harness.section() == "## Draft"
+    assert harness.instruction["context"]["feedback"] == "Try weight decay instead"
+    assert harness.instruction["context"]["revise"] == "c1"
+    elsewhere = draft(harness, "c9")
+    assert elsewhere["status"] == "rejected"
+    assert "record_id 'c1'" in elsewhere["message"]
+    draft(harness, "c1", summary="Add weight decay")
+    assert load_record("c1", config=config).summary == "Add weight decay"
+
+    harness.reply("implement")
+    assert harness.section() == "## Implement"
+    assert harness.instruction["context"]["experiment"]["summary"] == (
+        "Add weight decay"
     )
+    sha = commit(config, "weight decay")
+    harness.reply("implemented", commit="HEAD", notes="One line")
+    assert load_record("c1", config=config).commit == sha
+    assert harness.replies == ["launch", "revise", "finish"]
 
-    pending = harness.reply("submit_run", run_id="r2")
-    assert pending["status"] == "not_ready"
-    add_run(config, "r2", "c2", "0.8")
-    harness.reply("submit_run", run_id="r2")
-    assert harness.section() == "## Discuss"
-    assert harness.instruction["requires_user_response"] is True
-    assert harness.instruction["context"]["result"]["metrics"] == {"val": "0.8"}
-    assert harness.replies == ["next_round", "finish"]
+    harness.reply("launch")
+    assert harness.instruction["context"]["command"] == (
+        f"hiraku launch train --record c1 --commit {sha}"
+    )
+    assert harness.reply("launched")["status"] == "not_ready"
+    add_run(config, "r1", "c1", "0.8")
+    harness.reply("launched")
+    assert harness.instruction["context"]["result"]["runs"] == [
+        {"run_id": "r1", "metrics": {"val": "0.8"}}
+    ]
+    assert harness.replies == ["analyze", "revise", "finish"]
 
-    harness.reply("next_round")
-    experiment(config, "c3")
-    harness.reply("proposed", record_id="c3")
-    harness.reply("approve")
-    add_run(config, "r3", "c3", "0.7")
-    harness.reply("submit_run", run_id="r3")
-    assert harness.replies == ["finish"]
+    harness.reply("analyze")
+    assert harness.section() == "## Analyze"
+    assert harness.instruction["context"]["runs"][0]["run_id"] == "r1"
+    harness.reply("analyzed", verdict="inconclusive", conclusion="Unclear")
+    harness.reply("revise", feedback="Compare with the baseline")
+    harness.reply("analyzed", verdict="supports", conclusion="Better")
+    record = load_record("c1", config=config)
+    assert (record.status, record.verdict) == ("analyzed", "supports")
+    assert harness.instruction["context"]["rounds_left"] == 1
+    assert harness.replies == ["draft", "revise", "finish"]
+
+    harness.reply("draft")
+    assert harness.instruction["context"]["previous"] == [
+        {"record_id": "c1", "verdict": "supports"}
+    ]
+    draft(harness, "c2")
+    run_experiment(harness, config, "c2")
+    assert harness.replies == ["revise", "finish"]
 
     done = harness.reply("finish")
     assert done["completed"] is True
-    assert [item["run_id"] for item in done["result"]["results"]] == ["r2", "r3"]
+    assert [item["record_id"] for item in done["result"]["results"]] == [
+        "c1",
+        "c2",
+    ]
 
 
 def test_collaborative_rejects_invalid_input(config: HirakuConfig) -> None:
@@ -139,17 +205,29 @@ def test_collaborative_rejects_invalid_input(config: HirakuConfig) -> None:
     assert "nope" in unknown["message"]
 
     harness.start("collaborative", task="task")
-    Record.create("other", type="experiment", activate=False, config=config)
-    outside = harness.reply("proposed", record_id="other")
-    assert outside["status"] == "rejected"
-    assert "must be an experiment under 'task'" in outside["message"]
+    exists = draft(harness, "base")
+    assert exists["status"] == "rejected"
+    assert "already exists" in exists["message"]
+    draft(harness, "c1")
 
-    harness.reply("proposed", record_id="base")
-    harness.reply("approve")
-    elsewhere = harness.reply("submit_run", run_id="x")
-    assert elsewhere["status"] == "not_ready"
-    add_run(config, "x", "other", "0.5")
-    assert harness.reply("submit_run", run_id="x")["status"] == ("not_ready")
+    harness.reply("implement")
+    commit(config, "c1")
+    missing = harness.reply("implemented", commit="no-such-ref", notes="x")
+    assert missing["status"] == "rejected"
+    harness.reply("implemented", commit="HEAD", notes="x")
+
+    harness.reply("launch")
+    path = config.root / "runs.csv"
+    path.write_text("id,record_id,commit,metric.val\nr1,c1," + "0" * 40 + ",0.5\n")
+    wrong = harness.reply("launched")
+    assert wrong["status"] == "rejected"
+    assert "another commit" in wrong["message"]
+
+    path.write_text("id,record_id,metric.val\nr1,c1,\n")
+    harness.reply("launched")
+    early = harness.reply("analyze")
+    assert early["status"] == "not_ready"
+    assert "no metrics yet" in early["message"]
 
 
 def dataset(config: HirakuConfig, record_id: str, **fields: Any) -> None:
