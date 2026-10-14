@@ -34,14 +34,16 @@ Launch entrypoints, compare runs, and keep the research history visible.
 
 ## Installation
 
-```bash
-uv tool install ".[mlflow,wandb]"
-hiraku --help
+Install Hiraku as a development dependency of your project, so it shares
+the environment of your training code:
 
-# development setup
-uv sync --all-extras
+```bash
+uv add --dev git+https://github.com/SwissDataScienceCenter/hiraku --branch main
 uv run hiraku --help
 ```
+
+See [Install Hiraku](guides/installation.md) for new projects, packaged
+examples, and a global tool installation.
 
 
 ## The Hiraku workflow

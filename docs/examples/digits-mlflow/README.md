@@ -12,19 +12,24 @@ by their known maximum of 16.
 
 ## Setup
 
-Install Hiraku with its MLflow extra in your CLI environment first (from the
-Hiraku checkout: `uv tool install --force '.[mlflow]'`). Then create and
-initialize a new project:
+Initialize the example with a temporary Hiraku, then install Hiraku in the
+example's environment. The example's `pyproject.toml` pins MLflow, so training
+and `hiraku runs` use the same MLflow version (see
+[Install Hiraku](../../guides/installation.md)):
 
 ```bash
 mkdir digits-mlflow
 cd digits-mlflow
 git init
-hiraku init --example digits-mlflow
-uv sync
+uvx --from git+https://github.com/SwissDataScienceCenter/hiraku@main hiraku init --example digits-mlflow
+uv add --dev git+https://github.com/SwissDataScienceCenter/hiraku --branch main
 git add .
 git commit -m "initialize Digits MLflow example"
+source .venv/bin/activate
 ```
+
+The commands below run `hiraku` from the activated environment; alternatively,
+prefix them with `uv run`.
 
 MLflow creates `mlflow.db` in the project root on the first launch. The training
 script uses the Hiraku project root to keep that location stable for local and

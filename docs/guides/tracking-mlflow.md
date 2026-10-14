@@ -4,17 +4,14 @@ MLflow can store runs in a local SQLite database or a remote server.
 
 ## Install and configure
 
-From the Hiraku source checkout:
+Install Hiraku and MLflow in the training project's environment (see
+[Install Hiraku](installation.md)). Hiraku then reads the database with the
+same MLflow version that your training code writes it with:
 
 ```bash
-uv tool install --force '.[mlflow]'
-```
-
-In the training project:
-
-```bash
+uv add --dev git+https://github.com/SwissDataScienceCenter/hiraku --branch main
 uv add mlflow
-hiraku record update my-task \
+uv run hiraku record update my-task \
   --set 'tracking_backend={type: mlflow, database: mlflow.db, experiment_name: my-task}'
 ```
 
@@ -54,7 +51,7 @@ worktree dispatches writing to the original database.
 ## Inspect
 
 ```bash
-hiraku runs --record my-task --all --json
+uv run hiraku runs --record my-task --all --json
 ```
 
 Hiraku reads native run IDs, parameters, metrics, and attribution tags.

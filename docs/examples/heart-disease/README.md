@@ -5,30 +5,47 @@ This example illustrates the Hiraku workflow for developing predictive models on
 
 ## 1. Install Hiraku and initialize the example
 
-From a local Hiraku source checkout, install the Hiraku CLI:
+Create a project and let Hiraku install the training script, processed
+dataset, and dependencies for this example. Choose where Hiraku itself is
+installed (see [Install Hiraku](../../guides/installation.md)):
 
-```bash
-git clone https://github.com/SwissDataScienceCenter/hiraku.git
-cd hiraku
-uv tool install .
-```
+=== "Project environment (recommended)"
 
-Then create a project and let Hiraku install the training script, processed
-dataset, and dependencies for this example.
-```bash
-mkdir heart-disease
-cd heart-disease
-git init
-hiraku init --example heart-disease
-```
+    Initialize with a temporary Hiraku, then add Hiraku to the example's
+    environment and activate it:
+
+    ```bash
+    mkdir heart-disease
+    cd heart-disease
+    git init
+    uvx --from git+https://github.com/SwissDataScienceCenter/hiraku@main hiraku init --example heart-disease
+    uv add --dev git+https://github.com/SwissDataScienceCenter/hiraku --branch main
+    source .venv/bin/activate
+    ```
+
+    The following commands run `hiraku` from the activated environment;
+    alternatively, prefix them with `uv run`.
+
+=== "Global tool"
+
+    Install one `hiraku` for all projects, then initialize the example:
+
+    ```bash
+    uv tool install git+https://github.com/SwissDataScienceCenter/hiraku
+    mkdir heart-disease
+    cd heart-disease
+    git init
+    hiraku init --example heart-disease
+    ```
+
+    If your shell cannot find `hiraku`, run `uv tool update-shell` and open a
+    new shell.
+
 Initialization creates `hiraku.yml`, metadata directories, and the agent
 skill. The `heart-disease` example also copies `train.py`, `pyproject.toml`, and
 `data/processed.cleveland.data` into the project.
 Logistic regression and a random forest are included as initial baselines.
 
-
-If your shell cannot
-find `hiraku`, run `uv tool update-shell` and open a new shell.
 
 Install the example's training dependencies and commit the code.
 ```bash

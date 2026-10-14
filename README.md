@@ -6,23 +6,20 @@
 
 ## Getting started
 
+Install Hiraku in your project's environment and run it with `uv run`:
+
 ```bash
-git clone https://github.com/SwissDataScienceCenter/hiraku.git
-cd hiraku
-
-# system install
-uv tool install ".[mlflow,wandb]"
-
-# for local development
-uv sync --all-extras
-hiraku --help
-
-# create a hiraku project
 mkdir my-project
 cd my-project
 git init
-hiraku init
+uv init --bare
+uv add --dev git+https://github.com/SwissDataScienceCenter/hiraku --branch main
+uv run hiraku init
 ```
+
+See [Install Hiraku](docs/guides/installation.md) for packaged examples and
+alternatives such as a global `uv tool install`. For Hiraku development, clone
+the repository and run `uv sync --all-extras`.
 
 Check the examples for a more complete walkthrough:
 - [Heart-disease prediction using CSV logging](docs/examples/heart-disease/README.md)

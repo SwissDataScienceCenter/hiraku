@@ -40,6 +40,8 @@ an entrypoint; instrumented code independently writes the resulting run to the t
 ## Main CLI entry points
 
 Prefer `--json` for state that will be inspected or verified programmatically.
+If `hiraku` is not on `PATH`, it is usually installed in the project
+environment: run it from the project root as `uv run hiraku ...`.
 
 | Purpose | Main commands |
 | --- | --- |

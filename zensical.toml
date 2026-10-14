@@ -41,6 +41,7 @@ nav = [
   ] },
   { "Guides" = [
       { "Overview" = "guides/index.md" },
+      { "Install Hiraku" = "guides/installation.md" },
       { "Start from scratch" = "examples/minimal/README.md" },
       { "Tracking Backends" = [
         { "CSV" = "guides/tracking-csv.md" },

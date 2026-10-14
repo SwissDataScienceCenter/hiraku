@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Document installing Hiraku as a development dependency of the research project, so it shares the project's tracking SDK versions; the bundled skill falls back to `uv run hiraku` ([issue #36](https://github.com/SwissDataScienceCenter/hiraku/issues/36)).
 - Add `Record.resolve_tracking_backend()` to build the tracking backend inherited by a record; `TrackingBackend.list_runs()` now lists all attributed runs when `record_id` is omitted.
 - Add `hiraku runs --all` to list all attributed runs from the tracking source resolved for a record ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 
