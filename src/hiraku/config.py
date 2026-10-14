@@ -155,7 +155,6 @@ class HirakuConfig(BaseModel):
         ignore_git: bool = True,
         template: Path | str | None = None,
         example: str | None = None,
-        results: bool = False,
     ) -> HirakuConfig:
         """Initialize a new Hiraku project.
 
@@ -168,7 +167,6 @@ class HirakuConfig(BaseModel):
                 Defaults to true for programmatic initialization.
             template: Optional local directory copied over the initialized project.
             example: Optional packaged example name whose ``src`` tree is copied.
-            results: Include the example's prepared records and tracked runs.
 
         Returns:
             The initialized configuration.
@@ -187,7 +185,6 @@ class HirakuConfig(BaseModel):
             ignore_git=ignore_git,
             template=template,
             example=example,
-            results=results,
         )
 
     def save(self) -> None:

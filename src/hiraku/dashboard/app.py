@@ -14,7 +14,7 @@
 From the project to browse, run `hiraku dashboard` (or `--edit` to edit a
 project copy); it starts marimo in Hiraku's environment.
 
-Try a populated project with `hiraku init --example heart-disease --results`.
+Use any initialized Hiraku project containing records and tracked runs.
 Reload to read updated records. Loading and rendering live in
 `hiraku.dashboard.components`. To add a plot, add a cell that reads `runs`,
 `record`, or `selected_id` and place it in views/dashboard/index.html with

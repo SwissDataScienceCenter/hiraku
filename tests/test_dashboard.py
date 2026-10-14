@@ -19,7 +19,9 @@ from hiraku.dashboard import components as hd  # noqa: E402
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch) -> HirakuConfig:
     config = HirakuConfig.init(
-        tmp_path.resolve(), example="heart-disease", results=True, install_skill=False
+        tmp_path.resolve(),
+        template=Path(__file__).parent / "fixtures/dashboard",
+        install_skill=False,
     )
     monkeypatch.chdir(config.root)
     return config

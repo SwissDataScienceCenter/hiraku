@@ -81,24 +81,13 @@ hiraku init --example minimal
 ```
 
 Each example copies only its bundled
-`src/` subtree by default. Add `--results` to apply its optional `results/`
-overlay with sample records and synthetic runs:
-
-```bash
-hiraku init --example heart-disease --results
-```
-
-Results may override base files and configuration keys, but neither layer
-overwrites pre-existing project files. Explicit CLI options take precedence.
-The flag requires a packaged example with a `results/` directory.
-Sibling documentation and metadata are not copied:
+`src/` subtree; sibling documentation and metadata are not part of the project:
 
 ```text
 resources/examples/<name>/
 ├── README.md
 ├── example.yml
-├── src/                 # copied into the project root
-└── results/             # optional overlay with --results
+└── src/                 # copied into the project root
 ```
 
 The two options are mutually exclusive. Templates may replace files installed
