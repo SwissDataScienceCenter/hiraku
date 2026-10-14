@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Add Markdown-only workflows: a workflow directory with only `workflow.md` sends its whole body as one instruction, with typed `arguments` declared in the front matter filling `{{name}}` placeholders, and a single `complete` reply.
 - Add the bundled workflows: `collaborative` (a minimal gated loop: the user approves each experiment before any work and decides after each result whether to continue) and `autodataset`. The autoresearch example ships the Markdown-only `autoresearch`, which restores its previous program.
 - `Workflow.call()` runs a workflow's tools on its stored `Session`s; the session holds the pending `instruction_id`, so retries and late replies are safe. Replies may omit `session_id` while one session is active, and the session keeps the history of accepted calls.
+- Add the `count-steps` example (`hiraku init --example count-steps`): a workflow of numbered steps with random tokens the agent must echo back and a user gate at step 5, to check that a coding harness follows workflow instructions.
 - Add `hiraku workflow list|call` and `hiraku session list|show|cancel`.
 - Add `hiraku.record.update_record()`, shared by the CLI and MCP server.
 - Add `Record.resolve_tracking_backend()` to build the tracking backend inherited by a record; `TrackingBackend.list_runs()` now lists all attributed runs when `record_id` is omitted.

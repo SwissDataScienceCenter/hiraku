@@ -38,6 +38,7 @@ nav = [
       { "Iris (W&B)" = "examples/iris-wandb/README.md" },
       { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
       { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
+      { "Count Steps" = "examples/count-steps/README.md" },
   ] },
   { "Guides" = [
       { "Overview" = "guides/index.md" },
