@@ -20,7 +20,7 @@ def test_registry_constructs_csv_backend_from_mapping(tmp_path: Path) -> None:
 
 def test_registry_forwards_mlflow_ui_url(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
-    backend = backend_for(
+    backend = create_backend(
         {"type": "mlflow", "database": "mlflow.db", "ui_url": "https://ui.example"},
         config,
     )

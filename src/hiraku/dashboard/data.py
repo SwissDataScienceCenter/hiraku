@@ -17,7 +17,6 @@ from ..config import HirakuConfig
 from ..io import dump_yaml
 from ..record import Record, list_records
 from ..run import Run
-from ..tracking import select_backend
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -40,9 +39,8 @@ def load(config: HirakuConfig) -> ProjectRuns:
     records = list_records(config=config)
     by_source: dict[str, Record] = {}
     for record in records:
-        values = record.resolve(config=config).values
-        specification = values.get("tracking_backend") or config.tracking_backend
-        key = repr((specification, values.get("mlflow_experiment")))
+        specification = record.resolve(config=config).values.get("tracking_backend")
+        key = repr(specification or config.tracking_backend)
         by_source.setdefault(key, record)
 
     known = {record.id for record in records}
@@ -51,15 +49,16 @@ def load(config: HirakuConfig) -> ProjectRuns:
     errors: list[str] = []
     for record in by_source.values():
         try:
-            source = select_backend(record, config).backend_name
-            found = record.runs(config=config)
+            backend = record.resolve_tracking_backend(config=config)
+            # Without a record ID, the source lists every attributed run.
+            found = backend.list_runs()
         except Exception as exc:
             errors.append(f"Tracking source for {record.id!r} unavailable: {exc}")
             continue
         for run in found:
             if run.record_id in known:
-                runs.setdefault((source, run.id), run)
-                sources[run.id] = source
+                runs.setdefault((backend.backend_name, run.id), run)
+                sources[run.id] = backend.backend_name
     return ProjectRuns(records, list(runs.values()), sources, errors)
 
 

@@ -120,14 +120,14 @@ def test_load_reports_unavailable_source_without_failing(
     Record.create(
         "broken", tracking_backend={"type": "csv", "path": "other.csv"}, config=project
     )
-    original = Record.runs
+    original = Record.resolve_tracking_backend
 
-    def runs(self: Record, **options):
+    def resolve(self: Record, **options):
         if self.id == "broken":
             raise BackendError("source offline")
         return original(self, **options)
 
-    monkeypatch.setattr(Record, "runs", runs)
+    monkeypatch.setattr(Record, "resolve_tracking_backend", resolve)
 
     loaded = load(project)
 
