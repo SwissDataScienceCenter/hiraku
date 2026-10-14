@@ -187,6 +187,35 @@ def test_launch_capture_and_attribution(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
+def test_runs(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    (tmp_path / "runs.csv").write_text(
+        "id,record_id,metric.acc\na,task,0.5\nb,task,0.9\nc,other,0.7\n"
+    )
+    server = create_server(config)
+
+    async def exercise() -> None:
+        await server.call_tool(
+            "record_create",
+            {
+                "record_id": "task",
+                "fields": {"metrics": [{"name": "acc", "direction": "maximize"}]},
+            },
+        )
+
+        async def ids(**args) -> list[str]:
+            result = await server.call_tool("runs", {"record_id": "task", **args})
+            return [run["id"] for run in result.structured_content["result"]]
+
+        assert await ids(sort="acc") == ["b", "a"]
+        assert await ids(sort="acc", ascending=True, limit=1) == ["a"]
+        assert sorted(await ids(all_records=True)) == ["a", "b", "c"]
+        with pytest.raises(ToolError, match="requires sort"):
+            await server.call_tool("runs", {"record_id": "task", "ascending": True})
+
+    asyncio.run(exercise())
+
+
 def test_stdio_session(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     source = config.contexts_dir / "papers"

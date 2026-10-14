@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import quote, unquote
 
 from pydantic import ValidationError as PydanticValidationError
+from pydantic_core import to_jsonable_python
 
 from .agent import (
     Context,
@@ -232,6 +233,39 @@ def create_server(config: HirakuConfig | None = None) -> Any:
             "stdout": result.stdout,
             "stderr": result.stderr,
         }
+
+    @server.tool()
+    def runs(
+        record_id: str,
+        all_records: bool = False,
+        sort: str | None = None,
+        ascending: bool | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """List tracked runs attributed to a record, like `hiraku runs`.
+
+        With all_records, list every attributed run in the record's tracking
+        source. Sorting by a declared metric follows its direction unless
+        ascending is given.
+        """
+        if ascending is not None and sort is None:
+            raise ValidationError("A sort direction requires sort")
+        record = load_record(record_id, config=selected)
+        query: dict[str, Any] = {"limit": limit} if limit is not None else {}
+        if sort is not None:
+            declarations = record.resolve(config=selected).values.get("metrics") or []
+            directions = {item.name: item.direction for item in declarations}
+            query["sort"] = sort
+            query["ascending"] = (
+                ascending
+                if ascending is not None
+                else directions.get(sort) != "maximize"
+            )
+        found = record.resolve_tracking_backend(config=selected).list_runs(
+            record_id=None if all_records else record.id, **query
+        )
+        # Runs keep their fields in read-only mappings.
+        return to_jsonable_python(found, fallback=dict)
 
     @server.resource("hiraku://catalog", mime_type="application/json")
     def catalog() -> str:

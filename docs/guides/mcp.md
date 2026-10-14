@@ -53,6 +53,7 @@ and fall back to the CLI when the host has not connected the server.
 | `context_list`, `context_show` | Read curated context metadata and Markdown. |
 | `context_create`, `context_update`, `context_delete` | Persist or remove context metadata. Deletion leaves attached files in place. |
 | `launch_entrypoint` | Execute a configured record entrypoint through the dispatcher, preserving attribution. |
+| `runs` | List tracked runs attributed to a record, like `hiraku runs`; `all_records` lists every attributed run in its tracking source. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
 Record creation activates the record by default; pass `activate: false` to leave
