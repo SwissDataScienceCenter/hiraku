@@ -168,7 +168,9 @@ def main() -> int:
         parser.error("--epochs must be positive")
 
     if args.dir is None:
-        directory = Path(tempfile.mkdtemp(prefix="hiraku-digits-demo-"))
+        # macOS temp paths live under the /var -> /private/var symlink, which
+        # project initialization rejects.
+        directory = Path(tempfile.mkdtemp(prefix="hiraku-digits-demo-")).resolve()
     else:
         directory = args.dir.expanduser().resolve()
         if directory.exists() and any(directory.iterdir()):
