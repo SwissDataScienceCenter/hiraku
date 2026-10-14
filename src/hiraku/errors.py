@@ -47,3 +47,19 @@ class LaunchError(HirakuError):
 
 class BackendError(HirakuError):
     """A tracking backend failed to return normalized runs."""
+
+
+class WorkflowError(HirakuError):
+    """A workflow, its code, or one of its tools is invalid."""
+
+
+class SessionNotFoundError(HirakuError):
+    """A workflow session does not exist."""
+
+
+class SubmissionRejected(HirakuError):
+    """A workflow reply was invalid and did not advance its session."""
+
+
+class NotReady(SubmissionRejected):
+    """A valid workflow reply whose evidence is not available yet."""

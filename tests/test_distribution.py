@@ -8,6 +8,7 @@ REPOSITORY = Path(__file__).parents[1]
 PACKAGE = REPOSITORY / "src" / "hiraku"
 EXAMPLES = PACKAGE / "resources" / "examples"
 SKILLS = PACKAGE / "resources" / "skills"
+WORKFLOWS = PACKAGE / "resources" / "workflows"
 
 
 def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
@@ -30,10 +31,11 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
 
     expected = {
         f"hiraku/{path.relative_to(PACKAGE)}"
-        for resource_root in (EXAMPLES, SKILLS)
+        for resource_root in (EXAMPLES, SKILLS, WORKFLOWS)
         for path in resource_root.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts
     }
+    assert any(path.endswith("collaborative/workflow.md") for path in expected)
     with ZipFile(wheels[0]) as wheel:
         packaged = set(wheel.namelist())
 

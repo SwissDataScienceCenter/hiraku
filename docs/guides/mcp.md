@@ -81,8 +81,8 @@ resources are loaded on each request, including after changes made outside MCP.
 | --- | --- |
 | `hiraku://records/{record_id}` | Record fields and Markdown as JSON. |
 | `hiraku://contexts/{context_id}` | Curated context Markdown. |
-| `hiraku://programs/{program_id}` | Project program instructions. |
-| `hiraku://actions/{entity}/{action_id}` | Project action instructions. |
+| `hiraku://workflows/{workflow_id}` | Prompt document of a workflow. |
+| `hiraku://sessions/{session_id}` | Stored state of a workflow session as JSON. |
 | `hiraku://sources/{context_id}/{source_path}` | Attached file as an MCP blob with its inferred MIME type. |
 
 Place PDFs, literature reviews and other source files inside a context directory,
@@ -91,6 +91,13 @@ for example `hiraku/contexts/literature/papers/study.pdf`, alongside its
 slashes for nested directories. Use those URIs directly. File access rejects
 paths and symlinks escaping the selected context directory. PDF bytes are served
 with `application/pdf`; interpretation depends on the MCP client's capabilities.
+
+## Workflows
+
+Each project workflow is a tool and a prompt named after it, and replies go
+through `workflow_reply`. `workflow_list` and the `session_*` tools list
+workflows and inspect, resume, or cancel sessions. See the
+[Workflows guide](workflows.md).
 
 ## Prompt template
 

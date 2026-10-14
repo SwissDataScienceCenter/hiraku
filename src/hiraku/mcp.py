@@ -1,10 +1,19 @@
-"""Optional local MCP interface to a single Hiraku project."""
+"""Optional local MCP interface to a single Hiraku project.
+
+Workflows add their tools, prompts, and resources with `add_workflow_tools`.
+They are fixed when the server starts, because coding agents do not reliably
+pick up changes to the tool list. Each workflow is started by a tool and a
+prompt named after it, and every reply goes through one ``workflow_reply``
+tool.
+"""
 
 from __future__ import annotations
 
+import inspect
 import json
 import mimetypes
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Annotated, Any
 from urllib.parse import quote, unquote
 
 from mcp.server.mcpserver import MCPServer
@@ -14,23 +23,58 @@ from mcp.server.mcpserver.exceptions import (
     UnexpectedResourceError,
     UnexpectedToolError,
 )
+from mcp.server.mcpserver.prompts import Prompt
+from mcp.types import ToolAnnotations
+from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .agent import (
-    Context,
-    list_actions,
-    list_contexts,
-    list_programs,
-    load_action,
-    load_context,
-    load_program,
-)
+from .agent import Context, list_contexts, load_context
 from .base import BaseRecord
 from .config import HirakuConfig
 from .errors import HirakuError, ValidationError
 from .launch import launch, render_arguments
 from .record import Record, list_records, load_record
+from .session import Session
+from .workflow import (
+    Workflow,
+    list_workflows,
+    load_workflows,
+    summary,
+    workflow_description,
+)
+
+INSTRUCTIONS = """\
+Hiraku documents research in records (goals, hypotheses, experiments, findings),
+attributes tracked runs to them, and runs workflows that guide you step by step.
+Start a workflow with the tool named after it (workflow_list lists them), and
+answer its instructions with workflow_reply. Use session_list and session_show
+to resume earlier sessions.\
+"""
+
+GUIDE = """\
+How to follow a Hiraku workflow session:
+1. Carry out the instruction. Its context holds the data it refers to.
+2. If requires_user_response is true, ask the user and wait for their answer
+   before replying; otherwise decide yourself.
+3. Continue with the workflow_reply tool: pass one of the listed replies as
+   reply, its arguments as described by the reply's schema, and the
+   instruction_id and session_id of the response unchanged.
+4. Each accepted reply returns the next instruction. Stop when a response has
+   completed: true.
+5. A response with status rejected or not_ready keeps the same instruction
+   pending: fix the input, or check again later for not_ready. Status stale
+   means the reply answered an instruction that is no longer pending; continue
+   from the current instruction in the response.
+6. Repeating an identical reply is safe; it returns the same response.
+7. To resume, call session_show with the session_id; it returns the pending
+   instruction. Do not start a new session to resume an existing one.
+Before repeating consequential work such as creating records or launching
+experiments, check whether it already exists.\
+"""
+
+Project = Callable[[], HirakuConfig]
+SessionId = Annotated[str, Field(description="Session ID from session_list.")]
 
 
 def _data(record: BaseRecord) -> dict[str, Any]:
@@ -91,7 +135,7 @@ def create_server(config: HirakuConfig | None = None) -> Any:
                     item.mime_type = mime or "application/octet-stream"
             return contents
 
-    server = ProjectMCP("Hiraku")
+    server = ProjectMCP("Hiraku", instructions=INSTRUCTIONS)
 
     @server.tool()
     def record_list() -> list[dict[str, Any]]:
@@ -275,15 +319,8 @@ def create_server(config: HirakuConfig | None = None) -> Any:
 
     @server.resource("hiraku://catalog", mime_type="application/json")
     def catalog() -> str:
-        """Discover current records, contexts, programs, actions and source files."""
+        """Discover current records, contexts and source files."""
         uris = [f"hiraku://records/{item.id}" for item in list_records(config=selected)]
-        uris += [
-            f"hiraku://programs/{item.id}" for item in list_programs(config=selected)
-        ]
-        uris += [
-            f"hiraku://actions/{item.entity}/{item.id}"
-            for item in list_actions(config=selected)
-        ]
         for context in list_contexts(config=selected):
             uris.append(f"hiraku://contexts/{context.id}")
             root = (selected.contexts_dir / context.id).resolve()
@@ -302,14 +339,6 @@ def create_server(config: HirakuConfig | None = None) -> Any:
     @server.resource("hiraku://contexts/{context_id}")
     def context_resource(context_id: str) -> str:
         return load_context(context_id, config=selected).markdown
-
-    @server.resource("hiraku://programs/{program_id}")
-    def program_resource(program_id: str) -> str:
-        return load_program(program_id, config=selected).markdown
-
-    @server.resource("hiraku://actions/{entity}/{action_id}")
-    def action_resource(entity: str, action_id: str) -> str:
-        return load_action(action_id, entity=entity, config=selected).markdown
 
     @server.resource("hiraku://sources/{context_id}/{source_path}")
     def source_resource(context_id: str, source_path: str) -> bytes:
@@ -338,4 +367,302 @@ def create_server(config: HirakuConfig | None = None) -> Any:
             f"Record: {json.dumps(_data(record))}\n\nContexts:\n{evidence}"
         )
 
+    add_workflow_tools(server, selected)
     return server
+
+
+def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
+    """Add the workflow and session tools, prompts, and resources to a server.
+
+    Workflows are loaded once; a workflow added or changed later needs a new
+    server, e.g. by reconnecting it in the coding agent. Each call reads the
+    project configuration as currently saved, so changes made elsewhere, such
+    as a new active record, are visible to a long-running server.
+    """
+    path = config.path
+
+    def project() -> HirakuConfig:
+        return HirakuConfig.load(path)
+
+    workflows = load_workflows(config)
+
+    _add_workflow_tools(server, project, workflows)
+    _add_session_tools(server, project, workflows)
+    for workflow_id, workflow in sorted(workflows.items()):
+        server.add_prompt(
+            Prompt.from_function(
+                _start_prompt(workflow, project),
+                name=workflow_id,
+                description=summary(workflow_description(workflow))
+                or f"Start the {workflow_id} workflow.",
+            )
+        )
+    _register_resources(server, project, workflows)
+
+
+# Workflows and sessions -------------------------------------------------------
+
+
+def _add_workflow_tools(
+    server: MCPServer, project: Project, workflows: Mapping[str, Workflow]
+) -> None:
+    def workflow_list() -> list[dict[str, Any]]:
+        return list_workflows(workflows)
+
+    def workflow_reply(
+        reply: Annotated[
+            str, Field(description="One of the replies the instruction lists.")
+        ],
+        instruction_id: Annotated[
+            int, Field(description="instruction_id of the pending instruction.")
+        ],
+        arguments: Annotated[
+            dict[str, Any] | None,
+            Field(description="The reply's arguments, as its schema describes."),
+        ] = None,
+        session_id: Annotated[
+            str | None,
+            Field(
+                description="session_id of the instruction; may be omitted when "
+                "only one session is active."
+            ),
+        ] = None,
+    ) -> dict[str, Any]:
+        config = project()
+        if session_id is None:
+            active = [
+                item["session_id"]
+                for item in Session.list_all(config=config)
+                if item.get("status") == "active"
+            ]
+            if len(active) != 1:
+                return {
+                    "status": "rejected",
+                    "message": (
+                        f"Several sessions are active ({', '.join(active)}); pass "
+                        "session_id"
+                        if active
+                        else "No session is active; start a workflow first"
+                    ),
+                }
+            session_id = active[0]
+        session = Session.load(session_id, config=config)
+        workflow = workflows.get(session.workflow)
+        if workflow is None:
+            return session.outcome(
+                "rejected",
+                f"Workflow {session.workflow!r} is unavailable; the session cannot "
+                "continue until it loads.",
+            )
+        return workflow.bind(config).run_reply(
+            session_id, instruction_id, reply, arguments
+        )
+
+    _add_tool(
+        server,
+        workflow_list,
+        "List the project's workflows. Start one with the tool named after it.",
+        read_only=True,
+    )
+    _add_tool(
+        server,
+        workflow_reply,
+        "Reply to the pending instruction of a workflow session with one of the "
+        "replies it lists.",
+        read_only=False,
+    )
+    for workflow_id, workflow in sorted(workflows.items()):
+        _add_tool(
+            server,
+            _start_tool(workflow, project),
+            _start_description(workflow),
+            read_only=False,
+            name=workflow_id,
+        )
+
+
+def _add_session_tools(
+    server: MCPServer, project: Project, workflows: Mapping[str, Workflow]
+) -> None:
+    def session_list() -> list[dict[str, Any]]:
+        return Session.list_all(config=project())
+
+    def session_show(session_id: SessionId) -> dict[str, Any]:
+        return _show(Session.load(session_id, config=project()), workflows)
+
+    def session_cancel(session_id: SessionId) -> dict[str, Any]:
+        return Session.load(session_id, config=project()).cancel()
+
+    _add_tool(
+        server,
+        session_list,
+        "List workflow sessions with their status, newest first.",
+        read_only=True,
+    )
+    _add_tool(
+        server,
+        session_show,
+        "Show a workflow session: orientation, pending instruction or result, and "
+        "stored data. Use it to resume a session.",
+        read_only=True,
+    )
+    _add_tool(
+        server,
+        session_cancel,
+        "Cancel a workflow session. Records, code, and runs are kept.",
+        read_only=False,
+    )
+
+
+def _show(session: Session, workflows: Mapping[str, Workflow]) -> dict[str, Any]:
+    return {**session.show(workflows.get(session.workflow)), "guide": GUIDE}
+
+
+def _start_tool(workflow: Workflow, project: Project) -> Callable[..., Any]:
+    """Return a function whose signature is the workflow's start arguments."""
+
+    def run(**arguments: Any) -> dict[str, Any]:
+        response = workflow.bind(project()).run_start(arguments)
+        if response["status"] != "accepted":
+            return response
+        return {"status": "accepted", "guide": GUIDE, **response}
+
+    parameters = []
+    for name, field in workflow.start_arguments().model_fields.items():
+        default = (
+            inspect.Parameter.empty
+            if field.is_required()
+            else field.get_default(call_default_factory=True)
+        )
+        parameters.append(
+            inspect.Parameter(
+                name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=default,
+                annotation=Annotated[
+                    (
+                        field.annotation,  # ty: ignore[invalid-type-form]
+                        *field.metadata,
+                        Field(description=field.description),
+                    )
+                ],
+            )
+        )
+    return _with_signature(run, workflow.id, parameters)
+
+
+def _start_prompt(workflow: Workflow, project: Project) -> Callable[..., str]:
+    """Return a function that starts a session and renders its instruction.
+
+    Prompt arguments are strings; the start arguments' model converts them.
+    """
+
+    def run(**arguments: Any) -> str:
+        values = {key: value for key, value in arguments.items() if value is not None}
+        response = workflow.bind(project()).run_start(values)
+        if response["status"] != "accepted":
+            # The SDK hides exception messages from prompts, so explain in text.
+            return (
+                f"The Hiraku workflow `{workflow.id}` did not start: "
+                f"{response.get('message')}. Tell the user and ask for corrected "
+                "arguments."
+            )
+        return _prompt_text(response)
+
+    parameters = [
+        inspect.Parameter(
+            name,
+            inspect.Parameter.KEYWORD_ONLY,
+            default=inspect.Parameter.empty if field.is_required() else None,
+            annotation=Annotated[
+                str if field.is_required() else str | None,  # ty: ignore[invalid-type-form]
+                Field(description=field.description),
+            ],
+        )
+        for name, field in workflow.start_arguments().model_fields.items()
+    ]
+    return _with_signature(run, workflow.id, parameters)
+
+
+def _with_signature(
+    function: Callable[..., Any], workflow_id: str, parameters: list[inspect.Parameter]
+) -> Callable[..., Any]:
+    function.__name__ = workflow_id.replace("-", "_")  # ty: ignore[unresolved-attribute]
+    function.__signature__ = inspect.Signature(parameters)  # ty: ignore[unresolved-attribute]
+    # Pydantic's validate_call, used for prompts, reads the annotations.
+    function.__annotations__ = {item.name: item.annotation for item in parameters}
+    return function
+
+
+def _start_description(workflow: Workflow) -> str:
+    prefix = f"Start a {workflow.id} workflow session."
+    if text := summary(workflow_description(workflow)):
+        prefix += f" {text}"
+    start = inspect.getdoc(getattr(type(workflow), "start", None)) or ""
+    return f"{prefix}\n\n{start}" if start else prefix
+
+
+def _prompt_text(response: Mapping[str, Any]) -> str:
+    """Render a start response as a user message for the agent."""
+    instruction = response["instruction"]
+    parts = []
+    orientation = response.get("orientation") or ""
+    if orientation and not instruction["text"].startswith(orientation):
+        parts.append(orientation)
+    parts.append(instruction["text"])
+    if instruction.get("context") is not None:
+        context = json.dumps(instruction["context"], indent=1, ensure_ascii=False)
+        parts.append(f"Context:\n```json\n{context}\n```")
+    replies = json.dumps(instruction["replies"], indent=1, ensure_ascii=False)
+    parts.append(
+        f"---\nThis is Hiraku workflow session `{response['session_id']}`, "
+        f"instruction {response['instruction_id']}. Reply with the workflow_reply "
+        f"tool, passing session_id `{response['session_id']}`, instruction_id "
+        f"{response['instruction_id']}, one of these replies, and its "
+        f"arguments:\n```json\n{replies}\n```\n\n{GUIDE}"
+    )
+    return "\n\n".join(parts)
+
+
+# Workflow resources and helpers ----------------------------------------------
+
+
+def _register_resources(
+    server: MCPServer, project: Project, workflows: Mapping[str, Workflow]
+) -> None:
+    @server.resource(
+        "hiraku://sessions/{session_id}",
+        name="session",
+        description="Full stored state of a workflow session",
+        mime_type="application/json",
+    )
+    def session(session_id: str) -> str:
+        stored = Session.load(session_id, config=project())
+        return json.dumps(_show(stored, workflows), ensure_ascii=False, indent=1)
+
+    @server.resource(
+        "hiraku://workflows/{workflow_id}",
+        name="workflow",
+        description="Prompt document of a workflow",
+        mime_type="text/markdown",
+    )
+    def workflow(workflow_id: str) -> str:
+        if workflow_id not in workflows:
+            raise ResourceError(f"Unknown workflow {workflow_id!r}")
+        return workflows[workflow_id].text
+
+
+def _add_tool(
+    server: MCPServer,
+    function: Callable[..., Any],
+    description: str,
+    *,
+    read_only: bool,
+    name: str | None = None,
+) -> None:
+    server.add_tool(
+        function,
+        name=name,
+        description=description,
+        annotations=ToolAnnotations(read_only_hint=read_only),
+    )

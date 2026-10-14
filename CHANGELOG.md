@@ -13,15 +13,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - Add the local stdio MCP server (`hiraku mcp`) with record and context CRUD, attributed launches, run queries, curated source resources, and an evidence-based proposal prompt; `hiraku init` registers it for Claude Code and Codex ([issue #80](https://github.com/SwissDataScienceCenter/hiraku/issues/80)).
+- Add Python workflows: project-defined `hiraku/workflows/<id>/{workflow.py,workflow.md}` that guide a coding agent step by step, with persistent sessions under `hiraku/sessions/`, explicit replies per instruction, retry-safe continuation, inspection, and cancellation. Each workflow is an MCP tool and an MCP prompt named after it; replies go through the `workflow_reply` tool, whose arguments each instruction describes. See the Workflows guide.
+- Add workflow and session tools, workflow prompts, and workflow and session resources to the MCP server, with `hiraku.mcp.add_workflow_tools()`. They are fixed when the server starts.
+- `Workflow` is a `BaseRecord`: an instance is the loaded `workflow.md`, whose front matter holds the workflow `id` (matching its directory) and typed settings declared on the class, and whose body holds the prompts. A workflow class defines `start`, which becomes the MCP tool and prompt, and `@reply` methods that continue a session.
+- Add Markdown-only workflows: a workflow directory with only `workflow.md` sends its whole body as one instruction, with typed `arguments` declared in the front matter filling `{{name}}` placeholders, and a single `complete` reply.
+- Add the bundled workflows: `collaborative` (a minimal gated loop: the user approves each experiment before any work and decides after each result whether to continue) and `autodataset`. The autoresearch example ships the Markdown-only `autoresearch`, which restores its previous program.
+- `Workflow.run_start()` and `Workflow.run_reply()` run a workflow on its stored `Session`s, for the MCP server, the CLI, and tests; the session holds the pending `instruction_id`, so retries and late replies are safe. Replies may omit `session_id` while one session is active, and the session keeps the history of accepted calls.
+- Add the `count-steps` example (`hiraku init --example count-steps`): a workflow of numbered steps with random tokens the agent must echo back and a user gate at step 5, to check that a coding harness follows workflow instructions.
+- Add `hiraku workflow list|start|reply` and `hiraku session list|show|cancel`.
 - Add `Record.resolve_tracking_backend()` to build the tracking backend inherited by a record; `TrackingBackend.list_runs()` now lists all attributed runs when `record_id` is omitted.
 - Add `hiraku runs --all` to list all attributed runs from the tracking source resolved for a record ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 
 ### Fixed
 
-- Fix `hiraku record list`, `context list`, `program list`, `action list` (and other table output) crashing when there are no rows ([issue #96](https://github.com/SwissDataScienceCenter/hiraku/issues/96)).
+- Fix `hiraku record list`, `context list` (and other table output) crashing when there are no rows ([issue #96](https://github.com/SwissDataScienceCenter/hiraku/issues/96)).
 
 ### Removed
 
+- **Breaking:** Remove Programs and Actions, including `hiraku program`, `hiraku action`, `hiraku.agent.Program`, `hiraku.agent.Action`, and their bundled resources; use workflows instead. Contexts are unchanged. An existing Markdown program becomes a Markdown-only workflow: move it to `hiraku/workflows/<id>/workflow.md` and keep its `id` front matter.
+- **Breaking:** Remove the `default_program` configuration key; `hiraku.yml` files that still contain it are rejected with a migration message. Start workflows explicitly through their MCP tool or prompt.
 - **Breaking:** Remove the `hiraku runs list` subcommand; use `hiraku runs` ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 - **Breaking:** Remove `TrackingBackend.list_all_recorded_runs()` and the `backend` argument of `Record.runs()`; use `record.resolve_tracking_backend().list_runs()`. Replace `select_backend` with `Record.resolve_tracking_backend()` and rename `backend_for` to `create_backend`.
 - **Breaking:** Remove the undocumented `mlflow_experiment` record field fallback; set `experiment_name` in the MLflow `tracking_backend` mapping instead.

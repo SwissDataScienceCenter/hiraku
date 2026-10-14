@@ -116,8 +116,6 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
         for uri in [
             "hiraku://records/demo",
             "hiraku://contexts/literature",
-            "hiraku://programs/interactive",
-            "hiraku://actions/record/propose",
         ]:
             assert list(await server.read_resource(uri))[0].content
         with pytest.raises(ResourceError, match="'missing' not found"):

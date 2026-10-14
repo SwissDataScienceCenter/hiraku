@@ -81,6 +81,7 @@ The repository is a single `uv`-managed Python project.
 | --- | --- |
 | `src/hiraku/` | Installed Python package |
 | `src/hiraku/base.py` | Generic Markdown record serialization and validation |
+| `src/hiraku/markdown.py` | Markdown section parsing for record bodies |
 | `src/hiraku/record.py` | Research records, entrypoints, and metrics |
 | `src/hiraku/run.py` | Normalized tracked runs |
 | `src/hiraku/config.py` | Project discovery, configuration, and active context |
@@ -88,8 +89,11 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/launch.py` | Entrypoint argument rendering and dispatch execution |
 | `src/hiraku/tracking/` | Tracking backend adapters and run normalization |
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
-| `src/hiraku/agent.py` | Programs, actions, and agent-facing resources |
-| `src/hiraku/resources/` | Bundled programs, actions, dispatchers, skills, and examples |
+| `src/hiraku/agent.py` | Curated context records |
+| `src/hiraku/workflow.py` | Workflows: `workflow.md` records whose `start` and replies run on sessions |
+| `src/hiraku/session.py` | Workflow sessions: stored state and reply correlation |
+| `src/hiraku/mcp.py` | Stdio MCP server (`MCPServer`); `add_workflow_tools` adds the workflow and session tools, prompts, and resources |
+| `src/hiraku/resources/` | Bundled workflows, dispatchers, skills, and examples |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
 | `docs/` | Documentation sources |
 | `scripts/` | Development and release utilities |
@@ -112,6 +116,11 @@ Generated or transient paths:
   specific behavior inside `src/hiraku/tracking/`.
 - Launches go through the configured dispatcher and must preserve attribution
   such as record, entrypoint, and commit metadata.
+- Workflow semantics live in `workflow.py` and `session.py` and are transport
+  independent: a `Workflow` starts and continues its `Session`s through
+  `Workflow.run_start` and `Workflow.run_reply`. All MCP code, including the
+  tools and prompts for records, sessions, and workflows, lives in `mcp.py`;
+  no other module imports the MCP SDK.
 - Bundled resources under `src/hiraku/resources/` are installed by
   `hiraku init`; changes to them may affect newly initialized projects and
   should include appropriate example or integration coverage.
