@@ -93,8 +93,8 @@ Use **Refresh** to re-read records and tracking sources after new launches.
 
 ## Run and record tables
 
-The notebook defines two pandas DataFrames backed by Apache Arrow, which you
-can use in the edit mode:
+The notebook reads your project once into two pandas DataFrames backed by
+Apache Arrow, and every view on the page is computed from them:
 
 `runs_df`
 :   One row per run in execution order: `run`, `record`, `record_path`,
@@ -103,16 +103,23 @@ can use in the edit mode:
 
 `records_df`
 :   One row per record in tree order: `record`, `parent`, `record_path`,
-    `type`, `status`, `decision`, `metrics` (declared names and directions),
-    and `description` (the record's Markdown).
+    `type`, `status`, `decision`, `commit`, `metrics` (a list of declared
+    `name` and `direction` pairs), and `description` (the record's Markdown).
 
-`record_path` is the record's ancestry, such as `digits/weak-l2`, so
-`runs_df[runs_df.record_path.str.startswith("digits/")]` selects a subtree.
-Use these tables in your own cells, or mention `@runs_df` and `@records_df` in
-marimo's AI assistant to ask questions about your runs. Values keep the types
-the tracking backend reports; some backends, such as MLflow, report parameters
-as text, so cast them before comparing numbers, for example
-`runs_df["param.alpha"].astype(float)`.
+| View | Reads |
+| --- | --- |
+| Runs table | `records_df` rows, each followed by its runs from `runs_df` |
+| Run details | the selected run's row of `runs_df` |
+| Metric choice | the `metric.*` columns of `runs_df`; the default is the first metric declared in `records_df` |
+| Performance plot | the rows of `runs_df` in the selected record's subtree |
+
+`record_path` is the record's ancestry, such as `digits/weak-l2`.
+`subtree(runs_df, "digits")` selects every run of `digits` and the records
+below it. Use these tables in your own cells, or mention `@runs_df` and
+`@records_df` in marimo's AI assistant to ask questions about your runs.
+Values keep the types the tracking backend reports; some backends, such as
+MLflow, report parameters as text, so cast them before comparing numbers, for
+example `runs_df["param.alpha"].astype(float)`.
 
 For example, this cell compares two metrics across all runs, coloured by
 record. Vega-Lite reads `.` in a field name as nesting, so escape it:

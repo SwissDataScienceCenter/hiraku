@@ -18,7 +18,6 @@ def test_app_runs_every_cell_against_a_project(
     outputs, definitions = app.run()
 
     assert definitions["scope"] == "a"
-    assert definitions["scoped_runs"]["run"].tolist() == ["r0", "r2", "r3"]
     assert definitions["selected_run"] is None
     assert definitions["tree"].value[0]["key"] == "record:a"
     assert definitions["metric"].value == "loss"

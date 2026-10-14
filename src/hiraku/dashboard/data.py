@@ -1,7 +1,10 @@
-"""Plain-Python data shaping for the dashboard.
+"""Data for the dashboard: two tables and the views built from them.
 
-Nothing here imports marimo, so the tree, run numbering, and run text can be
-tested without a notebook runtime.
+``load`` reads the records and the runs of their tracking backends. ``run_rows``
+and ``record_rows`` flatten them into ``runs_df`` and ``records_df``, and every
+view on the page (run tree, run details, metric choice, plot) is computed from
+those two tables only. Nothing here imports marimo, so it can be tested without
+a notebook runtime.
 """
 
 from __future__ import annotations
@@ -10,18 +13,40 @@ import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlsplit
+
+import pandas as pd
+import pyarrow as pa
 
 from ..config import HirakuConfig
 from ..io import dump_yaml
 from ..record import Record, list_records
 from ..run import Run
 
-if TYPE_CHECKING:
-    import pandas as pd
-
 _LAST = datetime.max.replace(tzinfo=UTC)
+
+RUN_COLUMNS = (
+    "run",
+    "record",
+    "record_path",
+    "source",
+    "started",
+    "entrypoint",
+    "commit",
+    "url",
+)
+RECORD_COLUMNS = (
+    "record",
+    "parent",
+    "record_path",
+    "type",
+    "status",
+    "decision",
+    "commit",
+    "metrics",
+    "description",
+)
 
 
 @dataclass(frozen=True)
@@ -62,24 +87,14 @@ def load(config: HirakuConfig) -> ProjectRuns:
     return ProjectRuns(records, list(runs.values()), sources, errors)
 
 
-def children(records: Iterable[Record]) -> dict[str | None, list[str]]:
-    """Map each parent ID (``None`` for roots) to its sorted child IDs."""
-    records = list(records)
-    known = {record.id for record in records}
-    tree: dict[str | None, list[str]] = {}
-    for record in records:
-        parent = record.parent_id if record.parent_id in known else None
-        tree.setdefault(parent, []).append(record.id)
-    for ids in tree.values():
-        ids.sort()
-    return tree
+# Building the tables
 
 
 def record_paths(records: Iterable[Record]) -> dict[str, str]:
     """Map each record ID to its ancestry, such as ``root/a/a1``.
 
-    Records whose parent is missing are roots, as in :func:`children`. Paths
-    are built with a loop and reused for shared ancestors, so depth is unbounded.
+    Records whose parent is missing are roots. Paths are built with a loop and
+    reused for shared ancestors, so depth is unbounded.
     """
     by_id = {record.id: record for record in records}
     paths: dict[str, str] = {}
@@ -103,134 +118,8 @@ def execution_order(runs: Iterable[Run]) -> list[Run]:
     return sorted(runs, key=lambda run: (run.timestamp or _LAST, run.id))
 
 
-def metric_value(run: Run, name: str | None) -> float | None:
-    """Return a finite numeric metric value, or ``None``."""
-    try:
-        value = float(run.metrics[name])
-    except (KeyError, TypeError, ValueError):
-        return None
-    return value if math.isfinite(value) else None
-
-
-def metric_names(runs: Iterable[Run]) -> list[str]:
-    """Return numeric metric names in first-seen order."""
-    names: dict[str, None] = {}
-    for run in runs:
-        for name in run.metrics:
-            if metric_value(run, name) is not None:
-                names.setdefault(name)
-    return list(names)
-
-
-def default_metric(records: Sequence[Record], runs: Sequence[Run]) -> str | None:
-    """Prefer the first metric a record declares, else the first one logged."""
-    available = metric_names(runs)
-    for record in records:
-        for metric in record.metrics or ():
-            if metric.name in available:
-                return metric.name
-    return available[0] if available else None
-
-
-def tree_rows(
-    records: Sequence[Record], runs: Sequence[Run], metric: str | None
-) -> list[dict[str, Any]]:
-    """Flatten records and their runs into indented table rows.
-
-    ``depth`` is the indentation level for the label column, and ``metric``
-    adds one column, named after the metric, with each run's value.
-    """
-    by_id = {record.id: record for record in records}
-    runs_by_record: dict[str, list[Run]] = {}
-    for run in execution_order(runs):
-        runs_by_record.setdefault(str(run.record_id), []).append(run)
-    tree = children(records)
-    rows: list[dict[str, Any]] = []
-    # An explicit stack keeps arbitrarily deep trees clear of the recursion limit.
-    stack = [(root, 0) for root in reversed(tree.get(None, []))]
-    while stack:
-        record_id, depth = stack.pop()
-        record = by_id[record_id]
-        rows.append(
-            _row(
-                f"record:{record.id}",
-                depth,
-                "▾ " + record.id,
-                record.type,
-                None,
-                record.commit,
-                None,
-            )
-        )
-        if metric:
-            rows[-1][metric] = ""
-        for run in runs_by_record.get(record.id, ()):
-            rows.append(
-                _row(
-                    f"run:{run.id}",
-                    depth + 1,
-                    "• " + run.id[:12],
-                    "run",
-                    run.entrypoint,
-                    run.commit,
-                    run.timestamp,
-                )
-            )
-            if metric:
-                rows[-1][metric] = metric_value(run, metric)
-        stack.extend((child, depth + 1) for child in reversed(tree.get(record.id, [])))
-    return rows
-
-
-def _row(
-    key: str,
-    depth: int,
-    label: str,
-    kind: str | None,
-    entrypoint: str | None,
-    commit: str | None,
-    timestamp: datetime | None,
-) -> dict[str, Any]:
-    return {
-        "key": key,
-        "depth": depth,
-        "Record / run": label,
-        "Type": kind or "",
-        "Entrypoint": entrypoint or "",
-        "Commit": (commit or "")[:7],
-        "Started": timestamp.strftime("%Y-%m-%d %H:%M:%S") if timestamp else "",
-    }
-
-
-def run_text(run: Run) -> str:
-    """Render the run's provenance, parameters, and metrics as YAML."""
-    return dump_yaml(
-        {
-            "id": run.id,
-            "record": run.record_id,
-            "entrypoint": run.entrypoint,
-            "commit": run.commit,
-            "started": run.timestamp.isoformat() if run.timestamp else None,
-            "params": dict(run.params),
-            "metrics": dict(run.metrics),
-        }
-    )
-
-
-RUN_COLUMNS = (
-    "run",
-    "record",
-    "record_path",
-    "source",
-    "started",
-    "entrypoint",
-    "commit",
-    "url",
-)
-
-
 def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
-    """Return one flat row per run, in execution order, for tabular analysis.
+    """Return one flat row per run, in execution order.
 
     Metrics and parameters become ``metric.<name>`` and ``param.<name>`` columns,
     and ``record_path`` places the run's record in the tree.
@@ -256,7 +145,9 @@ def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
 def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
     """Return one row per record in tree order, with its declared metrics."""
     paths = record_paths(records)
-    by_id = {record.id: record for record in records}
+    # Sorting with the separator below every other character puts each record
+    # right after its parent and before the parent's next sibling.
+    ordered = sorted(records, key=lambda record: paths[record.id].replace("/", "\0"))
     return [
         {
             "record": record.id,
@@ -265,13 +156,14 @@ def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
             "type": record.type,
             "status": record.status,
             "decision": record.decision,
-            "metrics": "; ".join(
-                f"{metric.name}: {metric.direction}" for metric in record.metrics or ()
-            )
-            or None,
+            "commit": record.commit,
+            "metrics": [
+                {"name": metric.name, "direction": metric.direction}
+                for metric in record.metrics or ()
+            ],
             "description": record.markdown.strip() or None,
         }
-        for record in sorted(by_id.values(), key=lambda record: paths[record.id])
+        for record in ordered
     ]
 
 
@@ -284,9 +176,6 @@ def arrow_frame(
     tracking backend reports values in its own types, so a column Arrow cannot
     type consistently becomes text.
     """
-    import pandas as pd
-    import pyarrow as pa
-
     names = list(dict.fromkeys([*columns, *(name for row in rows for name in row)]))
     arrays = {}
     for name in names:
@@ -296,6 +185,37 @@ def arrow_frame(
         except (pa.ArrowInvalid, pa.ArrowTypeError):
             arrays[name] = pa.array([None if v is None else str(v) for v in values])
     return pa.table(arrays).to_pandas(types_mapper=pd.ArrowDtype)
+
+
+# Views over the tables
+
+
+def metric_values(runs_df: pd.DataFrame, metric: str | None) -> pd.Series:
+    """Return the runs' ``metric`` as floats, NaN where missing or not finite."""
+    column = f"metric.{metric}"
+    if column not in runs_df:
+        return pd.Series(math.nan, index=runs_df.index, dtype="float64")
+    values = pd.to_numeric(runs_df[column], errors="coerce").astype("float64")
+    return values.where(values.map(math.isfinite))
+
+
+def metric_names(runs_df: pd.DataFrame) -> list[str]:
+    """Return the metrics with at least one numeric value, in column order."""
+    names = [
+        column.removeprefix("metric.")
+        for column in runs_df.columns
+        if column.startswith("metric.")
+    ]
+    return [name for name in names if metric_values(runs_df, name).notna().any()]
+
+
+def default_metric(records_df: pd.DataFrame, available: Sequence[str]) -> str | None:
+    """Prefer the first metric a record declares, else the first one logged."""
+    for declared in records_df["metrics"]:
+        for metric in declared or ():
+            if metric["name"] in available:
+                return metric["name"]
+    return available[0] if available else None
 
 
 def within(path: str, ancestor: str) -> bool:
@@ -310,32 +230,105 @@ def subtree(runs_df: pd.DataFrame, ancestor: str | None) -> pd.DataFrame:
     return runs_df[runs_df["record_path"].map(lambda path: within(path, ancestor))]
 
 
+def tree_rows(
+    records_df: pd.DataFrame, runs_df: pd.DataFrame, metric: str | None
+) -> list[dict[str, Any]]:
+    """Interleave records (in tree order) with their runs as indented table rows.
+
+    ``depth`` comes from ``record_path``, and ``metric`` adds one column, named
+    after the metric, with each run's value.
+    """
+    values = metric_values(runs_df, metric).tolist()
+    runs_by_record: dict[str, list[dict[str, Any]]] = {}
+    for run, value in zip(_records(runs_df), values, strict=True):
+        run["value"] = None if math.isnan(value) else value
+        runs_by_record.setdefault(run["record"], []).append(run)
+
+    rows: list[dict[str, Any]] = []
+    for record in _records(records_df):
+        depth = record["record_path"].count("/")
+        rows.append(
+            _row(f"record:{record['record']}", depth, "▾ " + record["record"], record)
+        )
+        if metric:
+            rows[-1][metric] = ""
+        for run in runs_by_record.get(record["record"], ()):
+            rows.append(
+                _row(f"run:{run['run']}", depth + 1, "• " + run["run"][:12], run)
+            )
+            rows[-1]["Type"] = "run"
+            if metric:
+                rows[-1][metric] = run["value"]
+    return rows
+
+
+def _row(key: str, depth: int, label: str, item: Mapping[str, Any]) -> dict[str, Any]:
+    started = item.get("started")
+    return {
+        "key": key,
+        "depth": depth,
+        "Record / run": label,
+        "Type": item.get("type") or "",
+        "Entrypoint": item.get("entrypoint") or "",
+        "Commit": (item.get("commit") or "")[:7],
+        "Started": started.strftime("%Y-%m-%d %H:%M:%S") if started else "",
+    }
+
+
+def find_run(runs_df: pd.DataFrame, run_id: str) -> dict[str, Any] | None:
+    """Return the ``runs_df`` row of ``run_id`` with missing values as ``None``."""
+    return next(iter(_records(runs_df[runs_df["run"] == run_id])), None)
+
+
+def run_text(run: Mapping[str, Any]) -> str:
+    """Render a ``runs_df`` row's provenance, parameters, and metrics as YAML."""
+
+    def prefixed(prefix: str) -> dict[str, Any]:
+        return {
+            name.removeprefix(prefix): value
+            for name, value in run.items()
+            if name.startswith(prefix) and value is not None
+        }
+
+    started = run.get("started")
+    return dump_yaml(
+        {
+            "id": run["run"],
+            "record": run.get("record"),
+            "entrypoint": run.get("entrypoint"),
+            "commit": run.get("commit"),
+            "started": started.isoformat() if started else None,
+            "params": prefixed("param."),
+            "metrics": prefixed("metric."),
+        }
+    )
+
+
 def plot_frame(runs_df: pd.DataFrame, metric: str | None) -> tuple[pd.DataFrame, int]:
     """Number runs 1..N in row order and keep those with a finite ``metric``.
 
     Returns the plot data and how many runs lacked a numeric value.
     """
-    import pandas as pd
-
-    column = f"metric.{metric}"
-    values = (
-        pd.to_numeric(runs_df[column], errors="coerce")
-        if column in runs_df
-        else pd.Series(None, index=runs_df.index)
-    )
+    runs_df = runs_df.reset_index(drop=True)  # a subtree keeps the original index
     frame = pd.DataFrame(
         {
             "number": range(1, len(runs_df) + 1),
             "run": runs_df["run"].astype(str),
             "record": runs_df["record"].astype(str),
-            "started": runs_df["started"].map(
-                lambda started: "" if pd.isna(started) else started.isoformat()
-            ),
-            "value": values.astype("float64"),
+            "started": [
+                started.isoformat() if started else ""
+                for started in (row.get("started") for row in _records(runs_df))
+            ],
+            "value": metric_values(runs_df, metric),
         }
     )
-    plotted = frame[frame["value"].map(math.isfinite)].reset_index(drop=True)
+    plotted = frame.dropna(subset=["value"]).reset_index(drop=True)
     return plotted, len(frame) - len(plotted)
+
+
+def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """Return the rows of ``frame`` as dicts of Python values, ``None`` if missing."""
+    return pa.Table.from_pandas(frame, preserve_index=False).to_pylist()
 
 
 def safe_url(url: str | None) -> str | None:

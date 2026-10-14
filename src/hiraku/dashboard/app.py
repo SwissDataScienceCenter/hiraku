@@ -31,14 +31,14 @@ def _():
         theme_css,
     )
     from hiraku.dashboard.data import (
+        RECORD_COLUMNS,
         RUN_COLUMNS,
         arrow_frame,
-        children,
         default_metric,
+        find_run,
         load,
         metric_names,
         plot_frame,
-        record_paths,
         record_rows,
         run_rows,
         run_text,
@@ -62,9 +62,9 @@ def _():
     return (
         alt,
         arrow_frame,
-        children,
         config,
         default_metric,
+        find_run,
         html,
         load,
         logo_data_uri,
@@ -72,7 +72,7 @@ def _():
         mo,
         palette,
         plot_frame,
-        record_paths,
+        RECORD_COLUMNS,
         record_rows,
         requested_record,
         RUN_COLUMNS,
@@ -112,35 +112,52 @@ def _(mo):
 
 
 @app.cell
-def _(children, config, default_metric, load, mo, refresh, requested_record):
+def _(
+    RECORD_COLUMNS,
+    RUN_COLUMNS,
+    arrow_frame,
+    config,
+    load,
+    record_rows,
+    refresh,
+    run_rows,
+):
     _refreshes = refresh.value  # rerun this cell when Refresh is clicked
+    # Read the records and the runs from each record's tracking backend, and
+    # flatten them into the two Arrow-backed tables every view below reads.
+    # runs_df: one row per run, metric.* and param.* columns. records_df: one
+    # row per record with its declared metrics. record_path places both in the
+    # tree. Mention @runs_df and @records_df in marimo's AI assistant to ask
+    # questions about them.
     project = load(config)
-    runs_by_id = {run.id: run for run in project.runs}
-    tree_metric = default_metric(project.records, project.runs)
-    roots = children(project.records).get(None, [])
-    known = {record.id for record in project.records}
+    runs_df = arrow_frame(run_rows(project), RUN_COLUMNS)
+    records_df = arrow_frame(record_rows(project.records), RECORD_COLUMNS)
+    return project, records_df, runs_df
+
+
+@app.cell
+def _(
+    config,
+    default_metric,
+    metric_names,
+    mo,
+    records_df,
+    requested_record,
+    runs_df,
+):
+    paths = dict(zip(records_df["record"], records_df["record_path"], strict=True))
+    metrics = metric_names(runs_df)
+    tree_metric = default_metric(records_df, metrics)
     initial_record = next(
         (
             record_id
             for record_id in (requested_record, config.active_record_id)
-            if record_id in known
+            if record_id in paths
         ),
-        roots[0] if roots else None,
+        next(iter(paths), None),
     )
     get_scope, set_scope = mo.state(initial_record)
-    return get_scope, initial_record, project, runs_by_id, set_scope, tree_metric
-
-
-@app.cell
-def _(RUN_COLUMNS, arrow_frame, project, record_paths, record_rows, run_rows):
-    # Arrow-backed tables for your own cells or marimo's AI assistant (mention
-    # @runs_df and @records_df in its chat). runs_df has one row per run with
-    # metric.* and param.* columns; record_path places runs and records in the
-    # tree, and records_df lists each record's declared metrics.
-    runs_df = arrow_frame(run_rows(project), RUN_COLUMNS)
-    records_df = arrow_frame(record_rows(project.records))
-    paths = record_paths(project.records)
-    return paths, records_df, runs_df
+    return get_scope, initial_record, metrics, paths, set_scope, tree_metric
 
 
 @app.cell
@@ -150,8 +167,17 @@ def _(section_heading):
 
 
 @app.cell
-def _(initial_record, mo, project, section_body, tree_metric, tree_rows):
-    _rows = tree_rows(project.records, project.runs, tree_metric)
+def _(
+    initial_record,
+    mo,
+    project,
+    records_df,
+    runs_df,
+    section_body,
+    tree_metric,
+    tree_rows,
+):
+    _rows = tree_rows(records_df, runs_df, tree_metric)
 
     def _style(row, column):
         style = {"fontWeight": "600"} if row["key"].startswith("record:") else {}
@@ -183,7 +209,7 @@ def _(initial_record, mo, project, section_body, tree_metric, tree_rows):
         style_cell=lambda row, column, value: _style(_rows[int(row)], column),
     )
     _messages = [mo.callout(mo.md(error), kind="warn") for error in project.errors]
-    if not project.records:
+    if records_df.empty:
         _messages.append(
             mo.md("No records yet. Create one with `hiraku record create`.")
         )
@@ -192,19 +218,18 @@ def _(initial_record, mo, project, section_body, tree_metric, tree_rows):
 
 
 @app.cell
-def _(get_scope, paths, runs_by_id, runs_df, set_scope, subtree, tree, within):
+def _(find_run, get_scope, paths, runs_df, set_scope, tree, within):
     _key = tree.value[0]["key"] if tree.value else f"record:{get_scope()}"
     _kind, _, _identifier = _key.partition(":")
-    selected_run = runs_by_id.get(_identifier) if _kind == "run" else None
+    selected_run = find_run(runs_df, _identifier) if _kind == "run" else None
     scope = _identifier if _kind == "record" else get_scope()
     # Keep comparing against the chosen record unless the run lies outside it.
     if selected_run is not None and (
-        scope is None or not within(paths[selected_run.record_id], paths[scope])
+        scope is None or not within(selected_run["record_path"], paths[scope])
     ):
-        scope = selected_run.record_id
+        scope = selected_run["record"]
     set_scope(scope)
-    scoped_runs = subtree(runs_df, paths.get(scope))
-    return scope, scoped_runs, selected_run
+    return scope, selected_run
 
 
 @app.cell
@@ -217,7 +242,6 @@ def _(section_heading):
 def _(
     html,
     mo,
-    project,
     run_text,
     safe_url,
     section_body,
@@ -226,9 +250,9 @@ def _(
     if selected_run is None:
         _content = mo.md("Select a run in the tree to see its details.")
     else:
-        _url = safe_url(selected_run.url)
-        # The link and the source name come from the project's tracking backend.
-        _source = project.sources.get(selected_run.id) or "tracking backend"
+        # The link and the source name come from the run's tracking backend.
+        _url = safe_url(selected_run["url"])
+        _source = selected_run["source"] or "tracking backend"
         _content = mo.vstack(
             [
                 mo.md(f"[Open in {_source} ↗]({_url})") if _url else mo.md(""),
@@ -249,10 +273,8 @@ def _(section_heading):
 
 
 @app.cell
-def _(metric_names, mo, project, tree_metric):
-    metric = mo.ui.dropdown(
-        metric_names(project.runs), value=tree_metric, label="Metric (y axis)"
-    )
+def _(metrics, mo, tree_metric):
+    metric = mo.ui.dropdown(metrics, value=tree_metric, label="Metric (y axis)")
     return (metric,)
 
 
@@ -262,16 +284,18 @@ def _(
     metric,
     mo,
     palette,
+    paths,
     plot_frame,
+    runs_df,
     scope,
-    scoped_runs,
     section_body,
     selected_run,
+    subtree,
 ):
-    _points, _missing = plot_frame(scoped_runs, metric.value)
-    _notes = [
-        f"{len(scoped_runs)} runs under **{scope}**, numbered by execution order."
-    ]
+    # The runs under the selected record, numbered in execution order.
+    _scoped = subtree(runs_df, paths.get(scope))
+    _points, _missing = plot_frame(_scoped, metric.value)
+    _notes = [f"{len(_scoped)} runs under **{scope}**, numbered by execution order."]
     if _missing:
         _notes.append(f"{_missing} without a numeric `{metric.value}` are not shown.")
     if _points.empty:
@@ -300,7 +324,7 @@ def _(
         _layers = [_line, _dots]
         if selected_run is not None:
             _layers.append(
-                _base.transform_filter(alt.datum.run == selected_run.id).mark_point(
+                _base.transform_filter(alt.datum.run == selected_run["run"]).mark_point(
                     size=320, strokeWidth=3, color="#f59e0b", filled=False
                 )
             )
