@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -262,3 +263,26 @@ def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None
     marker.write_text("hiraku_dir: linked\n")
     with pytest.raises(ValidationError):
         HirakuConfig.load(marker)
+
+
+def test_init_adds_hiraku_to_existing_codex_configuration(tmp_path: Path) -> None:
+    codex = tmp_path / ".codex" / "config.toml"
+    codex.parent.mkdir()
+    codex.write_text('model = "x"\n\n[mcp_servers.other]\ncommand = "other"\n')
+    HirakuConfig.init(tmp_path, install_skill=False)
+    parsed = tomllib.loads(codex.read_text())
+    assert parsed["model"] == "x"
+    assert parsed["mcp_servers"]["other"] == {"command": "other"}
+    assert parsed["mcp_servers"]["hiraku"] == {"command": "hiraku", "args": ["mcp"]}
+
+
+def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
+    codex = tmp_path / ".codex" / "config.toml"
+    codex.parent.mkdir()
+    original = 'mcp_servers = { other = { command = "other" } }\n'
+    codex.write_text(original)
+    with pytest.raises(ValidationError, match=r"\[mcp_servers.hiraku\] table"):
+        HirakuConfig.init(tmp_path, install_skill=False)
+    assert codex.read_text() == original
+    assert not (tmp_path / "hiraku.yml").exists()
+    assert not (tmp_path / ".mcp.json").exists()

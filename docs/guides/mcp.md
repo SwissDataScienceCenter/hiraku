@@ -36,6 +36,10 @@ command = "hiraku"
 args = ["mcp"]
 ```
 
+An existing `hiraku` server entry is left as it is. If an existing file cannot
+be extended, for example because `mcp_servers` is an inline TOML table,
+initialization fails without changing it; add the entry manually.
+
 The host must be able to find the installed `hiraku` command. Claude Code asks
 for approval before using a project MCP server. Codex loads project config only
 for trusted projects. The MCP tools are exposed directly by the host, so no
