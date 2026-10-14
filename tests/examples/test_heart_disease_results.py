@@ -21,13 +21,15 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
             str(project),
             "--example",
             "heart-disease",
-            "--results",
+            "--with-results",
             "--ignore-git",
         ],
     )
     assert result.exit_code == 0, result.output
     assert project.joinpath("train.py").is_file()
     assert project.joinpath("data/processed.cleveland.data").is_file()
+    assert not project.joinpath("generate_results.py").exists()
+    assert not project.joinpath("README.md").exists()
     config = HirakuConfig.discover(project)
     assert config.active_record_id == "random-forest"
     records = list_records(config=config)
@@ -40,7 +42,7 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     ] == ["minimize", "maximize"]
     runs = forest.resolve_tracking_backend(config=config).list_runs()
     assert len(runs) == 9
-    assert [run.id for run in runs][:3] == ["logistic-1", "logistic-2", "logistic-3"]
+    assert [run.record_id for run in runs][:3] == ["logistic-baseline"] * 3
     assert len(forest.runs(config=config)) == 3
     monkeypatch.chdir(project)
     result = runner.invoke(main, ["runs", "--record", forest.id, "--all", "--json"])

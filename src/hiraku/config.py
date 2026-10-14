@@ -156,6 +156,7 @@ class HirakuConfig(BaseModel):
         template: Path | str | None = None,
         example: str | None = None,
         results: bool = False,
+        with_generator: bool = False,
     ) -> HirakuConfig:
         """Initialize a new Hiraku project.
 
@@ -169,6 +170,7 @@ class HirakuConfig(BaseModel):
             template: Optional local directory copied over the initialized project.
             example: Optional packaged example name whose ``src`` tree is copied.
             results: Include the example's prepared records and tracked runs.
+            with_generator: Copy the example's optional generation script.
 
         Returns:
             The initialized configuration.
@@ -188,6 +190,7 @@ class HirakuConfig(BaseModel):
             template=template,
             example=example,
             results=results,
+            with_generator=with_generator,
         )
 
     def save(self) -> None:
