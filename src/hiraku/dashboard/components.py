@@ -231,7 +231,9 @@ def run_chart(
             ],
         )
         .add_params(
-            alt.selection_point(fields=["id"], nearest=True, toggle=False, clear=False)
+            alt.selection_point(
+                fields=["id", "record_id"], nearest=True, toggle=False, clear=False
+            )
         )
     )
     if "best" in frame:
@@ -239,7 +241,7 @@ def run_chart(
         chart = line.encode(y="best:Q") + chart
 
     def on_change(selection: pd.DataFrame) -> None:
-        if not selection.empty and not selection.iloc[0]["selected"]:
+        if not selection.empty:
             on_select(selection.iloc[0]["record_id"])
 
     alt.data_transformers.register(

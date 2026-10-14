@@ -40,6 +40,38 @@ def test_numeric_rejects_invalid_values() -> None:
     assert hd.numeric("0.5") == 0.5
 
 
+def test_run_click_clears_warning_for_current_record(notebook):
+    module, _ = notebook
+    _, definitions = module.app.run()
+    select = definitions["select_record"]
+    select("missing-record")
+    assert definitions["get_selection"]()[1]
+    frame = hd.run_frame(
+        [Run(id="current", record_id="random-forest", metrics={"score": 1})],
+        "score",
+        "random-forest",
+    )
+    chart = hd.run_chart(frame, "score", select)
+    chart._on_change(frame)
+    assert definitions["get_selection"]() == ("random-forest", "")
+
+
+def test_run_selection_disambiguates_duplicate_ids():
+    frame = hd.run_frame(
+        [
+            Run(id="shared", record_id="first", metrics={"score": 1}),
+            Run(id="shared", record_id="second", metrics={"score": 2}),
+        ],
+        "score",
+    )
+    selected = []
+    chart = hd.run_chart(frame, "score", selected.append)
+    spec = chart._chart.to_dict()
+    assert spec["params"][0]["select"]["fields"] == ["id", "record_id"]
+    chart._on_change(frame.iloc[[1]])
+    assert selected == ["second"]
+
+
 @pytest.mark.parametrize(
     "metric,direction",
     [
