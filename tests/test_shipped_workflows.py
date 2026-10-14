@@ -22,17 +22,15 @@ class Harness:
 
     def start(self, workflow: str, **arguments: Any) -> dict[str, Any]:
         self.workflow = self.workflows[workflow].bind(self.config)
-        self.response = self.workflow.call("start", arguments)
+        self.response = self.workflow.run_start(arguments)
         return self.response
 
     def reply(self, reply: str, **arguments: Any) -> dict[str, Any]:
-        result = self.workflow.call(
+        result = self.workflow.run_reply(
+            self.response["session_id"],
+            self.response["instruction_id"],
             reply,
-            {
-                "session_id": self.response["session_id"],
-                "instruction_id": self.response["instruction_id"],
-                **arguments,
-            },
+            arguments,
         )
         if result["status"] == "accepted":
             self.response = result

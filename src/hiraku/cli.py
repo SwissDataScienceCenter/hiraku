@@ -20,13 +20,7 @@ from pydantic import ValidationError as PydanticValidationError
 from .base import BaseRecord
 from .config import HirakuConfig
 from .context import Context, list_contexts, load_context
-from .errors import (
-    GitError,
-    HirakuError,
-    NoActiveRecordError,
-    ValidationError,
-    WorkflowError,
-)
+from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .git import GitRepository
 from .io import dump_yaml
 from .launch import _dispatcher, launch, render_arguments
@@ -601,7 +595,7 @@ def mcp_command(project: Path | None) -> None:
 
 @main.group("workflow")
 def workflow_group() -> None:
-    """List and call project workflows."""
+    """List, start, and reply to project workflows."""
 
 
 @workflow_group.command("list")
@@ -623,42 +617,66 @@ def workflow_list(state: CLIContext, json_output: bool) -> None:
     )
 
 
-@workflow_group.command("call")
-@click.argument("tool_name")
-@click.option(
+_ARGUMENTS_FILE = click.option(
     "--arguments-file",
     type=click.File("r", encoding="utf-8"),
-    help="JSON object with the tool arguments; use - for standard input.",
+    help="JSON object with the arguments; use - for standard input.",
 )
-@click.pass_obj
-def workflow_call(state: CLIContext, tool_name: str, arguments_file: Any) -> None:
-    """Call a workflow tool as the MCP server would and print its JSON result.
 
-    TOOL_NAME is a workflow ID to start it, workflow_reply to answer an
-    instruction, or another workflow tool named <workflow-id>_<name>.
-    """
-    arguments: Any = {}
-    if arguments_file is not None:
-        try:
-            arguments = json.load(arguments_file)
-        except ValueError as exc:
-            raise ValidationError(f"Cannot read tool arguments: {exc}") from exc
-    if not isinstance(arguments, dict):
-        raise ValidationError("Tool arguments must be a JSON object")
-    from .workflow import Workflow, load_workflows
 
-    config = state.config
-    tools = {
-        tool.name: tool
-        for tool in Workflow.tools(lambda: config, load_workflows(config))
-    }
-    if tool_name not in tools:
-        raise WorkflowError(f"Unknown workflow tool {tool_name!r}")
+def _arguments(arguments_file: Any) -> dict[str, Any]:
+    if arguments_file is None:
+        return {}
     try:
-        result = tools[tool_name].fn(**arguments)
-    except TypeError as exc:
-        raise ValidationError(f"Invalid arguments for {tool_name}: {exc}") from exc
-    _emit_json(result)
+        arguments = json.load(arguments_file)
+    except ValueError as exc:
+        raise ValidationError(f"Cannot read arguments: {exc}") from exc
+    if not isinstance(arguments, dict):
+        raise ValidationError("Arguments must be a JSON object")
+    return arguments
+
+
+@workflow_group.command("start")
+@click.argument("workflow_id")
+@_ARGUMENTS_FILE
+@click.pass_obj
+def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> None:
+    """Start a workflow session and print the JSON response."""
+    from .workflow import load_workflow
+
+    workflow = load_workflow(workflow_id, config=state.config).bind(state.config)
+    _emit_json(workflow.run_start(_arguments(arguments_file)))
+
+
+@workflow_group.command("reply")
+@click.argument("session_id")
+@click.argument("reply")
+@click.option(
+    "--instruction-id",
+    type=int,
+    required=True,
+    help="ID of the pending instruction the reply answers.",
+)
+@_ARGUMENTS_FILE
+@click.pass_obj
+def workflow_reply(
+    state: CLIContext,
+    session_id: str,
+    reply: str,
+    instruction_id: int,
+    arguments_file: Any,
+) -> None:
+    """Answer a session's pending instruction with REPLY and print the response."""
+    from .session import Session
+    from .workflow import load_workflow
+
+    session = Session.load(session_id, config=state.config)
+    workflow = load_workflow(session.workflow, config=state.config).bind(state.config)
+    _emit_json(
+        workflow.run_reply(
+            session_id, instruction_id, reply, _arguments(arguments_file)
+        )
+    )
 
 
 @main.group("session")

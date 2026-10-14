@@ -52,7 +52,6 @@ with the `workflow_reply` tool, for example
     "text": "## Approve\n\nPresent the experiment to the user ...",
     "context": {"record_id": "exp-reg", "hypothesis": "Regularization helps"},
     "requires_user_response": true,
-    "reply_with": "workflow_reply",
     "replies": [
       {"reply": "approve", "description": "Record the user's approval ...",
        "arguments": {"properties": {}}},
@@ -174,7 +173,7 @@ from typing import Annotated
 from pydantic import Field
 
 from hiraku.errors import SubmissionRejected
-from hiraku.workflow import Session, Workflow, tool
+from hiraku.workflow import Session, Workflow, reply
 
 
 class ReviewSession(Session):
@@ -187,7 +186,6 @@ class Review(Workflow):
 
     min_questions: int = 2  # setting; override it in the front matter
 
-    @tool
     def start(
         self, topic: Annotated[str, Field(description="Research topic.")]
     ):
@@ -200,7 +198,7 @@ class Review(Workflow):
             replies=[self.propose],
         )
 
-    @tool
+    @reply
     def propose(self, session: ReviewSession, questions: list[str]):
         """Submit candidate research questions."""
         if len(questions) < self.min_questions:
@@ -214,7 +212,7 @@ class Review(Workflow):
             replies=[self.choose],
         )
 
-    @tool
+    @reply
     def choose(self, session: ReviewSession, question: str):
         """Record the question the user chose."""
         if question not in session.questions:
@@ -247,28 +245,29 @@ The rules are deliberately small:
 
 - A `Workflow` instance is the loaded `workflow.md` record. Its front matter
   needs the workflow `id`, matching the directory name. Workflow IDs use
-  letters, digits, and `-`, but not `_`, which separates the workflow ID from
-  the tool name in names such as `<workflow-id>_<name>`. Annotated class
+  letters, digits, and `-`, so the MCP tool named after a workflow never
+  collides with Hiraku's own tools such as `workflow_reply`. Annotated class
   attributes, like `min_questions` above, are settings validated from the front
   matter; other front-matter fields are kept as metadata. The class body
   follows Pydantic rules: constants need `ClassVar[...]`, and `__init__` is not
   overridden.
-- `@tool` registers a method as a workflow operation named after the method;
-  use `@tool("name")` to choose the name separately, for example when the
-  method name is taken by a record attribute such as `save`, `load`, or
-  `delete`. The signature and docstring define the arguments and description;
-  use `Annotated[..., Field()]` for parameter descriptions and constraints.
-- `start` creates sessions; it becomes the MCP tool and prompt named after the
-  workflow. A method with one parameter annotated as a `Session` subclass is a
-  **reply**, sent through `workflow_reply`: Hiraku loads the session, checks
-  that the reply answers the pending instruction and that its arguments match,
-  calls the method, and saves the result atomically. Any other `@tool` method
-  is an ordinary tool, `<workflow-id>_<name>`, that does not change sessions.
+- `start` creates a session and returns its first instruction. Its signature
+  and docstring define how the workflow is started: they become the MCP tool
+  and prompt named after the workflow. Use `Annotated[..., Field()]` for
+  parameter descriptions and constraints.
+- `@reply` marks a method that continues a session. Its first parameter is
+  the session, annotated with the workflow's `Session` subclass; the other
+  parameters and the docstring define the reply's arguments and description.
+  Hiraku loads the session, checks that the reply answers the pending
+  instruction and that its arguments match, calls the method, and saves the
+  result atomically. A reply cannot be named like a `Workflow` method such as
+  `save` or `section`.
 - A `Session` subclass declares the workflow's own data. The base fields, such
   as `id`, `status`, `instruction_id`, and `history`, belong to the runtime and
   cannot be redefined.
-- Replies return `self.instruction(...)` or `self.completion(...)`. An
-  instruction lists the replies that may answer it.
+- `start` and replies return `self.instruction(...)` or
+  `self.completion(...)`. An instruction lists the replies that may answer it,
+  e.g. `replies=[self.propose]`.
 - Raise `SubmissionRejected` for invalid input and `NotReady` when valid input
   refers to evidence that has not arrived yet. Nothing is saved in either case.
   A valid alternative, such as revising, skipping, or stopping, is a normal
@@ -280,8 +279,9 @@ The rules are deliberately small:
 - Each call gets a fresh copy of the loaded workflow, bound to the project
   configuration as currently saved; changing `self` during a
   call is not persisted. To run a workflow from Python, for example in a
-  test, load it with `hiraku.workflow.load_workflow()` and call
-  `workflow.bind(config).call("start", {...})`.
+  test, load it with `hiraku.workflow.load_workflow()`, bind it with
+  `workflow.bind(config)`, and call `run_start({...})` and
+  `run_reply(session_id, instruction_id, "propose", {...})`.
 - Use `self.config` and the Hiraku Python API to read and verify records and
   runs. Prefer replies that name records or runs, which the workflow loads and
   checks, over replies that carry results as free text.
@@ -298,10 +298,12 @@ are rejected, and they remain inspectable.
 Keep workflows compatible with existing sessions, or start new ones.
 Workflow code is trusted project code: loading it executes it.
 
-Test a workflow without an agent with `hiraku workflow call`:
+Test a workflow without an agent with `hiraku workflow start` and
+`hiraku workflow reply`, which print the JSON responses:
 
 ```bash
-echo '{"topic": "protein folding"}' | hiraku workflow call review --arguments-file -
+echo '{"topic": "protein folding"}' | hiraku workflow start review --arguments-file -
+echo '{"questions": ["Q1", "Q2"]}' | hiraku workflow reply <session-id> propose --instruction-id 1 --arguments-file -
 ```
 
 ## Bundled workflows

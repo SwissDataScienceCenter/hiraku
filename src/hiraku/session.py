@@ -6,11 +6,11 @@ import inspect
 import json
 import re
 import secrets
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar
 
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -20,8 +20,6 @@ from .errors import SessionNotFoundError, ValidationError
 from .io import atomic_write
 
 if TYPE_CHECKING:
-    from mcp.server.mcpserver.tools import Tool
-
     from .config import HirakuConfig
     from .workflow import Workflow
 
@@ -29,27 +27,7 @@ LOCK_TIMEOUT_SECONDS = 30.0
 _SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 SessionStatus = Literal["active", "completed", "cancelled"]
-
-GUIDE = """\
-How to follow a Hiraku workflow session:
-1. Carry out the instruction. Its context holds the data it refers to.
-2. If requires_user_response is true, ask the user and wait for their answer
-   before replying; otherwise decide yourself.
-3. Continue with the workflow_reply tool: pass one of the listed replies as
-   reply, its arguments as described by the reply's schema, and the
-   instruction_id and session_id of the response unchanged.
-4. Each accepted reply returns the next instruction. Stop when a response has
-   completed: true.
-5. A response with status rejected or not_ready keeps the same instruction
-   pending: fix the input, or check again later for not_ready. Status stale
-   means the reply answered an instruction that is no longer pending; continue
-   from the current instruction in the response.
-6. Repeating an identical reply is safe; it returns the same response.
-7. To resume, call session_show with the session_id; it returns the pending
-   instruction. Do not start a new session to resume an existing one.
-Before repeating consequential work such as creating records or launching
-experiments, check whether it already exists.\
-"""
+_S = TypeVar("_S", bound="Session")
 
 CANCEL_NOTE = (
     "Cancelling stops the workflow from accepting replies. It does not revert "
@@ -135,7 +113,20 @@ class Session(BaseModel):
             hiraku.errors.SessionNotFoundError: If the session does not exist.
             hiraku.errors.ValidationError: If the stored data does not match.
         """
-        raw = _read(session_id, config)
+        return cls._validate_stored(session_id, _read(session_id, config), config)
+
+    def typed(self, model: type[_S]) -> _S:
+        """Return this stored session as a workflow's own session model.
+
+        Raises:
+            hiraku.errors.ValidationError: If the stored data does not match.
+        """
+        return model._validate_stored(self.id, self._stored, self.config)
+
+    @classmethod
+    def _validate_stored(
+        cls, session_id: str, raw: dict[str, Any], config: HirakuConfig
+    ) -> Self:
         data = (
             raw
             if cls is not Session
@@ -190,55 +181,6 @@ class Session(BaseModel):
         _write(self.id, data, self.config)
         self._stored = data
 
-    # Tools ------------------------------------------------------------------------
-
-    @classmethod
-    def tools(
-        cls,
-        project: Callable[[], HirakuConfig],
-        workflows: Mapping[str, Workflow],
-    ) -> list[Tool]:
-        """Return the agent tools to list, show, and cancel sessions.
-
-        Args:
-            project: Returns the project configuration as currently saved.
-            workflows: Loaded workflows by ID, used to describe a session with
-                its workflow.
-        """
-        from mcp.server.mcpserver.tools import Tool
-        from mcp.types import ToolAnnotations
-
-        def session_list() -> list[dict[str, Any]]:
-            return Session.list_all(config=project())
-
-        def session_show(session_id: SessionId) -> dict[str, Any]:
-            session = Session.load(session_id, config=project())
-            return session.show(workflows.get(session.workflow))
-
-        def session_cancel(session_id: SessionId) -> dict[str, Any]:
-            return Session.load(session_id, config=project()).cancel()
-
-        return [
-            Tool.from_function(
-                session_list,
-                description="List workflow sessions with their status, newest first.",
-                annotations=ToolAnnotations(read_only_hint=True),
-            ),
-            Tool.from_function(
-                session_show,
-                description="Show a workflow session: orientation, pending "
-                "instruction or result, and stored data. Use it to resume a "
-                "session.",
-                annotations=ToolAnnotations(read_only_hint=True),
-            ),
-            Tool.from_function(
-                session_cancel,
-                description="Cancel a workflow session. Records, code, and runs are "
-                "kept.",
-                annotations=ToolAnnotations(read_only_hint=False),
-            ),
-        ]
-
     # Inspection and cancellation --------------------------------------------------
 
     def show(self, workflow: Workflow | None = None) -> dict[str, Any]:
@@ -254,7 +196,6 @@ class Session(BaseModel):
             "instruction_id": self.instruction_id,
             "created_at": _isoformat(self.created_at),
             "updated_at": _isoformat(self.updated_at),
-            "guide": GUIDE,
             "data": {
                 key: value
                 for key, value in self._stored.items()
@@ -383,7 +324,6 @@ class Session(BaseModel):
                 "text": response.text,
                 "context": response.context,
                 "requires_user_response": response.requires_user_response,
-                "reply_with": "workflow_reply",
                 "replies": [
                     {"reply": name, **replies.get(name, {})}
                     for name in response.replies
@@ -409,11 +349,9 @@ RESERVED = frozenset(
         "check",
         "advance",
         "outcome",
-        "tools",
+        "typed",
     }
 )
-
-SessionId = Annotated[str, Field(description="Session ID from session_list.")]
 
 
 @dataclass(frozen=True)
@@ -529,7 +467,6 @@ def _isoformat(value: datetime | None) -> str | None:
 
 __all__ = [
     "CANCEL_NOTE",
-    "GUIDE",
     "Completion",
     "Instruction",
     "HistoryEntry",

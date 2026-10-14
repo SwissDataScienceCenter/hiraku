@@ -7,7 +7,7 @@ Workflows live in `hiraku/workflows/<workflow-id>/workflow.py`. See the
 
 ::: hiraku.workflow.Session
 
-::: hiraku.workflow.tool
+::: hiraku.workflow.reply
 
 ::: hiraku.workflow.load_workflow
 

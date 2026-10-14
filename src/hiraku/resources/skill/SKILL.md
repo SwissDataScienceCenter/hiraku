@@ -47,7 +47,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set`, `entrypoints` |
 | Launch an entrypoint | `hiraku launch ENTRYPOINT [--record ID] [--commit REF] [--dispatch NAME]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
-| Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_reply`; terminal: `hiraku workflow list`, `hiraku workflow call TOOL` |
+| Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_reply`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow reply SESSION REPLY` |
 | Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
 | Manage context records | `hiraku context ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |

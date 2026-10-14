@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
-from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -25,11 +24,12 @@ from hiraku.workflow import (
     PromptWorkflow,
     Workflow,
     discover_workflows,
-    handlers,
     list_workflows,
     load_workflow,
     load_workflows,
+    reply_methods,
     session_model,
+    start_model,
     workflow_description,
 )
 
@@ -41,7 +41,7 @@ from typing import Annotated
 from pydantic import Field
 
 from hiraku.errors import NotReady, SubmissionRejected
-from hiraku.workflow import Session, Workflow, tool
+from hiraku.workflow import Session, Workflow, reply
 
 from .helpers import scale
 
@@ -59,14 +59,13 @@ class Toy(Workflow):
 
     step: int = 1
 
-    @tool
     def start(
         self, target: Annotated[int, Field(gt=0, description="Sum to reach.")] = 3
     ):
         """Start adding."""
         return self.ask(ToySession(target=target))
 
-    @tool
+    @reply
     def add(self, session: ToySession, amount: int):
         """Add an amount."""
         if amount < 0:
@@ -76,32 +75,22 @@ class Toy(Workflow):
             return self.completion(session, {"total": session.total})
         return self.ask(session)
 
-    @tool
+    @reply
     def wait(self, session: ToySession):
         """Wait for evidence."""
         session.total = -100
         raise NotReady("evidence is not there yet")
 
-    @tool
+    @reply
     def boom(self, session: ToySession):
         """Fail unexpectedly."""
         session.total = -100
         raise RuntimeError("kaboom")
 
-    @tool
+    @reply
     def hidden(self, session: ToySession):
         """Never offered."""
         return self.ask(session)
-
-    @tool
-    def peek(self, value: int) -> dict:
-        """An ordinary tool."""
-        return {"value": value}
-
-    @tool("save")
-    def save_total(self, session: ToySession):
-        """Finish and report the total."""
-        return self.completion(session, {"saved": session.total})
 
     def ask(self, session):
         return self.instruction(
@@ -151,19 +140,14 @@ def toy(config: HirakuConfig) -> Workflow:
 
 
 def started(workflow: Workflow, target: int = 3) -> dict:
-    response = workflow.call("start", {"target": target})
+    response = workflow.run_start({"target": target})
     assert response["status"] == "accepted", response
     return response
 
 
-def reply(workflow: Workflow, tool: str, response: dict, **arguments) -> dict:
-    return workflow.call(
-        tool,
-        {
-            "session_id": response["session_id"],
-            "instruction_id": response["instruction_id"],
-            **arguments,
-        },
+def reply(workflow: Workflow, name: str, response: dict, **arguments) -> dict:
+    return workflow.run_reply(
+        response["session_id"], response["instruction_id"], name, arguments
     )
 
 
@@ -171,30 +155,20 @@ def stored(config: HirakuConfig, session_id: str) -> dict:
     return json.loads((config.sessions_dir / f"{session_id}.json").read_text())
 
 
-def tool_names(config: HirakuConfig) -> dict[str, Any]:
-    workflows = load_workflows(config)
-    return {tool.name: tool for tool in Workflow.tools(lambda: config, workflows)}
-
-
-def test_handlers_schemas_and_relative_imports(config: HirakuConfig) -> None:
+def test_start_and_reply_signatures_and_relative_imports(
+    config: HirakuConfig,
+) -> None:
     workflow = toy(config)
     assert workflow_description(workflow).startswith("Add numbers until a target")
-    registered = handlers(type(workflow))
-    kinds = {name: item.kind for name, item in registered.items()}
-    assert kinds["start"] == "start"
-    assert kinds["add"] == "continuation"
-    assert kinds["peek"] == "tool"
-    tools = tool_names(config)
-    start = tools["toy"].parameters
-    assert start["properties"]["target"]["default"] == 3
-    assert start["properties"]["target"]["description"] == "Sum to reach."
-    assert start["properties"]["target"]["exclusiveMinimum"] == 0
-    assert tools["toy"].description.startswith("Start a toy workflow session.")
-    assert "toy_peek" in tools
-    assert not any(name.startswith("toy_add") for name in tools)
+    start = start_model(type(workflow)).model_json_schema()["properties"]["target"]
+    assert start["default"] == 3
+    assert start["description"] == "Sum to reach."
+    assert start["exclusiveMinimum"] == 0
+    assert workflow.start_arguments() is start_model(type(workflow))
+    assert set(reply_methods(type(workflow))) == {"add", "boom", "hidden", "wait"}
 
 
-def test_handlers_stay_directly_callable(config: HirakuConfig) -> None:
+def test_start_and_replies_stay_directly_callable(config: HirakuConfig) -> None:
     workflow = toy(config)
     model = session_model(type(workflow))
     assert model is not None
@@ -203,7 +177,19 @@ def test_handlers_stay_directly_callable(config: HirakuConfig) -> None:
     assert response.replies == ("add", "wait", "boom")
     assert response.context == {"total": 2}
     assert isinstance(workflow.add(model(target=1), amount=2), Completion)
-    assert workflow.peek(4) == {"value": 4}
+    assert isinstance(workflow.start(target=2), Instruction)
+
+
+def test_instructions_offer_only_reply_methods(config: HirakuConfig) -> None:
+    workflow = toy(config)
+    model = session_model(type(workflow))
+    assert model is not None
+    with pytest.raises(WorkflowError, match="must be @reply methods"):
+        workflow.instruction(model(target=3), "Ask", replies=[workflow.ask])
+    with pytest.raises(WorkflowError, match="same reply more than once"):
+        workflow.instruction(
+            model(target=3), "Ask", replies=[workflow.add, workflow.add]
+        )
 
 
 @pytest.mark.parametrize(
@@ -211,75 +197,72 @@ def test_handlers_stay_directly_callable(config: HirakuConfig) -> None:
     [
         ("x = 1\n", "must export WORKFLOW"),
         (
-            "from hiraku.workflow import Workflow, tool\n"
-            "class W(Workflow):\n"
-            "    @tool\n"
-            "    def other(self) -> None: ...\n"
+            "from hiraku.workflow import Workflow\n"
+            "class W(Workflow):\n    pass\n"
             "WORKFLOW = W\n",
-            "must define a @tool start",
+            "must define a start method",
         ),
         (
-            "from hiraku.workflow import Session, Workflow, tool\n"
+            "from hiraku.workflow import Session, Workflow\n"
             "class S(Session):\n    pass\n"
             "class W(Workflow):\n"
-            "    @tool\n"
             "    def start(self, session: S) -> None: ...\n"
             "WORKFLOW = W\n",
-            "cannot take one",
+            "cannot be a session",
         ),
         (
-            "from hiraku.workflow import Session, Workflow, tool\n"
+            "from hiraku.workflow import Session, Workflow, reply\n"
             "class S(Session):\n    pass\n"
             "class W(Workflow):\n"
-            "    @tool\n"
             "    def start(self) -> None: ...\n"
-            "    @tool\n"
+            "    @reply\n"
             "    def two(self, a: S, b: S) -> None: ...\n"
             "WORKFLOW = W\n",
-            "more than one session",
+            "cannot be a session",
         ),
         (
-            "from hiraku.workflow import Session, Workflow, tool\n"
+            "from hiraku.workflow import Workflow, reply\n"
+            "class W(Workflow):\n"
+            "    def start(self) -> None: ...\n"
+            "    @reply\n"
+            "    def other(self, value: int) -> None: ...\n"
+            "WORKFLOW = W\n",
+            "must take the session as its first parameter",
+        ),
+        (
+            "from hiraku.workflow import Session, Workflow, reply\n"
+            "class S(Session):\n    pass\n"
+            "class T(Session):\n    pass\n"
+            "class W(Workflow):\n"
+            "    def start(self) -> None: ...\n"
+            "    @reply\n"
+            "    def a(self, session: S) -> None: ...\n"
+            "    @reply\n"
+            "    def b(self, session: T) -> None: ...\n"
+            "WORKFLOW = W\n",
+            "use different session models",
+        ),
+        (
+            "from hiraku.workflow import Session, Workflow\n"
             "class S(Session):\n    status: str = 'mine'\n"
             "class W(Workflow):\n"
-            "    @tool\n"
             "    def start(self) -> None: ...\n"
             "WORKFLOW = W\n",
             "redefines reserved Session names: status",
         ),
         (
-            "from hiraku.workflow import Workflow, tool\n"
+            "from hiraku.workflow import Workflow\n"
             "class W(Workflow):\n"
-            "    @tool\n"
-            "    def start(self, instruction_id: int) -> None: ...\n"
-            "WORKFLOW = W\n",
-            "reserved parameter",
-        ),
-        (
-            "from hiraku.workflow import Workflow, tool\n"
-            "class W(Workflow):\n"
-            "    @tool\n"
             "    def start(self, *values: int) -> None: ...\n"
             "WORKFLOW = W\n",
             "cannot use",
         ),
         (
-            "from hiraku.workflow import Workflow, tool\n"
+            "from hiraku.workflow import Workflow\n"
             "class W(Workflow):\n"
-            "    @tool\n"
             "    def start(self, untyped) -> None: ...\n"
             "WORKFLOW = W\n",
             "needs a type annotation",
-        ),
-        (
-            "from hiraku.workflow import Workflow, tool\n"
-            "class W(Workflow):\n"
-            "    @tool\n"
-            "    def start(self) -> None: ...\n"
-            "    @tool\n"
-            "    def section(self) -> None: ...\n"
-            "WORKFLOW = W\n",
-            "shadows a Workflow attribute",
         ),
         ("raise ImportError('broken helper')\n", "broken helper"),
     ],
@@ -291,37 +274,25 @@ def test_invalid_workflows_are_logged_and_left_out(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     write_workflow(config, "bad", source)
-    tools = tool_names(config)
+    workflows = load_workflows(config)
     assert "Workflow bad is unavailable" in caplog.text
     assert message in caplog.text
-    assert "toy" in tools
-    assert not any(name == "bad" or name.startswith("bad_") for name in tools)
+    assert "toy" in workflows
+    assert "bad" not in workflows
     assert message in load_error(config, "bad")
 
 
-def test_workflow_ids_cannot_make_tool_names_ambiguous(config: HirakuConfig) -> None:
-    simple = (
-        "from hiraku.workflow import Workflow, tool\n"
+def test_workflow_ids_are_letters_digits_and_hyphens(config: HirakuConfig) -> None:
+    source = (
+        "from hiraku.workflow import Workflow\n"
         "class W(Workflow):\n"
-        "    @tool\n"
         "    def start(self) -> None: ...\n"
-        "{extra}"
         "WORKFLOW = W\n"
     )
-    write_workflow(config, "bad.name", simple.format(extra=""))
-    write_workflow(config, "x_y", simple.format(extra=""))
-    write_workflow(
-        config,
-        "x",
-        simple.format(extra="    @tool\n    def y_start(self) -> None: ...\n"),
-    )
-    tools = tool_names(config)
     for identifier in ("bad.name", "x_y"):
+        write_workflow(config, identifier, source)
         assert "Invalid workflow ID" in load_error(config, identifier)
-        assert identifier not in tools
-    assert {"x", "x_y_start"} <= set(tools)
-    with pytest.raises(WorkflowError, match="Unknown workflow tool"):
-        toy(config).call("missing", {})
+    assert {"toy"} == set(load_workflows(config)) - {"autodataset", "collaborative"}
 
 
 def test_prompts_are_snapshotted_with_the_code(config: HirakuConfig) -> None:
@@ -336,13 +307,11 @@ def test_prompts_are_snapshotted_with_the_code(config: HirakuConfig) -> None:
 def test_start_returns_orientation_and_explicit_replies(config: HirakuConfig) -> None:
     response = started(toy(config))
     assert response["orientation"] == "# Toy\n\nAdd numbers."
-    assert "workflow_reply" in response["guide"]
     assert response["instruction_id"] == 1
     instruction = response["instruction"]
     assert instruction["text"] == "## Add\n\nAdd a number."
     assert instruction["context"] == {"total": 0}
     assert instruction["requires_user_response"] is False
-    assert instruction["reply_with"] == "workflow_reply"
     assert [item["reply"] for item in instruction["replies"]] == ["add", "wait", "boom"]
     assert instruction["replies"][0]["description"] == "Add an amount."
     assert instruction["replies"][0]["arguments"] == {
@@ -359,7 +328,7 @@ def test_start_returns_orientation_and_explicit_replies(config: HirakuConfig) ->
 
 
 def test_start_validation_errors_create_no_session(config: HirakuConfig) -> None:
-    response = toy(config).call("start", {"target": 0})
+    response = toy(config).run_start({"target": 0})
     assert response["status"] == "rejected"
     assert "target" in response["message"]
     assert Session.list_all(config=config) == []
@@ -381,9 +350,7 @@ def test_correlation_table(config: HirakuConfig) -> None:
     assert "already answered" in conflict["message"]
     assert conflict["instruction"]["context"] == {"total": 2}
 
-    future = workflow.call(
-        "add", {"session_id": first["session_id"], "instruction_id": 9, "amount": 1}
-    )
+    future = workflow.run_reply(first["session_id"], 9, "add", {"amount": 1})
     assert future["status"] == "stale"
     assert "pending instruction is 2" in future["message"]
 
@@ -391,36 +358,17 @@ def test_correlation_table(config: HirakuConfig) -> None:
     assert not_offered["status"] == "rejected"
     assert "not a reply to the pending instruction" in not_offered["message"]
 
+    unknown = reply(workflow, "ask", accepted)
+    assert unknown["status"] == "rejected"
+    assert "not a reply of workflow 'toy'" in unknown["message"]
+    assert "accepts: add, wait, boom" in unknown["message"]
+
     second = reply(workflow, "add", accepted, amount=1)
     stale = reply(workflow, "add", first, amount=5)
     assert second["instruction_id"] == 3
     assert stale["status"] == "stale"
     assert stale["instruction_id"] == 3
     assert stored(config, first["session_id"])["total"] == 3
-
-
-def test_workflow_reply_finds_the_only_active_session(config: HirakuConfig) -> None:
-    tools = {
-        tool.name: tool for tool in Workflow.tools(lambda: config, {"toy": toy(config)})
-    }
-    send = tools["workflow_reply"].fn
-    first = started(toy(config), target=5)
-    response = send(reply="add", instruction_id=1, arguments={"amount": 2})
-    assert response["status"] == "accepted"
-    assert response["session_id"] == first["session_id"]
-
-    second = started(toy(config))
-    several = send(reply="add", instruction_id=2, arguments={"amount": 1})
-    assert several["status"] == "rejected"
-    assert "pass session_id" in several["message"]
-
-    Session.load(first["session_id"], config=config).cancel()
-    Session.load(second["session_id"], config=config).cancel()
-    none = send(reply="add", instruction_id=1, arguments={"amount": 1})
-    assert none["status"] == "rejected"
-    assert "No session is active" in none["message"]
-    with pytest.raises(ValidationError, match="Invalid session ID"):
-        toy(config).call("add", {"instruction_id": 1, "amount": 1})
 
 
 def test_completion_and_retried_completion(config: HirakuConfig) -> None:
@@ -434,9 +382,7 @@ def test_completion_and_retried_completion(config: HirakuConfig) -> None:
         "result": {"total": 2},
     }
     assert reply(workflow, "add", first, amount=2) == done
-    after = workflow.call(
-        "add", {"session_id": first["session_id"], "instruction_id": 2, "amount": 1}
-    )
+    after = workflow.run_reply(first["session_id"], 2, "add", {"amount": 1})
     assert after["status"] == "rejected"
     assert "completed" in after["message"]
     shown = Session.load(first["session_id"], config=config).show()
@@ -487,20 +433,11 @@ def test_invalid_correlation_arguments(config: HirakuConfig) -> None:
     workflow = toy(config)
     first = started(workflow)
     with pytest.raises(ValidationError, match="Invalid session ID"):
-        workflow.call("add", {"session_id": "../x", "instruction_id": 1})
+        workflow.run_reply("../x", 1, "add")
     with pytest.raises(ValidationError, match="instruction_id"):
-        workflow.call("add", {"session_id": first["session_id"], "amount": 1})
+        workflow.run_reply(first["session_id"], None, "add", {"amount": 1})  # type: ignore[arg-type]
     with pytest.raises(SessionNotFoundError):
-        workflow.call("add", {"session_id": "missing", "instruction_id": 1})
-
-
-def test_ordinary_tools(config: HirakuConfig) -> None:
-    workflow = toy(config)
-    assert workflow.call("peek", {"value": 3}) == {
-        "status": "ok",
-        "result": {"value": 3},
-    }
-    assert workflow.call("peek", {})["status"] == "rejected"
+        workflow.run_reply("missing", 1, "add")
 
 
 def test_restart_recovery_continues_from_disk(config: HirakuConfig) -> None:
@@ -634,7 +571,7 @@ def test_cli_matches_the_runtime(
     arguments = tmp_path / "arguments.json"
     arguments.write_text(json.dumps({"target": 2}))
     result = runner.invoke(
-        main, ["workflow", "call", "toy", "--arguments-file", str(arguments)]
+        main, ["workflow", "start", "toy", "--arguments-file", str(arguments)]
     )
     assert result.exit_code == 0, result.output
     response = json.loads(result.output)
@@ -643,17 +580,27 @@ def test_cli_matches_the_runtime(
     assert response == {
         **Session.load(session_id, config=config).show()["response"],
         "status": "accepted",
-        "guide": response["guide"],
         "orientation": "# Toy\n\nAdd numbers.",
     }
 
-    follow = json.dumps(
-        {"reply": "add", "instruction_id": 1, "arguments": {"amount": 1}}
-    )
     result = runner.invoke(
         main,
-        ["workflow", "call", "workflow_reply", "--arguments-file", "-"],
-        input=follow,
+        ["workflow", "reply", session_id, "add", "--instruction-id", "1"],
+    )
+    assert json.loads(result.output)["status"] == "rejected"
+    result = runner.invoke(
+        main,
+        [
+            "workflow",
+            "reply",
+            session_id,
+            "add",
+            "--instruction-id",
+            "1",
+            "--arguments-file",
+            "-",
+        ],
+        input=json.dumps({"amount": 1}),
     )
     assert json.loads(result.output)["status"] == "accepted"
 
@@ -666,53 +613,32 @@ def test_cli_matches_the_runtime(
     assert sessions[0]["session_id"] == session_id
     cancelled = runner.invoke(main, ["session", "cancel", session_id])
     assert "cancelled" in cancelled.output
-    unknown = runner.invoke(main, ["workflow", "call", "nope_start"])
+    unknown = runner.invoke(main, ["workflow", "start", "nope"])
     assert unknown.exit_code != 0
     assert "Unknown workflow" in unknown.output
-
-
-def test_tool_names_can_differ_from_method_names(config: HirakuConfig) -> None:
-    workflow = toy(config)
-    assert handlers(type(workflow))["save"].method == "save_total"
-    model = session_model(type(workflow))
-    assert model is not None
-    instruction = workflow.instruction(
-        model(target=3), "Done?", replies=[workflow.save_total, workflow.add]
-    )
-    assert instruction.replies == ("save", "add")
 
 
 @pytest.mark.parametrize(
     ("body", "message"),
     [
         (
-            "    @tool\n    def save(self) -> None: ...\n",
-            "shadows a Workflow attribute; rename the method and keep the name "
-            'with @tool("save")',
+            "    @reply\n    def save(self, session: S) -> None: ...\n",
+            "@reply W.save is named like a Workflow method",
         ),
         (
-            "    @tool\n    def call(self) -> None: ...\n",
-            "shadows a Workflow attribute",
-        ),
-        (
-            "    @tool('peek')\n    def a(self) -> None: ...\n"
-            "    @tool('peek')\n    def b(self) -> None: ...\n",
-            "Tool name 'peek' is used by both W.a and W.b",
-        ),
-        (
-            "    @tool('bad name')\n    def a(self) -> None: ...\n",
-            "Invalid tool name 'bad name'",
+            "    @reply\n    def run_reply(self, session: S) -> None: ...\n",
+            "is named like a Workflow method",
         ),
         ("    LIMIT = 3\n", "non-annotated attribute"),
     ],
 )
-def test_invalid_method_and_tool_names(
+def test_invalid_reply_names_and_attributes(
     config: HirakuConfig, body: str, message: str
 ) -> None:
     source = (
-        "from hiraku.workflow import Workflow, tool\n"
+        "from hiraku.workflow import Session, Workflow, reply\n"
+        "class S(Session):\n    pass\n"
         "class W(Workflow):\n"
-        "    @tool\n"
         "    def start(self) -> None: ...\n"
         f"{body}"
         "WORKFLOW = W\n"
@@ -771,10 +697,10 @@ def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> 
     loaded = load_workflows(config)["loop"]
     assert type(loaded) is PromptWorkflow
     assert workflow_description(loaded) == "Run the loop."
-    assert set(handlers(type(loaded))) == {"start", "complete"}
+    assert set(reply_methods(type(loaded))) == {"complete"}
 
     workflow = loaded.bind(config)
-    first = workflow.call("start", {"task": "sep10", "iterations": "3"})
+    first = workflow.run_start({"task": "sep10", "iterations": "3"})
     assert first["status"] == "accepted"
     assert first["orientation"] == ""
     assert first["instruction"]["text"].startswith(
@@ -796,38 +722,16 @@ def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> 
         ("complete", 1),
     ]
 
-    missing = workflow.call("start", {})
+    missing = workflow.run_start({})
     assert missing["status"] == "rejected"
     assert "task" in missing["message"]
-    unknown = workflow.call("start", {"task": "x", "other": 1})
+    unknown = workflow.run_start({"task": "x", "other": 1})
     assert unknown["status"] == "rejected"
 
     (directory / "workflow.md").write_text("---\nid: loop\n---\nUse {{nope}}.\n")
     assert "placeholders without declared arguments: nope" in load_error(config, "loop")
     (directory / "workflow.md").write_text(body)
     assert "front matter" in load_error(config, "loop")
-
-
-def test_workflows_and_sessions_provide_their_tools(config: HirakuConfig) -> None:
-    tools = {
-        tool.name: tool for tool in Workflow.tools(lambda: config, {"toy": toy(config)})
-    }
-    assert set(tools) == {"workflow_list", "workflow_reply", "toy", "toy_peek"}
-    first = tools["toy"].fn(target=2)
-    assert first["status"] == "accepted"
-    done = tools["workflow_reply"].fn(
-        reply="add", instruction_id=1, arguments={"amount": 2}
-    )
-    assert done["result"] == {"total": 2}
-    assert tools["workflow_list"].fn()[0]["id"] == "toy"
-
-    sessions = {
-        tool.name: tool for tool in Session.tools(lambda: config, {"toy": toy(config)})
-    }
-    assert set(sessions) == {"session_list", "session_show", "session_cancel"}
-    shown = sessions["session_show"].fn(session_id=first["session_id"])
-    assert shown["status"] == "completed"
-    assert shown["orientation"] == "# Toy\n\nAdd numbers."
 
 
 # workflow.md: sections, placeholders, and the record -----------------------

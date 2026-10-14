@@ -8,7 +8,7 @@ from typing import Annotated
 from pydantic import Field
 
 from hiraku.errors import SubmissionRejected
-from hiraku.workflow import Completion, Instruction, Session, Workflow, tool
+from hiraku.workflow import Completion, Instruction, Session, Workflow, reply
 
 GATE_STEP = 5
 
@@ -26,15 +26,14 @@ class CountSteps(Workflow):
     skipped, repeated, or invented step is rejected. Step 5 is a user gate.
     """
 
-    @tool
     def start(
         self,
         count: Annotated[int, Field(gt=0, description="Number of steps.")] = 10,
-    ) -> Instruction:
+    ) -> Instruction | Completion:
         """Start counting steps to check the harness."""
         return self._next(CountStepsSession(count=count))
 
-    @tool
+    @reply
     def ack(
         self,
         session: CountStepsSession,
@@ -44,7 +43,7 @@ class CountSteps(Workflow):
         self._check(session, token)
         return self._next(session)
 
-    @tool
+    @reply
     def proceed(
         self,
         session: CountStepsSession,
@@ -54,7 +53,7 @@ class CountSteps(Workflow):
         self._check(session, token)
         return self._next(session)
 
-    @tool
+    @reply
     def finish(self, session: CountStepsSession) -> Completion:
         """End the session early."""
         return self._done(session)

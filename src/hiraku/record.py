@@ -3,35 +3,20 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeAlias
+from typing import Any, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from pydantic_core import to_jsonable_python
 
 from .base import BaseRecord
-from .errors import (
-    NoActiveRecordError,
-    RecordExistsError,
-    RecordNotFoundError,
-    ValidationError,
-)
-from .git import GitRepository
+from .errors import RecordExistsError, RecordNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml
 from .run import Run
 from .tracking import TrackingBackend, create_backend
 from .validation import validate_identifier
-
-if TYPE_CHECKING:
-    from mcp.server.mcpserver.tools import Tool
-
-    from .config import HirakuConfig
-
-MARKDOWN_LIMIT = 8000
-DEFAULT_RUN_LIMIT = 20
 
 ArgumentScalar: TypeAlias = str | int | float | Path
 ArgumentValue: TypeAlias = ArgumentScalar | bool | None | Sequence[ArgumentScalar]
@@ -376,229 +361,6 @@ class Record(BaseRecord):
         if any(self.id in item.related_to for item in records if item.id != self.id):
             raise ValidationError(f"Cannot delete referenced record {self.id!r}")
         super().delete()
-
-    @classmethod
-    def tools(cls, project: Callable[[], HirakuConfig]) -> list[Tool]:
-        """Return the agent tools to list, show, create, and update records and
-        to list their runs.
-
-        Args:
-            project: Returns the project configuration as currently saved.
-        """
-        # The MCP SDK is imported only when tools are requested, so the CLI
-        # does not pay for it.
-        from mcp.server.mcpserver.tools import Tool
-        from mcp.types import ToolAnnotations
-
-        read_only = ToolAnnotations(read_only_hint=True)
-        writes = ToolAnnotations(read_only_hint=False)
-
-        def record_list() -> list[dict[str, Any]]:
-            return [
-                {
-                    "id": record.id,
-                    "parent_id": record.parent_id,
-                    "type": record.type,
-                    "status": record.status,
-                    "decision": record.decision,
-                }
-                for record in list_records(config=project())
-            ]
-
-        def record_show(
-            record_id: Annotated[
-                str | None,
-                Field(description="Record to show; defaults to the active record."),
-            ] = None,
-            raw: Annotated[
-                bool, Field(description="Show stored fields only, without inheritance.")
-            ] = False,
-        ) -> dict[str, Any]:
-            config = project()
-            record = _active_record(record_id, config)
-            if raw:
-                values, sources = record.to_dict(), {}
-            else:
-                resolved = record.resolve(config=config)
-                values, sources = resolved.values, resolved.sources
-            result: dict[str, Any] = {
-                "id": record.id,
-                "values": to_jsonable_python(values, fallback=dict),
-                "sources": to_jsonable_python(sources, fallback=dict),
-                "markdown": record.markdown[:MARKDOWN_LIMIT],
-            }
-            if len(record.markdown) > MARKDOWN_LIMIT:
-                result["markdown_truncated"] = True
-                result["markdown_resource"] = f"hiraku://records/{record.id}"
-            return result
-
-        def record_create(
-            record_id: Annotated[str, Field(description="New record ID.")],
-            parent_id: Annotated[
-                str | None, Field(description="Parent record ID.")
-            ] = None,
-            related_to: Annotated[
-                list[str] | None, Field(description="Related record IDs.")
-            ] = None,
-            type: Annotated[
-                str | None,
-                Field(description="Record role, e.g. task, experiment, dataset."),
-            ] = None,
-            commit: Annotated[
-                str | None,
-                Field(description="Git ref to bind; resolved to a full hash."),
-            ] = None,
-            markdown: Annotated[str, Field(description="Markdown body.")] = "",
-            fields: Annotated[
-                dict[str, Any] | None, Field(description="Additional stored fields.")
-            ] = None,
-            activate: Annotated[
-                bool, Field(description="Make the new record the active record.")
-            ] = False,
-        ) -> dict[str, Any]:
-            config = project()
-            extra = dict(fields or {})
-            reserved = {"id", "parent_id", "related_to", "markdown", "type", "commit"}
-            if reserved.intersection(extra):
-                raise ValidationError(
-                    f"Use the dedicated arguments for {sorted(reserved)}, not fields"
-                )
-            if type is not None:
-                extra["type"] = type
-            if commit is not None:
-                extra["commit"] = GitRepository(config).resolve(commit)
-            record = Record.create(
-                record_id,
-                parent_id=parent_id,
-                related_to=list(related_to or []),
-                markdown=markdown,
-                activate=activate,
-                config=config,
-                **extra,
-            )
-            return {"created": record.id, "path": str(record.path)}
-
-        def record_update(
-            record_id: Annotated[str, Field(description="Record to update.")],
-            fields: Annotated[
-                dict[str, Any] | None, Field(description="Stored fields to set.")
-            ] = None,
-            unset: Annotated[
-                list[str] | None, Field(description="Stored fields to remove.")
-            ] = None,
-            parent_id: Annotated[
-                str | None, Field(description="New parent record ID.")
-            ] = None,
-            make_root: Annotated[
-                bool, Field(description="Make the record a root.")
-            ] = False,
-            related_to: Annotated[
-                list[str] | None,
-                Field(description="Replacement list of related record IDs."),
-            ] = None,
-            commit: Annotated[
-                str | None,
-                Field(description="Git ref to bind; resolved to a full hash."),
-            ] = None,
-            markdown: Annotated[
-                str | None, Field(description="Replacement Markdown body.")
-            ] = None,
-        ) -> dict[str, Any]:
-            config = project()
-            changes = dict(fields or {})
-            if related_to is not None:
-                changes["related_to"] = list(related_to)
-            if commit is not None:
-                changes["commit"] = GitRepository(config).resolve(commit)
-            record = update_record(
-                record_id,
-                changes=changes,
-                unset=list(unset or []),
-                parent_id=parent_id,
-                make_root=make_root,
-                markdown=markdown,
-                config=config,
-            )
-            return {"updated": record.id}
-
-        def runs(
-            record_id: Annotated[
-                str | None,
-                Field(description="Record whose runs to list; defaults to active."),
-            ] = None,
-            all: Annotated[
-                bool,
-                Field(description="List every attributed run in the record's source."),
-            ] = False,
-            sort: Annotated[
-                str | None, Field(description="Field or metric to sort by.")
-            ] = None,
-            ascending: Annotated[
-                bool | None,
-                Field(description="Sort direction; defaults to the metric direction."),
-            ] = None,
-            limit: Annotated[
-                int, Field(ge=1, le=200, description="Maximum runs returned.")
-            ] = DEFAULT_RUN_LIMIT,
-        ) -> list[dict[str, Any]]:
-            config = project()
-            record = _active_record(record_id, config)
-            query: dict[str, Any] = {"limit": limit}
-            if sort is not None:
-                query["sort"] = sort
-                if ascending is not None:
-                    query["ascending"] = ascending
-                else:
-                    declarations = (
-                        record.resolve(config=config).values.get("metrics") or []
-                    )
-                    directions = {item.name: item.direction for item in declarations}
-                    query["ascending"] = directions.get(sort) != "maximize"
-            elif ascending is not None:
-                raise ValidationError("ascending requires sort")
-            found = record.resolve_tracking_backend(config=config).list_runs(
-                record_id=None if all else record.id, **query
-            )
-            # Runs keep their fields in read-only mappings.
-            return to_jsonable_python(found, fallback=dict)
-
-        return [
-            Tool.from_function(
-                record_list,
-                description="List research records with their parent, type, status, "
-                "and decision.",
-                annotations=read_only,
-            ),
-            Tool.from_function(
-                record_show,
-                description="Show a record's effective fields with the records "
-                "defining them, including resolved entrypoints.",
-                annotations=read_only,
-            ),
-            Tool.from_function(
-                record_create,
-                description="Create a root or child research record.",
-                annotations=writes,
-            ),
-            Tool.from_function(
-                record_update,
-                description="Update a record's stored fields, parent, links, "
-                "commit, or body.",
-                annotations=writes,
-            ),
-            Tool.from_function(
-                runs,
-                description="List tracked runs attributed to a record.",
-                annotations=read_only,
-            ),
-        ]
-
-
-def _active_record(record_id: str | None, config: HirakuConfig) -> Record:
-    identifier = record_id or config.active_record_id
-    if identifier is None:
-        raise NoActiveRecordError("No active record; pass record_id")
-    return load_record(identifier, config=config)
 
 
 def _config(config: Any) -> Any:

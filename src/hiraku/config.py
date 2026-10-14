@@ -67,7 +67,7 @@ class HirakuConfig(BaseModel):
                 "Configuration key 'default_program' is no longer supported: "
                 "programs were replaced by workflows. Remove the key from "
                 "hiraku.yml and start a workflow explicitly through its MCP "
-                "tool or prompt, or 'hiraku workflow call'."
+                "tool or prompt, or 'hiraku workflow start'."
             )
         backend = raw.get("tracking_backend")
         if isinstance(backend, str):

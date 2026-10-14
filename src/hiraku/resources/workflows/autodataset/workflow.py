@@ -8,7 +8,7 @@ from pydantic import Field
 
 from hiraku.errors import SubmissionRejected
 from hiraku.record import load_record
-from hiraku.workflow import Completion, Instruction, Session, Workflow, tool
+from hiraku.workflow import Completion, Instruction, Session, Workflow, reply
 
 
 class DatasetSession(Session):
@@ -26,7 +26,6 @@ class Autodataset(Workflow):
     with an explained shortfall.
     """
 
-    @tool
     def start(
         self,
         task: Annotated[
@@ -45,7 +44,7 @@ class Autodataset(Workflow):
         session = DatasetSession(task=record.id, count=count)
         return self._search(session)
 
-    @tool
+    @reply
     def complete(
         self,
         session: DatasetSession,
@@ -63,7 +62,7 @@ class Autodataset(Workflow):
         session.found = list(record_ids)
         return self._finish(session, "completed")
 
-    @tool
+    @reply
     def report_shortfall(
         self,
         session: DatasetSession,
@@ -94,12 +93,12 @@ class Autodataset(Workflow):
             replies=[self.continue_search, self.accept_partial],
         )
 
-    @tool
+    @reply
     def continue_search(self, session: DatasetSession) -> Instruction:
         """Continue searching for the missing datasets."""
         return self._search(session)
 
-    @tool
+    @reply
     def accept_partial(self, session: DatasetSession) -> Completion:
         """Accept the datasets found so far as a partial result."""
         return self._finish(session, "partial")

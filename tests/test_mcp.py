@@ -131,6 +131,11 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
     server = create_server(config)
 
     async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
+        none = payload(
+            await client.call_tool(
+                "workflow_reply", {"reply": "complete", "instruction_id": 1}
+            )
+        )
         first = payload(await client.call_tool("loop", {"task": "a"}))
         wrong = payload(
             await client.call_tool(
@@ -162,6 +167,7 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
             )
         )
         return {
+            "none": none,
             "first": first,
             "wrong": wrong,
             "invalid": invalid,
@@ -171,7 +177,8 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
 
     result = run(server, scenario)
     replies = result["first"]["instruction"]["replies"]
-    assert result["first"]["instruction"]["reply_with"] == "workflow_reply"
+    assert "No session is active" in result["none"]["message"]
+    assert "workflow_reply" in result["first"]["guide"]
     assert replies[0]["reply"] == "complete"
     assert replies[0]["arguments"]["required"] == ["summary"]
     assert result["wrong"]["status"] == "rejected"
@@ -221,6 +228,8 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
     session_id = result["started"]["session_id"]
     assert result["listing"][0]["session_id"] == session_id
     assert result["shown"]["response"]["instruction_id"] == 1
+    assert result["shown"]["orientation"].startswith("# Autodataset")
+    assert "session_show" in result["shown"]["guide"]
     assert result["resource"]["session_id"] == session_id
     assert result["workflow"].startswith("# Autodataset")
     assert result["record"].startswith("---\n")
@@ -311,10 +320,9 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     noisy = config.workflows_dir / "noisy"
     noisy.mkdir()
     (noisy / "workflow.py").write_text(
-        "from hiraku.workflow import Session, Workflow, tool\n"
+        "from hiraku.workflow import Session, Workflow\n"
         "class S(Session):\n    pass\n"
         "class Noisy(Workflow):\n"
-        "    @tool\n"
         "    def start(self):\n"
         "        print('stray output')\n"
         "        return self.completion(S(), {'ok': True})\n"

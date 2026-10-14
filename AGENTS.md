@@ -90,9 +90,9 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/tracking/` | Tracking backend adapters and run normalization |
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
 | `src/hiraku/context.py` | Curated context records |
-| `src/hiraku/workflow.py` | Workflows: `workflow.md` records whose tools run on sessions |
+| `src/hiraku/workflow.py` | Workflows: `workflow.md` records whose `start` and replies run on sessions |
 | `src/hiraku/session.py` | Workflow sessions: stored state and reply correlation |
-| `src/hiraku/mcp.py` | Stdio MCP server (`MCPServer`) that registers the tools and prompts of `Record`, `Session`, and workflows |
+| `src/hiraku/mcp.py` | Stdio MCP server (`MCPServer`): tools and prompts for records, runs, workflows, and sessions |
 | `src/hiraku/resources/` | Bundled workflows, dispatchers, skills, and examples |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
 | `docs/` | Documentation sources |
@@ -117,10 +117,10 @@ Generated or transient paths:
 - Launches go through the configured dispatcher and must preserve attribution
   such as record, entrypoint, and commit metadata.
 - Workflow semantics live in `workflow.py` and `session.py` and are transport
-  independent: a `Workflow` runs its tools on its `Session`s through
-  `Workflow.call`. `Record`, `Session`, and workflows provide their agent tools
-  as MCP SDK `Tool` objects; `mcp.py` only registers them and must not be
-  imported by them.
+  independent: a `Workflow` starts and continues its `Session`s through
+  `Workflow.run_start` and `Workflow.run_reply`. All MCP code, including the
+  tools and prompts for records, sessions, and workflows, lives in `mcp.py`;
+  no other module imports the MCP SDK.
 - Bundled resources under `src/hiraku/resources/` are installed by
   `hiraku init`; changes to them may affect newly initialized projects and
   should include appropriate example or integration coverage.

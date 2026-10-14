@@ -19,9 +19,9 @@ def invoke(runner: CliRunner, arguments: list[str], payload: Any = None) -> Any:
     return result
 
 
-def call(runner: CliRunner, tool: str, payload: dict[str, Any]) -> dict[str, Any]:
+def start(runner: CliRunner, workflow: str, payload: dict[str, Any]) -> dict[str, Any]:
     result = invoke(
-        runner, ["workflow", "call", tool, "--arguments-file", "-"], payload
+        runner, ["workflow", "start", workflow, "--arguments-file", "-"], payload
     )
     return json.loads(result.output)
 
@@ -42,23 +42,24 @@ def runner(tmp_path: Path, monkeypatch) -> CliRunner:
 def reply(
     runner: CliRunner, response: dict[str, Any], name: str, **arguments: Any
 ) -> dict[str, Any]:
-    return call(
-        runner,
-        "workflow_reply",
-        {
-            "reply": name,
-            "instruction_id": response["instruction_id"],
-            "session_id": response["session_id"],
-            "arguments": arguments,
-        },
-    )
+    command = [
+        "workflow",
+        "reply",
+        response["session_id"],
+        name,
+        "--instruction-id",
+        str(response["instruction_id"]),
+        "--arguments-file",
+        "-",
+    ]
+    return json.loads(invoke(runner, command, arguments).output)
 
 
 def test_count_steps_tokens_and_gate(runner: CliRunner) -> None:
     listed = invoke(runner, ["workflow", "list"]).output
     assert "count-steps" in listed
 
-    response = call(runner, "count-steps", {"count": 6})
+    response = start(runner, "count-steps", {"count": 6})
     tokens = []
     for step in range(1, 5):
         instruction = response["instruction"]
@@ -89,9 +90,9 @@ def test_count_steps_tokens_and_gate(runner: CliRunner) -> None:
 def test_count_steps_rejects_wrong_tokens_and_finishes_early(
     runner: CliRunner,
 ) -> None:
-    assert call(runner, "count-steps", {"count": 0})["status"] == "rejected"
+    assert start(runner, "count-steps", {"count": 0})["status"] == "rejected"
 
-    response = call(runner, "count-steps", {"count": 2})
+    response = start(runner, "count-steps", {"count": 2})
     wrong = reply(runner, response, "ack", token="00000000")
     assert wrong["status"] == "rejected"
     done = reply(runner, response, "finish")

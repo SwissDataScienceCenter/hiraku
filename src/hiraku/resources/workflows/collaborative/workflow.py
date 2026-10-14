@@ -8,7 +8,7 @@ from pydantic import Field
 
 from hiraku.errors import NotReady, SubmissionRejected
 from hiraku.record import Record, load_record
-from hiraku.workflow import Completion, Instruction, Session, Workflow, tool
+from hiraku.workflow import Completion, Instruction, Session, Workflow, reply
 
 
 class CollaborativeSession(Session):
@@ -27,7 +27,6 @@ class Collaborative(Workflow):
     before any work and decides after each result whether to continue.
     """
 
-    @tool
     def start(
         self,
         task: Annotated[
@@ -47,7 +46,7 @@ class Collaborative(Workflow):
         session = CollaborativeSession(task=task, entrypoint=entrypoint, rounds=rounds)
         return self._propose(session)
 
-    @tool
+    @reply
     def proposed(
         self,
         session: CollaborativeSession,
@@ -68,7 +67,7 @@ class Collaborative(Workflow):
             replies=[self.approve, self.revise, self.finish],
         )
 
-    @tool
+    @reply
     def revise(
         self,
         session: CollaborativeSession,
@@ -78,7 +77,7 @@ class Collaborative(Workflow):
         session.feedback = feedback
         return self._propose(session)
 
-    @tool
+    @reply
     def approve(self, session: CollaborativeSession) -> Instruction:
         """Record the user's approval of the proposed experiment."""
         command = f"hiraku launch {session.entrypoint} --record {session.experiment}"
@@ -89,7 +88,7 @@ class Collaborative(Workflow):
             replies=[self.submit_run, self.finish],
         )
 
-    @tool
+    @reply
     def submit_run(
         self,
         session: CollaborativeSession,
@@ -121,14 +120,14 @@ class Collaborative(Workflow):
             replies=[self.next_round, self.finish] if more else [self.finish],
         )
 
-    @tool
+    @reply
     def next_round(self, session: CollaborativeSession) -> Instruction:
         """Continue with the next experiment."""
         session.experiment = None
         session.feedback = None
         return self._propose(session)
 
-    @tool
+    @reply
     def finish(self, session: CollaborativeSession) -> Completion:
         """End the session and summarize the results."""
         return self.completion(
