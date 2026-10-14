@@ -109,8 +109,9 @@ can use in the edit mode:
 `record_path` is the record's ancestry, such as `digits/weak-l2`, so
 `runs_df[runs_df.record_path.str.startswith("digits/")]` selects a subtree.
 Use these tables in your own cells, or mention `@runs_df` and `@records_df` in
-marimo's AI assistant to ask questions about your runs. MLflow stores
-parameters as text, so cast them before comparing numbers, for example
+marimo's AI assistant to ask questions about your runs. Values keep the types
+the tracking backend reports; some backends, such as MLflow, report parameters
+as text, so cast them before comparing numbers, for example
 `runs_df["param.alpha"].astype(float)`.
 
 For example, this cell compares two metrics across all runs, coloured by
@@ -128,11 +129,18 @@ def _(alt, runs_df):
     return
 ```
 
-## Links to tracking backends
+## Tracking backends
 
-Run links come from the tracking backend. For MLflow, set `ui_url` when you
-track to a local database, or use an HTTP(S) `tracking_uri`; see
-[MLflow](tracking-mlflow.md). Without a link, the run details are still shown.
+Runs, metrics, parameters, and links come from the tracking backend that each
+record resolves, whether CSV, MLflow, W&B, or a
+[custom backend](tracking-custom.md); the dashboard has no backend-specific
+code. Records that share a backend configuration are queried once.
+
+A run's link label names its backend, for example **Open in mlflow**. Links
+appear when the backend provides an HTTP(S) URL for the run. For MLflow, set
+`ui_url` when you track to a local database, or use an HTTP(S) `tracking_uri`;
+see [MLflow](tracking-mlflow.md). Without a link, the run details are still
+shown.
 
 ## Try it on the Digits example
 

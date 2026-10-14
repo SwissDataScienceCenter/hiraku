@@ -6,20 +6,21 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.dashboard.data import (
+    RUN_COLUMNS,
     arrow_frame,
-    backend_label,
     default_metric,
     execution_order,
     load,
     metric_names,
-    plot_points,
+    plot_frame,
     record_paths,
     record_rows,
     run_rows,
     run_text,
     safe_url,
-    subtree_ids,
+    subtree,
     tree_rows,
+    within,
 )
 from hiraku.errors import BackendError
 from hiraku.record import Record
@@ -168,12 +169,14 @@ def test_tree_rows_treat_records_with_missing_parent_as_roots() -> None:
     assert "loss" not in rows[0]
 
 
-def test_subtree_ids(project: HirakuConfig) -> None:
-    records = load(project).records
+def test_subtree_selects_descendants_by_record_path(project: HirakuConfig) -> None:
+    runs_df = arrow_frame(run_rows(load(project)), RUN_COLUMNS)
 
-    assert subtree_ids(records, "root") == {"root", "a", "a1", "b"}
-    assert subtree_ids(records, "a") == {"a", "a1"}
-    assert subtree_ids(records, "b") == {"b"}
+    assert subtree(runs_df, "root/a")["run"].tolist() == ["r0", "r2", "r3"]
+    assert subtree(runs_df, "root/b")["run"].tolist() == ["r1", "r4"]
+    assert subtree(runs_df, None).empty
+    # A sibling whose ID extends another's is not its descendant.
+    assert not within("root/ab", "root/a")
 
 
 def test_execution_order_breaks_ties_by_id_and_puts_untimed_runs_last() -> None:
@@ -187,38 +190,27 @@ def test_execution_order_breaks_ties_by_id_and_puts_untimed_runs_last() -> None:
     assert [run.id for run in execution_order(runs)] == ["a", "b", "untimed"]
 
 
-def test_plot_points_restart_numbering_within_the_given_runs(
-    project: HirakuConfig,
-) -> None:
-    loaded = load(project)
-    scoped = [run for run in loaded.runs if run.record_id in {"a", "a1"}]
+def test_plot_frame_numbers_runs_and_skips_unusable_values() -> None:
+    pytest.importorskip("pyarrow")
+    loss = ["0.5", "nan", "n/a", None, 0.25]
+    runs_df = arrow_frame(
+        [
+            {"run": f"r{index}", "record": "a", "started": None, "metric.loss": value}
+            for index, value in enumerate(loss)
+        ],
+        RUN_COLUMNS,
+    )
 
-    points, missing = plot_points(scoped, "loss")
+    points, missing = plot_frame(runs_df, "loss")
 
-    assert [(point["number"], point["run"]) for point in points] == [
-        (1, "r0"),
-        (2, "r2"),
-        (3, "r3"),
-    ]
-    assert missing == 0
-
-
-def test_plot_points_skip_missing_and_non_numeric_values() -> None:
-    runs = [
-        Run(id="a", metrics={"loss": "0.5"}),
-        Run(id="b", metrics={"loss": "nan"}),
-        Run(id="c", metrics={"loss": "n/a"}),
-        Run(id="d", metrics={}),
-        Run(id="e", metrics={"loss": 0.25}),
-    ]
-
-    points, missing = plot_points(runs, "loss")
-
-    assert [(point["number"], point["value"]) for point in points] == [
-        (1, 0.5),
-        (5, 0.25),
+    assert points[["number", "run", "value"]].values.tolist() == [
+        [1, "r0", 0.5],
+        [5, "r4", 0.25],
     ]
     assert missing == 3
+    assert plot_frame(runs_df, "accuracy")[1] == 5
+    empty, none_missing = plot_frame(arrow_frame([], RUN_COLUMNS), "loss")
+    assert empty.empty and none_missing == 0
 
 
 def test_default_metric_prefers_declared_metrics() -> None:
@@ -255,19 +247,6 @@ def test_run_text_renders_provenance_params_and_metrics() -> None:
         "metrics:\n"
         "  loss: 0.5\n"
     )
-
-
-@pytest.mark.parametrize(
-    ("source", "label"),
-    [
-        ("mlflow", "Open in MLflow"),
-        ("wandb", "Open in W&B"),
-        ("csv", "Open in tracking backend"),
-        (None, "Open in tracking backend"),
-    ],
-)
-def test_backend_label(source: str | None, label: str) -> None:
-    assert backend_label(source) == label
 
 
 @pytest.mark.parametrize(

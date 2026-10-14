@@ -75,19 +75,6 @@ def children(records: Iterable[Record]) -> dict[str | None, list[str]]:
     return tree
 
 
-def subtree_ids(records: Iterable[Record], record_id: str) -> set[str]:
-    """Return ``record_id`` and all of its descendants."""
-    tree = children(records)
-    found: set[str] = set()
-    stack = [record_id]
-    while stack:
-        current = stack.pop()
-        if current not in found:
-            found.add(current)
-            stack.extend(tree.get(current, ()))
-    return found
-
-
 def record_paths(records: Iterable[Record]) -> dict[str, str]:
     """Map each record ID to its ancestry, such as ``root/a/a1``.
 
@@ -215,32 +202,6 @@ def _row(
     }
 
 
-def plot_points(
-    runs: Iterable[Run], metric: str | None
-) -> tuple[list[dict[str, Any]], int]:
-    """Number runs 1..N by execution order and return plottable points.
-
-    Returns the points and how many runs lacked a numeric ``metric`` value.
-    """
-    points: list[dict[str, Any]] = []
-    missing = 0
-    for number, run in enumerate(execution_order(runs), start=1):
-        value = metric_value(run, metric)
-        if value is None:
-            missing += 1
-            continue
-        points.append(
-            {
-                "number": number,
-                "value": value,
-                "run": run.id,
-                "record": run.record_id,
-                "started": run.timestamp.isoformat() if run.timestamp else "",
-            }
-        )
-    return points, missing
-
-
 def run_text(run: Run) -> str:
     """Render the run's provenance, parameters, and metrics as YAML."""
     return dump_yaml(
@@ -254,6 +215,18 @@ def run_text(run: Run) -> str:
             "metrics": dict(run.metrics),
         }
     )
+
+
+RUN_COLUMNS = (
+    "run",
+    "record",
+    "record_path",
+    "source",
+    "started",
+    "entrypoint",
+    "commit",
+    "url",
+)
 
 
 def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
@@ -302,30 +275,67 @@ def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
     ]
 
 
-def arrow_frame(rows: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
+def arrow_frame(
+    rows: Sequence[Mapping[str, Any]], columns: Sequence[str] = ()
+) -> pd.DataFrame:
     """Return ``rows`` as a pandas DataFrame backed by Arrow columns.
 
-    Backends report values loosely (MLflow parameters are strings, W&B keeps
-    native types), so a column Arrow cannot type consistently becomes text.
+    ``columns`` are always present, so an empty table keeps its schema. Each
+    tracking backend reports values in its own types, so a column Arrow cannot
+    type consistently becomes text.
     """
     import pandas as pd
     import pyarrow as pa
 
-    names = list(dict.fromkeys(name for row in rows for name in row))
-    columns = {}
+    names = list(dict.fromkeys([*columns, *(name for row in rows for name in row)]))
+    arrays = {}
     for name in names:
         values = [row.get(name) for row in rows]
         try:
-            columns[name] = pa.array(values)
+            arrays[name] = pa.array(values)
         except (pa.ArrowInvalid, pa.ArrowTypeError):
-            columns[name] = pa.array([None if v is None else str(v) for v in values])
-    return pa.table(columns).to_pandas(types_mapper=pd.ArrowDtype)
+            arrays[name] = pa.array([None if v is None else str(v) for v in values])
+    return pa.table(arrays).to_pandas(types_mapper=pd.ArrowDtype)
 
 
-def backend_label(source: str | None) -> str:
-    """Return the link label for a tracking backend name."""
-    names = {"mlflow": "MLflow", "wandb": "W&B"}
-    return f"Open in {names.get(source or '', 'tracking backend')}"
+def within(path: str, ancestor: str) -> bool:
+    """Return whether record ``path`` is ``ancestor`` or lies below it."""
+    return f"{path}/".startswith(f"{ancestor}/")
+
+
+def subtree(runs_df: pd.DataFrame, ancestor: str | None) -> pd.DataFrame:
+    """Return the rows of ``runs_df`` whose record lies in ``ancestor``'s subtree."""
+    if ancestor is None or runs_df.empty:
+        return runs_df.iloc[0:0]
+    return runs_df[runs_df["record_path"].map(lambda path: within(path, ancestor))]
+
+
+def plot_frame(runs_df: pd.DataFrame, metric: str | None) -> tuple[pd.DataFrame, int]:
+    """Number runs 1..N in row order and keep those with a finite ``metric``.
+
+    Returns the plot data and how many runs lacked a numeric value.
+    """
+    import pandas as pd
+
+    column = f"metric.{metric}"
+    values = (
+        pd.to_numeric(runs_df[column], errors="coerce")
+        if column in runs_df
+        else pd.Series(None, index=runs_df.index)
+    )
+    frame = pd.DataFrame(
+        {
+            "number": range(1, len(runs_df) + 1),
+            "run": runs_df["run"].astype(str),
+            "record": runs_df["record"].astype(str),
+            "started": runs_df["started"].map(
+                lambda started: "" if pd.isna(started) else started.isoformat()
+            ),
+            "value": values.astype("float64"),
+        }
+    )
+    plotted = frame[frame["value"].map(math.isfinite)].reset_index(drop=True)
+    return plotted, len(frame) - len(plotted)
 
 
 def safe_url(url: str | None) -> str | None:

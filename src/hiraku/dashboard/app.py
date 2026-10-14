@@ -31,19 +31,21 @@ def _():
         theme_css,
     )
     from hiraku.dashboard.data import (
+        RUN_COLUMNS,
         arrow_frame,
-        backend_label,
         children,
         default_metric,
         load,
         metric_names,
-        plot_points,
+        plot_frame,
+        record_paths,
         record_rows,
         run_rows,
         run_text,
         safe_url,
-        subtree_ids,
+        subtree,
         tree_rows,
+        within,
     )
 
     _root = os.environ.get("HIRAKU_PROJECT_ROOT")
@@ -60,7 +62,6 @@ def _():
     return (
         alt,
         arrow_frame,
-        backend_label,
         children,
         config,
         default_metric,
@@ -70,17 +71,20 @@ def _():
         metric_names,
         mo,
         palette,
-        plot_points,
+        plot_frame,
+        record_paths,
         record_rows,
         requested_record,
+        RUN_COLUMNS,
         run_rows,
         run_text,
         safe_url,
         section_body,
         section_heading,
-        subtree_ids,
+        subtree,
         theme_css,
         tree_rows,
+        within,
     )
 
 
@@ -128,14 +132,15 @@ def _(children, config, default_metric, load, mo, refresh, requested_record):
 
 
 @app.cell
-def _(arrow_frame, project, record_rows, run_rows):
+def _(RUN_COLUMNS, arrow_frame, project, record_paths, record_rows, run_rows):
     # Arrow-backed tables for your own cells or marimo's AI assistant (mention
     # @runs_df and @records_df in its chat). runs_df has one row per run with
     # metric.* and param.* columns; record_path places runs and records in the
     # tree, and records_df lists each record's declared metrics.
-    runs_df = arrow_frame(run_rows(project))
+    runs_df = arrow_frame(run_rows(project), RUN_COLUMNS)
     records_df = arrow_frame(record_rows(project.records))
-    return records_df, runs_df
+    paths = record_paths(project.records)
+    return paths, records_df, runs_df
 
 
 @app.cell
@@ -187,20 +192,18 @@ def _(initial_record, mo, project, section_body, tree_metric, tree_rows):
 
 
 @app.cell
-def _(get_scope, project, runs_by_id, set_scope, subtree_ids, tree):
+def _(get_scope, paths, runs_by_id, runs_df, set_scope, subtree, tree, within):
     _key = tree.value[0]["key"] if tree.value else f"record:{get_scope()}"
     _kind, _, _identifier = _key.partition(":")
     selected_run = runs_by_id.get(_identifier) if _kind == "run" else None
     scope = _identifier if _kind == "record" else get_scope()
     # Keep comparing against the chosen record unless the run lies outside it.
     if selected_run is not None and (
-        scope is None
-        or selected_run.record_id not in subtree_ids(project.records, scope)
+        scope is None or not within(paths[selected_run.record_id], paths[scope])
     ):
         scope = selected_run.record_id
     set_scope(scope)
-    scoped_ids = subtree_ids(project.records, scope) if scope else set()
-    scoped_runs = [run for run in project.runs if run.record_id in scoped_ids]
+    scoped_runs = subtree(runs_df, paths.get(scope))
     return scope, scoped_runs, selected_run
 
 
@@ -212,7 +215,6 @@ def _(section_heading):
 
 @app.cell
 def _(
-    backend_label,
     html,
     mo,
     project,
@@ -225,10 +227,11 @@ def _(
         _content = mo.md("Select a run in the tree to see its details.")
     else:
         _url = safe_url(selected_run.url)
-        _label = backend_label(project.sources.get(selected_run.id))
+        # The link and the source name come from the project's tracking backend.
+        _source = project.sources.get(selected_run.id) or "tracking backend"
         _content = mo.vstack(
             [
-                mo.md(f"[{_label} ↗]({_url})") if _url else mo.md(""),
+                mo.md(f"[Open in {_source} ↗]({_url})") if _url else mo.md(""),
                 mo.Html(
                     f'<pre class="hk-run-text">{html.escape(run_text(selected_run))}'
                     "</pre>"
@@ -259,22 +262,22 @@ def _(
     metric,
     mo,
     palette,
-    plot_points,
+    plot_frame,
     scope,
     scoped_runs,
     section_body,
     selected_run,
 ):
-    _points, _missing = plot_points(scoped_runs, metric.value)
+    _points, _missing = plot_frame(scoped_runs, metric.value)
     _notes = [
         f"{len(scoped_runs)} runs under **{scope}**, numbered by execution order."
     ]
     if _missing:
         _notes.append(f"{_missing} without a numeric `{metric.value}` are not shown.")
-    if not _points:
+    if _points.empty:
         _chart = mo.md("No runs to plot.")
     else:
-        _base = alt.Chart(alt.Data(values=_points)).encode(
+        _base = alt.Chart(_points).encode(
             x=alt.X(
                 "number:Q",
                 title="Run number (execution order)",
