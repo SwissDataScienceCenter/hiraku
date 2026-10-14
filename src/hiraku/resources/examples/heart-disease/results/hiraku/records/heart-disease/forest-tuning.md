@@ -5,6 +5,6 @@ type: diagnostic
 status: concluded
 decision: supports
 ---
-## Tune tree depth
+## Compare validation splits
 
-These illustrative runs explore a smaller tree depth and more estimators.
+These illustrative runs use a validation fraction of 0.3 instead of 0.2.

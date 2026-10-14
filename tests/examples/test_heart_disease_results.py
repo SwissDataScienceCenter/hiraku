@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import runpy
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -45,3 +46,21 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     result = runner.invoke(main, ["runs", "--record", forest.id, "--all", "--json"])
     assert result.exit_code == 0, result.output
     assert len(json.loads(result.output)) == 9
+    training = runpy.run_path(str(project / "train.py"))
+    training["append_run"](
+        project / "runs.csv",
+        {
+            "id": "new-training-run",
+            "record_id": forest.id,
+            "timestamp": "2026-01-02T00:00:00Z",
+            "entrypoint": "train",
+            "param.model": "random_forest",
+            "param.seed": "4",
+            "param.validation_fraction": "0.2",
+            "metric.val/log_loss": "0.4",
+            "metric.val/accuracy": "0.8",
+            "commit": "",
+            "git_state": "",
+        },
+    )
+    assert len(forest.resolve_tracking_backend(config=config).list_runs()) == 10
