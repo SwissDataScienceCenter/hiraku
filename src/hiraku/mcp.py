@@ -7,6 +7,13 @@ import mimetypes
 from typing import Any
 from urllib.parse import quote, unquote
 
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import (
+    ResourceError,
+    ToolError,
+    UnexpectedResourceError,
+    UnexpectedToolError,
+)
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
@@ -53,13 +60,6 @@ def create_server(config: HirakuConfig | None = None) -> Any:
     The MCP SDK is a regular Hiraku dependency. Resources are read afresh on
     each request so external edits and tool mutations remain visible.
     """
-    from mcp.server.mcpserver import MCPServer
-    from mcp.server.mcpserver.exceptions import (
-        ResourceError,
-        ToolError,
-        UnexpectedToolError,
-    )
-
     selected = config or HirakuConfig.discover()
 
     class ProjectMCP(MCPServer):
@@ -77,7 +77,13 @@ def create_server(config: HirakuConfig | None = None) -> Any:
                 raise
 
         async def read_resource(self, uri: Any, context: Any = None) -> Any:
-            contents = await super().read_resource(uri, context)
+            try:
+                contents = await super().read_resource(uri, context)
+            except UnexpectedResourceError as exc:
+                # As for tools, keep the reason a Hiraku resource is unavailable.
+                if isinstance(exc.__cause__, HirakuError):
+                    raise ResourceError(str(exc.__cause__)) from exc.__cause__
+                raise
             # Source templates contain many file types; MIME depends on the URI.
             if str(uri).startswith("hiraku://sources/"):
                 mime = mimetypes.guess_type(unquote(str(uri)))[0]

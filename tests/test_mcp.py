@@ -120,6 +120,8 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
             "hiraku://actions/record/propose",
         ]:
             assert list(await server.read_resource(uri))[0].content
+        with pytest.raises(ResourceError, match="'missing' not found"):
+            await server.read_resource("hiraku://records/missing")
         prompt = await server.get_prompt(
             "propose_implementation",
             {
