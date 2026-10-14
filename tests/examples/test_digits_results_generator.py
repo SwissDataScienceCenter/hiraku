@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import runpy
 import sqlite3
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -58,9 +59,10 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
 
 def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
     pytest.importorskip("mlflow")
-    monkeypatch.setenv("UV_OFFLINE", "1")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://invalid.example")
     monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "unrelated")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", sys.prefix)
+    monkeypatch.setenv("UV_NO_SYNC", "1")
     output = tmp_path / "results"
     generator["generate_results"](output)
     assert {

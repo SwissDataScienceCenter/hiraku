@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import runpy
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -118,7 +119,8 @@ def test_generator_does_not_publish_failed_batch(generator, tmp_path, monkeypatc
 
 
 def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
-    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", sys.prefix)
+    monkeypatch.setenv("UV_NO_SYNC", "1")
     output = tmp_path / "results"
     generator["generate_results"](output)
     assert {
