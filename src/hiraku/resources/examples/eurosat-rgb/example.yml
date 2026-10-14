@@ -1,0 +1,2 @@
+id: eurosat-rgb
+description: Compare two classifiers on the EuroSAT RGB dataset with Weights & Biases tracking backend.
