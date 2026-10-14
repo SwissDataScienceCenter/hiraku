@@ -869,5 +869,23 @@ def run_list(
         click.echo(_table(columns, rows))
 
 
+@main.command("dashboard")
+@click.option("--record", "record_id", help="Record selected when the page opens.")
+@click.option("--port", type=click.IntRange(1, 65535), default=8765, show_default=True)
+@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
+@click.pass_obj
+def dashboard_command(
+    state: CLIContext, record_id: str | None, port: int, no_browser: bool
+) -> None:
+    """Browse records and tracked runs in a local, read-only dashboard."""
+    from .dashboard.launcher import serve_dashboard
+
+    exit_code = serve_dashboard(
+        state.config, record_id=record_id, port=port, no_browser=no_browser
+    )
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
+
+
 if __name__ == "__main__":
     main()
