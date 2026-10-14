@@ -89,6 +89,15 @@ You can list the same runs using Hiraku:
 hiraku runs --record digits --all
 ```
 
+Or browse them, with a per-run plot and links into the MLflow UI, in the
+[dashboard](../../guides/dashboard.md). Add
+`ui_url: http://127.0.0.1:5000` to the root record's `tracking_backend` so
+each run links to the MLflow UI started above:
+
+```bash
+hiraku dashboard --record digits
+```
+
 ??? info "Example run results"
     The table is a compact, illustrative view of final MLflow values. Click a
     column heading to sort it; full epoch histories remain available in MLflow.
