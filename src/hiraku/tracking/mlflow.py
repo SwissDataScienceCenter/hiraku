@@ -97,10 +97,27 @@ class MLflowBackend(TrackingBackend):
                     return []
                 experiment_ids = [experiment.experiment_id]
             else:
-                experiment_ids = [
-                    item.experiment_id for item in client.search_experiments()
-                ]
-            native_runs = client.search_runs(experiment_ids=experiment_ids)
+                experiment_ids = []
+                token = None
+                while True:
+                    page = client.search_experiments(page_token=token)
+                    experiment_ids.extend(item.experiment_id for item in page)
+                    token = getattr(page, "token", None)
+                    if not token:
+                        break
+            if not experiment_ids:
+                return []
+            # MLflow returns at most one page of runs per search call.
+            native_runs: list[Any] = []
+            token = None
+            while True:
+                page = client.search_runs(
+                    experiment_ids=experiment_ids, max_results=1000, page_token=token
+                )
+                native_runs.extend(page)
+                token = getattr(page, "token", None)
+                if not token:
+                    break
             runs: list[Run] = []
             for native in native_runs:
                 info, data = native.info, native.data
