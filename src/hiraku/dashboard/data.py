@@ -7,10 +7,10 @@ tested without a notebook runtime.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from ..config import HirakuConfig
@@ -18,6 +18,9 @@ from ..io import dump_yaml
 from ..record import Record, list_records
 from ..run import Run
 from ..tracking import select_backend
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 _LAST = datetime.max.replace(tzinfo=UTC)
 
@@ -86,6 +89,29 @@ def subtree_ids(records: Iterable[Record], record_id: str) -> set[str]:
     return found
 
 
+def record_paths(records: Iterable[Record]) -> dict[str, str]:
+    """Map each record ID to its ancestry, such as ``root/a/a1``.
+
+    Records whose parent is missing are roots, as in :func:`children`. Paths
+    are built with a loop and reused for shared ancestors, so depth is unbounded.
+    """
+    by_id = {record.id: record for record in records}
+    paths: dict[str, str] = {}
+    for record in by_id.values():
+        chain: list[str] = []
+        seen: set[str] = set()
+        current = record.id
+        while current in by_id and current not in paths and current not in seen:
+            chain.append(current)
+            seen.add(current)
+            current = by_id[current].parent_id
+        prefix = paths.get(current)
+        for identifier in reversed(chain):
+            prefix = identifier if prefix is None else f"{prefix}/{identifier}"
+            paths[identifier] = prefix
+    return paths
+
+
 def execution_order(runs: Iterable[Run]) -> list[Run]:
     """Sort runs by start time; ties by ID, missing timestamps last."""
     return sorted(runs, key=lambda run: (run.timestamp or _LAST, run.id))
@@ -134,8 +160,10 @@ def tree_rows(
         runs_by_record.setdefault(str(run.record_id), []).append(run)
     tree = children(records)
     rows: list[dict[str, Any]] = []
-
-    def visit(record_id: str, depth: int) -> None:
+    # An explicit stack keeps arbitrarily deep trees clear of the recursion limit.
+    stack = [(root, 0) for root in reversed(tree.get(None, []))]
+    while stack:
+        record_id, depth = stack.pop()
         record = by_id[record_id]
         rows.append(
             _row(
@@ -164,11 +192,7 @@ def tree_rows(
             )
             if metric:
                 rows[-1][metric] = metric_value(run, metric)
-        for child in tree.get(record.id, ()):
-            visit(child, depth + 1)
-
-    for root in tree.get(None, ()):
-        visit(root, 0)
+        stack.extend((child, depth + 1) for child in reversed(tree.get(record.id, [])))
     return rows
 
 
@@ -231,6 +255,72 @@ def run_text(run: Run) -> str:
             "metrics": dict(run.metrics),
         }
     )
+
+
+def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
+    """Return one flat row per run, in execution order, for tabular analysis.
+
+    Metrics and parameters become ``metric.<name>`` and ``param.<name>`` columns,
+    and ``record_path`` places the run's record in the tree.
+    """
+    paths = record_paths(project.records)
+    return [
+        {
+            "run": run.id,
+            "record": run.record_id,
+            "record_path": paths.get(str(run.record_id)),
+            "source": project.sources.get(run.id),
+            "started": run.timestamp,
+            "entrypoint": run.entrypoint,
+            "commit": run.commit,
+            "url": run.url,
+            **{f"metric.{name}": value for name, value in run.metrics.items()},
+            **{f"param.{name}": value for name, value in run.params.items()},
+        }
+        for run in execution_order(project.runs)
+    ]
+
+
+def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
+    """Return one row per record in tree order, with its declared metrics."""
+    paths = record_paths(records)
+    by_id = {record.id: record for record in records}
+    return [
+        {
+            "record": record.id,
+            "parent": record.parent_id,
+            "record_path": paths[record.id],
+            "type": record.type,
+            "status": record.status,
+            "decision": record.decision,
+            "metrics": "; ".join(
+                f"{metric.name}: {metric.direction}" for metric in record.metrics or ()
+            )
+            or None,
+            "description": record.markdown.strip() or None,
+        }
+        for record in sorted(by_id.values(), key=lambda record: paths[record.id])
+    ]
+
+
+def arrow_frame(rows: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
+    """Return ``rows`` as a pandas DataFrame backed by Arrow columns.
+
+    Backends report values loosely (MLflow parameters are strings, W&B keeps
+    native types), so a column Arrow cannot type consistently becomes text.
+    """
+    import pandas as pd
+    import pyarrow as pa
+
+    names = list(dict.fromkeys(name for row in rows for name in row))
+    columns = {}
+    for name in names:
+        values = [row.get(name) for row in rows]
+        try:
+            columns[name] = pa.array(values)
+        except (pa.ArrowInvalid, pa.ArrowTypeError):
+            columns[name] = pa.array([None if v is None else str(v) for v in values])
+    return pa.table(columns).to_pandas(types_mapper=pd.ArrowDtype)
 
 
 def backend_label(source: str | None) -> str:

@@ -6,12 +6,16 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.dashboard.data import (
+    arrow_frame,
     backend_label,
     default_metric,
     execution_order,
     load,
     metric_names,
     plot_points,
+    record_paths,
+    record_rows,
+    run_rows,
     run_text,
     safe_url,
     subtree_ids,
@@ -30,6 +34,84 @@ def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:
     assert sorted(run.id for run in loaded.runs) == ["r0", "r1", "r2", "r3", "r4"]
     assert set(loaded.sources.values()) == {"csv"}
     assert loaded.errors == []
+
+
+def test_run_rows_flatten_runs_in_execution_order(project: HirakuConfig) -> None:
+    rows = run_rows(load(project))
+
+    assert [row["run"] for row in rows] == ["r0", "r1", "r2", "r3", "r4"]
+    first = rows[0]
+    assert first["record"] == "a"
+    assert first["record_path"] == "root/a"
+    assert first["source"] == "csv"
+    assert first["started"] == datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
+    assert first["entrypoint"] == "train"
+    assert float(first["metric.loss"]) == 0.9
+    assert rows[2]["record_path"] == "root/a/a1"
+    assert rows[-1]["started"] is None
+
+
+def test_record_rows_list_the_tree_with_declared_metrics(
+    project: HirakuConfig,
+) -> None:
+    rows = record_rows(load(project).records)
+
+    assert [(row["record"], row["parent"], row["record_path"]) for row in rows] == [
+        ("root", None, "root"),
+        ("a", "root", "root/a"),
+        ("a1", "a", "root/a/a1"),
+        ("b", "root", "root/b"),
+    ]
+    assert rows[0]["metrics"] == "loss: minimize"
+    assert rows[1]["metrics"] is None
+
+
+def test_record_paths_treat_missing_parents_as_roots_and_survive_cycles() -> None:
+    records = [
+        Record(id="orphan", parent_id="gone"),
+        Record(id="child", parent_id="orphan"),
+        Record(id="x", parent_id="y"),
+        Record(id="y", parent_id="x"),
+    ]
+
+    paths = record_paths(records)
+
+    assert paths["orphan"] == "orphan"
+    assert paths["child"] == "orphan/child"
+    assert {paths["x"], paths["y"]} == {"y/x", "y"}
+
+
+def test_deep_trees_do_not_hit_the_recursion_limit() -> None:
+    depth = 5000
+    records = [
+        Record(id=f"r{index}", parent_id=f"r{index - 1}" if index else None)
+        for index in range(depth)
+    ]
+
+    rows = tree_rows(records, [], None)
+    paths = record_paths(records)
+
+    assert [row["depth"] for row in rows] == list(range(depth))
+    assert paths[f"r{depth - 1}"].count("/") == depth - 1
+
+
+def test_arrow_frame_types_columns_and_falls_back_to_text() -> None:
+    pytest.importorskip("pyarrow")
+    pd = pytest.importorskip("pandas")
+
+    frame = arrow_frame(
+        [
+            {"run": "r0", "metric.loss": 0.5, "param.lr": "0.1"},
+            {"run": "r1", "metric.loss": 1, "param.lr": 0.2, "param.seed": 3},
+        ]
+    )
+
+    assert list(frame.columns) == ["run", "metric.loss", "param.lr", "param.seed"]
+    assert all(isinstance(dtype, pd.ArrowDtype) for dtype in frame.dtypes)
+    assert str(frame["metric.loss"].dtype) == "double[pyarrow]"
+    assert list(frame["param.lr"]) == ["0.1", "0.2"]
+    assert frame["param.seed"].isna().tolist() == [True, False]
+    assert arrow_frame([]).empty
 
 
 def test_load_reports_unavailable_source_without_failing(

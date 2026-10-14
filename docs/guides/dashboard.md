@@ -41,6 +41,51 @@ record is selected. Press Ctrl-C to stop the server.
 
 Use **Refresh** to re-read records and tracking sources after new launches.
 
+## See and change the notebook
+
+The dashboard is a [marimo](https://marimo.io) notebook. Pass `--include-code`
+to let the read-only page show each cell's code from marimo's menu.
+
+To customize the dashboard, copy the notebook into the project and open it in
+the marimo editor:
+
+```bash
+hiraku dashboard --init          # creates hiraku/dashboard/app.py
+hiraku dashboard --edit          # edits that copy
+hiraku dashboard --init --edit   # both at once
+```
+
+Once the copy exists, `hiraku dashboard` serves it instead of the bundled
+notebook. Commit it with the project; marimo's caches in
+`hiraku/dashboard/__marimo__/` are ignored. `--init` refuses to overwrite an
+existing copy, and `--edit` requires one. The editor runs arbitrary code, so
+unlike the read-only page it is protected by marimo's access token, which is
+part of the URL it prints and opens.
+
+The copy imports its data and styling helpers from the installed
+`hiraku.dashboard` package. You can also open it directly with
+`marimo edit hiraku/dashboard/app.py`; it then finds its project from its own
+location.
+
+The notebook also defines two pandas DataFrames backed by Apache Arrow:
+
+`runs_df`
+:   One row per run in execution order: `run`, `record`, `record_path`,
+    `source`, `started`, `entrypoint`, `commit`, `url`, plus a
+    `metric.<name>` and `param.<name>` column for each metric and parameter.
+
+`records_df`
+:   One row per record in tree order: `record`, `parent`, `record_path`,
+    `type`, `status`, `decision`, `metrics` (declared names and directions),
+    and `description` (the record's Markdown).
+
+`record_path` is the record's ancestry, such as `digits/weak-l2`, so
+`runs_df[runs_df.record_path.str.startswith("digits/")]` selects a subtree.
+Use these tables in your own cells, or mention `@runs_df` and `@records_df` in
+marimo's AI assistant to ask questions about your runs. MLflow stores
+parameters as text, so cast them before comparing numbers, for example
+`runs_df["param.alpha"].astype(float)`.
+
 ## Links to tracking backends
 
 Run links come from the tracking backend. For MLflow, set `ui_url` when you

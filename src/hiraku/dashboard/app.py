@@ -2,7 +2,11 @@
 # [tool.marimo.display]
 # theme = "system"
 # ///
-"""Bundled Hiraku dashboard. Start it with ``hiraku dashboard``."""
+"""Bundled Hiraku dashboard. Start it with ``hiraku dashboard``.
+
+``hiraku dashboard --init`` copies this notebook into the project and
+``hiraku dashboard --edit`` opens that copy in the marimo editor.
+"""
 
 import marimo
 
@@ -27,25 +31,35 @@ def _():
         theme_css,
     )
     from hiraku.dashboard.data import (
+        arrow_frame,
         backend_label,
         children,
         default_metric,
         load,
         metric_names,
         plot_points,
+        record_rows,
+        run_rows,
         run_text,
         safe_url,
         subtree_ids,
         tree_rows,
     )
 
-    config = HirakuConfig.load(Path(os.environ["HIRAKU_PROJECT_ROOT"]) / "hiraku.yml")
+    _root = os.environ.get("HIRAKU_PROJECT_ROOT")
+    # A project copy opened with plain `marimo edit` finds its own project.
+    config = (
+        HirakuConfig.load(Path(_root) / "hiraku.yml")
+        if _root
+        else HirakuConfig.discover(mo.notebook_dir())
+    )
     requested_record = os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
     # Brand colours from theme.css that stay visible on light and dark pages;
     # the warning orange is reserved for the selected-run ring.
     palette = ["#5461a6", "#90ca42", "#848484", "#3b82f6", "#ef4444", "#10b981"]
     return (
         alt,
+        arrow_frame,
         backend_label,
         children,
         config,
@@ -57,7 +71,9 @@ def _():
         mo,
         palette,
         plot_points,
+        record_rows,
         requested_record,
+        run_rows,
         run_text,
         safe_url,
         section_body,
@@ -109,6 +125,17 @@ def _(children, config, default_metric, load, mo, refresh, requested_record):
     )
     get_scope, set_scope = mo.state(initial_record)
     return get_scope, initial_record, project, runs_by_id, set_scope, tree_metric
+
+
+@app.cell
+def _(arrow_frame, project, record_rows, run_rows):
+    # Arrow-backed tables for your own cells or marimo's AI assistant (mention
+    # @runs_df and @records_df in its chat). runs_df has one row per run with
+    # metric.* and param.* columns; record_path places runs and records in the
+    # tree, and records_df lists each record's declared metrics.
+    runs_df = arrow_frame(run_rows(project))
+    records_df = arrow_frame(record_rows(project.records))
+    return records_df, runs_df
 
 
 @app.cell
