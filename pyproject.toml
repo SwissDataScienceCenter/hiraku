@@ -19,6 +19,7 @@ dependencies = [
     "Click>=8.1",
     "pydantic>=2.13.5",
     "PyYAML>=6.0",
+    "mcp>=1.26,<2",
 ]
 
 [project.scripts]

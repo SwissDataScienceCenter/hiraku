@@ -71,7 +71,14 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
     monkeypatch.chdir(project)
     runner = CliRunner()
     invoke(runner, ["init", "--example", "autoresearch"])
-    git(project, "add", ".gitignore", "cpu_mock.py")
+    git(
+        project,
+        "add",
+        ".gitignore",
+        "cpu_mock.py",
+        ".mcp.json",
+        ".codex/config.toml",
+    )
     git(project, "commit", "-m", "add Hiraku autoresearch workflow")
 
     git(project, "switch", "-c", "autoresearch/sep10")
@@ -175,6 +182,13 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert "/hiraku/*" in gitignore
     assert "/.agents/" in gitignore
     assert "/.claude/" in gitignore
+    mcp_config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+    assert mcp_config["mcpServers"]["hiraku"] == {
+        "command": "hiraku",
+        "args": ["mcp"],
+    }
+    codex_config = (project / ".codex/config.toml").read_text(encoding="utf-8")
+    assert 'command = "hiraku"' in codex_config
     assert "/runs.csv" in gitignore
     assert (project / "program.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "program.md"

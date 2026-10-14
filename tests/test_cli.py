@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,16 @@ from hiraku.record import load_record
 
 def invoke(*args: str):
     return CliRunner().invoke(main, args, catch_exceptions=False)
+
+
+def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", None)
+    result = invoke("mcp")
+    assert result.exit_code == 1
+    assert "MCP SDK dependency" in result.output
+    assert invoke("--help").exit_code == 0
 
 
 def test_record_cli_lifecycle(tmp_path: Path, monkeypatch) -> None:

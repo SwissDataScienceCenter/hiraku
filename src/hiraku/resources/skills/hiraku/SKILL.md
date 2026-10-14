@@ -39,6 +39,14 @@ an entrypoint; instrumented code independently writes the resulting run to the t
 
 ## Main CLI entry points
 
+When the connected agent environment provides Hiraku MCP tools, use them for
+record and context CRUD, project resources, and attributed entrypoint launches.
+The MCP server uses the project directory selected by the host and applies the
+same Hiraku validation and persistence rules as the Python API. Use the CLI
+commands below when the relevant MCP tool is unavailable or the user asks for
+CLI commands. MCP tools may be listed under names such as `record_create`,
+`record_show`, or `context_list`.
+
 Prefer `--json` for state that will be inspected or verified programmatically.
 
 | Purpose | Main commands |

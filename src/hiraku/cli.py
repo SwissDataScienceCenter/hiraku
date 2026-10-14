@@ -234,6 +234,22 @@ def main(ctx: click.Context) -> None:
     ctx.ensure_object(CLIContext)
 
 
+@main.command("mcp")
+def mcp_command() -> None:
+    """Serve the Hiraku project discovered from the current directory over stdio."""
+    try:
+        from .mcp import create_server
+
+        server = create_server(HirakuConfig.discover())
+    except ModuleNotFoundError as exc:
+        if exc.name == "mcp" or (exc.name or "").startswith("mcp."):
+            raise click.ClickException(
+                "MCP support requires the MCP SDK dependency to be installed"
+            ) from exc
+        raise
+    server.run(transport="stdio")
+
+
 @main.command("init")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
 @click.option("--tracking-backend")

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import tomllib
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from importlib.resources import as_file, files
@@ -103,6 +105,7 @@ class ProjectInitializer:
             raise ProjectExistsError(f"Hiraku project already exists at {marker}")
         created_files: list[Path] = []
         created_dirs: list[Path] = []
+        replaced_files: dict[Path, bytes] = {}
         root_existed = project_root.exists()
         with ExitStack() as stack:
             overlay = cls._resolve_overlay(template, example, stack)
@@ -151,6 +154,9 @@ class ProjectInitializer:
                         created_dirs,
                     )
                 cls._apply_overlay(entries, project_root, created_files, created_dirs)
+                cls._install_mcp_configs(
+                    project_root, created_files, created_dirs, replaced_files
+                )
                 for name in ("launch.sh", "worktree.sh"):
                     dispatcher = config.dispatch_dir / name
                     if dispatcher.is_file():
@@ -161,6 +167,9 @@ class ProjectInitializer:
                     created_dirs=tuple(dict.fromkeys(created_dirs)),
                 )
             except Exception as exc:
+                for path, content in replaced_files.items():
+                    with suppress(OSError):
+                        atomic_write(path, content.decode("utf-8"))
                 for path in reversed(created_files):
                     path.unlink(missing_ok=True)
                 for path in sorted(
@@ -173,6 +182,90 @@ class ProjectInitializer:
                 raise ValidationError(
                     f"Could not initialize Hiraku project at {project_root}: {exc}"
                 ) from exc
+
+    @classmethod
+    def _install_mcp_configs(
+        cls,
+        project_root: Path,
+        created_files: list[Path],
+        created_dirs: list[Path],
+        replaced_files: dict[Path, bytes],
+    ) -> None:
+        """Register the stdio server for Claude Code and Codex project configs."""
+        claude_path = project_root / ".mcp.json"
+        claude_data: dict[str, object] = {}
+        if claude_path.is_symlink():
+            raise ValidationError(
+                f"MCP configuration cannot be a symbolic link: {claude_path}"
+            )
+        if claude_path.exists():
+            if not claude_path.is_file():
+                raise ValidationError(
+                    f"MCP configuration is not a regular file: {claude_path}"
+                )
+            original = claude_path.read_bytes()
+            try:
+                parsed = json.loads(original)
+            except (UnicodeError, json.JSONDecodeError) as exc:
+                raise ValidationError(
+                    f"Cannot merge MCP configuration {claude_path}: {exc}"
+                ) from exc
+            if not isinstance(parsed, dict):
+                raise ValidationError(
+                    f"MCP configuration must be a JSON object: {claude_path}"
+                )
+            claude_data = parsed
+        servers = claude_data.setdefault("mcpServers", {})
+        if not isinstance(servers, dict):
+            raise ValidationError(f"mcpServers must be a JSON object: {claude_path}")
+        if "hiraku" not in servers:
+            servers["hiraku"] = {"command": "hiraku", "args": ["mcp"]}
+            if claude_path.exists():
+                replaced_files[claude_path] = original
+            else:
+                cls._ensure_directory(claude_path.parent, created_dirs)
+                created_files.append(claude_path)
+            atomic_write(claude_path, json.dumps(claude_data, indent=2) + "\n")
+
+        codex_path = project_root / ".codex" / "config.toml"
+        codex_text = ""
+        if codex_path.parent.is_symlink():
+            raise ValidationError(
+                "MCP configuration directory cannot be a symbolic link: "
+                f"{codex_path.parent}"
+            )
+        if codex_path.is_symlink():
+            raise ValidationError(
+                f"MCP configuration cannot be a symbolic link: {codex_path}"
+            )
+        if codex_path.exists():
+            if not codex_path.is_file():
+                raise ValidationError(
+                    f"MCP configuration is not a regular file: {codex_path}"
+                )
+            original = codex_path.read_bytes()
+            try:
+                parsed_codex = tomllib.loads(original.decode("utf-8"))
+            except (UnicodeError, tomllib.TOMLDecodeError) as exc:
+                raise ValidationError(
+                    f"Cannot merge MCP configuration {codex_path}: {exc}"
+                ) from exc
+            if not isinstance(parsed_codex.get("mcp_servers", {}), dict):
+                raise ValidationError(f"mcp_servers must be a TOML table: {codex_path}")
+            if "hiraku" in parsed_codex.get("mcp_servers", {}):
+                return
+            replaced_files[codex_path] = original
+            codex_text = original.decode("utf-8")
+        else:
+            cls._ensure_directory(codex_path.parent, created_dirs)
+            created_files.append(codex_path)
+        suffix = "\n" if codex_text and not codex_text.endswith("\n") else ""
+        if codex_text and not codex_text.endswith("\n\n"):
+            suffix += "\n"
+        codex_text += (
+            f'{suffix}[mcp_servers.hiraku]\ncommand = "hiraku"\nargs = ["mcp"]\n'
+        )
+        atomic_write(codex_path, codex_text)
 
     @staticmethod
     def _resolve_overlay(
