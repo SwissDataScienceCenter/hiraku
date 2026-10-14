@@ -8,4 +8,5 @@ different datasets and tracking backends.
 - Add `--with-results` to `hiraku init --example heart-disease` for prepared records and measured CSV runs, ready to browse without training.
 - [Iris with Weights & Biases](iris-wandb/README.md) — a small classification example using the Iris dataset and W&amp;B.
 - [Digits with MLflow](digits-mlflow/README.md) — compare regularization strengths while logging learning curves to MLflow.
+- Digits also supports `--with-results`, `--with-generator`, and `--generate`, with six measured runs in a portable, metrics-only SQLite snapshot.
 - [Autoresearch](autoresearch/README.md) — add a Hiraku research loop and tracked dispatcher to the original autoresearch repository.
