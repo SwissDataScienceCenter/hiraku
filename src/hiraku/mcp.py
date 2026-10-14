@@ -25,8 +25,8 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .agent import load_context
 from .config import HirakuConfig
+from .context import load_context
 from .errors import GitError, HirakuError
 from .git import GitRepository
 from .record import Record, load_record

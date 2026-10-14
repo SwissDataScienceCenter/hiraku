@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from hiraku import agent
-from hiraku.agent import Context, list_contexts, load_context
+from hiraku import context
 from hiraku.config import HirakuConfig
+from hiraku.context import Context, list_contexts, load_context
 
 
 def test_context_registry(tmp_path: Path) -> None:
@@ -21,4 +21,4 @@ def test_context_registry(tmp_path: Path) -> None:
     "name", ["Program", "Action", "list_programs", "load_program", "load_action"]
 )
 def test_programs_and_actions_are_removed(name: str) -> None:
-    assert not hasattr(agent, name)
+    assert not hasattr(context, name)
