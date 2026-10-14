@@ -49,6 +49,7 @@ nav = [
         { "MLflow" = "guides/tracking-mlflow.md" },
         { "Custom Backend" = "guides/tracking-custom.md"}
       ] },
+      { "MCP server" = "guides/mcp.md" },
   ] },
   { "CLI" = "api/cli.md" },
   { "Python API" = [
