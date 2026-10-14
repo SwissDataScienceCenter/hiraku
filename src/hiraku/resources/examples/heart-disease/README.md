@@ -23,5 +23,5 @@ From that directory, launch the dashboard using the repository's uv environment:
 uv run --project /path/to/hiraku --extra dashboard hiraku dashboard
 ```
 
-Select `val/log_loss` for a running minimum, `val/accuracy` for a running maximum,
-or `duration` for dots without a best line. Click a dot to select its record.
+Select `val/log_loss` for a running minimum or `val/accuracy` for a running maximum.
+Click a dot to select its record.

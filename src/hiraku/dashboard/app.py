@@ -132,34 +132,48 @@ def record_tree(escape, mo, project_error, records, select_record, selected_id):
       .record-row.selected {background:#f0fdfa;border-color:#0f766e;}
     </style>"""
 
-    def branch(parent_id):
-        rows = []
-        for item in records:
-            if item.parent_id != parent_id:
-                continue
-            badges = " ".join(
-                f'<span class="badge">{escape(value)}</span>'
-                for value in (item.type, item.status, item.decision)
-                if value
-            )
-            button = mo.ui.button(
-                label=(
-                    button_style + '<span class="dot"></span>'
-                    f'<span class="record-id">{escape(item.id)}</span>{badges}'
-                ),
-                full_width=True,
-                on_click=lambda _, identifier=item.id: select_record(identifier),
-            )
-            tree_buttons[item.id] = button
-            selected = " selected" if item.id == selected_id else ""
-            rows.append(
-                f'<li><div class="record-row{selected}">{button.text}</div>'
-                f"{branch(item.id)}</li>"
-            )
-        return "<ul>" + "".join(rows) + "</ul>" if rows else ""
+    children = {}
+    for item in records:
+        children.setdefault(item.parent_id, []).append(item)
+    fragments = []
+    stack = []
+    stack.extend((item, False) for item in reversed(children.get(None, [])))
+    if stack:
+        fragments.append("<ul>")
+    while stack:
+        item, closing = stack.pop()
+        if closing:
+            fragments.append("</ul></li>")
+            continue
+        badges = " ".join(
+            f'<span class="badge">{escape(value)}</span>'
+            for value in (item.type, item.status, item.decision)
+            if value
+        )
+        button = mo.ui.button(
+            label=(
+                button_style + '<span class="dot"></span>'
+                f'<span class="record-id">{escape(item.id)}</span>{badges}'
+            ),
+            full_width=True,
+            on_click=lambda _, identifier=item.id: select_record(identifier),
+        )
+        tree_buttons[item.id] = button
+        selected = " selected" if item.id == selected_id else ""
+        fragments.append(f'<li><div class="record-row{selected}">{button.text}</div>')
+        nested = children.get(item.id, [])
+        if nested:
+            fragments.append("<ul>")
+            stack.append((item, True))
+            stack.extend((child, False) for child in reversed(nested))
+        else:
+            fragments.append("</li>")
+    if fragments:
+        fragments.append("</ul>")
+    tree_html = "".join(fragments)
 
     tree = (
-        mo.Html(f'{tree_style}<div class="record-tree">{branch(None)}</div>')
+        mo.Html(f'{tree_style}<div class="record-tree">{tree_html}</div>')
         if records
         else mo.md(project_error or "No records found.")
     )
