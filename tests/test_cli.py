@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
@@ -71,6 +72,17 @@ def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
     assert lines[0].split() == ["id", "parent", "type", "status"]
     assert lines[2].split() == ["child", "root"]
     assert lines[3].split() == ["root", "task", "active"]
+
+
+def test_record_list_with_no_records(tmp_path: Path, monkeypatch) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("record", "list")
+    assert result.exit_code == 0
+    lines = result.output.splitlines()
+    assert lines[0].split() == ["id", "parent", "type", "status"]
+    assert len(lines) == 2
 
 
 def test_record_cli_reparents_and_makes_root(tmp_path: Path, monkeypatch) -> None:
@@ -174,6 +186,34 @@ def test_generic_agent_commands_still_work(tmp_path: Path, monkeypatch) -> None:
         == 0
     )
     assert invoke("action", "delete", "record/review").exit_code == 0
+
+
+@pytest.mark.parametrize(
+    ("command", "header"),
+    [
+        ("context", ["id"]),
+        ("program", ["id"]),
+        ("action", ["entity", "id"]),
+    ],
+)
+def test_generic_list_with_no_entries(
+    command: str, header: list[str], tmp_path: Path, monkeypatch
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    directory = {
+        "context": config.contexts_dir,
+        "program": config.programs_dir,
+        "action": config.actions_dir,
+    }[command]
+    for path in directory.rglob("*.md"):
+        path.unlink()
+
+    result = invoke(command, "list")
+    assert result.exit_code == 0
+    lines = result.output.splitlines()
+    assert lines[0].split() == header
+    assert len(lines) == 2
 
 
 def test_edit_uses_stored_file(tmp_path: Path, monkeypatch) -> None:
