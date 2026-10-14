@@ -5,8 +5,9 @@ different datasets and tracking backends.
 
 - [Start from scratch](minimal/README.md) — initialize a minimal project with a ready-to-run local evaluation script.
 - [Heart Disease](heart-disease/README.md) — the recommended first walkthrough. It ships with a small dataset and training script, and uses CSV tracking.
-- Add `--with-results` to `hiraku init --example heart-disease` for prepared records and measured CSV runs, ready to browse without training.
+  - Add `--with-results` to `hiraku init --example heart-disease` for prepared records and measured CSV runs, ready to browse without training.
 - [Iris with Weights & Biases](iris-wandb/README.md) — a small classification example using the Iris dataset and W&amp;B.
 - [Digits with MLflow](digits-mlflow/README.md) — compare regularization strengths while logging learning curves to MLflow.
-- Digits also supports `--with-results`, `--with-generator`, and `--generate`, with six measured runs in a portable, metrics-only SQLite snapshot.
+  - Digits also supports `--with-results`, `--with-generator`, and `--generate`, with six measured runs in a portable, metrics-only SQLite snapshot.
+- [EuroSAT RGB](eurosat-rgb/README.md) — investigate image-specific architectural inductive biases with a flattened-image MLP baseline and follow-up experiments.
 - [Autoresearch](autoresearch/README.md) — add a Hiraku research loop and tracked dispatcher to the original autoresearch repository.
