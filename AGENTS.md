@@ -89,7 +89,7 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/launch.py` | Entrypoint argument rendering and dispatch execution |
 | `src/hiraku/tracking/` | Tracking backend adapters and run normalization |
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
-| `src/hiraku/agent.py` | Curated context records |
+| `src/hiraku/context.py` | Curated context records |
 | `src/hiraku/workflow.py` | Workflows: `workflow.md` records whose `start` and replies run on sessions |
 | `src/hiraku/session.py` | Workflow sessions: stored state and reply correlation |
 | `src/hiraku/mcp.py` | Stdio MCP server (`MCPServer`); `add_workflow_tools` adds the workflow and session tools, prompts, and resources |

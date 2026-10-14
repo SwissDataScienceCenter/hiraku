@@ -17,9 +17,9 @@ import yaml
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-from .agent import Context, list_contexts, load_context
 from .base import BaseRecord
 from .config import HirakuConfig
+from .context import Context, list_contexts, load_context
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .git import GitRepository
 from .io import dump_yaml

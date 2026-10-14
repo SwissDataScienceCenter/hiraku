@@ -15,9 +15,9 @@ from mcp import ClientSession, StdioServerParameters  # noqa: E402
 from mcp.client.stdio import stdio_client  # noqa: E402
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E402
 
-from hiraku.agent import load_context  # noqa: E402
 from hiraku.cli import main  # noqa: E402
 from hiraku.config import HirakuConfig  # noqa: E402
+from hiraku.context import load_context  # noqa: E402
 from hiraku.mcp import create_server  # noqa: E402
 from hiraku.record import load_record  # noqa: E402
 
