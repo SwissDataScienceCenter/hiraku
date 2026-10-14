@@ -63,3 +63,46 @@ def test_mlflow_backend_paginates_experiments_and_runs(tmp_path, monkeypatch) ->
 
     assert [run.id for run in backend._read_source_runs()] == ["r1", "r2"]
     assert calls == [None, "next"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "not-a-url",
+        "ftp://example.com",
+        "https://user:secret@example.com",
+        "https://example.com/path?query=1",
+        "https://example.com/path#fragment",
+    ],
+)
+def test_mlflow_backend_config_rejects_unsafe_ui_url(value: str) -> None:
+    with pytest.raises(BackendError, match="ui_url"):
+        MLflowBackendConfig(database="mlflow.db", ui_url=value)
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        ({"database": "mlflow.db"}, None),
+        (
+            {"database": "mlflow.db", "ui_url": "http://127.0.0.1:5000"},
+            "http://127.0.0.1:5000/#/experiments/e%2F1/runs/r1",
+        ),
+        (
+            {"tracking_uri": "https://mlflow.example.com/prefix/"},
+            "https://mlflow.example.com/prefix/#/experiments/e%2F1/runs/r1",
+        ),
+        (
+            {
+                "tracking_uri": "https://tracker.example.com",
+                "ui_url": "https://ui.example.com",
+            },
+            "https://ui.example.com/#/experiments/e%2F1/runs/r1",
+        ),
+        ({"tracking_uri": "https://user:secret@mlflow.example.com"}, None),
+    ],
+)
+def test_mlflow_backend_run_url(tmp_path, settings, expected) -> None:
+    backend = MLflowBackend(HirakuConfig.init(tmp_path), **settings)
+
+    assert backend._run_url("e/1", "r1") == expected

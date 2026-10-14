@@ -22,6 +22,21 @@ The record must already exist. The database path is relative to the Hiraku
 project root. For a remote server, specify `tracking_uri` instead of
 `database`; the options are mutually exclusive.
 
+Runs read from an HTTP(S) `tracking_uri` link to that server's web UI. For a
+local `database`, set `ui_url` to the address where you serve `mlflow ui`:
+
+```yaml
+tracking_backend:
+  type: mlflow
+  database: mlflow.db
+  experiment_name: my-task
+  ui_url: http://127.0.0.1:5000
+```
+
+`ui_url` must be an absolute HTTP(S) URL without credentials, query, or
+fragment; it may include a path prefix. Tracking URIs that contain credentials
+are never turned into links.
+
 ## Log from your script
 
 Set an absolute URI pointing to that same database before launch:
