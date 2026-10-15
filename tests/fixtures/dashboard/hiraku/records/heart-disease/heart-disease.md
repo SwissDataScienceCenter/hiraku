@@ -1,19 +1,16 @@
 ---
 id: heart-disease
+parent_id: null
+related_to: []
 type: task
-status: active
+status: concluded
 metrics:
-  - name: val/log_loss
-    direction: minimize
-  - name: val/accuracy
-    direction: maximize
+- name: val/log_loss
+  direction: minimize
+- name: val/accuracy
+  direction: maximize
 ---
 # Heart disease classification
 
-Can a random forest improve on a logistic regression baseline?
-
-This is a ready-to-browse dashboard fixture. The runs are **synthetic examples**,
-not measured results or clinical evidence. No training or network access is needed.
-
-Select an experiment to highlight its runs. Compare `val/log_loss` (lower is
-better) and `val/accuracy` (higher is better).
+Measured runs on the processed Cleveland dataset with seeds 1, 2 and 3.
+These small validation comparisons are not clinical evidence.

@@ -1,14 +1,27 @@
 ---
 id: random-forest
 parent_id: heart-disease
+related_to: []
 type: hypothesis
 status: concluded
-decision: supports
+entrypoints:
+  train:
+    command:
+    - uv
+    - run
+    - python
+    - train.py
+    args:
+      model: random_forest
+      validation_fraction: 0.2
 ---
-## Random forest
+## random-forest
 
-The illustrative runs improve both validation metrics over the baseline.
+Model: `random_forest`; validation fraction: 0.2; seeds: 1, 2, 3.
 
-- Compare all runs from the shared CSV source.
-- Click a baseline dot to navigate back to its record.
-- Select the tuning child to inspect the final improvements.
+Mean across the three runs:
+
+- `val/log_loss`: 0.42219747
+- `val/accuracy`: 0.79781421
+
+No statistical significance is claimed.
