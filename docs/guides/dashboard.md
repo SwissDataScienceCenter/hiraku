@@ -165,6 +165,28 @@ hiraku dashboard --record digits
 ```
 
 The dashboard reads the six runs directly from the bundled `mlflow.db`; an
-MLflow server is not required. See the
+MLflow server is not required. You can also try the other modes in that project:
+
+```bash
+hiraku dashboard --include-code --record digits
+hiraku dashboard --init --edit --record digits
+```
+
+The bundled configuration has no `ui_url`, so run details initially have no
+**Open in mlflow** link. To enable it, add this property under
+`tracking_backend` in `hiraku.yml`:
+
+```yaml
+ui_url: http://127.0.0.1:5000
+```
+
+Then start the UI in another terminal before refreshing the dashboard:
+
+```bash
+uv run mlflow ui --backend-store-uri sqlite:///mlflow.db \
+  --host 127.0.0.1 --port 5000
+```
+
+See the
 [Digits example](../examples/digits-mlflow/README.md) to inspect the runs in
 MLflow or generate fresh results.

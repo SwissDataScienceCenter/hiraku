@@ -25,10 +25,24 @@ hiraku init
 ```
 
 Check the examples for a more complete walkthrough:
+
 - [Heart-disease prediction using CSV logging](docs/examples/heart-disease/README.md)
 - [Iris dataset using Weights & Biases](docs/examples/iris-wandb/README.md)
 - [Digits dataset using MLFlow](docs/examples/digits-mlflow/README.md)
 - [Karpathy's LLM autoresearch example](docs/examples/autoresearch/README.md)
+
+Initialize an example in any of these ways:
+
+| Command | Result |
+| --- | --- |
+| `hiraku init --example NAME` | Copy the runnable project files only |
+| `hiraku init --example NAME --with-results` | Also copy bundled records and measured runs |
+| `hiraku init --example NAME --with-generator` | Also copy `generate_results.py` for running later |
+| `hiraku init --example NAME --generate` | Generate fresh records and runs immediately |
+
+The results and generator modes are available for the Heart Disease and Digits
+examples. `--generate` cannot be combined with `--with-results`; generation can
+take time and may install the example's dependencies.
 
 ## Dashboard
 
@@ -42,7 +56,25 @@ Check the examples for a more complete walkthrough:
 | `hiraku dashboard --edit` | Open that copy in the marimo editor |
 | `hiraku dashboard --init --edit` | Both in one step |
 
-After `--init`, `hiraku dashboard` serves your copy. In the editor, the `runs_df` and `records_df` tables hold every run and record with its place in the tree, ready for your own plots or marimo's AI assistant. To try it with bundled MLflow results, initialize the Digits example with `hiraku init --example digits-mlflow --with-results`. See the [dashboard guide](docs/guides/dashboard.md) for details.
+After `--init`, `hiraku dashboard` serves your copy. In the editor, the
+`runs_df` and `records_df` tables hold every run and record with its place in
+the tree, ready for your own plots or marimo's AI assistant.
+
+Try every dashboard mode without training by loading the bundled Digits runs:
+
+```bash
+mkdir digits-dashboard && cd digits-dashboard
+git init
+hiraku init --example digits-mlflow --with-results
+hiraku dashboard --record digits                 # read-only
+hiraku dashboard --include-code --record digits  # read-only, with source
+hiraku dashboard --init --edit --record digits   # copy and edit
+```
+
+Run the dashboard commands one at a time and press Ctrl-C before changing mode.
+The bundled database works without an MLflow server. To show **Open in
+mlflow** links, start the MLflow UI and configure its `ui_url`; the
+[dashboard guide](docs/guides/dashboard.md) has the complete commands.
 
 ## Documentation
 
