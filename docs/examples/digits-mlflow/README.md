@@ -26,6 +26,20 @@ git add .
 git commit -m "initialize Digits MLflow example"
 ```
 
+Alternatively, to browse the example without training, install the `dashboard`
+extra too and initialize a separate project with the six bundled runs:
+
+```bash
+mkdir digits-dashboard
+cd digits-dashboard
+git init
+hiraku init --example digits-mlflow --with-results
+hiraku dashboard --record digits
+```
+
+The dashboard reads the prepared `mlflow.db` directly, so an MLflow server is
+not required.
+
 MLflow creates `mlflow.db` in the project root on the first launch. The training
 script uses the Hiraku project root to keep that location stable for local and
 worktree dispatchers. Set `MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only

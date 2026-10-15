@@ -151,13 +151,20 @@ shown.
 
 ## Try it on the Digits example
 
-From a Hiraku checkout, this script creates a Digits project with three
-regularization records, trains each with three seeds, and serves both the
-MLflow UI and the dashboard:
+The bundled Digits example includes three records and six measured MLflow runs,
+so you can try the dashboard without training first. Install both optional
+extras, then initialize a new Git repository with the prepared results:
 
 ```bash
-uv run --all-extras python scripts/dashboard_demo.py
+uv tool install "hiraku[dashboard,mlflow]"
+mkdir digits-dashboard
+cd digits-dashboard
+git init
+hiraku init --example digits-mlflow --with-results
+hiraku dashboard --record digits
 ```
 
-Use `--epochs` to change the training budget (default 10), `--dir` to choose
-the project directory, and `--no-serve` to stop after the nine runs.
+The dashboard reads the six runs directly from the bundled `mlflow.db`; an
+MLflow server is not required. See the
+[Digits example](../examples/digits-mlflow/README.md) to inspect the runs in
+MLflow or generate fresh results.
