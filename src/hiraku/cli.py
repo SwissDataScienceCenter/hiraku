@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import shlex
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
+from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Any
 
@@ -239,25 +241,61 @@ def main(ctx: click.Context) -> None:
 @click.option("--tracking-backend")
 @click.option("--template", type=click.Path(path_type=Path))
 @click.option("--example")
+@click.option("--with-generator", is_flag=True, help="Copy the example generator.")
+@click.option(
+    "--generate", is_flag=True, help="Generate example runs after initialization."
+)
+@click.option(
+    "--with-results",
+    "results",
+    is_flag=True,
+    help="Copy bundled research records and tracked runs.",
+)
 @click.option("--ignore-git", is_flag=True)
 def init_command(
     path: Path | None,
     tracking_backend: str | None,
     template: Path | None,
     example: str | None,
+    results: bool,
+    with_generator: bool,
+    generate: bool,
     ignore_git: bool,
 ) -> None:
     """Initialize a project."""
     if template is not None and example is not None:
         raise click.UsageError("--template and --example are mutually exclusive")
+    if generate and (not example or results):
+        raise click.UsageError(
+            "--generate requires --example and cannot use --with-results"
+        )
+    generator = None
+    if generate:
+        validate_identifier(example, label="example name")
+        generator = (
+            files("hiraku.resources") / "examples" / example / "generate_results.py"
+        )
+        if not generator.is_file():
+            raise click.UsageError(f"Example {example!r} has no generator")
     config = HirakuConfig.init(
         path or Path.cwd(),
         tracking_backend=tracking_backend,
         template=template,
         example=example,
+        results=results,
+        with_generator=with_generator,
         ignore_git=ignore_git,
     )
     click.echo(f"Initialized Hiraku project at {config.path}")
+    if generator is not None:
+        with as_file(generator) as source:
+            try:
+                runpy.run_path(str(source))["generate"](config)
+            except Exception as exc:
+                raise click.ClickException(
+                    "Generation failed; initialized project and completed runs kept: "
+                    f"{exc}"
+                ) from exc
 
 
 @main.command("status")

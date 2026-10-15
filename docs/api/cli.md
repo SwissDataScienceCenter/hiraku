@@ -33,13 +33,29 @@ hiraku init --example minimal
 ```
 
 Each example copies only its bundled
-`src/` subtree; sibling documentation and metadata are not part of the project:
+`src/` subtree by default. Add `--with-results` to apply its optional `results/`
+overlay with sample records and tracked runs:
+
+```bash
+hiraku init --example heart-disease --with-results
+```
+
+Results may override base files and configuration keys, but neither layer
+overwrites pre-existing project files. Explicit CLI options take precedence.
+The flag requires a packaged example with a `results/` directory.
+Use `--with-generator` to copy an example's optional `generate_results.py` for
+running later, or `--generate` to execute it immediately after initialization.
+Both flags require an example with a generator; `--generate` cannot accompany
+`--with-results`. Existing projects are rejected. Generation failures retain the new
+project and completed runs. `--generate` alone does not copy the script.
+Sibling documentation and metadata are not copied:
 
 ```text
 resources/examples/<name>/
 ├── README.md
 ├── example.yml
-└── src/                 # copied into the project root
+├── src/                 # copied into the project root
+└── results/             # optional overlay with --with-results
 ```
 
 The two options are mutually exclusive. Templates may replace files installed
