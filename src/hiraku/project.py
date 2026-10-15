@@ -147,6 +147,10 @@ class ProjectInitializer:
             overlay_marker = overlay / "hiraku.yml" if overlay is not None else None
             if overlay_marker is not None and overlay_marker.is_file():
                 data = load_yaml_mapping(overlay_marker)
+            if result_overlay is not None:
+                result_marker = result_overlay / "hiraku.yml"
+                if result_marker.is_file():
+                    data.update(load_yaml_mapping(result_marker))
             if tracking_backend is not None:
                 data["tracking_backend"] = {"type": tracking_backend}
             config = HirakuConfig(path=marker, root=project_root, **data)
