@@ -39,9 +39,10 @@ def test_digits_refuses_existing_output_and_partial_export(
 
 
 def test_bundled_digits_database_is_portable(generator, tmp_path):
-    HirakuConfig.init(
+    config = HirakuConfig.init(
         tmp_path, example="digits-mlflow", results=True, install_skill=False
     )
+    assert config.tracking_backend["type"] == "mlflow"
     generator["validate_database"](tmp_path / "mlflow.db")
     assert not (tmp_path / "generate_results.py").exists()
     with sqlite3.connect(tmp_path / "mlflow.db") as db:

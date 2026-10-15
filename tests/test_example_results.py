@@ -42,6 +42,28 @@ def test_results_configuration_and_explicit_override(tmp_path: Path):
     assert config.tracking_backend["type"] == "mlflow"
 
 
+def test_results_override_base_files(tmp_path: Path, monkeypatch):
+    from hiraku import project
+
+    resources = tmp_path / "resources"
+    base = resources / "examples/layered/src"
+    results = resources / "examples/layered/results"
+    base.mkdir(parents=True)
+    results.mkdir()
+    (base / "train.py").write_text("base")
+    (base / "hiraku.yml").write_text("branch: custom/{record_id}\n")
+    (results / "train.py").write_text("results")
+    (results / "hiraku.yml").write_text("active_record_id: root\n")
+    monkeypatch.setattr(project, "files", lambda name: resources)
+    target = tmp_path / "target"
+    config = HirakuConfig.init(
+        target, example="layered", results=True, install_skill=False
+    )
+    assert (target / "train.py").read_text() == "results"
+    assert config.branch == "custom/{record_id}"
+    assert config.active_record_id == "root"
+
+
 def test_results_flag_requires_example(tmp_path: Path):
     result = CliRunner().invoke(
         main, ["init", str(tmp_path), "--with-results", "--ignore-git"]
