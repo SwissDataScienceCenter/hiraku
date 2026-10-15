@@ -1,14 +1,3 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "marimo==0.25.1", "marimo-studio==0.3.0", "altair>=5,<7", "pandas>=2,<3",
-# ]
-#
-# [tool.marimo-studio]
-# default = "dashboard"
-# view_root = "views"
-# runtime = "server"
-# ///
 """Read-only browser using Hiraku's Python API.
 
 From the project to browse, run `hiraku dashboard` (or `--edit` to edit a
