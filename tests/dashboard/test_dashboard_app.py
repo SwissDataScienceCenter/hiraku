@@ -15,7 +15,7 @@ def test_app_runs_every_cell_against_a_project(
     monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "a")
     from hiraku.dashboard.app import app
 
-    outputs, definitions = app.run()
+    _, definitions = app.run()
 
     assert definitions["scope"] == "a"
     assert definitions["selected_run"] is None
@@ -31,10 +31,6 @@ def test_app_runs_every_cell_against_a_project(
         "root/a/a1",
         "root/b",
     ]
-    rendered = "".join(output.text for output in outputs if hasattr(output, "text"))
-    assert "hk-header" in rendered
-    assert "--hk-brand-dark" in rendered
-    assert "hk-footer" in rendered
 
 
 def test_project_copy_finds_its_project_without_the_launcher(

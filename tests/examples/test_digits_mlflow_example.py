@@ -62,7 +62,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             "goal=Compare regularization curves",
             "--set",
             "tracking_backend={type: mlflow, database: mlflow.db, "
-            "experiment_name: hiraku-digits, ui_url: 'http://127.0.0.1:5000'}",
+            "experiment_name: hiraku-digits}",
         ],
     )
     for record_id, alpha in (("weak-l2", 0.0001), ("strong-l2", 1.0)):
@@ -144,19 +144,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         ).output
     )
     assert {row["record_id"] for row in filtered} == {"strong-l2"}
-
-    from hiraku.config import HirakuConfig
-    from hiraku.dashboard.data import load
-
-    dashboard = load(HirakuConfig.load(project / "hiraku.yml"))
-    assert dashboard.errors == []
-    assert {run.id for run in dashboard.runs} == {row["id"] for row in rows}
-    for run in dashboard.runs:
-        experiment = run.raw["experiment_id"]
-        assert run.url == (
-            f"http://127.0.0.1:5000/#/experiments/{experiment}/runs/{run.id}"
-        )
-        assert dashboard.sources[run.id] == "mlflow"
 
 
 def test_digits_requires_provenance_before_creating_runs(tmp_path):

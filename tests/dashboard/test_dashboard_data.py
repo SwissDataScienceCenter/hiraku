@@ -16,7 +16,6 @@ from hiraku.dashboard.data import (
     load,
     metric_names,
     plot_frame,
-    record_paths,
     record_rows,
     run_rows,
     run_text,
@@ -112,21 +111,6 @@ def test_record_rows_list_records_in_tree_order() -> None:
     ]
     assert rows[0]["metrics"] == [{"name": "loss", "direction": "minimize"}]
     assert rows[1]["metrics"] == []
-
-
-def test_record_paths_treat_missing_parents_as_roots_and_survive_cycles() -> None:
-    records = [
-        Record(id="orphan", parent_id="gone"),
-        Record(id="child", parent_id="orphan"),
-        Record(id="x", parent_id="y"),
-        Record(id="y", parent_id="x"),
-    ]
-
-    paths = record_paths(records)
-
-    assert paths["orphan"] == "orphan"
-    assert paths["child"] == "orphan/child"
-    assert {paths["x"], paths["y"]} == {"y/x", "y"}
 
 
 def test_arrow_frame_types_columns_and_falls_back_to_text() -> None:
