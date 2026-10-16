@@ -11,7 +11,7 @@ git clone https://github.com/SwissDataScienceCenter/hiraku.git
 cd hiraku
 
 # system install
-uv tool install ".[mlflow,wandb]"
+uv tool install ".[mlflow,wandb,dashboard]"
 
 # for local development
 uv sync --all-extras
@@ -25,10 +25,56 @@ hiraku init
 ```
 
 Check the examples for a more complete walkthrough:
+
 - [Heart-disease prediction using CSV logging](docs/examples/heart-disease/README.md)
 - [Iris dataset using Weights & Biases](docs/examples/iris-wandb/README.md)
 - [Digits dataset using MLFlow](docs/examples/digits-mlflow/README.md)
 - [Karpathy's LLM autoresearch example](docs/examples/autoresearch/README.md)
+
+Initialize an example in any of these ways:
+
+| Command | Result |
+| --- | --- |
+| `hiraku init --example NAME` | Copy the runnable project files only |
+| `hiraku init --example NAME --with-results` | Also copy bundled records and measured runs |
+| `hiraku init --example NAME --with-generator` | Also copy `generate_results.py` for running later |
+| `hiraku init --example NAME --generate` | Generate fresh records and runs immediately |
+
+The results and generator modes are available for the Heart Disease and Digits
+examples. `--generate` cannot be combined with `--with-results`; generation can
+take time and may install the example's dependencies.
+
+## Dashboard
+
+`hiraku dashboard` serves a local [marimo](https://marimo.io) page with the record tree, the runs attributed to each record, run details with links to the tracking backend, and a performance plot. It needs the `dashboard` extra.
+
+| Command | What it does |
+| --- | --- |
+| `hiraku dashboard` | Serve the read-only dashboard at <http://127.0.0.1:8765> |
+| `hiraku dashboard --include-code` | Also let the page show its notebook code (marimo menu, **⋯**) |
+| `hiraku dashboard --init` | Copy the notebook to `hiraku/dashboard/app.py` so you can customize it |
+| `hiraku dashboard --edit` | Open that copy in the marimo editor |
+| `hiraku dashboard --init --edit` | Both in one step |
+
+After `--init`, `hiraku dashboard` serves your copy. In the editor, the
+`runs_df` and `records_df` tables hold every run and record with its place in
+the tree, ready for your own plots or marimo's AI assistant.
+
+Try every dashboard mode without training by loading the bundled Digits runs:
+
+```bash
+mkdir digits-dashboard && cd digits-dashboard
+git init
+hiraku init --example digits-mlflow --with-results
+hiraku dashboard --record digits                 # read-only
+hiraku dashboard --include-code --record digits  # read-only, with source
+hiraku dashboard --init --edit --record digits   # copy and edit
+```
+
+Run the dashboard commands one at a time and press Ctrl-C before changing mode.
+The bundled database works without an MLflow server. To show **Open in
+mlflow** links, start the MLflow UI and configure its `ui_url`; the
+[dashboard guide](docs/guides/dashboard.md) has the complete commands.
 
 ## Documentation
 

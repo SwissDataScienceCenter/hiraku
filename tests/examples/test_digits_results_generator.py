@@ -56,6 +56,16 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
             == 120
         )
 
+    from hiraku.dashboard.data import load
+
+    dashboard = load(HirakuConfig.discover(tmp_path))
+    assert dashboard.errors == []
+    assert Counter(run.record_id for run in dashboard.runs) == {
+        "weak-l2": 3,
+        "strong-l2": 3,
+    }
+    assert set(dashboard.sources.values()) == {"mlflow"}
+
 
 def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
     pytest.importorskip("mlflow")

@@ -9,5 +9,6 @@ working with research records.
     - [Weights &amp; Biases](tracking-wandb.md)
     - [MLflow](tracking-mlflow.md)
     - [Custom backend](tracking-custom.md)
+- [Dashboard](dashboard.md)
 - Advanced usage:
     - [Branches and record provenance](experiment-branches.md)

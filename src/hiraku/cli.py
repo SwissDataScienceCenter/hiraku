@@ -869,5 +869,52 @@ def run_list(
         click.echo(_table(columns, rows))
 
 
+@main.command("dashboard")
+@click.option("--record", "record_id", help="Record selected when the page opens.")
+@click.option("--port", type=click.IntRange(1, 65535), default=8765, show_default=True)
+@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
+@click.option(
+    "--init",
+    "initialize",
+    is_flag=True,
+    help="Copy the dashboard notebook into the project; exit unless --edit is given.",
+)
+@click.option(
+    "--edit", is_flag=True, help="Open the project's notebook in the marimo editor."
+)
+@click.option(
+    "--include-code",
+    is_flag=True,
+    help="Let the read-only dashboard show its notebook code.",
+)
+@click.pass_obj
+def dashboard_command(
+    state: CLIContext,
+    record_id: str | None,
+    port: int,
+    no_browser: bool,
+    initialize: bool,
+    edit: bool,
+    include_code: bool,
+) -> None:
+    """Browse records and tracked runs in a local, read-only dashboard."""
+    from .dashboard.launcher import init_dashboard, serve_dashboard
+
+    if initialize:
+        click.echo(f"Created dashboard: {init_dashboard(state.config)}")
+        if not edit:
+            return
+    exit_code = serve_dashboard(
+        state.config,
+        record_id=record_id,
+        port=port,
+        no_browser=no_browser,
+        edit=edit,
+        include_code=include_code,
+    )
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
+
+
 if __name__ == "__main__":
     main()
