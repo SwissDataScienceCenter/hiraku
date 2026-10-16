@@ -880,7 +880,7 @@ def run_list(
     help="Copy the dashboard notebook into the project; exit unless --edit is given.",
 )
 @click.option(
-    "--edit", is_flag=True, help="Open the project's notebook in the marimo editor."
+    "--edit", is_flag=True, help="Open the project's notebook in marimo-studio."
 )
 @click.option(
     "--include-code",

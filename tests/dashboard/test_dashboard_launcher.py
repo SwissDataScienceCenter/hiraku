@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -42,6 +43,19 @@ def test_build_command(options: dict, flags: list[str]) -> None:
     ]
 
 
+def test_bundled_view_places_every_displayed_cell() -> None:
+    from marimo._ast.load import load_app
+
+    app = load_app(str(launcher.BUNDLED_NOTEBOOK))
+    view = (launcher.BUNDLED_VIEWS / "dashboard" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    placed = re.findall(r'<marimo-cell name="([^"]+)">', view)
+    named = [cell.name for cell in app._cell_manager.cells() if cell.name != "_"]
+
+    assert placed == named
+
+
 def test_init_dashboard_copies_the_notebook(project: HirakuConfig) -> None:
     notebook = launcher.init_dashboard(project)
 
@@ -49,7 +63,15 @@ def test_init_dashboard_copies_the_notebook(project: HirakuConfig) -> None:
     assert notebook.read_text(encoding="utf-8") == (
         launcher.BUNDLED_NOTEBOOK.read_text(encoding="utf-8")
     )
-    assert (notebook.parent / ".gitignore").read_text() == "__marimo__/\n"
+    view = notebook.parent / "studio" / "dashboard" / "index.html"
+    assert view.read_text(encoding="utf-8") == (
+        (launcher.BUNDLED_VIEWS / "dashboard" / "index.html").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert (notebook.parent / ".gitignore").read_text() == (
+        "__marimo__/\nstudio/.locks/\nstudio/*/.artifacts/\n"
+    )
     with pytest.raises(ValidationError, match="already exists"):
         launcher.init_dashboard(project)
 
@@ -68,6 +90,7 @@ def popen(monkeypatch: pytest.MonkeyPatch) -> dict:
                 env=env,
                 copied=notebook.read_text(encoding="utf-8"),
                 notebook=notebook,
+                view=(notebook.parent / "studio" / "dashboard" / "view.toml").is_file(),
             )
 
         def wait(self, timeout=None):
@@ -88,6 +111,7 @@ def test_serve_dashboard_runs_a_copy_outside_the_project(
     assert popen["notebook"].parent == popen["cwd"]
     assert not popen["cwd"].is_relative_to(project.root)
     assert popen["copied"].startswith("# /// script")
+    assert popen["view"]
     assert popen["env"]["HIRAKU_PROJECT_ROOT"] == str(project.root)
     assert popen["env"]["HIRAKU_DASHBOARD_RECORD"] == "a"
     assert "9000" in popen["command"]

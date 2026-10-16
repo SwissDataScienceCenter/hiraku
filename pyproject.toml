@@ -31,6 +31,7 @@ wandb = ["wandb>=0.29.0"]
 dashboard = [
     "altair>=6.3.0",
     "marimo>=0.25.1,<0.26",
+    "marimo-studio==0.3.0",
     "pandas>=2.3.3",
     "pyarrow>=21",
 ]

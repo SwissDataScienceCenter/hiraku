@@ -1,8 +1,10 @@
 # Dashboard
 
 `hiraku dashboard` serves a local page for browsing records and the runs
-attributed to them. The page is a [marimo](https://marimo.io) notebook: you can
-use it as it is, read its code, or copy it into your project and change it.
+attributed to them. The page is a [marimo](https://marimo.io) notebook served
+through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view:
+you can use it as it is, read its code, or copy it into your project and
+change it.
 
 Install the optional dependencies first:
 
@@ -20,7 +22,7 @@ Run every command from inside a Hiraku project.
 | `hiraku dashboard` | View | Serves the read-only dashboard. |
 | `hiraku dashboard --include-code` | View with code | Same page; marimo's menu can also show each cell's code. |
 | `hiraku dashboard --init` | Customize | Copies the notebook to `hiraku/dashboard/app.py` and exits. |
-| `hiraku dashboard --edit` | Edit | Opens that copy in the marimo editor. |
+| `hiraku dashboard --edit` | Edit | Opens that copy in marimo-studio. |
 | `hiraku dashboard --init --edit` | Customize and edit | Both in one step. |
 
 ### View
@@ -44,9 +46,11 @@ above its output. The code is read-only here; use the edit mode to change it.
 hiraku dashboard --init
 ```
 
-Copies the bundled notebook to `hiraku/dashboard/app.py` with a `.gitignore`
-for marimo's `__marimo__/` caches. From then on, `hiraku dashboard` serves this
-copy instead of the bundled notebook, so commit it with the project. `--init`
+Copies the bundled notebook to `hiraku/dashboard/app.py` and its Studio view
+to `hiraku/dashboard/studio/dashboard/`, with a `.gitignore` for marimo's
+`__marimo__/` caches and Studio's build state. From then on,
+`hiraku dashboard` serves this copy instead of the bundled notebook, so commit
+it with the project. `--init`
 refuses to overwrite an existing copy; delete `hiraku/dashboard/` to start
 over from the bundled version.
 
@@ -59,8 +63,10 @@ The copy imports its data and styling helpers from the installed
 hiraku dashboard --edit
 ```
 
-Opens the project's copy in the marimo editor, which reloads when the file
-changes on disk, for example when an agent edits it. `--edit` requires a copy;
+Opens the project's copy in marimo-studio, with the notebook beside a live
+preview of the dashboard. It reloads when the file changes on disk, for
+example when an agent edits it. The view's `index.html` places the notebook's
+named cells on the page; add a named cell there to show it on the dashboard. `--edit` requires a copy;
 run `--init` first, or both at once with `hiraku dashboard --init --edit`.
 Saved changes appear the next time you run `hiraku dashboard`.
 

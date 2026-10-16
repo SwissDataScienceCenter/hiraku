@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hiraku dashboard</title>
+    <style>
+      /* The notebook's cells bring theme.css; this matches marimo's wide app. */
+      #app-shell {
+        display: grid;
+        gap: 1.75rem;
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 3rem 1rem;
+      }
+      /* Studio places cells in <marimo-cell> hosts, not marimo's .marimo-cell. */
+      marimo-cell:has(.hk-section-heading[data-section="tree"]:not([open])) ~ marimo-cell:has(.hk-section-body[data-section="tree"]),
+      marimo-cell:has(.hk-section-heading[data-section="run"]:not([open])) ~ marimo-cell:has(.hk-section-body[data-section="run"]),
+      marimo-cell:has(.hk-section-heading[data-section="plot"]:not([open])) ~ marimo-cell:has(.hk-section-body[data-section="plot"]) {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app-shell">
+      <marimo-cell name="header"></marimo-cell>
+      <marimo-cell name="refresh_button"></marimo-cell>
+      <marimo-cell name="tree_heading"></marimo-cell>
+      <marimo-cell name="tree_section"></marimo-cell>
+      <marimo-cell name="run_heading"></marimo-cell>
+      <marimo-cell name="run_section"></marimo-cell>
+      <marimo-cell name="plot_heading"></marimo-cell>
+      <marimo-cell name="plot_section"></marimo-cell>
+      <marimo-cell name="footer"></marimo-cell>
+    </main>
+  </body>
+</html>

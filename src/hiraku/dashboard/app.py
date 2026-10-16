@@ -1,11 +1,15 @@
 # /// script
 # [tool.marimo.display]
 # theme = "system"
+#
+# [tool.marimo-studio]
+# default = "dashboard"
+# view_root = "studio"
 # ///
 """Bundled Hiraku dashboard. Start it with ``hiraku dashboard``.
 
 ``hiraku dashboard --init`` copies this notebook into the project and
-``hiraku dashboard --edit`` opens that copy in the marimo editor.
+``hiraku dashboard --edit`` opens that copy in marimo-studio.
 """
 
 import marimo
@@ -89,7 +93,7 @@ def _():
 
 
 @app.cell
-def _(config, logo_data_uri, mo, theme_css):
+def header(config, logo_data_uri, mo, theme_css):
     mo.Html(
         f"<style>{theme_css()}</style>"
         '<header class="hk-header"><div class="hk-shell hk-header-inner">'
@@ -105,7 +109,7 @@ def _(config, logo_data_uri, mo, theme_css):
 
 
 @app.cell
-def _(mo):
+def refresh_button(mo):
     refresh = mo.ui.button(label="↻ Refresh", value=0, on_click=lambda count: count + 1)
     mo.hstack([refresh], justify="end")
     return (refresh,)
@@ -161,13 +165,13 @@ def _(
 
 
 @app.cell
-def _(section_heading):
+def tree_heading(section_heading):
     section_heading("tree", "Runs", open=True)
     return
 
 
 @app.cell
-def _(
+def tree_section(
     initial_record,
     mo,
     project,
@@ -233,13 +237,13 @@ def _(find_run, get_scope, paths, runs_df, set_scope, tree, within):
 
 
 @app.cell
-def _(section_heading):
+def run_heading(section_heading):
     section_heading("run", "Run")
     return
 
 
 @app.cell
-def _(
+def run_section(
     html,
     mo,
     run_text,
@@ -267,7 +271,7 @@ def _(
 
 
 @app.cell
-def _(section_heading):
+def plot_heading(section_heading):
     section_heading("plot", "Performance")
     return
 
@@ -279,7 +283,7 @@ def _(metrics, mo, tree_metric):
 
 
 @app.cell
-def _(
+def plot_section(
     alt,
     metric,
     mo,
@@ -341,7 +345,7 @@ def _(
 
 
 @app.cell
-def _(logo_data_uri, mo):
+def footer(logo_data_uri, mo):
     mo.Html(
         '<footer class="hk-footer"><div class="hk-shell hk-footer-inner">'
         f'<img src="{logo_data_uri(reversed_logo=True)}" '

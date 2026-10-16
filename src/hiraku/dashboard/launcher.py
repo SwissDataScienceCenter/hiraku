@@ -17,6 +17,8 @@ from ..record import load_record
 DEFAULT_PORT = 8765
 DEFAULT_HOST = "127.0.0.1"
 BUNDLED_NOTEBOOK = Path(__file__).with_name("app.py")
+# marimo-studio serves the notebook through the view in this folder.
+BUNDLED_VIEWS = Path(__file__).with_name("studio")
 
 
 def project_notebook(config: HirakuConfig) -> Path:
@@ -34,10 +36,19 @@ def init_dashboard(config: HirakuConfig) -> Path:
     if notebook.parent.exists():
         raise ValidationError(f"Dashboard already exists: {notebook.parent}")
     notebook.parent.mkdir(parents=True)
-    shutil.copy2(BUNDLED_NOTEBOOK, notebook)
-    # marimo keeps session caches in __marimo__/ beside the notebook.
-    (notebook.parent / ".gitignore").write_text("__marimo__/\n", encoding="utf-8")
+    _copy_bundled(notebook.parent)
+    # marimo keeps session caches in __marimo__/ beside the notebook, and
+    # marimo-studio keeps build state and locks beside its views.
+    (notebook.parent / ".gitignore").write_text(
+        "__marimo__/\nstudio/.locks/\nstudio/*/.artifacts/\n", encoding="utf-8"
+    )
     return notebook
+
+
+def _copy_bundled(directory: Path) -> Path:
+    """Copy the bundled notebook and its Studio views into ``directory``."""
+    shutil.copytree(BUNDLED_VIEWS, directory / BUNDLED_VIEWS.name)
+    return Path(shutil.copy2(BUNDLED_NOTEBOOK, directory))
 
 
 def build_command(
@@ -97,7 +108,7 @@ def serve_dashboard(
         )
     if record_id is not None:
         load_record(record_id, config=config)
-    if any(find_spec(name) is None for name in ("marimo", "altair")):
+    if any(find_spec(name) is None for name in ("marimo", "marimo_studio", "altair")):
         raise ValidationError(
             "The dashboard requires the optional 'dashboard' dependencies. "
             'Install them with: uv sync --extra dashboard (or "hiraku[dashboard]")'
@@ -124,7 +135,7 @@ def serve_dashboard(
     # marimo writes session caches beside the notebook and in its working
     # directory, so run a copy from a scratch directory outside the project.
     with tempfile.TemporaryDirectory(prefix="hiraku-dashboard-") as directory:
-        return serve(Path(shutil.copy2(BUNDLED_NOTEBOOK, directory)))
+        return serve(_copy_bundled(Path(directory)))
 
 
 def _wait(process: subprocess.Popen[bytes]) -> int:
