@@ -1,14 +1,16 @@
 # Workflow examples
 
-The `workflow-examples` example installs two small workflows next to the
-bundled `collaborative` workflow. Neither does research work or changes files,
-so you can use them to try out a new harness, model, or MCP setup before
-running a real workflow, and as starting points for your own:
+The `workflow-examples` example installs three small workflows next to the
+bundled `collaborative` workflow. None does research work, so you can use them
+to try out a new harness, model, or MCP setup before running a real workflow,
+and as starting points for your own:
 
 - [`count-steps`](#count-steps), a Python workflow that checks whether a coding
   harness follows Hiraku workflow instructions exactly;
 - [`greet`](#greet), a prompt-only workflow whose arguments fill placeholders
-  in its `workflow.md`.
+  in its `workflow.md`;
+- [`scheduler`](#scheduler), a Python workflow that picks its next step from
+  the project's records, by priority.
 
 ## Initialize
 
@@ -115,3 +117,34 @@ the session's only instruction. That instruction is final: the session
 completes when it starts, so there is nothing to reply, and the agent just
 prints the greetings. Copy the directory to turn your own prompt into a
 workflow.
+
+## Scheduler
+
+The workflow is `hiraku/workflows/scheduler/`. Its next step does not follow a
+fixed sequence; it comes from the records in the project:
+
+1. `start` creates a task record `scheduler-<id>` and `records` experiment
+   records below it (default 3), each with a random `priority` from 1 to 9 and
+   `count: 0`.
+2. Hiraku assigns the open record with the highest priority, ties going to the
+   larger ID. A record is open while its `count` is below `target` (default 2).
+3. The agent raises the assigned record's `count` by one, with
+   `hiraku record update <record> --set count=<n>` or the `record_update`
+   tool, and replies `incremented` with the record ID.
+4. Hiraku checks the evidence: the reply must name the assigned record, and its
+   count must be exactly one higher than when it was assigned. Then it assigns
+   the next record.
+5. When every count reaches `target`, a final instruction asks the agent to show
+   you the records.
+
+There is no user gate, so the agent works on its own:
+
+```bash
+hiraku-agent scheduler --records 3 --target 2   # six steps, one agent each
+hiraku record tree                               # the records and their counts
+```
+
+Assigning a record is a decision, so `start` and the `incremented` reply make
+it and store it in the session's state; `next` only shows the assignment. A
+reply can then be checked against what the agent was told, and `session_show`
+returns the same assignment until the agent reports it.

@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from hiraku.agent import main as agent_main
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
+from hiraku.record import load_record
 from hiraku.session import Session
 
 
@@ -41,6 +42,7 @@ def runner(tmp_path: Path, monkeypatch) -> CliRunner:
     workflows = project / "hiraku" / "workflows"
     assert (workflows / "count-steps" / "workflow.py").is_file()
     assert (workflows / "greet" / "workflow.md").is_file()
+    assert (workflows / "scheduler" / "workflow.py").is_file()
     assert not (workflows / "greet" / "workflow.py").exists()
     assert not (project / "example.yml").exists()
     return selected
@@ -212,3 +214,104 @@ def test_greet_through_hiraku_agent(
     assert "Print 2 greetings to Ada, one per line. Greet formally:" in result.output
     assert "reply file: None" in result.output
     assert 'completed: {"name": "Ada", "times": 2, "formal": true}' in result.output
+
+
+def children(parent: str) -> list[Any]:
+    config = HirakuConfig.discover()
+    return sorted(
+        load_record(parent, config=config).children(config=config),
+        key=lambda item: item.id,
+    )
+
+
+def set_count(runner: CliRunner, record_id: str, count: int) -> None:
+    invoke(runner, ["record", "update", record_id, "--set", f"count={count}"])
+
+
+def test_scheduler_works_by_priority_until_every_record_reaches_the_target(
+    runner: CliRunner,
+) -> None:
+    response = start(runner, "scheduler", {"records": 3, "target": 2})
+    assert response["status"] == "accepted"
+    parent = response["instruction"]["context"]["record"].rsplit("-", 1)[0]
+    records = children(parent)
+    assert len(records) == 3
+    assert all(1 <= item.priority <= 9 and item.count == 0 for item in records)
+    # The highest priority runs to the target first; ties go to the larger ID.
+    order = sorted(records, key=lambda item: (item.priority, item.id), reverse=True)
+    expected = [item.id for item in order for _ in range(2)]
+
+    for done, record_id in enumerate(expected):
+        instruction = response["instruction"]
+        context = instruction["context"]
+        assert context["record"] == record_id
+        assert context["remaining"] == 6 - done
+        count = context["count"]
+        assert f"--set count={count + 1}" in instruction["text"]
+        assert [item["reply"] for item in instruction["reply"]["options"]] == [
+            "incremented"
+        ]
+
+        unchanged = reply(runner, response, "incremented", record_id=record_id)
+        assert unchanged["status"] == "rejected"
+        assert f"set it to {count + 1}" in unchanged["message"]
+        other = next(item.id for item in records if item.id != record_id)
+        wrong = reply(runner, response, "incremented", record_id=other)
+        assert wrong["status"] == "rejected"
+        assert "assigned record" in wrong["message"]
+
+        set_count(runner, record_id, count + 1)
+        response = reply(runner, response, "incremented", record_id=record_id)
+        assert response["status"] == "accepted"
+
+    assert response["completed"] is True
+    assert response["instruction"]["text"].startswith("## Done")
+    summary = response["instruction"]["context"]["records"]
+    assert [item["record"] for item in summary] == [item.id for item in records]
+    assert {item["count"] for item in summary} == {2}
+
+
+def test_scheduler_rejects_a_count_raised_too_far(runner: CliRunner) -> None:
+    response = start(runner, "scheduler", {"records": 1, "target": 3})
+    record_id = response["instruction"]["context"]["record"]
+    set_count(runner, record_id, 2)
+    skipped = reply(runner, response, "incremented", record_id=record_id)
+    assert skipped["status"] == "rejected"
+    assert "is 2; set it to 1" in skipped["message"]
+    set_count(runner, record_id, 1)
+    accepted = reply(runner, response, "incremented", record_id=record_id)
+    assert accepted["instruction"]["context"]["count"] == 1
+
+
+# A scripted harness: raises the assigned count with the CLI, then replies.
+SCHEDULER_AGENT = """
+import json, os, subprocess, sys
+from pathlib import Path
+
+response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
+context = response["instruction"]["context"]
+if response.get("completed"):
+    print("final:", [(item["record"], item["count"]) for item in context["records"]])
+    raise SystemExit
+command = ["record", "update", context["record"], "--set", f"count={context['next']}"]
+subprocess.run([sys.executable, "-m", "hiraku.cli", *command], check=True)
+reply = {"reply": "incremented", "arguments": {"record_id": context["record"]}}
+Path(os.environ["HIRAKU_REPLY_FILE"]).write_text(json.dumps(reply))
+"""
+
+
+def test_scheduler_runs_on_its_own_through_hiraku_agent(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    script = tmp_path / "scheduler_agent.py"
+    script.write_text(SCHEDULER_AGENT)
+    monkeypatch.setenv("HIRAKU_AGENT_CMD", f"{sys.executable} {script}")
+
+    result = runner.invoke(agent_main, ["scheduler", "--records", "2"])
+    assert result.exit_code == 0, result.output
+    # No user gate: four increments, then the final instruction.
+    assert result.output.count("agent → incremented  accepted") == 4
+    assert "[5 Done] final" in result.output
+    assert "waiting for you" not in result.output
+    (summary,) = Session.list_all(config=HirakuConfig.discover())
+    assert summary["status"] == "completed"

@@ -420,8 +420,9 @@ budget. The same session runs over MCP or step by step with `hiraku-agent`.
 Two examples add more workflows:
 
 - the [workflow examples](../examples/workflow-examples/README.md) install
-  `count-steps`, a small Python workflow that checks a coding harness, and
-  `greet`, a prompt-only workflow with arguments;
+  `count-steps`, a small Python workflow that checks a coding harness,
+  `greet`, a prompt-only workflow with arguments, and `scheduler`, which picks
+  its next step from records by priority;
 - the [autoresearch example](../examples/autoresearch/README.md) installs
   `autoresearch`, a Markdown-only workflow with the upstream "experiment until
   stopped" procedure.
