@@ -1292,3 +1292,119 @@ def test_cli_prints_the_graph_with_a_session_state(
     assert result.output.endswith("  class check current\n")
     shown = runner.invoke(main, ["session", "show", first["session_id"]])
     assert "State:    check" in shown.output
+
+
+NAMED_PY = '''\
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+from hiraku.workflow import Instruction, Workflow, event, state
+
+
+class Notes(BaseModel):
+    notes: list[str] = []
+
+
+class Named(Workflow):
+    def start(self) -> Notes:
+        return Notes()
+
+    @state("ask", start=True)
+    def asking(self, notes: Notes) -> Instruction:
+        return Instruction("Ask.")
+
+    @state("check")
+    def checking(self, notes: Notes) -> Instruction:
+        return Instruction("Check.")
+
+    @state("done", final=True)
+    def finishing(self, notes: Notes) -> Instruction:
+        return Instruction("Done.", context={"notes": notes.notes})
+
+    @event(source="ask", dest="check")
+    def next_step(self, notes: Notes) -> None:
+        """Go to the check."""
+
+    @event("note", source="ask", dest="ask")
+    def note_question(self, notes: Notes, text: str) -> None:
+        """Note something about the question."""
+        notes.notes.append(f"question: {text}")
+
+    @event("note", source="check", dest="check")
+    def note_answer(self, notes: Notes, text: str) -> None:
+        """Note something about the answer."""
+        notes.notes.append(f"answer: {text}")
+
+    @event(source="check", dest="done")
+    def finish(self, notes: Notes) -> None:
+        """Finish."""
+
+
+WORKFLOW = Named
+'''
+
+
+def described(response: dict) -> dict[str, str]:
+    return {
+        item["event"]: item["description"]
+        for item in response["instruction"]["events"]["accepted"]
+    }
+
+
+def test_named_events_run_the_method_of_the_current_state(
+    config: HirakuConfig,
+) -> None:
+    write_workflow(config, "named", NAMED_PY, "# Named\n")
+    workflow = load_workflow("named", config=config).bind(config)
+    first = workflow.run_start({})
+    assert described(first) == {
+        "next_step": "Go to the check.",
+        "note": "Note something about the question.",
+    }
+    noted = send(workflow, "note", first, text="why?")
+    assert noted["instruction"]["text"] == "Ask."
+    checking = send(workflow, "next_step", noted)
+    assert described(checking)["note"] == "Note something about the answer."
+    checked = send(workflow, "note", checking, text="because")
+    done = send(workflow, "finish", checked)
+    assert done["instruction"]["context"] == {
+        "notes": ["question: why?", "answer: because"]
+    }
+    assert [
+        item.event for item in Session.load(first["session_id"], config=config).history
+    ] == ["start", "note", "next_step", "note", "finish"]
+    graph = workflow_graph(workflow)
+    assert "  ask --> ask: note\n  check --> check: note\n" in graph
+
+
+def test_named_events_need_disjoint_source_states(config: HirakuConfig) -> None:
+    source = NAMED_PY.replace(
+        '    @event("note", source="check", dest="check")\n',
+        '    @event("note", source=["ask", "check"], dest="check")\n',
+    )
+    write_workflow(config, "named", source, "# Named\n")
+    assert (
+        "Event 'note' of Named is handled twice in state 'ask', by note_question "
+        "and note_answer"
+    ) in load_error(config, "named")
+    source = NAMED_PY.replace(
+        '    @event("note", source="ask"', '    @event("a-note", source="ask"'
+    )
+    write_workflow(config, "named", source, "# Named\n")
+    assert "Event names use letters, digits, and '_'" in load_error(config, "named")
+
+
+def test_instructions_narrow_named_events_by_method(config: HirakuConfig) -> None:
+    narrowed = NAMED_PY.replace(
+        '        return Instruction("Ask.")\n',
+        '        return Instruction("Ask.", events=[self.note_question])\n',
+    )
+    write_workflow(config, "named", narrowed, "# Named\n")
+    workflow = load_workflow("named", config=config).bind(config)
+    assert accepted(workflow.run_start({})) == ["note"]
+    wrong = narrowed.replace("events=[self.note_question]", "events=[self.note_answer]")
+    write_workflow(config, "named", wrong, "# Named\n")
+    response = load_workflow("named", config=config).bind(config).run_start({})
+    assert response["status"] == "error"
+    assert "State 'ask' does not accept note_answer" in response["message"]

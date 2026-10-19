@@ -130,17 +130,35 @@ def test_collaborative_runs_each_step_and_stops_after_the_rounds(
     assert started["status"] == "accepted"
     assert harness.section() == "## Draft"
     # Until gates exist, the agent gets the user's approval in the conversation.
-    assert "until they approve it" in " ".join(harness.instruction["text"].split())
+    text = " ".join(harness.instruction["text"].split())
+    assert "Once they approve, send the event `drafted`" in text
     assert harness.instruction["text"].endswith(
         "Never delete records or rewrite Git history."
     )
     assert harness.instruction["context"] == {"task": "task", "previous": []}
-    assert harness.events == ["drafted", "finish"]
+    assert harness.events == ["drafted", "revise", "finish"]
+
+    # revise redoes the current step with the user's feedback.
+    harness.send("revise", feedback="Try weight decay instead")
+    assert harness.section() == "## Draft"
+    assert harness.instruction["context"]["feedback"] == "Try weight decay instead"
+    accepted = harness.instruction["events"]["accepted"]
+    assert (
+        accepted[1]["description"] == "Redraft the experiment with the user's feedback."
+    )
 
     draft(harness, "c1")
     assert harness.section() == "## Implement"
     assert harness.instruction["context"]["experiment"]["summary"] == "Add dropout"
-    assert harness.events == ["implemented", "finish"]
+    assert "feedback" not in harness.instruction["context"]
+    assert harness.events == ["implemented", "revise", "finish"]
+    harness.send("revise", feedback="Keep the learning rate")
+    assert harness.section() == "## Implement"
+    assert harness.instruction["context"]["feedback"] == "Keep the learning rate"
+    accepted = harness.instruction["events"]["accepted"]
+    assert accepted[1]["description"] == (
+        "Rework the implementation with the user's feedback."
+    )
     assert load_record("c1", config=config).status == "drafted"
 
     sha = commit(config, "dropout")
@@ -224,6 +242,10 @@ def test_collaborative_draws_its_experiment_loop(config: HirakuConfig) -> None:
         "  launch --> analyze: launched\n"
         "  analyze --> draft: analyzed\n"
         "  analyze --> finished: analyzed\n"
+        "  draft --> draft: revise\n"
+        "  implement --> implement: revise\n"
+        "  launch --> launch: revise\n"
+        "  analyze --> analyze: revise\n"
         "  draft --> finished: finish\n"
         "  implement --> finished: finish\n"
         "  launch --> finished: finish\n"

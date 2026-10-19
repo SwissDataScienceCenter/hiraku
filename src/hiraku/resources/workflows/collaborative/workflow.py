@@ -12,6 +12,7 @@ from hiraku.record import Record, load_record
 from hiraku.workflow import Instruction, Workflow, event, state
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
+Feedback = Annotated[str, Field(description="What the user wants changed.")]
 STEPS = ["draft", "implement", "launch", "analyze"]
 
 
@@ -20,6 +21,8 @@ class Experiments(BaseModel):
     entrypoint: str
     rounds: int
     experiment: str | None = None
+    # The user's feedback on the current step, until the step is reported.
+    feedback: str | None = None
     results: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -28,8 +31,9 @@ class Collaborative(Workflow):
 
     The agent works through the four steps of each experiment and gets the
     user's approval before it reports a step with an event such as ``drafted``,
-    which Hiraku checks and records. Hiraku writes the experiment records,
-    checks commits and run attribution, and stops after ``rounds`` experiments.
+    which Hiraku checks and records. Until then, ``revise`` redoes the step
+    with the user's feedback. Hiraku writes the experiment records, checks
+    commits and run attribution, and stops after ``rounds`` experiments.
     """
 
     # Setting: rules for every step, added to each step's instruction.
@@ -58,11 +62,13 @@ class Collaborative(Workflow):
     @state("draft", start=True)
     def drafting(self, experiments: Experiments) -> Instruction:
         context = {"task": experiments.task, "previous": experiments.results}
-        return self._step("## Draft", context)
+        return self._step(experiments, "## Draft", context)
 
     @state("implement")
     def implementing(self, experiments: Experiments) -> Instruction:
-        return self._step("## Implement", self._experiment_context(experiments))
+        return self._step(
+            experiments, "## Implement", self._experiment_context(experiments)
+        )
 
     @state("launch")
     def launching(self, experiments: Experiments) -> Instruction:
@@ -72,7 +78,7 @@ class Collaborative(Workflow):
             f"hiraku launch {experiments.entrypoint} --record {record.id} "
             f"--commit {record.commit}"
         )
-        return self._step("## Launch", context)
+        return self._step(experiments, "## Launch", context)
 
     @state("analyze")
     def analyzing(self, experiments: Experiments) -> Instruction:
@@ -88,7 +94,7 @@ class Collaborative(Workflow):
             "runs": runs,
             "previous": experiments.results,
         }
-        return self._step("## Analyze", context)
+        return self._step(experiments, "## Analyze", context)
 
     @state("finished", final=True)
     def summarizing(self, experiments: Experiments) -> Instruction:
@@ -123,6 +129,7 @@ class Collaborative(Workflow):
             config=self.config,
         )
         experiments.experiment = record.id
+        experiments.feedback = None
 
     @event(source="implement", dest="launch")
     def implemented(
@@ -137,6 +144,7 @@ class Collaborative(Workflow):
         record.commit = sha
         record.status = "implemented"
         record.save()
+        experiments.feedback = None
 
     @event(source="launch", dest="analyze")
     def launched(self, experiments: Experiments) -> None:
@@ -154,6 +162,7 @@ class Collaborative(Workflow):
             )
         record.status = "launched"
         record.save()
+        experiments.feedback = None
 
     @event(source="analyze", dest=["draft", "finished"])
     def analyzed(
@@ -172,7 +181,32 @@ class Collaborative(Workflow):
         record.save()
         experiments.results.append({"record_id": record.id, "verdict": verdict})
         experiments.experiment = None
+        experiments.feedback = None
         return "draft" if len(experiments.results) < experiments.rounds else "finished"
+
+    # Revise: redo the current step with the user's feedback ----------------------
+
+    @event("revise", source="draft", dest="draft")
+    def revise_draft(self, experiments: Experiments, feedback: Feedback) -> None:
+        """Redraft the experiment with the user's feedback."""
+        experiments.feedback = feedback
+
+    @event("revise", source="implement", dest="implement")
+    def revise_implementation(
+        self, experiments: Experiments, feedback: Feedback
+    ) -> None:
+        """Rework the implementation with the user's feedback."""
+        experiments.feedback = feedback
+
+    @event("revise", source="launch", dest="launch")
+    def revise_launch(self, experiments: Experiments, feedback: Feedback) -> None:
+        """Change how the experiment is launched, with the user's feedback."""
+        experiments.feedback = feedback
+
+    @event("revise", source="analyze", dest="analyze")
+    def revise_analysis(self, experiments: Experiments, feedback: Feedback) -> None:
+        """Redo the analysis with the user's feedback."""
+        experiments.feedback = feedback
 
     @event(source=STEPS, dest="finished")
     def finish(self, experiments: Experiments) -> None:
@@ -180,8 +214,12 @@ class Collaborative(Workflow):
 
     # Helpers ----------------------------------------------------------------------
 
-    def _step(self, section: str, context: dict[str, Any]) -> Instruction:
+    def _step(
+        self, experiments: Experiments, section: str, context: dict[str, Any]
+    ) -> Instruction:
         text = self.markdown.section(section)
+        if experiments.feedback is not None:
+            context = {**context, "feedback": experiments.feedback}
         return Instruction(
             f"{text}\n\n{self.rules}" if self.rules else text, context=context
         )

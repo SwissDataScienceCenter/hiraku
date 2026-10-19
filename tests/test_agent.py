@@ -306,3 +306,14 @@ def test_missing_agent_command_is_explained(
     assert result.exit_code == 1
     assert "Cannot run the agent command 'no-such-agent-command'" in result.output
     assert "HIRAKU_AGENT_CMD" in result.output
+
+
+def test_events_shared_by_several_states_are_one_subcommand(
+    config: HirakuConfig,
+) -> None:
+    result = agent("collaborative", "revise", "--help")
+    assert result.exit_code == 0, result.output
+    text = " ".join(result.output.split())
+    assert "In draft: Redraft the experiment with the user's feedback." in text
+    assert "In analyze: Redo the analysis with the user's feedback." in text
+    assert "--feedback TEXT What the user wants changed. [required]" in text

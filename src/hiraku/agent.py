@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import click
-from pydantic import BaseModel
+from pydantic import BaseModel, create_model
 from pydantic import ValidationError as PydanticValidationError
 from pydantic.fields import FieldInfo
 
@@ -38,6 +38,7 @@ from .config import HirakuConfig
 from .errors import HirakuError, ProjectNotFoundError, WorkflowError
 from .session import Session
 from .workflow import (
+    Event,
     Workflow,
     discover_workflows,
     event_methods,
@@ -185,15 +186,34 @@ def _workflow_command(workflow: Workflow) -> click.Group:
         help=workflow_description(workflow),
         short_help=summary(workflow_description(workflow)),
     )
-    for name, method in event_methods(type(workflow)).items():
-        group.add_command(_event_command(workflow, name, method.arguments, method))
+    by_name: dict[str, list[Event]] = {}
+    for method in event_methods(type(workflow)).values():
+        by_name.setdefault(method.name, []).append(method)
+    for name, methods in by_name.items():
+        group.add_command(_event_command(workflow, name, methods))
     return group
 
 
 def _event_command(
-    workflow: Workflow, name: str, model: type[BaseModel], method: Any
+    workflow: Workflow, name: str, methods: list[Event]
 ) -> click.Command:
+    """Return the subcommand that sends an event, in whichever state accepts it.
+
+    Several methods may handle the event in different states; the options are
+    the union of their arguments, which the current state's method validates.
+    """
     driver = _driver_params()
+    fields: dict[str, Any] = {}
+    for method in methods:
+        for field_name, field in method.arguments.model_fields.items():
+            fields.setdefault(field_name, (field.annotation, field))
+    model = create_model(f"{name}_options", **fields)
+    if len(methods) == 1:
+        description = methods[0].description
+    else:
+        description = "\n\n".join(
+            f"In {', '.join(method.source)}: {method.description}" for method in methods
+        )
 
     @click.pass_context
     def run(ctx: click.Context, **values: Any) -> None:
@@ -214,8 +234,8 @@ def _event_command(
         name=name,
         callback=run,
         params=[*driver, *_model_params(model, driver)],
-        help=method.description,
-        short_help=summary(method.description),
+        help=description,
+        short_help=summary(methods[0].description),
     )
 
 

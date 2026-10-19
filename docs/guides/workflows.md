@@ -370,11 +370,15 @@ The rules are deliberately small:
   and the states it moves to. Its other parameters and docstring define the
   event's arguments and description. An event changes the data in place. With
   one destination it returns nothing, and with several it returns the state it
-  chooses, e.g. `return "done" if finished else "waiting"`. Hiraku checks that
-  the current instruction accepts the event and that its arguments match,
-  calls the event, enters the destination state, and saves the result
-  atomically. A state or event method cannot be named `start` or like a
-  `Workflow` method such as `save`.
+  chooses, e.g. `return "done" if finished else "waiting"`. The event's name
+  is the method's name, or the one you pass, e.g.
+  `@event("revise", source="draft", dest="draft")`: several methods may share
+  a name if their source states differ, and the event then runs the method of
+  the current state, with that method's description and arguments. Hiraku
+  checks that the current instruction accepts the event and that its
+  arguments match, calls the event, enters the destination state, and saves
+  the result atomically. A state or event method cannot be named `start` or
+  like a `Workflow` method such as `save`.
 - State and event methods take the data as their first parameter, annotated
   with the model `start` returns; in a workflow without data, they take none.
 - Raise `EventRejected` for invalid input and `NotReady` when valid input
@@ -460,8 +464,8 @@ The MCP server serves the same diagram as `hiraku://workflows/<id>/graph`, and
 
 `hiraku init` installs **collaborative**, which runs experiments on a task in
 four states: draft, implement, launch, and analyze. The agent does each step,
-shows you the result and revises it with you, and reports it with an event such
-as `drafted` or `implemented` once you approve; Hiraku writes the experiment
+shows you the result, sends `revise` with your feedback to redo the step, and
+reports it with an event such as `drafted` or `implemented` once you approve; Hiraku writes the experiment
 record, binds the resolved commit, checks that the runs are attributed to the
 experiment and its commit, and records the verdict. After `rounds`
 experiments, or when you ask to `finish`, the agent summarizes the results.
