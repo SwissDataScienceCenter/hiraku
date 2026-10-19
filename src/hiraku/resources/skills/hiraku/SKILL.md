@@ -54,6 +54,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set`, `entrypoints` |
 | Launch an entrypoint | `hiraku launch ENTRYPOINT [--record ID] [--commit REF] [--dispatch NAME]` |
+| Run or author a Snakemake workflow | `hiraku snakemake run` / `init` / `generate` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
 | Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_send_event`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow send-event SESSION EVENT` |
 | Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
@@ -271,9 +272,10 @@ different source state appear to be the same attempt.
 
 ## Run records and inspect evidence
 
-A run is an execution trace owned by CSV, MLflow, W&B, or a custom tracking
-backend. Hiraku launches entrypoints and queries runs; the training or evaluation
-code writes the run to its backend.
+A run is an execution trace owned by CSV, MLflow, W&B, Snakemake, or a custom
+tracking backend. Hiraku launches entrypoints and queries runs; the training or
+evaluation code writes the run to its backend. The Snakemake source instead
+records runs directly when you execute with `hiraku snakemake run`.
 
 For a high-level run request:
 
@@ -381,8 +383,71 @@ and `HIRAKU_GIT_STATE`.
 
 The default CSV backend uses project-root `runs.csv`. MLflow and W&B require the
 training code and Hiraku adapter to use the same configured backend destination.
+The `snakemake` backend stores one JSON file per workflow execution under
+`hiraku/runs/snakemake/`; see "Track Snakemake workflows".
 Hiraku exposes normalized summaries; full curves and artifacts remain in the
 tracking backend.
+
+## Track Snakemake workflows
+
+Snakemake runs are recorded by the `snakemake` tracking source, not through
+`hiraku launch`. `hiraku snakemake run` executes a workflow and records one run
+per execution with the record attribution, requested targets, result status,
+and the workflow's declared and observed files. Set the record's
+`tracking_backend` to `{type: snakemake}` and author a `Snakefile`.
+
+Entrypoints may declare the files a rule reads and writes so Hiraku can draft
+the workflow:
+
+```yaml
+entrypoints:
+  train:
+    command: [uv, run, python, train.py]
+    args: {seed: 42, epochs: 40}
+    inputs: [train.py, pyproject.toml]
+    outputs: [mlflow.db]
+```
+
+Author the workflow explicitly and review it before executing:
+
+1. Run `hiraku snakemake init` for a starter `Snakefile`, or
+   `hiraku snakemake generate --record <record-id>` to draft one rule per
+   entrypoint from its `inputs` and `outputs`. Use `--print` to review the
+   draft without writing it. A hand-written `--snakefile` always wins over a
+   generated one; generated rules cover the simple local-file case only.
+2. Open the `Snakefile` and correct every `input:` and `output:` so they match
+   the files the script actually reads and writes. Declare a file as `input`
+   when changing it should invalidate the job, and every stable product as
+   `output`. Keep orchestration in Snakemake and domain logic in scripts.
+3. Dry-run to validate the DAG before executing:
+
+```bash
+hiraku snakemake run --record <record-id> --snakefile Snakefile --dry-run
+```
+
+4. Execute, then query the recorded run:
+
+```bash
+hiraku snakemake run --record <record-id> --snakefile Snakefile --cores 2
+hiraku runs --record <record-id> --json
+```
+
+Run Snakemake through the project launcher when one is required:
+
+```bash
+hiraku snakemake run --record <record-id> --command uv \
+  --command-arg run --command-arg snakemake
+```
+
+Each run separates `declared_inputs`/`declared_outputs` (parsed from Snakemake's
+dry run) from `inputs`/`outputs` (the file states actually observed, each
+`file`, `directory`, `missing`, or `unavailable`). Inputs are observed before
+execution and outputs after, so a missing output after a failed run is expected.
+When a run misbehaves, compare the two sets: a declared file that is `missing`
+or `unavailable` usually names the next fix. Snakemake's job log is best effort
+(dynamic checkpoints, remote storage, and file names containing commas may not
+be captured fully, and `raw` marks declarations as incomplete), so do not
+present declared files as an exhaustive provenance manifest.
 
 ## Finish clearly
 
