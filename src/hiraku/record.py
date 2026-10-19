@@ -28,12 +28,25 @@ class Entrypoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
     command: list[str]
     args: dict[str, ArgumentValue] = Field(default_factory=dict)
+    inputs: list[str] = Field(default_factory=list)
+    outputs: list[str] = Field(default_factory=list)
 
     @field_validator("args", mode="before")
     @classmethod
     def validate_args_mapping(cls, value: Any) -> Any:
         if not isinstance(value, Mapping):
             raise ValueError("Entrypoint args must be a mapping")
+        return value
+
+    @field_validator("inputs", "outputs", mode="before")
+    @classmethod
+    def validate_paths(cls, value: Any) -> Any:
+        if not isinstance(value, list) or any(
+            not isinstance(item, str) or not item for item in value
+        ):
+            raise ValidationError(
+                "Entrypoint inputs and outputs must be lists of non-empty strings"
+            )
         return value
 
     @field_validator("command")

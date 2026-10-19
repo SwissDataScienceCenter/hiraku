@@ -6,6 +6,36 @@ Configure a record to use Hiraku's local Snakemake run source:
 hiraku record update workflow --set 'tracking_backend={type: snakemake}'
 ```
 
+## Write the Snakefile
+
+Start from a template:
+
+```bash
+hiraku snakemake init
+```
+
+This writes a starter `Snakefile` into the project root (refusing to overwrite
+one unless `--force`). Fill in each rule's `input:` and `output:` files and the
+`HIRAKU_RECORD_ID` placeholder.
+
+When a record declares entrypoints with file inputs and outputs, Hiraku can
+draft the workflow for you:
+
+```bash
+hiraku record update workflow --set \
+  'entrypoints={train: {command: [uv, run, python, train.py], args: {epochs: 5}, inputs: [train.py], outputs: [model.pkl]}}'
+
+hiraku snakemake generate --record workflow
+```
+
+`generate` renders one rule per entrypoint: `input:` and `output:` come from the
+entrypoint's `inputs` and `outputs`, and the `shell:` command is the entrypoint
+`command` plus its rendered `args`, prefixed with the `HIRAKU_*` attribution
+variables. A `rule all` collects every declared output. Pass `--print` to review
+the draft without writing, `--output` for another path, and `--force` to
+overwrite. Generated rules cover the simple local-file case only; wildcards,
+checkpoints, and remote storage belong in a hand-written `--snakefile`.
+
 Run a workflow from the project directory:
 
 ```bash

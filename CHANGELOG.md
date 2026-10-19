@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Add the MLflow `ui_url` option; MLflow runs now link to the MLflow web UI, also when `tracking_uri` is a credential-free HTTP(S) server.
 - Add a Snakemake tracking source and `hiraku snakemake run` to capture a workflow execution's declared inputs and outputs, observed file states, requested targets, result, and commit metadata.
 - Add structured file inputs and outputs to normalized runs; `hiraku runs --json` and the dashboard run details now show declared and observed files separately.
+- Add `Entrypoint.inputs` and `Entrypoint.outputs`, and `hiraku snakemake init` / `hiraku snakemake generate` to author a `Snakefile` from a template or from a record's entrypoints.
 
 ### Fixed
 

@@ -961,6 +961,48 @@ def snakemake_run(
         raise click.exceptions.Exit(exit_code)
 
 
+@snakemake_group.command("init")
+@click.option("--force", is_flag=True, help="Overwrite an existing Snakefile.")
+@click.pass_obj
+def snakemake_init(state: CLIContext, force: bool) -> None:
+    """Write a starter Snakefile into the project root."""
+    from .snakemake import init_workflow
+
+    path = init_workflow(state.config, force=force)
+    click.echo(f"Created Snakefile at {path}")
+
+
+@snakemake_group.command("generate")
+@click.option("--record", "record_id", required=True)
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    default=Path("Snakefile"),
+    help="Destination, relative to the project root unless absolute.",
+)
+@click.option("--force", is_flag=True, help="Overwrite an existing file.")
+@click.option("--print", "print_only", is_flag=True, help="Print instead of writing.")
+@click.pass_obj
+def snakemake_generate(
+    state: CLIContext,
+    record_id: str,
+    output: Path,
+    force: bool,
+    print_only: bool,
+) -> None:
+    """Draft a Snakefile from the record's entrypoints."""
+    from .snakemake import generate_workflow, write_workflow
+
+    record = load_record(record_id, config=state.config)
+    content = generate_workflow(record, config=state.config)
+    if print_only:
+        click.echo(content, nl=False)
+        return
+    destination = output if output.is_absolute() else state.config.root / output
+    path = write_workflow(content, destination, force=force)
+    click.echo(f"Generated Snakefile at {path}")
+
+
 @main.command("runs")
 @click.option("--record", "record_id")
 @click.option(
