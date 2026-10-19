@@ -11,30 +11,28 @@ The CSV adapter reads records; it does not write them. Your evaluation script
 can append a row using this schema:
 
 ```csv
-id,record_id,commit,git_state,timestamp,duration,entrypoint,metric.val/accuracy,param.seed
-run-001,baseline,abc123,dirty,2026-01-01T12:00:00Z,42.5,evaluate,0.84,42
+id,record_id,commit,git_state,timestamp,job_id,metric.val/accuracy,param.seed
+run-001,baseline,abc123,clean,2026-01-01T12:00:00Z,job-001,0.84,42
 ```
 
-Choose a unique run ID for each execution. Set `timestamp` to when the run
-started, taken before any work, and `duration` to its wall-clock length in
-seconds; both are optional. The dashboard shows them as the run's start time
-and duration. Prefix metric columns with
-`metric.` and parameter columns with `param.`. Use `HIRAKU_GIT_STATE` to
-distinguish a clean commit from a dirty working tree based on that commit.
+Choose a unique run ID for each execution. Prefix metric columns with
+`metric.` and parameter columns with `param.`. Use `HIRAKU_GIT_STATE` and
+`HIRAKU_SOURCE_DIGEST` to identify the selected source snapshot. Job submission
+requires a clean Git working tree.
 
-During a launch, `HIRAKU_ROOT` points to the original project root. Use it so
-worktree dispatches write to the persistent table rather than the temporary
-checkout:
+During a job, `HIRAKU_ROOT` points to the captured source tree and
+`HIRAKU_TRACKING_ROOT` points to the persistent project directory. Write the
+tracking table there so it remains queryable after the isolated job completes:
 
 ```python
 import os
 from pathlib import Path
 
-runs_path = Path(os.environ["HIRAKU_ROOT"]) / "runs.csv"
+runs_path = Path(os.environ["HIRAKU_TRACKING_ROOT"]) / "runs.csv"
 ```
 
-Use `HIRAKU_RECORD_ID`, `HIRAKU_ENTRYPOINT`,
-`HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE` to populate attribution. See
+Use `HIRAKU_RECORD_ID`, `HIRAKU_JOB_ID`, `HIRAKU_COMMIT`,
+`HIRAKU_GIT_STATE`, and `HIRAKU_SOURCE_DIGEST` to populate attribution. See
 Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 `hiraku example create heart-disease` to get a complete writer in `train.py`.
 

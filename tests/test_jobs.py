@@ -191,6 +191,8 @@ def test_explicit_command_does_not_require_a_default_and_run_json(project, monke
     record.command = None
     record.save(overwrite=True)
     project.command = None
+    git(project.root, "add", ".")
+    git(project.root, "commit", "-qm", "remove default command")
     monkeypatch.chdir(project.root)
 
     result = CliRunner().invoke(
@@ -231,15 +233,14 @@ def test_missing_explicit_and_default_command_has_actionable_error(project):
 
 
 @pytest.mark.parametrize("kind", ["unstaged", "staged", "untracked"])
-def test_dirty_sources_are_captured_in_snapshot(project, kind):
+def test_dirty_sources_are_rejected(project, kind):
     path = project.root / ("new.txt" if kind == "untracked" else "marker.txt")
     path.write_text("changed")
     if kind == "staged":
         git(project.root, "add", ".")
-    job = submit(project, "print('captured')")
-    assert wait_job(job.id, timeout=10, config=project).status == "succeeded"
-    assert job.spec.source_dirty is True
-    assert (job.working_directory / path.name).read_text() == "changed"
+    with pytest.raises(JobError, match="Git working tree"):
+        submit(project, "print('captured')")
+    assert not project.jobs_dir.exists()
 
 
 def test_source_snapshot_digest_is_stable_and_ignored_files_are_excluded(project):
@@ -250,12 +251,14 @@ def test_source_snapshot_digest_is_stable_and_ignored_files_are_excluded(project
     ignored.write_bytes(b"do not capture")
     git(project.root, "config", "core.excludesfile", str(project.root / ".ignore"))
     (project.root / ".ignore").write_text("private-data.bin\n")
+    git(project.root, "add", ".ignore")
+    git(project.root, "commit", "-qm", "add ignored data rule")
     first = project.root.with_name(project.root.name + "-snapshot-one")
     second = project.root.with_name(project.root.name + "-snapshot-two")
     snapshot_one = prepare_source(GitRepository(project), first)
     snapshot_two = prepare_source(GitRepository(project), second)
     assert snapshot_one.digest == snapshot_two.digest
-    assert snapshot_one.dirty is True and snapshot_two.dirty is True
+    assert snapshot_one.dirty is False and snapshot_two.dirty is False
     assert (first / "marker.txt").read_text() == "original"
     assert not (first / "private-data.bin").exists()
 
@@ -272,7 +275,9 @@ def test_pinned_source_uses_the_requested_revision(project):
     (project.root / "marker.txt").write_text("later checkout")
     git(project.root, "add", "marker.txt")
     git(project.root, "commit", "-qm", "later source")
-    snapshot = prepare_source(GitRepository(project), project.root / "pinned", first)
+    snapshot = prepare_source(
+        GitRepository(project), project.root.parent / "pinned", first
+    )
     assert snapshot.base_revision == first
     assert snapshot.dirty is False
     assert (snapshot.path / "marker.txt").read_text() == "original"
@@ -285,6 +290,8 @@ def test_source_snapshot_rejects_external_symlinks(project):
     from hiraku.source import prepare_source
 
     (project.root / "outside-link").symlink_to("/etc/passwd")
+    git(project.root, "add", "outside-link")
+    git(project.root, "commit", "-qm", "add unsafe source symlink")
     with pytest.raises(JobError, match="symlink escapes"):
         prepare_source(GitRepository(project), project.root / "unsafe-snapshot")
 

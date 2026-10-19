@@ -79,14 +79,14 @@ report `orphaned` or `lost`. stdout and stderr are saved separately.
 
 ## Source and provenance
 
-For local jobs, when `--commit` or the record's commit is set, Hiraku snapshots
-that exact revision. Otherwise local jobs snapshot the current Git-visible
-working tree and record its `HEAD` as the base revision. Modified, staged, and
-non-ignored untracked files are included in working-tree snapshots; ignored files, datasets,
-and installed environments are excluded. The receipt records the base revision,
-whether the source was dirty, and a SHA-256 digest of the captured files. Hiraku
-checks for file changes during capture and rejects symlinks that escape the
-repository. Outputs and logs stay with the job after completion.
+Job submission requires a clean Git working tree: staged changes, unstaged
+changes, and non-ignored untracked files must be committed or discarded first.
+This applies even when `--commit` or a record commit selects an earlier
+revision. Hiraku executes the selected commit in an isolated source snapshot;
+ignored files, datasets, and installed environments are excluded. The receipt
+records the resolved commit and a SHA-256 digest of the captured files. Hiraku
+rejects symlinks that escape the repository. Outputs and logs stay with the job
+after completion.
 
 Source selection belongs to Hiraku core; the local compute backend owns
 execution lifecycle. Jobs use managed snapshots of the source tree.

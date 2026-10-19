@@ -6,7 +6,7 @@ import hashlib
 import os
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from .errors import GitError, JobError
 from .git import GitRepository
@@ -22,28 +22,33 @@ class SourceSnapshot:
     dirty: bool
 
 
+def require_clean(repository: GitRepository) -> str:
+    """Require a clean Git tree and return its current HEAD."""
+    state = repository._git("status", "--porcelain", "--untracked-files=normal").stdout
+    if state:
+        raise JobError(
+            "Cannot submit a job from a dirty Git working tree; "
+            "commit or discard changes first"
+        )
+    return repository.head
+
+
 def prepare_source(
     repository: GitRepository,
     destination: Path,
     revision: str | None = None,
 ) -> SourceSnapshot:
-    """Capture either a pinned commit or current Git-visible working tree."""
+    """Capture a commit after verifying the repository has no local changes."""
+    initial_head = require_clean(repository)
     base_revision = repository.resolve(revision) if revision else repository.head
     destination.mkdir(parents=True, exist_ok=False)
-    if revision:
-        digest = _prepare_revision(repository, base_revision, destination)
-        return SourceSnapshot(destination, base_revision, digest, False)
-
-    state = repository._git("status", "--porcelain", "--untracked-files=normal").stdout
-    digest = _prepare_working_tree(repository, destination, state)
-    if repository.head != base_revision:
-        raise JobError("Git HEAD changed while snapshotting; retry submission")
-    return SourceSnapshot(
-        destination,
-        base_revision,
-        digest,
-        bool(state),
-    )
+    digest = _prepare_revision(repository, base_revision, destination)
+    final_state = repository._git(
+        "status", "--porcelain", "--untracked-files=normal"
+    ).stdout
+    if final_state or repository.head != initial_head:
+        raise JobError("Git state changed while preparing source; retry submission")
+    return SourceSnapshot(destination, base_revision, digest, False)
 
 
 def _prepare_revision(
@@ -129,78 +134,3 @@ def _within(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
-
-
-def _prepare_working_tree(
-    repository: GitRepository, destination: Path, initial_state: str
-) -> str:
-    root = repository.root
-    entries = repository._git(
-        "ls-files", "--cached", "--others", "--exclude-standard", "-z"
-    ).stdout
-    digest = hashlib.sha256()
-    signatures: dict[str, tuple[int, int, int, int] | str] = {}
-    for entry in entries.split("\0"):
-        if not entry:
-            continue
-        relative = PurePosixPath(entry)
-        if relative.is_absolute() or ".." in relative.parts:
-            raise GitError(f"Unsafe path returned by Git: {entry!r}")
-        source = root.joinpath(*relative.parts)
-        target = destination.joinpath(*relative.parts)
-        if not source.exists() and not source.is_symlink():
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if source.is_symlink():
-            link = os.readlink(source)
-            if Path(link).is_absolute() or not _within(
-                (source.parent / link).resolve(strict=False), root
-            ):
-                raise JobError(f"Source symlink escapes repository: {entry!r}")
-            target.symlink_to(link)
-            data = link.encode()
-            mode = b"link"
-            signatures[entry] = link
-        elif source.is_file():
-            before = source.stat()
-            content = source.read_bytes()
-            after = source.stat()
-            signature = (after.st_ino, after.st_size, after.st_mtime_ns, after.st_mode)
-            initial = (
-                before.st_ino,
-                before.st_size,
-                before.st_mtime_ns,
-                before.st_mode,
-            )
-            if initial != signature:
-                raise JobError(f"Source changed while snapshotting: {entry!r}")
-            target.write_bytes(content)
-            target.chmod(0o755 if after.st_mode & 0o111 else 0o644)
-            data = content
-            mode = b"x" if after.st_mode & 0o111 else b"-"
-            signatures[entry] = signature
-        else:
-            continue
-        digest.update(entry.encode() + b"\0" + mode + b"\0" + data + b"\0")
-    final_state = repository._git(
-        "status", "--porcelain", "--untracked-files=normal"
-    ).stdout
-    if initial_state != final_state or not entries:
-        raise JobError("Source changed while snapshotting; retry submission")
-    for entry, signature in signatures.items():
-        source = root.joinpath(*PurePosixPath(entry).parts)
-        if source.is_symlink():
-            unchanged = os.readlink(source) == signature
-        elif source.is_file():
-            stat = source.stat()
-            unchanged = (
-                stat.st_ino,
-                stat.st_size,
-                stat.st_mtime_ns,
-                stat.st_mode,
-            ) == signature
-        else:
-            unchanged = False
-        if not unchanged:
-            raise JobError(f"Source changed while snapshotting: {entry!r}")
-    return digest.hexdigest()

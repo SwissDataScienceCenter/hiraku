@@ -44,7 +44,7 @@ training code and dataset that the initial baseline experiments will evaluate.
 ??? note "Tracking Hiraku metadata in Git"
     In this example, `.gitignore` excludes hiraku metadata (`hiraku.yml`, `hiraku/*`) and the `runs.csv` file.
 
-    Hiraku is (mostly) agnostic to Git state: You can commit metadata, and Hiraku shows what is currently visible in the working tree.
+    Hiraku can read metadata from the working tree, but job submission requires a clean Git state. Commit the source and metadata changes before running a job.
     Merging research records is a user (or agent) responsibility.
 
 
@@ -112,8 +112,8 @@ training program writes the CSV row to project-root `runs.csv`.
 ??? note "Dispatchers and isolated execution"
     Hiraku creates an isolated source snapshot and invokes
     the optional `hiraku/dispatch/launch.sh` runtime setup hook.
-    `--commit REF` records a base revision; the source digest identifies the
-    exact files captured for this execution.
+    Job submission requires a clean Git working tree. `--commit REF` selects
+    the source revision; the source digest identifies the exact snapshot used.
 
 ## 4. Run a second experiment
 
@@ -281,4 +281,4 @@ the new implementation commit and use the same evaluation settings.
 
 ### Job execution
 
-Jobs capture committed and dirty Git-visible source in an isolated snapshot. Ignored datasets and environments are not copied; configure access through an optional dispatcher. Submission returns a job ID; wait before querying runs. Use `hiraku job logs JOB_ID` for output. Arguments after `--` replace the complete default command.
+Jobs require a clean Git working tree and capture the selected commit in an isolated snapshot. Ignored datasets and environments are not copied; configure access through an optional dispatcher. Submission returns a job ID; wait before querying runs. Use `hiraku job logs JOB_ID` for output. Arguments after `--` replace the complete default command.

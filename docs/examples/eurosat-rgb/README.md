@@ -119,4 +119,4 @@ hiraku runs --record eurosat --all --sort val/accuracy
 Each run stores Hiraku provenance, model and dataset configuration, random seed, training hyperparameters, epoch-level metrics, model parameter count, and W&B metadata.
 ### Job execution
 
-Jobs capture committed and dirty Git-visible source in an isolated snapshot. Ignored datasets and environments are not copied; configure access through an optional dispatcher. Submission returns a job ID; wait before querying runs. Use `hiraku job logs JOB_ID` for output. Arguments after `--` replace the complete default command.
+Jobs require a clean Git working tree and capture the selected commit in an isolated snapshot. Ignored datasets and environments are not copied; configure access through an optional dispatcher. Submission returns a job ID; wait before querying runs. Use `hiraku job logs JOB_ID` for output. Arguments after `--` replace the complete default command.

@@ -24,7 +24,7 @@ from .errors import (
 )
 from .git import GitRepository
 from .record import load_record
-from .source import prepare_source
+from .source import prepare_source, require_clean
 from .validation import validate_command
 
 JobStatus = Literal[
@@ -257,6 +257,7 @@ def submit_job(
     pinned_revision = commit or record.commit
 
     repository = GitRepository(selected)
+    require_clean(repository)
     revision = repository.resolve(pinned_revision or "HEAD")
     project_path = selected.root.resolve().relative_to(repository.root).as_posix()
     dispatcher_name = dispatch if dispatch is not None else selected.default_dispatch
