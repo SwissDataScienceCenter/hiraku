@@ -9,7 +9,8 @@ The driver hands every pending instruction to a coding agent, such as
 ``claude -p``, and sends the event the agent writes to a file back to the
 workflow. It stops where the user decides, at an instruction that requires a
 user response, which the user answers with an event subcommand, and after the
-agent carried out the final instruction, which takes no event. With
+agent carried out the final instruction, which takes no event. An event that
+requires approval runs only once the user approves it in the terminal. With
 ``--interactive``, each agent step is a conversation with the user in the
 terminal instead of a headless run. The driver uses only the public workflow API
 (`Workflow.run_start`, `Workflow.run_event`, and stored `Session`s), the same
@@ -23,6 +24,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import types
 import typing
 from dataclasses import dataclass
@@ -62,7 +64,9 @@ DEFAULT_COMMANDS = {
 }
 COMMAND_VARIABLES = {False: "HIRAKU_AGENT_CMD", True: "HIRAKU_AGENT_INTERACTIVE_CMD"}
 
-Status = Literal["accepted", "rejected", "not_ready", "stale", "error"]
+Status = Literal[
+    "accepted", "rejected", "not_ready", "stale", "error", "approval_required"
+]
 
 
 @dataclass(frozen=True)
@@ -220,7 +224,11 @@ def _event_command(
         options = _options(ctx)
         session = _select_for_event(workflow, name, options)
         result = workflow.run_event(
-            session.id, session.instruction_id, name, _arguments(model, values)
+            session.id,
+            session.instruction_id,
+            name,
+            _arguments(model, values),
+            approved=True,
         )
         _report(session.instruction_id, _heading(session.response), "you", name, result)
         status = result["status"]
@@ -430,10 +438,12 @@ def _drive(
             _show_gate(workflow, response)
             return EXIT_WAITING
         pending = _pending(workflow, response)
-        status = _resend(workflow, response, pending) if pending else None
+        status, error = (
+            _resend(workflow, response, pending) if pending else (None, None)
+        )
         if status is None:
             try:
-                status = _agent_turns(workflow, response, options)
+                status = _agent_turns(workflow, response, options, error)
             except _NoEvent:
                 click.echo(
                     f"No event was written; instruction {response['instruction_id']} "
@@ -446,13 +456,25 @@ def _drive(
                 f"`hiraku-agent {workflow.id}`."
             )
             return EXIT_NOT_READY
+        if status == "approval_required":
+            click.echo(
+                "Waiting for your approval; run "
+                f"`hiraku-agent {workflow.id}` in a terminal to give it."
+            )
+            return EXIT_WAITING
 
 
 def _agent_turns(
-    workflow: Workflow, response: dict[str, Any], options: Options
+    workflow: Workflow,
+    response: dict[str, Any],
+    options: Options,
+    error: str | None = None,
 ) -> Status:
-    """Run the agent on the current instruction until an event is not rejected."""
-    error: str | None = None
+    """Run the agent on the current instruction until an event is not rejected.
+
+    Args:
+        error: Why the last event was rejected, for the agent's first attempt.
+    """
     for attempt in range(1, options.retries + 2):
         try:
             name, arguments = _run_agent(workflow, response, attempt, error, options)
@@ -460,15 +482,12 @@ def _agent_turns(
             error = str(exc)
             click.echo(f"  rejected: {error}")
             continue
-        result = workflow.run_event(
-            response["session_id"], response["instruction_id"], name, arguments
-        )
-        _report(response["instruction_id"], _heading(response), "agent", name, result)
+        result = _send(workflow, response, "agent", name, arguments)
         status: Status = result["status"]
         if status == "rejected":
             error = result["message"]
             continue
-        if status == "not_ready":
+        if status in ("not_ready", "approval_required"):
             _save_pending(workflow, response, name, arguments)
         if status in ("stale", "error"):
             raise click.ClickException(result["message"])
@@ -619,27 +638,70 @@ def _save_pending(
 
 def _resend(
     workflow: Workflow, response: dict[str, Any], pending: dict[str, Any]
-) -> Status | None:
-    """Send an event that was not ready again; ``None`` if the agent must retry."""
-    result = workflow.run_event(
-        response["session_id"],
-        response["instruction_id"],
-        pending["event"],
-        pending["arguments"],
-    )
-    _report(
-        response["instruction_id"],
-        _heading(response),
-        "again",
-        pending["event"],
-        result,
-    )
+) -> tuple[Status | None, str | None]:
+    """Send an event that was not ready or not approved again.
+
+    Returns:
+        The status, or ``None`` with the reason if the agent must retry.
+    """
+    result = _send(workflow, response, "again", pending["event"], pending["arguments"])
     status: Status = result["status"]
-    if status != "not_ready":
+    if status not in ("not_ready", "approval_required"):
         (_directory(workflow, response) / "pending.json").unlink(missing_ok=True)
     if status in ("stale", "error"):
         raise click.ClickException(result["message"])
-    return None if status == "rejected" else status
+    if status == "rejected":
+        return None, result["message"]
+    return status, None
+
+
+def _send(
+    workflow: Workflow,
+    response: dict[str, Any],
+    actor: str,
+    name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Send the agent's event, asking the user first if it requires approval."""
+    session_id, instruction_id = response["session_id"], response["instruction_id"]
+    result = workflow.run_event(session_id, instruction_id, name, arguments)
+    _report(instruction_id, _heading(response), actor, name, result)
+    if result["status"] != "approval_required" or not _can_ask():
+        return result
+    approved, feedback = _ask_approval(result["approval"])
+    if approved:
+        result = workflow.run_event(
+            session_id, instruction_id, name, arguments, approved=True
+        )
+        _report(instruction_id, _heading(response), "you", name, result)
+        return result
+    return {
+        **{key: value for key, value in result.items() if key != "approval"},
+        "status": "rejected",
+        "message": f"The user asked for changes: {feedback or 'no details given'}",
+    }
+
+
+def _can_ask() -> bool:
+    """Whether the user can answer in the terminal."""
+    return sys.stdin.isatty()
+
+
+def _ask_approval(approval: dict[str, Any]) -> tuple[bool, str]:
+    """Ask the user to approve an event; return the decision and feedback."""
+    click.echo(f"Approve event {approval['event']!r}?")
+    if approval.get("description"):
+        click.echo(f"  {summary(approval['description'])}")
+    arguments = json.dumps(approval["arguments"], indent=1, ensure_ascii=False)
+    click.echo("\n".join(f"  {line}" for line in arguments.splitlines()))
+    decision = click.prompt(
+        "approve or revise",
+        type=click.Choice(["approve", "revise"]),
+        default="approve",
+    )
+    if decision == "approve":
+        return True, ""
+    return False, click.prompt("What should change", default="", show_default=False)
 
 
 # Output --------------------------------------------------------------------------

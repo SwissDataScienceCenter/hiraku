@@ -13,9 +13,11 @@ import inspect
 import json
 import mimetypes
 from collections.abc import Callable, Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
 
+from mcp.server.elicitation import render_elicitation_schema
+from mcp.server.mcpserver import Context as MCPContext
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import (
     ResourceError,
@@ -24,8 +26,14 @@ from mcp.server.mcpserver.exceptions import (
     UnexpectedToolError,
 )
 from mcp.server.mcpserver.prompts import Prompt
-from mcp.types import ToolAnnotations
-from pydantic import Field
+from mcp.shared.exceptions import NoBackChannelError
+from mcp.types import (
+    ElicitRequest,
+    ElicitRequestFormParams,
+    InputRequiredResult,
+    ToolAnnotations,
+)
+from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
@@ -72,8 +80,11 @@ unless it is final, an events block that says which events it accepts:
    current: fix the input, or check again later for not_ready. Status stale
    means the event answered an instruction that is no longer current; continue
    from the current instruction in the response.
-6. Sending an identical event again is safe; it returns the same response.
-7. To resume, call session_show with the session_id; it returns the current
+6. An accepted event with requires_approval true runs only once the user
+   approves it: this tool asks them, and a response with status rejected
+   carries their requested changes. Do not ask for approval in the chat.
+7. Sending an identical event again is safe; it returns the same response.
+8. To resume, call session_show with the session_id; it returns the current
    instruction. Do not start a new session to resume an existing one.
 Before repeating consequential work such as creating records or launching
 experiments, check whether it already exists.\
@@ -415,7 +426,8 @@ def _add_workflow_tools(
     def workflow_list() -> list[dict[str, Any]]:
         return list_workflows(workflows)
 
-    def workflow_send_event(
+    async def workflow_send_event(
+        ctx: MCPContext,
         event: Annotated[
             str, Field(description="One of the events the instruction accepts.")
         ],
@@ -433,7 +445,7 @@ def _add_workflow_tools(
                 "when only one session is active."
             ),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | InputRequiredResult:
         config = project()
         if session_id is None:
             active = [
@@ -462,11 +474,14 @@ def _add_workflow_tools(
                     "cannot continue until it loads.",
                 )
             )
-        return _over_mcp(
-            workflow.bind(config).run_event(
-                session_id, instruction_id, event, arguments
-            )
-        )
+        runtime = workflow.bind(config)
+        result = runtime.run_event(session_id, instruction_id, event, arguments)
+        if result["status"] == "approval_required":
+            asked = await _ask_approval(ctx, runtime, result)
+            if isinstance(asked, InputRequiredResult):
+                return asked
+            result = asked
+        return _over_mcp(result)
 
     _add_tool(
         server,
@@ -526,6 +541,128 @@ def _add_session_tools(
 def _show(session: Session, workflows: Mapping[str, Workflow]) -> dict[str, Any]:
     shown = session.show(workflows.get(session.workflow))
     return {**shown, "response": _over_mcp(shown["response"])}
+
+
+class Approval(BaseModel):
+    """The user's answer to an event that requires approval."""
+
+    decision: Literal["approve", "revise"] = Field(
+        description="Approve the event, or ask the agent for changes."
+    )
+    feedback: str = Field("", description="What to change, if you ask for changes.")
+
+
+async def _ask_approval(
+    ctx: MCPContext, workflow: Workflow, result: dict[str, Any]
+) -> dict[str, Any] | InputRequiredResult:
+    """Ask the user, through the client, to approve an event, and apply it.
+
+    Before protocol 2026-07-28, the server sends the client a nested
+    elicitation request and waits for the answer. From 2026-07-28 on, it
+    returns the request in an `InputRequiredResult`; the client asks the user
+    and calls the tool again with the same arguments and the answer.
+
+    Elicitation is answered by the client, which shows it to the user; Hiraku
+    cannot verify that a person answered, only that the agent did not.
+    """
+    approval = result["approval"]
+    session_id = result["session_id"]
+    instruction_id = result["instruction_id"]
+    if not _elicits_forms(ctx):
+        return {
+            **result,
+            "message": f"{result['message']} This client cannot ask the user (it "
+            "does not support MCP elicitation); ask the user to approve it "
+            "outside the chat with `hiraku workflow send-event "
+            f"{session_id} {approval['event']} --instruction-id {instruction_id} "
+            "--approve`.",
+        }
+    arguments = json.dumps(approval["arguments"], indent=2, ensure_ascii=False)
+    message = (
+        f"Workflow {workflow.id!r} (session {session_id}) asks to send event "
+        f"{approval['event']!r}.\n\n{approval['description']}\n\n"
+        f"Arguments:\n{arguments}"
+    ).strip()
+    schema = _approval_schema()
+    # The answer applies only to the event it was asked for.
+    asked = json.dumps(
+        [session_id, instruction_id, approval["event"], approval["arguments"]],
+        sort_keys=True,
+    )
+    answer = None
+    if ctx.request_state == asked:
+        answer = (ctx.input_responses or {}).get(_APPROVAL)
+    if answer is None:
+        if not ctx.session.can_send_request:
+            request = ElicitRequest(
+                params=ElicitRequestFormParams(message=message, requested_schema=schema)
+            )
+            return InputRequiredResult(
+                input_requests={_APPROVAL: request}, request_state=asked
+            )
+        try:
+            answer = await ctx.session.elicit_form(
+                message, schema, related_request_id=ctx.request_id
+            )
+        except NoBackChannelError:
+            return result
+    return _apply_approval(workflow, result, answer)
+
+
+_APPROVAL = "approval"
+
+
+def _approval_schema() -> dict[str, Any]:
+    """Return the approval form's schema with only the keys the spec defines.
+
+    Pydantic adds a top-level title and description, which Codex rejects,
+    cancelling the elicitation; the properties keep theirs.
+    """
+    schema = render_elicitation_schema(Approval)
+    return {key: schema[key] for key in ("type", "properties", "required")}
+
+
+def _apply_approval(
+    workflow: Workflow, result: dict[str, Any], answer: Any
+) -> dict[str, Any]:
+    """Run an approved event, or reject it with the user's answer."""
+    approval = result["approval"]
+    action = getattr(answer, "action", "cancel")
+    decision: Approval | None = None
+    if action == "accept":
+        try:
+            decision = Approval.model_validate(getattr(answer, "content", None) or {})
+        except PydanticValidationError:
+            action = "cancel"
+    if decision is not None and decision.decision == "approve":
+        return workflow.run_event(
+            result["session_id"],
+            result["instruction_id"],
+            approval["event"],
+            approval["arguments"],
+            approved=True,
+        )
+    if decision is not None:
+        feedback = decision.feedback.strip() or "no details given"
+        message = f"The user asked for changes: {feedback}"
+    elif action == "decline":
+        message = f"The user declined event {approval['event']!r}."
+    else:
+        message = (
+            f"The user dismissed the approval of event {approval['event']!r}; ask "
+            "them how to continue."
+        )
+    rejected = {key: value for key, value in result.items() if key != "approval"}
+    return {**rejected, "status": "rejected", "message": message}
+
+
+def _elicits_forms(ctx: MCPContext) -> bool:
+    """Whether the client declared form elicitation; an empty object means form."""
+    capabilities = ctx.client_capabilities
+    elicitation = capabilities.elicitation if capabilities else None
+    if elicitation is None:
+        return False
+    return elicitation.form is not None or elicitation.url is None
 
 
 def _over_mcp(response: Mapping[str, Any]) -> dict[str, Any]:

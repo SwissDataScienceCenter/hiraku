@@ -8,6 +8,7 @@ from typing import Any
 import anyio
 import pytest
 from mcp import Client, StdioServerParameters
+from mcp.types import ElicitResult
 
 from hiraku.config import HirakuConfig
 from hiraku.mcp import create_server
@@ -272,6 +273,118 @@ def test_workflow_send_event_continues_any_session(config: HirakuConfig) -> None
     }
     assert result["ambiguous"]["status"] == "rejected"
     assert "pass session_id" in result["ambiguous"]["message"]
+
+
+def write_gated(config: HirakuConfig) -> None:
+    source = ECHO_PY.replace(
+        '@event(source="working", dest="done")',
+        '@event(source="working", dest="done", requires_approval=True)',
+    )
+    directory = config.workflows_dir / "gated"
+    directory.mkdir()
+    (directory / "workflow.py").write_text(source, encoding="utf-8")
+    (directory / "workflow.md").write_text(
+        "---\nid: gated\n---\n# Gated\n", encoding="utf-8"
+    )
+
+
+def answer(action: str, **content: Any) -> Any:
+    """Return an elicitation callback that answers every request the same way."""
+    asked: list[Any] = []
+
+    async def callback(context: Any, params: Any) -> Any:
+        asked.append(params)
+        return ElicitResult(action=action, content=content or None)
+
+    callback.asked = asked  # type: ignore[attr-defined]
+    return callback
+
+
+# Before 2026-07-28 the server sends a nested elicitation request; from then
+# on it returns InputRequiredResult, and the client calls the tool again.
+PROTOCOLS = pytest.mark.parametrize("mode", ["legacy", "2026-07-28"])
+
+
+def send_gated(server: Any, elicitation: Any, mode: str) -> tuple[dict, dict, dict]:
+    async def main() -> Any:
+        async with Client(
+            server, mode=mode, elicitation_callback=elicitation
+        ) as client:
+            first = payload(await client.call_tool("gated", {"task": "a"}))
+            arguments = {"summary": "Tried three ideas"}
+            sent = payload(
+                await client.call_tool(
+                    "workflow_send_event",
+                    {"event": "complete", "instruction_id": 1, "arguments": arguments},
+                )
+            )
+            shown = payload(
+                await client.call_tool(
+                    "session_show", {"session_id": first["session_id"]}
+                )
+            )
+            return first, sent, shown
+
+    return anyio.run(main)
+
+
+@PROTOCOLS
+def test_events_requiring_approval_ask_the_user(
+    config: HirakuConfig, mode: str
+) -> None:
+    write_gated(config)
+    approve = answer("accept", decision="approve")
+    first, sent, shown = send_gated(create_server(config), approve, mode)
+    accepted = first["instruction"]["events"]["accepted"]
+    assert accepted[0]["requires_approval"] is True
+    [params] = approve.asked
+    assert "'complete'" in params.message
+    assert "Tried three ideas" in params.message
+    assert set(params.requested_schema["properties"]) == {"decision", "feedback"}
+    # Codex cancels forms whose schema has top-level keys beyond these.
+    assert set(params.requested_schema) == {"type", "properties", "required"}
+    assert sent["status"] == "accepted"
+    assert sent["completed"] is True
+    assert shown["status"] == "completed"
+
+
+@PROTOCOLS
+@pytest.mark.parametrize(
+    ("elicitation", "message"),
+    [
+        (
+            answer("accept", decision="revise", feedback="Name the ideas"),
+            "The user asked for changes: Name the ideas",
+        ),
+        (answer("decline"), "The user declined event 'complete'."),
+        (answer("cancel"), "The user dismissed the approval"),
+    ],
+)
+def test_unapproved_events_are_rejected_and_save_nothing(
+    config: HirakuConfig, elicitation: Any, message: str, mode: str
+) -> None:
+    write_gated(config)
+    elicitation.asked.clear()
+    _, sent, shown = send_gated(create_server(config), elicitation, mode)
+    assert sent["status"] == "rejected"
+    assert sent["message"].startswith(message)
+    assert "approval" not in sent
+    assert sent["instruction_id"] == 1
+    assert shown["status"] == "active"
+    assert shown["response"]["instruction_id"] == 1
+
+
+@PROTOCOLS
+def test_clients_without_elicitation_get_approval_required(
+    config: HirakuConfig, mode: str
+) -> None:
+    write_gated(config)
+    _, sent, shown = send_gated(create_server(config), None, mode)
+    assert sent["status"] == "approval_required"
+    assert sent["approval"]["event"] == "complete"
+    assert "--approve" in sent["message"]
+    assert sent["instruction"]["events"]["tool"] == "workflow_send_event"
+    assert shown["status"] == "active"
 
 
 def test_session_tools_and_resources(config: HirakuConfig) -> None:

@@ -343,7 +343,10 @@ it accepts:
    event again is safe; a `stale` status means the instruction moved on, so
    continue from the one returned.
 4. A `rejected` or `not_ready` response keeps the same instruction current; fix
-   the input or check again later. An instruction without an `events` block is
+   the input or check again later. An event with `requires_approval` runs only
+   after the user approves it in a form the tool shows them; do not ask for
+   approval in the chat. If they ask for changes, the response is `rejected`
+   with their feedback. An instruction without an `events` block is
    final: carry it out, then stop.
 
 To resume, find the session with `session_list` and read its current

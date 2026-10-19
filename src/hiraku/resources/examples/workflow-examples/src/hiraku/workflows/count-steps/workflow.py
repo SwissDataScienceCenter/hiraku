@@ -1,4 +1,4 @@
-"""Count steps: numbered steps with tokens, each started by the user."""
+"""Count steps: numbered steps with tokens, each approved by the user."""
 
 from __future__ import annotations
 
@@ -23,11 +23,12 @@ class Counter(BaseModel):
 
 
 class CountSteps(Workflow):
-    """Check that the harness follows numbered instructions and stops for the user.
+    """Check that the harness follows numbered instructions and asks the user.
 
     Each step sends a fresh random token that the harness must echo back, so a
-    skipped, repeated, or invented step is rejected. After each step the user
-    decides whether to run the next one.
+    skipped, repeated, or invented step is rejected. The user approves each
+    step's acknowledgement before the next step runs, and the end of the
+    session.
     """
 
     def start(
@@ -37,7 +38,7 @@ class CountSteps(Workflow):
         """Start counting steps to check the harness; runs the first step."""
         return Counter(count=count)
 
-    # States: the agent runs a step, then the user decides at the gate.
+    # States: the agent runs one step after another until the last.
 
     @state("running", start=True)
     def run_step(self, counter: Counter) -> Instruction:
@@ -47,14 +48,6 @@ class CountSteps(Workflow):
             render(self.markdown.section("## Step"), values), context=values
         )
 
-    @state("waiting")
-    def ask_to_continue(self, counter: Counter) -> Instruction:
-        return Instruction(
-            self.markdown.section("## Next"),
-            context={"done": counter.step, "remaining": counter.count - counter.step},
-            requires_user_response=True,
-        )
-
     @state("finished", final=True)
     def report(self, counter: Counter) -> Instruction:
         return Instruction(
@@ -62,31 +55,30 @@ class CountSteps(Workflow):
             context={"steps": counter.step, "count": counter.count},
         )
 
-    # Events: only the user goes on or finishes, at the gate after a step.
+    # Events: the user approves each one, so only the user goes on or finishes.
 
-    @event(source="running", dest=["waiting", "finished"])
+    @event(source="running", dest=["running", "finished"], requires_approval=True)
     def ack(
         self,
         counter: Counter,
         token: Annotated[str, Field(description="Token of the current step.")],
     ) -> str:
-        """Acknowledge the current step with its token."""
+        """Acknowledge the current step with its token, and run the next one."""
         if token != counter.token:
             raise EventRejected(
                 f"Token {token!r} does not match step {counter.step}; send the "
                 "token from the current instruction"
             )
-        return "finished" if counter.step >= counter.count else "waiting"
-
-    @event(source="waiting", dest="running")
-    def step(self, counter: Counter) -> None:
-        """Run the next step."""
+        if counter.step >= counter.count:
+            return "finished"
         counter.step += 1
         counter.token = _token()
+        return "running"
 
-    @event(source="waiting", dest="finished")
+    @event(source="running", dest="finished", requires_approval=True)
     def finish(self, counter: Counter) -> None:
-        """End the session after the current step."""
+        """End the session without acknowledging the current step."""
+        counter.step -= 1
 
 
 WORKFLOW = CountSteps

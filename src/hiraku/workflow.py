@@ -104,6 +104,7 @@ def event(
     *,
     source: str | Sequence[str],
     dest: str | Sequence[str],
+    requires_approval: bool = False,
 ) -> Callable[[_F], _F]:
     """Declare an event: a transition from source states to destination states.
 
@@ -123,6 +124,10 @@ def event(
             can handle it, and describe it, in its own way.
         source: The states that accept the event.
         dest: The states the event may move to.
+        requires_approval: Whether the user must approve the event before it
+            runs. `Workflow.run_event` then answers ``approval_required``
+            until it is called with ``approved=True``, which a transport does
+            only after asking the user, e.g. through MCP elicitation.
 
     Example:
         ```python
@@ -142,7 +147,12 @@ def event(
             f"Event names use letters, digits, and '_', starting with a letter; "
             f"got {name!r}"
         )
-    declared = (name, _state_names(source, "source"), _state_names(dest, "dest"))
+    declared = (
+        name,
+        _state_names(source, "source"),
+        _state_names(dest, "dest"),
+        bool(requires_approval),
+    )
 
     def mark(method: _F) -> _F:
         setattr(method, _EVENT_MARKER, declared)
@@ -187,6 +197,7 @@ class Event:
             methods handle an event in different states.
         source: States that accept the event.
         dest: States the event may move to.
+        requires_approval: Whether the user must approve the event first.
     """
 
     name: str
@@ -196,6 +207,7 @@ class Event:
     description: str
     source: tuple[str, ...]
     dest: tuple[str, ...]
+    requires_approval: bool = False
 
 
 @dataclass(frozen=True)
@@ -320,6 +332,8 @@ class Workflow(BaseRecord):
         instruction_id: int,
         event: str,
         arguments: Mapping[str, Any] | None = None,
+        *,
+        approved: bool = False,
     ) -> dict[str, Any]:
         """Send an event to the current instruction of a stored session.
 
@@ -333,11 +347,17 @@ class Workflow(BaseRecord):
             instruction_id: The instruction the event answers.
             event: Name of an `event` method the instruction accepts.
             arguments: JSON-compatible arguments of the event.
+            approved: Whether the user approved the event. Pass it only after
+                asking the user, never on the agent's word.
 
         Returns:
             A JSON-compatible response whose ``status`` is ``accepted``,
-            ``rejected``, ``not_ready``, ``stale``, or ``error``, with the
-            session's current instruction.
+            ``rejected``, ``not_ready``, ``stale``, ``error``, or
+            ``approval_required``, with the session's current instruction.
+            ``approval_required`` answers an event that `event` declares with
+            ``requires_approval`` and that is not ``approved``; its
+            ``approval`` block describes what the user approves. Nothing is
+            saved, so the event can be sent again once approved.
 
         Raises:
             hiraku.errors.ValidationError: If the session or instruction ID is
@@ -381,6 +401,18 @@ class Workflow(BaseRecord):
                 early = session.check(event, instruction_id, values)
                 if early is not None:
                     return early
+                if method.requires_approval and not approved:
+                    return {
+                        "status": "approval_required",
+                        "message": f"The user must approve event {event!r} before "
+                        "it runs; nothing was saved.",
+                        "approval": {
+                            "event": event,
+                            "description": method.description,
+                            "arguments": values,
+                        },
+                        **session.response,
+                    }
                 try:
                     data = _load_data(type(self), session.data)
                 except PydanticValidationError as exc:
@@ -832,7 +864,8 @@ def event_methods(cls: type[Workflow]) -> dict[str, Event]:
             does not match the workflow's data, or its name is taken.
     """
     found: dict[str, Event] = {}
-    for name, function, (event_name, source, dest) in _marked(cls, _EVENT_MARKER):
+    for name, function, declared in _marked(cls, _EVENT_MARKER):
+        event_name, source, dest, requires_approval = declared
         label = f"{cls.__name__}.{name}"
         parameters = _data_parameter(cls, label, "@event", function)
         found[name] = Event(
@@ -843,6 +876,7 @@ def event_methods(cls: type[Workflow]) -> dict[str, Event]:
             description=inspect.getdoc(function) or "",
             source=source,
             dest=dest,
+            requires_approval=requires_approval,
         )
     return found
 
@@ -984,7 +1018,8 @@ def workflow_graph(
     """Draw the states and events of a workflow as a Mermaid state diagram.
 
     Each event becomes an edge from each of its source states to each of its
-    destination states, labelled with the event's name.
+    destination states, labelled with the event's name, and with
+    ``(approval)`` if the user must approve it.
 
     Args:
         workflow: A workflow, or its class.
@@ -994,9 +1029,10 @@ def workflow_graph(
     check_workflow(cls)
     lines = ["stateDiagram-v2", f"  [*] --> {start_state(cls)}"]
     for item in event_methods(cls).values():
+        label = f"{item.name} (approval)" if item.requires_approval else item.name
         for source in item.source:
             for dest in item.dest:
-                lines.append(f"  {source} --> {dest}: {item.name}")
+                lines.append(f"  {source} --> {dest}: {label}")
     lines.extend(
         f"  {name} --> [*]" for name, item in state_methods(cls).items() if item.final
     )
@@ -1199,6 +1235,7 @@ def _event_specs(workflow: Workflow, current: str) -> dict[str, dict[str, Any]]:
         method.name: {
             "description": summary(method.description),
             "arguments": _compact_schema(method.arguments),
+            **({"requires_approval": True} if method.requires_approval else {}),
         }
         for method in event_methods(type(workflow)).values()
         if current in method.source

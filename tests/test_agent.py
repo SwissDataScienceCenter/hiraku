@@ -317,3 +317,33 @@ def test_events_shared_by_several_states_are_one_subcommand(
     assert "In draft: Redraft the experiment with the user's feedback." in text
     assert "In analyze: Redo the analysis with the user's feedback." in text
     assert "--feedback TEXT What the user wants changed. [required]" in text
+
+
+def test_events_requiring_approval_ask_in_the_terminal(
+    config: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = config.workflows_dir / "toy" / "workflow.py"
+    source.write_text(
+        WORKFLOW_PY.replace(
+            '@event(source="work", dest=["gate", "done"])',
+            '@event(source="work", dest=["gate", "done"], requires_approval=True)',
+        )
+    )
+    answers(config, "one", "uno")
+    # Without a terminal to ask in, the event waits for the user's approval.
+    waiting = agent("toy", "--items", "1")
+    assert waiting.exit_code == 3, waiting.output
+    assert "agent → answer  approval_required" in waiting.output
+    assert "Waiting for your approval" in waiting.output
+
+    monkeypatch.setattr("hiraku.agent._can_ask", lambda: True)
+    asked = CliRunner().invoke(main, ["toy"], input="revise\nShorter\napprove\n")
+    assert asked.exit_code == 0, asked.output
+    assert "again → answer  approval_required" in asked.output
+    assert "Approve event 'answer'?" in asked.output
+    assert '"value": "one"' in asked.output
+    assert "you → answer  accepted" in asked.output
+    assert 'completed: {"answers": ["uno"]}' in asked.output
+    (session,) = sessions(config)
+    prompt = config.sessions_dir / session["session_id"] / "1/1/prompt.md"
+    assert "The user asked for changes: Shorter" in prompt.read_text()

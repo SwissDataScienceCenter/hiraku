@@ -49,7 +49,11 @@ def runner(tmp_path: Path, monkeypatch) -> CliRunner:
 
 
 def send(
-    runner: CliRunner, response: dict[str, Any], name: str, **arguments: Any
+    runner: CliRunner,
+    response: dict[str, Any],
+    name: str,
+    *flags: str,
+    **arguments: Any,
 ) -> dict[str, Any]:
     command = [
         "workflow",
@@ -60,11 +64,12 @@ def send(
         str(response["instruction_id"]),
         "--arguments-file",
         "-",
+        *flags,
     ]
     return json.loads(invoke(runner, command, arguments).output)
 
 
-def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
+def test_count_steps_tokens_and_approved_steps(runner: CliRunner) -> None:
     listed = invoke(runner, ["workflow", "list"]).output
     assert "count-steps" in listed
     assert "greet" in listed
@@ -78,22 +83,19 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
         assert f"`Step {step}/3: token {context['token']}`" in instruction["text"]
         assert "{{" not in instruction["text"]
         options = instruction["events"]["accepted"]
-        assert [item["event"] for item in options] == ["ack"]
+        assert [item["event"] for item in options] == ["ack", "finish"]
+        assert all(item["requires_approval"] for item in options)
         if tokens:
-            stale = send(runner, response, "ack", token=tokens[-1])
+            stale = send(runner, response, "ack", "--approve", token=tokens[-1])
             assert stale["status"] == "rejected"
             assert f"does not match step {step}" in stale["message"]
         tokens.append(context["token"])
-        response = send(runner, response, "ack", token=context["token"])
-        if step == 3:
-            break
-        gate = response["instruction"]
-        assert gate["text"].startswith("## Next")
-        assert gate["events"]["requires_user_response"] is True
-        assert gate["context"] == {"done": step, "remaining": 3 - step}
-        gate_options = gate["events"]["accepted"]
-        assert [item["event"] for item in gate_options] == ["step", "finish"]
-        response = send(runner, response, "step")
+        # The agent's acknowledgement waits for the user's approval.
+        asked = send(runner, response, "ack", token=context["token"])
+        assert asked["status"] == "approval_required"
+        assert asked["instruction_id"] == response["instruction_id"]
+        response = send(runner, response, "ack", "--approve", token=context["token"])
+        assert response["status"] == "accepted"
 
     assert response["completed"] is True
     assert response["instruction"]["text"].startswith("## Done")
@@ -107,15 +109,12 @@ def test_count_steps_rejects_wrong_tokens_and_finishes_early(
     assert start(runner, "count-steps", {"count": 0})["status"] == "rejected"
 
     response = start(runner, "count-steps", {"count": 2})
-    wrong = send(runner, response, "ack", token="00000000")
+    wrong = send(runner, response, "ack", "--approve", token="00000000")
     assert wrong["status"] == "rejected"
-    early = send(runner, response, "finish")
-    assert early["status"] == "rejected"
-    assert "not an event the current instruction accepts" in early["message"]
-    gate = send(
-        runner, response, "ack", token=response["instruction"]["context"]["token"]
-    )
-    done = send(runner, gate, "finish")
+    token = response["instruction"]["context"]["token"]
+    second = send(runner, response, "ack", "--approve", token=token)
+    assert send(runner, second, "finish")["status"] == "approval_required"
+    done = send(runner, second, "finish", "--approve")
     assert done["completed"] is True
     assert done["instruction"]["context"] == {"steps": 1, "count": 2}
 
@@ -137,40 +136,39 @@ Path(os.environ["HIRAKU_EVENT_FILE"]).write_text(json.dumps(event))
 """
 
 
-def test_count_steps_one_step_at_a_time_through_hiraku_agent(
+def test_count_steps_one_approved_step_at_a_time_through_hiraku_agent(
     runner: CliRunner, tmp_path: Path, monkeypatch
 ) -> None:
     script = tmp_path / "echo_agent.py"
     script.write_text(ECHO_AGENT)
     monkeypatch.setenv("HIRAKU_AGENT_CMD", f"{sys.executable} {script}")
 
+    # Without a terminal to ask in, each step waits for the user's approval.
     started = runner.invoke(agent_main, ["count-steps", "--count", "3"])
     assert started.exit_code == 3, started.output
     assert "Step 1/3: token" in started.output
     assert "Step 2/3" not in started.output
-    assert "[1 Step] agent → ack  accepted" in started.output
-    assert "[2 Next] waiting for you" in started.output
-    assert "hiraku-agent count-steps step  # Run the next step." in started.output
+    assert "[1 Step] agent → ack  approval_required" in started.output
+    assert "Waiting for your approval" in started.output
 
-    second = runner.invoke(agent_main, ["count-steps", "step"])
-    assert second.exit_code == 3, second.output
-    assert "[2 Next] you → step  accepted" in second.output
-    assert "Step 2/3: token" in second.output
-    assert "Step 3/3" not in second.output
-
-    (summary,) = Session.list_all(config=HirakuConfig.discover())
-    session = Session.load(summary["session_id"], config=HirakuConfig.discover())
-    # Step 2 is done; its token cannot be sent again while the session waits.
-    old = session.history[-1].arguments["token"]
-    stale = runner.invoke(agent_main, ["count-steps", "ack", "--token", old])
-    assert stale.exit_code == 1
-    assert "No active session accepts 'ack'" in stale.output
-
-    done = runner.invoke(agent_main, ["count-steps", "step"])
+    # In a terminal, the driver asks before each step goes on.
+    monkeypatch.setattr("hiraku.agent._can_ask", lambda: True)
+    done = runner.invoke(agent_main, ["count-steps"], input="approve\n" * 3)
     assert done.exit_code == 0, done.output
+    assert done.output.count("Approve event 'ack'?") == 3
+    assert "[1 Step] you → ack  accepted" in done.output
     assert "Step 3/3: token" in done.output
     assert "Ran 3 steps" in done.output
     assert 'completed: {"steps": 3, "count": 3}' in done.output
+
+    # The user ends a session early by sending finish, which they approve.
+    monkeypatch.setattr("hiraku.agent._can_ask", lambda: False)
+    again = runner.invoke(agent_main, ["count-steps", "--new", "--count", "2"])
+    assert again.exit_code == 3, again.output
+    finished = runner.invoke(agent_main, ["count-steps", "finish"])
+    assert finished.exit_code == 0, finished.output
+    assert "you → finish  accepted" in finished.output
+    assert 'completed: {"steps": 0, "count": 2}' in finished.output
 
 
 def test_greet_is_one_final_prompt_filled_from_its_arguments(
@@ -322,10 +320,9 @@ def test_example_workflows_draw_their_states(runner: CliRunner) -> None:
     assert count_steps == (
         "stateDiagram-v2\n"
         "  [*] --> running\n"
-        "  running --> waiting: ack\n"
-        "  running --> finished: ack\n"
-        "  waiting --> running: step\n"
-        "  waiting --> finished: finish\n"
+        "  running --> running: ack (approval)\n"
+        "  running --> finished: ack (approval)\n"
+        "  running --> finished: finish (approval)\n"
         "  finished --> [*]\n"
     )
     scheduler = invoke(runner, ["workflow", "graph", "scheduler"]).output

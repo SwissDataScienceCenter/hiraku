@@ -111,6 +111,7 @@ An event has one of these outcomes:
 | `rejected` | The input was invalid; the same instruction stays current. |
 | `not_ready` | The input was valid, but the evidence it refers to has not arrived yet; check again later. |
 | `stale` | The event answers an instruction that is no longer current; the call was not applied, and the response holds the current instruction. |
+| `approval_required` | The event requires your approval, which the transport could not ask for; nothing was saved. See [Events that require approval](#events-that-require-approval). |
 
 Sending an identical event again is safe: it returns the same response without
 applying the event again.
@@ -118,6 +119,32 @@ applying the event again.
 Completion means the session accepts no more events, not necessarily that
 every objective was met: the final instruction's context distinguishes, for
 example, completed, partial, and stopped results.
+
+### Events that require approval
+
+An event declared with `@event(..., requires_approval=True)` runs only once
+you approve it; its entry in `events.accepted` has `"requires_approval": true`.
+When the agent sends it, nothing runs yet, and Hiraku asks you:
+
+- Over MCP, `workflow_send_event` asks you through the client with
+  [MCP elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation):
+  the client shows the event, its description, and its arguments, and you
+  approve it or ask for changes. If you approve, the event runs and the tool
+  returns the next instruction. If you ask for changes, decline, or dismiss
+  the form, it returns `rejected` with your feedback, and the same instruction
+  stays current.
+- `hiraku-agent` asks in the terminal before it sends an event the agent
+  wrote, and passes your feedback to the agent's next attempt. Without a
+  terminal, it exits with code 3 and asks again when you run it next. Events
+  you send with `hiraku-agent WORKFLOW EVENT` count as approved.
+- A client without elicitation gets `approval_required`, and the message tells
+  the agent to ask you to approve it with
+  `hiraku workflow send-event SESSION EVENT --instruction-id N --approve`.
+
+Approval keeps the decision out of the agent's hands, not out of the client's:
+the MCP client answers elicitations, and some clients can answer them with
+hooks or an automatic reviewer. Hiraku cannot verify that a person answered,
+and an agent with shell access could run the CLI command itself.
 
 ### Resume, inspect, and cancel
 
@@ -168,8 +195,7 @@ from the agent's MCP configuration, not from the agent's shell.
 instruction to a coding agent and stops whenever you decide:
 
 ```bash
-hiraku-agent count-steps --count 3   # start; the agent runs step 1
-hiraku-agent count-steps step        # you go on; the agent runs step 2
+hiraku-agent count-steps --count 3   # the agent runs each step; you approve it
 hiraku-agent count-steps finish      # or you stop
 ```
 
@@ -193,12 +219,14 @@ values are parsed as JSON, and the workflow validates them.
   `hiraku-agent WORKFLOW` sends it again without the agent, and exits with
   status 4 while it still waits. The agent carries out the final instruction
   without writing an event, and the driver exits with 0.
+- Before it sends an event that requires approval, the driver asks you in the
+  terminal; without one, it exits with status 3 and asks when you run it
+  again. Events you send with `hiraku-agent WORKFLOW EVENT` count as approved.
 - With `--interactive`, each agent step runs as a conversation with you in the
   terminal instead of headless: the agent first says what it would do and
   waits; discuss the step, and once you tell it to go ahead it carries out the
-  step and writes the event. The driver still stops where you decide, so
-  `hiraku-agent count-steps step --interactive` is exactly one conversational
-  step. Exit the agent without an event to stop; the instruction stays current.
+  step and writes the event. The driver still stops where you decide. Exit
+  the agent without an event to stop; the instruction stays current.
 
 | Mode | Default command | Override |
 | --- | --- | --- |
@@ -442,7 +470,7 @@ declared once, exactly one is the start state and at least one is final,
 every state an event names exists, a final state accepts no events and every
 other state accepts at least one, and every state can be reached from the
 start state. Then it draws the workflow as a Mermaid state diagram, with one
-edge per event:
+edge per event, marked `(approval)` if the event requires approval:
 
 ```bash
 hiraku workflow graph review

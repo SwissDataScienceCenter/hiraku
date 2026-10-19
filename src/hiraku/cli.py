@@ -673,6 +673,11 @@ def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> 
     help="ID of the current instruction the event answers.",
 )
 @_ARGUMENTS_FILE
+@click.option(
+    "--approve",
+    is_flag=True,
+    help="Approve an event that requires the user's approval.",
+)
 @click.pass_obj
 def workflow_send_event(
     state: CLIContext,
@@ -680,8 +685,13 @@ def workflow_send_event(
     event: str,
     instruction_id: int,
     arguments_file: Any,
+    approve: bool,
 ) -> None:
-    """Send EVENT to a session's current instruction and print the response."""
+    """Send EVENT to a session's current instruction and print the response.
+
+    An event that requires approval runs only with --approve, which you, not
+    the agent, should pass.
+    """
     from .session import Session
     from .workflow import load_workflow
 
@@ -689,7 +699,11 @@ def workflow_send_event(
     workflow = load_workflow(session.workflow, config=state.config).bind(state.config)
     _emit_json(
         workflow.run_event(
-            session_id, instruction_id, event, _arguments(arguments_file)
+            session_id,
+            instruction_id,
+            event,
+            _arguments(arguments_file),
+            approved=approve,
         )
     )
 

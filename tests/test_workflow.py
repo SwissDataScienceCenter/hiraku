@@ -1408,3 +1408,56 @@ def test_instructions_narrow_named_events_by_method(config: HirakuConfig) -> Non
     response = load_workflow("named", config=config).bind(config).run_start({})
     assert response["status"] == "error"
     assert "State 'ask' does not accept note_answer" in response["message"]
+
+
+GATED_PY = (
+    MINIMAL
+    + "class W(Workflow):\n"
+    + "    def start(self) -> S:\n        return S()\n"
+    + STATES.replace(
+        "@event(source='go', dest='end')",
+        "@event(source='go', dest='end', requires_approval=True)",
+    ).replace(
+        "-> Instruction: ...", "-> Instruction:\n        return Instruction('Go.')"
+    )
+    + "WORKFLOW = W\n"
+)
+
+
+def test_events_requiring_approval_run_only_when_approved(
+    config: HirakuConfig,
+) -> None:
+    write_workflow(config, "gated", GATED_PY)
+    workflow = load_workflow("gated", config=config).bind(config)
+    graph = workflow_graph(workflow)
+    assert "go --> end: stop (approval)" in graph
+    first = workflow.run_start({})
+    assert first["instruction"]["events"]["accepted"][0]["requires_approval"] is True
+    path = config.sessions_dir / f"{first['session_id']}.json"
+    before = path.read_text()
+
+    asked = send(workflow, "stop", first)
+    assert asked["status"] == "approval_required"
+    assert asked["approval"] == {"event": "stop", "description": "", "arguments": {}}
+    assert asked["instruction_id"] == 1
+    assert path.read_text() == before
+
+    approved = workflow.run_event(first["session_id"], 1, "stop", {}, approved=True)
+    assert approved["status"] == "accepted"
+    assert approved["completed"] is True
+    # Retrying the approved event returns its response without asking again.
+    assert send(workflow, "stop", first) == approved
+
+
+def test_cli_approves_events(config: HirakuConfig, monkeypatch) -> None:
+    monkeypatch.chdir(config.root)
+    write_workflow(config, "gated", GATED_PY)
+    first = load_workflow("gated", config=config).bind(config).run_start({})
+    command = ["workflow", "send-event", first["session_id"], "stop"]
+    command += ["--instruction-id", "1"]
+    asked = CliRunner().invoke(main, command)
+    assert asked.exit_code == 0, asked.output
+    assert json.loads(asked.output)["status"] == "approval_required"
+    approved = CliRunner().invoke(main, [*command, "--approve"])
+    assert approved.exit_code == 0, approved.output
+    assert json.loads(approved.output)["status"] == "accepted"
