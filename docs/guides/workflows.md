@@ -62,6 +62,7 @@ agent answers with the `workflow_reply` tool, for example
       "rounds_left": 3
     },
     "reply": {
+      "tool": "workflow_reply",
       "session_id": "collaborative-3f9a1c2b4d5e",
       "instruction_id": 2,
       "requires_user_response": true,
@@ -81,9 +82,11 @@ agent answers with the `workflow_reply` tool, for example
 
 When `reply.requires_user_response` is true, the agent asks you before
 replying. This is a conversational contract; it does not authenticate approval.
-The `workflow_reply` tool's description explains this protocol to the agent,
-and an MCP prompt hands over the instruction as text with its context and reply
-block.
+The `workflow_reply` tool's description explains this protocol to the agent.
+An MCP prompt hands over the instruction as text with its context and reply
+block, and ends with a line saying to answer with `workflow_reply`: the prompt
+arrives as a user message, and without that line agents may answer "reply
+`incremented`" in the chat, which never reaches the workflow.
 
 A reply passes the `instruction_id` of the instruction it answers, so a late or
 repeated call cannot be applied to a later step. `session_id` may be left out

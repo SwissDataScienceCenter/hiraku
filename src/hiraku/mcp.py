@@ -453,13 +453,17 @@ def _add_workflow_tools(
         session = Session.load(session_id, config=config)
         workflow = workflows.get(session.workflow)
         if workflow is None:
-            return session.outcome(
-                "rejected",
-                f"Workflow {session.workflow!r} is unavailable; the session cannot "
-                "continue until it loads.",
+            return _over_mcp(
+                session.outcome(
+                    "rejected",
+                    f"Workflow {session.workflow!r} is unavailable; the session "
+                    "cannot continue until it loads.",
+                )
             )
-        return workflow.bind(config).run_reply(
-            session_id, instruction_id, reply, arguments
+        return _over_mcp(
+            workflow.bind(config).run_reply(
+                session_id, instruction_id, reply, arguments
+            )
         )
 
     _add_tool(
@@ -518,14 +522,28 @@ def _add_session_tools(
 
 
 def _show(session: Session, workflows: Mapping[str, Workflow]) -> dict[str, Any]:
-    return session.show(workflows.get(session.workflow))
+    shown = session.show(workflows.get(session.workflow))
+    return {**shown, "response": _over_mcp(shown["response"])}
+
+
+def _over_mcp(response: Mapping[str, Any]) -> dict[str, Any]:
+    """Name the tool that answers an instruction in its reply block.
+
+    The runtime does not know the transport; over MCP, replies go through
+    workflow_reply, while hiraku-agent asks for a reply file instead.
+    """
+    instruction = response.get("instruction")
+    if not isinstance(instruction, Mapping) or "reply" not in instruction:
+        return dict(response)
+    reply = {"tool": "workflow_reply", **instruction["reply"]}
+    return {**response, "instruction": {**instruction, "reply": reply}}
 
 
 def _start_tool(workflow: Workflow, project: Project) -> Callable[..., Any]:
     """Return a function whose signature is the workflow's start arguments."""
 
     def run(**arguments: Any) -> dict[str, Any]:
-        return workflow.bind(project()).run_start(arguments)
+        return _over_mcp(workflow.bind(project()).run_start(arguments))
 
     parameters = []
     for name, field in workflow.start_arguments().model_fields.items():
@@ -567,7 +585,17 @@ def _start_prompt(workflow: Workflow, project: Project) -> Callable[..., str]:
                 f"{response.get('message')}. Tell the user and ask for corrected "
                 "arguments."
             )
-        return instruction_text(response["instruction"])
+        instruction = _over_mcp(response)["instruction"]
+        text = instruction_text(instruction)
+        if "reply" not in instruction:
+            return text
+        # A prompt is a user message: say that "reply" means the tool, not chat.
+        return (
+            f"{text}\n\nAnswer with the workflow_reply tool, passing the reply "
+            "block's session_id and instruction_id, one of its options as reply, "
+            "and the option's arguments. Replying in the chat does not reach the "
+            "workflow."
+        )
 
     parameters = [
         inspect.Parameter(

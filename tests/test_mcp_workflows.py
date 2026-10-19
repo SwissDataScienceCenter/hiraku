@@ -177,15 +177,25 @@ def test_prompts_render_the_reply_block_and_tools_explain_it(
         tools = {tool.name: tool for tool in (await client.list_tools()).tools}
         started = await client.get_prompt("echo", {"task": "a"})
         listing = items(await client.call_tool("session_list", {}))
-        return tools, started.messages[0].content.text, listing
+        shown = payload(
+            await client.call_tool(
+                "session_show", {"session_id": listing[0]["session_id"]}
+            )
+        )
+        return tools, started.messages[0].content.text, listing, shown
 
-    tools, text, listing = run(server, scenario)
+    tools, text, listing, shown = run(server, scenario)
     session_id = listing[0]["session_id"]
     assert text.startswith("Work on a.\n\nReply:\n```json\n")
     block = json.loads(text.split("```json\n", 1)[1].rsplit("\n```", 1)[0])
+    assert block["tool"] == "workflow_reply"
     assert block["session_id"] == session_id
     assert block["instruction_id"] == 1
     assert [option["reply"] for option in block["options"]] == ["complete"]
+    # A prompt is a user message; without this line agents answered in chat.
+    assert text.endswith("Replying in the chat does not reach the workflow.")
+    assert "Answer with the workflow_reply tool" in text
+    assert shown["response"]["instruction"]["reply"]["tool"] == "workflow_reply"
     description = tools["workflow_reply"].description
     assert "reply block" in description
     assert "An instruction without a" in description
@@ -244,6 +254,7 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
     reply_block = result["first"]["instruction"]["reply"]
     assert "No session is active" in result["none"]["message"]
     assert "guide" not in result["first"]
+    assert reply_block["tool"] == "workflow_reply"
     assert reply_block["session_id"] == result["first"]["session_id"]
     assert reply_block["instruction_id"] == 1
     assert reply_block["options"][0]["reply"] == "complete"
@@ -253,6 +264,7 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
     assert result["invalid"]["status"] == "rejected"
     assert "summary" in result["invalid"]["message"]
     assert result["done"]["completed"] is True
+    assert result["invalid"]["instruction"]["reply"]["tool"] == "workflow_reply"
     assert result["done"]["instruction"] == {
         "text": "Report the summary.",
         "context": {"summary": "Tried three ideas"},

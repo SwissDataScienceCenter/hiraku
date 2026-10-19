@@ -336,9 +336,9 @@ the tool named after it. Each response contains one instruction: its text, its
 1. Carry out the instruction text, using its `context`.
 2. If `reply.requires_user_response` is true, ask the user and wait for their
    answer before replying. Otherwise decide yourself.
-3. Reply with the `workflow_reply` tool: one of `reply.options`, its arguments
-   as the option's schema describes, and the reply block's `session_id` and
-   `instruction_id` unchanged. Repeating an identical reply is safe; a `stale`
+3. Reply with the `workflow_reply` tool, never in the chat: one of
+   `reply.options`, its arguments as the option's schema describes, and the
+   reply block's `session_id` and `instruction_id` unchanged. Repeating an identical reply is safe; a `stale`
    status means the instruction moved on, so continue from the one returned.
 4. A `rejected` or `not_ready` response keeps the same instruction pending; fix
    the input or check again later. An instruction without a `reply` block is
