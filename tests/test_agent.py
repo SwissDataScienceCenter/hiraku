@@ -195,6 +195,29 @@ def test_runs_until_a_gate_and_continues_after_the_user_event(
     assert 'completed: {"answers": ["one", "two"]}' in shown.output
 
 
+def test_rejected_events_stop_after_three_attempts(config: HirakuConfig) -> None:
+    answers(config, "bad", "bad", "bad", "one")
+    result = agent("toy")
+    assert result.exit_code == 1
+    assert "The agent's events were rejected 3 times" in result.output
+    assert (config.root / "answers.txt").read_text() == "one\n"
+    (session,) = sessions(config)
+    stored = Session.load(session["session_id"], config=config)
+    assert stored.status == "active"
+    assert stored.instruction_id == 1
+    assert stored.data["answers"] == []
+
+
+@pytest.mark.parametrize("command", [("toy",), ("toy", "approve")])
+def test_retries_option_is_not_supported(
+    config: HirakuConfig, command: tuple[str, ...]
+) -> None:
+    result = agent(*command, "--retries", "0")
+    assert result.exit_code == 2
+    assert "No such option '--retries'" in result.output
+    assert sessions(config) == []
+
+
 def test_not_ready_events_are_sent_again_without_the_agent(
     config: HirakuConfig,
 ) -> None:
@@ -308,12 +331,14 @@ def test_missing_agent_command_is_explained(
     assert "HIRAKU_AGENT_CMD" in result.output
 
 
-def test_events_shared_by_several_states_are_one_subcommand(
+def test_event_subcommands_use_method_names(
     config: HirakuConfig,
 ) -> None:
-    result = agent("collaborative", "revise", "--help")
+    result = agent("collaborative", "revise_implementation", "--help")
     assert result.exit_code == 0, result.output
     text = " ".join(result.output.split())
-    assert "In draft: Redraft the experiment with the user's feedback." in text
-    assert "In analyze: Redo the analysis with the user's feedback." in text
+    assert "Rework the implementation with the user's feedback." in text
     assert "--feedback TEXT What the user wants changed. [required]" in text
+    removed = agent("collaborative", "revise", "--help")
+    assert removed.exit_code == 2
+    assert "No such command 'revise'" in removed.output

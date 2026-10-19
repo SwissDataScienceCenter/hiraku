@@ -56,8 +56,8 @@ Every instruction has text, context, and, unless it is final, an `events`
 block that says which events it accepts: whether you must answer first, the
 accepted events with their argument schemas, and the session and instruction
 IDs to pass. The agent sends one with the `workflow_send_event` tool, for
-example `workflow_send_event(event="revise", arguments={"feedback": "Keep SGD"},
-...)`:
+example `workflow_send_event(event="revise_implementation",
+arguments={"feedback": "Keep SGD"}, ...)`:
 
 ```json
 {
@@ -65,21 +65,27 @@ example `workflow_send_event(event="revise", arguments={"feedback": "Keep SGD"},
   "session_id": "collaborative-3f9a1c2b4d5e",
   "instruction_id": 2,
   "instruction": {
-    "text": "## Review\n\nPresent the result of the step in the context ...",
+    "text": "## Implement\n\nImplement the drafted experiment ...",
     "context": {
-      "step": "draft",
-      "result": {"record_id": "exp-wd", "summary": "Add weight decay", ...},
-      "rounds_left": 3
+      "task": "training",
+      "experiment": {
+        "record_id": "exp-wd",
+        "summary": "Add weight decay",
+        "hypothesis": "Weight decay reduces overfitting",
+        "change": "## Change\n\nSet weight decay to 0.01.",
+        "commit": null
+      }
     },
     "events": {
       "tool": "workflow_send_event",
       "session_id": "collaborative-3f9a1c2b4d5e",
       "instruction_id": 2,
-      "requires_user_response": true,
+      "requires_user_response": false,
       "accepted": [
-        {"event": "implement", "description": "Implement the drafted experiment.",
-         "arguments": {"properties": {}}},
-        {"event": "revise", "description": "Redo the reviewed step with ...",
+        {"event": "implemented", "description": "Submit the implementation commit.",
+         "arguments": {"properties": {"commit": {"type": "string"}},
+                       "required": ["commit"]}},
+        {"event": "revise_implementation", "description": "Rework the implementation.",
          "arguments": {"properties": {"feedback": {"type": "string"}},
                        "required": ["feedback"]}},
         {"event": "finish", "description": "End the session and summarize ...",
@@ -185,8 +191,8 @@ values are parsed as JSON, and the workflow validates them.
 - For every other instruction, the driver writes a prompt to
   `hiraku/sessions/<session-id>/<instruction-id>/<attempt>/prompt.md` and runs
   the agent. The agent writes its event as JSON to the `event.json` named in
-  the prompt. A rejected event goes back to the agent with the error, up to
-  `--retries` times.
+  the prompt. A rejected event goes back to the agent with the error for up to
+  two retries after the initial attempt.
 - At an instruction that requires your response, the driver prints its context
   and the event commands and exits with status 3. An event that is not ready,
   such as a launch whose run is not tracked yet, is kept: the next
@@ -371,11 +377,8 @@ The rules are deliberately small:
   event's arguments and description. An event changes the data in place. With
   one destination it returns nothing, and with several it returns the state it
   chooses, e.g. `return "done" if finished else "waiting"`. The event's name
-  is the method's name, or the one you pass, e.g.
-  `@event("revise", source="draft", dest="draft")`: several methods may share
-  a name if their source states differ, and the event then runs the method of
-  the current state, with that method's description and arguments. Hiraku
-  checks that the current instruction accepts the event and that its
+  is its method's name, and its docstring describes it to agents and users.
+  Hiraku checks that the current instruction accepts the event and that its
   arguments match, calls the event, enters the destination state, and saves
   the result atomically. A state or event method cannot be named `start` or
   like a `Workflow` method such as `save`.
@@ -432,10 +435,9 @@ echo '{"candidates": ["Q1", "Q2"]}' | hiraku workflow send-event <session-id> pr
 
 Hiraku owns a session's current state: a session begins in the start state,
 and only declared events move it, to one of their destinations. Each
-instruction accepts the events whose `source` names its state, so a state
-method lists none. It may narrow them, e.g.
-`Instruction(..., events=[self.finish])` while a step is not available yet;
-listing an event the state does not accept is an error.
+instruction's events block is generated from the events whose `source` names
+its state. State methods return the instruction text and context without
+listing events. Use separate states when different events should be available.
 
 When a workflow loads, Hiraku checks its states and events: each state is
 declared once, exactly one is the start state and at least one is final,
@@ -464,8 +466,9 @@ The MCP server serves the same diagram as `hiraku://workflows/<id>/graph`, and
 
 `hiraku init` installs **collaborative**, which runs experiments on a task in
 four states: draft, implement, launch, and analyze. The agent does each step,
-shows you the result, sends `revise` with your feedback to redo the step, and
-reports it with an event such as `drafted` or `implemented` once you approve; Hiraku writes the experiment
+shows you the result, sends the step's revision event (such as `revise_draft`)
+with your feedback to redo the step, and reports it with an event such as
+`drafted` or `implemented` once you approve; Hiraku writes the experiment
 record, binds the resolved commit, checks that the runs are attributed to the
 experiment and its commit, and records the verdict. After `rounds`
 experiments, or when you ask to `finish`, the agent summarizes the results.

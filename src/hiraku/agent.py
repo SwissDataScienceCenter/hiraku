@@ -2,8 +2,8 @@
 
 Each workflow is a command, and each of its events a subcommand:
 
-    hiraku-agent collaborative --task cifar     # start, or resume, a session
-    hiraku-agent collaborative implement        # send as the user, continue
+    hiraku-agent collaborative --task cifar --interactive  # start a session
+    hiraku-agent collaborative finish --interactive       # end and summarize
 
 The driver hands every pending instruction to a coding agent, such as
 ``claude -p``, and sends the event the agent writes to a file back to the
@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import click
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 from pydantic.fields import FieldInfo
 
@@ -50,7 +50,7 @@ from .workflow import (
 
 EXIT_WAITING = 3
 EXIT_NOT_READY = 4
-DEFAULT_RETRIES = 2
+_MAX_ATTEMPTS = 3
 
 # Instructions such as implementing or launching need editing and the shell.
 _TOOLS = "Read,Glob,Grep,Write,Edit,Bash"
@@ -73,7 +73,6 @@ class Options:
     new: bool = False
     interactive: bool = False
     agent_cmd: str | None = None
-    retries: int = DEFAULT_RETRIES
 
 
 class _NoEvent(Exception):
@@ -141,12 +140,6 @@ def _driver_params() -> list[click.Parameter]:
             help="Agent command; the instruction is sent on standard input "
             "(appended as a message with --interactive).",
         ),
-        click.Option(
-            ["--retries", "retries"],
-            type=click.IntRange(min=0),
-            default=None,
-            help=f"Retries after a rejected agent event [default: {DEFAULT_RETRIES}].",
-        ),
     ]
 
 
@@ -186,34 +179,15 @@ def _workflow_command(workflow: Workflow) -> click.Group:
         help=workflow_description(workflow),
         short_help=summary(workflow_description(workflow)),
     )
-    by_name: dict[str, list[Event]] = {}
     for method in event_methods(type(workflow)).values():
-        by_name.setdefault(method.name, []).append(method)
-    for name, methods in by_name.items():
-        group.add_command(_event_command(workflow, name, methods))
+        group.add_command(_event_command(workflow, method))
     return group
 
 
-def _event_command(
-    workflow: Workflow, name: str, methods: list[Event]
-) -> click.Command:
-    """Return the subcommand that sends an event, in whichever state accepts it.
-
-    Several methods may handle the event in different states; the options are
-    the union of their arguments, which the current state's method validates.
-    """
+def _event_command(workflow: Workflow, method: Event) -> click.Command:
+    """Return the subcommand that sends an event."""
     driver = _driver_params()
-    fields: dict[str, Any] = {}
-    for method in methods:
-        for field_name, field in method.arguments.model_fields.items():
-            fields.setdefault(field_name, (field.annotation, field))
-    model = create_model(f"{name}_options", **fields)
-    if len(methods) == 1:
-        description = methods[0].description
-    else:
-        description = "\n\n".join(
-            f"In {', '.join(method.source)}: {method.description}" for method in methods
-        )
+    name, model = method.name, method.arguments
 
     @click.pass_context
     def run(ctx: click.Context, **values: Any) -> None:
@@ -234,8 +208,8 @@ def _event_command(
         name=name,
         callback=run,
         params=[*driver, *_model_params(model, driver)],
-        help=description,
-        short_help=summary(methods[0].description),
+        help=method.description,
+        short_help=summary(method.description),
     )
 
 
@@ -252,7 +226,7 @@ def _options(ctx: click.Context) -> Options:
     for context in (ctx.parent, ctx):
         if context is None:
             continue
-        for key in ("session", "new", "interactive", "agent_cmd", "retries"):
+        for key in ("session", "new", "interactive", "agent_cmd"):
             value = context.params.get(key)
             if value not in (None, False):
                 merged[key] = value
@@ -453,7 +427,7 @@ def _agent_turns(
 ) -> Status:
     """Run the agent on the current instruction until an event is not rejected."""
     error: str | None = None
-    for attempt in range(1, options.retries + 2):
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
             name, arguments = _run_agent(workflow, response, attempt, error, options)
         except ValueError as exc:
@@ -474,7 +448,7 @@ def _agent_turns(
             raise click.ClickException(result["message"])
         return status
     raise click.ClickException(
-        f"The agent's events were rejected {options.retries + 1} times; see "
+        f"The agent's events were rejected {_MAX_ATTEMPTS} times; see "
         f"{_directory(workflow, response)}"
     )
 

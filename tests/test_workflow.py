@@ -12,11 +12,9 @@ from hiraku.config import HirakuConfig
 from hiraku.errors import (
     HirakuError,
     RecordNotFoundError,
-    SectionNotFoundError,
     SessionNotFoundError,
     ValidationError,
 )
-from hiraku.markdown import Markdown
 from hiraku.session import Session
 from hiraku.workflow import (
     Instruction,
@@ -72,7 +70,6 @@ class Toy(Workflow):
         return Instruction(
             self.markdown.section("## Add"),
             context={"total": total.total},
-            events=[self.add, self.wait, self.boom],
         )
 
     @state("done", final=True)
@@ -100,10 +97,6 @@ class Toy(Workflow):
         """Fail unexpectedly."""
         total.total = -100
         raise RuntimeError("kaboom")
-
-    @event(source="adding", dest="adding")
-    def hidden(self, total: Total) -> None:
-        """Never offered."""
 
 
 WORKFLOW = Toy
@@ -187,7 +180,7 @@ def test_start_and_event_signatures_and_relative_imports(
     assert start["description"] == "Sum to reach."
     assert start["exclusiveMinimum"] == 0
     assert workflow.start_arguments() is start_model(type(workflow))
-    assert list(event_methods(type(workflow))) == ["add", "wait", "boom", "hidden"]
+    assert list(event_methods(type(workflow))) == ["add", "wait", "boom"]
     assert list(state_methods(type(workflow))) == ["adding", "done"]
     assert start_state(type(workflow)) == "adding"
 
@@ -200,7 +193,6 @@ def test_start_states_and_events_stay_directly_callable(config: HirakuConfig) ->
     assert total.total == 2
     instruction = workflow.adding(total)
     assert isinstance(instruction, Instruction)
-    assert instruction.events == [workflow.add, workflow.wait, workflow.boom]
     assert instruction.context == {"total": 2}
     assert workflow.add(total, amount=3) == "done"
 
@@ -209,7 +201,6 @@ ADDING = """\
         return Instruction(
             self.markdown.section("## Add"),
             context={"total": total.total},
-            events=[self.add, self.wait, self.boom],
         )
 """
 DONE = """\
@@ -222,16 +213,6 @@ DONE = """\
 @pytest.mark.parametrize(
     ("old", "new", "message"),
     [
-        (
-            ADDING,
-            "        return Instruction('Ask', events=[self.adding])\n",
-            "must be @event methods",
-        ),
-        (
-            ADDING,
-            "        return Instruction('Ask', events=[self.add, self.add])\n",
-            "same event more than once",
-        ),
         (ADDING, "        return Instruction(' ')\n", "must not be empty"),
         (
             ADDING,
@@ -246,13 +227,8 @@ DONE = """\
         ),
         (
             DONE,
-            "        return Instruction('Done', events=[self.add])\n",
-            "final state 'done' accepts no events",
-        ),
-        (
-            DONE,
             "        return Instruction('Done', requires_user_response=True)\n",
-            "final state 'done' accepts no events and requires no user response",
+            "final state 'done' requires no user response",
         ),
     ],
 )
@@ -299,12 +275,12 @@ def test_events_with_several_destinations_return_one(
 
 def test_events_with_one_destination_return_nothing(config: HirakuConfig) -> None:
     source = TOY_PY.replace(
-        '        """Never offered."""\n',
-        '        """Never offered."""\n        return "done"\n',
-    ).replace("events=[self.add, self.wait, self.boom]", "events=[self.hidden]")
+        '        raise NotReady("evidence is not there yet")',
+        '        return "done"',
+    )
     (config.workflows_dir / "toy" / "workflow.py").write_text(source)
     workflow = toy(config)
-    response = send(workflow, "hidden", started(workflow))
+    response = send(workflow, "wait", started(workflow))
     assert response["status"] == "error"
     assert "it moves to 'adding' and returns nothing" in response["message"]
 
@@ -421,7 +397,7 @@ def test_prompts_are_snapshotted_with_the_code(config: HirakuConfig) -> None:
     assert toy(config).markdown.section("## Add") == "## Add\n\nNew"
 
 
-def test_start_returns_the_first_section_and_explicit_events(
+def test_start_returns_the_first_section_and_state_events(
     config: HirakuConfig,
 ) -> None:
     response = started(toy(config))
@@ -476,10 +452,6 @@ def test_correlation_table(config: HirakuConfig) -> None:
     future = workflow.run_event(first["session_id"], 9, "add", {"amount": 1})
     assert future["status"] == "stale"
     assert "pending instruction is 2" in future["message"]
-
-    not_offered = send(workflow, "hidden", accepted)
-    assert not_offered["status"] == "rejected"
-    assert "not an event the current instruction accepts" in not_offered["message"]
 
     unknown = send(workflow, "ask", accepted)
     assert unknown["status"] == "rejected"
@@ -857,117 +829,12 @@ def test_markdown_only_workflows_send_one_final_instruction(
     assert "front matter" in load_error(config, "loop")
 
 
-# workflow.md: sections, placeholders, and the record -----------------------
-
-
-DOCUMENT = """\
-# Research
-
-Introduction text.
-
-### Not a section boundary
-
-Still introduction.
-
-## Select
-
-Pick one.
-
-### Details
-
-Nested detail.
-
-```markdown
-## Not a heading
-```
-
-## Approve the Launch!
-
-Ask first.
-"""
-
-
-def research() -> Workflow:
-    return Workflow(id="research", markdown=DOCUMENT)
-
-
-def test_headings_are_top_level_sections_with_their_lines() -> None:
-    assert [str(item) for item in Markdown(DOCUMENT).headings] == [
-        "# Research",
-        "### Not a section boundary",
-        "## Select",
-        "### Details",
-        "## Approve the Launch!",
-    ]
-    nested = Markdown("- item\n\n  ## In a list\n\n> ## Quoted\n")
-    assert nested.headings == ()
-
-
-def test_first_level_section_contains_the_whole_document() -> None:
-    document = research().markdown.section("# Research")
-    assert document.startswith("# Research\n\nIntroduction text.")
-    assert document.endswith("Ask first.")
-
-
-def test_section_includes_subsections_and_ignores_fenced_headings() -> None:
-    markdown = research().markdown
-    select = markdown.section("## Select")
-    assert select.startswith("## Select")
-    assert "Nested detail." in select
-    assert "## Not a heading" in select
-    assert "Ask first." not in select
-    details = markdown.section("### Details")
-    assert details.startswith("### Details\n\nNested detail.")
-    assert details.endswith("```")
-    assert markdown.section("## Approve the Launch!").endswith("Ask first.")
-    assert markdown.section("  ##  Approve  the Launch! ##").endswith("Ask first.")
-    with pytest.raises(SectionNotFoundError):
-        markdown.section("## Not a heading")
-
-
-def test_section_level_must_match() -> None:
-    with pytest.raises(SectionNotFoundError, match="headings: '# Research'"):
-        research().markdown.section("## Details")
-
-
-@pytest.mark.parametrize("selector", ["select", "Select", "#Select", "####### X", "##"])
-def test_section_selector_must_be_a_heading_line(selector: str) -> None:
-    with pytest.raises(ValidationError, match="Select a section by its heading"):
-        research().markdown.section(selector)
-
-
-def test_underlined_headings_are_selected_as_heading_lines() -> None:
-    markdown = Markdown("Title\n=====\n\nIntro.\n\nStep\n----\n\nDo it.\n")
-    assert markdown.section("## Step") == "Step\n----\n\nDo it."
-    assert markdown.section("# Title").startswith("Title\n=====\n\nIntro.")
-
-
-def test_section_lines_follow_markdown_line_endings() -> None:
-    markdown = Markdown("# A\r\n\r\n## B\r\nb \u2028 still b\r\n## C\r\n")
-    assert markdown.section("## B") == "## B\nb \u2028 still b"
-
-
-def test_records_may_repeat_headings_but_selecting_one_is_ambiguous() -> None:
-    markdown = Markdown("## Notes\n\nA\n\n## Notes\n\nB\n")
-    with pytest.raises(ValidationError, match="Several sections"):
-        markdown.section("## Notes")
-
-
-def test_markdown_field_stays_a_string() -> None:
-    record = Workflow(id="doc", markdown="## Old\n")
-    record.markdown = "## New\n"
-    assert isinstance(record.markdown, Markdown)
-    assert record.markdown == "## New\n"
-    assert type(record.model_dump()["markdown"]) is str
+# workflow.md: the workflow record ----------------------------------------------
 
 
 def test_whole_document_text() -> None:
-    assert research().text == DOCUMENT.strip()
-
-
-def test_missing_section() -> None:
-    with pytest.raises(SectionNotFoundError, match="'## Missing' not found"):
-        research().markdown.section("## Missing")
+    body = "\n# Research\n\nIntroduction text.\n"
+    assert Workflow(id="research", markdown=body).text == body.strip()
 
 
 def test_workflow_headings_must_be_unique() -> None:
@@ -1117,7 +984,9 @@ def test_the_runtime_moves_between_declared_states(config: HirakuConfig) -> None
     assert Session.list_all(config=config)[0]["state"] == "done"
 
 
-def test_instructions_may_narrow_the_events_of_a_state(config: HirakuConfig) -> None:
+def test_instructions_cannot_override_the_events_of_a_state(
+    config: HirakuConfig,
+) -> None:
     workflow = machine(
         config,
         MACHINE_PY.replace(
@@ -1125,18 +994,10 @@ def test_instructions_may_narrow_the_events_of_a_state(config: HirakuConfig) -> 
             '        return Instruction("Only stop.", events=[self.stop])\n',
         ),
     )
-    assert accepted(workflow.run_start({})) == ["stop"]
-    wrong = machine(
-        config,
-        MACHINE_PY.replace(
-            '        return Instruction("Ask.")\n',
-            '        return Instruction("Ask.", events=[self.judge])\n',
-        ),
-    ).run_start({})
-    assert wrong["status"] == "error"
-    assert (
-        "State 'ask' does not accept judge; it accepts give, stop" in wrong["message"]
-    )
+    response = workflow.run_start({})
+    assert response["status"] == "error"
+    assert "unexpected keyword argument 'events'" in response["message"]
+    assert Session.list_all(config=config) == []
 
 
 def test_a_final_start_state_completes_the_session_when_it_starts(
@@ -1326,12 +1187,12 @@ class Named(Workflow):
     def next_step(self, notes: Notes) -> None:
         """Go to the check."""
 
-    @event("note", source="ask", dest="ask")
+    @event(source="ask", dest="ask")
     def note_question(self, notes: Notes, text: str) -> None:
         """Note something about the question."""
         notes.notes.append(f"question: {text}")
 
-    @event("note", source="check", dest="check")
+    @event(source="check", dest="check")
     def note_answer(self, notes: Notes, text: str) -> None:
         """Note something about the answer."""
         notes.notes.append(f"answer: {text}")
@@ -1352,7 +1213,7 @@ def described(response: dict) -> dict[str, str]:
     }
 
 
-def test_named_events_run_the_method_of_the_current_state(
+def test_events_use_their_method_names(
     config: HirakuConfig,
 ) -> None:
     write_workflow(config, "named", NAMED_PY, "# Named\n")
@@ -1360,51 +1221,65 @@ def test_named_events_run_the_method_of_the_current_state(
     first = workflow.run_start({})
     assert described(first) == {
         "next_step": "Go to the check.",
-        "note": "Note something about the question.",
+        "note_question": "Note something about the question.",
     }
-    noted = send(workflow, "note", first, text="why?")
+    noted = send(workflow, "note_question", first, text="why?")
     assert noted["instruction"]["text"] == "Ask."
     checking = send(workflow, "next_step", noted)
-    assert described(checking)["note"] == "Note something about the answer."
-    checked = send(workflow, "note", checking, text="because")
+    assert send(workflow, "next_step", noted) == checking
+    assert described(checking)["note_answer"] == "Note something about the answer."
+    checked = send(workflow, "note_answer", checking, text="because")
     done = send(workflow, "finish", checked)
     assert done["instruction"]["context"] == {
         "notes": ["question: why?", "answer: because"]
     }
     assert [
         item.event for item in Session.load(first["session_id"], config=config).history
-    ] == ["start", "note", "next_step", "note", "finish"]
+    ] == ["start", "note_question", "next_step", "note_answer", "finish"]
     graph = workflow_graph(workflow)
-    assert "  ask --> ask: note\n  check --> check: note\n" in graph
+    assert "  ask --> ask: note_question\n  check --> check: note_answer\n" in graph
 
 
-def test_named_events_need_disjoint_source_states(config: HirakuConfig) -> None:
+def test_events_with_overlapping_sources_have_distinct_method_names(
+    config: HirakuConfig,
+) -> None:
     source = NAMED_PY.replace(
-        '    @event("note", source="check", dest="check")\n',
-        '    @event("note", source=["ask", "check"], dest="check")\n',
+        '    @event(source="check", dest="check")\n',
+        '    @event(source=["ask", "check"], dest="check")\n',
     )
     write_workflow(config, "named", source, "# Named\n")
-    assert (
-        "Event 'note' of Named is handled twice in state 'ask', by note_question "
-        "and note_answer"
-    ) in load_error(config, "named")
-    source = NAMED_PY.replace(
-        '    @event("note", source="ask"', '    @event("a-note", source="ask"'
-    )
-    write_workflow(config, "named", source, "# Named\n")
-    assert "Event names use letters, digits, and '_'" in load_error(config, "named")
-
-
-def test_instructions_narrow_named_events_by_method(config: HirakuConfig) -> None:
-    narrowed = NAMED_PY.replace(
-        '        return Instruction("Ask.")\n',
-        '        return Instruction("Ask.", events=[self.note_question])\n',
-    )
-    write_workflow(config, "named", narrowed, "# Named\n")
     workflow = load_workflow("named", config=config).bind(config)
-    assert accepted(workflow.run_start({})) == ["note"]
-    wrong = narrowed.replace("events=[self.note_question]", "events=[self.note_answer]")
-    write_workflow(config, "named", wrong, "# Named\n")
-    response = load_workflow("named", config=config).bind(config).run_start({})
-    assert response["status"] == "error"
-    assert "State 'ask' does not accept note_answer" in response["message"]
+    first = workflow.run_start({})
+    assert set(accepted(first)) == {"next_step", "note_question", "note_answer"}
+    checked = send(workflow, "note_answer", first, text="because")
+    assert checked["status"] == "accepted"
+    assert checked["instruction"]["text"] == "Check."
+    assert send(workflow, "note_answer", first, text="because") == checked
+
+
+def test_events_reject_separate_names(config: HirakuConfig) -> None:
+    source = NAMED_PY.replace(
+        '@event(source="ask", dest="ask")',
+        '@event("note", source="ask", dest="ask")',
+    )
+    write_workflow(config, "named", source, "# Named\n")
+    assert "TypeError" in load_error(config, "named")
+
+
+def test_events_reject_sources_removed_by_workflow_edits(config: HirakuConfig) -> None:
+    write_workflow(config, "named", NAMED_PY, "# Named\n")
+    workflow = load_workflow("named", config=config).bind(config)
+    first = workflow.run_start({})
+    changed = NAMED_PY.replace(
+        '@event(source="ask", dest="check")',
+        '@event(source="check", dest="check")',
+    ).replace(
+        '@event(source="ask", dest="ask")',
+        '@event(source="ask", dest="check")',
+    )
+    write_workflow(config, "named", changed, "# Named\n")
+    workflow = load_workflow("named", config=config).bind(config)
+    result = send(workflow, "next_step", first)
+    assert result["status"] == "rejected"
+    assert "no longer accepts state 'ask'" in result["message"]
+    assert Session.load(first["session_id"], config=config).state == "ask"

@@ -99,8 +99,6 @@ def state(name: str, *, start: bool = False, final: bool = False) -> Callable[[_
 
 
 def event(
-    name: str | None = None,
-    /,
     *,
     source: str | Sequence[str],
     dest: str | Sequence[str],
@@ -110,17 +108,13 @@ def event(
     The method continues a session: it takes the workflow's data, annotated
     with the model ``start`` returns, unless the workflow has none; its other
     parameters and its docstring define the event's arguments and
-    description. It changes the data in place. The current state accepts the
-    event if it is one of ``source``.
+    description. The method's name identifies the event. It changes the data
+    in place. The current state accepts the event if it is one of ``source``.
 
     With one destination, the method returns nothing and the session moves
     there. With several, it returns the one it chooses.
 
     Args:
-        name: The event's name; the method's name by default. Several methods
-            may share a name if their source states do not overlap: the
-            event then runs the method of the current state, so each state
-            can handle it, and describe it, in its own way.
         source: The states that accept the event.
         dest: The states the event may move to.
 
@@ -130,19 +124,12 @@ def event(
         def ack(self, counter: Counter, token: str) -> str:
             return "finished" if counter.step >= counter.count else "waiting"
 
-        @event("revise", source="draft", dest="draft")
+        @event(source="draft", dest="draft")
         def revise_draft(self, experiments: Experiments, feedback: str) -> None:
             experiments.feedback = feedback
         ```
     """
-    if name is not None and (
-        not isinstance(name, str) or not _STATE_NAME.fullmatch(name)
-    ):
-        raise WorkflowError(
-            f"Event names use letters, digits, and '_', starting with a letter; "
-            f"got {name!r}"
-        )
-    declared = (name, _state_names(source, "source"), _state_names(dest, "dest"))
+    declared = (_state_names(source, "source"), _state_names(dest, "dest"))
 
     def mark(method: _F) -> _F:
         setattr(method, _EVENT_MARKER, declared)
@@ -182,15 +169,12 @@ class Event:
     """An `event` method of a workflow and its derived argument model.
 
     Attributes:
-        name: The event's name, which agents and users send.
-        method: The method's name; it differs from ``name`` when several
-            methods handle an event in different states.
+        name: The method's name, which agents and users send as the event.
         source: States that accept the event.
         dest: States the event may move to.
     """
 
     name: str
-    method: str
     function: Callable[..., Any]
     arguments: type[BaseModel]
     description: str
@@ -202,20 +186,19 @@ class Event:
 class Instruction:
     """What the agent does in a state, returned by a `state` method.
 
+    The runtime adds the events declared for the current state to the
+    instruction sent to the agent.
+
     Attributes:
         text: Actionable guidance, usually a section of ``workflow.md``.
         context: Concise JSON-compatible data the text refers to. In a final
             state, it is the session's result.
-        events: Narrows the events the state accepts, e.g.
-            ``[self.finish]`` while a step is not available yet; by default,
-            the instruction accepts every event of its state.
         requires_user_response: Whether the agent must obtain a user answer
             before sending an event. This is a conversational contract only.
     """
 
     text: str
     context: Any = None
-    events: Sequence[Callable[..., Any]] = ()
     requires_user_response: bool = False
 
 
@@ -356,24 +339,14 @@ class Workflow(BaseRecord):
                         f"Session {session_id!r} belongs to workflow "
                         f"{session.workflow!r}, not {self.id!r}",
                     )
-                candidates = [
-                    item
-                    for item in event_methods(type(self)).values()
-                    if item.name == event
-                ]
-                if not candidates:
+                method = event_methods(type(self)).get(event)
+                if method is None:
                     return session.outcome(
                         "rejected",
                         f"{event!r} is not an event of workflow {self.id!r}; the "
                         "current instruction accepts: "
                         f"{', '.join(session.events) or 'none'}",
                     )
-                # The current state's method handles the event; a retry after the
-                # state moved on is recognized by check() below.
-                method = next(
-                    (item for item in candidates if session.state in item.source),
-                    candidates[0],
-                )
                 validated, failure = _validate(method.arguments, arguments)
                 if failure is not None:
                     return {**failure, **session.response}
@@ -381,6 +354,12 @@ class Workflow(BaseRecord):
                 early = session.check(event, instruction_id, values)
                 if early is not None:
                     return early
+                if session.state not in method.source:
+                    return session.outcome(
+                        "rejected",
+                        f"Event {event!r} no longer accepts state {session.state!r}. "
+                        "Inspect the session and start a new one.",
+                    )
                 try:
                     data = _load_data(type(self), session.data)
                 except PydanticValidationError as exc:
@@ -474,42 +453,24 @@ class Workflow(BaseRecord):
         text = instruction.text
         if not isinstance(text, str) or not text.strip():
             raise WorkflowError("Instruction text must not be empty")
-        listed = [self._listed_event(item) for item in instruction.events]
-        if len(listed) != len(set(listed)):
-            raise WorkflowError("An instruction lists the same event more than once")
-        if method.final and (listed or instruction.requires_user_response):
+        if method.final and instruction.requires_user_response:
             raise WorkflowError(
-                f"The instruction of final state {method.name!r} accepts no events "
-                "and requires no user response"
+                f"The instruction of final state {method.name!r} "
+                "requires no user response"
             )
-        names = [] if method.final else _accepted(type(self), method.name, listed)
+        specs = {} if method.final else _event_specs(self, method.name)
+        names = list(specs)
         rendered: dict[str, Any] = {
             "text": text.strip(),
             "context": _ensure_json(instruction.context, "Instruction context"),
         }
         if names:
             # How to answer; the session adds its session and instruction IDs.
-            specs = _event_specs(self, method.name)
             rendered["events"] = {
                 "requires_user_response": bool(instruction.requires_user_response),
                 "accepted": [{"event": name, **specs[name]} for name in names],
             }
         return rendered, names
-
-    def _listed_event(self, method: Callable[..., Any]) -> Event:
-        """Return the event method an instruction lists."""
-        function = getattr(method, "__func__", None)
-        registered = event_methods(type(self)).get(getattr(function, "__name__", ""))
-        if (
-            getattr(method, "__self__", None) is not self
-            or registered is None
-            or registered.function is not function
-        ):
-            raise WorkflowError(
-                f"Events must be @event methods of this workflow, e.g. "
-                f"self.approve; got {method!r}"
-            )
-        return registered
 
 
 _ARGUMENT_TYPES: dict[str, type] = {
@@ -824,20 +785,18 @@ def state_methods(cls: type[Workflow]) -> dict[str, State]:
 def event_methods(cls: type[Workflow]) -> dict[str, Event]:
     """Collect and validate the `event` methods of a workflow class.
 
-    Events are returned by method name, in the order the class defines them;
-    `Event.name` is the name agents and users send.
+    Events are returned by method name, in the order the class defines them.
 
     Raises:
         hiraku.errors.WorkflowError: If an event's signature is unsupported or
-            does not match the workflow's data, or its name is taken.
+            does not match the workflow's data.
     """
     found: dict[str, Event] = {}
-    for name, function, (event_name, source, dest) in _marked(cls, _EVENT_MARKER):
+    for name, function, (source, dest) in _marked(cls, _EVENT_MARKER):
         label = f"{cls.__name__}.{name}"
         parameters = _data_parameter(cls, label, "@event", function)
         found[name] = Event(
-            name=event_name or name,
-            method=name,
+            name=name,
             function=function,
             arguments=_arguments_model(label, parameters, _hints(label, function)),
             description=inspect.getdoc(function) or "",
@@ -926,25 +885,11 @@ def check_workflow(cls: type[Workflow]) -> None:
         unknown = [name for name in (*item.source, *item.dest) if name not in states]
         if unknown:
             raise WorkflowError(
-                f"@event {cls.__name__}.{item.method} names unknown states "
+                f"@event {cls.__name__}.{item.name} names unknown states "
                 f"{', '.join(unknown)}; states are {', '.join(states)}"
             )
-    handlers: dict[tuple[str, str], str] = {}
-    for item in events.values():
-        for source in item.source:
-            other = handlers.setdefault((item.name, source), item.method)
-            if other != item.method:
-                raise WorkflowError(
-                    f"Event {item.name!r} of {cls.__name__} is handled twice in "
-                    f"state {source!r}, by {other} and {item.method}; give the "
-                    "methods of an event different source states"
-                )
     for name, item in states.items():
-        leaving = list(
-            dict.fromkeys(
-                event.name for event in events.values() if name in event.source
-            )
-        )
+        leaving = [event.name for event in events.values() if name in event.source]
         if item.final and leaving:
             raise WorkflowError(
                 f"Final state {name!r} of {cls.__name__} accepts {', '.join(leaving)}; "
@@ -1090,22 +1035,6 @@ def _invoke(
                 f"{type(exc).__name__}: {exc}. No session progress was saved."
             ),
         }
-
-
-def _accepted(cls: type[Workflow], current: str, listed: list[Event]) -> list[str]:
-    """Return the events a state accepts, narrowed to those listed."""
-    accepted = list(
-        dict.fromkeys(
-            item.name for item in event_methods(cls).values() if current in item.source
-        )
-    )
-    extra = [item.method for item in listed if current not in item.source]
-    if extra:
-        raise WorkflowError(
-            f"State {current!r} does not accept {', '.join(extra)}; it accepts "
-            f"{', '.join(accepted)}"
-        )
-    return [item.name for item in listed] or accepted
 
 
 def _load_data(cls: type[Workflow], raw: dict[str, Any] | None) -> Any:

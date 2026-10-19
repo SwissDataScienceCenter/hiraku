@@ -115,7 +115,7 @@ def draft(harness: Harness, record_id: str, summary: str = "Add dropout") -> dic
 def run_experiment(harness: Harness, config: HirakuConfig, record_id: str) -> str:
     """Take a drafted experiment through implement, launch, and analyze."""
     sha = commit(config, record_id)
-    harness.send("implemented", commit="HEAD", notes="One line")
+    harness.send("implemented", commit="HEAD")
     add_run(config, f"r-{record_id}", record_id, "0.8")
     harness.send("launched")
     harness.send("analyzed", verdict="supports", conclusion="Better")
@@ -136,10 +136,10 @@ def test_collaborative_runs_each_step_and_stops_after_the_rounds(
         "Never delete records or rewrite Git history."
     )
     assert harness.instruction["context"] == {"task": "task", "previous": []}
-    assert harness.events == ["drafted", "revise", "finish"]
+    assert harness.events == ["drafted", "revise_draft", "finish"]
 
     # revise redoes the current step with the user's feedback.
-    harness.send("revise", feedback="Try weight decay instead")
+    harness.send("revise_draft", feedback="Try weight decay instead")
     assert harness.section() == "## Draft"
     assert harness.instruction["context"]["feedback"] == "Try weight decay instead"
     accepted = harness.instruction["events"]["accepted"]
@@ -151,8 +151,8 @@ def test_collaborative_runs_each_step_and_stops_after_the_rounds(
     assert harness.section() == "## Implement"
     assert harness.instruction["context"]["experiment"]["summary"] == "Add dropout"
     assert "feedback" not in harness.instruction["context"]
-    assert harness.events == ["implemented", "revise", "finish"]
-    harness.send("revise", feedback="Keep the learning rate")
+    assert harness.events == ["implemented", "revise_implementation", "finish"]
+    harness.send("revise_implementation", feedback="Keep the learning rate")
     assert harness.section() == "## Implement"
     assert harness.instruction["context"]["feedback"] == "Keep the learning rate"
     accepted = harness.instruction["events"]["accepted"]
@@ -162,12 +162,15 @@ def test_collaborative_runs_each_step_and_stops_after_the_rounds(
     assert load_record("c1", config=config).status == "drafted"
 
     sha = commit(config, "dropout")
-    harness.send("implemented", commit="HEAD", notes="One line")
+    harness.send("implemented", commit="HEAD")
     assert load_record("c1", config=config).commit == sha
     assert harness.section() == "## Launch"
     assert harness.instruction["context"]["command"] == (
         f"hiraku launch train --record c1 --commit {sha}"
     )
+    assert harness.events == ["launched", "revise_launch", "finish"]
+    harness.send("revise_launch", feedback="Use the local dispatcher")
+    assert harness.instruction["context"]["feedback"] == "Use the local dispatcher"
 
     assert harness.send("launched")["status"] == "not_ready"
     add_run(config, "r1", "c1", "0.8")
@@ -176,6 +179,9 @@ def test_collaborative_runs_each_step_and_stops_after_the_rounds(
     assert harness.instruction["context"]["runs"] == [
         {"run_id": "r1", "metrics": {"val": "0.8"}}
     ]
+    assert harness.events == ["analyzed", "revise_analysis", "finish"]
+    harness.send("revise_analysis", feedback="Compare against the baseline")
+    assert harness.instruction["context"]["feedback"] == "Compare against the baseline"
 
     harness.send("analyzed", verdict="supports", conclusion="Better")
     record = load_record("c1", config=config)
@@ -215,9 +221,13 @@ def test_collaborative_rejects_invalid_input(config: HirakuConfig) -> None:
     draft(harness, "c1")
 
     commit(config, "c1")
-    missing = harness.send("implemented", commit="no-such-ref", notes="x")
+    unused = harness.send("implemented", commit="HEAD", notes="unused")
+    assert unused["status"] == "rejected"
+    assert "notes: Extra inputs are not permitted" in unused["message"]
+    assert load_record("c1", config=config).status == "drafted"
+    missing = harness.send("implemented", commit="no-such-ref")
     assert missing["status"] == "rejected"
-    harness.send("implemented", commit="HEAD", notes="x")
+    assert harness.send("implemented", commit="HEAD")["status"] == "accepted"
 
     path = config.root / "runs.csv"
     path.write_text("id,record_id,commit,metric.val\nr1,c1," + "0" * 40 + ",0.5\n")
@@ -242,10 +252,10 @@ def test_collaborative_draws_its_experiment_loop(config: HirakuConfig) -> None:
         "  launch --> analyze: launched\n"
         "  analyze --> draft: analyzed\n"
         "  analyze --> finished: analyzed\n"
-        "  draft --> draft: revise\n"
-        "  implement --> implement: revise\n"
-        "  launch --> launch: revise\n"
-        "  analyze --> analyze: revise\n"
+        "  draft --> draft: revise_draft\n"
+        "  implement --> implement: revise_implementation\n"
+        "  launch --> launch: revise_launch\n"
+        "  analyze --> analyze: revise_analysis\n"
         "  draft --> finished: finish\n"
         "  implement --> finished: finish\n"
         "  launch --> finished: finish\n"

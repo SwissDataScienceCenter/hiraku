@@ -248,12 +248,13 @@ two experiments"; the agent then calls the `collaborative` MCP tool. The agent
 drafts, implements, launches, and analyzes each experiment, and you review the
 result of every step before choosing the next one.
 
-From a terminal, `hiraku-agent` runs the same workflow step by step with a
-headless agent, or in a conversation with `--interactive`:
+From a terminal, use `hiraku-agent collaborative --interactive` so you can review
+and approve each step in conversation:
 
 ```bash
-hiraku-agent collaborative --task heart-disease --rounds 2
-hiraku-agent collaborative implement
+hiraku-agent collaborative --task heart-disease --rounds 2 --interactive
+# Resume after stopping an agent conversation before it submits an event:
+hiraku-agent collaborative --interactive
 hiraku session list
 hiraku session show <session-id>
 hiraku runs --record heart-disease --all --json

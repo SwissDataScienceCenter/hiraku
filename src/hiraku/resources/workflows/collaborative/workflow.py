@@ -31,7 +31,7 @@ class Collaborative(Workflow):
 
     The agent works through the four steps of each experiment and gets the
     user's approval before it reports a step with an event such as ``drafted``,
-    which Hiraku checks and records. Until then, ``revise`` redoes the step
+    which Hiraku checks and records. Until then, revision events redo the step
     with the user's feedback. Hiraku writes the experiment records, checks
     commits and run attribution, and stops after ``rounds`` experiments.
     """
@@ -136,7 +136,6 @@ class Collaborative(Workflow):
         self,
         experiments: Experiments,
         commit: Annotated[str, Field(description="Commit with the change.")],
-        notes: Annotated[str, Field(description="What changed, briefly.")],
     ) -> None:
         """Submit the commit that implements the experiment."""
         sha = GitRepository(self.config).resolve(commit)
@@ -186,24 +185,24 @@ class Collaborative(Workflow):
 
     # Revise: redo the current step with the user's feedback ----------------------
 
-    @event("revise", source="draft", dest="draft")
+    @event(source="draft", dest="draft")
     def revise_draft(self, experiments: Experiments, feedback: Feedback) -> None:
         """Redraft the experiment with the user's feedback."""
         experiments.feedback = feedback
 
-    @event("revise", source="implement", dest="implement")
+    @event(source="implement", dest="implement")
     def revise_implementation(
         self, experiments: Experiments, feedback: Feedback
     ) -> None:
         """Rework the implementation with the user's feedback."""
         experiments.feedback = feedback
 
-    @event("revise", source="launch", dest="launch")
+    @event(source="launch", dest="launch")
     def revise_launch(self, experiments: Experiments, feedback: Feedback) -> None:
         """Change how the experiment is launched, with the user's feedback."""
         experiments.feedback = feedback
 
-    @event("revise", source="analyze", dest="analyze")
+    @event(source="analyze", dest="analyze")
     def revise_analysis(self, experiments: Experiments, feedback: Feedback) -> None:
         """Redo the analysis with the user's feedback."""
         experiments.feedback = feedback
