@@ -75,7 +75,7 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
         assert instruction["text"].startswith("## Step")
         assert f"`Step {step}/3: token {context['token']}`" in instruction["text"]
         assert "{{" not in instruction["text"]
-        assert [item["reply"] for item in instruction["replies"]] == ["ack", "finish"]
+        assert [item["reply"] for item in instruction["replies"]] == ["ack"]
         if tokens:
             stale = reply(runner, response, "ack", token=tokens[-1])
             assert stale["status"] == "rejected"
@@ -105,7 +105,13 @@ def test_count_steps_rejects_wrong_tokens_and_finishes_early(
     response = start(runner, "count-steps", {"count": 2})
     wrong = reply(runner, response, "ack", token="00000000")
     assert wrong["status"] == "rejected"
-    done = reply(runner, response, "finish")
+    early = reply(runner, response, "finish")
+    assert early["status"] == "rejected"
+    assert "not a reply to the pending instruction" in early["message"]
+    gate = reply(
+        runner, response, "ack", token=response["instruction"]["context"]["token"]
+    )
+    done = reply(runner, gate, "finish")
     assert done["completed"] is True
     assert done["instruction"]["context"] == {"steps": 1, "count": 2}
 

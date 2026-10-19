@@ -62,7 +62,8 @@ class CountSteps(Workflow):
         return Instruction(
             render(self.markdown.section("## Step"), values),
             context=values,
-            replies=[self.ack, self.finish],
+            # Only the user ends the session, at the gate after a step.
+            replies=[self.ack],
         )
 
     @reply
@@ -88,7 +89,7 @@ class CountSteps(Workflow):
 
     @reply
     def finish(self, state: State) -> None:
-        """End the session early."""
+        """End the session after the current step."""
         state.phase = "finished"
 
 
