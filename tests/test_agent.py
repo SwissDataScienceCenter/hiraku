@@ -22,7 +22,7 @@ Answer each item.
 
 ## Work
 
-Reply `answer` with a value.
+Send the event `answer` with a value.
 
 ## Gate
 
@@ -40,8 +40,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from hiraku.errors import NotReady, SubmissionRejected
-from hiraku.workflow import Instruction, Workflow, reply
+from hiraku.errors import NotReady, EventRejected
+from hiraku.workflow import Instruction, Workflow, event
 
 
 class ToyState(BaseModel):
@@ -69,32 +69,32 @@ class Toy(Workflow):
                 self.markdown.section("## Gate"),
                 context={"answers": state.answers},
                 requires_user_response=True,
-                replies=[self.approve, self.stop],
+                events=[self.approve, self.stop],
             )
         return Instruction(
             self.markdown.section("## Work"),
             context={"done": len(state.answers)},
-            replies=[self.answer, self.stop],
+            events=[self.answer, self.stop],
         )
 
-    @reply
+    @event
     def answer(
         self, state: ToyState, value: Annotated[str, Field(description="Value.")]
     ) -> None:
         """Answer the current item."""
         if value == "bad":
-            raise SubmissionRejected("bad is not an answer")
+            raise EventRejected("bad is not an answer")
         if value == "wait" and not (self.config.root / "ready").exists():
             raise NotReady("not ready yet")
         state.answers.append(value)
         state.gate = True
 
-    @reply
+    @event
     def approve(self, state: ToyState) -> None:
         """Go on with the next item."""
         state.gate = False
 
-    @reply
+    @event
     def stop(self, state: ToyState) -> None:
         """Stop early."""
         state.stopped = True
@@ -103,8 +103,8 @@ class Toy(Workflow):
 WORKFLOW = Toy
 '''
 
-# Answers replies that take a value with the next line of FAKE_ANSWERS, and
-# other replies with the first listed reply; writes nothing when out of answers.
+# Answers events that take a value with the next line of FAKE_ANSWERS, and
+# other events with the first accepted event; writes nothing when out of answers.
 FAKE_AGENT = """
 import json, os, sys
 from pathlib import Path
@@ -113,11 +113,11 @@ prompt = sys.stdin.read() if not sys.stdin.isatty() else ""
 response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
 print("saw", response["instruction"]["text"].splitlines()[0])
 if response.get("completed"):
-    print("final, reply file given:", "HIRAKU_REPLY_FILE" in os.environ)
+    print("final, event file given:", "HIRAKU_EVENT_FILE" in os.environ)
     sys.exit(0)
-reply_file = os.environ["HIRAKU_REPLY_FILE"]
-print("prompt names reply file:", reply_file in prompt)
-first = response["instruction"]["reply"]["options"][0]
+event_file = os.environ["HIRAKU_EVENT_FILE"]
+print("prompt names event file:", event_file in prompt)
+first = response["instruction"]["events"]["accepted"][0]
 arguments = {}
 if "value" in first["arguments"].get("properties", {}):
     answers = Path(os.environ["FAKE_ANSWERS"])
@@ -126,8 +126,8 @@ if "value" in first["arguments"].get("properties", {}):
         sys.exit(0)
     answers.write_text("".join(line + "\\n" for line in lines[1:]))
     arguments = {"value": lines[0]}
-reply = {"reply": first["reply"], "arguments": arguments}
-Path(reply_file).write_text(json.dumps(reply))
+event = {"event": first["event"], "arguments": arguments}
+Path(event_file).write_text(json.dumps(event))
 """
 
 
@@ -160,7 +160,7 @@ def sessions(config: HirakuConfig) -> list[dict]:
     return Session.list_all(config=config)
 
 
-def test_runs_until_a_gate_and_continues_after_the_user_reply(
+def test_runs_until_a_gate_and_continues_after_the_user_event(
     config: HirakuConfig,
 ) -> None:
     answers(config, "bad", "one", "two")
@@ -168,7 +168,7 @@ def test_runs_until_a_gate_and_continues_after_the_user_reply(
     assert started.exit_code == 3, started.output
     assert "session toy-" in started.output
     assert "saw ## Work" in started.output
-    assert "prompt names reply file: True" in started.output
+    assert "prompt names event file: True" in started.output
     assert "agent → answer  rejected: bad is not an answer" in started.output
     assert "agent → answer  accepted" in started.output
     assert "waiting for you" in started.output
@@ -176,21 +176,21 @@ def test_runs_until_a_gate_and_continues_after_the_user_reply(
 
     (session,) = sessions(config)
     logs = config.sessions_dir / session["session_id"] / "1"
-    assert "Your previous reply was rejected: bad" in (logs / "2/prompt.md").read_text()
-    assert json.loads((logs / "2/reply.json").read_text())["arguments"] == {
+    assert "Your previous event was rejected: bad" in (logs / "2/prompt.md").read_text()
+    assert json.loads((logs / "2/event.json").read_text())["arguments"] == {
         "value": "one"
     }
 
     approved = agent("toy", "approve")
     assert approved.exit_code == 0, approved.output
     assert "you → approve  accepted" in approved.output
-    # The agent carries out the final instruction, which takes no reply.
+    # The agent carries out the final instruction, which takes no event.
     assert "[4 Done] final" in approved.output
     assert "saw ## Done" in approved.output
-    assert "final, reply file given: False" in approved.output
+    assert "final, event file given: False" in approved.output
     assert 'completed: {"answers": ["one", "two"]}' in approved.output
     final = config.sessions_dir / session["session_id"] / "4/1/prompt.md"
-    assert "final instruction of the session; it takes no reply" in final.read_text()
+    assert "final instruction of the session; it takes no event" in final.read_text()
 
     # A completed session named with --session is shown, not carried out again.
     shown = agent("toy", "--session", session["session_id"])
@@ -199,7 +199,7 @@ def test_runs_until_a_gate_and_continues_after_the_user_reply(
     assert 'completed: {"answers": ["one", "two"]}' in shown.output
 
 
-def test_not_ready_replies_are_sent_again_without_the_agent(
+def test_not_ready_events_are_sent_again_without_the_agent(
     config: HirakuConfig,
 ) -> None:
     answers(config, "wait")
@@ -220,7 +220,7 @@ def test_not_ready_replies_are_sent_again_without_the_agent(
     assert "saw" not in ready.output
 
 
-def test_sessions_are_selected_by_workflow_and_pending_reply(
+def test_sessions_are_selected_by_workflow_and_pending_event(
     config: HirakuConfig,
 ) -> None:
     answers(config, "one")
@@ -229,10 +229,10 @@ def test_sessions_are_selected_by_workflow_and_pending_reply(
     assert again.exit_code == 1
     assert "already has an active session" in again.output
 
-    # Out of answers: the agent writes no reply and the session stays at Work.
+    # Out of answers: the agent writes no event and the session stays at Work.
     second = agent("toy", "--new")
     assert second.exit_code == 1
-    assert "The agent wrote no reply" in second.output
+    assert "The agent wrote no event" in second.output
     assert len(sessions(config)) == 2
 
     several = agent("toy")
@@ -273,7 +273,7 @@ def test_interactive_mode_stops_at_user_gates(config: HirakuConfig) -> None:
     answers(config)
     paused = agent("toy", "--interactive", "--new")
     assert paused.exit_code == 3, paused.output
-    assert "No reply was written; instruction 1 is still pending" in paused.output
+    assert "No event was written; instruction 1 is still pending" in paused.output
 
 
 def test_arguments_are_validated_by_the_workflow(config: HirakuConfig) -> None:
@@ -281,8 +281,8 @@ def test_arguments_are_validated_by_the_workflow(config: HirakuConfig) -> None:
     assert "--items INTEGER" not in help_text
     assert "--items JSON" in help_text
     assert "approve" in help_text and "answer" in help_text
-    reply_help = " ".join(agent("toy", "answer", "--help").output.split())
-    assert "--value TEXT Value. [required]" in reply_help
+    event_help = " ".join(agent("toy", "answer", "--help").output.split())
+    assert "--value TEXT Value. [required]" in event_help
 
     invalid = agent("toy", "--items", "0")
     assert invalid.exit_code == 1

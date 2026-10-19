@@ -7,9 +7,9 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from hiraku.errors import SubmissionRejected
+from hiraku.errors import EventRejected
 from hiraku.markdown import render
-from hiraku.workflow import Instruction, Workflow, reply
+from hiraku.workflow import Instruction, Workflow, event
 
 
 def _token() -> str:
@@ -22,7 +22,7 @@ class State(BaseModel):
     token: str = Field(default_factory=_token)
     # running: the agent runs the current step; waiting: the step was
     # acknowledged and the user decides whether to go on; finished: done.
-    phase: Literal["running", "waiting", "finished"] = "running"
+    state: Literal["running", "waiting", "finished"] = "running"
 
 
 class CountSteps(Workflow):
@@ -41,32 +41,30 @@ class CountSteps(Workflow):
         return State(count=count)
 
     def next(self, state: State) -> Instruction:
-        if state.phase == "finished":
+        if state.state == "finished":
             return Instruction(
                 self.markdown.section("## Done"),
                 context={"steps": state.step, "count": state.count},
                 final=True,
             )
-        if state.phase == "waiting":
+        if state.state == "waiting":
             return Instruction(
                 self.markdown.section("## Next"),
                 context={
                     "done": state.step,
                     "remaining": state.count - state.step,
                 },
-                replies=[self.step, self.finish],
                 requires_user_response=True,
             )
         # The step's values fill the {{placeholders}} of the section.
         values = {"step": state.step, "count": state.count, "token": state.token}
         return Instruction(
-            render(self.markdown.section("## Step"), values),
-            context=values,
-            # Only the user ends the session, at the gate after a step.
-            replies=[self.ack],
+            render(self.markdown.section("## Step"), values), context=values
         )
 
-    @reply
+    # Each state accepts the events whose source names it: the agent only
+    # acknowledges a running step; the user goes on or finishes at the gate.
+    @event(source="running", dest=["waiting", "finished"])
     def ack(
         self,
         state: State,
@@ -74,23 +72,23 @@ class CountSteps(Workflow):
     ) -> None:
         """Acknowledge the current step with its token."""
         if token != state.token:
-            raise SubmissionRejected(
-                f"Token {token!r} does not match step {state.step}; reply with "
-                "the token from the current instruction"
+            raise EventRejected(
+                f"Token {token!r} does not match step {state.step}; send the "
+                "token from the current instruction"
             )
-        state.phase = "finished" if state.step >= state.count else "waiting"
+        state.state = "finished" if state.step >= state.count else "waiting"
 
-    @reply
+    @event(source="waiting", dest="running")
     def step(self, state: State) -> None:
         """Run the next step."""
         state.step += 1
         state.token = _token()
-        state.phase = "running"
+        state.state = "running"
 
-    @reply
+    @event(source="waiting", dest="finished")
     def finish(self, state: State) -> None:
         """End the session after the current step."""
-        state.phase = "finished"
+        state.state = "finished"
 
 
 WORKFLOW = CountSteps

@@ -27,17 +27,17 @@ _SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 SessionStatus = Literal["active", "completed", "cancelled"]
 
 CANCEL_NOTE = (
-    "Cancelling stops the workflow from accepting replies. It does not revert "
+    "Cancelling stops the workflow from accepting events. It does not revert "
     "code, delete records, or stop processes that are still running."
 )
 
 
 class HistoryEntry(BaseModel):
-    """One accepted call of a session: its start or a reply."""
+    """One accepted call of a session: its start or an event."""
 
     model_config = ConfigDict(extra="forbid")
     instruction_id: int
-    reply: str
+    event: str
     arguments: dict[str, Any]
     at: datetime
 
@@ -46,18 +46,18 @@ class Session(BaseModel):
     """The stored state of one workflow invocation.
 
     The runtime owns the session; workflow code never sees it. A workflow's own
-    data is its state, a model returned by ``start`` and changed by replies,
+    data is its state, a model returned by ``start`` and changed by events,
     stored as JSON in `data`. Sessions are stored in ``hiraku/sessions/``.
 
     Attributes:
         id: Session ID, assigned when the session starts.
         workflow: ID of the workflow that owns the session.
         status: ``active`` until its final instruction or cancellation.
-        instruction_id: Number of the current instruction; replies must name it.
-        replies: Replies allowed for the current instruction; none once the
+        instruction_id: Number of the current instruction; events must name it.
+        events: Events the current instruction accepts; none once the
             session ended.
         response: The last response, returned again for retries and by `show`.
-        history: Accepted calls, oldest first: the start, then each reply. The
+        history: Accepted calls, oldest first: the start, then each event. The
             last entry recognizes retries.
         data: The workflow's state, as JSON.
     """
@@ -68,7 +68,7 @@ class Session(BaseModel):
     workflow: str = ""
     status: SessionStatus = "active"
     instruction_id: int = Field(default=0, ge=0)
-    replies: list[str] = Field(default_factory=list)
+    events: list[str] = Field(default_factory=list)
     response: dict[str, Any] = Field(default_factory=dict)
     history: list[HistoryEntry] = Field(default_factory=list)
     data: dict[str, Any] = Field(default_factory=dict)
@@ -194,41 +194,41 @@ class Session(BaseModel):
                 if raw.get("status") == "active":
                     raw.update(
                         status="cancelled",
-                        replies=[],
+                        events=[],
                         updated_at=datetime.now(UTC).isoformat(),
                     )
                     _write(self.id, raw, self.config)
         except Timeout as exc:
             raise ValidationError(_busy(self.id)) from exc
         self.status = "cancelled"
-        self.replies = []
+        self.events = []
         return {"session_id": self.id, "status": "cancelled", "note": CANCEL_NOTE}
 
     # Replies ----------------------------------------------------------------------
 
     def check(
-        self, reply: str, instruction_id: int, arguments: dict[str, Any]
+        self, event: str, instruction_id: int, arguments: dict[str, Any]
     ) -> dict[str, Any] | None:
-        """Decide whether a reply may run against the pending instruction.
+        """Decide whether an event may run against the current instruction.
 
         Returns:
-            ``None`` if the reply answers the pending instruction; otherwise the
+            ``None`` if the event answers the current instruction; otherwise the
             response to return instead: the stored response for an identical
             retry, or a ``stale`` or ``rejected`` status.
         """
         last = self.history[-1] if self.history else None
         if last is not None and last.instruction_id == instruction_id:
-            if last.reply == reply and last.arguments == arguments:
+            if last.event == event and last.arguments == arguments:
                 return {"status": "accepted", **self.response}
             return self.outcome(
                 "stale",
-                f"Instruction {instruction_id} was already answered with reply "
-                f"{last.reply!r} and arguments {last.arguments}; this call was not "
+                f"Instruction {instruction_id} was already answered with event "
+                f"{last.event!r} and arguments {last.arguments}; this call was not "
                 "applied.",
             )
         if self.status != "active":
             return self.outcome(
-                "rejected", f"Session is {self.status}; it accepts no replies"
+                "rejected", f"Session is {self.status}; it accepts no events"
             )
         if instruction_id != self.instruction_id:
             return self.outcome(
@@ -236,11 +236,11 @@ class Session(BaseModel):
                 f"Instruction {instruction_id} is not pending; this call was not "
                 f"applied. The pending instruction is {self.instruction_id}.",
             )
-        if reply not in self.replies:
+        if event not in self.events:
             return self.outcome(
                 "rejected",
-                f"{reply!r} is not a reply to the pending instruction; use one of: "
-                f"{', '.join(self.replies)}",
+                f"{event!r} is not an event the current instruction accepts; use "
+                f"one of: {', '.join(self.events)}",
             )
         return None
 
@@ -249,7 +249,7 @@ class Session(BaseModel):
         call: HistoryEntry,
         data: dict[str, Any],
         instruction: dict[str, Any],
-        replies: list[str],
+        events: list[str],
     ) -> None:
         """Record an accepted call, the state it led to, and the next instruction.
 
@@ -257,19 +257,19 @@ class Session(BaseModel):
             call: The accepted call, appended to the history.
             data: The workflow's state after the call, as JSON.
             instruction: The next instruction, as JSON. Unless it is final, its
-                ``reply`` block describes how to answer it; the session adds
-                the IDs a reply must pass.
-            replies: Replies allowed for the instruction; none for a final
+                ``events`` block describes how to answer it; the session adds
+                the IDs an event must pass.
+            events: Events the instruction accepts; none for a final
                 instruction, which completes the session.
         """
         self.history = [*self.history, call]
         self.data = data
         self.instruction_id += 1
-        self.replies = list(replies)
+        self.events = list(events)
         self.response = {"session_id": self.id, "instruction_id": self.instruction_id}
-        if replies:
-            reply = {"session_id": self.id, "instruction_id": self.instruction_id}
-            instruction = {**instruction, "reply": {**reply, **instruction["reply"]}}
+        if events:
+            ids = {"session_id": self.id, "instruction_id": self.instruction_id}
+            instruction = {**instruction, "events": {**ids, **instruction["events"]}}
         else:
             self.status = "completed"
             self.response["completed"] = True

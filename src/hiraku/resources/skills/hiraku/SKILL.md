@@ -55,7 +55,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set`, `entrypoints` |
 | Launch an entrypoint | `hiraku launch ENTRYPOINT [--record ID] [--commit REF] [--dispatch NAME]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
-| Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_reply`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow reply SESSION REPLY` |
+| Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_send_event`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow send-event SESSION EVENT` |
 | Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
 | Manage context records | `hiraku context ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
@@ -331,25 +331,27 @@ Workflows are project-defined procedures under `hiraku/workflows/` that guide
 you step by step through the Hiraku MCP server. The user may start one with
 its prompt, which shows the first instruction directly, or you start it with
 the tool named after it. Each response contains one instruction: its text, its
-`context`, and, unless it is final, a `reply` block that says how to answer it:
+`context`, and, unless it is final, an `events` block that says which events
+it accepts:
 
 1. Carry out the instruction text, using its `context`.
-2. If `reply.requires_user_response` is true, ask the user and wait for their
-   answer before replying. Otherwise decide yourself.
-3. Reply with the `workflow_reply` tool, never in the chat: one of
-   `reply.options`, its arguments as the option's schema describes, and the
-   reply block's `session_id` and `instruction_id` unchanged. Repeating an identical reply is safe; a `stale`
-   status means the instruction moved on, so continue from the one returned.
-4. A `rejected` or `not_ready` response keeps the same instruction pending; fix
-   the input or check again later. An instruction without a `reply` block is
+2. If `events.requires_user_response` is true, ask the user and wait for their
+   answer before sending an event. Otherwise decide yourself.
+3. Send one of `events.accepted` with the `workflow_send_event` tool, never in
+   the chat: its arguments as the event's schema describes, and the events
+   block's `session_id` and `instruction_id` unchanged. Sending an identical
+   event again is safe; a `stale` status means the instruction moved on, so
+   continue from the one returned.
+4. A `rejected` or `not_ready` response keeps the same instruction current; fix
+   the input or check again later. An instruction without an `events` block is
    final: carry it out, then stop.
 
-To resume, find the session with `session_list` and read its pending
+To resume, find the session with `session_list` and read its current
 instruction with `session_show`; do not start a new session. Before repeating
 consequential work such as creating records or launching experiments, check
 whether it already exists. User instructions override workflow defaults; if
 they conflict with the workflow, explain the conflict, or stop the session with
-its `stop` reply when it has one. If a workflow's tool is missing, the workflow
+its `stop` or `finish` event when it has one. If a workflow's tool is missing, the workflow
 may have failed to load or been added after the MCP server started; ask the
 user to reconnect the MCP server.
 

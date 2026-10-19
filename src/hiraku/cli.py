@@ -663,35 +663,63 @@ def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> 
     _emit_json(workflow.run_start(_arguments(arguments_file)))
 
 
-@workflow_group.command("reply")
+@workflow_group.command("send-event")
 @click.argument("session_id")
-@click.argument("reply")
+@click.argument("event")
 @click.option(
     "--instruction-id",
     type=int,
     required=True,
-    help="ID of the pending instruction the reply answers.",
+    help="ID of the current instruction the event answers.",
 )
 @_ARGUMENTS_FILE
 @click.pass_obj
-def workflow_reply(
+def workflow_send_event(
     state: CLIContext,
     session_id: str,
-    reply: str,
+    event: str,
     instruction_id: int,
     arguments_file: Any,
 ) -> None:
-    """Answer a session's pending instruction with REPLY and print the response."""
+    """Send EVENT to a session's current instruction and print the response."""
     from .session import Session
     from .workflow import load_workflow
 
     session = Session.load(session_id, config=state.config)
     workflow = load_workflow(session.workflow, config=state.config).bind(state.config)
     _emit_json(
-        workflow.run_reply(
-            session_id, instruction_id, reply, _arguments(arguments_file)
+        workflow.run_event(
+            session_id, instruction_id, event, _arguments(arguments_file)
         )
     )
+
+
+@workflow_group.command("graph")
+@click.argument("workflow_id")
+@click.option(
+    "--session",
+    "session_id",
+    default=None,
+    help="Highlight the current state of this session.",
+)
+@click.pass_obj
+def workflow_graph_command(
+    state: CLIContext, workflow_id: str, session_id: str | None
+) -> None:
+    """Print a workflow's states and events as a Mermaid state diagram."""
+    from .session import Session
+    from .workflow import load_workflow, workflow_graph
+
+    workflow = load_workflow(workflow_id, config=state.config)
+    current = None
+    if session_id is not None:
+        session = Session.load(session_id, config=state.config)
+        if session.workflow != workflow_id:
+            raise ValidationError(
+                f"Session {session_id!r} belongs to workflow {session.workflow!r}"
+            )
+        current = session.data.get("state")
+    click.echo(workflow_graph(workflow, current=current), nl=False)
 
 
 @main.group("session")
@@ -760,9 +788,9 @@ def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
             click.echo("\nResult:")
             click.echo(json.dumps(instruction["context"], indent=2, sort_keys=True))
         else:
-            options = instruction["reply"]["options"]
-            replies = ", ".join(option["reply"] for option in options)
-            click.echo(f"\nReplies: {replies}")
+            accepted = instruction["events"]["accepted"]
+            events = ", ".join(item["event"] for item in accepted)
+            click.echo(f"\nEvents: {events}")
 
 
 @session_group.command("cancel")

@@ -8,6 +8,7 @@ from typing import Any
 import anyio
 import pytest
 from mcp import Client, StdioServerParameters
+from mcp.shared.exceptions import MCPError
 
 from hiraku.config import HirakuConfig
 from hiraku.mcp import create_server
@@ -15,7 +16,7 @@ from hiraku.record import Record
 
 BUILTINS = {
     "workflow_list",
-    "workflow_reply",
+    "workflow_send_event",
     "session_list",
     "session_show",
     "session_cancel",
@@ -75,8 +76,8 @@ Run {{iterations}} experiments on {{task}}.
 ECHO_PY = '''
 from pydantic import BaseModel
 
-from hiraku.errors import SubmissionRejected
-from hiraku.workflow import Instruction, Workflow, reply
+from hiraku.errors import EventRejected
+from hiraku.workflow import Instruction, Workflow, event
 
 
 class State(BaseModel):
@@ -94,13 +95,13 @@ class Echo(Workflow):
             return Instruction(
                 "Report the summary.", context={"summary": state.summary}, final=True
             )
-        return Instruction(f"Work on {state.task}.", replies=[self.complete])
+        return Instruction(f"Work on {state.task}.", events=[self.complete])
 
-    @reply
+    @event
     def complete(self, state: State, summary: str) -> None:
         """Report what was done."""
         if not summary.strip():
-            raise SubmissionRejected("Summarize what was done")
+            raise EventRejected("Summarize what was done")
         state.summary = summary
 
 
@@ -156,7 +157,7 @@ def test_prompts_start_sessions(config: HirakuConfig) -> None:
 
     started, invalid, listing = run(server, scenario)
     text = started.messages[0].content.text
-    # A final instruction is the workflow's text and context, with no reply.
+    # A final instruction is the workflow's text and context, with no events.
     assert text == (
         "# Loop\n\nRun 3 experiments on sep10.\n\nContext:\n```json\n"
         '{\n "task": "sep10",\n "iterations": 3\n}\n```'
@@ -167,7 +168,7 @@ def test_prompts_start_sessions(config: HirakuConfig) -> None:
     assert "iterations" in invalid.messages[0].content.text
 
 
-def test_prompts_render_the_reply_block_and_tools_explain_it(
+def test_prompts_render_the_events_block_and_tools_explain_it(
     config: HirakuConfig,
 ) -> None:
     write_echo(config)
@@ -186,48 +187,48 @@ def test_prompts_render_the_reply_block_and_tools_explain_it(
 
     tools, text, listing, shown = run(server, scenario)
     session_id = listing[0]["session_id"]
-    assert text.startswith("Work on a.\n\nReply:\n```json\n")
+    assert text.startswith("Work on a.\n\nEvents:\n```json\n")
     block = json.loads(text.split("```json\n", 1)[1].rsplit("\n```", 1)[0])
-    assert block["tool"] == "workflow_reply"
+    assert block["tool"] == "workflow_send_event"
     assert block["session_id"] == session_id
     assert block["instruction_id"] == 1
-    assert [option["reply"] for option in block["options"]] == ["complete"]
+    assert [item["event"] for item in block["accepted"]] == ["complete"]
     # A prompt is a user message; without this line agents answered in chat.
-    assert text.endswith("Replying in the chat does not reach the workflow.")
-    assert "Answer with the workflow_reply tool" in text
-    assert shown["response"]["instruction"]["reply"]["tool"] == "workflow_reply"
-    description = tools["workflow_reply"].description
-    assert "reply block" in description
-    assert "An instruction without a" in description
+    assert text.endswith("Answering in the chat does not reach the workflow.")
+    assert "Send one of the accepted events with the workflow_send_event tool" in text
+    assert shown["response"]["instruction"]["events"]["tool"] == "workflow_send_event"
+    description = tools["workflow_send_event"].description
+    assert "events block" in description
+    assert "An instruction without an" in description
 
 
-def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
+def test_workflow_send_event_continues_any_session(config: HirakuConfig) -> None:
     write_echo(config)
     server = create_server(config)
 
     async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
         none = payload(
             await client.call_tool(
-                "workflow_reply", {"reply": "complete", "instruction_id": 1}
+                "workflow_send_event", {"event": "complete", "instruction_id": 1}
             )
         )
         first = payload(await client.call_tool("echo", {"task": "a"}))
         wrong = payload(
             await client.call_tool(
-                "workflow_reply", {"reply": "submit_run", "instruction_id": 1}
+                "workflow_send_event", {"event": "submit_run", "instruction_id": 1}
             )
         )
         invalid = payload(
             await client.call_tool(
-                "workflow_reply",
-                {"reply": "complete", "instruction_id": 1, "arguments": {}},
+                "workflow_send_event",
+                {"event": "complete", "instruction_id": 1, "arguments": {}},
             )
         )
         done = payload(
             await client.call_tool(
-                "workflow_reply",
+                "workflow_send_event",
                 {
-                    "reply": "complete",
+                    "event": "complete",
                     "instruction_id": 1,
                     "arguments": {"summary": "Tried three ideas"},
                 },
@@ -237,8 +238,8 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
         payload(await client.call_tool("echo", {"task": "c"}))
         ambiguous = payload(
             await client.call_tool(
-                "workflow_reply",
-                {"reply": "complete", "instruction_id": 1, "arguments": {}},
+                "workflow_send_event",
+                {"event": "complete", "instruction_id": 1, "arguments": {}},
             )
         )
         return {
@@ -251,20 +252,20 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
         }
 
     result = run(server, scenario)
-    reply_block = result["first"]["instruction"]["reply"]
+    events_block = result["first"]["instruction"]["events"]
     assert "No session is active" in result["none"]["message"]
     assert "guide" not in result["first"]
-    assert reply_block["tool"] == "workflow_reply"
-    assert reply_block["session_id"] == result["first"]["session_id"]
-    assert reply_block["instruction_id"] == 1
-    assert reply_block["options"][0]["reply"] == "complete"
-    assert reply_block["options"][0]["arguments"]["required"] == ["summary"]
+    assert events_block["tool"] == "workflow_send_event"
+    assert events_block["session_id"] == result["first"]["session_id"]
+    assert events_block["instruction_id"] == 1
+    assert events_block["accepted"][0]["event"] == "complete"
+    assert events_block["accepted"][0]["arguments"]["required"] == ["summary"]
     assert result["wrong"]["status"] == "rejected"
     assert "accepts: complete" in result["wrong"]["message"]
     assert result["invalid"]["status"] == "rejected"
     assert "summary" in result["invalid"]["message"]
     assert result["done"]["completed"] is True
-    assert result["invalid"]["instruction"]["reply"]["tool"] == "workflow_reply"
+    assert result["invalid"]["instruction"]["events"]["tool"] == "workflow_send_event"
     assert result["done"]["instruction"] == {
         "text": "Report the summary.",
         "context": {"summary": "Tried three ideas"},
@@ -286,6 +287,11 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
         )
         resource = await client.read_resource(f"hiraku://sessions/{session_id}")
         workflow = await client.read_resource("hiraku://workflows/echo")
+        graph = await client.read_resource("hiraku://workflows/collaborative/graph")
+        try:
+            await client.read_resource("hiraku://workflows/echo/graph")
+        except MCPError as exc:
+            no_graph = str(exc)
         templates = await client.list_resource_templates()
         cancelled = payload(
             await client.call_tool("session_cancel", {"session_id": session_id})
@@ -297,6 +303,8 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
             "shown": shown,
             "resource": json.loads(resource.contents[0].text),
             "workflow": workflow.contents[0].text,
+            "graph": graph.contents[0].text,
+            "no_graph": no_graph,
             "templates": {item.uri_template for item in templates.resource_templates},
             "cancelled": cancelled,
             "missing": missing,
@@ -310,6 +318,9 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
     assert "guide" not in result["shown"]
     assert result["resource"]["session_id"] == session_id
     assert result["workflow"] == "# Echo"
+    assert result["graph"].startswith("stateDiagram-v2\n  [*] --> draft\n")
+    assert "  review --> implement: implement\n" in result["graph"]
+    assert "has no states to draw" in result["no_graph"]
     assert result["templates"] >= {
         "hiraku://sessions/{session_id}",
         "hiraku://workflows/{workflow_id}",

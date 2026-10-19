@@ -48,12 +48,12 @@ def runner(tmp_path: Path, monkeypatch) -> CliRunner:
     return selected
 
 
-def reply(
+def send(
     runner: CliRunner, response: dict[str, Any], name: str, **arguments: Any
 ) -> dict[str, Any]:
     command = [
         "workflow",
-        "reply",
+        "send-event",
         response["session_id"],
         name,
         "--instruction-id",
@@ -77,23 +77,23 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
         assert instruction["text"].startswith("## Step")
         assert f"`Step {step}/3: token {context['token']}`" in instruction["text"]
         assert "{{" not in instruction["text"]
-        options = instruction["reply"]["options"]
-        assert [item["reply"] for item in options] == ["ack"]
+        options = instruction["events"]["accepted"]
+        assert [item["event"] for item in options] == ["ack"]
         if tokens:
-            stale = reply(runner, response, "ack", token=tokens[-1])
+            stale = send(runner, response, "ack", token=tokens[-1])
             assert stale["status"] == "rejected"
             assert f"does not match step {step}" in stale["message"]
         tokens.append(context["token"])
-        response = reply(runner, response, "ack", token=context["token"])
+        response = send(runner, response, "ack", token=context["token"])
         if step == 3:
             break
         gate = response["instruction"]
         assert gate["text"].startswith("## Next")
-        assert gate["reply"]["requires_user_response"] is True
+        assert gate["events"]["requires_user_response"] is True
         assert gate["context"] == {"done": step, "remaining": 3 - step}
-        gate_options = gate["reply"]["options"]
-        assert [item["reply"] for item in gate_options] == ["step", "finish"]
-        response = reply(runner, response, "step")
+        gate_options = gate["events"]["accepted"]
+        assert [item["event"] for item in gate_options] == ["step", "finish"]
+        response = send(runner, response, "step")
 
     assert response["completed"] is True
     assert response["instruction"]["text"].startswith("## Done")
@@ -107,15 +107,15 @@ def test_count_steps_rejects_wrong_tokens_and_finishes_early(
     assert start(runner, "count-steps", {"count": 0})["status"] == "rejected"
 
     response = start(runner, "count-steps", {"count": 2})
-    wrong = reply(runner, response, "ack", token="00000000")
+    wrong = send(runner, response, "ack", token="00000000")
     assert wrong["status"] == "rejected"
-    early = reply(runner, response, "finish")
+    early = send(runner, response, "finish")
     assert early["status"] == "rejected"
-    assert "not a reply to the pending instruction" in early["message"]
-    gate = reply(
+    assert "not an event the current instruction accepts" in early["message"]
+    gate = send(
         runner, response, "ack", token=response["instruction"]["context"]["token"]
     )
-    done = reply(runner, gate, "finish")
+    done = send(runner, gate, "finish")
     assert done["completed"] is True
     assert done["instruction"]["context"] == {"steps": 1, "count": 2}
 
@@ -131,9 +131,9 @@ if response.get("completed"):
     print("Ran", instruction["context"]["steps"], "steps")
     raise SystemExit
 print(re.search(r"`(Step .*?)`", instruction["text"]).group(1))
-reply = {"reply": instruction["reply"]["options"][0]["reply"],
+event = {"event": instruction["events"]["accepted"][0]["event"],
          "arguments": {"token": instruction["context"]["token"]}}
-Path(os.environ["HIRAKU_REPLY_FILE"]).write_text(json.dumps(reply))
+Path(os.environ["HIRAKU_EVENT_FILE"]).write_text(json.dumps(event))
 """
 
 
@@ -183,21 +183,21 @@ def test_greet_is_one_final_prompt_filled_from_its_arguments(
     assert instruction["text"].startswith("# Greet\n\nPrint 3 greetings to Ada")
     assert "Greet formally:\nfalse." in instruction["text"]
     assert instruction["context"] == {"name": "Ada", "times": 3, "formal": False}
-    assert "reply" not in instruction
+    assert "events" not in instruction
 
     missing = start(runner, "greet", {})
     assert missing["status"] == "rejected"
     assert "name" in missing["message"]
 
 
-# A scripted harness for a final instruction: there is nothing to reply.
+# A scripted harness for a final instruction: there is no event to send.
 PROMPT_AGENT = """
 import json, os
 from pathlib import Path
 
 response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
 print(response["instruction"]["text"].splitlines()[2])
-print("reply file:", os.environ.get("HIRAKU_REPLY_FILE"))
+print("event file:", os.environ.get("HIRAKU_EVENT_FILE"))
 """
 
 
@@ -212,7 +212,7 @@ def test_greet_through_hiraku_agent(
     assert result.exit_code == 0, result.output
     assert "[1 Greet] final" in result.output
     assert "Print 2 greetings to Ada, one per line. Greet formally:" in result.output
-    assert "reply file: None" in result.output
+    assert "event file: None" in result.output
     assert 'completed: {"name": "Ada", "times": 2, "formal": true}' in result.output
 
 
@@ -248,20 +248,20 @@ def test_scheduler_works_by_priority_until_every_record_reaches_the_target(
         assert context["remaining"] == 6 - done
         count = context["count"]
         assert f"--set count={count + 1}" in instruction["text"]
-        assert [item["reply"] for item in instruction["reply"]["options"]] == [
+        assert [item["event"] for item in instruction["events"]["accepted"]] == [
             "incremented"
         ]
 
-        unchanged = reply(runner, response, "incremented", record_id=record_id)
+        unchanged = send(runner, response, "incremented", record_id=record_id)
         assert unchanged["status"] == "rejected"
         assert f"set it to {count + 1}" in unchanged["message"]
         other = next(item.id for item in records if item.id != record_id)
-        wrong = reply(runner, response, "incremented", record_id=other)
+        wrong = send(runner, response, "incremented", record_id=other)
         assert wrong["status"] == "rejected"
         assert "assigned record" in wrong["message"]
 
         set_count(runner, record_id, count + 1)
-        response = reply(runner, response, "incremented", record_id=record_id)
+        response = send(runner, response, "incremented", record_id=record_id)
         assert response["status"] == "accepted"
 
     assert response["completed"] is True
@@ -275,15 +275,15 @@ def test_scheduler_rejects_a_count_raised_too_far(runner: CliRunner) -> None:
     response = start(runner, "scheduler", {"records": 1, "target": 3})
     record_id = response["instruction"]["context"]["record"]
     set_count(runner, record_id, 2)
-    skipped = reply(runner, response, "incremented", record_id=record_id)
+    skipped = send(runner, response, "incremented", record_id=record_id)
     assert skipped["status"] == "rejected"
     assert "is 2; set it to 1" in skipped["message"]
     set_count(runner, record_id, 1)
-    accepted = reply(runner, response, "incremented", record_id=record_id)
+    accepted = send(runner, response, "incremented", record_id=record_id)
     assert accepted["instruction"]["context"]["count"] == 1
 
 
-# A scripted harness: raises the assigned count with the CLI, then replies.
+# A scripted harness: raises the assigned count with the CLI, then sends an event.
 SCHEDULER_AGENT = """
 import json, os, subprocess, sys
 from pathlib import Path
@@ -295,8 +295,8 @@ if response.get("completed"):
     raise SystemExit
 command = ["record", "update", context["record"], "--set", f"count={context['next']}"]
 subprocess.run([sys.executable, "-m", "hiraku.cli", *command], check=True)
-reply = {"reply": "incremented", "arguments": {"record_id": context["record"]}}
-Path(os.environ["HIRAKU_REPLY_FILE"]).write_text(json.dumps(reply))
+event = {"event": "incremented", "arguments": {"record_id": context["record"]}}
+Path(os.environ["HIRAKU_EVENT_FILE"]).write_text(json.dumps(event))
 """
 
 
@@ -315,3 +315,19 @@ def test_scheduler_runs_on_its_own_through_hiraku_agent(
     assert "waiting for you" not in result.output
     (summary,) = Session.list_all(config=HirakuConfig.discover())
     assert summary["status"] == "completed"
+
+
+def test_example_workflows_draw_their_states(runner: CliRunner) -> None:
+    count_steps = invoke(runner, ["workflow", "graph", "count-steps"]).output
+    assert count_steps == (
+        "stateDiagram-v2\n"
+        "  [*] --> running\n"
+        "  running --> waiting: ack\n"
+        "  running --> finished: ack\n"
+        "  waiting --> running: step\n"
+        "  waiting --> finished: finish\n"
+        "  finished --> [*]\n"
+    )
+    scheduler = invoke(runner, ["workflow", "graph", "scheduler"]).output
+    assert "  working --> working: incremented\n" in scheduler
+    assert "  working --> finished: incremented\n" in scheduler

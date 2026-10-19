@@ -14,7 +14,7 @@ This example installs three small workflows that do no research work:
 hiraku init --example workflow-examples
 hiraku-agent count-steps --count 3   # run step 1; or start it over MCP
 hiraku-agent count-steps step        # run the next step
-hiraku-agent greet --name Ada        # one prompt, no replies
+hiraku-agent greet --name Ada        # one prompt, no events
 hiraku-agent scheduler               # work through records by priority
 ```
 

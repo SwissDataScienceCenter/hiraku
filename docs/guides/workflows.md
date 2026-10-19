@@ -17,11 +17,18 @@ A workflow consists of three concepts:
   history of accepted calls, and the current instruction, so work continues
   after a restart.
 - **Instruction**: the next request to the agent. It contains guidance,
-  concise context, whether the user must answer first, and the replies that
-  may continue the session, each with its argument schema. The final
-  instruction offers no replies: it ends the session, and its context is the
-  session's result. The agent still carries it out, for example by
-  summarizing the results for you.
+  concise context, whether the user must answer first, and the events it
+  accepts, each with its argument schema. The final instruction accepts no
+  events: it ends the session, and its context is the session's result. The
+  agent still carries it out, for example by summarizing the results for you.
+- **Event**: what continues a session: a report from the agent, such as
+  `implemented` with a commit, or a decision of yours, such as `revise` with
+  feedback. The workflow checks each event and may reject it.
+
+The terms come from state machines: a workflow's events move it between
+states, and a workflow that declares its states can be drawn as a diagram (see
+[States and graphs](#states-and-graphs)). Hiraku is not a state machine
+framework, though: workflow code stays plain Python.
 
 ## Use a workflow
 
@@ -43,11 +50,12 @@ server runs `hiraku mcp`, so the `hiraku` command must be on the agent's
   `collaborative` tool. Codex has no MCP prompts, so this is how it starts
   workflows.
 
-Every instruction has text, context, and, unless it is final, a `reply` block
-that says how to answer it: whether you must answer first, the reply options
-with their argument schemas, and the session and instruction IDs to pass. The
-agent answers with the `workflow_reply` tool, for example
-`workflow_reply(reply="revise", arguments={"feedback": "Keep SGD"}, ...)`:
+Every instruction has text, context, and, unless it is final, an `events`
+block that says which events it accepts: whether you must answer first, the
+accepted events with their argument schemas, and the session and instruction
+IDs to pass. The agent sends one with the `workflow_send_event` tool, for
+example `workflow_send_event(event="revise", arguments={"feedback": "Keep SGD"},
+...)`:
 
 ```json
 {
@@ -61,18 +69,18 @@ agent answers with the `workflow_reply` tool, for example
       "result": {"record_id": "exp-wd", "summary": "Add weight decay", ...},
       "rounds_left": 3
     },
-    "reply": {
-      "tool": "workflow_reply",
+    "events": {
+      "tool": "workflow_send_event",
       "session_id": "collaborative-3f9a1c2b4d5e",
       "instruction_id": 2,
       "requires_user_response": true,
-      "options": [
-        {"reply": "implement", "description": "Implement the drafted experiment.",
+      "accepted": [
+        {"event": "implement", "description": "Implement the drafted experiment.",
          "arguments": {"properties": {}}},
-        {"reply": "revise", "description": "Redo the reviewed step with ...",
+        {"event": "revise", "description": "Redo the reviewed step with ...",
          "arguments": {"properties": {"feedback": {"type": "string"}},
                        "required": ["feedback"]}},
-        {"reply": "finish", "description": "End the session and summarize ...",
+        {"event": "finish", "description": "End the session and summarize ...",
          "arguments": {"properties": {}}}
       ]
     }
@@ -80,32 +88,32 @@ agent answers with the `workflow_reply` tool, for example
 }
 ```
 
-When `reply.requires_user_response` is true, the agent asks you before
-replying. This is a conversational contract; it does not authenticate approval.
-The `workflow_reply` tool's description explains this protocol to the agent.
-An MCP prompt hands over the instruction as text with its context and reply
-block, and ends with a line saying to answer with `workflow_reply`: the prompt
-arrives as a user message, and without that line agents may answer "reply
-`incremented`" in the chat, which never reaches the workflow.
+When `events.requires_user_response` is true, the agent asks you before
+sending an event. This is a conversational contract; it does not authenticate
+approval. The `workflow_send_event` tool's description explains this protocol
+to the agent. An MCP prompt hands over the instruction as text with its context
+and events block, and ends with a line saying to send an event with
+`workflow_send_event`: the prompt arrives as a user message, and without that
+line agents may answer in the chat, which never reaches the workflow.
 
-A reply passes the `instruction_id` of the instruction it answers, so a late or
-repeated call cannot be applied to a later step. `session_id` may be left out
-while only one session is active. Hiraku checks the reply's arguments against
-its schema and keeps each accepted call in the session's history.
+An event passes the `instruction_id` of the instruction it answers, so a late
+or repeated call cannot be applied to a later step. `session_id` may be left
+out while only one session is active. Hiraku checks the event's arguments
+against its schema and keeps each accepted call in the session's history.
 
-A reply has one of these outcomes:
+An event has one of these outcomes:
 
 | Status | Meaning |
 | --- | --- |
-| `accepted` | The reply was applied; the response holds the next instruction. With `completed: true`, it is the final instruction, which takes no reply. |
-| `rejected` | The input was invalid; the same instruction stays pending. |
+| `accepted` | The event was applied; the response holds the next instruction. With `completed: true`, it is the final instruction, which accepts no events. |
+| `rejected` | The input was invalid; the same instruction stays current. |
 | `not_ready` | The input was valid, but the evidence it refers to has not arrived yet; check again later. |
-| `stale` | The reply answers an instruction that is no longer pending; the call was not applied, and the response holds the current instruction. |
+| `stale` | The event answers an instruction that is no longer current; the call was not applied, and the response holds the current instruction. |
 
-Repeating an identical reply is safe: it returns the same response without
-applying the reply again.
+Sending an identical event again is safe: it returns the same response without
+applying the event again.
 
-Completion means the session accepts no more replies, not necessarily that
+Completion means the session accepts no more events, not necessarily that
 every objective was met: the final instruction's context distinguishes, for
 example, completed, partial, and stopped results.
 
@@ -113,7 +121,7 @@ example, completed, partial, and stopped results.
 
 Sessions are stored on disk, so a restarted MCP server or a new conversation
 continues where the session stopped. Ask the agent to resume the session; it
-uses `session_list` and `session_show` to get the pending instruction. From a
+uses `session_list` and `session_show` to get the current instruction. From a
 terminal:
 
 ```bash
@@ -122,28 +130,29 @@ hiraku session show <session-id>
 hiraku session cancel <session-id>
 ```
 
-Cancelling stops the session from accepting replies. It never reverts code,
+Cancelling stops the session from accepting events. It never reverts code,
 deletes records, or stops processes that are still running.
 
-Hiraku resumes the last saved instruction and never applies an accepted reply
-twice. Work the agent did before replying, such as creating records or
+Hiraku resumes the last saved instruction and never applies an accepted event
+twice. Work the agent did before sending an event, such as creating records or
 launching runs, is not rolled back; workflows tell the agent to check for
 existing outputs before repeating such work.
 
 ### Tools and prompts are fixed
 
 The MCP server offers one tool and one prompt per workflow, the generic
-`workflow_reply`, and the tools below, all fixed when it starts: coding agents
+`workflow_send_event`, and the tools below, all fixed when it starts: coding agents
 do not reliably pick up tools that change during a session. A workflow added or
 edited later appears after you reconnect the Hiraku MCP server or restart the
 agent.
 
 ### Workflow and session tools
 
-Besides the tool named after each workflow and `workflow_reply`, the server
-offers `workflow_list`, `session_list`, `session_show`, and `session_cancel`,
-and resources for workflow documents (`hiraku://workflows/<id>`) and sessions
-(`hiraku://sessions/<id>`). The server's record, context, and run tools are
+Besides the tool named after each workflow and `workflow_send_event`, the
+server offers `workflow_list`, `session_list`, `session_show`, and
+`session_cancel`, and resources for workflow documents
+(`hiraku://workflows/<id>`), workflow graphs (`hiraku://workflows/<id>/graph`),
+and sessions (`hiraku://sessions/<id>`). The server's record, context, and run tools are
 described in the [MCP server guide](mcp.md).
 
 The bundled workflows launch experiments with the `hiraku launch` CLI rather
@@ -153,7 +162,7 @@ from the agent's MCP configuration, not from the agent's shell.
 
 ## Run a workflow from the terminal
 
-`hiraku-agent` runs the same sessions from a terminal. It hands each pending
+`hiraku-agent` runs the same sessions from a terminal. It hands each current
 instruction to a coding agent and stops whenever you decide:
 
 ```bash
@@ -165,31 +174,31 @@ hiraku-agent collaborative finish
 ```
 
 Each workflow is a command whose options are its start arguments, and each
-reply is a subcommand whose options are the reply's arguments; see
+event is a subcommand whose options are the event's arguments; see
 `hiraku-agent collaborative --help`. Text arguments are passed as given, other
 values are parsed as JSON, and the workflow validates them.
 
 - `hiraku-agent WORKFLOW` starts a session, or resumes the workflow's active
   session. Pass `--new` to start another one and `--session` to choose one.
-- `hiraku-agent WORKFLOW REPLY` answers the pending instruction of the active
-  session that accepts `REPLY`, then continues.
+- `hiraku-agent WORKFLOW EVENT` sends `EVENT` to the current instruction of
+  the active session that accepts it, then continues.
 - For every other instruction, the driver writes a prompt to
   `hiraku/sessions/<session-id>/<instruction-id>/<attempt>/prompt.md` and runs
-  the agent. The agent writes its reply as JSON to the `reply.json` named in
-  the prompt. A rejected reply goes back to the agent with the error, up to
+  the agent. The agent writes its event as JSON to the `event.json` named in
+  the prompt. A rejected event goes back to the agent with the error, up to
   `--retries` times.
 - At an instruction that requires your response, the driver prints its context
-  and the reply commands and exits with status 3. A reply that is not ready,
+  and the event commands and exits with status 3. An event that is not ready,
   such as a launch whose run is not tracked yet, is kept: the next
   `hiraku-agent WORKFLOW` sends it again without the agent, and exits with
   status 4 while it still waits. The agent carries out the final instruction
-  without writing a reply, and the driver exits with 0.
+  without writing an event, and the driver exits with 0.
 - With `--interactive`, each agent step runs as a conversation with you in the
   terminal instead of headless: the agent first says what it would do and
   waits; discuss the step, and once you tell it to go ahead it carries out the
-  step and writes the reply. The driver still stops where you decide, so
+  step and writes the event. The driver still stops where you decide, so
   `hiraku-agent count-steps step --interactive` is exactly one conversational
-  step. Exit the agent without a reply to stop; the instruction stays pending.
+  step. Exit the agent without an event to stop; the instruction stays current.
 
 | Mode | Default command | Override |
 | --- | --- | --- |
@@ -201,7 +210,7 @@ commands, which steps such as implementing or launching need; an override is
 used as given. The
 prompt arrives on standard input, or with `--interactive` as an opening
 message appended as the last argument, so an interactive command must accept a
-prompt there (the default ends its options with `--`), and the environment holds `HIRAKU_REPLY_FILE`
+prompt there (the default ends its options with `--`), and the environment holds `HIRAKU_EVENT_FILE`
 (except for the final instruction), `HIRAKU_PROMPT_FILE`, `HIRAKU_SESSION_ID`,
 and `HIRAKU_INSTRUCTION_FILE`, the response with the instruction as JSON. A
 script can therefore stand in for the agent.
@@ -209,7 +218,7 @@ script can therefore stand in for the agent.
 Sessions are shared with the MCP server: draft an experiment in Claude Code
 and launch it later with `hiraku-agent collaborative launch` from a terminal.
 The instruction ID and a per-session lock keep the two from applying
-conflicting replies.
+conflicting events.
 
 ## Write a Markdown-only workflow
 
@@ -240,7 +249,7 @@ starts, and the agent then carries out the prompt. `session_show` still
 returns it, so a new conversation can read it again.
 
 Hiraku checks nothing about the work in a Markdown-only workflow: there are no
-replies, budgets, approvals, or evidence checks. Add a `workflow.py` when you
+events, budgets, approvals, or evidence checks. Add a `workflow.py` when you
 need such checks; the `workflow.md` stays the same record.
 
 ## Write a workflow
@@ -249,15 +258,16 @@ Create `hiraku/workflows/<workflow-id>/workflow.py` exporting `WORKFLOW`, and a
 `workflow.md` with the prompts:
 
 ```python
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from hiraku.errors import SubmissionRejected
-from hiraku.workflow import Instruction, Workflow, reply
+from hiraku.errors import EventRejected
+from hiraku.workflow import Instruction, Workflow, event
 
 
 class State(BaseModel):
+    state: Literal["search", "choose", "done"] = "search"
     topic: str
     questions: list[str] = []
     question: str | None = None
@@ -275,38 +285,37 @@ class Review(Workflow):
         return State(topic=topic)
 
     def next(self, state: State) -> Instruction:
-        if state.question is not None:
+        if state.state == "done":
             return Instruction(
                 self.markdown.section("## Done"),
                 context={"question": state.question},
                 final=True,
             )
-        if state.questions:
+        if state.state == "choose":
             return Instruction(
                 self.markdown.section("## Choose"),
                 context={"questions": state.questions},
                 requires_user_response=True,
-                replies=[self.choose],
             )
         return Instruction(
-            self.markdown.section("## Search"),
-            context={"topic": state.topic},
-            replies=[self.propose],
+            self.markdown.section("## Search"), context={"topic": state.topic}
         )
 
-    @reply
+    @event(source="search", dest="choose")
     def propose(self, state: State, questions: list[str]) -> None:
         """Submit candidate research questions."""
         if len(questions) < self.min_questions:
-            raise SubmissionRejected(f"Propose at least {self.min_questions} questions")
+            raise EventRejected(f"Propose at least {self.min_questions} questions")
         state.questions = questions
+        state.state = "choose"
 
-    @reply
+    @event(source="choose", dest="done")
     def choose(self, state: State, question: str) -> None:
         """Record the question the user chose."""
         if question not in state.questions:
-            raise SubmissionRejected(f"Choose one of {state.questions}")
+            raise EventRejected(f"Choose one of {state.questions}")
         state.question = question
+        state.state = "done"
 
 
 WORKFLOW = Review
@@ -321,11 +330,13 @@ min_questions: 3
 
 ## Search
 
-Search the literature on the topic and propose research questions.
+Search the literature on the topic, then send the event `propose` with
+candidate research questions.
 
 ## Choose
 
-Present the questions and ask the user which one to pursue.
+Present the questions and ask the user which one to pursue. Send the event
+`choose` with the question they pick.
 
 ## Done
 
@@ -337,36 +348,35 @@ The rules are deliberately small:
 - A `Workflow` instance is the loaded `workflow.md` record. Its front matter
   needs the workflow `id`, matching the directory name. Workflow IDs use
   letters, digits, and `-`, so the MCP tool named after a workflow never
-  collides with Hiraku's own tools such as `workflow_reply`. Annotated class
-  attributes, like `min_questions` above, are settings validated from the front
-  matter; other front-matter fields are kept as metadata. The class body
+  collides with Hiraku's own tools such as `workflow_send_event`. Annotated
+  class attributes, like `min_questions` above, are settings validated from the
+  front matter; other front-matter fields are kept as metadata. The class body
   follows Pydantic rules: constants need `ClassVar[...]`, and `__init__` is not
   overridden.
-- The workflow's **state** is a Pydantic model you define, like `State`
+- The workflow's **state model** is a Pydantic model you define, like `State`
   above. It is stored as JSON in the session, so its fields must be
-  JSON-serializable. Record where the session is in the state, for example
-  which step runs or whether the user is reviewing, so that `next` can tell.
+  JSON-serializable. Its `state` field names where the session is; see
+  [States and graphs](#states-and-graphs).
 - `start` returns the first state of a new session; its return annotation
   names the state model. Its signature and docstring define how the workflow
   is started: they become the MCP tool and prompt named after the workflow.
   Use `Annotated[..., Field()]` for parameter descriptions and constraints.
 - `next(state)` returns the `Instruction` for a state. Every instruction comes
-  from here: after `start` and after each accepted reply, Hiraku calls `next`
+  from here: after `start` and after each accepted event, Hiraku calls `next`
   and stores what it returns. `next` may read records and runs, but must not
-  change the state; Hiraku reports a change as an error. An instruction lists
-  the replies that may answer it, e.g. `replies=[self.propose]`, or is
-  `final=True` with no replies, which completes the session.
-- `@reply` marks a method that continues a session. Its first parameter is
+  change the state; Hiraku reports a change as an error. An instruction with
+  `final=True` accepts no events and completes the session.
+- `@event` marks a method that continues a session. Its first parameter is
   the state, annotated with the state model; the other parameters and the
-  docstring define the reply's arguments and description. A reply changes the
-  state in place and returns nothing. Hiraku loads the state, checks that the
-  reply answers the current instruction and that its arguments match, calls
-  the reply and then `next`, and saves the result atomically. A reply cannot
-  be named `start`, `next`, or like a `Workflow` method such as `save`.
-- Raise `SubmissionRejected` for invalid input and `NotReady` when valid input
-  refers to evidence that has not arrived yet, in a reply or in `next`.
+  docstring define the event's arguments and description. An event changes
+  the state in place and returns nothing. Hiraku loads the state, checks that
+  the current instruction accepts the event and that its arguments match,
+  calls the event and then `next`, and saves the result atomically. An event
+  cannot be named `start`, `next`, or like a `Workflow` method such as `save`.
+- Raise `EventRejected` for invalid input and `NotReady` when valid input
+  refers to evidence that has not arrived yet, in an event or in `next`.
   Nothing is saved in either case. A valid alternative, such as revising,
-  skipping, or stopping, is a normal reply that changes the state.
+  skipping, or stopping, is a normal event that changes the state.
 - `self.markdown.section("## Search")` returns a section of this workflow's
   `workflow.md`, including its subsections, and `self.text` the whole body.
   Select a section by its heading line as written: the level must match, so
@@ -384,10 +394,10 @@ The rules are deliberately small:
   call is not persisted. To run a workflow from Python, for example in a
   test, load it with `hiraku.workflow.load_workflow()`, bind it with
   `workflow.bind(config)`, and call `run_start({...})` and
-  `run_reply(session_id, instruction_id, "propose", {...})`.
+  `run_event(session_id, instruction_id, "propose", {...})`.
 - Use `self.config` and the Hiraku Python API to read and verify records and
-  runs. Prefer replies that name records or runs, which the workflow loads and
-  checks, over replies that carry results as free text.
+  runs. Prefer events that name records or runs, which the workflow loads and
+  checks, over events that carry results as free text.
 - Workflow modules can import helpers from their own directory with relative
   imports.
 
@@ -396,24 +406,65 @@ fails to load is logged to the server's stderr and left out;
 `hiraku workflow list` in a terminal shows the error. After editing a workflow,
 reconnect the MCP server. Existing sessions
 continue with the new code if their stored state still validates against the
-state model and their pending replies still exist; otherwise their replies
+state model and their pending events still exist; otherwise their events
 are rejected, and they remain inspectable.
 Keep workflows compatible with existing sessions, or start new ones.
 Workflow code is trusted project code: loading it executes it.
 
 Test a workflow without an agent with `hiraku workflow start` and
-`hiraku workflow reply`, which print the JSON responses:
+`hiraku workflow send-event`, which print the JSON responses:
 
 ```bash
 echo '{"topic": "protein folding"}' | hiraku workflow start review --arguments-file -
-echo '{"questions": ["Q1", "Q2"]}' | hiraku workflow reply <session-id> propose --instruction-id 1 --arguments-file -
+echo '{"questions": ["Q1", "Q2"]}' | hiraku workflow send-event <session-id> propose --instruction-id 1 --arguments-file -
 ```
+
+### States and graphs
+
+`@event(source=..., dest=...)` declares the states in which an event is
+accepted and the states it may move to. The state model's `state` field lists
+every state as a `Literal` and defaults to the start state, and an event sets
+it, as `propose` and `choose` do above. With these declarations:
+
+- Each instruction accepts the events whose `source` names the current state,
+  so `next` lists none. It may narrow them, e.g.
+  `Instruction(..., events=[self.revise, self.finish])` when a step is not
+  available yet; listing an event the state does not accept is an error.
+- After each event, the `state` field must name one of its `dest` states, or
+  Hiraku reports an error and saves nothing. `start` must return the start
+  state.
+- A state that accepts no events is final, and only it has a final
+  instruction.
+- When the workflow loads, Hiraku checks that every state named by an event
+  exists and that every state can be reached from the start state.
+
+Hiraku then draws the workflow as a Mermaid state diagram, with one edge per
+event:
+
+```bash
+hiraku workflow graph review
+hiraku workflow graph collaborative --session <session-id>   # highlight its state
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> search
+  search --> choose: propose
+  choose --> done: choose
+  done --> [*]
+```
+
+The MCP server serves the same diagram as `hiraku://workflows/<id>/graph`.
+Declaring states is optional: a workflow whose events are bare `@event`
+methods lists the events each instruction accepts instead, e.g.
+`Instruction(..., events=[self.propose])`, and has no graph. A workflow
+declares states for all its events or for none.
 
 ## Bundled workflows
 
 `hiraku init` installs **collaborative**, which runs experiments on a task in
 four steps: draft, implement, launch, and analyze. The agent does each step
-and reports it with a reply such as `drafted` or `implemented`; Hiraku writes
+and reports it with an event such as `drafted` or `implemented`; Hiraku writes
 the experiment record, binds the resolved commit, checks that the runs are
 attributed to the experiment and its commit, and records the verdict. After
 each step you review the result and choose the next step, `revise` with

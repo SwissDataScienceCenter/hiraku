@@ -1,18 +1,18 @@
 """``hiraku-agent``: run workflow sessions from the terminal with a coding agent.
 
-Each workflow is a command, and each of its replies a subcommand:
+Each workflow is a command, and each of its events a subcommand:
 
     hiraku-agent collaborative --task cifar     # start, or resume, a session
-    hiraku-agent collaborative implement        # reply as the user, continue
+    hiraku-agent collaborative implement        # send as the user, continue
 
 The driver hands every pending instruction to a coding agent, such as
-``claude -p``, and sends the reply the agent writes to a file back to the
+``claude -p``, and sends the event the agent writes to a file back to the
 workflow. It stops where the user decides, at an instruction that requires a
-user response, which the user answers with a reply subcommand, and after the
-agent carried out the final instruction, which takes no reply. With
+user response, which the user answers with an event subcommand, and after the
+agent carried out the final instruction, which takes no event. With
 ``--interactive``, each agent step is a conversation with the user in the
 terminal instead of a headless run. The driver uses only the public workflow API
-(`Workflow.run_start`, `Workflow.run_reply`, and stored `Session`s), the same
+(`Workflow.run_start`, `Workflow.run_event`, and stored `Session`s), the same
 one the MCP server uses, so both can continue the same session.
 """
 
@@ -40,9 +40,9 @@ from .session import Session
 from .workflow import (
     Workflow,
     discover_workflows,
+    event_methods,
     instruction_text,
     load_workflow,
-    reply_methods,
     summary,
     workflow_description,
 )
@@ -66,7 +66,7 @@ Status = Literal["accepted", "rejected", "not_ready", "stale", "error"]
 
 @dataclass(frozen=True)
 class Options:
-    """Options of the driver, shared by a workflow and its reply commands."""
+    """Options of the driver, shared by a workflow and its event commands."""
 
     session: str | None = None
     new: bool = False
@@ -75,8 +75,8 @@ class Options:
     retries: int = DEFAULT_RETRIES
 
 
-class _NoReply(Exception):
-    """The agent ended without writing a reply."""
+class _NoEvent(Exception):
+    """The agent ended without writing an event."""
 
 
 # Command line --------------------------------------------------------------------
@@ -114,7 +114,7 @@ def main() -> None:
 
     `hiraku-agent WORKFLOW` starts a session, or resumes the active one, and
     lets the agent carry out instructions until one needs your decision.
-    `hiraku-agent WORKFLOW REPLY` answers it and continues. The agent runs
+    `hiraku-agent WORKFLOW EVENT` answers it and continues. The agent runs
     headless (`claude -p` by default; set HIRAKU_AGENT_CMD or --agent-cmd), or
     in a conversation with you with --interactive (HIRAKU_AGENT_INTERACTIVE_CMD);
     either way the driver stops where you decide.
@@ -144,7 +144,7 @@ def _driver_params() -> list[click.Parameter]:
             ["--retries", "retries"],
             type=click.IntRange(min=0),
             default=None,
-            help=f"Retries after a rejected agent reply [default: {DEFAULT_RETRIES}].",
+            help=f"Retries after a rejected agent event [default: {DEFAULT_RETRIES}].",
         ),
     ]
 
@@ -185,12 +185,12 @@ def _workflow_command(workflow: Workflow) -> click.Group:
         help=workflow_description(workflow),
         short_help=summary(workflow_description(workflow)),
     )
-    for name, method in reply_methods(type(workflow)).items():
-        group.add_command(_reply_command(workflow, name, method.arguments, method))
+    for name, method in event_methods(type(workflow)).items():
+        group.add_command(_event_command(workflow, name, method.arguments, method))
     return group
 
 
-def _reply_command(
+def _event_command(
     workflow: Workflow, name: str, model: type[BaseModel], method: Any
 ) -> click.Command:
     driver = _driver_params()
@@ -198,8 +198,8 @@ def _reply_command(
     @click.pass_context
     def run(ctx: click.Context, **values: Any) -> None:
         options = _options(ctx)
-        session = _select_for_reply(workflow, name, options)
-        result = workflow.run_reply(
+        session = _select_for_event(workflow, name, options)
+        result = workflow.run_event(
             session.id, session.instruction_id, name, _arguments(model, values)
         )
         _report(session.instruction_id, _heading(session.response), "you", name, result)
@@ -227,7 +227,7 @@ def _unavailable(name: str, message: str) -> click.Command:
 
 
 def _options(ctx: click.Context) -> Options:
-    """Merge the driver options of a reply command with its workflow's."""
+    """Merge the driver options of an event command with its workflow's."""
     merged: dict[str, Any] = {}
     for context in (ctx.parent, ctx):
         if context is None:
@@ -351,8 +351,8 @@ def _start_or_resume(
     return response["session_id"]
 
 
-def _select_for_reply(workflow: Workflow, reply: str, options: Options) -> Session:
-    """Return the active session whose pending instruction accepts ``reply``."""
+def _select_for_event(workflow: Workflow, event: str, options: Options) -> Session:
+    """Return the active session whose current instruction accepts ``event``."""
     if options.session is not None:
         return _own(workflow, options.session)
     active = _active(workflow)
@@ -361,15 +361,15 @@ def _select_for_reply(workflow: Workflow, reply: str, options: Options) -> Sessi
             f"No active {workflow.id} session; start one with "
             f"`hiraku-agent {workflow.id}`"
         )
-    candidates = [item for item in active if reply in item.replies]
+    candidates = [item for item in active if event in item.events]
     if len(candidates) == 1:
         return candidates[0]
     if not candidates:
         pending = "; ".join(
-            f"{item.id} accepts {', '.join(item.replies) or 'nothing'}"
+            f"{item.id} accepts {', '.join(item.events) or 'nothing'}"
             for item in active
         )
-        raise click.ClickException(f"No active session accepts {reply!r}: {pending}")
+        raise click.ClickException(f"No active session accepts {event!r}: {pending}")
     raise click.ClickException(_several(workflow, candidates))
 
 
@@ -406,7 +406,7 @@ def _drive(
             click.echo(f"{session.status}: {json.dumps(context, ensure_ascii=False)}")
             return 0
         instruction = response["instruction"]
-        if instruction["reply"]["requires_user_response"]:
+        if instruction["events"]["requires_user_response"]:
             _show_gate(workflow, response)
             return EXIT_WAITING
         pending = _pending(workflow, response)
@@ -414,9 +414,9 @@ def _drive(
         if status is None:
             try:
                 status = _agent_turns(workflow, response, options)
-            except _NoReply:
+            except _NoEvent:
                 click.echo(
-                    f"No reply was written; instruction {response['instruction_id']} "
+                    f"No event was written; instruction {response['instruction_id']} "
                     f"is still pending. Continue with `hiraku-agent {workflow.id}`."
                 )
                 return EXIT_WAITING
@@ -431,7 +431,7 @@ def _drive(
 def _agent_turns(
     workflow: Workflow, response: dict[str, Any], options: Options
 ) -> Status:
-    """Run the agent on the pending instruction until a reply is not rejected."""
+    """Run the agent on the current instruction until an event is not rejected."""
     error: str | None = None
     for attempt in range(1, options.retries + 2):
         try:
@@ -440,7 +440,7 @@ def _agent_turns(
             error = str(exc)
             click.echo(f"  rejected: {error}")
             continue
-        result = workflow.run_reply(
+        result = workflow.run_event(
             response["session_id"], response["instruction_id"], name, arguments
         )
         _report(response["instruction_id"], _heading(response), "agent", name, result)
@@ -454,7 +454,7 @@ def _agent_turns(
             raise click.ClickException(result["message"])
         return status
     raise click.ClickException(
-        f"The agent's replies were rejected {options.retries + 1} times; see "
+        f"The agent's events were rejected {options.retries + 1} times; see "
         f"{_directory(workflow, response)}"
     )
 
@@ -466,26 +466,26 @@ def _run_agent(
     error: str | None,
     options: Options,
 ) -> tuple[str, dict[str, Any]]:
-    """Run the agent once and return the reply it wrote.
+    """Run the agent once and return the event it wrote.
 
-    For a final instruction, which takes no reply, return nothing.
+    For a final instruction, which takes no event, return nothing.
 
     Raises:
-        _NoReply: If the agent wrote no reply.
-        ValueError: If the reply file is malformed.
+        _NoEvent: If the agent wrote no event.
+        ValueError: If the event file is malformed.
     """
     final = bool(response.get("completed"))
     if final:
         click.echo(f"[{response['instruction_id']} {_heading(response)}] final")
     directory = _directory(workflow, response) / str(attempt)
     directory.mkdir(parents=True, exist_ok=True)
-    reply_file = directory / "reply.json"
-    reply_file.unlink(missing_ok=True)
+    event_file = directory / "event.json"
+    event_file.unlink(missing_ok=True)
     prompt_file = directory / "prompt.md"
     instruction_file = directory / "instruction.json"
     prompt_file.write_text(
         render_prompt(
-            response, None if final else reply_file, error, options.interactive
+            response, None if final else event_file, error, options.interactive
         ),
         encoding="utf-8",
     )
@@ -498,7 +498,7 @@ def _run_agent(
         "HIRAKU_SESSION_ID": response["session_id"],
         "HIRAKU_PROMPT_FILE": str(prompt_file),
         "HIRAKU_INSTRUCTION_FILE": str(instruction_file),
-        **({} if final else {"HIRAKU_REPLY_FILE": str(reply_file)}),
+        **({} if final else {"HIRAKU_EVENT_FILE": str(event_file)}),
     }
     try:
         if options.interactive:
@@ -518,13 +518,13 @@ def _run_agent(
         ) from exc
     if final:
         return "", {}
-    if not reply_file.is_file():
+    if not event_file.is_file():
         if options.interactive:
-            raise _NoReply
+            raise _NoEvent
         raise click.ClickException(
-            f"The agent wrote no reply; see {directory / 'output.txt'}"
+            f"The agent wrote no event; see {directory / 'output.txt'}"
         )
-    return _read_reply(reply_file)
+    return _read_event(event_file)
 
 
 def _run_headless(
@@ -550,17 +550,17 @@ def _run_headless(
         process.wait()
 
 
-def _read_reply(path: Path) -> tuple[str, dict[str, Any]]:
+def _read_event(path: Path) -> tuple[str, dict[str, Any]]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except ValueError as exc:
-        raise ValueError(f"The reply file is not JSON: {exc}") from exc
+        raise ValueError(f"The event file is not JSON: {exc}") from exc
     if not isinstance(data, dict):
         data = {}
-    name, arguments = data.get("reply"), data.get("arguments") or {}
+    name, arguments = data.get("event"), data.get("arguments") or {}
     if not isinstance(name, str) or not isinstance(arguments, dict):
         raise ValueError(
-            'The reply file must hold {"reply": "<name>", "arguments": {...}}'
+            'The event file must hold {"event": "<name>", "arguments": {...}}'
         )
     return name, arguments
 
@@ -594,24 +594,24 @@ def _save_pending(
 ) -> None:
     path = _directory(workflow, response) / "pending.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"reply": name, "arguments": arguments}), "utf-8")
+    path.write_text(json.dumps({"event": name, "arguments": arguments}), "utf-8")
 
 
 def _resend(
     workflow: Workflow, response: dict[str, Any], pending: dict[str, Any]
 ) -> Status | None:
-    """Send a reply that was not ready again; ``None`` if the agent must retry."""
-    result = workflow.run_reply(
+    """Send an event that was not ready again; ``None`` if the agent must retry."""
+    result = workflow.run_event(
         response["session_id"],
         response["instruction_id"],
-        pending["reply"],
+        pending["event"],
         pending["arguments"],
     )
     _report(
         response["instruction_id"],
         _heading(response),
         "again",
-        pending["reply"],
+        pending["event"],
         result,
     )
     status: Status = result["status"]
@@ -627,13 +627,13 @@ def _resend(
 
 def render_prompt(
     response: dict[str, Any],
-    reply_file: Path | None,
+    event_file: Path | None,
     error: str | None = None,
     interactive: bool = False,
 ) -> str:
     """Render an instruction as a self-contained prompt for an agent.
 
-    Without a reply file, the instruction is final and takes no reply.
+    Without an event file, the instruction is final and takes no event.
     """
     parts = [instruction_text(response["instruction"])]
     if interactive:
@@ -643,29 +643,29 @@ def render_prompt(
             "understand the instruction asks for and what you would do. Do not "
             "change files or run commands until the user tells you to go ahead; "
             "then carry out the step"
-            + ("." if reply_file is None else " and write the reply.")
+            + ("." if event_file is None else " and write the event.")
         )
     else:
         mode = (
             "The user sees your output but cannot answer; decide yourself and do "
             "not ask questions."
         )
-    if reply_file is None:
+    if event_file is None:
         parts.append(
             f"---\n{mode}\n\nThis is the final instruction of the session; it "
-            "takes no reply. Stop when you are done."
+            "takes no event. Stop when you are done."
         )
         return "\n\n".join(parts) + "\n"
     parts.append(
-        f"---\n{mode}\n\nWhen you are done, write exactly one reply as a JSON "
-        f"object to `{reply_file}`:\n"
-        '`{"reply": "<one of reply.options>", "arguments": {...}}`, with the '
+        f"---\n{mode}\n\nWhen you are done, write exactly one event as a JSON "
+        f"object to `{event_file}`:\n"
+        '`{"event": "<one of events.accepted>", "arguments": {...}}`, with the '
         "arguments the option's schema describes. The session and instruction "
         "IDs are not needed."
     )
     if error is not None:
         parts.append(
-            f"Your previous reply was rejected: {error}\nWrite a corrected reply."
+            f"Your previous event was rejected: {error}\nWrite a corrected event."
         )
     return "\n\n".join(parts) + "\n"
 
@@ -693,13 +693,13 @@ def _show_gate(workflow: Workflow, response: dict[str, Any]) -> None:
     if instruction.get("context") is not None:
         context = json.dumps(instruction["context"], indent=1, ensure_ascii=False)
         click.echo("\n".join(f"  {line}" for line in context.splitlines()))
-    click.echo("Reply with one of:")
-    for item in instruction["reply"]["options"]:
+    click.echo("Send one of:")
+    for item in instruction["events"]["accepted"]:
         flags = " ".join(
             f"--{name.replace('_', '-')} …"
             for name in item.get("arguments", {}).get("properties", {})
         )
-        command = f"hiraku-agent {workflow.id} {item['reply']} {flags}".strip()
+        command = f"hiraku-agent {workflow.id} {item['event']} {flags}".strip()
         description = f"  # {item['description']}" if item.get("description") else ""
         click.echo(f"  {command}{description}")
 

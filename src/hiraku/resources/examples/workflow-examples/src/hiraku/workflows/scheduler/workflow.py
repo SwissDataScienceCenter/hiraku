@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import random
 import secrets
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from hiraku.errors import SubmissionRejected
+from hiraku.errors import EventRejected
 from hiraku.markdown import render
 from hiraku.record import Record, load_record
-from hiraku.workflow import Instruction, Workflow, reply
+from hiraku.workflow import Instruction, Workflow, event
 
 
 class State(BaseModel):
     parent: str
     target: int
+    state: Literal["working", "finished"] = "working"
     # The assigned record, and its count when it was assigned; None when done.
     current: str | None = None
     baseline: int = 0
@@ -63,7 +64,7 @@ class Scheduler(Workflow):
         return state
 
     def next(self, state: State) -> Instruction:
-        if state.current is None:
+        if state.state == "finished":
             return Instruction(
                 self.markdown.section("## Done"),
                 context={"records": self._summary(state)},
@@ -86,10 +87,9 @@ class Scheduler(Workflow):
                     if _count(item) < state.target
                 ),
             },
-            replies=[self.incremented],
         )
 
-    @reply
+    @event(source="working", dest=["working", "finished"])
     def incremented(
         self,
         state: State,
@@ -97,17 +97,17 @@ class Scheduler(Workflow):
     ) -> None:
         """Report that the assigned record's count is one higher."""
         if record_id != state.current:
-            raise SubmissionRejected(
+            raise EventRejected(
                 f"Work on the assigned record {state.current!r}, not {record_id!r}"
             )
         count = _count(load_record(record_id, config=self.config))
         if count != state.baseline + 1:
-            raise SubmissionRejected(
+            raise EventRejected(
                 f"The count of {record_id!r} is {count}; set it to {state.baseline + 1}"
             )
         self._assign(state)
 
-    # Scheduling happens in start and replies, so next only shows the assignment.
+    # Scheduling happens in start and events, so next only shows the assignment.
     def _assign(self, state: State) -> None:
         open_records = [
             item for item in self._children(state) if _count(item) < state.target
@@ -117,6 +117,7 @@ class Scheduler(Workflow):
         )
         state.current = pick.id if pick is not None else None
         state.baseline = _count(pick) if pick is not None else 0
+        state.state = "working" if pick is not None else "finished"
 
     def _children(self, state: State) -> list[Record]:
         parent = load_record(state.parent, config=self.config)
@@ -136,7 +137,7 @@ def _priority(record: Record) -> int:
 def _count(record: Record) -> int:
     value = getattr(record, "count", 0)
     if isinstance(value, bool) or not isinstance(value, int):
-        raise SubmissionRejected(
+        raise EventRejected(
             f"The count of {record.id!r} must be an integer, not {value!r}"
         )
     return value

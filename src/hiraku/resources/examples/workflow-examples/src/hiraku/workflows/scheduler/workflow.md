@@ -8,8 +8,8 @@ description: Work through records by priority until each count reaches a target.
 
 Increase the `count` of record {{record}} from {{count}} to {{next}}, with
 `hiraku record update {{record}} --set count={{next}}` or the `record_update`
-tool. Change nothing else. Then reply `incremented` with the record ID
-{{record}}.
+tool. Change nothing else. Then send the event `incremented` with the record
+ID {{record}}.
 
 ## Done
 

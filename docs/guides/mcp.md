@@ -94,8 +94,8 @@ with `application/pdf`; interpretation depends on the MCP client's capabilities.
 
 ## Workflows
 
-Each project workflow is a tool and a prompt named after it, and replies go
-through `workflow_reply`. `workflow_list` and the `session_*` tools list
+Each project workflow is a tool and a prompt named after it, and events go
+through `workflow_send_event`. `workflow_list` and the `session_*` tools list
 workflows and inspect, resume, or cancel sessions. See the
 [Workflows guide](workflows.md).
 

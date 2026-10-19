@@ -1,4 +1,4 @@
-"""Workflows: a ``workflow.md`` record whose ``start`` and replies run on sessions."""
+"""Workflows: a ``workflow.md`` record whose ``start`` and events run on sessions."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeVar, overload
 
 from pydantic import (
     BaseModel,
@@ -31,9 +31,9 @@ from pydantic_core import to_jsonable_python
 
 from .base import BaseRecord
 from .errors import (
+    EventRejected,
     HirakuError,
     NotReady,
-    SubmissionRejected,
     ValidationError,
     WorkflowError,
 )
@@ -53,36 +53,102 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _F = TypeVar("_F", bound=Callable[..., Any])
-_REPLY_MARKER = "__hiraku_reply__"
+_EVENT_MARKER = "__hiraku_event__"
 # No underscores, so the tool named after a workflow cannot collide with fixed
-# tool names such as workflow_reply.
+# tool names such as workflow_send_event.
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
+# States are Mermaid state IDs in workflow graphs.
+_STATE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def reply(function: _F) -> _F:
-    """Mark a workflow method as a reply that continues a session.
+@overload
+def event(function: _F, /) -> _F: ...
+
+
+@overload
+def event(
+    *, source: str | Sequence[str], dest: str | Sequence[str]
+) -> Callable[[_F], _F]: ...
+
+
+def event(
+    function: _F | None = None,
+    /,
+    *,
+    source: str | Sequence[str] | None = None,
+    dest: str | Sequence[str] | None = None,
+) -> Any:
+    """Mark a workflow method as an event that continues a session.
 
     The first parameter after ``self`` is the workflow's state, annotated with
     the model ``start`` returns. The other parameters and the docstring define
-    the reply's arguments and description. A reply changes the state in place
-    and returns nothing; ``next`` then builds the following instruction. A
-    reply is accepted only while the current instruction lists it, e.g.
-    ``replies=[self.approve]``.
+    the event's arguments and description. An event changes the state in place
+    and returns nothing; ``next`` then builds the following instruction.
+
+    Used bare, ``@event``, an event is accepted while the current instruction
+    lists it, e.g. ``events=[self.approve]``. With ``source`` and ``dest``,
+    e.g. ``@event(source="review", dest=["draft", "finished"])``, the
+    workflow is a state machine: the ``state`` field of its state model names
+    the current state, an event is accepted in its source states, and it must
+    set ``state`` to one of its destination states. These states also draw the
+    workflow as a graph.
 
     The decorated method stays directly callable from Python.
     """
-    setattr(function, _REPLY_MARKER, True)
-    return function
+    if function is not None:
+        if source is not None or dest is not None:
+            raise TypeError("Use @event or @event(source=..., dest=...)")
+        setattr(function, _EVENT_MARKER, (None, None))
+        return function
+    if source is None or dest is None:
+        raise WorkflowError("@event(...) needs both source and dest states")
+    states = (_state_names(source), _state_names(dest))
+
+    def mark(method: _F) -> _F:
+        setattr(method, _EVENT_MARKER, states)
+        return method
+
+    return mark
+
+
+def _state_names(value: str | Sequence[str]) -> tuple[str, ...]:
+    names = (value,) if isinstance(value, str) else tuple(value)
+    if not names or not all(isinstance(name, str) for name in names):
+        raise WorkflowError(f"States must be names, got {value!r}")
+    return names
 
 
 @dataclass(frozen=True)
-class Reply:
-    """A `reply` method of a workflow and its derived argument model."""
+class Event:
+    """An `event` method of a workflow and its derived argument model.
+
+    Attributes:
+        source: States that accept the event; ``None`` without states.
+        dest: States the event may move to; ``None`` without states.
+    """
 
     name: str
     function: Callable[..., Any]
     arguments: type[BaseModel]
     description: str
+    source: tuple[str, ...] | None = None
+    dest: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True)
+class States:
+    """The states of a workflow whose events declare source and destination.
+
+    Attributes:
+        names: Every state, from the ``Literal`` type of the state model's
+            ``state`` field.
+        start: The default of that field, where every session starts.
+        final: States that accept no event; their instruction is final.
+    """
+
+    names: tuple[str, ...]
+    start: str
+    final: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -92,24 +158,26 @@ class Instruction:
     Attributes:
         text: Actionable guidance, usually a section of ``workflow.md``.
         context: Concise JSON-compatible data the text refers to.
-        replies: `reply` methods of the workflow that may answer it, e.g.
-            ``[self.approve, self.stop]``.
+        events: `event` methods of the workflow the instruction accepts, e.g.
+            ``[self.approve, self.stop]``. With states, it defaults to every
+            event of the current state, and may narrow them.
         requires_user_response: Whether the agent must obtain a user answer
-            before replying. This is a conversational contract only.
-        final: Whether this is the last instruction. A final instruction lists
-            no replies; returning it completes the session, and its context is
-            the session's result. The agent still carries out its text.
+            before sending an event. This is a conversational contract only.
+        final: Whether this is the last instruction. A final instruction
+            accepts no events; returning it completes the session, and its
+            context is the session's result. The agent still carries out its
+            text.
     """
 
     text: str
     context: Any = None
-    replies: Sequence[Callable[..., Any]] = ()
+    events: Sequence[Callable[..., Any]] = ()
     requires_user_response: bool = False
     final: bool = False
 
 
 class Workflow(BaseRecord):
-    """A workflow: its ``workflow.md`` record, ``start``, ``next``, and replies.
+    """A workflow: its ``workflow.md`` record, ``start``, ``next``, and events.
 
     Subclass it in ``hiraku/workflows/<workflow-id>/workflow.py`` and export the
     class as ``WORKFLOW``. The subclass defines:
@@ -119,7 +187,9 @@ class Workflow(BaseRecord):
       of a Pydantic model, named in the return annotation of ``start``;
     - ``next(state)``, which returns the `Instruction` for a state; it reads
       the state and never changes it;
-    - `reply` methods, which change the state and return nothing.
+    - `event` methods, which change the state and return nothing. Declaring
+      their source and destination states makes the workflow a state machine
+      that `graph` draws.
 
     An instance is the loaded ``workflow.md``: the front matter holds the
     workflow ``id``, which must match the directory name, and any settings the
@@ -183,6 +253,13 @@ class Workflow(BaseRecord):
         state, failure = _invoke(self, "start", lambda: start(**_keywords(validated)))
         if failure is not None:
             return failure
+        states = workflow_states(type(self))
+        if states is not None and getattr(state, "state", None) != states.start:
+            return {
+                "status": "error",
+                "message": f"start of workflow {self.id!r} must return a state in "
+                f"its start state {states.start!r}",
+            }
         step, failure = self._next(state)
         if failure is not None:
             return failure
@@ -190,7 +267,7 @@ class Workflow(BaseRecord):
         session = Session(id=new_session_id(self.id), workflow=self.id, created_at=now)
         call = HistoryEntry(
             instruction_id=0,
-            reply="start",
+            event="start",
             arguments=validated.model_dump(mode="json"),
             at=now,
         )
@@ -198,25 +275,25 @@ class Workflow(BaseRecord):
         session.save(config=self.config)
         return {"status": "accepted", **session.response}
 
-    def run_reply(
+    def run_event(
         self,
         session_id: str,
         instruction_id: int,
-        reply: str,
+        event: str,
         arguments: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Answer the current instruction of a stored session with a reply.
+        """Send an event to the current instruction of a stored session.
 
-        The reply changes the session's state, and ``next`` builds the
+        The event changes the session's state, and ``next`` builds the
         following instruction. The session is locked while this runs, and saved
         only if both succeed. The workflow must be bound to a project with
         `bind`.
 
         Args:
             session_id: Session to continue.
-            instruction_id: The instruction the reply answers.
-            reply: Name of a `reply` method listed by that instruction.
-            arguments: JSON-compatible arguments of the reply.
+            instruction_id: The instruction the event answers.
+            event: Name of an `event` method the instruction accepts.
+            arguments: JSON-compatible arguments of the event.
 
         Returns:
             A JSON-compatible response whose ``status`` is ``accepted``,
@@ -240,19 +317,19 @@ class Workflow(BaseRecord):
                         f"Session {session_id!r} belongs to workflow "
                         f"{session.workflow!r}, not {self.id!r}",
                     )
-                method = reply_methods(type(self)).get(reply)
+                method = event_methods(type(self)).get(event)
                 if method is None:
                     return session.outcome(
                         "rejected",
-                        f"{reply!r} is not a reply of workflow {self.id!r}; the "
+                        f"{event!r} is not an event of workflow {self.id!r}; the "
                         "current instruction accepts: "
-                        f"{', '.join(session.replies) or 'none'}",
+                        f"{', '.join(session.events) or 'none'}",
                     )
                 validated, failure = _validate(method.arguments, arguments)
                 if failure is not None:
                     return {**failure, **session.response}
                 values = validated.model_dump(mode="json")
-                early = session.check(reply, instruction_id, values)
+                early = session.check(event, instruction_id, values)
                 if early is not None:
                     return early
                 try:
@@ -261,24 +338,22 @@ class Workflow(BaseRecord):
                     return session.outcome("rejected", _incompatible(exc))
                 returned, failure = _invoke(
                     self,
-                    reply,
+                    event,
                     lambda: method.function(self, state, **_keywords(validated)),
                 )
                 if failure is not None:
                     return {**failure, **session.response}
-                if returned is not None:
+                problem = _event_result(self, method, returned, state)
+                if problem is not None:
                     return session.outcome(
-                        "error",
-                        f"Reply {reply!r} of workflow {self.id!r} returned "
-                        f"{type(returned).__name__}; replies change the state and "
-                        "return nothing. No session progress was saved.",
+                        "error", f"{problem}. No session progress was saved."
                     )
                 step, failure = self._next(state)
                 if failure is not None:
                     return {**failure, **session.response}
                 call = HistoryEntry(
                     instruction_id=instruction_id,
-                    reply=reply,
+                    event=event,
                     arguments=values,
                     at=datetime.now(UTC),
                 )
@@ -310,8 +385,8 @@ class Workflow(BaseRecord):
         """Call ``next`` on a new state; return the session's next data.
 
         Returns:
-            The state as JSON, the instruction as JSON, and its reply names; or
-            a failure status.
+            The state as JSON, the instruction as JSON, and the names of the
+            events it accepts; or a failure status.
         """
         try:
             data = self._dump_state(state)
@@ -325,9 +400,9 @@ class Workflow(BaseRecord):
             if self._dump_state(state) != data:
                 raise WorkflowError(
                     f"next of workflow {self.id!r} changed the state; change it "
-                    "only in start and replies"
+                    "only in start and events"
                 )
-            rendered, names = self._render(instruction)
+            rendered, names = self._render(instruction, state)
         except WorkflowError as exc:
             return None, {"status": "error", "message": str(exc)}
         return (data, rendered, names), None
@@ -348,8 +423,8 @@ class Workflow(BaseRecord):
             ) from exc
         return data
 
-    def _render(self, instruction: Any) -> tuple[dict[str, Any], list[str]]:
-        """Return an instruction as JSON, and its reply names."""
+    def _render(self, instruction: Any, state: Any) -> tuple[dict[str, Any], list[str]]:
+        """Return an instruction as JSON, and the events it accepts."""
         if not isinstance(instruction, Instruction):
             raise WorkflowError(
                 f"next of workflow {self.id!r} returned "
@@ -358,16 +433,19 @@ class Workflow(BaseRecord):
         text = instruction.text
         if not isinstance(text, str) or not text.strip():
             raise WorkflowError("Instruction text must not be empty")
-        names = [self._reply_name(method) for method in instruction.replies]
+        names = [self._event_name(method) for method in instruction.events]
         if len(names) != len(set(names)):
-            raise WorkflowError("An instruction lists the same reply more than once")
+            raise WorkflowError("An instruction lists the same event more than once")
         if instruction.final and (names or instruction.requires_user_response):
             raise WorkflowError(
-                "A final instruction takes no replies and requires no user response"
+                "A final instruction accepts no events and requires no user response"
             )
+        states = workflow_states(type(self))
+        if states is not None:
+            names = self._state_events(state.state, names, instruction.final)
         if not instruction.final and not names:
             raise WorkflowError(
-                "An instruction must offer at least one reply, or be final"
+                "An instruction must accept at least one event, or be final"
             )
         rendered: dict[str, Any] = {
             "text": text.strip(),
@@ -375,24 +453,48 @@ class Workflow(BaseRecord):
         }
         if names:
             # How to answer; the session adds its session and instruction IDs.
-            specs = _reply_specs(self)
-            rendered["reply"] = {
+            specs = _event_specs(self)
+            rendered["events"] = {
                 "requires_user_response": bool(instruction.requires_user_response),
-                "options": [{"reply": name, **specs[name]} for name in names],
+                "accepted": [{"event": name, **specs[name]} for name in names],
             }
         return rendered, names
 
-    def _reply_name(self, method: Callable[..., Any]) -> str:
+    def _state_events(self, current: str, listed: list[str], final: bool) -> list[str]:
+        """Return the events a state accepts, narrowed to those listed."""
+        accepted = [
+            name
+            for name, method in event_methods(type(self)).items()
+            if method.source is not None and current in method.source
+        ]
+        if final:
+            if accepted:
+                raise WorkflowError(
+                    f"State {current!r} accepts {', '.join(accepted)}; only a state "
+                    "without events has a final instruction"
+                )
+            return []
+        if not listed:
+            return accepted
+        extra = [name for name in listed if name not in accepted]
+        if extra:
+            raise WorkflowError(
+                f"State {current!r} does not accept {', '.join(extra)}; it accepts "
+                f"{', '.join(accepted) or 'no events'}"
+            )
+        return listed
+
+    def _event_name(self, method: Callable[..., Any]) -> str:
         function = getattr(method, "__func__", None)
         name = getattr(function, "__name__", "")
-        registered = reply_methods(type(self)).get(name)
+        registered = event_methods(type(self)).get(name)
         if (
             getattr(method, "__self__", None) is not self
             or registered is None
             or registered.function is not function
         ):
             raise WorkflowError(
-                f"Replies must be @reply methods of this workflow, e.g. "
+                f"Events must be @event methods of this workflow, e.g. "
                 f"self.approve; got {method!r}"
             )
         return name
@@ -516,7 +618,8 @@ def load_workflow(workflow_id: str, *, config: HirakuConfig | None = None) -> Wo
 
     Raises:
         hiraku.errors.WorkflowError: If the ID is invalid, the code cannot be
-            imported, or ``start`` or a reply is invalid.
+            imported, or ``start``, ``next``, an event, or the states are
+            invalid.
         hiraku.errors.RecordNotFoundError: If the workflow has no workflow.md.
         hiraku.errors.ValidationError: If the record is invalid or its ID does
             not match the workflow directory.
@@ -544,7 +647,7 @@ def load_workflow(workflow_id: str, *, config: HirakuConfig | None = None) -> Wo
         else PromptWorkflow
     )
     state_model(cls)
-    reply_methods(cls)
+    workflow_states(cls)
     path = directory / "workflow.md"
     try:
         workflow = cls.load(path)
@@ -680,25 +783,32 @@ def state_model(cls: type[Workflow]) -> type[BaseModel]:
 
 
 @cache
-def reply_methods(cls: type[Workflow]) -> dict[str, Reply]:
-    """Collect and validate the `reply` methods of a workflow class.
+def event_methods(cls: type[Workflow]) -> dict[str, Event]:
+    """Collect and validate the `event` methods of a workflow class.
+
+    Events are returned in the order the class defines them.
 
     Raises:
-        hiraku.errors.WorkflowError: If a reply's signature is unsupported, or
-            its name is taken by `Workflow`, ``start``, or ``next``.
+        hiraku.errors.WorkflowError: If an event's signature is unsupported, its
+            name is taken by `Workflow`, ``start``, or ``next``, or only some
+            events declare states.
     """
-    found: dict[str, Reply] = {}
-    for name in sorted(dir(cls)):
+    names: dict[str, None] = {}
+    for klass in reversed(cls.__mro__):
+        names.update(dict.fromkeys(vars(klass)))
+    found: dict[str, Event] = {}
+    for name in names:
         function = inspect.getattr_static(cls, name, None)
-        if not getattr(function, _REPLY_MARKER, False):
+        states = getattr(function, _EVENT_MARKER, None)
+        if states is None:
             continue
         label = f"{cls.__name__}.{name}"
         if name in ("start", "next") or hasattr(Workflow, name):
             raise WorkflowError(
-                f"@reply {label} is named like a Workflow method; rename it"
+                f"@event {label} is named like a Workflow method; rename it"
             )
         if not inspect.isfunction(function):
-            raise WorkflowError(f"@reply {label} must be a method")
+            raise WorkflowError(f"@event {label} must be a method")
         parameters = _parameters(label, function)
         hints = _hints(label, function)
         first = parameters[0] if parameters else None
@@ -709,16 +819,133 @@ def reply_methods(cls: type[Workflow]) -> dict[str, Reply]:
             or hints.get(first.name) is not model
         ):
             raise WorkflowError(
-                f"@reply {label} must take the state as its first parameter, "
+                f"@event {label} must take the state as its first parameter, "
                 f"annotated with {model.__name__}"
             )
-        found[name] = Reply(
+        found[name] = Event(
             name=name,
             function=function,
             arguments=_arguments_model(label, parameters[1:], hints),
             description=inspect.getdoc(function) or "",
+            source=states[0],
+            dest=states[1],
+        )
+    without = [name for name, item in found.items() if item.source is None]
+    if without and len(without) != len(found):
+        raise WorkflowError(
+            f"Declare source and dest for every event of {cls.__name__} or for "
+            f"none; missing for {', '.join(without)}"
         )
     return found
+
+
+@cache
+def workflow_states(cls: type[Workflow]) -> States | None:
+    """Return the states of a workflow class, or ``None`` if it has none.
+
+    A workflow has states when its events declare ``source`` and ``dest``.
+    The ``state`` field of its state model lists them as a ``Literal`` and
+    defaults to the start state.
+
+    Raises:
+        hiraku.errors.WorkflowError: If the states are inconsistent: no typed
+            ``state`` field, an unknown or malformed state, or a state that
+            cannot be reached from the start state.
+    """
+    events = event_methods(cls)
+    if not events or any(item.source is None for item in events.values()):
+        return None
+    model = state_model(cls)
+    field = model.model_fields.get("state")
+    names = (
+        typing.get_args(field.annotation)
+        if field is not None and typing.get_origin(field.annotation) is Literal
+        else ()
+    )
+    if not names or not all(isinstance(name, str) for name in names):
+        raise WorkflowError(
+            f"The events of {cls.__name__} declare states, so {model.__name__} "
+            "needs a state field listing them, e.g. "
+            'state: Literal["running", "finished"] = "running"'
+        )
+    malformed = [name for name in names if not _STATE.fullmatch(name)]
+    if malformed:
+        raise WorkflowError(
+            f"State names use letters, digits, and '_': {', '.join(malformed)}"
+        )
+    assert field is not None
+    start = field.default
+    if start not in names:
+        raise WorkflowError(
+            f"{model.__name__}.state needs a default, the start state; one of "
+            f"{', '.join(names)}"
+        )
+    for item in events.values():
+        unknown = [
+            name
+            for name in (*(item.source or ()), *(item.dest or ()))
+            if name not in names
+        ]
+        if unknown:
+            raise WorkflowError(
+                f"@event {cls.__name__}.{item.name} names unknown states "
+                f"{', '.join(unknown)}; states are {', '.join(names)}"
+            )
+    reached = {start}
+    frontier = [start]
+    while frontier:
+        state = frontier.pop()
+        for item in events.values():
+            if state in (item.source or ()):
+                for target in item.dest or ():
+                    if target not in reached:
+                        reached.add(target)
+                        frontier.append(target)
+    unreachable = [name for name in names if name not in reached]
+    if unreachable:
+        raise WorkflowError(
+            f"States of {cls.__name__} cannot be reached from {start!r}: "
+            f"{', '.join(unreachable)}"
+        )
+    final = tuple(
+        name
+        for name in names
+        if not any(name in (item.source or ()) for item in events.values())
+    )
+    return States(names=names, start=start, final=final)
+
+
+def workflow_graph(
+    workflow: Workflow | type[Workflow], *, current: str | None = None
+) -> str:
+    """Draw the states of a workflow as a Mermaid state diagram.
+
+    Each event becomes an edge from each of its source states to each of its
+    destination states, labelled with the event's name.
+
+    Args:
+        workflow: A workflow, or its class.
+        current: A state to highlight, e.g. a session's current state.
+
+    Raises:
+        hiraku.errors.WorkflowError: If the workflow has no states.
+    """
+    cls = workflow if isinstance(workflow, type) else type(workflow)
+    states = workflow_states(cls)
+    if states is None:
+        raise WorkflowError(
+            f"Workflow {cls.__name__} has no states to draw; declare source and "
+            "dest on its events, e.g. @event(source=..., dest=...)"
+        )
+    lines = ["stateDiagram-v2", f"  [*] --> {states.start}"]
+    for name, item in event_methods(cls).items():
+        for source in item.source or ():
+            for dest in item.dest or ():
+                lines.append(f"  {source} --> {dest}: {name}")
+    lines.extend(f"  {name} --> [*]" for name in states.final)
+    if current is not None:
+        lines += ["  classDef current fill:#fdff32", f"  class {current} current"]
+    return "\n".join(lines) + "\n"
 
 
 def _parameters(label: str, function: Callable[..., Any]) -> list[inspect.Parameter]:
@@ -741,7 +968,7 @@ def _hints(label: str, function: Callable[..., Any]) -> dict[str, Any]:
 def _arguments_model(
     label: str, parameters: list[inspect.Parameter], hints: Mapping[str, Any]
 ) -> type[BaseModel]:
-    """Derive the argument model of ``start`` or a reply from its parameters."""
+    """Derive the argument model of ``start`` or an event from its parameters."""
     fields: dict[str, Any] = {}
     for parameter in parameters:
         if parameter.kind not in (
@@ -774,7 +1001,7 @@ def _arguments_model(
     return model
 
 
-# Running start, next, and replies -------------------------------------------------
+# Running start, next, and events --------------------------------------------------
 
 
 def _validate(
@@ -790,7 +1017,7 @@ def _validate(
 def _invoke(
     workflow: Workflow, name: str, call: Callable[[], Any]
 ) -> tuple[Any, dict[str, Any] | None]:
-    """Call ``start``, ``next``, or a reply; return its result, or a failure."""
+    """Call ``start``, ``next``, or an event; return its result, or a failure."""
     try:
         return call(), None
     except NotReady as exc:
@@ -808,6 +1035,24 @@ def _invoke(
         }
 
 
+def _event_result(
+    workflow: Workflow, method: Event, returned: Any, state: Any
+) -> str | None:
+    """Describe what an event did wrong, or return ``None``."""
+    if returned is not None:
+        return (
+            f"Event {method.name!r} of workflow {workflow.id!r} returned "
+            f"{type(returned).__name__}; events change the state and return nothing"
+        )
+    current = getattr(state, "state", None)
+    if method.dest is not None and current not in method.dest:
+        return (
+            f"Event {method.name!r} of workflow {workflow.id!r} moved to state "
+            f"{current!r}; it declares dest {', '.join(method.dest)}"
+        )
+    return None
+
+
 def compatibility_problem(workflow: Workflow, session: Session) -> str | None:
     """Check a stored session against the loaded workflow code.
 
@@ -816,11 +1061,11 @@ def compatibility_problem(workflow: Workflow, session: Session) -> str | None:
         continue. Sessions continue with the currently loaded code; authors are
         responsible for keeping it compatible with existing sessions.
     """
-    registered = reply_methods(type(workflow))
-    missing = [name for name in session.replies if name not in registered]
+    registered = event_methods(type(workflow))
+    missing = [name for name in session.events if name not in registered]
     if missing:
         return (
-            "The loaded workflow no longer defines the pending replies "
+            "The loaded workflow no longer defines the pending events "
             f"{', '.join(missing)}. Inspect the session and start a new one."
         )
     try:
@@ -837,14 +1082,14 @@ def _incompatible(exc: PydanticValidationError) -> str:
     )
 
 
-def _reply_specs(workflow: Workflow) -> dict[str, dict[str, Any]]:
-    """Return the description and argument schema of each reply, by name."""
+def _event_specs(workflow: Workflow) -> dict[str, dict[str, Any]]:
+    """Return the description and argument schema of each event, by name."""
     return {
         name: {
             "description": summary(method.description),
             "arguments": _compact_schema(method.arguments),
         }
-        for name, method in reply_methods(type(workflow)).items()
+        for name, method in event_methods(type(workflow)).items()
     }
 
 
@@ -877,10 +1122,10 @@ def instruction_text(instruction: Mapping[str, Any]) -> str:
     """Render an instruction of a response as text for an agent.
 
     The text comes first, then the context and, unless the instruction is
-    final, the reply block as JSON.
+    final, the block of events it accepts as JSON.
     """
     parts = [instruction["text"]]
-    for label, key in (("Context", "context"), ("Reply", "reply")):
+    for label, key in (("Context", "context"), ("Events", "events")):
         if instruction.get(key) is not None:
             value = json.dumps(instruction[key], indent=1, ensure_ascii=False)
             parts.append(f"{label}:\n```json\n{value}\n```")
@@ -902,16 +1147,21 @@ def validation_message(exc: PydanticValidationError) -> str:
 
 
 __all__ = [
+    "Event",
+    "EventRejected",
     "Instruction",
     "NotReady",
+    "States",
     "PromptState",
     "PromptWorkflow",
     "Session",
-    "SubmissionRejected",
     "Workflow",
     "discover_workflows",
+    "event",
+    "event_methods",
     "list_workflows",
     "load_workflow",
     "load_workflows",
-    "reply",
+    "workflow_graph",
+    "workflow_states",
 ]

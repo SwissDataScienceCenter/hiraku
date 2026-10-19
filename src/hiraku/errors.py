@@ -61,9 +61,9 @@ class SessionNotFoundError(HirakuError):
     """A workflow session does not exist."""
 
 
-class SubmissionRejected(HirakuError):
-    """A workflow reply was invalid and did not advance its session."""
+class EventRejected(HirakuError):
+    """A workflow event was invalid and did not advance its session."""
 
 
-class NotReady(SubmissionRejected):
-    """A valid workflow reply whose evidence is not available yet."""
+class NotReady(EventRejected):
+    """A valid workflow event whose evidence is not available yet."""

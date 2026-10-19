@@ -6,12 +6,13 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from hiraku.errors import NotReady, SubmissionRejected
+from hiraku.errors import EventRejected, NotReady
 from hiraku.git import GitRepository
 from hiraku.record import Record, load_record
-from hiraku.workflow import Instruction, Workflow, reply
+from hiraku.workflow import Instruction, Workflow, event
 
 Step = Literal["draft", "implement", "launch", "analyze"]
+STEPS = ["draft", "implement", "launch", "analyze"]
 Verdict = Literal["supports", "refutes", "inconclusive"]
 # The step a review offers after each step; after analyze, the next experiment.
 NEXT: dict[str, str] = {
@@ -26,19 +27,22 @@ class State(BaseModel):
     task: str
     entrypoint: str
     rounds: int
+    # The agent works in a step's state; the user then reviews it.
+    state: Literal["draft", "implement", "launch", "analyze", "review", "finished"] = (
+        "draft"
+    )
     step: Step = "draft"
-    # The result of the step under review; None while the agent works on it.
+    # The result of the step under review.
     review: dict[str, Any] | None = None
     experiment: str | None = None
     feedback: str | None = None
     results: list[dict[str, Any]] = Field(default_factory=list)
-    finished: bool = False
 
 
 class Collaborative(Workflow):
     """Draft, implement, launch, and analyze experiments with the user.
 
-    Each step is a pair: the agent does the work and reports it with a reply
+    Each step is a pair: the agent does the work and reports it with an event
     such as ``drafted``, which Hiraku checks and records; then the user reviews
     the result and chooses the next step, such as ``implement``, or ``revise``
     or ``finish``. Hiraku writes the experiment records, checks commits and run
@@ -61,19 +65,19 @@ class Collaborative(Workflow):
         """Start collaborative research on a task record."""
         task = task or self.config.active_record_id
         if task is None:
-            raise SubmissionRejected("No active record; pass the task record ID")
+            raise EventRejected("No active record; pass the task record ID")
         # Raises if the task does not declare the entrypoint, rejecting the start.
         load_record(task, config=self.config).entrypoint(entrypoint, config=self.config)
         return State(task=task, entrypoint=entrypoint, rounds=rounds)
 
     def next(self, state: State) -> Instruction:
-        if state.finished:
+        if state.state == "finished":
             return Instruction(
                 self.markdown.section("## Done"),
                 context={"task": state.task, "results": state.results},
                 final=True,
             )
-        if state.review is not None:
+        if state.state == "review":
             following = NEXT[state.step]
             more = following != "draft" or len(state.results) < state.rounds
             steps = [getattr(self, following)] if more else []
@@ -84,7 +88,8 @@ class Collaborative(Workflow):
                     "result": state.review,
                     "rounds_left": state.rounds - len(state.results),
                 },
-                replies=[*steps, self.revise, self.finish],
+                # The review state accepts every step; offer the one that follows.
+                events=[*steps, self.revise, self.finish],
                 requires_user_response=True,
             )
         reports = {
@@ -97,33 +102,33 @@ class Collaborative(Workflow):
         return Instruction(
             f"{text}\n\n{self.rules}" if self.rules else text,
             context=self._context(state),
-            replies=[reports[state.step], self.finish],
+            events=[reports[state.step], self.finish],
         )
 
     # Steps: the user's choice at a review -----------------------------------------
 
-    @reply
+    @event(source="review", dest="draft")
     def draft(self, state: State) -> None:
         """Draft the next experiment."""
         state.experiment = None
         self._goto(state, "draft")
 
-    @reply
+    @event(source="review", dest="implement")
     def implement(self, state: State) -> None:
         """Implement the drafted experiment."""
         self._goto(state, "implement")
 
-    @reply
+    @event(source="review", dest="launch")
     def launch(self, state: State) -> None:
         """Launch the implemented experiment."""
         self._goto(state, "launch")
 
-    @reply
+    @event(source="review", dest="analyze")
     def analyze(self, state: State) -> None:
         """Analyze the experiment's runs once they have metrics."""
         self._goto(state, "analyze")
 
-    @reply
+    @event(source="review", dest=STEPS)
     def revise(
         self,
         state: State,
@@ -131,16 +136,16 @@ class Collaborative(Workflow):
     ) -> None:
         """Redo the reviewed step with the user's feedback."""
         state.feedback = feedback
-        state.review = None
+        state.state = state.step
 
-    @reply
+    @event(source=[*STEPS, "review"], dest="finished")
     def finish(self, state: State) -> None:
         """End the session and summarize the results."""
-        state.finished = True
+        state.state = "finished"
 
     # Reports: the agent's results, checked and recorded --------------------------
 
-    @reply
+    @event(source="draft", dest="review")
     def drafted(
         self,
         state: State,
@@ -166,8 +171,8 @@ class Collaborative(Workflow):
                 config=self.config,
             )
         elif record_id != state.experiment:
-            raise SubmissionRejected(
-                f"Revise the draft in place: reply with record_id {state.experiment!r}"
+            raise EventRejected(
+                f"Revise the draft in place: send record_id {state.experiment!r}"
             )
         else:
             record = self._experiment(state)
@@ -176,6 +181,7 @@ class Collaborative(Workflow):
             record.markdown = body
             record.save()
         state.experiment = record.id
+        state.state = "review"
         state.review = {
             "record_id": record.id,
             "summary": summary,
@@ -183,7 +189,7 @@ class Collaborative(Workflow):
             "change": change,
         }
 
-    @reply
+    @event(source="implement", dest="review")
     def implemented(
         self,
         state: State,
@@ -196,27 +202,29 @@ class Collaborative(Workflow):
         record.commit = sha
         record.status = "implemented"
         record.save()
+        state.state = "review"
         state.review = {"commit": sha, "notes": notes}
 
-    @reply
+    @event(source="launch", dest="review")
     def launched(self, state: State) -> None:
         """Report that the experiment's run is tracked."""
         record = self._experiment(state)
         runs = record.runs(config=self.config)
         if not runs:
             raise NotReady(
-                f"No run is attributed to {record.id!r} yet; reply again once the "
+                f"No run is attributed to {record.id!r} yet; send it again once the "
                 "launch is tracked"
             )
         if any(run.commit not in (None, record.commit) for run in runs):
-            raise SubmissionRejected(
+            raise EventRejected(
                 f"A run of {record.id!r} used another commit than {record.commit}"
             )
         record.status = "launched"
         record.save()
+        state.state = "review"
         state.review = {"runs": _runs(record, self)}
 
-    @reply
+    @event(source="analyze", dest="review")
     def analyzed(
         self,
         state: State,
@@ -237,12 +245,13 @@ class Collaborative(Workflow):
             *(item for item in state.results if item["record_id"] != record.id),
             result,
         ]
+        state.state = "review"
         state.review = {**result, "conclusion": conclusion}
 
     # Helpers ----------------------------------------------------------------------
 
     def _goto(self, state: State, step: Step) -> None:
-        state.step = step
+        state.step = state.state = step
         state.feedback = None
         state.review = None
 
@@ -278,7 +287,7 @@ class Collaborative(Workflow):
 
     def _experiment(self, state: State) -> Record:
         if state.experiment is None:
-            raise SubmissionRejected("No experiment is drafted yet")
+            raise EventRejected("No experiment is drafted yet")
         return load_record(state.experiment, config=self.config)
 
 

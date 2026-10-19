@@ -3,8 +3,8 @@
 Workflows add their tools, prompts, and resources with `add_workflow_tools`.
 They are fixed when the server starts, because coding agents do not reliably
 pick up changes to the tool list. Each workflow is started by a tool and a
-prompt named after it, and every reply goes through one ``workflow_reply``
-tool.
+prompt named after it, and every event goes through one
+``workflow_send_event`` tool.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from pydantic_core import to_jsonable_python
 from .base import BaseRecord
 from .config import HirakuConfig
 from .context import Context, list_contexts, load_context
-from .errors import HirakuError, ValidationError
+from .errors import HirakuError, ValidationError, WorkflowError
 from .launch import launch, render_arguments
 from .record import Record, list_records, load_record
 from .session import Session
@@ -43,34 +43,36 @@ from .workflow import (
     load_workflows,
     summary,
     workflow_description,
+    workflow_graph,
 )
 
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, and runs workflows that guide you step by step.
 Start a workflow with the tool named after it (workflow_list lists them), and
-answer its instructions with workflow_reply, as its description explains. Use
-session_list and session_show to resume earlier sessions.\
+answer its instructions by sending events with workflow_send_event, as its
+description explains. Use session_list and session_show to resume earlier
+sessions.\
 """
 
-REPLY_GUIDE = """\
-Answer the current instruction of a Hiraku workflow session.
+EVENT_GUIDE = """\
+Send an event to the current instruction of a Hiraku workflow session.
 
 An instruction has text to carry out, context with the data it refers to, and,
-unless it is final, a reply block that says how to answer it:
+unless it is final, an events block that says which events it accepts:
 1. Carry out the instruction text, using its context.
-2. If reply.requires_user_response is true, ask the user and wait for their
-   answer before replying; otherwise decide yourself.
-3. Call this tool with one of reply.options as reply, its arguments as the
-   option's schema describes, and the reply block's session_id and
-   instruction_id unchanged.
-4. An accepted reply returns the next instruction. An instruction without a
-   reply block is final: carry it out, then stop.
+2. If events.requires_user_response is true, ask the user and wait for their
+   answer before sending an event; otherwise decide yourself.
+3. Call this tool with one of events.accepted as event, its arguments as the
+   event's schema describes, and the events block's session_id and
+   instruction_id unchanged. Answering in the chat does not reach the workflow.
+4. An accepted event returns the next instruction. An instruction without an
+   events block is final: carry it out, then stop.
 5. A response with status rejected or not_ready keeps the same instruction
-   pending: fix the input, or check again later for not_ready. Status stale
-   means the reply answered an instruction that is no longer pending; continue
+   current: fix the input, or check again later for not_ready. Status stale
+   means the event answered an instruction that is no longer current; continue
    from the current instruction in the response.
-6. Repeating an identical reply is safe; it returns the same response.
+6. Sending an identical event again is safe; it returns the same response.
 7. To resume, call session_show with the session_id; it returns the current
    instruction. Do not start a new session to resume an existing one.
 Before repeating consequential work such as creating records or launching
@@ -413,21 +415,21 @@ def _add_workflow_tools(
     def workflow_list() -> list[dict[str, Any]]:
         return list_workflows(workflows)
 
-    def workflow_reply(
-        reply: Annotated[
-            str, Field(description="One of the reply options of the instruction.")
+    def workflow_send_event(
+        event: Annotated[
+            str, Field(description="One of the events the instruction accepts.")
         ],
         instruction_id: Annotated[
-            int, Field(description="instruction_id from the reply block.")
+            int, Field(description="instruction_id from the events block.")
         ],
         arguments: Annotated[
             dict[str, Any] | None,
-            Field(description="The reply's arguments, as its schema describes."),
+            Field(description="The event's arguments, as its schema describes."),
         ] = None,
         session_id: Annotated[
             str | None,
             Field(
-                description="session_id from the reply block; may be omitted "
+                description="session_id from the events block; may be omitted "
                 "when only one session is active."
             ),
         ] = None,
@@ -461,8 +463,8 @@ def _add_workflow_tools(
                 )
             )
         return _over_mcp(
-            workflow.bind(config).run_reply(
-                session_id, instruction_id, reply, arguments
+            workflow.bind(config).run_event(
+                session_id, instruction_id, event, arguments
             )
         )
 
@@ -474,8 +476,8 @@ def _add_workflow_tools(
     )
     _add_tool(
         server,
-        workflow_reply,
-        REPLY_GUIDE,
+        workflow_send_event,
+        EVENT_GUIDE,
         read_only=False,
     )
     for workflow_id, workflow in sorted(workflows.items()):
@@ -527,16 +529,16 @@ def _show(session: Session, workflows: Mapping[str, Workflow]) -> dict[str, Any]
 
 
 def _over_mcp(response: Mapping[str, Any]) -> dict[str, Any]:
-    """Name the tool that answers an instruction in its reply block.
+    """Name the tool that sends events in an instruction's events block.
 
-    The runtime does not know the transport; over MCP, replies go through
-    workflow_reply, while hiraku-agent asks for a reply file instead.
+    The runtime does not know the transport; over MCP, events go through
+    workflow_send_event, while hiraku-agent asks for an event file instead.
     """
     instruction = response.get("instruction")
-    if not isinstance(instruction, Mapping) or "reply" not in instruction:
+    if not isinstance(instruction, Mapping) or "events" not in instruction:
         return dict(response)
-    reply = {"tool": "workflow_reply", **instruction["reply"]}
-    return {**response, "instruction": {**instruction, "reply": reply}}
+    events = {"tool": "workflow_send_event", **instruction["events"]}
+    return {**response, "instruction": {**instruction, "events": events}}
 
 
 def _start_tool(workflow: Workflow, project: Project) -> Callable[..., Any]:
@@ -587,14 +589,14 @@ def _start_prompt(workflow: Workflow, project: Project) -> Callable[..., str]:
             )
         instruction = _over_mcp(response)["instruction"]
         text = instruction_text(instruction)
-        if "reply" not in instruction:
+        if "events" not in instruction:
             return text
-        # A prompt is a user message: say that "reply" means the tool, not chat.
+        # A prompt is a user message: say how to answer, or agents answer in chat.
         return (
-            f"{text}\n\nAnswer with the workflow_reply tool, passing the reply "
-            "block's session_id and instruction_id, one of its options as reply, "
-            "and the option's arguments. Replying in the chat does not reach the "
-            "workflow."
+            f"{text}\n\nSend one of the accepted events with the "
+            "workflow_send_event tool, passing the events block's session_id and "
+            "instruction_id, and the event's arguments. Answering in the chat does "
+            "not reach the workflow."
         )
 
     parameters = [
@@ -656,6 +658,20 @@ def _register_resources(
         if workflow_id not in workflows:
             raise ResourceError(f"Unknown workflow {workflow_id!r}")
         return workflows[workflow_id].text
+
+    @server.resource(
+        "hiraku://workflows/{workflow_id}/graph",
+        name="workflow_graph",
+        description="States and events of a workflow as a Mermaid state diagram",
+        mime_type="text/vnd.mermaid",
+    )
+    def graph(workflow_id: str) -> str:
+        if workflow_id not in workflows:
+            raise ResourceError(f"Unknown workflow {workflow_id!r}")
+        try:
+            return workflow_graph(workflows[workflow_id])
+        except WorkflowError as exc:
+            raise ResourceError(str(exc)) from exc
 
 
 def _add_tool(
