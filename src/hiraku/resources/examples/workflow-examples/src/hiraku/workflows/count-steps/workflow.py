@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import secrets
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
 from hiraku.errors import SubmissionRejected
+from hiraku.markdown import render
 from hiraku.workflow import Instruction, Workflow, reply
 
 
@@ -19,9 +20,9 @@ class State(BaseModel):
     count: int
     step: int = 1
     token: str = Field(default_factory=_token)
-    # The current step was acknowledged; the user decides whether to go on.
-    waiting: bool = False
-    finished: bool = False
+    # running: the agent runs the current step; waiting: the step was
+    # acknowledged and the user decides whether to go on; finished: done.
+    phase: Literal["running", "waiting", "finished"] = "running"
 
 
 class CountSteps(Workflow):
@@ -40,13 +41,13 @@ class CountSteps(Workflow):
         return State(count=count)
 
     def next(self, state: State) -> Instruction:
-        if state.finished:
+        if state.phase == "finished":
             return Instruction(
                 self.markdown.section("## Done"),
                 context={"steps": state.step, "count": state.count},
                 final=True,
             )
-        if state.waiting:
+        if state.phase == "waiting":
             return Instruction(
                 self.markdown.section("## Next"),
                 context={
@@ -56,14 +57,11 @@ class CountSteps(Workflow):
                 replies=[self.step, self.finish],
                 requires_user_response=True,
             )
+        # The step's values fill the {{placeholders}} of the section.
+        values = {"step": state.step, "count": state.count, "token": state.token}
         return Instruction(
-            self.markdown.section("## Step"),
-            context={
-                "step": state.step,
-                "count": state.count,
-                "token": state.token,
-                "line": f"Step {state.step}/{state.count}: token {state.token}",
-            },
+            render(self.markdown.section("## Step"), values),
+            context=values,
             replies=[self.ack, self.finish],
         )
 
@@ -79,20 +77,19 @@ class CountSteps(Workflow):
                 f"Token {token!r} does not match step {state.step}; reply with "
                 "the token from the current instruction"
             )
-        state.finished = state.step >= state.count
-        state.waiting = not state.finished
+        state.phase = "finished" if state.step >= state.count else "waiting"
 
     @reply
     def step(self, state: State) -> None:
         """Run the next step."""
         state.step += 1
         state.token = _token()
-        state.waiting = False
+        state.phase = "running"
 
     @reply
     def finish(self, state: State) -> None:
         """End the session early."""
-        state.finished = True
+        state.phase = "finished"
 
 
 WORKFLOW = CountSteps

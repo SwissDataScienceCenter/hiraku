@@ -360,7 +360,9 @@ The rules are deliberately small:
   Select a section by its heading line as written: the level must match, so
   `"### Search"` is a different section. Headings in code blocks, lists, and
   block quotes do not start sections, and each heading may appear only once in
-  a `workflow.md`. Hiraku sends only the instruction text you pass, so each
+  a `workflow.md`. To fill `{{name}}` placeholders in a section, pass it to
+  `hiraku.markdown.render(text, values)`; a placeholder without a value is an
+  error. Hiraku sends only the instruction text you pass, so each
   instruction must stand on its own: text before the first `##` heading is not
   sent. To repeat guidance in several instructions, declare it as a setting,
   as the bundled `collaborative` workflow does with `rules`, and add it to the
@@ -397,20 +399,20 @@ echo '{"questions": ["Q1", "Q2"]}' | hiraku workflow reply <session-id> propose 
 
 ## Bundled workflows
 
-The [autoresearch example](../examples/autoresearch/README.md) also installs
-`autoresearch`, a Markdown-only workflow with the upstream
-"experiment until stopped" procedure.
+`hiraku init` installs **collaborative**, which runs experiments on a task in
+four steps: draft, implement, launch, and analyze. The agent does each step
+and reports it with a reply such as `drafted` or `implemented`; Hiraku writes
+the experiment record, binds the resolved commit, checks that the runs are
+attributed to the experiment and its commit, and records the verdict. After
+each step you review the result and choose the next step, `revise` with
+feedback, or `finish`. A new experiment is offered only within the `rounds`
+budget. The same session runs over MCP or step by step with `hiraku-agent`.
 
-- **collaborative** runs experiments on a task in four steps: draft,
-  implement, launch, and analyze. The agent does each step and reports it with
-  a reply such as `drafted` or `implemented`; Hiraku writes the experiment
-  record, binds the resolved commit, checks that the runs are attributed to the
-  experiment and its commit, and records the verdict. After each step you
-  review the result and choose the next step, `revise` with feedback, or
-  `finish`. A new experiment is offered only within the `rounds` budget. The
-  same session runs over MCP or step by step with `hiraku-agent`.
-- **autodataset** sends one complete instruction to find datasets for a task
-  and document each as a `type: dataset` record with `sources`. A shortfall is
-  a valid reply: you decide whether to keep searching or accept a partial
-  result. Hiraku checks the records' structure and sources, not licensing or
-  suitability.
+Two examples add more workflows:
+
+- the [workflow examples](../examples/workflow-examples/README.md) install
+  `count-steps`, a small Python workflow that checks a coding harness, and
+  `greet`, a prompt-only workflow with arguments;
+- the [autoresearch example](../examples/autoresearch/README.md) installs
+  `autoresearch`, a Markdown-only workflow with the upstream "experiment until
+  stopped" procedure.

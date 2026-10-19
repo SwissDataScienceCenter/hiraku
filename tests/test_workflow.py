@@ -359,7 +359,7 @@ def test_workflow_ids_are_letters_digits_and_hyphens(config: HirakuConfig) -> No
     for identifier in ("bad.name", "x_y"):
         write_workflow(config, identifier, source)
         assert "Invalid workflow ID" in load_error(config, identifier)
-    assert {"toy"} == set(load_workflows(config)) - {"autodataset", "collaborative"}
+    assert set(load_workflows(config)) == {"collaborative", "toy"}
 
 
 def test_prompts_are_snapshotted_with_the_code(config: HirakuConfig) -> None:
@@ -612,7 +612,6 @@ def test_malformed_session_files(config: HirakuConfig) -> None:
 def test_workflow_list_describes_every_loaded_workflow(config: HirakuConfig) -> None:
     listed = list_workflows(load_workflows(config))
     assert [item["id"] for item in listed] == [
-        "autodataset",
         "collaborative",
         "toy",
     ]
@@ -938,7 +937,7 @@ def test_workflow_md_is_a_registry_record(tmp_path: Path) -> None:
     assert document.path == config.workflows_dir / "collaborative" / "workflow.md"
     assert document.text.startswith("# Collaborative research")
     assert "id: collaborative" not in document.text
-    assert discover_workflows(config) == ["autodataset", "collaborative"]
+    assert discover_workflows(config) == ["collaborative"]
 
     document.summary = "Bounded research"
     document.save()
@@ -967,13 +966,11 @@ def test_invalid_workflow_documents_disable_the_workflow(
     tmp_path: Path, content: str | None, error: type[Exception], message: str
 ) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
-    path = config.workflows_dir / "autodataset" / "workflow.md"
+    path = config.workflows_dir / "collaborative" / "workflow.md"
     if content is None:
         path.unlink()
     else:
         path.write_text(content)
     with pytest.raises(error, match=message):
-        load_workflow("autodataset", config=config)
-    workflows = load_workflows(config)
-    assert "autodataset" not in workflows
-    assert "collaborative" in workflows
+        load_workflow("collaborative", config=config)
+    assert load_workflows(config) == {}

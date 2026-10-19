@@ -48,9 +48,11 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
 
     assert HirakuConfig.discover(root).root == root
     assert HirakuConfig.discover(nested).root == root
-    for workflow in ("autodataset", "collaborative"):
-        assert (config.workflows_dir / workflow / "workflow.py").is_file()
-        assert (config.workflows_dir / workflow / "workflow.md").is_file()
+    assert sorted(path.name for path in config.workflows_dir.iterdir()) == [
+        "collaborative"
+    ]
+    assert (config.workflows_dir / "collaborative" / "workflow.py").is_file()
+    assert (config.workflows_dir / "collaborative" / "workflow.md").is_file()
     assert not (config.hiraku_dir / "programs").exists()
     assert not (config.hiraku_dir / "actions").exists()
     for name in ("launch.sh", "worktree.sh"):

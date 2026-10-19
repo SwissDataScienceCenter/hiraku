@@ -39,7 +39,7 @@ nav = [
       { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
       { "EuroSAT RGB" = "examples/eurosat-rgb/README.md" },
       { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
-      { "Count Steps" = "examples/count-steps/README.md" },
+      { "Workflow Examples" = "examples/workflow-examples/README.md" },
   ] },
   { "Guides" = [
       { "Overview" = "guides/index.md" },

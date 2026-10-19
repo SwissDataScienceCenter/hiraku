@@ -8,5 +8,5 @@ different datasets and tracking backends.
 - [Iris with Weights & Biases](iris-wandb/README.md) — a small classification example using the Iris dataset and W&amp;B.
 - [Digits with MLflow](digits-mlflow/README.md) — compare regularization strengths while logging learning curves to MLflow.
 - [EuroSAT RGB](eurosat-rgb/README.md) — investigate image-specific architectural inductive biases with a flattened-image MLP baseline and follow-up experiments.
-- [Count steps](count-steps/README.md) — check that a coding harness follows Hiraku workflow instructions and stops for the user after each step.
+- [Workflow examples](workflow-examples/README.md) — a Python workflow that checks that a coding harness follows Hiraku workflow instructions and stops for the user, and a prompt-only workflow with arguments.
 - [Autoresearch](autoresearch/README.md) — add a Hiraku research loop and tracked dispatcher to the original autoresearch repository.

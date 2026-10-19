@@ -151,6 +151,6 @@ to experimental results, all completed by you while they slept!
 
 ## Finishing
 
-When the user stops the loop, report what you tried with `complete`: the
-experiments, their decisions, the best retained `val_bpb` with its run ID and
-commit, and ideas you did not get to.
+When the user stops the loop, report what you tried: the experiments, their
+decisions, the best retained `val_bpb` with its run ID and commit, and ideas
+you did not get to.

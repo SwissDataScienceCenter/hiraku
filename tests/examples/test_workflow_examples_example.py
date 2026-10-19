@@ -32,13 +32,16 @@ def start(runner: CliRunner, workflow: str, payload: dict[str, Any]) -> dict[str
 
 @pytest.fixture
 def runner(tmp_path: Path, monkeypatch) -> CliRunner:
-    project = tmp_path / "count-steps"
+    project = tmp_path / "workflow-examples"
     project.mkdir()
     subprocess.run(["git", "init", "-b", "main"], cwd=project, check=True)
     monkeypatch.chdir(project)
     selected = CliRunner()
-    invoke(selected, ["init", "--example", "count-steps"])
-    assert (project / "hiraku" / "workflows" / "count-steps" / "workflow.py").is_file()
+    invoke(selected, ["init", "--example", "workflow-examples"])
+    workflows = project / "hiraku" / "workflows"
+    assert (workflows / "count-steps" / "workflow.py").is_file()
+    assert (workflows / "greet" / "workflow.md").is_file()
+    assert not (workflows / "greet" / "workflow.py").exists()
     assert not (project / "example.yml").exists()
     return selected
 
@@ -62,6 +65,7 @@ def reply(
 def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
     listed = invoke(runner, ["workflow", "list"]).output
     assert "count-steps" in listed
+    assert "greet" in listed
 
     response = start(runner, "count-steps", {"count": 3})
     tokens = []
@@ -69,7 +73,8 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
         instruction = response["instruction"]
         context = instruction["context"]
         assert instruction["text"].startswith("## Step")
-        assert context["line"] == f"Step {step}/3: token {context['token']}"
+        assert f"`Step {step}/3: token {context['token']}`" in instruction["text"]
+        assert "{{" not in instruction["text"]
         assert [item["reply"] for item in instruction["replies"]] == ["ack", "finish"]
         if tokens:
             stale = reply(runner, response, "ack", token=tokens[-1])
@@ -107,7 +112,7 @@ def test_count_steps_rejects_wrong_tokens_and_finishes_early(
 
 # A scripted harness: prints the step line and echoes the step's token.
 ECHO_AGENT = """
-import json, os
+import json, os, re
 from pathlib import Path
 
 response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
@@ -115,7 +120,7 @@ instruction = response["instruction"]
 if response.get("completed"):
     print("Ran", instruction["context"]["steps"], "steps")
     raise SystemExit
-print(instruction["context"]["line"])
+print(re.search(r"`(Step .*?)`", instruction["text"]).group(1))
 reply = {"reply": instruction["replies"][0]["reply"],
          "arguments": {"token": instruction["context"]["token"]}}
 Path(os.environ["HIRAKU_REPLY_FILE"]).write_text(json.dumps(reply))
@@ -156,3 +161,46 @@ def test_count_steps_one_step_at_a_time_through_hiraku_agent(
     assert "Step 3/3: token" in done.output
     assert "Ran 3 steps" in done.output
     assert 'completed: {"steps": 3, "count": 3}' in done.output
+
+
+def test_greet_is_one_final_prompt_filled_from_its_arguments(
+    runner: CliRunner,
+) -> None:
+    response = start(runner, "greet", {"name": "Ada", "times": 3})
+    assert response["status"] == "accepted"
+    assert response["completed"] is True
+    instruction = response["instruction"]
+    assert instruction["text"].startswith("# Greet\n\nPrint 3 greetings to Ada")
+    assert "Greet formally:\nfalse." in instruction["text"]
+    assert instruction["context"] == {"name": "Ada", "times": 3, "formal": False}
+    assert "replies" not in instruction
+
+    missing = start(runner, "greet", {})
+    assert missing["status"] == "rejected"
+    assert "name" in missing["message"]
+
+
+# A scripted harness for a final instruction: there is nothing to reply.
+PROMPT_AGENT = """
+import json, os
+from pathlib import Path
+
+response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
+print(response["instruction"]["text"].splitlines()[2])
+print("reply file:", os.environ.get("HIRAKU_REPLY_FILE"))
+"""
+
+
+def test_greet_through_hiraku_agent(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    script = tmp_path / "prompt_agent.py"
+    script.write_text(PROMPT_AGENT)
+    monkeypatch.setenv("HIRAKU_AGENT_CMD", f"{sys.executable} {script}")
+
+    result = runner.invoke(agent_main, ["greet", "--name", "Ada", "--formal", "true"])
+    assert result.exit_code == 0, result.output
+    assert "[1 Greet] final" in result.output
+    assert "Print 2 greetings to Ada, one per line. Greet formally:" in result.output
+    assert "reply file: None" in result.output
+    assert 'completed: {"name": "Ada", "times": 2, "formal": true}' in result.output

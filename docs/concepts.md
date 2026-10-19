@@ -166,8 +166,8 @@ project-relevant information to the agent.
 | **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its state, history, and current instruction. Sessions are local and not committed. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
-Hiraku ships the `collaborative` and `autodataset`
-workflows as editable copies in your project. See the [Workflows guide](guides/workflows.md) for how
+Hiraku ships the `collaborative` workflow as an editable copy in your
+project. See the [Workflows guide](guides/workflows.md) for how
 sessions work and how to write your own.
 
 ```bash

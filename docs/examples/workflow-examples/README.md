@@ -1,9 +1,14 @@
-# Count steps
+# Workflow examples
 
-The `count-steps` example installs a workflow that checks whether a coding
-harness follows Hiraku workflow instructions exactly. It does no research work
-and changes no files, so you can use it to try out a new harness, model, or MCP
-setup before running a real workflow.
+The `workflow-examples` example installs two small workflows next to the
+bundled `collaborative` workflow. Neither does research work or changes files,
+so you can use them to try out a new harness, model, or MCP setup before
+running a real workflow, and as starting points for your own:
+
+- [`count-steps`](#count-steps), a Python workflow that checks whether a coding
+  harness follows Hiraku workflow instructions exactly;
+- [`greet`](#greet), a prompt-only workflow whose arguments fill placeholders
+  in its `workflow.md`.
 
 ## Initialize
 
@@ -11,10 +16,17 @@ In a Git repository, install the example and restart your coding agent so it
 loads the `hiraku` MCP server:
 
 ```bash
-hiraku init --example count-steps
+hiraku init --example workflow-examples
 ```
 
-## Run
+## Count steps
+
+The workflow is `hiraku/workflows/count-steps/`. Its `## Step` section
+contains `{{step}}`, `{{count}}`, and `{{token}}` placeholders, which `next`
+fills with `hiraku.markdown.render`, so the agent receives the exact line to
+print.
+
+### Run
 
 Invoke the MCP prompt `hiraku:count-steps` (or raw: `/mcp__hiraku__count-steps`) in Claude Code. Note: Codex does not support MCP prompts.
 
@@ -33,7 +45,7 @@ run the next one. It replies `step` only after you agree, or `finish` to stop.
 After the last step, or after `finish`, the session completes with a final
 instruction: the agent tells you how many steps ran.
 
-## What to look for
+### What to look for
 
 - **Every step is printed in order.** A wrong, stale, or invented token is
   rejected, so a skipped or repeated step shows up as a rejected reply.
@@ -46,7 +58,7 @@ instruction: the agent tells you how many steps ran.
 To test recovery, compact or restart the conversation mid-run and ask the agent
 to continue the session; it should resume at the pending step.
 
-## Run from the terminal
+### Run from the terminal
 
 `hiraku-agent` runs the same workflow one step at a time with a headless
 agent, `claude -p` by default:
@@ -68,3 +80,38 @@ Add `--interactive`, e.g. `hiraku-agent count-steps step --interactive`, to run
 the step as a conversation with the agent in your terminal instead: the agent
 says what it would do and waits for your go-ahead, and the driver still stops
 before the next step.
+
+## Greet
+
+`hiraku/workflows/greet/workflow.md` is the whole workflow; there is no
+`workflow.py`:
+
+```markdown
+---
+id: greet
+description: Greet someone a few times; a prompt-only workflow with arguments.
+arguments:
+  name: {required: true, description: Who to greet}
+  times: {type: integer, default: 2, description: How many greetings to print}
+  formal: {type: boolean, default: false, description: Whether to greet formally}
+---
+# Greet
+
+Print {{times}} greetings to {{name}}, one per line. Greet formally:
+{{formal}}. Do not change any files.
+```
+
+Each `{{name}}` placeholder needs a declared argument, so a typo is an error
+when the workflow loads. Start it with the MCP prompt
+`/mcp__hiraku__greet name=Ada times=3`, by asking your agent to greet Ada with
+the Hiraku greet workflow, or from the terminal:
+
+```bash
+hiraku-agent greet --name Ada --formal true
+```
+
+Hiraku validates and converts the arguments, renders the body, and sends it as
+the session's only instruction. That instruction is final: the session
+completes when it starts, so there is nothing to reply, and the agent just
+prints the greetings. Copy the directory to turn your own prompt into a
+workflow.

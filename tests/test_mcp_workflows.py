@@ -118,7 +118,9 @@ def write_echo(config: HirakuConfig) -> None:
     directory = config.workflows_dir / "echo"
     directory.mkdir()
     (directory / "workflow.py").write_text(ECHO_PY, encoding="utf-8")
-    (directory / "workflow.md").write_text("---\nid: echo\n---\n", encoding="utf-8")
+    (directory / "workflow.md").write_text(
+        "---\nid: echo\n---\n# Echo\n", encoding="utf-8"
+    )
 
 
 def test_tools_and_prompts_are_fixed_per_workflow(config: HirakuConfig) -> None:
@@ -131,7 +133,7 @@ def test_tools_and_prompts_are_fixed_per_workflow(config: HirakuConfig) -> None:
         return tools, prompts
 
     tools, prompts = run(server, scenario)
-    workflows = {"autodataset", "collaborative", "loop"}
+    workflows = {"collaborative", "loop"}
     assert BUILTINS | workflows <= set(tools)
     assert workflows <= set(prompts)
     loop = tools["loop"].input_schema
@@ -139,7 +141,7 @@ def test_tools_and_prompts_are_fixed_per_workflow(config: HirakuConfig) -> None:
     assert loop["properties"]["iterations"]["default"] == 5
     arguments = {item.name: item.required for item in prompts["loop"].arguments}
     assert arguments == {"task": True, "iterations": False}
-    assert tools["autodataset"].description.startswith("Start a autodataset")
+    assert tools["collaborative"].description.startswith("Start a collaborative")
 
 
 def test_prompts_start_sessions(config: HirakuConfig) -> None:
@@ -233,19 +235,18 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
 
 
 def test_session_tools_and_resources(config: HirakuConfig) -> None:
+    write_echo(config)
     server = create_server(config)
 
     async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
-        started = payload(
-            await client.call_tool("autodataset", {"task": "task", "count": 1})
-        )
+        started = payload(await client.call_tool("echo", {"task": "task"}))
         session_id = started["session_id"]
         listing = items(await client.call_tool("session_list", {}))
         shown = payload(
             await client.call_tool("session_show", {"session_id": session_id})
         )
         resource = await client.read_resource(f"hiraku://sessions/{session_id}")
-        workflow = await client.read_resource("hiraku://workflows/autodataset")
+        workflow = await client.read_resource("hiraku://workflows/echo")
         templates = await client.list_resource_templates()
         cancelled = payload(
             await client.call_tool("session_cancel", {"session_id": session_id})
@@ -269,7 +270,7 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
     assert "orientation" not in result["shown"]
     assert "session_show" in result["shown"]["guide"]
     assert result["resource"]["session_id"] == session_id
-    assert result["workflow"].startswith("# Autodataset")
+    assert result["workflow"] == "# Echo"
     assert result["templates"] >= {
         "hiraku://sessions/{session_id}",
         "hiraku://workflows/{workflow_id}",
