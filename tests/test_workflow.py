@@ -15,12 +15,10 @@ from hiraku.errors import (
     SectionNotFoundError,
     SessionNotFoundError,
     ValidationError,
-    WorkflowError,
 )
 from hiraku.markdown import Markdown
 from hiraku.session import Session
 from hiraku.workflow import (
-    Completion,
     Instruction,
     PromptWorkflow,
     Workflow,
@@ -29,8 +27,8 @@ from hiraku.workflow import (
     load_workflow,
     load_workflows,
     reply_methods,
-    session_model,
     start_model,
+    state_model,
     workflow_description,
 )
 
@@ -39,15 +37,15 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from hiraku.errors import NotReady, SubmissionRejected
-from hiraku.workflow import Session, Workflow, reply
+from hiraku.workflow import Instruction, Workflow, reply
 
 from .helpers import scale
 
 
-class ToySession(Session):
+class ToyState(BaseModel):
     target: int
     total: int = 0
 
@@ -62,50 +60,60 @@ class Toy(Workflow):
 
     def start(
         self, target: Annotated[int, Field(gt=0, description="Sum to reach.")] = 3
-    ):
+    ) -> ToyState:
         """Start adding."""
-        return self.ask(ToySession(target=target))
+        return ToyState(target=target)
+
+    def next(self, state: ToyState) -> Instruction:
+        if state.total >= state.target:
+            return Instruction(
+                self.markdown.section("## Done"),
+                context={"total": state.total},
+                final=True,
+            )
+        return Instruction(
+            self.markdown.section("## Add"),
+            context={"total": state.total},
+            replies=[self.add, self.wait, self.boom],
+        )
 
     @reply
-    def add(self, session: ToySession, amount: int):
+    def add(self, state: ToyState, amount: int) -> None:
         """Add an amount."""
         if amount < 0:
             raise SubmissionRejected("amount must not be negative")
-        session.total += scale(amount) * self.step
-        if session.total >= session.target:
-            return self.completion(session, {"total": session.total})
-        return self.ask(session)
+        state.total += scale(amount) * self.step
 
     @reply
-    def wait(self, session: ToySession):
+    def wait(self, state: ToyState) -> None:
         """Wait for evidence."""
-        session.total = -100
+        state.total = -100
         raise NotReady("evidence is not there yet")
 
     @reply
-    def boom(self, session: ToySession):
+    def boom(self, state: ToyState) -> None:
         """Fail unexpectedly."""
-        session.total = -100
+        state.total = -100
         raise RuntimeError("kaboom")
 
     @reply
-    def hidden(self, session: ToySession):
+    def hidden(self, state: ToyState) -> None:
         """Never offered."""
-        return self.ask(session)
-
-    def ask(self, session):
-        return self.instruction(
-            session,
-            self.markdown.section("## Add"),
-            context={"total": session.total},
-            replies=[self.add, self.wait, self.boom],
-        )
 
 
 WORKFLOW = Toy
 '''
 
-TOY_MD = "# Toy\n\nAdd numbers.\n\n## Add\n\nAdd a number.\n"
+TOY_MD = (
+    "# Toy\n\nAdd numbers.\n\n## Add\n\nAdd a number.\n\n## Done\n\nReport the total.\n"
+)
+
+# A minimal valid workflow class, for sources that test one invalid part.
+MINIMAL = (
+    "from pydantic import BaseModel\n"
+    "from hiraku.workflow import Instruction, Workflow, reply\n"
+    "class S(BaseModel):\n    pass\n"
+)
 
 
 def document(workflow_id: str, body: str = "") -> str:
@@ -169,28 +177,102 @@ def test_start_and_reply_signatures_and_relative_imports(
     assert set(reply_methods(type(workflow))) == {"add", "boom", "hidden", "wait"}
 
 
-def test_start_and_replies_stay_directly_callable(config: HirakuConfig) -> None:
+def test_start_next_and_replies_stay_directly_callable(config: HirakuConfig) -> None:
     workflow = toy(config)
-    model = session_model(type(workflow))
-    assert model is not None
-    response = workflow.add(model(target=5), amount=2)
-    assert isinstance(response, Instruction)
-    assert response.replies == ("add", "wait", "boom")
-    assert response.context == {"total": 2}
-    assert isinstance(workflow.add(model(target=1), amount=2), Completion)
-    assert isinstance(workflow.start(target=2), Instruction)
+    state = workflow.start(target=5)
+    assert type(state) is state_model(type(workflow))
+    assert workflow.add(state, amount=2) is None
+    assert state.total == 2
+    instruction = workflow.next(state)
+    assert isinstance(instruction, Instruction)
+    assert instruction.replies == [workflow.add, workflow.wait, workflow.boom]
+    assert instruction.context == {"total": 2}
+    workflow.add(state, amount=3)
+    assert workflow.next(state).final is True
 
 
-def test_instructions_offer_only_reply_methods(config: HirakuConfig) -> None:
+@pytest.mark.parametrize(
+    ("next_body", "message"),
+    [
+        (
+            "        return Instruction('Ask', replies=[self.next])\n",
+            "must be @reply methods",
+        ),
+        (
+            "        return Instruction('Ask', replies=[self.add, self.add])\n",
+            "same reply more than once",
+        ),
+        ("        return Instruction('Ask')\n", "at least one reply, or be final"),
+        (
+            "        return Instruction('Ask', replies=[self.add], final=True)\n",
+            "final instruction takes no replies",
+        ),
+        (
+            "        return Instruction(\n"
+            "            'Ask', final=True, requires_user_response=True\n"
+            "        )\n",
+            "requires no user response",
+        ),
+        (
+            "        return Instruction(' ', replies=[self.add])\n",
+            "must not be empty",
+        ),
+        (
+            "        return Instruction('Ask', context=object(), replies=[self.add])\n",
+            "must be JSON-compatible",
+        ),
+        ("        return 'Ask'\n", "it must return an Instruction"),
+        (
+            "        state.total = 1\n"
+            "        return Instruction('Ask', replies=[self.add])\n",
+            "next of workflow 'toy' changed the state",
+        ),
+    ],
+)
+def test_invalid_instructions_are_errors_and_save_nothing(
+    config: HirakuConfig, next_body: str, message: str
+) -> None:
+    start = TOY_PY.index("    def next(")
+    end = TOY_PY.index("    @reply\n    def add(")
+    source = (
+        TOY_PY[:start]
+        + "    def next(self, state: ToyState) -> Instruction:\n"
+        + next_body
+        + "\n"
+        + TOY_PY[end:]
+    )
+    (config.workflows_dir / "toy" / "workflow.py").write_text(source)
+    response = toy(config).run_start({"target": 3})
+    assert response["status"] == "error"
+    assert message in response["message"]
+    assert Session.list_all(config=config) == []
+
+
+def test_replies_must_return_nothing(config: HirakuConfig) -> None:
+    source = TOY_PY.replace(
+        "        state.total += scale(amount) * self.step\n",
+        "        state.total += scale(amount) * self.step\n        return state\n",
+    )
+    (config.workflows_dir / "toy" / "workflow.py").write_text(source)
     workflow = toy(config)
-    model = session_model(type(workflow))
-    assert model is not None
-    with pytest.raises(WorkflowError, match="must be @reply methods"):
-        workflow.instruction(model(target=3), "Ask", replies=[workflow.ask])
-    with pytest.raises(WorkflowError, match="same reply more than once"):
-        workflow.instruction(
-            model(target=3), "Ask", replies=[workflow.add, workflow.add]
-        )
+    first = started(workflow)
+    response = reply(workflow, "add", first, amount=1)
+    assert response["status"] == "error"
+    assert "replies change the state and return nothing" in response["message"]
+    assert stored(config, first["session_id"])["data"] == {"target": 3, "total": 0}
+
+
+def test_start_must_return_the_state(config: HirakuConfig) -> None:
+    source = TOY_PY.replace(
+        "        return ToyState(target=target)", "        return {'target': target}"
+    )
+    (config.workflows_dir / "toy" / "workflow.py").write_text(source)
+    response = toy(config).run_start({"target": 3})
+    assert response["status"] == "error"
+    assert "start must return a ToyState" in response["message"]
+
+
+NEXT = "    def next(self, state: S) -> Instruction: ...\n"
 
 
 @pytest.mark.parametrize(
@@ -204,65 +286,51 @@ def test_instructions_offer_only_reply_methods(config: HirakuConfig) -> None:
             "must define a start method",
         ),
         (
-            "from hiraku.workflow import Session, Workflow\n"
-            "class S(Session):\n    pass\n"
-            "class W(Workflow):\n"
-            "    def start(self, session: S) -> None: ...\n"
-            "WORKFLOW = W\n",
-            "cannot be a session",
+            MINIMAL + "class W(Workflow):\n"
+            "    def start(self): ...\n" + NEXT + "WORKFLOW = W\n",
+            "must declare its state as the return type",
         ),
         (
-            "from hiraku.workflow import Session, Workflow, reply\n"
-            "class S(Session):\n    pass\n"
-            "class W(Workflow):\n"
-            "    def start(self) -> None: ...\n"
-            "    @reply\n"
-            "    def two(self, a: S, b: S) -> None: ...\n"
-            "WORKFLOW = W\n",
-            "cannot be a session",
+            MINIMAL + "class W(Workflow):\n"
+            "    def start(self) -> int: ...\n" + NEXT + "WORKFLOW = W\n",
+            "must declare its state as the return type",
         ),
         (
-            "from hiraku.workflow import Workflow, reply\n"
-            "class W(Workflow):\n"
-            "    def start(self) -> None: ...\n"
-            "    @reply\n"
+            MINIMAL + "class W(Workflow):\n"
+            "    def start(self) -> S: ...\n"
+            "WORKFLOW = W\n",
+            "must define next(self, state)",
+        ),
+        (
+            MINIMAL + "class W(Workflow):\n"
+            "    def start(self) -> S: ...\n"
+            "    def next(self, state: S, extra: int) -> Instruction: ...\n"
+            "WORKFLOW = W\n",
+            "W.next must take only the state",
+        ),
+        (
+            MINIMAL + "class W(Workflow):\n"
+            "    def start(self) -> S: ...\n" + NEXT + "    @reply\n"
             "    def other(self, value: int) -> None: ...\n"
             "WORKFLOW = W\n",
-            "must take the session as its first parameter",
+            "must take the state as its first parameter, annotated with S",
         ),
         (
-            "from hiraku.workflow import Session, Workflow, reply\n"
-            "class S(Session):\n    pass\n"
-            "class T(Session):\n    pass\n"
+            MINIMAL + "class T(BaseModel):\n    pass\n"
             "class W(Workflow):\n"
-            "    def start(self) -> None: ...\n"
-            "    @reply\n"
-            "    def a(self, session: S) -> None: ...\n"
-            "    @reply\n"
-            "    def b(self, session: T) -> None: ...\n"
+            "    def start(self) -> S: ...\n" + NEXT + "    @reply\n"
+            "    def other(self, state: T) -> None: ...\n"
             "WORKFLOW = W\n",
-            "use different session models",
+            "must take the state as its first parameter, annotated with S",
         ),
         (
-            "from hiraku.workflow import Session, Workflow\n"
-            "class S(Session):\n    status: str = 'mine'\n"
-            "class W(Workflow):\n"
-            "    def start(self) -> None: ...\n"
-            "WORKFLOW = W\n",
-            "redefines reserved Session names: status",
-        ),
-        (
-            "from hiraku.workflow import Workflow\n"
-            "class W(Workflow):\n"
-            "    def start(self, *values: int) -> None: ...\n"
-            "WORKFLOW = W\n",
+            MINIMAL + "class W(Workflow):\n"
+            "    def start(self, *values: int) -> S: ...\n" + NEXT + "WORKFLOW = W\n",
             "cannot use",
         ),
         (
-            "from hiraku.workflow import Workflow\n"
-            "class W(Workflow):\n"
-            "    def start(self, untyped) -> None: ...\n"
-            "WORKFLOW = W\n",
+            MINIMAL + "class W(Workflow):\n"
+            "    def start(self, untyped) -> S: ...\n" + NEXT + "WORKFLOW = W\n",
             "needs a type annotation",
         ),
         ("raise ImportError('broken helper')\n", "broken helper"),
@@ -285,10 +353,8 @@ def test_invalid_workflows_are_logged_and_left_out(
 
 def test_workflow_ids_are_letters_digits_and_hyphens(config: HirakuConfig) -> None:
     source = (
-        "from hiraku.workflow import Workflow\n"
-        "class W(Workflow):\n"
-        "    def start(self) -> None: ...\n"
-        "WORKFLOW = W\n"
+        MINIMAL + "class W(Workflow):\n"
+        "    def start(self) -> S: ...\n" + NEXT + "WORKFLOW = W\n"
     )
     for identifier in ("bad.name", "x_y"):
         write_workflow(config, identifier, source)
@@ -323,8 +389,7 @@ def test_start_returns_the_first_section_and_explicit_replies(
         "required": ["amount"],
     }
     saved = stored(config, response["session_id"])
-    assert saved["target"] == 3
-    assert saved["total"] == 0
+    assert saved["data"] == {"target": 3, "total": 0}
     assert saved["workflow"] == "toy"
     assert saved["instruction_id"] == 1
     assert saved["replies"] == ["add", "wait", "boom"]
@@ -372,18 +437,22 @@ def test_correlation_table(config: HirakuConfig) -> None:
     assert second["instruction_id"] == 3
     assert stale["status"] == "stale"
     assert stale["instruction_id"] == 3
-    assert stored(config, first["session_id"])["total"] == 3
+    assert stored(config, first["session_id"])["data"]["total"] == 3
 
 
-def test_completion_and_retried_completion(config: HirakuConfig) -> None:
+def test_final_instruction_and_retried_completion(config: HirakuConfig) -> None:
     workflow = toy(config)
     first = started(workflow, target=2)
     done = reply(workflow, "add", first, amount=2)
     assert done == {
         "status": "accepted",
         "session_id": first["session_id"],
+        "instruction_id": 2,
         "completed": True,
-        "result": {"total": 2},
+        "instruction": {
+            "text": "## Done\n\nReport the total.",
+            "context": {"total": 2},
+        },
     }
     assert reply(workflow, "add", first, amount=2) == done
     after = workflow.run_reply(first["session_id"], 2, "add", {"amount": 1})
@@ -415,22 +484,6 @@ def test_rejections_and_not_ready_save_nothing(config: HirakuConfig) -> None:
     assert error["instruction_id"] == 1
     assert path.read_text() == before
     assert reply(workflow, "add", first, amount=1)["status"] == "accepted"
-
-
-def test_handlers_cannot_change_runtime_fields(config: HirakuConfig) -> None:
-    source = TOY_PY.replace(
-        "        session.total += scale(amount) * self.step\n",
-        "        session.total += scale(amount) * self.step\n"
-        "        session.status = 'cancelled'\n"
-        "        session.instruction_id = 99\n",
-    )
-    (config.workflows_dir / "toy" / "workflow.py").write_text(source)
-    workflow = toy(config)
-    first = started(workflow, target=5)
-    response = reply(workflow, "add", first, amount=1)
-    assert response["status"] == "accepted"
-    assert response["instruction_id"] == 2
-    assert stored(config, first["session_id"])["status"] == "active"
 
 
 def test_invalid_correlation_arguments(config: HirakuConfig) -> None:
@@ -471,7 +524,7 @@ def test_concurrent_replies_apply_once(config: HirakuConfig) -> None:
         thread.join()
     assert {item["status"] for item in results} == {"accepted"}
     assert {item["instruction_id"] for item in results} == {2}
-    assert stored(config, first["session_id"])["total"] == 1
+    assert stored(config, first["session_id"])["data"]["total"] == 1
 
 
 def test_failed_save_keeps_previous_state(config: HirakuConfig, monkeypatch) -> None:
@@ -502,7 +555,7 @@ def test_incompatible_sessions_are_rejected_but_inspectable(
     workflow = toy(config)
     rejected = reply(workflow, "add", first, amount=1)
     assert rejected["status"] == "rejected"
-    assert "no longer matches" in rejected["message"]
+    assert "stored state no longer matches" in rejected["message"]
     shown = Session.load(first["session_id"], config=config).show(workflow)
     assert "new" in shown["compatibility"]
 
@@ -615,6 +668,15 @@ def test_cli_matches_the_runtime(
     assert sessions[0]["session_id"] == session_id
     cancelled = runner.invoke(main, ["session", "cancel", session_id])
     assert "cancelled" in cancelled.output
+
+    done = toy(config)
+    first = started(done, target=1)
+    reply(done, "add", first, amount=1)
+    shown = runner.invoke(main, ["session", "show", first["session_id"]])
+    assert "Final instruction 2:" in shown.output
+    assert "Report the total." in shown.output
+    assert '"total": 1' in shown.output
+    assert "Replies:" not in shown.output
     unknown = runner.invoke(main, ["workflow", "start", "nope"])
     assert unknown.exit_code != 0
     assert "Unknown workflow" in unknown.output
@@ -624,11 +686,11 @@ def test_cli_matches_the_runtime(
     ("body", "message"),
     [
         (
-            "    @reply\n    def save(self, session: S) -> None: ...\n",
+            "    @reply\n    def save(self, state: S) -> None: ...\n",
             "@reply W.save is named like a Workflow method",
         ),
         (
-            "    @reply\n    def run_reply(self, session: S) -> None: ...\n",
+            "    @reply\n    def run_reply(self, state: S) -> None: ...\n",
             "is named like a Workflow method",
         ),
         ("    LIMIT = 3\n", "non-annotated attribute"),
@@ -638,10 +700,9 @@ def test_invalid_reply_names_and_attributes(
     config: HirakuConfig, body: str, message: str
 ) -> None:
     source = (
-        "from hiraku.workflow import Session, Workflow, reply\n"
-        "class S(Session):\n    pass\n"
-        "class W(Workflow):\n"
-        "    def start(self) -> None: ...\n"
+        MINIMAL + "class W(Workflow):\n"
+        "    def start(self) -> S: ...\n"
+        "    def next(self, state: S) -> Instruction: ...\n"
         f"{body}"
         "WORKFLOW = W\n"
     )
@@ -682,7 +743,9 @@ def test_bound_copies_are_isolated(config: HirakuConfig) -> None:
     )
 
 
-def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> None:
+def test_markdown_only_workflows_send_one_final_instruction(
+    config: HirakuConfig,
+) -> None:
     directory = config.workflows_dir / "loop"
     directory.mkdir()
     body = (
@@ -699,7 +762,7 @@ def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> 
     loaded = load_workflows(config)["loop"]
     assert type(loaded) is PromptWorkflow
     assert workflow_description(loaded) == "Run the loop."
-    assert set(reply_methods(type(loaded))) == {"complete"}
+    assert reply_methods(type(loaded)) == {}
 
     workflow = loaded.bind(config)
     first = workflow.run_start({"task": "sep10", "iterations": "3"})
@@ -712,15 +775,17 @@ def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> 
         "iterations": 3,
         "quick": False,
     }
-    assert [item["reply"] for item in first["instruction"]["replies"]] == ["complete"]
-    assert reply(workflow, "complete", first, summary=" ")["status"] == "rejected"
-    done = reply(workflow, "complete", first, summary="Tried three ideas")
-    assert done["result"] == {"summary": "Tried three ideas"}
+    assert first["completed"] is True
+    assert "replies" not in first["instruction"]
+    after = reply(workflow, "complete", first, summary="Tried three ideas")
+    assert after["status"] == "rejected"
     stored = Session.load(first["session_id"], config=config)
-    assert stored.show()["data"] == {}
+    assert stored.status == "completed"
+    assert stored.show()["data"] == {
+        "arguments": {"task": "sep10", "iterations": 3, "quick": False}
+    }
     assert [(item.reply, item.instruction_id) for item in stored.history] == [
-        ("start", 0),
-        ("complete", 1),
+        ("start", 0)
     ]
 
     missing = workflow.run_start({})

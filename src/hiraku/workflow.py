@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeGuard, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeVar
 
 from pydantic import (
     BaseModel,
@@ -39,10 +39,7 @@ from .errors import (
 )
 from .markdown import placeholders, render
 from .session import (
-    Completion,
     HistoryEntry,
-    Instruction,
-    Response,
     Session,
     Timeout,
     locked,
@@ -65,10 +62,12 @@ _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 def reply(function: _F) -> _F:
     """Mark a workflow method as a reply that continues a session.
 
-    The first parameter after ``self`` is the session, annotated with the
-    workflow's `Session` subclass. The other parameters and the docstring define
-    the reply's arguments and description. A reply is accepted only while the
-    session's pending instruction lists it, e.g. ``replies=[self.approve]``.
+    The first parameter after ``self`` is the workflow's state, annotated with
+    the model ``start`` returns. The other parameters and the docstring define
+    the reply's arguments and description. A reply changes the state in place
+    and returns nothing; ``next`` then builds the following instruction. A
+    reply is accepted only while the current instruction lists it, e.g.
+    ``replies=[self.approve]``.
 
     The decorated method stays directly callable from Python.
     """
@@ -83,26 +82,52 @@ class Reply:
     name: str
     function: Callable[..., Any]
     arguments: type[BaseModel]
-    session_model: type[Session]
     description: str
 
 
+@dataclass(frozen=True)
+class Instruction:
+    """What the agent does next, returned by a workflow's ``next``.
+
+    Attributes:
+        text: Actionable guidance, usually a section of ``workflow.md``.
+        context: Concise JSON-compatible data the text refers to.
+        replies: `reply` methods of the workflow that may answer it, e.g.
+            ``[self.approve, self.stop]``.
+        requires_user_response: Whether the agent must obtain a user answer
+            before replying. This is a conversational contract only.
+        final: Whether this is the last instruction. A final instruction lists
+            no replies; returning it completes the session, and its context is
+            the session's result. The agent still carries out its text.
+    """
+
+    text: str
+    context: Any = None
+    replies: Sequence[Callable[..., Any]] = ()
+    requires_user_response: bool = False
+    final: bool = False
+
+
 class Workflow(BaseRecord):
-    """A workflow: its ``workflow.md`` record, ``start``, and its replies.
+    """A workflow: its ``workflow.md`` record, ``start``, ``next``, and replies.
 
     Subclass it in ``hiraku/workflows/<workflow-id>/workflow.py`` and export the
-    class as ``WORKFLOW``. The subclass defines ``start``, whose signature and
-    docstring define how the workflow is started and which returns the first
-    instruction of a new session, and `reply` methods that continue a session.
+    class as ``WORKFLOW``. The subclass defines:
+
+    - ``start``, whose signature and docstring define how the workflow is
+      started, and which returns the first state of a new session: an instance
+      of a Pydantic model, named in the return annotation of ``start``;
+    - ``next(state)``, which returns the `Instruction` for a state; it reads
+      the state and never changes it;
+    - `reply` methods, which change the state and return nothing.
 
     An instance is the loaded ``workflow.md``: the front matter holds the
     workflow ``id``, which must match the directory name, and any settings the
     subclass declares as annotated fields; the Markdown body holds the prompt
     sections, selected by heading with ``self.markdown.section("## Step")``.
     The base class alone loads any ``workflow.md`` without importing project
-    code. The runtime loads each workflow once and gives
-    every call a fresh copy bound to the project; changes to an instance are
-    not persisted.
+    code. The runtime loads each workflow once and gives every call a fresh
+    copy bound to the project; changes to an instance are not persisted.
 
     Note:
         Class bodies follow Pydantic rules: annotated attributes are front-matter
@@ -139,7 +164,7 @@ class Workflow(BaseRecord):
         return start_model(type(self))
 
     def run_start(self, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
-        """Start a session: call ``start`` and store the session it returns.
+        """Start a session: call ``start``, then ``next``, and store the session.
 
         The workflow must be bound to a project with `bind`.
 
@@ -155,26 +180,21 @@ class Workflow(BaseRecord):
         if failure is not None:
             return failure
         start = getattr(self, "start")  # noqa: B009 - defined by subclasses
-        response, failure = _invoke(
-            self, "start", lambda: start(**_keywords(validated))
-        )
+        state, failure = _invoke(self, "start", lambda: start(**_keywords(validated)))
         if failure is not None:
             return failure
-        try:
-            session = _checked_response(self, response)
-        except WorkflowError as exc:
-            return {"status": "error", "message": str(exc)}
+        step, failure = self._next(state)
+        if failure is not None:
+            return failure
         now = datetime.now(UTC)
-        session.id = new_session_id(self.id)
-        session.workflow = self.id
-        session.created_at = now
+        session = Session(id=new_session_id(self.id), workflow=self.id, created_at=now)
         call = HistoryEntry(
             instruction_id=0,
             reply="start",
             arguments=validated.model_dump(mode="json"),
             at=now,
         )
-        session.advance(response, _reply_specs(self), call)
+        session.advance(call, *step)
         session.save(config=self.config)
         return {"status": "accepted", **session.response}
 
@@ -185,10 +205,12 @@ class Workflow(BaseRecord):
         reply: str,
         arguments: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Answer the pending instruction of a stored session with a reply.
+        """Answer the current instruction of a stored session with a reply.
 
-        The session is locked while the reply runs, and saved only if the reply
-        is accepted. The workflow must be bound to a project with `bind`.
+        The reply changes the session's state, and ``next`` builds the
+        following instruction. The session is locked while this runs, and saved
+        only if both succeed. The workflow must be bound to a project with
+        `bind`.
 
         Args:
             session_id: Session to continue.
@@ -199,7 +221,7 @@ class Workflow(BaseRecord):
         Returns:
             A JSON-compatible response whose ``status`` is ``accepted``,
             ``rejected``, ``not_ready``, ``stale``, or ``error``, with the
-            session's current instruction or result.
+            session's current instruction.
 
         Raises:
             hiraku.errors.ValidationError: If the session or instruction ID is
@@ -211,56 +233,58 @@ class Workflow(BaseRecord):
             raise ValidationError("instruction_id must be an integer")
         try:
             with locked(session_id, config=self.config):
-                stored = Session.load(session_id, config=self.config)
-                if stored.workflow != self.id:
-                    return stored.outcome(
+                session = Session.load(session_id, config=self.config)
+                if session.workflow != self.id:
+                    return session.outcome(
                         "rejected",
                         f"Session {session_id!r} belongs to workflow "
-                        f"{stored.workflow!r}, not {self.id!r}",
+                        f"{session.workflow!r}, not {self.id!r}",
                     )
                 method = reply_methods(type(self)).get(reply)
                 if method is None:
-                    return stored.outcome(
+                    return session.outcome(
                         "rejected",
                         f"{reply!r} is not a reply of workflow {self.id!r}; the "
-                        "pending instruction accepts: "
-                        f"{', '.join(stored.replies) or 'none'}",
+                        "current instruction accepts: "
+                        f"{', '.join(session.replies) or 'none'}",
                     )
                 validated, failure = _validate(method.arguments, arguments)
                 if failure is not None:
-                    return {**failure, **stored.response}
+                    return {**failure, **session.response}
                 values = validated.model_dump(mode="json")
-                early = stored.check(reply, instruction_id, values)
+                early = session.check(reply, instruction_id, values)
                 if early is not None:
                     return early
                 try:
-                    session = stored.typed(method.session_model)
-                except ValidationError as exc:
-                    return stored.outcome("rejected", _incompatible(exc))
-                response, failure = _invoke(
+                    state = state_model(type(self)).model_validate(session.data)
+                except PydanticValidationError as exc:
+                    return session.outcome("rejected", _incompatible(exc))
+                returned, failure = _invoke(
                     self,
                     reply,
-                    lambda: method.function(self, session, **_keywords(validated)),
+                    lambda: method.function(self, state, **_keywords(validated)),
                 )
                 if failure is not None:
-                    return {**failure, **stored.response}
-                try:
-                    result = _checked_response(self, response)
-                except WorkflowError as exc:
-                    return stored.outcome("error", str(exc))
-                # The runtime owns the base fields; discard any changes the reply
-                # made.
-                for name in Session.model_fields:
-                    setattr(result, name, getattr(stored, name))
+                    return {**failure, **session.response}
+                if returned is not None:
+                    return session.outcome(
+                        "error",
+                        f"Reply {reply!r} of workflow {self.id!r} returned "
+                        f"{type(returned).__name__}; replies change the state and "
+                        "return nothing. No session progress was saved.",
+                    )
+                step, failure = self._next(state)
+                if failure is not None:
+                    return {**failure, **session.response}
                 call = HistoryEntry(
                     instruction_id=instruction_id,
                     reply=reply,
                     arguments=values,
                     at=datetime.now(UTC),
                 )
-                result.advance(response, _reply_specs(self), call)
-                result.save(config=self.config)
-                return {"status": "accepted", **result.response}
+                session.advance(call, *step)
+                session.save()
+                return {"status": "accepted", **session.response}
         except Timeout:
             return {
                 "status": "rejected",
@@ -280,54 +304,82 @@ class Workflow(BaseRecord):
         """Return the Markdown body without front matter."""
         return self.markdown.strip()
 
-    def instruction(
-        self,
-        session: Session,
-        text: str,
-        *,
-        replies: Sequence[Callable[..., Any]],
-        context: Any = None,
-        requires_user_response: bool = False,
-    ) -> Instruction:
-        """Build the next instruction.
+    def _next(
+        self, state: Any
+    ) -> tuple[tuple[dict[str, Any], dict[str, Any], list[str]] | None, Any]:
+        """Call ``next`` on a new state; return the session's next data.
 
-        Args:
-            session: Session the instruction belongs to.
-            text: Actionable guidance for the harness.
-            replies: `reply` methods of this workflow, e.g.
-                ``[self.select, self.stop]``.
-            context: Concise JSON-compatible data.
-            requires_user_response: Whether a user answer is required before
-                replying.
-
-        Raises:
-            hiraku.errors.WorkflowError: If a reply is not a `reply` method of
-                this workflow or the context is not JSON-compatible.
+        Returns:
+            The state as JSON, the instruction as JSON, and its reply names; or
+            a failure status.
         """
-        if not isinstance(session, Session):
-            raise WorkflowError("Instructions require a Session instance")
-        if not text or not text.strip():
+        try:
+            data = self._dump_state(state)
+        except WorkflowError as exc:
+            return None, {"status": "error", "message": str(exc)}
+        next_ = getattr(self, "next")  # noqa: B009 - defined by subclasses
+        instruction, failure = _invoke(self, "next", lambda: next_(state))
+        if failure is not None:
+            return None, failure
+        try:
+            if self._dump_state(state) != data:
+                raise WorkflowError(
+                    f"next of workflow {self.id!r} changed the state; change it "
+                    "only in start and replies"
+                )
+            rendered, names = self._render(instruction)
+        except WorkflowError as exc:
+            return None, {"status": "error", "message": str(exc)}
+        return (data, rendered, names), None
+
+    def _dump_state(self, state: Any) -> dict[str, Any]:
+        model = state_model(type(self))
+        if type(state) is not model:
+            raise WorkflowError(
+                f"Workflow {self.id!r} produced a {type(state).__name__} state; "
+                f"start must return a {model.__name__}"
+            )
+        try:
+            data = state.model_dump(mode="json")
+            model.model_validate(data)
+        except (TypeError, ValueError) as exc:
+            raise WorkflowError(
+                f"State of workflow {self.id!r} does not round-trip through JSON: {exc}"
+            ) from exc
+        return data
+
+    def _render(self, instruction: Any) -> tuple[dict[str, Any], list[str]]:
+        """Return an instruction as JSON, and its reply names."""
+        if not isinstance(instruction, Instruction):
+            raise WorkflowError(
+                f"next of workflow {self.id!r} returned "
+                f"{type(instruction).__name__}; it must return an Instruction"
+            )
+        text = instruction.text
+        if not isinstance(text, str) or not text.strip():
             raise WorkflowError("Instruction text must not be empty")
-        if not replies:
-            raise WorkflowError("An instruction must offer at least one reply")
-        names = tuple(self._reply_name(method) for method in replies)
+        names = [self._reply_name(method) for method in instruction.replies]
         if len(names) != len(set(names)):
             raise WorkflowError("An instruction lists the same reply more than once")
-        return Instruction(
-            session=session,
-            text=text.strip(),
-            replies=names,
-            context=_ensure_json(context, "Instruction context"),
-            requires_user_response=bool(requires_user_response),
-        )
-
-    def completion(self, session: Session, result: Any = None) -> Completion:
-        """Build a terminal response with a JSON-compatible result."""
-        if not isinstance(session, Session):
-            raise WorkflowError("Completion requires a Session instance")
-        return Completion(
-            session=session, result=_ensure_json(result, "Completion result")
-        )
+        if instruction.final and (names or instruction.requires_user_response):
+            raise WorkflowError(
+                "A final instruction takes no replies and requires no user response"
+            )
+        if not instruction.final and not names:
+            raise WorkflowError(
+                "An instruction must offer at least one reply, or be final"
+            )
+        rendered: dict[str, Any] = {
+            "text": text.strip(),
+            "context": _ensure_json(instruction.context, "Instruction context"),
+        }
+        if names:
+            specs = _reply_specs(self)
+            rendered["requires_user_response"] = bool(
+                instruction.requires_user_response
+            )
+            rendered["replies"] = [{"reply": name, **specs[name]} for name in names]
+        return rendered, names
 
     def _reply_name(self, method: Callable[..., Any]) -> str:
         function = getattr(method, "__func__", None)
@@ -370,13 +422,19 @@ class Argument(BaseModel):
     default: str | int | float | bool | None = None
 
 
+class PromptState(BaseModel):
+    """The state of a Markdown workflow: its start arguments."""
+
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
 class PromptWorkflow(Workflow):
-    """Send the whole workflow.md as one instruction and finish on the reply.
+    """Send the whole workflow.md as one final instruction.
 
     Used for workflow directories that contain only ``workflow.md``. Its front
     matter may declare start ``arguments``, which fill ``{{name}}``
-    placeholders in the body. Hiraku checks nothing about the work itself; the
-    agent follows the prompt and may report a summary when it is done.
+    placeholders in the body. The session completes when it starts; the agent
+    then follows the prompt, and Hiraku checks nothing about the work.
 
     Example:
         ```markdown
@@ -401,27 +459,16 @@ class PromptWorkflow(Workflow):
             )
         return self
 
-    def start(self, **arguments: Any) -> Instruction:
+    def start(self, **arguments: Any) -> PromptState:
         """Start the workflow; its whole prompt arrives as one instruction."""
-        return self.instruction(
-            Session(),
-            render(self.text, arguments),
-            context=arguments or None,
-            replies=[self.complete],
-        )
+        return PromptState(arguments=arguments)
 
-    @reply
-    def complete(
-        self,
-        session: Session,
-        summary: Annotated[
-            str, Field(description="What was done, what resulted, what remains open.")
-        ],
-    ) -> Completion:
-        """Report that the work is finished, with a summary for the user."""
-        if not summary.strip():
-            raise SubmissionRejected("Summarize what was done")
-        return self.completion(session, {"summary": summary.strip()})
+    def next(self, state: PromptState) -> Instruction:
+        return Instruction(
+            render(self.text, state.arguments),
+            context=state.arguments or None,
+            final=True,
+        )
 
     def start_arguments(self) -> type[BaseModel]:
         fields: dict[str, Any] = {}
@@ -495,6 +542,7 @@ def load_workflow(workflow_id: str, *, config: HirakuConfig | None = None) -> Wo
         if (directory / "workflow.py").is_file()
         else PromptWorkflow
     )
+    state_model(cls)
     reply_methods(cls)
     path = directory / "workflow.md"
     try:
@@ -601,13 +649,42 @@ def start_model(cls: type[Workflow]) -> type[BaseModel]:
 
 
 @cache
+def state_model(cls: type[Workflow]) -> type[BaseModel]:
+    """Return the state model of a workflow class: what ``start`` returns.
+
+    Raises:
+        hiraku.errors.WorkflowError: If ``start`` does not name a Pydantic model
+            as its return type, or ``next`` is missing or does not take only
+            the state.
+    """
+    start = inspect.getattr_static(cls, "start", None)
+    if not inspect.isfunction(start):
+        raise WorkflowError(f"Workflow {cls.__name__} must define a start method")
+    model = _hints(f"{cls.__name__}.start", start).get("return")
+    if not (isinstance(model, type) and issubclass(model, BaseModel)):
+        raise WorkflowError(
+            f"{cls.__name__}.start must declare its state as the return type, a "
+            "Pydantic model, e.g. `def start(self, ...) -> State`"
+        )
+    function = inspect.getattr_static(cls, "next", None)
+    label = f"{cls.__name__}.next"
+    if not inspect.isfunction(function):
+        raise WorkflowError(
+            f"Workflow {cls.__name__} must define next(self, state), which returns "
+            "the instruction for a state"
+        )
+    if len(_parameters(label, function)) != 1:
+        raise WorkflowError(f"{label} must take only the state")
+    return model
+
+
+@cache
 def reply_methods(cls: type[Workflow]) -> dict[str, Reply]:
     """Collect and validate the `reply` methods of a workflow class.
 
     Raises:
-        hiraku.errors.WorkflowError: If a reply's signature is unsupported, its
-            name is taken by `Workflow`, or replies use different session
-            models.
+        hiraku.errors.WorkflowError: If a reply's signature is unsupported, or
+            its name is taken by `Workflow`, ``start``, or ``next``.
     """
     found: dict[str, Reply] = {}
     for name in sorted(dir(cls)):
@@ -615,7 +692,7 @@ def reply_methods(cls: type[Workflow]) -> dict[str, Reply]:
         if not getattr(function, _REPLY_MARKER, False):
             continue
         label = f"{cls.__name__}.{name}"
-        if name == "start" or hasattr(Workflow, name):
+        if name in ("start", "next") or hasattr(Workflow, name):
             raise WorkflowError(
                 f"@reply {label} is named like a Workflow method; rename it"
             )
@@ -624,35 +701,23 @@ def reply_methods(cls: type[Workflow]) -> dict[str, Reply]:
         parameters = _parameters(label, function)
         hints = _hints(label, function)
         first = parameters[0] if parameters else None
-        model = hints.get(first.name) if first is not None else None
+        model = state_model(cls)
         if (
             first is None
             or first.kind is inspect.Parameter.KEYWORD_ONLY
-            or not _is_session(model)
+            or hints.get(first.name) is not model
         ):
             raise WorkflowError(
-                f"@reply {label} must take the session as its first parameter, "
-                "annotated with a Session subclass"
+                f"@reply {label} must take the state as its first parameter, "
+                f"annotated with {model.__name__}"
             )
         found[name] = Reply(
             name=name,
             function=function,
             arguments=_arguments_model(label, parameters[1:], hints),
-            session_model=model,
             description=inspect.getdoc(function) or "",
         )
-    models = {item.session_model for item in found.values()}
-    if len(models) > 1:
-        names = ", ".join(sorted(model.__name__ for model in models))
-        raise WorkflowError(
-            f"Replies of {cls.__name__} use different session models: {names}"
-        )
     return found
-
-
-def session_model(cls: type[Workflow]) -> type[Session] | None:
-    """Return the session model shared by a workflow's replies."""
-    return next((item.session_model for item in reply_methods(cls).values()), None)
 
 
 def _parameters(label: str, function: Callable[..., Any]) -> list[inspect.Parameter]:
@@ -690,16 +755,10 @@ def _arguments_model(
             raise WorkflowError(
                 f"{label} parameter {parameter.name!r} needs a type annotation"
             )
-        annotation = hints[parameter.name]
-        if _is_session(annotation):
-            raise WorkflowError(
-                f"{label} parameter {parameter.name!r} cannot be a session; only "
-                "the first parameter of a @reply method is"
-            )
         default = (
             ... if parameter.default is inspect.Parameter.empty else parameter.default
         )
-        fields[parameter.name] = (annotation, default)
+        fields[parameter.name] = (hints[parameter.name], default)
     try:
         model = create_model(
             f"{label.replace('.', '_')}_arguments",
@@ -714,11 +773,7 @@ def _arguments_model(
     return model
 
 
-def _is_session(annotation: Any) -> TypeGuard[type[Session]]:
-    return isinstance(annotation, type) and issubclass(annotation, Session)
-
-
-# Running start and replies ------------------------------------------------------
+# Running start, next, and replies -------------------------------------------------
 
 
 def _validate(
@@ -734,7 +789,7 @@ def _validate(
 def _invoke(
     workflow: Workflow, name: str, call: Callable[[], Any]
 ) -> tuple[Any, dict[str, Any] | None]:
-    """Call ``start`` or a reply; return its result, or a failure status."""
+    """Call ``start``, ``next``, or a reply; return its result, or a failure."""
     try:
         return call(), None
     except NotReady as exc:
@@ -752,30 +807,6 @@ def _invoke(
         }
 
 
-def _checked_response(workflow: Workflow, response: Any) -> Session:
-    if not isinstance(response, Instruction | Completion):
-        raise WorkflowError(
-            f"Workflow {workflow.id!r} returned {type(response).__name__}; start "
-            "and replies must return self.instruction(...) or "
-            "self.completion(...)"
-        )
-    session = response.session
-    model = session_model(type(workflow))
-    if model is not None and type(session) is not model:
-        raise WorkflowError(
-            f"Workflow {workflow.id!r} returned a {type(session).__name__} session; "
-            f"expected {model.__name__}"
-        )
-    try:
-        type(session).model_validate(session.model_dump(mode="json"))
-    except PydanticValidationError as exc:
-        raise WorkflowError(
-            f"Session of workflow {workflow.id!r} does not round-trip through JSON: "
-            f"{validation_message(exc)}"
-        ) from exc
-    return session
-
-
 def compatibility_problem(workflow: Workflow, session: Session) -> str | None:
     """Check a stored session against the loaded workflow code.
 
@@ -791,20 +822,17 @@ def compatibility_problem(workflow: Workflow, session: Session) -> str | None:
             "The loaded workflow no longer defines the pending replies "
             f"{', '.join(missing)}. Inspect the session and start a new one."
         )
-    model = session_model(type(workflow))
-    if model is None:
-        return "The loaded workflow defines no replies."
     try:
-        session.typed(model)
-    except ValidationError as exc:
+        state_model(type(workflow)).model_validate(session.data)
+    except PydanticValidationError as exc:
         return _incompatible(exc)
     return None
 
 
-def _incompatible(exc: ValidationError) -> str:
+def _incompatible(exc: PydanticValidationError) -> str:
     return (
-        f"The stored session no longer matches the loaded workflow: {exc}. "
-        "Inspect the session and start a new one."
+        "The stored state no longer matches the loaded workflow: "
+        f"{validation_message(exc)}. Inspect the session and start a new one."
     )
 
 
@@ -859,11 +887,10 @@ def validation_message(exc: PydanticValidationError) -> str:
 
 
 __all__ = [
-    "Completion",
     "Instruction",
     "NotReady",
+    "PromptState",
     "PromptWorkflow",
-    "Response",
     "Session",
     "SubmissionRejected",
     "Workflow",

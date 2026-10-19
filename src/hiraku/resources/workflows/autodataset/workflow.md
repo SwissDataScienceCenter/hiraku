@@ -29,11 +29,15 @@ Then reply:
 - `report_shortfall` with the records you have and the reason, if you could not
   find enough suitable datasets. Never pad the result with unsuitable datasets.
 
-Finally, give the user a short comparison of the datasets: why each is
-relevant, how to obtain it, and what remains uncertain.
-
 ## Shortfall
 
 Fewer suitable datasets were found than requested. Explain the shortfall to the
 user using the context, and ask whether to keep searching (`continue_search`)
 or to accept the partial result (`accept_partial`).
+
+## Done
+
+Give the user a short comparison of the datasets in the context: why each is
+relevant, how to obtain it, and what remains uncertain. Say that Hiraku checked
+only the records' structure and recorded sources, not licensing or
+suitability. If the result is partial, explain the shortfall.

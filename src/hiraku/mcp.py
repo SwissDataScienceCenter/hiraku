@@ -60,8 +60,9 @@ How to follow a Hiraku workflow session:
 3. Continue with the workflow_reply tool: pass one of the listed replies as
    reply, its arguments as described by the reply's schema, and the
    instruction_id and session_id of the response unchanged.
-4. Each accepted reply returns the next instruction. Stop when a response has
-   completed: true.
+4. Each accepted reply returns the next instruction. A response with
+   completed: true holds the final instruction: carry it out, then stop; it
+   takes no reply.
 5. A response with status rejected or not_ready keeps the same instruction
    pending: fix the input, or check again later for not_ready. Status stale
    means the reply answered an instruction that is no longer pending; continue
@@ -609,6 +610,12 @@ def _prompt_text(response: Mapping[str, Any]) -> str:
     if instruction.get("context") is not None:
         context = json.dumps(instruction["context"], indent=1, ensure_ascii=False)
         parts.append(f"Context:\n```json\n{context}\n```")
+    if response.get("completed"):
+        parts.append(
+            f"---\nThis is the final instruction of Hiraku workflow session "
+            f"`{response['session_id']}`; it takes no reply."
+        )
+        return "\n\n".join(parts)
     replies = json.dumps(instruction["replies"], indent=1, ensure_ascii=False)
     parts.append(
         f"---\nThis is Hiraku workflow session `{response['session_id']}`, "

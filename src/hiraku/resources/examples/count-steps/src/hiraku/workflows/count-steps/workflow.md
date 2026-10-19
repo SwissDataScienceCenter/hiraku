@@ -13,3 +13,7 @@ Print the step line from the context to the user, for example
 
 Tell the user which step is done and how many remain, and ask whether to run
 the next step. Reply `step` only if the user agrees, or `finish` to stop.
+
+## Done
+
+Tell the user how many of the steps in the context ran.

@@ -163,7 +163,7 @@ project-relevant information to the agent.
 | Term | Data | Summary |
 | --- | ---  | --- |
 | **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A record with an `id`, settings, and prompts (`workflow.md`) whose class adds the operations (`workflow.py`). |
-| **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its arguments, progress, and pending instruction. Sessions are local and not committed. |
+| **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its state, history, and current instruction. Sessions are local and not committed. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
 Hiraku ships the `collaborative` and `autodataset`

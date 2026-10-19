@@ -38,3 +38,8 @@ a few sentences.
 Present the result of the step in the context to the user. Ask how to continue
 and wait for the answer: the next step, `revise` with the user's feedback to
 redo this step, or `finish` to stop.
+
+## Done
+
+Summarize the session for the user: each experiment in the context's
+`results` with its verdict, and what you would try next.

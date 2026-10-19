@@ -5,16 +5,23 @@ from __future__ import annotations
 import secrets
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from hiraku.errors import SubmissionRejected
-from hiraku.workflow import Completion, Instruction, Session, Workflow, reply
+from hiraku.workflow import Instruction, Workflow, reply
 
 
-class CountStepsSession(Session):
+def _token() -> str:
+    return secrets.token_hex(4)
+
+
+class State(BaseModel):
     count: int
-    step: int = 0
-    token: str = ""
+    step: int = 1
+    token: str = Field(default_factory=_token)
+    # The current step was acknowledged; the user decides whether to go on.
+    waiting: bool = False
+    finished: bool = False
 
 
 class CountSteps(Workflow):
@@ -28,62 +35,64 @@ class CountSteps(Workflow):
     def start(
         self,
         count: Annotated[int, Field(gt=0, description="Number of steps.")] = 5,
-    ) -> Instruction:
+    ) -> State:
         """Start counting steps to check the harness; runs the first step."""
-        return self._step(CountStepsSession(count=count))
+        return State(count=count)
 
-    @reply
-    def step(self, session: CountStepsSession) -> Instruction:
-        """Run the next step."""
-        return self._step(session)
-
-    @reply
-    def ack(
-        self,
-        session: CountStepsSession,
-        token: Annotated[str, Field(description="Token of the current step.")],
-    ) -> Instruction | Completion:
-        """Acknowledge the current step with its token."""
-        if token != session.token:
-            raise SubmissionRejected(
-                f"Token {token!r} does not match step {session.step}; reply with "
-                "the token from the current instruction"
+    def next(self, state: State) -> Instruction:
+        if state.finished:
+            return Instruction(
+                self.markdown.section("## Done"),
+                context={"steps": state.step, "count": state.count},
+                final=True,
             )
-        if session.step >= session.count:
-            return self._done(session)
-        return self.instruction(
-            session,
-            self.markdown.section("## Next"),
-            context={
-                "done": session.step,
-                "remaining": session.count - session.step,
-            },
-            requires_user_response=True,
-            replies=[self.step, self.finish],
-        )
-
-    @reply
-    def finish(self, session: CountStepsSession) -> Completion:
-        """End the session early."""
-        return self._done(session)
-
-    def _step(self, session: CountStepsSession) -> Instruction:
-        session.step += 1
-        session.token = secrets.token_hex(4)
-        return self.instruction(
-            session,
+        if state.waiting:
+            return Instruction(
+                self.markdown.section("## Next"),
+                context={
+                    "done": state.step,
+                    "remaining": state.count - state.step,
+                },
+                replies=[self.step, self.finish],
+                requires_user_response=True,
+            )
+        return Instruction(
             self.markdown.section("## Step"),
             context={
-                "step": session.step,
-                "count": session.count,
-                "token": session.token,
-                "line": f"Step {session.step}/{session.count}: token {session.token}",
+                "step": state.step,
+                "count": state.count,
+                "token": state.token,
+                "line": f"Step {state.step}/{state.count}: token {state.token}",
             },
             replies=[self.ack, self.finish],
         )
 
-    def _done(self, session: CountStepsSession) -> Completion:
-        return self.completion(session, {"steps": session.step, "count": session.count})
+    @reply
+    def ack(
+        self,
+        state: State,
+        token: Annotated[str, Field(description="Token of the current step.")],
+    ) -> None:
+        """Acknowledge the current step with its token."""
+        if token != state.token:
+            raise SubmissionRejected(
+                f"Token {token!r} does not match step {state.step}; reply with "
+                "the token from the current instruction"
+            )
+        state.finished = state.step >= state.count
+        state.waiting = not state.finished
+
+    @reply
+    def step(self, state: State) -> None:
+        """Run the next step."""
+        state.step += 1
+        state.token = _token()
+        state.waiting = False
+
+    @reply
+    def finish(self, state: State) -> None:
+        """End the session early."""
+        state.finished = True
 
 
 WORKFLOW = CountSteps

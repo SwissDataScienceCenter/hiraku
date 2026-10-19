@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 import re
 import secrets
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -27,7 +25,6 @@ LOCK_TIMEOUT_SECONDS = 30.0
 _SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 SessionStatus = Literal["active", "completed", "cancelled"]
-_S = TypeVar("_S", bound="Session")
 
 CANCEL_NOTE = (
     "Cancelling stops the workflow from accepting replies. It does not revert "
@@ -48,23 +45,21 @@ class HistoryEntry(BaseModel):
 class Session(BaseModel):
     """The stored state of one workflow invocation.
 
-    Subclasses declare typed fields for the workflow's own data: resolved
-    arguments, record references, counters, and results. Sessions are stored as
-    JSON in ``hiraku/sessions/``, so fields must be JSON-serializable.
-
-    The base fields and methods belong to the runtime and are reserved:
-    subclasses cannot redefine them, and changes a tool makes to the base
-    fields are discarded.
+    The runtime owns the session; workflow code never sees it. A workflow's own
+    data is its state, a model returned by ``start`` and changed by replies,
+    stored as JSON in `data`. Sessions are stored in ``hiraku/sessions/``.
 
     Attributes:
-        id: Session ID, assigned when the session is first saved.
+        id: Session ID, assigned when the session starts.
         workflow: ID of the workflow that owns the session.
-        status: ``active`` until it completes or is cancelled.
-        instruction_id: Number of the pending instruction; replies must name it.
-        replies: Reply tools allowed for the pending instruction.
+        status: ``active`` until its final instruction or cancellation.
+        instruction_id: Number of the current instruction; replies must name it.
+        replies: Replies allowed for the current instruction; none once the
+            session ended.
         response: The last response, returned again for retries and by `show`.
         history: Accepted calls, oldest first: the start, then each reply. The
             last entry recognizes retries.
+        data: The workflow's state, as JSON.
     """
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
@@ -76,22 +71,11 @@ class Session(BaseModel):
     replies: list[str] = Field(default_factory=list)
     response: dict[str, Any] = Field(default_factory=dict)
     history: list[HistoryEntry] = Field(default_factory=list)
+    data: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
     _config: HirakuConfig | None = PrivateAttr(default=None)
-    _stored: dict[str, Any] = PrivateAttr(default_factory=dict)
-
-    @classmethod
-    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
-        super().__pydantic_init_subclass__(**kwargs)
-        names = set(inspect.get_annotations(cls)) | set(vars(cls))
-        reserved = sorted(names & RESERVED)
-        if reserved:
-            raise TypeError(
-                f"{cls.__name__} redefines reserved Session names: "
-                f"{', '.join(reserved)}"
-            )
 
     @property
     def config(self) -> HirakuConfig:
@@ -106,40 +90,17 @@ class Session(BaseModel):
     def load(cls, session_id: str, *, config: HirakuConfig) -> Self:
         """Load a stored session.
 
-        The base `Session` reads only the runtime fields, so any session can be
-        inspected without its workflow's code; a subclass reads all fields.
-
         Raises:
             hiraku.errors.SessionNotFoundError: If the session does not exist.
             hiraku.errors.ValidationError: If the stored data does not match.
         """
-        return cls._validate_stored(session_id, _read(session_id, config), config)
-
-    def typed(self, model: type[_S]) -> _S:
-        """Return this stored session as a workflow's own session model.
-
-        Raises:
-            hiraku.errors.ValidationError: If the stored data does not match.
-        """
-        return model._validate_stored(self.id, self._stored, self.config)
-
-    @classmethod
-    def _validate_stored(
-        cls, session_id: str, raw: dict[str, Any], config: HirakuConfig
-    ) -> Self:
-        data = (
-            raw
-            if cls is not Session
-            else {key: value for key, value in raw.items() if key in BASE_FIELDS}
-        )
+        raw = _read(session_id, config)
         try:
-            session = cls.model_validate(data)
+            session = cls.model_validate(raw)
         except PydanticValidationError as exc:
-            raise ValidationError(
-                f"Session {session_id!r} does not match {cls.__name__}: {exc}"
-            ) from exc
+            message = f"Session {session_id!r} is malformed: {exc}"
+            raise ValidationError(message) from exc
         session._config = config
-        session._stored = raw
         return session
 
     @classmethod
@@ -177,9 +138,7 @@ class Session(BaseModel):
         if config is not None:
             self._config = config
         self.updated_at = datetime.now(UTC)
-        data = self.model_dump(mode="json")
-        _write(self.id, data, self.config)
-        self._stored = data
+        _write(self.id, self.model_dump(mode="json"), self.config)
 
     # Inspection and cancellation --------------------------------------------------
 
@@ -196,11 +155,7 @@ class Session(BaseModel):
             "instruction_id": self.instruction_id,
             "created_at": _isoformat(self.created_at),
             "updated_at": _isoformat(self.updated_at),
-            "data": {
-                key: value
-                for key, value in self._stored.items()
-                if key not in BASE_FIELDS
-            },
+            "data": self.data,
             "response": self.response,
         }
         if self.status == "cancelled":
@@ -291,102 +246,33 @@ class Session(BaseModel):
 
     def advance(
         self,
-        response: Instruction | Completion,
-        replies: Mapping[str, dict[str, Any]],
         call: HistoryEntry,
+        data: dict[str, Any],
+        instruction: dict[str, Any],
+        replies: list[str],
     ) -> None:
-        """Record an accepted call and the response it led to.
+        """Record an accepted call, the state it led to, and the next instruction.
 
         Args:
-            response: The instruction or completion a tool returned.
-            replies: Description and argument schema of each of the workflow's
-                replies, by name.
             call: The accepted call, appended to the history.
+            data: The workflow's state after the call, as JSON.
+            instruction: The next instruction, as JSON.
+            replies: Replies allowed for the instruction; none for a final
+                instruction, which completes the session.
         """
         self.history = [*self.history, call]
+        self.data = data
         self.instruction_id += 1
-        if isinstance(response, Completion):
+        self.replies = list(replies)
+        self.response = {"session_id": self.id, "instruction_id": self.instruction_id}
+        if not replies:
             self.status = "completed"
-            self.replies = []
-            self.response = {
-                "session_id": self.id,
-                "completed": True,
-                "result": response.result,
-            }
-            return
-        self.replies = list(response.replies)
-        self.response = {
-            "session_id": self.id,
-            "instruction_id": self.instruction_id,
-            "instruction": {
-                "text": response.text,
-                "context": response.context,
-                "requires_user_response": response.requires_user_response,
-                "replies": [
-                    {"reply": name, **replies.get(name, {})}
-                    for name in response.replies
-                ],
-            },
-        }
+            self.response["completed"] = True
+        self.response["instruction"] = instruction
 
     def outcome(self, status: str, message: str) -> dict[str, Any]:
         """Return a status that leaves the session unchanged, with its response."""
         return {"status": status, "message": message, **self.response}
-
-
-BASE_FIELDS = tuple(Session.model_fields)
-RESERVED = frozenset(
-    {
-        *BASE_FIELDS,
-        "config",
-        "load",
-        "list_all",
-        "save",
-        "show",
-        "cancel",
-        "check",
-        "advance",
-        "outcome",
-        "typed",
-    }
-)
-
-
-@dataclass(frozen=True)
-class Instruction:
-    """The next request to the harness, returned by a workflow tool.
-
-    Attributes:
-        session: Session whose state accompanies the instruction.
-        text: Actionable guidance, usually taken from ``workflow.md``.
-        replies: Names of the replies that may answer it.
-        context: Concise JSON-compatible data for the harness.
-        requires_user_response: Whether the harness must obtain a user answer
-            before replying. This is a conversational contract only.
-    """
-
-    session: Session
-    text: str
-    replies: tuple[str, ...]
-    context: Any = None
-    requires_user_response: bool = False
-
-
-@dataclass(frozen=True)
-class Completion:
-    """A terminal response: the invocation ended.
-
-    Attributes:
-        session: Final session state.
-        result: Workflow-specific JSON-compatible result. Completion means the
-            invocation ended, not necessarily that every objective was met.
-    """
-
-    session: Session
-    result: Any = None
-
-
-Response = Instruction | Completion
 
 
 def new_session_id(workflow_id: str) -> str:
@@ -465,10 +351,7 @@ def _isoformat(value: datetime | None) -> str | None:
 
 __all__ = [
     "CANCEL_NOTE",
-    "Completion",
-    "Instruction",
     "HistoryEntry",
-    "Response",
     "Session",
     "Timeout",
     "locked",

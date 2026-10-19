@@ -196,7 +196,10 @@ def test_collaborative_steps_reviews_and_budget(config: HirakuConfig) -> None:
 
     done = harness.reply("finish")
     assert done["completed"] is True
-    assert [item["record_id"] for item in done["result"]["results"]] == [
+    assert harness.section() == "## Done"
+    assert [
+        item["record_id"] for item in done["instruction"]["context"]["results"]
+    ] == [
         "c1",
         "c2",
     ]
@@ -260,9 +263,12 @@ def test_autodataset_whole_prompt_completion(config: HirakuConfig) -> None:
 
     dataset(config, "d4")
     done = harness.reply("complete", record_ids=["d1", "d4"])
-    assert done["result"]["outcome"] == "completed"
-    assert done["result"]["datasets"] == ["d1", "d4"]
-    assert "not verified" in done["result"]["verified"]
+    assert done["completed"] is True
+    assert harness.section() == "## Done"
+    result = done["instruction"]["context"]
+    assert result["outcome"] == "completed"
+    assert result["datasets"] == ["d1", "d4"]
+    assert "not verified" in result["verified"]
 
 
 def test_autodataset_shortfall_continue_and_partial(config: HirakuConfig) -> None:
@@ -284,5 +290,7 @@ def test_autodataset_shortfall_continue_and_partial(config: HirakuConfig) -> Non
     assert harness.instruction["context"]["already_found"] == ["d1"]
     harness.reply("report_shortfall", record_ids=["d1"], reason="Rare")
     done = harness.reply("accept_partial")
-    assert done["result"]["outcome"] == "partial"
-    assert done["result"]["datasets"] == ["d1"]
+    result = done["instruction"]["context"]
+    assert result["outcome"] == "partial"
+    assert result["datasets"] == ["d1"]
+    assert result["shortfall_reason"] == "Rare"

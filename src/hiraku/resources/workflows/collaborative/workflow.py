@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from hiraku.errors import NotReady, SubmissionRejected
 from hiraku.git import GitRepository
 from hiraku.record import Record, load_record
-from hiraku.workflow import Completion, Instruction, Session, Workflow, reply
+from hiraku.workflow import Instruction, Workflow, reply
 
 Step = Literal["draft", "implement", "launch", "analyze"]
 Verdict = Literal["supports", "refutes", "inconclusive"]
@@ -22,14 +22,17 @@ NEXT: dict[str, str] = {
 }
 
 
-class CollaborativeSession(Session):
+class State(BaseModel):
     task: str
     entrypoint: str
     rounds: int
     step: Step = "draft"
+    # The result of the step under review; None while the agent works on it.
+    review: dict[str, Any] | None = None
     experiment: str | None = None
     feedback: str | None = None
     results: list[dict[str, Any]] = Field(default_factory=list)
+    finished: bool = False
 
 
 class Collaborative(Workflow):
@@ -54,75 +57,106 @@ class Collaborative(Workflow):
             str, Field(description="Entrypoint of the task to launch.")
         ] = "train",
         rounds: Annotated[int, Field(gt=0, description="Most experiments to run.")] = 3,
-    ) -> Instruction:
+    ) -> State:
         """Start collaborative research on a task record."""
         task = task or self.config.active_record_id
         if task is None:
             raise SubmissionRejected("No active record; pass the task record ID")
         # Raises if the task does not declare the entrypoint, rejecting the start.
         load_record(task, config=self.config).entrypoint(entrypoint, config=self.config)
-        session = CollaborativeSession(task=task, entrypoint=entrypoint, rounds=rounds)
-        return self._work(session)
+        return State(task=task, entrypoint=entrypoint, rounds=rounds)
+
+    def next(self, state: State) -> Instruction:
+        if state.finished:
+            return Instruction(
+                self.markdown.section("## Done"),
+                context={"task": state.task, "results": state.results},
+                final=True,
+            )
+        if state.review is not None:
+            following = NEXT[state.step]
+            more = following != "draft" or len(state.results) < state.rounds
+            steps = [getattr(self, following)] if more else []
+            return Instruction(
+                self.markdown.section("## Review"),
+                context={
+                    "step": state.step,
+                    "result": state.review,
+                    "rounds_left": state.rounds - len(state.results),
+                },
+                replies=[*steps, self.revise, self.finish],
+                requires_user_response=True,
+            )
+        reports = {
+            "draft": self.drafted,
+            "implement": self.implemented,
+            "launch": self.launched,
+            "analyze": self.analyzed,
+        }
+        text = self.markdown.section(f"## {state.step.title()}")
+        return Instruction(
+            f"{text}\n\n{self.rules}" if self.rules else text,
+            context=self._context(state),
+            replies=[reports[state.step], self.finish],
+        )
 
     # Steps: the user's choice at a review -----------------------------------------
 
     @reply
-    def draft(self, session: CollaborativeSession) -> Instruction:
+    def draft(self, state: State) -> None:
         """Draft the next experiment."""
-        session.experiment = None
-        return self._goto(session, "draft")
+        state.experiment = None
+        self._goto(state, "draft")
 
     @reply
-    def implement(self, session: CollaborativeSession) -> Instruction:
+    def implement(self, state: State) -> None:
         """Implement the drafted experiment."""
-        return self._goto(session, "implement")
+        self._goto(state, "implement")
 
     @reply
-    def launch(self, session: CollaborativeSession) -> Instruction:
+    def launch(self, state: State) -> None:
         """Launch the implemented experiment."""
-        return self._goto(session, "launch")
+        self._goto(state, "launch")
 
     @reply
-    def analyze(self, session: CollaborativeSession) -> Instruction:
+    def analyze(self, state: State) -> None:
         """Analyze the experiment's runs once they have metrics."""
-        return self._goto(session, "analyze")
+        self._goto(state, "analyze")
 
     @reply
     def revise(
         self,
-        session: CollaborativeSession,
+        state: State,
         feedback: Annotated[str, Field(description="What to change in this step.")],
-    ) -> Instruction:
+    ) -> None:
         """Redo the reviewed step with the user's feedback."""
-        session.feedback = feedback
-        return self._work(session)
+        state.feedback = feedback
+        state.review = None
 
     @reply
-    def finish(self, session: CollaborativeSession) -> Completion:
+    def finish(self, state: State) -> None:
         """End the session and summarize the results."""
-        return self.completion(
-            session, {"task": session.task, "results": session.results}
-        )
+        state.finished = True
 
     # Reports: the agent's results, checked and recorded --------------------------
 
     @reply
     def drafted(
         self,
-        session: CollaborativeSession,
+        state: State,
         record_id: Annotated[
             str, Field(description="Short ID of the experiment record.")
         ],
         summary: Annotated[str, Field(description="The experiment in one line.")],
         hypothesis: Annotated[str, Field(description="What the experiment tests.")],
         change: Annotated[str, Field(description="The planned code change.")],
-    ) -> Instruction:
+    ) -> None:
         """Submit the drafted experiment."""
         body = f"## Change\n\n{change.strip()}\n"
-        if session.experiment is None:
+        if state.experiment is None:
             record = Record.create(
                 record_id,
-                parent_id=session.task,
+                parent_id=state.task,
                 type="experiment",
                 status="drafted",
                 summary=summary,
@@ -131,47 +165,43 @@ class Collaborative(Workflow):
                 activate=False,
                 config=self.config,
             )
-        elif record_id != session.experiment:
+        elif record_id != state.experiment:
             raise SubmissionRejected(
-                f"Revise the draft in place: reply with record_id "
-                f"{session.experiment!r}"
+                f"Revise the draft in place: reply with record_id {state.experiment!r}"
             )
         else:
-            record = self._experiment(session)
+            record = self._experiment(state)
             record.summary = summary
             record.hypothesis = hypothesis
             record.markdown = body
             record.save()
-        session.experiment = record.id
-        return self._review(
-            session,
-            {
-                "record_id": record.id,
-                "summary": summary,
-                "hypothesis": hypothesis,
-                "change": change,
-            },
-        )
+        state.experiment = record.id
+        state.review = {
+            "record_id": record.id,
+            "summary": summary,
+            "hypothesis": hypothesis,
+            "change": change,
+        }
 
     @reply
     def implemented(
         self,
-        session: CollaborativeSession,
+        state: State,
         commit: Annotated[str, Field(description="Commit with the change.")],
         notes: Annotated[str, Field(description="What changed, briefly.")],
-    ) -> Instruction:
+    ) -> None:
         """Submit the commit that implements the experiment."""
         sha = GitRepository(self.config).resolve(commit)
-        record = self._experiment(session)
+        record = self._experiment(state)
         record.commit = sha
         record.status = "implemented"
         record.save()
-        return self._review(session, {"commit": sha, "notes": notes})
+        state.review = {"commit": sha, "notes": notes}
 
     @reply
-    def launched(self, session: CollaborativeSession) -> Instruction:
+    def launched(self, state: State) -> None:
         """Report that the experiment's run is tracked."""
-        record = self._experiment(session)
+        record = self._experiment(state)
         runs = record.runs(config=self.config)
         if not runs:
             raise NotReady(
@@ -184,91 +214,58 @@ class Collaborative(Workflow):
             )
         record.status = "launched"
         record.save()
-        return self._review(session, {"runs": _runs(record, self)})
+        state.review = {"runs": _runs(record, self)}
 
     @reply
     def analyzed(
         self,
-        session: CollaborativeSession,
+        state: State,
         verdict: Annotated[
             Verdict, Field(description="Whether the runs support the hypothesis.")
         ],
         conclusion: Annotated[str, Field(description="A few sentences.")],
-    ) -> Instruction:
+    ) -> None:
         """Submit the verdict and conclusion of the experiment."""
-        record = self._experiment(session)
+        record = self._experiment(state)
         record.status = "analyzed"
         record.verdict = verdict
         record.conclusion = conclusion
         record.save()
         result = {"record_id": record.id, "verdict": verdict}
         # A revised analysis replaces the earlier result of the same experiment.
-        session.results = [
-            *(item for item in session.results if item["record_id"] != record.id),
+        state.results = [
+            *(item for item in state.results if item["record_id"] != record.id),
             result,
         ]
-        return self._review(session, {**result, "conclusion": conclusion})
+        state.review = {**result, "conclusion": conclusion}
 
     # Helpers ----------------------------------------------------------------------
 
-    def _goto(self, session: CollaborativeSession, step: Step) -> Instruction:
-        session.step = step
-        session.feedback = None
-        return self._work(session)
+    def _goto(self, state: State, step: Step) -> None:
+        state.step = step
+        state.feedback = None
+        state.review = None
 
-    def _work(self, session: CollaborativeSession) -> Instruction:
-        reports = {
-            "draft": self.drafted,
-            "implement": self.implemented,
-            "launch": self.launched,
-            "analyze": self.analyzed,
-        }
-        text = self.markdown.section(f"## {session.step.title()}")
-        return self.instruction(
-            session,
-            f"{text}\n\n{self.rules}" if self.rules else text,
-            context=self._context(session),
-            replies=[reports[session.step], self.finish],
-        )
-
-    def _review(
-        self, session: CollaborativeSession, result: dict[str, Any]
-    ) -> Instruction:
-        following = NEXT[session.step]
-        more = following != "draft" or len(session.results) < session.rounds
-        steps = [getattr(self, following)] if more else []
-        return self.instruction(
-            session,
-            self.markdown.section("## Review"),
-            context={
-                "step": session.step,
-                "result": result,
-                "rounds_left": session.rounds - len(session.results),
-            },
-            requires_user_response=True,
-            replies=[*steps, self.revise, self.finish],
-        )
-
-    def _context(self, session: CollaborativeSession) -> dict[str, Any]:
-        context: dict[str, Any] = {"task": session.task, "feedback": session.feedback}
-        if session.step == "draft":
-            context["previous"] = session.results
-            if session.experiment is not None:
-                context["revise"] = session.experiment
+    def _context(self, state: State) -> dict[str, Any]:
+        context: dict[str, Any] = {"task": state.task, "feedback": state.feedback}
+        if state.step == "draft":
+            context["previous"] = state.results
+            if state.experiment is not None:
+                context["revise"] = state.experiment
             return context
-        record = self._experiment(session)
+        record = self._experiment(state)
         context["experiment"] = {
             "record_id": record.id,
             "summary": getattr(record, "summary", None),
             "hypothesis": getattr(record, "hypothesis", None),
             "change": record.markdown.strip(),
         }
-        if session.step == "launch":
+        if state.step == "launch":
             context["command"] = (
-                f"hiraku launch {session.entrypoint} --record {record.id} "
+                f"hiraku launch {state.entrypoint} --record {record.id} "
                 f"--commit {record.commit}"
             )
-        if session.step == "analyze":
+        if state.step == "analyze":
             runs = _runs(record, self)
             if not any(run["metrics"] for run in runs):
                 raise NotReady(
@@ -276,13 +273,13 @@ class Collaborative(Workflow):
                     "they finish"
                 )
             context["runs"] = runs
-            context["previous"] = session.results
+            context["previous"] = state.results
         return context
 
-    def _experiment(self, session: CollaborativeSession) -> Record:
-        if session.experiment is None:
+    def _experiment(self, state: State) -> Record:
+        if state.experiment is None:
             raise SubmissionRejected("No experiment is drafted yet")
-        return load_record(session.experiment, config=self.config)
+        return load_record(state.experiment, config=self.config)
 
 
 def _runs(record: Record, workflow: Workflow) -> list[dict[str, Any]]:

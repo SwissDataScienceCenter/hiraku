@@ -87,7 +87,8 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
         response = reply(runner, response, "step")
 
     assert response["completed"] is True
-    assert response["result"] == {"steps": 3, "count": 3}
+    assert response["instruction"]["text"].startswith("## Done")
+    assert response["instruction"]["context"] == {"steps": 3, "count": 3}
     assert len(set(tokens)) == 3
 
 
@@ -100,7 +101,8 @@ def test_count_steps_rejects_wrong_tokens_and_finishes_early(
     wrong = reply(runner, response, "ack", token="00000000")
     assert wrong["status"] == "rejected"
     done = reply(runner, response, "finish")
-    assert done["result"] == {"steps": 1, "count": 2}
+    assert done["completed"] is True
+    assert done["instruction"]["context"] == {"steps": 1, "count": 2}
 
 
 # A scripted harness: prints the step line and echoes the step's token.
@@ -110,6 +112,9 @@ from pathlib import Path
 
 response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
 instruction = response["instruction"]
+if response.get("completed"):
+    print("Ran", instruction["context"]["steps"], "steps")
+    raise SystemExit
 print(instruction["context"]["line"])
 reply = {"reply": instruction["replies"][0]["reply"],
          "arguments": {"token": instruction["context"]["token"]}}
@@ -149,4 +154,5 @@ def test_count_steps_one_step_at_a_time_through_hiraku_agent(
     done = runner.invoke(agent_main, ["count-steps", "step"])
     assert done.exit_code == 0, done.output
     assert "Step 3/3: token" in done.output
+    assert "Ran 3 steps" in done.output
     assert 'completed: {"steps": 3, "count": 3}' in done.output

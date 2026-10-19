@@ -27,66 +27,77 @@ Reply `answer` with a value.
 ## Gate
 
 Ask the user whether to go on.
+
+## Done
+
+Tell the user the answers.
 """
 
 WORKFLOW_PY = '''
-from pathlib import Path
+from __future__ import annotations
+
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from hiraku.errors import NotReady, SubmissionRejected
-from hiraku.workflow import Completion, Instruction, Session, Workflow, reply
+from hiraku.workflow import Instruction, Workflow, reply
 
 
-class ToySession(Session):
+class ToyState(BaseModel):
     items: int
     answers: list[str] = Field(default_factory=list)
+    gate: bool = False
+    stopped: bool = False
 
 
 class Toy(Workflow):
     def start(
         self, items: Annotated[int, Field(gt=0, description="Items.")] = 2
-    ) -> Instruction:
-        return self._work(ToySession(items=items))
+    ) -> ToyState:
+        return ToyState(items=items)
+
+    def next(self, state: ToyState) -> Instruction:
+        if state.stopped or len(state.answers) == state.items:
+            return Instruction(
+                self.markdown.section("## Done"),
+                context={"answers": state.answers},
+                final=True,
+            )
+        if state.gate:
+            return Instruction(
+                self.markdown.section("## Gate"),
+                context={"answers": state.answers},
+                requires_user_response=True,
+                replies=[self.approve, self.stop],
+            )
+        return Instruction(
+            self.markdown.section("## Work"),
+            context={"done": len(state.answers)},
+            replies=[self.answer, self.stop],
+        )
 
     @reply
     def answer(
-        self, session: ToySession, value: Annotated[str, Field(description="Value.")]
-    ) -> Instruction | Completion:
+        self, state: ToyState, value: Annotated[str, Field(description="Value.")]
+    ) -> None:
         """Answer the current item."""
         if value == "bad":
             raise SubmissionRejected("bad is not an answer")
         if value == "wait" and not (self.config.root / "ready").exists():
             raise NotReady("not ready yet")
-        session.answers.append(value)
-        if len(session.answers) == session.items:
-            return self.completion(session, {"answers": session.answers})
-        return self.instruction(
-            session,
-            self.markdown.section("## Gate"),
-            context={"answers": session.answers},
-            requires_user_response=True,
-            replies=[self.approve, self.stop],
-        )
+        state.answers.append(value)
+        state.gate = True
 
     @reply
-    def approve(self, session: ToySession) -> Instruction:
+    def approve(self, state: ToyState) -> None:
         """Go on with the next item."""
-        return self._work(session)
+        state.gate = False
 
     @reply
-    def stop(self, session: ToySession) -> Completion:
+    def stop(self, state: ToyState) -> None:
         """Stop early."""
-        return self.completion(session, {"answers": session.answers})
-
-    def _work(self, session: ToySession) -> Instruction:
-        return self.instruction(
-            session,
-            self.markdown.section("## Work"),
-            context={"done": len(session.answers)},
-            replies=[self.answer, self.stop],
-        )
+        state.stopped = True
 
 
 WORKFLOW = Toy
@@ -100,8 +111,11 @@ from pathlib import Path
 
 prompt = sys.stdin.read() if not sys.stdin.isatty() else ""
 response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
-reply_file = os.environ["HIRAKU_REPLY_FILE"]
 print("saw", response["instruction"]["text"].splitlines()[0])
+if response.get("completed"):
+    print("final, reply file given:", "HIRAKU_REPLY_FILE" in os.environ)
+    sys.exit(0)
+reply_file = os.environ["HIRAKU_REPLY_FILE"]
 print("prompt names reply file:", reply_file in prompt)
 first = response["instruction"]["replies"][0]
 arguments = {}
@@ -170,7 +184,19 @@ def test_runs_until_a_gate_and_continues_after_the_user_reply(
     approved = agent("toy", "approve")
     assert approved.exit_code == 0, approved.output
     assert "you → approve  accepted" in approved.output
+    # The agent carries out the final instruction, which takes no reply.
+    assert "[4 Done] final" in approved.output
+    assert "saw ## Done" in approved.output
+    assert "final, reply file given: False" in approved.output
     assert 'completed: {"answers": ["one", "two"]}' in approved.output
+    final = config.sessions_dir / session["session_id"] / "4/1/prompt.md"
+    assert "final instruction of the session; it takes no reply" in final.read_text()
+
+    # A completed session named with --session is shown, not carried out again.
+    shown = agent("toy", "--session", session["session_id"])
+    assert shown.exit_code == 0, shown.output
+    assert "saw" not in shown.output
+    assert 'completed: {"answers": ["one", "two"]}' in shown.output
 
 
 def test_not_ready_replies_are_sent_again_without_the_agent(

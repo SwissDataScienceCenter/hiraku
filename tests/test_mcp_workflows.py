@@ -72,10 +72,53 @@ Run {{iterations}} experiments on {{task}}.
 """
 
 
+ECHO_PY = '''
+from pydantic import BaseModel
+
+from hiraku.errors import SubmissionRejected
+from hiraku.workflow import Instruction, Workflow, reply
+
+
+class State(BaseModel):
+    task: str
+    summary: str | None = None
+
+
+class Echo(Workflow):
+    def start(self, task: str) -> State:
+        """Start working on a task."""
+        return State(task=task)
+
+    def next(self, state: State) -> Instruction:
+        if state.summary is not None:
+            return Instruction(
+                "Report the summary.", context={"summary": state.summary}, final=True
+            )
+        return Instruction(f"Work on {state.task}.", replies=[self.complete])
+
+    @reply
+    def complete(self, state: State, summary: str) -> None:
+        """Report what was done."""
+        if not summary.strip():
+            raise SubmissionRejected("Summarize what was done")
+        state.summary = summary
+
+
+WORKFLOW = Echo
+'''
+
+
 def write_loop(config: HirakuConfig) -> None:
     directory = config.workflows_dir / "loop"
     directory.mkdir()
     (directory / "workflow.md").write_text(LOOP, encoding="utf-8")
+
+
+def write_echo(config: HirakuConfig) -> None:
+    directory = config.workflows_dir / "echo"
+    directory.mkdir()
+    (directory / "workflow.py").write_text(ECHO_PY, encoding="utf-8")
+    (directory / "workflow.md").write_text("---\nid: echo\n---\n", encoding="utf-8")
 
 
 def test_tools_and_prompts_are_fixed_per_workflow(config: HirakuConfig) -> None:
@@ -112,15 +155,17 @@ def test_prompts_start_sessions(config: HirakuConfig) -> None:
     started, invalid, listing = run(server, scenario)
     text = started.messages[0].content.text
     assert text.startswith("# Loop\n\nRun 3 experiments on sep10.")
-    assert '"reply": "complete"' in text
+    assert "final instruction" in text
+    assert "workflow_reply" not in text
     assert f"session `{listing[0]['session_id']}`" in text
+    assert listing[0]["status"] == "completed"
     assert len(listing) == 1
     assert "did not start" in invalid.messages[0].content.text
     assert "iterations" in invalid.messages[0].content.text
 
 
 def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
-    write_loop(config)
+    write_echo(config)
     server = create_server(config)
 
     async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
@@ -129,7 +174,7 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
                 "workflow_reply", {"reply": "complete", "instruction_id": 1}
             )
         )
-        first = payload(await client.call_tool("loop", {"task": "a"}))
+        first = payload(await client.call_tool("echo", {"task": "a"}))
         wrong = payload(
             await client.call_tool(
                 "workflow_reply", {"reply": "submit_run", "instruction_id": 1}
@@ -151,8 +196,8 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
                 },
             )
         )
-        payload(await client.call_tool("loop", {"task": "b"}))
-        payload(await client.call_tool("loop", {"task": "c"}))
+        payload(await client.call_tool("echo", {"task": "b"}))
+        payload(await client.call_tool("echo", {"task": "c"}))
         ambiguous = payload(
             await client.call_tool(
                 "workflow_reply",
@@ -178,7 +223,11 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
     assert "accepts: complete" in result["wrong"]["message"]
     assert result["invalid"]["status"] == "rejected"
     assert "summary" in result["invalid"]["message"]
-    assert result["done"]["result"] == {"summary": "Tried three ideas"}
+    assert result["done"]["completed"] is True
+    assert result["done"]["instruction"] == {
+        "text": "Report the summary.",
+        "context": {"summary": "Tried three ideas"},
+    }
     assert result["ambiguous"]["status"] == "rejected"
     assert "pass session_id" in result["ambiguous"]["message"]
 
@@ -234,12 +283,15 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     noisy = config.workflows_dir / "noisy"
     noisy.mkdir()
     (noisy / "workflow.py").write_text(
-        "from hiraku.workflow import Session, Workflow\n"
-        "class S(Session):\n    pass\n"
+        "from pydantic import BaseModel\n"
+        "from hiraku.workflow import Instruction, Workflow\n"
+        "class S(BaseModel):\n    pass\n"
         "class Noisy(Workflow):\n"
-        "    def start(self):\n"
+        "    def start(self) -> S:\n"
         "        print('stray output')\n"
-        "        return self.completion(S(), {'ok': True})\n"
+        "        return S()\n"
+        "    def next(self, state: S) -> Instruction:\n"
+        "        return Instruction('Done.', context={'ok': True}, final=True)\n"
         "WORKFLOW = Noisy\n",
         encoding="utf-8",
     )
@@ -258,7 +310,7 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
 
     names, result = anyio.run(main)
     assert "noisy" in names
-    assert json.loads(result.content[0].text)["result"] == {"ok": True}
+    assert json.loads(result.content[0].text)["instruction"]["context"] == {"ok": True}
 
 
 def test_workflows_read_current_project_state(config: HirakuConfig) -> None:

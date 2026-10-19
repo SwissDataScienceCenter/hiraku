@@ -753,13 +753,15 @@ def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
     response = result["response"]
     if "instruction" in response:
         instruction = response["instruction"]
-        click.echo(f"\nPending instruction {response['instruction_id']}:\n")
+        label = "Final" if response.get("completed") else "Pending"
+        click.echo(f"\n{label} instruction {response['instruction_id']}:\n")
         click.echo(instruction["text"])
-        replies = ", ".join(reply["reply"] for reply in instruction["replies"])
-        click.echo(f"\nReplies: {replies}")
-    elif response.get("completed"):
-        click.echo("\nResult:")
-        click.echo(json.dumps(response.get("result"), indent=2, sort_keys=True))
+        if response.get("completed"):
+            click.echo("\nResult:")
+            click.echo(json.dumps(instruction["context"], indent=2, sort_keys=True))
+        else:
+            replies = ", ".join(reply["reply"] for reply in instruction["replies"])
+            click.echo(f"\nReplies: {replies}")
 
 
 @session_group.command("cancel")

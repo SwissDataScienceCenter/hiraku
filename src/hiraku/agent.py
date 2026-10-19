@@ -8,7 +8,8 @@ Each workflow is a command, and each of its replies a subcommand:
 The driver hands every pending instruction to a coding agent, such as
 ``claude -p``, and sends the reply the agent writes to a file back to the
 workflow. It stops where the user decides, at an instruction that requires a
-user response, which the user answers with a reply subcommand. With
+user response, which the user answers with a reply subcommand, and after the
+agent carried out the final instruction, which takes no reply. With
 ``--interactive``, each agent step is a conversation with the user in the
 terminal instead of a headless run. The driver uses only the public workflow API
 (`Workflow.run_start`, `Workflow.run_reply`, and stored `Session`s), the same
@@ -164,7 +165,16 @@ def _workflow_command(workflow: Workflow) -> click.Group:
         options = _options(ctx)
         arguments = _arguments(start_model, values)
         session_id = _start_or_resume(workflow, options, arguments)
-        ctx.exit(_drive(workflow, session_id, options))
+        # A session that --session names after it ended is shown, not run again.
+        ended = Session.load(session_id, config=workflow.config).status != "active"
+        ctx.exit(
+            _drive(
+                workflow,
+                session_id,
+                options,
+                run_final=not options.session or not ended,
+            )
+        )
 
     group = click.Group(
         name=workflow.id,
@@ -372,8 +382,14 @@ def _several(workflow: Workflow, sessions: list[Session]) -> str:
 # Driving -------------------------------------------------------------------------
 
 
-def _drive(workflow: Workflow, session_id: str, options: Options) -> int:
+def _drive(
+    workflow: Workflow, session_id: str, options: Options, *, run_final: bool = True
+) -> int:
     """Let the agent answer instructions until a user decision or the end.
+
+    Args:
+        run_final: Whether the agent carries out the final instruction of a
+            completed session; otherwise it is only shown.
 
     Returns:
         The exit code: 0 when the session ended, `EXIT_WAITING` when it waits
@@ -382,9 +398,11 @@ def _drive(workflow: Workflow, session_id: str, options: Options) -> int:
     while True:
         session = Session.load(session_id, config=workflow.config)
         response = session.response
+        if session.status == "completed" and run_final:
+            _run_agent(workflow, response, 1, None, options)
         if session.status != "active":
-            result = json.dumps(response.get("result"), ensure_ascii=False)
-            click.echo(f"{session.status}: {result}")
+            context = (response.get("instruction") or {}).get("context")
+            click.echo(f"{session.status}: {json.dumps(context, ensure_ascii=False)}")
             return 0
         instruction = response["instruction"]
         if instruction["requires_user_response"]:
@@ -449,10 +467,15 @@ def _run_agent(
 ) -> tuple[str, dict[str, Any]]:
     """Run the agent once and return the reply it wrote.
 
+    For a final instruction, which takes no reply, return nothing.
+
     Raises:
         _NoReply: If the agent wrote no reply.
         ValueError: If the reply file is malformed.
     """
+    final = bool(response.get("completed"))
+    if final:
+        click.echo(f"[{response['instruction_id']} {_heading(response)}] final")
     directory = _directory(workflow, response) / str(attempt)
     directory.mkdir(parents=True, exist_ok=True)
     reply_file = directory / "reply.json"
@@ -460,7 +483,9 @@ def _run_agent(
     prompt_file = directory / "prompt.md"
     instruction_file = directory / "instruction.json"
     prompt_file.write_text(
-        render_prompt(response, reply_file, error, options.interactive),
+        render_prompt(
+            response, None if final else reply_file, error, options.interactive
+        ),
         encoding="utf-8",
     )
     instruction_file.write_text(
@@ -472,7 +497,7 @@ def _run_agent(
         "HIRAKU_SESSION_ID": response["session_id"],
         "HIRAKU_PROMPT_FILE": str(prompt_file),
         "HIRAKU_INSTRUCTION_FILE": str(instruction_file),
-        "HIRAKU_REPLY_FILE": str(reply_file),
+        **({} if final else {"HIRAKU_REPLY_FILE": str(reply_file)}),
     }
     try:
         if options.interactive:
@@ -490,6 +515,8 @@ def _run_agent(
             f"Cannot run the agent command {command[0]!r}; install it, or set "
             f"--agent-cmd or {COMMAND_VARIABLES[options.interactive]}"
         ) from exc
+    if final:
+        return "", {}
     if not reply_file.is_file():
         if options.interactive:
             raise _NoReply
@@ -599,11 +626,14 @@ def _resend(
 
 def render_prompt(
     response: dict[str, Any],
-    reply_file: Path,
+    reply_file: Path | None,
     error: str | None = None,
     interactive: bool = False,
 ) -> str:
-    """Render a pending instruction as a self-contained prompt for an agent."""
+    """Render an instruction as a self-contained prompt for an agent.
+
+    Without a reply file, the instruction is final and takes no reply.
+    """
     instruction = response["instruction"]
     parts = [instruction["text"]]
     if instruction.get("context") is not None:
@@ -614,18 +644,28 @@ def render_prompt(
         mode = (
             "The user is in this conversation. Start by telling them what you "
             "understand the instruction asks for and what you would do. Do not "
-            "change files, run commands, or write the reply until the user tells "
-            "you to go ahead; then carry out the step and write the reply."
+            "change files or run commands until the user tells you to go ahead; "
+            "then carry out the step"
+            + ("." if reply_file is None else " and write the reply.")
         )
     else:
         mode = (
             "The user sees your output but cannot answer; decide yourself and do "
             "not ask questions."
         )
+    header = (
+        f"---\nThis is instruction {response['instruction_id']} of Hiraku workflow "
+        f"session `{response['session_id']}`. {mode}"
+    )
+    if reply_file is None:
+        parts.append(
+            f"{header}\n\nThis is the final instruction of the session; it takes no "
+            "reply. Stop when you are done."
+        )
+        return "\n\n".join(parts) + "\n"
     replies = json.dumps(instruction["replies"], indent=1, ensure_ascii=False)
     parts.append(
-        f"---\nThis is instruction {response['instruction_id']} of Hiraku workflow "
-        f"session `{response['session_id']}`. {mode}\n\n"
+        f"{header}\n\n"
         f"When you are done, write exactly one reply as a JSON object to "
         f"`{reply_file}`:\n"
         '`{"reply": "<one of the replies below>", "arguments": {...}}`, with the '

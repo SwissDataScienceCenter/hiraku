@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from hiraku.errors import SubmissionRejected
 from hiraku.record import load_record
-from hiraku.workflow import Completion, Instruction, Session, Workflow, reply
+from hiraku.workflow import Instruction, Workflow, reply
 
 
-class DatasetSession(Session):
+class State(BaseModel):
     task: str
     count: int
+    phase: Literal["search", "shortfall", "done"] = "search"
     found: list[str] = Field(default_factory=list)
     shortfall_reason: str | None = None
+    outcome: Literal["completed", "partial"] | None = None
 
 
 class Autodataset(Workflow):
@@ -35,103 +37,102 @@ class Autodataset(Workflow):
         count: Annotated[
             int, Field(gt=0, description="Number of datasets to find.")
         ] = 5,
-    ) -> Instruction:
+    ) -> State:
         """Start dataset discovery for a task record."""
         task = task or self.config.active_record_id
         if task is None:
             raise SubmissionRejected("No active record; pass the task record ID")
         record = load_record(task, config=self.config)
-        session = DatasetSession(task=record.id, count=count)
-        return self._search(session)
+        return State(task=record.id, count=count)
+
+    def next(self, state: State) -> Instruction:
+        if state.phase == "done":
+            return Instruction(
+                self.markdown.section("## Done"),
+                context={
+                    "outcome": state.outcome,
+                    "task": state.task,
+                    "requested": state.count,
+                    "datasets": state.found,
+                    "shortfall_reason": state.shortfall_reason,
+                    "verified": (
+                        "record structure and recorded sources only; licensing and "
+                        "suitability were not verified by Hiraku"
+                    ),
+                },
+                final=True,
+            )
+        if state.phase == "shortfall":
+            return Instruction(
+                self.markdown.section("## Shortfall"),
+                context={
+                    "requested": state.count,
+                    "found": state.found,
+                    "reason": state.shortfall_reason,
+                },
+                replies=[self.continue_search, self.accept_partial],
+                requires_user_response=True,
+            )
+        return Instruction(
+            self.markdown.section("## Instructions"),
+            context={
+                "task": state.task,
+                "count": state.count,
+                "already_found": state.found,
+            },
+            replies=[self.complete, self.report_shortfall],
+        )
 
     @reply
     def complete(
         self,
-        session: DatasetSession,
+        state: State,
         record_ids: Annotated[
             list[str], Field(description="IDs of all dataset records found.")
         ],
-    ) -> Completion:
+    ) -> None:
         """Submit the requested number of dataset records."""
-        self._check_datasets(session, record_ids)
-        if len(record_ids) != session.count:
+        self._check_datasets(state, record_ids)
+        if len(record_ids) != state.count:
             raise SubmissionRejected(
-                f"Expected {session.count} dataset records, got {len(record_ids)}; "
+                f"Expected {state.count} dataset records, got {len(record_ids)}; "
                 "reply with report_shortfall if fewer suitable datasets exist"
             )
-        session.found = list(record_ids)
-        return self._finish(session, "completed")
+        state.found = list(record_ids)
+        state.phase, state.outcome = "done", "completed"
 
     @reply
     def report_shortfall(
         self,
-        session: DatasetSession,
+        state: State,
         record_ids: Annotated[
             list[str], Field(description="IDs of the dataset records found.")
         ],
         reason: Annotated[
             str, Field(description="Why no further suitable datasets were found.")
         ],
-    ) -> Instruction:
+    ) -> None:
         """Report that fewer suitable datasets exist than requested."""
-        self._check_datasets(session, record_ids)
-        if len(record_ids) >= session.count:
+        self._check_datasets(state, record_ids)
+        if len(record_ids) >= state.count:
             raise SubmissionRejected(
                 "This is not a shortfall; reply with complete instead"
             )
-        session.found = list(record_ids)
-        session.shortfall_reason = reason
-        return self.instruction(
-            session,
-            self.markdown.section("## Shortfall"),
-            context={
-                "requested": session.count,
-                "found": session.found,
-                "reason": reason,
-            },
-            requires_user_response=True,
-            replies=[self.continue_search, self.accept_partial],
-        )
+        state.found = list(record_ids)
+        state.shortfall_reason = reason
+        state.phase = "shortfall"
 
     @reply
-    def continue_search(self, session: DatasetSession) -> Instruction:
+    def continue_search(self, state: State) -> None:
         """Continue searching for the missing datasets."""
-        return self._search(session)
+        state.phase = "search"
 
     @reply
-    def accept_partial(self, session: DatasetSession) -> Completion:
+    def accept_partial(self, state: State) -> None:
         """Accept the datasets found so far as a partial result."""
-        return self._finish(session, "partial")
+        state.phase, state.outcome = "done", "partial"
 
-    def _finish(self, session: DatasetSession, outcome: str) -> Completion:
-        return self.completion(
-            session,
-            {
-                "outcome": outcome,
-                "task": session.task,
-                "requested": session.count,
-                "datasets": session.found,
-                "shortfall_reason": session.shortfall_reason,
-                "verified": (
-                    "record structure and recorded sources only; licensing and "
-                    "suitability were not verified by Hiraku"
-                ),
-            },
-        )
-
-    def _search(self, session: DatasetSession) -> Instruction:
-        return self.instruction(
-            session,
-            self.markdown.section("## Instructions"),
-            context={
-                "task": session.task,
-                "count": session.count,
-                "already_found": session.found,
-            },
-            replies=[self.complete, self.report_shortfall],
-        )
-
-    def _check_datasets(self, session: DatasetSession, record_ids: list[str]) -> None:
+    def _check_datasets(self, state: State, record_ids: list[str]) -> None:
         if len(set(record_ids)) != len(record_ids):
             raise SubmissionRejected("Dataset record IDs must be distinct")
         for record_id in record_ids:
@@ -140,9 +141,9 @@ class Autodataset(Workflow):
                 raise SubmissionRejected(
                     f"Record {record_id!r} must have type 'dataset'"
                 )
-            if record.parent_id != session.task:
+            if record.parent_id != state.task:
                 raise SubmissionRejected(
-                    f"Record {record_id!r} must be a child of task {session.task!r}"
+                    f"Record {record_id!r} must be a child of task {state.task!r}"
                 )
             sources = record.to_dict().get("sources")
             if not _has_sources(sources):

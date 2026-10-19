@@ -30,7 +30,8 @@ fresh random token, and the agent must:
 
 After each step the agent tells you how many steps remain and asks whether to
 run the next one. It replies `step` only after you agree, or `finish` to stop.
-After the last step, the session completes with the number of steps done.
+After the last step, or after `finish`, the session completes with a final
+instruction: the agent tells you how many steps ran.
 
 ## What to look for
 

@@ -341,7 +341,8 @@ that continue it:
    unchanged. Repeating an identical reply is safe; a `stale` status means the
    instruction moved on, so continue from the one returned.
 4. A `rejected` or `not_ready` response keeps the same instruction pending; fix
-   the input or check again later. Stop when a response has `completed: true`.
+   the input or check again later. A response with `completed: true` holds the
+   final instruction: carry it out, then stop; it takes no reply.
 
 To resume, find the session with `session_list` and read its pending
 instruction with `session_show`; do not start a new session. Before repeating
