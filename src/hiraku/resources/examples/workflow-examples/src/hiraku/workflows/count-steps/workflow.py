@@ -3,26 +3,23 @@
 from __future__ import annotations
 
 import secrets
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
 from hiraku.errors import EventRejected
 from hiraku.markdown import render
-from hiraku.workflow import Instruction, Workflow, event
+from hiraku.workflow import Instruction, Workflow, event, state
 
 
 def _token() -> str:
     return secrets.token_hex(4)
 
 
-class State(BaseModel):
+class Counter(BaseModel):
     count: int
     step: int = 1
     token: str = Field(default_factory=_token)
-    # running: the agent runs the current step; waiting: the step was
-    # acknowledged and the user decides whether to go on; finished: done.
-    state: Literal["running", "waiting", "finished"] = "running"
 
 
 class CountSteps(Workflow):
@@ -36,59 +33,60 @@ class CountSteps(Workflow):
     def start(
         self,
         count: Annotated[int, Field(gt=0, description="Number of steps.")] = 5,
-    ) -> State:
+    ) -> Counter:
         """Start counting steps to check the harness; runs the first step."""
-        return State(count=count)
+        return Counter(count=count)
 
-    def next(self, state: State) -> Instruction:
-        if state.state == "finished":
-            return Instruction(
-                self.markdown.section("## Done"),
-                context={"steps": state.step, "count": state.count},
-                final=True,
-            )
-        if state.state == "waiting":
-            return Instruction(
-                self.markdown.section("## Next"),
-                context={
-                    "done": state.step,
-                    "remaining": state.count - state.step,
-                },
-                requires_user_response=True,
-            )
+    # States: the agent runs a step, then the user decides at the gate.
+
+    @state("running", start=True)
+    def run_step(self, counter: Counter) -> Instruction:
         # The step's values fill the {{placeholders}} of the section.
-        values = {"step": state.step, "count": state.count, "token": state.token}
+        values = {"step": counter.step, "count": counter.count, "token": counter.token}
         return Instruction(
             render(self.markdown.section("## Step"), values), context=values
         )
 
-    # Each state accepts the events whose source names it: the agent only
-    # acknowledges a running step; the user goes on or finishes at the gate.
+    @state("waiting")
+    def ask_to_continue(self, counter: Counter) -> Instruction:
+        return Instruction(
+            self.markdown.section("## Next"),
+            context={"done": counter.step, "remaining": counter.count - counter.step},
+            requires_user_response=True,
+        )
+
+    @state("finished", final=True)
+    def report(self, counter: Counter) -> Instruction:
+        return Instruction(
+            self.markdown.section("## Done"),
+            context={"steps": counter.step, "count": counter.count},
+        )
+
+    # Events: only the user goes on or finishes, at the gate after a step.
+
     @event(source="running", dest=["waiting", "finished"])
     def ack(
         self,
-        state: State,
+        counter: Counter,
         token: Annotated[str, Field(description="Token of the current step.")],
-    ) -> None:
+    ) -> str:
         """Acknowledge the current step with its token."""
-        if token != state.token:
+        if token != counter.token:
             raise EventRejected(
-                f"Token {token!r} does not match step {state.step}; send the "
+                f"Token {token!r} does not match step {counter.step}; send the "
                 "token from the current instruction"
             )
-        state.state = "finished" if state.step >= state.count else "waiting"
+        return "finished" if counter.step >= counter.count else "waiting"
 
     @event(source="waiting", dest="running")
-    def step(self, state: State) -> None:
+    def step(self, counter: Counter) -> None:
         """Run the next step."""
-        state.step += 1
-        state.token = _token()
-        state.state = "running"
+        counter.step += 1
+        counter.token = _token()
 
     @event(source="waiting", dest="finished")
-    def finish(self, state: State) -> None:
+    def finish(self, counter: Counter) -> None:
         """End the session after the current step."""
-        state.state = "finished"
 
 
 WORKFLOW = CountSteps

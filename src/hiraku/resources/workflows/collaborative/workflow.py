@@ -1,4 +1,4 @@
-"""Collaborative research: the agent does each step, the user reviews it."""
+"""Collaborative research: the agent does each step and the user approves it."""
 
 from __future__ import annotations
 
@@ -9,44 +9,27 @@ from pydantic import BaseModel, Field
 from hiraku.errors import EventRejected, NotReady
 from hiraku.git import GitRepository
 from hiraku.record import Record, load_record
-from hiraku.workflow import Instruction, Workflow, event
+from hiraku.workflow import Instruction, Workflow, event, state
 
-Step = Literal["draft", "implement", "launch", "analyze"]
-STEPS = ["draft", "implement", "launch", "analyze"]
 Verdict = Literal["supports", "refutes", "inconclusive"]
-# The step a review offers after each step; after analyze, the next experiment.
-NEXT: dict[str, str] = {
-    "draft": "implement",
-    "implement": "launch",
-    "launch": "analyze",
-    "analyze": "draft",
-}
+STEPS = ["draft", "implement", "launch", "analyze"]
 
 
-class State(BaseModel):
+class Experiments(BaseModel):
     task: str
     entrypoint: str
     rounds: int
-    # The agent works in a step's state; the user then reviews it.
-    state: Literal["draft", "implement", "launch", "analyze", "review", "finished"] = (
-        "draft"
-    )
-    step: Step = "draft"
-    # The result of the step under review.
-    review: dict[str, Any] | None = None
     experiment: str | None = None
-    feedback: str | None = None
     results: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class Collaborative(Workflow):
     """Draft, implement, launch, and analyze experiments with the user.
 
-    Each step is a pair: the agent does the work and reports it with an event
-    such as ``drafted``, which Hiraku checks and records; then the user reviews
-    the result and chooses the next step, such as ``implement``, or ``revise``
-    or ``finish``. Hiraku writes the experiment records, checks commits and run
-    attribution, and stops offering new experiments after ``rounds``.
+    The agent works through the four steps of each experiment and gets the
+    user's approval before it reports a step with an event such as ``drafted``,
+    which Hiraku checks and records. Hiraku writes the experiment records,
+    checks commits and run attribution, and stops after ``rounds`` experiments.
     """
 
     # Setting: rules for every step, added to each step's instruction.
@@ -61,94 +44,65 @@ class Collaborative(Workflow):
             str, Field(description="Entrypoint of the task to launch.")
         ] = "train",
         rounds: Annotated[int, Field(gt=0, description="Most experiments to run.")] = 3,
-    ) -> State:
+    ) -> Experiments:
         """Start collaborative research on a task record."""
         task = task or self.config.active_record_id
         if task is None:
             raise EventRejected("No active record; pass the task record ID")
         # Raises if the task does not declare the entrypoint, rejecting the start.
         load_record(task, config=self.config).entrypoint(entrypoint, config=self.config)
-        return State(task=task, entrypoint=entrypoint, rounds=rounds)
+        return Experiments(task=task, entrypoint=entrypoint, rounds=rounds)
 
-    def next(self, state: State) -> Instruction:
-        if state.state == "finished":
-            return Instruction(
-                self.markdown.section("## Done"),
-                context={"task": state.task, "results": state.results},
-                final=True,
+    # States: one per step of an experiment ------------------------------------------
+
+    @state("draft", start=True)
+    def drafting(self, experiments: Experiments) -> Instruction:
+        context = {"task": experiments.task, "previous": experiments.results}
+        return self._step("## Draft", context)
+
+    @state("implement")
+    def implementing(self, experiments: Experiments) -> Instruction:
+        return self._step("## Implement", self._experiment_context(experiments))
+
+    @state("launch")
+    def launching(self, experiments: Experiments) -> Instruction:
+        context = self._experiment_context(experiments)
+        record = self._experiment(experiments)
+        context["command"] = (
+            f"hiraku launch {experiments.entrypoint} --record {record.id} "
+            f"--commit {record.commit}"
+        )
+        return self._step("## Launch", context)
+
+    @state("analyze")
+    def analyzing(self, experiments: Experiments) -> Instruction:
+        record = self._experiment(experiments)
+        runs = _runs(record, self)
+        if not any(run["metrics"] for run in runs):
+            raise NotReady(
+                f"The runs of {record.id!r} have no metrics yet; analyze once they "
+                "finish"
             )
-        if state.state == "review":
-            following = NEXT[state.step]
-            more = following != "draft" or len(state.results) < state.rounds
-            steps = [getattr(self, following)] if more else []
-            return Instruction(
-                self.markdown.section("## Review"),
-                context={
-                    "step": state.step,
-                    "result": state.review,
-                    "rounds_left": state.rounds - len(state.results),
-                },
-                # The review state accepts every step; offer the one that follows.
-                events=[*steps, self.revise, self.finish],
-                requires_user_response=True,
-            )
-        reports = {
-            "draft": self.drafted,
-            "implement": self.implemented,
-            "launch": self.launched,
-            "analyze": self.analyzed,
+        context = {
+            **self._experiment_context(experiments),
+            "runs": runs,
+            "previous": experiments.results,
         }
-        text = self.markdown.section(f"## {state.step.title()}")
+        return self._step("## Analyze", context)
+
+    @state("finished", final=True)
+    def summarizing(self, experiments: Experiments) -> Instruction:
         return Instruction(
-            f"{text}\n\n{self.rules}" if self.rules else text,
-            context=self._context(state),
-            events=[reports[state.step], self.finish],
+            self.markdown.section("## Done"),
+            context={"task": experiments.task, "results": experiments.results},
         )
 
-    # Steps: the user's choice at a review -----------------------------------------
+    # Events: the agent's approved results, checked and recorded ----------------------
 
-    @event(source="review", dest="draft")
-    def draft(self, state: State) -> None:
-        """Draft the next experiment."""
-        state.experiment = None
-        self._goto(state, "draft")
-
-    @event(source="review", dest="implement")
-    def implement(self, state: State) -> None:
-        """Implement the drafted experiment."""
-        self._goto(state, "implement")
-
-    @event(source="review", dest="launch")
-    def launch(self, state: State) -> None:
-        """Launch the implemented experiment."""
-        self._goto(state, "launch")
-
-    @event(source="review", dest="analyze")
-    def analyze(self, state: State) -> None:
-        """Analyze the experiment's runs once they have metrics."""
-        self._goto(state, "analyze")
-
-    @event(source="review", dest=STEPS)
-    def revise(
-        self,
-        state: State,
-        feedback: Annotated[str, Field(description="What to change in this step.")],
-    ) -> None:
-        """Redo the reviewed step with the user's feedback."""
-        state.feedback = feedback
-        state.state = state.step
-
-    @event(source=[*STEPS, "review"], dest="finished")
-    def finish(self, state: State) -> None:
-        """End the session and summarize the results."""
-        state.state = "finished"
-
-    # Reports: the agent's results, checked and recorded --------------------------
-
-    @event(source="draft", dest="review")
+    @event(source="draft", dest="implement")
     def drafted(
         self,
-        state: State,
+        experiments: Experiments,
         record_id: Annotated[
             str, Field(description="Short ID of the experiment record.")
         ],
@@ -156,64 +110,43 @@ class Collaborative(Workflow):
         hypothesis: Annotated[str, Field(description="What the experiment tests.")],
         change: Annotated[str, Field(description="The planned code change.")],
     ) -> None:
-        """Submit the drafted experiment."""
-        body = f"## Change\n\n{change.strip()}\n"
-        if state.experiment is None:
-            record = Record.create(
-                record_id,
-                parent_id=state.task,
-                type="experiment",
-                status="drafted",
-                summary=summary,
-                hypothesis=hypothesis,
-                markdown=body,
-                activate=False,
-                config=self.config,
-            )
-        elif record_id != state.experiment:
-            raise EventRejected(
-                f"Revise the draft in place: send record_id {state.experiment!r}"
-            )
-        else:
-            record = self._experiment(state)
-            record.summary = summary
-            record.hypothesis = hypothesis
-            record.markdown = body
-            record.save()
-        state.experiment = record.id
-        state.state = "review"
-        state.review = {
-            "record_id": record.id,
-            "summary": summary,
-            "hypothesis": hypothesis,
-            "change": change,
-        }
+        """Submit the drafted experiment the user approved."""
+        record = Record.create(
+            record_id,
+            parent_id=experiments.task,
+            type="experiment",
+            status="drafted",
+            summary=summary,
+            hypothesis=hypothesis,
+            markdown=f"## Change\n\n{change.strip()}\n",
+            activate=False,
+            config=self.config,
+        )
+        experiments.experiment = record.id
 
-    @event(source="implement", dest="review")
+    @event(source="implement", dest="launch")
     def implemented(
         self,
-        state: State,
+        experiments: Experiments,
         commit: Annotated[str, Field(description="Commit with the change.")],
         notes: Annotated[str, Field(description="What changed, briefly.")],
     ) -> None:
         """Submit the commit that implements the experiment."""
         sha = GitRepository(self.config).resolve(commit)
-        record = self._experiment(state)
+        record = self._experiment(experiments)
         record.commit = sha
         record.status = "implemented"
         record.save()
-        state.state = "review"
-        state.review = {"commit": sha, "notes": notes}
 
-    @event(source="launch", dest="review")
-    def launched(self, state: State) -> None:
+    @event(source="launch", dest="analyze")
+    def launched(self, experiments: Experiments) -> None:
         """Report that the experiment's run is tracked."""
-        record = self._experiment(state)
+        record = self._experiment(experiments)
         runs = record.runs(config=self.config)
         if not runs:
             raise NotReady(
-                f"No run is attributed to {record.id!r} yet; send it again once the "
-                "launch is tracked"
+                f"No run is attributed to {record.id!r} yet; send the event again "
+                "once the launch is tracked"
             )
         if any(run.commit not in (None, record.commit) for run in runs):
             raise EventRejected(
@@ -221,74 +154,55 @@ class Collaborative(Workflow):
             )
         record.status = "launched"
         record.save()
-        state.state = "review"
-        state.review = {"runs": _runs(record, self)}
 
-    @event(source="analyze", dest="review")
+    @event(source="analyze", dest=["draft", "finished"])
     def analyzed(
         self,
-        state: State,
+        experiments: Experiments,
         verdict: Annotated[
             Verdict, Field(description="Whether the runs support the hypothesis.")
         ],
         conclusion: Annotated[str, Field(description="A few sentences.")],
-    ) -> None:
+    ) -> str:
         """Submit the verdict and conclusion of the experiment."""
-        record = self._experiment(state)
+        record = self._experiment(experiments)
         record.status = "analyzed"
         record.verdict = verdict
         record.conclusion = conclusion
         record.save()
-        result = {"record_id": record.id, "verdict": verdict}
-        # A revised analysis replaces the earlier result of the same experiment.
-        state.results = [
-            *(item for item in state.results if item["record_id"] != record.id),
-            result,
-        ]
-        state.state = "review"
-        state.review = {**result, "conclusion": conclusion}
+        experiments.results.append({"record_id": record.id, "verdict": verdict})
+        experiments.experiment = None
+        return "draft" if len(experiments.results) < experiments.rounds else "finished"
+
+    @event(source=STEPS, dest="finished")
+    def finish(self, experiments: Experiments) -> None:
+        """End the session early and summarize the results."""
 
     # Helpers ----------------------------------------------------------------------
 
-    def _goto(self, state: State, step: Step) -> None:
-        state.step = state.state = step
-        state.feedback = None
-        state.review = None
+    def _step(self, section: str, context: dict[str, Any]) -> Instruction:
+        text = self.markdown.section(section)
+        return Instruction(
+            f"{text}\n\n{self.rules}" if self.rules else text, context=context
+        )
 
-    def _context(self, state: State) -> dict[str, Any]:
-        context: dict[str, Any] = {"task": state.task, "feedback": state.feedback}
-        if state.step == "draft":
-            context["previous"] = state.results
-            if state.experiment is not None:
-                context["revise"] = state.experiment
-            return context
-        record = self._experiment(state)
-        context["experiment"] = {
-            "record_id": record.id,
-            "summary": getattr(record, "summary", None),
-            "hypothesis": getattr(record, "hypothesis", None),
-            "change": record.markdown.strip(),
+    def _experiment_context(self, experiments: Experiments) -> dict[str, Any]:
+        record = self._experiment(experiments)
+        return {
+            "task": experiments.task,
+            "experiment": {
+                "record_id": record.id,
+                "summary": getattr(record, "summary", None),
+                "hypothesis": getattr(record, "hypothesis", None),
+                "change": record.markdown.strip(),
+                "commit": record.commit,
+            },
         }
-        if state.step == "launch":
-            context["command"] = (
-                f"hiraku launch {state.entrypoint} --record {record.id} "
-                f"--commit {record.commit}"
-            )
-        if state.step == "analyze":
-            runs = _runs(record, self)
-            if not any(run["metrics"] for run in runs):
-                raise NotReady(
-                    f"The runs of {record.id!r} have no metrics yet; analyze once "
-                    "they finish"
-                )
-            context["runs"] = runs
-            context["previous"] = state.results
-        return context
 
-    def _experiment(self, state: State) -> Record:
-        if state.experiment is None:
+    def _experiment(self, experiments: Experiments) -> Record:
+        if experiments.experiment is None:
             raise EventRejected("No experiment is drafted yet")
-        return load_record(state.experiment, config=self.config)
+        return load_record(experiments.experiment, config=self.config)
 
 
 def _runs(record: Record, workflow: Workflow) -> list[dict[str, Any]]:

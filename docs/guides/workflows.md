@@ -21,14 +21,16 @@ A workflow consists of three concepts:
   accepts, each with its argument schema. The final instruction accepts no
   events: it ends the session, and its context is the session's result. The
   agent still carries it out, for example by summarizing the results for you.
-- **Event**: what continues a session: a report from the agent, such as
-  `implemented` with a commit, or a decision of yours, such as `revise` with
-  feedback. The workflow checks each event and may reject it.
+- **State**: where a session is, such as `draft` or `waiting`. Each state has
+  one instruction. A session begins in the start state and ends in a final
+  state, whose instruction is the final one.
+- **Event**: what moves a session from a state to another: a report from the
+  agent, such as `implemented` with a commit, or a decision of yours, such as
+  `step`. The workflow checks each event and may reject it.
 
-The terms come from state machines: a workflow's events move it between
-states, and a workflow that declares its states can be drawn as a diagram (see
-[States and graphs](#states-and-graphs)). Hiraku is not a state machine
-framework, though: workflow code stays plain Python.
+The terms come from state machines, and every workflow can be drawn as one
+(see [States and graphs](#states-and-graphs)). Workflow code stays plain
+Python, though: methods declare the states and events.
 
 ## Use a workflow
 
@@ -166,16 +168,14 @@ from the agent's MCP configuration, not from the agent's shell.
 instruction to a coding agent and stops whenever you decide:
 
 ```bash
-hiraku-agent collaborative --task cifar --rounds 2   # start; the agent drafts
-hiraku-agent collaborative revise --feedback "Keep SGD"
-hiraku-agent collaborative implement                 # the agent implements
-hiraku-agent collaborative launch
-hiraku-agent collaborative finish
+hiraku-agent count-steps --count 3   # start; the agent runs step 1
+hiraku-agent count-steps step        # you go on; the agent runs step 2
+hiraku-agent count-steps finish      # or you stop
 ```
 
 Each workflow is a command whose options are its start arguments, and each
 event is a subcommand whose options are the event's arguments; see
-`hiraku-agent collaborative --help`. Text arguments are passed as given, other
+`hiraku-agent count-steps --help`. Text arguments are passed as given, other
 values are parsed as JSON, and the workflow validates them.
 
 - `hiraku-agent WORKFLOW` starts a session, or resumes the workflow's active
@@ -215,8 +215,9 @@ prompt there (the default ends its options with `--`), and the environment holds
 and `HIRAKU_INSTRUCTION_FILE`, the response with the instruction as JSON. A
 script can therefore stand in for the agent.
 
-Sessions are shared with the MCP server: draft an experiment in Claude Code
-and launch it later with `hiraku-agent collaborative launch` from a terminal.
+Sessions are shared with the MCP server: start a session in Claude Code and
+continue it later with `hiraku-agent <workflow> --session <session-id>` from a
+terminal.
 The instruction ID and a per-session lock keep the two from applying
 conflicting events.
 
@@ -258,19 +259,18 @@ Create `hiraku/workflows/<workflow-id>/workflow.py` exporting `WORKFLOW`, and a
 `workflow.md` with the prompts:
 
 ```python
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
 from hiraku.errors import EventRejected
-from hiraku.workflow import Instruction, Workflow, event
+from hiraku.workflow import Instruction, Workflow, event, state
 
 
-class State(BaseModel):
-    state: Literal["search", "choose", "done"] = "search"
+class Questions(BaseModel):
     topic: str
-    questions: list[str] = []
-    question: str | None = None
+    candidates: list[str] = []
+    chosen: str | None = None
 
 
 class Review(Workflow):
@@ -280,42 +280,43 @@ class Review(Workflow):
 
     def start(
         self, topic: Annotated[str, Field(description="Research topic.")]
-    ) -> State:
+    ) -> Questions:
         """Start a literature review."""
-        return State(topic=topic)
+        return Questions(topic=topic)
 
-    def next(self, state: State) -> Instruction:
-        if state.state == "done":
-            return Instruction(
-                self.markdown.section("## Done"),
-                context={"question": state.question},
-                final=True,
-            )
-        if state.state == "choose":
-            return Instruction(
-                self.markdown.section("## Choose"),
-                context={"questions": state.questions},
-                requires_user_response=True,
-            )
+    @state("search", start=True)
+    def searching(self, questions: Questions) -> Instruction:
         return Instruction(
-            self.markdown.section("## Search"), context={"topic": state.topic}
+            self.markdown.section("## Search"), context={"topic": questions.topic}
+        )
+
+    @state("choose")
+    def choosing(self, questions: Questions) -> Instruction:
+        return Instruction(
+            self.markdown.section("## Choose"),
+            context={"candidates": questions.candidates},
+            requires_user_response=True,
+        )
+
+    @state("done", final=True)
+    def confirming(self, questions: Questions) -> Instruction:
+        return Instruction(
+            self.markdown.section("## Done"), context={"question": questions.chosen}
         )
 
     @event(source="search", dest="choose")
-    def propose(self, state: State, questions: list[str]) -> None:
+    def propose(self, questions: Questions, candidates: list[str]) -> None:
         """Submit candidate research questions."""
-        if len(questions) < self.min_questions:
+        if len(candidates) < self.min_questions:
             raise EventRejected(f"Propose at least {self.min_questions} questions")
-        state.questions = questions
-        state.state = "choose"
+        questions.candidates = candidates
 
     @event(source="choose", dest="done")
-    def choose(self, state: State, question: str) -> None:
+    def choose(self, questions: Questions, question: str) -> None:
         """Record the question the user chose."""
-        if question not in state.questions:
-            raise EventRejected(f"Choose one of {state.questions}")
-        state.question = question
-        state.state = "done"
+        if question not in questions.candidates:
+            raise EventRejected(f"Choose one of {questions.candidates}")
+        questions.chosen = question
 
 
 WORKFLOW = Review
@@ -335,7 +336,7 @@ candidate research questions.
 
 ## Choose
 
-Present the questions and ask the user which one to pursue. Send the event
+Present the candidates and ask the user which one to pursue. Send the event
 `choose` with the question they pick.
 
 ## Done
@@ -353,30 +354,33 @@ The rules are deliberately small:
   front matter; other front-matter fields are kept as metadata. The class body
   follows Pydantic rules: constants need `ClassVar[...]`, and `__init__` is not
   overridden.
-- The workflow's **state model** is a Pydantic model you define, like `State`
-  above. It is stored as JSON in the session, so its fields must be
-  JSON-serializable. Its `state` field names where the session is; see
-  [States and graphs](#states-and-graphs).
-- `start` returns the first state of a new session; its return annotation
-  names the state model. Its signature and docstring define how the workflow
-  is started: they become the MCP tool and prompt named after the workflow.
-  Use `Annotated[..., Field()]` for parameter descriptions and constraints.
-- `next(state)` returns the `Instruction` for a state. Every instruction comes
-  from here: after `start` and after each accepted event, Hiraku calls `next`
-  and stores what it returns. `next` may read records and runs, but must not
-  change the state; Hiraku reports a change as an error. An instruction with
-  `final=True` accepts no events and completes the session.
-- `@event` marks a method that continues a session. Its first parameter is
-  the state, annotated with the state model; the other parameters and the
-  docstring define the event's arguments and description. An event changes
-  the state in place and returns nothing. Hiraku loads the state, checks that
+- `start` handles the start arguments: its signature and docstring define how
+  the workflow is started, and they become the MCP tool and prompt named after
+  the workflow. Use `Annotated[..., Field()]` for parameter descriptions and
+  constraints. `start` returns the workflow's **data**, a Pydantic model you
+  define and name after what it holds, like `Questions` above. The data is
+  stored as JSON in the session, so its fields must be JSON-serializable. A
+  workflow without data declares `def start(...) -> None`.
+- `@state("name")` declares a state, and the method builds its `Instruction`.
+  Exactly one state has `start=True`, where sessions begin, and at least one
+  has `final=True`; a final state's instruction is the session's last, and its
+  context is the session's result. A state method may read records and runs,
+  but must not change the data; Hiraku reports a change as an error.
+- `@event(source=..., dest=...)` declares an event: the states that accept it
+  and the states it moves to. Its other parameters and docstring define the
+  event's arguments and description. An event changes the data in place. With
+  one destination it returns nothing, and with several it returns the state it
+  chooses, e.g. `return "done" if finished else "waiting"`. Hiraku checks that
   the current instruction accepts the event and that its arguments match,
-  calls the event and then `next`, and saves the result atomically. An event
-  cannot be named `start`, `next`, or like a `Workflow` method such as `save`.
+  calls the event, enters the destination state, and saves the result
+  atomically. A state or event method cannot be named `start` or like a
+  `Workflow` method such as `save`.
+- State and event methods take the data as their first parameter, annotated
+  with the model `start` returns; in a workflow without data, they take none.
 - Raise `EventRejected` for invalid input and `NotReady` when valid input
-  refers to evidence that has not arrived yet, in an event or in `next`.
-  Nothing is saved in either case. A valid alternative, such as revising,
-  skipping, or stopping, is a normal event that changes the state.
+  refers to evidence that has not arrived yet, in an event or in a state
+  method. Nothing is saved in either case. A valid alternative, such as
+  skipping or stopping, is a normal event.
 - `self.markdown.section("## Search")` returns a section of this workflow's
   `workflow.md`, including its subsections, and `self.text` the whole body.
   Select a section by its heading line as written: the level must match, so
@@ -405,8 +409,9 @@ The MCP server loads workflow code and prompts when it starts. A workflow that
 fails to load is logged to the server's stderr and left out;
 `hiraku workflow list` in a terminal shows the error. After editing a workflow,
 reconnect the MCP server. Existing sessions
-continue with the new code if their stored state still validates against the
-state model and their pending events still exist; otherwise their events
+continue with the new code if their state is still declared, their stored data
+still validates against the data model, and their pending events still exist;
+otherwise their events
 are rejected, and they remain inspectable.
 Keep workflows compatible with existing sessions, or start new ones.
 Workflow code is trusted project code: loading it executes it.
@@ -416,30 +421,24 @@ Test a workflow without an agent with `hiraku workflow start` and
 
 ```bash
 echo '{"topic": "protein folding"}' | hiraku workflow start review --arguments-file -
-echo '{"questions": ["Q1", "Q2"]}' | hiraku workflow send-event <session-id> propose --instruction-id 1 --arguments-file -
+echo '{"candidates": ["Q1", "Q2"]}' | hiraku workflow send-event <session-id> propose --instruction-id 1 --arguments-file -
 ```
 
 ### States and graphs
 
-`@event(source=..., dest=...)` declares the states in which an event is
-accepted and the states it may move to. The state model's `state` field lists
-every state as a `Literal` and defaults to the start state, and an event sets
-it, as `propose` and `choose` do above. With these declarations:
+Hiraku owns a session's current state: a session begins in the start state,
+and only declared events move it, to one of their destinations. Each
+instruction accepts the events whose `source` names its state, so a state
+method lists none. It may narrow them, e.g.
+`Instruction(..., events=[self.finish])` while a step is not available yet;
+listing an event the state does not accept is an error.
 
-- Each instruction accepts the events whose `source` names the current state,
-  so `next` lists none. It may narrow them, e.g.
-  `Instruction(..., events=[self.revise, self.finish])` when a step is not
-  available yet; listing an event the state does not accept is an error.
-- After each event, the `state` field must name one of its `dest` states, or
-  Hiraku reports an error and saves nothing. `start` must return the start
-  state.
-- A state that accepts no events is final, and only it has a final
-  instruction.
-- When the workflow loads, Hiraku checks that every state named by an event
-  exists and that every state can be reached from the start state.
-
-Hiraku then draws the workflow as a Mermaid state diagram, with one edge per
-event:
+When a workflow loads, Hiraku checks its states and events: each state is
+declared once, exactly one is the start state and at least one is final,
+every state an event names exists, a final state accepts no events and every
+other state accepts at least one, and every state can be reached from the
+start state. Then it draws the workflow as a Mermaid state diagram, with one
+edge per event:
 
 ```bash
 hiraku workflow graph review
@@ -454,22 +453,20 @@ stateDiagram-v2
   done --> [*]
 ```
 
-The MCP server serves the same diagram as `hiraku://workflows/<id>/graph`.
-Declaring states is optional: a workflow whose events are bare `@event`
-methods lists the events each instruction accepts instead, e.g.
-`Instruction(..., events=[self.propose])`, and has no graph. A workflow
-declares states for all its events or for none.
+The MCP server serves the same diagram as `hiraku://workflows/<id>/graph`, and
+`hiraku session show` prints a session's current state.
 
 ## Bundled workflows
 
 `hiraku init` installs **collaborative**, which runs experiments on a task in
-four steps: draft, implement, launch, and analyze. The agent does each step
-and reports it with an event such as `drafted` or `implemented`; Hiraku writes
-the experiment record, binds the resolved commit, checks that the runs are
-attributed to the experiment and its commit, and records the verdict. After
-each step you review the result and choose the next step, `revise` with
-feedback, or `finish`. A new experiment is offered only within the `rounds`
-budget. The same session runs over MCP or step by step with `hiraku-agent`.
+four states: draft, implement, launch, and analyze. The agent does each step,
+shows you the result and revises it with you, and reports it with an event such
+as `drafted` or `implemented` once you approve; Hiraku writes the experiment
+record, binds the resolved commit, checks that the runs are attributed to the
+experiment and its commit, and records the verdict. After `rounds`
+experiments, or when you ask to `finish`, the agent summarizes the results.
+The approval happens in the conversation, so use collaborative over MCP or
+with `hiraku-agent --interactive`; a headless agent has no one to ask.
 
 Two examples add more workflows:
 

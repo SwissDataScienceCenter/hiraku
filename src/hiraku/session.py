@@ -45,21 +45,23 @@ class HistoryEntry(BaseModel):
 class Session(BaseModel):
     """The stored state of one workflow invocation.
 
-    The runtime owns the session; workflow code never sees it. A workflow's own
-    data is its state, a model returned by ``start`` and changed by events,
-    stored as JSON in `data`. Sessions are stored in ``hiraku/sessions/``.
+    The runtime owns the session; workflow code never sees it. The session
+    records the workflow's current state, which only declared events change,
+    and the workflow's data: the model ``start`` returns, changed by events,
+    stored as JSON. Sessions are stored in ``hiraku/sessions/``.
 
     Attributes:
         id: Session ID, assigned when the session starts.
         workflow: ID of the workflow that owns the session.
-        status: ``active`` until its final instruction or cancellation.
+        status: ``active`` until it reaches a final state or is cancelled.
+        state: The workflow's current state.
         instruction_id: Number of the current instruction; events must name it.
         events: Events the current instruction accepts; none once the
             session ended.
         response: The last response, returned again for retries and by `show`.
         history: Accepted calls, oldest first: the start, then each event. The
             last entry recognizes retries.
-        data: The workflow's state, as JSON.
+        data: The workflow's data as JSON, or ``None`` if it has none.
     """
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
@@ -67,11 +69,12 @@ class Session(BaseModel):
     id: str = ""
     workflow: str = ""
     status: SessionStatus = "active"
+    state: str = ""
     instruction_id: int = Field(default=0, ge=0)
     events: list[str] = Field(default_factory=list)
     response: dict[str, Any] = Field(default_factory=dict)
     history: list[HistoryEntry] = Field(default_factory=list)
-    data: dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -120,6 +123,7 @@ class Session(BaseModel):
                     "session_id": session.id,
                     "workflow": session.workflow,
                     "status": session.status,
+                    "state": session.state,
                     "instruction_id": session.instruction_id,
                     "created_at": _isoformat(session.created_at),
                     "updated_at": _isoformat(session.updated_at),
@@ -152,6 +156,7 @@ class Session(BaseModel):
             "session_id": self.id,
             "workflow": self.workflow,
             "status": self.status,
+            "state": self.state,
             "instruction_id": self.instruction_id,
             "created_at": _isoformat(self.created_at),
             "updated_at": _isoformat(self.updated_at),
@@ -247,22 +252,25 @@ class Session(BaseModel):
     def advance(
         self,
         call: HistoryEntry,
-        data: dict[str, Any],
+        state: str,
+        data: dict[str, Any] | None,
         instruction: dict[str, Any],
         events: list[str],
     ) -> None:
-        """Record an accepted call, the state it led to, and the next instruction.
+        """Record an accepted call, the state it led to, and its instruction.
 
         Args:
             call: The accepted call, appended to the history.
-            data: The workflow's state after the call, as JSON.
-            instruction: The next instruction, as JSON. Unless it is final, its
-                ``events`` block describes how to answer it; the session adds
-                the IDs an event must pass.
-            events: Events the instruction accepts; none for a final
-                instruction, which completes the session.
+            state: The workflow's state after the call.
+            data: The workflow's data after the call, as JSON, if it has any.
+            instruction: The state's instruction, as JSON. Unless it is final,
+                its ``events`` block describes how to answer it; the session
+                adds the IDs an event must pass.
+            events: Events the instruction accepts; none in a final state,
+                which completes the session.
         """
         self.history = [*self.history, call]
+        self.state = state
         self.data = data
         self.instruction_id += 1
         self.events = list(events)

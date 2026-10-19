@@ -7,6 +7,8 @@ Workflows live in `hiraku/workflows/<workflow-id>/workflow.py`. See the
 
 ::: hiraku.workflow.Session
 
+::: hiraku.workflow.state
+
 ::: hiraku.workflow.event
 
 ::: hiraku.workflow.load_workflow
@@ -21,7 +23,7 @@ Workflows live in `hiraku/workflows/<workflow-id>/workflow.py`. See the
 
 ::: hiraku.workflow.workflow_graph
 
-::: hiraku.workflow.workflow_states
+::: hiraku.workflow.check_workflow
 
 ::: hiraku.errors.EventRejected
 

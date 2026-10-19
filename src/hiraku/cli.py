@@ -718,7 +718,7 @@ def workflow_graph_command(
             raise ValidationError(
                 f"Session {session_id!r} belongs to workflow {session.workflow!r}"
             )
-        current = session.data.get("state")
+        current = session.state
     click.echo(workflow_graph(workflow, current=current), nl=False)
 
 
@@ -775,6 +775,7 @@ def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
     click.echo(f"Session:  {result['session_id']}")
     click.echo(f"Workflow: {result['workflow']}")
     click.echo(f"Status:   {result['status']}")
+    click.echo(f"State:    {result['state']}")
     for key in ("note", "compatibility"):
         if key in result:
             click.echo(f"Note:     {result[key]}")

@@ -24,9 +24,9 @@ hiraku init --example workflow-examples
 ## Count steps
 
 The workflow is `hiraku/workflows/count-steps/`. Its `## Step` section
-contains `{{step}}`, `{{count}}`, and `{{token}}` placeholders, which `next`
-fills with `hiraku.markdown.render`, so the agent receives the exact line to
-print.
+contains `{{step}}`, `{{count}}`, and `{{token}}` placeholders, which its
+`running` state fills with `hiraku.markdown.render`, so the agent receives the
+exact line to print.
 
 ### Run
 
@@ -160,6 +160,7 @@ hiraku record tree                               # the records and their counts
 ```
 
 Assigning a record is a decision, so `start` and the `incremented` event make
-it and store it in the session's state; `next` only shows the assignment. An
+it and store it in the workflow's data; the `working` state only shows the
+assignment. An
 event can then be checked against what the agent was told, and `session_show`
 returns the same assignment until the agent reports it.

@@ -11,33 +11,29 @@ rules: >-
 ## Draft
 
 Draft one experiment for the task. Read the task record and its earlier
-experiments first, build on the previous results in the context, and address
-the user's `feedback` if there is any. Do not change code yet. Send the event
-`drafted` with a short record ID, a one-line summary, the hypothesis, and the
-change you plan to make.
+experiments first, and build on the previous results in the context. Do not
+change code yet. Present the draft to the user and revise it with them until
+they approve it; then send the event `drafted` with a short record ID, a
+one-line summary, the hypothesis, and the change you plan to make.
 
 ## Implement
 
-Implement the drafted experiment in the context, following the user's
-`feedback` if there is any. Commit the change and send the event `implemented`
-with the commit and a short note on what changed.
+Implement the drafted experiment in the context and commit the change. Show
+the user the change and revise it with them until they approve it; then send
+the event `implemented` with the commit and a short note on what changed.
 
 ## Launch
 
-Run the launch command from the context. Send the event `launched` once the
-run is tracked; check with `hiraku runs --record <experiment>`.
+Ask the user before launching. Run the launch command from the context once
+they agree, and send the event `launched` once the run is tracked; check with
+`hiraku runs --record <experiment>`.
 
 ## Analyze
 
 Compare the runs in the context with the task's metrics, earlier results, and
-the experiment's hypothesis. Send the event `analyzed` with a verdict and a
-conclusion of a few sentences.
-
-## Review
-
-Present the result of the step in the context to the user. Ask how to continue
-and wait for the answer: the next step, `revise` with the user's feedback to
-redo this step, or `finish` to stop.
+the experiment's hypothesis. Present your verdict and conclusion to the user
+and revise them with the user until they approve; then send the event
+`analyzed` with the verdict and a conclusion of a few sentences.
 
 ## Done
 

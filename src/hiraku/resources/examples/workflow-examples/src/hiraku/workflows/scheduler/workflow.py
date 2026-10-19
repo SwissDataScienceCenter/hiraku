@@ -4,20 +4,19 @@ from __future__ import annotations
 
 import random
 import secrets
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
 from hiraku.errors import EventRejected
 from hiraku.markdown import render
 from hiraku.record import Record, load_record
-from hiraku.workflow import Instruction, Workflow, event
+from hiraku.workflow import Instruction, Workflow, event, state
 
 
-class State(BaseModel):
+class Queue(BaseModel):
     parent: str
     target: int
-    state: Literal["working", "finished"] = "working"
     # The assigned record, and its count when it was assigned; None when done.
     current: str | None = None
     baseline: int = 0
@@ -40,7 +39,7 @@ class Scheduler(Workflow):
         target: Annotated[
             int, Field(gt=0, le=10, description="Count each record must reach.")
         ] = 2,
-    ) -> State:
+    ) -> Queue:
         """Create records with random priorities and start working through them."""
         parent = Record.create(
             f"scheduler-{secrets.token_hex(3)}",
@@ -59,22 +58,17 @@ class Scheduler(Workflow):
                 activate=False,
                 config=self.config,
             )
-        state = State(parent=parent.id, target=target)
-        self._assign(state)
-        return state
+        queue = Queue(parent=parent.id, target=target)
+        self._assign(queue)
+        return queue
 
-    def next(self, state: State) -> Instruction:
-        if state.state == "finished":
-            return Instruction(
-                self.markdown.section("## Done"),
-                context={"records": self._summary(state)},
-                final=True,
-            )
-        record = load_record(state.current, config=self.config)
+    @state("working", start=True)
+    def work(self, queue: Queue) -> Instruction:
+        record = load_record(str(queue.current), config=self.config)
         values = {
             "record": record.id,
-            "count": state.baseline,
-            "next": state.baseline + 1,
+            "count": queue.baseline,
+            "next": queue.baseline + 1,
         }
         return Instruction(
             render(self.markdown.section("## Work"), values),
@@ -82,51 +76,60 @@ class Scheduler(Workflow):
                 **values,
                 "priority": _priority(record),
                 "remaining": sum(
-                    state.target - _count(item)
-                    for item in self._children(state)
-                    if _count(item) < state.target
+                    queue.target - _count(item)
+                    for item in self._children(queue)
+                    if _count(item) < queue.target
                 ),
             },
+        )
+
+    @state("finished", final=True)
+    def report(self, queue: Queue) -> Instruction:
+        return Instruction(
+            self.markdown.section("## Done"),
+            context={"records": self._summary(queue)},
         )
 
     @event(source="working", dest=["working", "finished"])
     def incremented(
         self,
-        state: State,
+        queue: Queue,
         record_id: Annotated[str, Field(description="ID of the assigned record.")],
-    ) -> None:
+    ) -> str:
         """Report that the assigned record's count is one higher."""
-        if record_id != state.current:
+        if record_id != queue.current:
             raise EventRejected(
-                f"Work on the assigned record {state.current!r}, not {record_id!r}"
+                f"Work on the assigned record {queue.current!r}, not {record_id!r}"
             )
         count = _count(load_record(record_id, config=self.config))
-        if count != state.baseline + 1:
+        if count != queue.baseline + 1:
             raise EventRejected(
-                f"The count of {record_id!r} is {count}; set it to {state.baseline + 1}"
+                f"The count of {record_id!r} is {count}; set it to {queue.baseline + 1}"
             )
-        self._assign(state)
+        return "working" if self._assign(queue) else "finished"
 
-    # Scheduling happens in start and events, so next only shows the assignment.
-    def _assign(self, state: State) -> None:
+    # Scheduling happens in start and events, so a state only shows the
+    # assignment.
+    def _assign(self, queue: Queue) -> bool:
+        """Assign the open record with the highest priority; False if none."""
         open_records = [
-            item for item in self._children(state) if _count(item) < state.target
+            item for item in self._children(queue) if _count(item) < queue.target
         ]
         pick = max(
             open_records, key=lambda item: (_priority(item), item.id), default=None
         )
-        state.current = pick.id if pick is not None else None
-        state.baseline = _count(pick) if pick is not None else 0
-        state.state = "working" if pick is not None else "finished"
+        queue.current = pick.id if pick is not None else None
+        queue.baseline = _count(pick) if pick is not None else 0
+        return pick is not None
 
-    def _children(self, state: State) -> list[Record]:
-        parent = load_record(state.parent, config=self.config)
+    def _children(self, queue: Queue) -> list[Record]:
+        parent = load_record(queue.parent, config=self.config)
         return sorted(parent.children(config=self.config), key=lambda item: item.id)
 
-    def _summary(self, state: State) -> list[dict[str, Any]]:
+    def _summary(self, queue: Queue) -> list[dict[str, Any]]:
         return [
             {"record": item.id, "priority": _priority(item), "count": _count(item)}
-            for item in self._children(state)
+            for item in self._children(queue)
         ]
 
 

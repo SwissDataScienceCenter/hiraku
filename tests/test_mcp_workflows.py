@@ -8,7 +8,6 @@ from typing import Any
 import anyio
 import pytest
 from mcp import Client, StdioServerParameters
-from mcp.shared.exceptions import MCPError
 
 from hiraku.config import HirakuConfig
 from hiraku.mcp import create_server
@@ -77,32 +76,33 @@ ECHO_PY = '''
 from pydantic import BaseModel
 
 from hiraku.errors import EventRejected
-from hiraku.workflow import Instruction, Workflow, event
+from hiraku.workflow import Instruction, Workflow, event, state
 
 
-class State(BaseModel):
+class Task(BaseModel):
     task: str
     summary: str | None = None
 
 
 class Echo(Workflow):
-    def start(self, task: str) -> State:
+    def start(self, task: str) -> Task:
         """Start working on a task."""
-        return State(task=task)
+        return Task(task=task)
 
-    def next(self, state: State) -> Instruction:
-        if state.summary is not None:
-            return Instruction(
-                "Report the summary.", context={"summary": state.summary}, final=True
-            )
-        return Instruction(f"Work on {state.task}.", events=[self.complete])
+    @state("working", start=True)
+    def working(self, task: Task) -> Instruction:
+        return Instruction(f"Work on {task.task}.")
 
-    @event
-    def complete(self, state: State, summary: str) -> None:
+    @state("done", final=True)
+    def done(self, task: Task) -> Instruction:
+        return Instruction("Report the summary.", context={"summary": task.summary})
+
+    @event(source="working", dest="done")
+    def complete(self, task: Task, summary: str) -> None:
         """Report what was done."""
         if not summary.strip():
             raise EventRejected("Summarize what was done")
-        state.summary = summary
+        task.summary = summary
 
 
 WORKFLOW = Echo
@@ -288,10 +288,7 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
         resource = await client.read_resource(f"hiraku://sessions/{session_id}")
         workflow = await client.read_resource("hiraku://workflows/echo")
         graph = await client.read_resource("hiraku://workflows/collaborative/graph")
-        try:
-            await client.read_resource("hiraku://workflows/echo/graph")
-        except MCPError as exc:
-            no_graph = str(exc)
+        echo_graph = await client.read_resource("hiraku://workflows/echo/graph")
         templates = await client.list_resource_templates()
         cancelled = payload(
             await client.call_tool("session_cancel", {"session_id": session_id})
@@ -304,7 +301,7 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
             "resource": json.loads(resource.contents[0].text),
             "workflow": workflow.contents[0].text,
             "graph": graph.contents[0].text,
-            "no_graph": no_graph,
+            "echo_graph": echo_graph.contents[0].text,
             "templates": {item.uri_template for item in templates.resource_templates},
             "cancelled": cancelled,
             "missing": missing,
@@ -319,8 +316,13 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
     assert result["resource"]["session_id"] == session_id
     assert result["workflow"] == "# Echo"
     assert result["graph"].startswith("stateDiagram-v2\n  [*] --> draft\n")
-    assert "  review --> implement: implement\n" in result["graph"]
-    assert "has no states to draw" in result["no_graph"]
+    assert "  draft --> implement: drafted\n" in result["graph"]
+    assert result["echo_graph"] == (
+        "stateDiagram-v2\n"
+        "  [*] --> working\n"
+        "  working --> done: complete\n"
+        "  done --> [*]\n"
+    )
     assert result["templates"] >= {
         "hiraku://sessions/{session_id}",
         "hiraku://workflows/{workflow_id}",
@@ -334,15 +336,13 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     noisy = config.workflows_dir / "noisy"
     noisy.mkdir()
     (noisy / "workflow.py").write_text(
-        "from pydantic import BaseModel\n"
-        "from hiraku.workflow import Instruction, Workflow\n"
-        "class S(BaseModel):\n    pass\n"
+        "from hiraku.workflow import Instruction, Workflow, state\n"
         "class Noisy(Workflow):\n"
-        "    def start(self) -> S:\n"
+        "    def start(self) -> None:\n"
         "        print('stray output')\n"
-        "        return S()\n"
-        "    def next(self, state: S) -> Instruction:\n"
-        "        return Instruction('Done.', context={'ok': True}, final=True)\n"
+        "    @state('done', start=True, final=True)\n"
+        "    def done(self) -> Instruction:\n"
+        "        return Instruction('Done.', context={'ok': True})\n"
         "WORKFLOW = Noisy\n",
         encoding="utf-8",
     )

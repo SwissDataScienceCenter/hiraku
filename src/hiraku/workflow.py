@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeVar, overload
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeVar
 
 from pydantic import (
     BaseModel,
@@ -53,69 +53,109 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _F = TypeVar("_F", bound=Callable[..., Any])
+_STATE_MARKER = "__hiraku_state__"
 _EVENT_MARKER = "__hiraku_event__"
 # No underscores, so the tool named after a workflow cannot collide with fixed
 # tool names such as workflow_send_event.
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 # States are Mermaid state IDs in workflow graphs.
-_STATE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_STATE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-@overload
-def event(function: _F, /) -> _F: ...
+def state(name: str, *, start: bool = False, final: bool = False) -> Callable[[_F], _F]:
+    """Declare a state of a workflow; the method builds the state's instruction.
 
+    The method returns the `Instruction` the agent receives in the state. It
+    takes the workflow's data, annotated with the model ``start`` returns, or
+    nothing if the workflow has no data. It reads the data and never changes
+    it.
 
-@overload
-def event(
-    *, source: str | Sequence[str], dest: str | Sequence[str]
-) -> Callable[[_F], _F]: ...
+    Args:
+        name: The state's name: letters, digits, and ``_``.
+        start: Whether sessions start in this state; exactly one state does.
+        final: Whether the state ends the session. A final state accepts no
+            events, and its instruction is final: the agent carries it out,
+            and its context is the session's result.
 
-
-def event(
-    function: _F | None = None,
-    /,
-    *,
-    source: str | Sequence[str] | None = None,
-    dest: str | Sequence[str] | None = None,
-) -> Any:
-    """Mark a workflow method as an event that continues a session.
-
-    The first parameter after ``self`` is the workflow's state, annotated with
-    the model ``start`` returns. The other parameters and the docstring define
-    the event's arguments and description. An event changes the state in place
-    and returns nothing; ``next`` then builds the following instruction.
-
-    Used bare, ``@event``, an event is accepted while the current instruction
-    lists it, e.g. ``events=[self.approve]``. With ``source`` and ``dest``,
-    e.g. ``@event(source="review", dest=["draft", "finished"])``, the
-    workflow is a state machine: the ``state`` field of its state model names
-    the current state, an event is accepted in its source states, and it must
-    set ``state`` to one of its destination states. These states also draw the
-    workflow as a graph.
-
-    The decorated method stays directly callable from Python.
+    Example:
+        ```python
+        @state("waiting")
+        def ask(self, counter: Counter) -> Instruction:
+            return Instruction(self.markdown.section("## Next"))
+        ```
     """
-    if function is not None:
-        if source is not None or dest is not None:
-            raise TypeError("Use @event or @event(source=..., dest=...)")
-        setattr(function, _EVENT_MARKER, (None, None))
-        return function
-    if source is None or dest is None:
-        raise WorkflowError("@event(...) needs both source and dest states")
-    states = (_state_names(source), _state_names(dest))
+    if not isinstance(name, str) or not _STATE_NAME.fullmatch(name):
+        raise WorkflowError(
+            f"State names use letters, digits, and '_', starting with a letter; "
+            f"got {name!r}"
+        )
+    spec = StateSpec(name=name, start=bool(start), final=bool(final))
 
     def mark(method: _F) -> _F:
-        setattr(method, _EVENT_MARKER, states)
+        setattr(method, _STATE_MARKER, spec)
         return method
 
     return mark
 
 
-def _state_names(value: str | Sequence[str]) -> tuple[str, ...]:
+def event(
+    *, source: str | Sequence[str], dest: str | Sequence[str]
+) -> Callable[[_F], _F]:
+    """Declare an event: a transition from source states to destination states.
+
+    The method continues a session: it takes the workflow's data, annotated
+    with the model ``start`` returns, unless the workflow has none; its other
+    parameters and its docstring define the event's arguments and
+    description. It changes the data in place. The current state accepts the
+    event if it is one of ``source``.
+
+    With one destination, the method returns nothing and the session moves
+    there. With several, it returns the one it chooses.
+
+    Args:
+        source: The states that accept the event.
+        dest: The states the event may move to.
+
+    Example:
+        ```python
+        @event(source="running", dest=["waiting", "finished"])
+        def ack(self, counter: Counter, token: str) -> str:
+            return "finished" if counter.step >= counter.count else "waiting"
+        ```
+    """
+    names = (_state_names(source, "source"), _state_names(dest, "dest"))
+
+    def mark(method: _F) -> _F:
+        setattr(method, _EVENT_MARKER, names)
+        return method
+
+    return mark
+
+
+def _state_names(value: str | Sequence[str], label: str) -> tuple[str, ...]:
     names = (value,) if isinstance(value, str) else tuple(value)
     if not names or not all(isinstance(name, str) for name in names):
-        raise WorkflowError(f"States must be names, got {value!r}")
+        raise WorkflowError(f"@event {label} must name states, got {value!r}")
     return names
+
+
+@dataclass(frozen=True)
+class StateSpec:
+    """What `state` declares: a state's name and whether it starts or ends."""
+
+    name: str
+    start: bool = False
+    final: bool = False
+
+
+@dataclass(frozen=True)
+class State:
+    """A `state` method of a workflow."""
+
+    name: str
+    function: Callable[..., Any]
+    start: bool
+    final: bool
 
 
 @dataclass(frozen=True)
@@ -123,73 +163,56 @@ class Event:
     """An `event` method of a workflow and its derived argument model.
 
     Attributes:
-        source: States that accept the event; ``None`` without states.
-        dest: States the event may move to; ``None`` without states.
+        source: States that accept the event.
+        dest: States the event may move to.
     """
 
     name: str
     function: Callable[..., Any]
     arguments: type[BaseModel]
     description: str
-    source: tuple[str, ...] | None = None
-    dest: tuple[str, ...] | None = None
-
-
-@dataclass(frozen=True)
-class States:
-    """The states of a workflow whose events declare source and destination.
-
-    Attributes:
-        names: Every state, from the ``Literal`` type of the state model's
-            ``state`` field.
-        start: The default of that field, where every session starts.
-        final: States that accept no event; their instruction is final.
-    """
-
-    names: tuple[str, ...]
-    start: str
-    final: tuple[str, ...]
+    source: tuple[str, ...]
+    dest: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class Instruction:
-    """What the agent does next, returned by a workflow's ``next``.
+    """What the agent does in a state, returned by a `state` method.
 
     Attributes:
         text: Actionable guidance, usually a section of ``workflow.md``.
-        context: Concise JSON-compatible data the text refers to.
-        events: `event` methods of the workflow the instruction accepts, e.g.
-            ``[self.approve, self.stop]``. With states, it defaults to every
-            event of the current state, and may narrow them.
+        context: Concise JSON-compatible data the text refers to. In a final
+            state, it is the session's result.
+        events: Narrows the events the state accepts, e.g.
+            ``[self.finish]`` while a step is not available yet; by default,
+            the instruction accepts every event of its state.
         requires_user_response: Whether the agent must obtain a user answer
             before sending an event. This is a conversational contract only.
-        final: Whether this is the last instruction. A final instruction
-            accepts no events; returning it completes the session, and its
-            context is the session's result. The agent still carries out its
-            text.
     """
 
     text: str
     context: Any = None
     events: Sequence[Callable[..., Any]] = ()
     requires_user_response: bool = False
-    final: bool = False
 
 
 class Workflow(BaseRecord):
-    """A workflow: its ``workflow.md`` record, ``start``, ``next``, and events.
+    """A workflow: its ``workflow.md`` record, ``start``, states, and events.
 
     Subclass it in ``hiraku/workflows/<workflow-id>/workflow.py`` and export the
     class as ``WORKFLOW``. The subclass defines:
 
     - ``start``, whose signature and docstring define how the workflow is
-      started, and which returns the first state of a new session: an instance
-      of a Pydantic model, named in the return annotation of ``start``;
-    - ``next(state)``, which returns the `Instruction` for a state; it reads
-      the state and never changes it;
-    - `event` methods, which change the state and return nothing. Declaring
-      their source and destination states makes the workflow a state machine
-      that `graph` draws.
+      started, and which returns the workflow's data: an instance of the
+      Pydantic model named in its return annotation, or ``None`` with
+      ``-> None`` for a workflow without data;
+    - `state` methods, which declare the states and build each state's
+      `Instruction`; sessions begin in the state marked ``start``;
+    - `event` methods, which move the session from a state to another and
+      change the data.
+
+    The runtime owns the current state: only declared events change it. The
+    states and events also draw the workflow as a graph, see `workflow_graph`.
 
     An instance is the loaded ``workflow.md``: the front matter holds the
     workflow ``id``, which must match the directory name, and any settings the
@@ -234,7 +257,7 @@ class Workflow(BaseRecord):
         return start_model(type(self))
 
     def run_start(self, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
-        """Start a session: call ``start``, then ``next``, and store the session.
+        """Start a session: call ``start``, enter the start state, and store it.
 
         The workflow must be bound to a project with `bind`.
 
@@ -250,17 +273,10 @@ class Workflow(BaseRecord):
         if failure is not None:
             return failure
         start = getattr(self, "start")  # noqa: B009 - defined by subclasses
-        state, failure = _invoke(self, "start", lambda: start(**_keywords(validated)))
+        data, failure = _invoke(self, "start", lambda: start(**_keywords(validated)))
         if failure is not None:
             return failure
-        states = workflow_states(type(self))
-        if states is not None and getattr(state, "state", None) != states.start:
-            return {
-                "status": "error",
-                "message": f"start of workflow {self.id!r} must return a state in "
-                f"its start state {states.start!r}",
-            }
-        step, failure = self._next(state)
+        step, failure = self._enter(start_state(type(self)), data)
         if failure is not None:
             return failure
         now = datetime.now(UTC)
@@ -284,10 +300,10 @@ class Workflow(BaseRecord):
     ) -> dict[str, Any]:
         """Send an event to the current instruction of a stored session.
 
-        The event changes the session's state, and ``next`` builds the
-        following instruction. The session is locked while this runs, and saved
-        only if both succeed. The workflow must be bound to a project with
-        `bind`.
+        The event changes the session's data and moves it to a destination
+        state, whose instruction comes next. The session is locked while this
+        runs, and saved only if all of it succeeds. The workflow must be bound
+        to a project with `bind`.
 
         Args:
             session_id: Session to continue.
@@ -333,22 +349,23 @@ class Workflow(BaseRecord):
                 if early is not None:
                     return early
                 try:
-                    state = state_model(type(self)).model_validate(session.data)
+                    data = _load_data(type(self), session.data)
                 except PydanticValidationError as exc:
                     return session.outcome("rejected", _incompatible(exc))
+                own = () if data is None else (data,)
                 returned, failure = _invoke(
                     self,
                     event,
-                    lambda: method.function(self, state, **_keywords(validated)),
+                    lambda: method.function(self, *own, **_keywords(validated)),
                 )
                 if failure is not None:
                     return {**failure, **session.response}
-                problem = _event_result(self, method, returned, state)
+                dest, problem = _destination(self, method, returned)
                 if problem is not None:
                     return session.outcome(
                         "error", f"{problem}. No session progress was saved."
                     )
-                step, failure = self._next(state)
+                step, failure = self._enter(dest, data)
                 if failure is not None:
                     return {**failure, **session.response}
                 call = HistoryEntry(
@@ -379,74 +396,60 @@ class Workflow(BaseRecord):
         """Return the Markdown body without front matter."""
         return self.markdown.strip()
 
-    def _next(
-        self, state: Any
-    ) -> tuple[tuple[dict[str, Any], dict[str, Any], list[str]] | None, Any]:
-        """Call ``next`` on a new state; return the session's next data.
+    def _enter(
+        self, name: str, data: Any
+    ) -> tuple[
+        tuple[str, dict[str, Any] | None, dict[str, Any], list[str]] | None, Any
+    ]:
+        """Enter a state: build its instruction for the data.
 
         Returns:
-            The state as JSON, the instruction as JSON, and the names of the
-            events it accepts; or a failure status.
+            The state, the data as JSON, the instruction as JSON, and the names
+            of the events it accepts; or a failure status.
         """
         try:
-            data = self._dump_state(state)
+            dumped = _dump_data(type(self), data)
         except WorkflowError as exc:
             return None, {"status": "error", "message": str(exc)}
-        next_ = getattr(self, "next")  # noqa: B009 - defined by subclasses
-        instruction, failure = _invoke(self, "next", lambda: next_(state))
+        method = state_methods(type(self))[name]
+        own = () if data is None else (data,)
+        instruction, failure = _invoke(
+            self, f"state {name!r}", lambda: method.function(self, *own)
+        )
         if failure is not None:
             return None, failure
         try:
-            if self._dump_state(state) != data:
+            if _dump_data(type(self), data) != dumped:
                 raise WorkflowError(
-                    f"next of workflow {self.id!r} changed the state; change it "
-                    "only in start and events"
+                    f"State {name!r} of workflow {self.id!r} changed the data; "
+                    "change it only in start and events"
                 )
-            rendered, names = self._render(instruction, state)
+            rendered, names = self._render(instruction, method)
         except WorkflowError as exc:
             return None, {"status": "error", "message": str(exc)}
-        return (data, rendered, names), None
+        return (name, dumped, rendered, names), None
 
-    def _dump_state(self, state: Any) -> dict[str, Any]:
-        model = state_model(type(self))
-        if type(state) is not model:
-            raise WorkflowError(
-                f"Workflow {self.id!r} produced a {type(state).__name__} state; "
-                f"start must return a {model.__name__}"
-            )
-        try:
-            data = state.model_dump(mode="json")
-            model.model_validate(data)
-        except (TypeError, ValueError) as exc:
-            raise WorkflowError(
-                f"State of workflow {self.id!r} does not round-trip through JSON: {exc}"
-            ) from exc
-        return data
-
-    def _render(self, instruction: Any, state: Any) -> tuple[dict[str, Any], list[str]]:
-        """Return an instruction as JSON, and the events it accepts."""
+    def _render(
+        self, instruction: Any, method: State
+    ) -> tuple[dict[str, Any], list[str]]:
+        """Return a state's instruction as JSON, and the events it accepts."""
         if not isinstance(instruction, Instruction):
             raise WorkflowError(
-                f"next of workflow {self.id!r} returned "
+                f"State {method.name!r} of workflow {self.id!r} returned "
                 f"{type(instruction).__name__}; it must return an Instruction"
             )
         text = instruction.text
         if not isinstance(text, str) or not text.strip():
             raise WorkflowError("Instruction text must not be empty")
-        names = [self._event_name(method) for method in instruction.events]
-        if len(names) != len(set(names)):
+        listed = [self._event_name(item) for item in instruction.events]
+        if len(listed) != len(set(listed)):
             raise WorkflowError("An instruction lists the same event more than once")
-        if instruction.final and (names or instruction.requires_user_response):
+        if method.final and (listed or instruction.requires_user_response):
             raise WorkflowError(
-                "A final instruction accepts no events and requires no user response"
+                f"The instruction of final state {method.name!r} accepts no events "
+                "and requires no user response"
             )
-        states = workflow_states(type(self))
-        if states is not None:
-            names = self._state_events(state.state, names, instruction.final)
-        if not instruction.final and not names:
-            raise WorkflowError(
-                "An instruction must accept at least one event, or be final"
-            )
+        names = [] if method.final else _accepted(type(self), method.name, listed)
         rendered: dict[str, Any] = {
             "text": text.strip(),
             "context": _ensure_json(instruction.context, "Instruction context"),
@@ -459,30 +462,6 @@ class Workflow(BaseRecord):
                 "accepted": [{"event": name, **specs[name]} for name in names],
             }
         return rendered, names
-
-    def _state_events(self, current: str, listed: list[str], final: bool) -> list[str]:
-        """Return the events a state accepts, narrowed to those listed."""
-        accepted = [
-            name
-            for name, method in event_methods(type(self)).items()
-            if method.source is not None and current in method.source
-        ]
-        if final:
-            if accepted:
-                raise WorkflowError(
-                    f"State {current!r} accepts {', '.join(accepted)}; only a state "
-                    "without events has a final instruction"
-                )
-            return []
-        if not listed:
-            return accepted
-        extra = [name for name in listed if name not in accepted]
-        if extra:
-            raise WorkflowError(
-                f"State {current!r} does not accept {', '.join(extra)}; it accepts "
-                f"{', '.join(accepted) or 'no events'}"
-            )
-        return listed
 
     def _event_name(self, method: Callable[..., Any]) -> str:
         function = getattr(method, "__func__", None)
@@ -525,8 +504,8 @@ class Argument(BaseModel):
     default: str | int | float | bool | None = None
 
 
-class PromptState(BaseModel):
-    """The state of a Markdown workflow: its start arguments."""
+class PromptArguments(BaseModel):
+    """The data of a Markdown workflow: its start arguments."""
 
     arguments: dict[str, Any] = Field(default_factory=dict)
 
@@ -536,8 +515,9 @@ class PromptWorkflow(Workflow):
 
     Used for workflow directories that contain only ``workflow.md``. Its front
     matter may declare start ``arguments``, which fill ``{{name}}``
-    placeholders in the body. The session completes when it starts; the agent
-    then follows the prompt, and Hiraku checks nothing about the work.
+    placeholders in the body. The workflow has a single state, ``done``, which
+    is final: the session completes when it starts, the agent then follows the
+    prompt, and Hiraku checks nothing about the work.
 
     Example:
         ```markdown
@@ -562,15 +542,14 @@ class PromptWorkflow(Workflow):
             )
         return self
 
-    def start(self, **arguments: Any) -> PromptState:
+    def start(self, **arguments: Any) -> PromptArguments:
         """Start the workflow; its whole prompt arrives as one instruction."""
-        return PromptState(arguments=arguments)
+        return PromptArguments(arguments=arguments)
 
-    def next(self, state: PromptState) -> Instruction:
+    @state("done", start=True, final=True)
+    def prompt(self, data: PromptArguments) -> Instruction:
         return Instruction(
-            render(self.text, state.arguments),
-            context=state.arguments or None,
-            final=True,
+            render(self.text, data.arguments), context=data.arguments or None
         )
 
     def start_arguments(self) -> type[BaseModel]:
@@ -646,8 +625,7 @@ def load_workflow(workflow_id: str, *, config: HirakuConfig | None = None) -> Wo
         if (directory / "workflow.py").is_file()
         else PromptWorkflow
     )
-    state_model(cls)
-    workflow_states(cls)
+    check_workflow(cls)
     path = directory / "workflow.md"
     try:
         workflow = cls.load(path)
@@ -732,7 +710,7 @@ def _ensure_json(value: Any, label: str) -> Any:
     return converted
 
 
-# Signatures ----------------------------------------------------------------------
+# Signatures and declarations -----------------------------------------------------
 
 
 @cache
@@ -753,33 +731,60 @@ def start_model(cls: type[Workflow]) -> type[BaseModel]:
 
 
 @cache
-def state_model(cls: type[Workflow]) -> type[BaseModel]:
-    """Return the state model of a workflow class: what ``start`` returns.
+def data_model(cls: type[Workflow]) -> type[BaseModel] | None:
+    """Return the data model of a workflow class: what ``start`` returns.
+
+    Returns:
+        The Pydantic model, or ``None`` for a workflow declared without data,
+        ``def start(...) -> None``.
 
     Raises:
-        hiraku.errors.WorkflowError: If ``start`` does not name a Pydantic model
-            as its return type, or ``next`` is missing or does not take only
-            the state.
+        hiraku.errors.WorkflowError: If ``start`` is missing or does not
+            declare its return type as a Pydantic model or ``None``.
     """
-    start = inspect.getattr_static(cls, "start", None)
-    if not inspect.isfunction(start):
+    function = inspect.getattr_static(cls, "start", None)
+    if not inspect.isfunction(function):
         raise WorkflowError(f"Workflow {cls.__name__} must define a start method")
-    model = _hints(f"{cls.__name__}.start", start).get("return")
+    hints = _hints(f"{cls.__name__}.start", function)
+    model = hints.get("return", inspect.Parameter.empty)
+    if model is None or model is type(None):
+        return None
     if not (isinstance(model, type) and issubclass(model, BaseModel)):
         raise WorkflowError(
-            f"{cls.__name__}.start must declare its state as the return type, a "
-            "Pydantic model, e.g. `def start(self, ...) -> State`"
+            f"{cls.__name__}.start must declare the workflow's data as its return "
+            "type, a Pydantic model, e.g. `def start(self, ...) -> Counter`, or "
+            "`-> None` for a workflow without data"
         )
-    function = inspect.getattr_static(cls, "next", None)
-    label = f"{cls.__name__}.next"
-    if not inspect.isfunction(function):
-        raise WorkflowError(
-            f"Workflow {cls.__name__} must define next(self, state), which returns "
-            "the instruction for a state"
-        )
-    if len(_parameters(label, function)) != 1:
-        raise WorkflowError(f"{label} must take only the state")
     return model
+
+
+@cache
+def state_methods(cls: type[Workflow]) -> dict[str, State]:
+    """Collect and validate the `state` methods of a workflow class, by state.
+
+    Raises:
+        hiraku.errors.WorkflowError: If a state is declared twice or a method's
+            signature does not match the workflow's data.
+    """
+    found: dict[str, State] = {}
+    for name, function, spec in _marked(cls, _STATE_MARKER):
+        label = f"{cls.__name__}.{name}"
+        parameters = _data_parameter(cls, label, "@state", function)
+        if parameters:
+            raise WorkflowError(
+                f"@state {label} must take only the workflow's data"
+                if data_model(cls) is not None
+                else f"@state {label} must take no parameters; the workflow has no data"
+            )
+        if spec.name in found:
+            raise WorkflowError(
+                f"State {spec.name!r} of {cls.__name__} is declared twice, by "
+                f"{found[spec.name].function.__name__} and {name}"
+            )
+        found[spec.name] = State(
+            name=spec.name, function=function, start=spec.start, final=spec.final
+        )
+    return found
 
 
 @cache
@@ -789,136 +794,145 @@ def event_methods(cls: type[Workflow]) -> dict[str, Event]:
     Events are returned in the order the class defines them.
 
     Raises:
-        hiraku.errors.WorkflowError: If an event's signature is unsupported, its
-            name is taken by `Workflow`, ``start``, or ``next``, or only some
-            events declare states.
+        hiraku.errors.WorkflowError: If an event's signature is unsupported or
+            does not match the workflow's data, or its name is taken.
     """
-    names: dict[str, None] = {}
-    for klass in reversed(cls.__mro__):
-        names.update(dict.fromkeys(vars(klass)))
     found: dict[str, Event] = {}
-    for name in names:
-        function = inspect.getattr_static(cls, name, None)
-        states = getattr(function, _EVENT_MARKER, None)
-        if states is None:
-            continue
+    for name, function, (source, dest) in _marked(cls, _EVENT_MARKER):
         label = f"{cls.__name__}.{name}"
-        if name in ("start", "next") or hasattr(Workflow, name):
-            raise WorkflowError(
-                f"@event {label} is named like a Workflow method; rename it"
-            )
-        if not inspect.isfunction(function):
-            raise WorkflowError(f"@event {label} must be a method")
-        parameters = _parameters(label, function)
-        hints = _hints(label, function)
-        first = parameters[0] if parameters else None
-        model = state_model(cls)
-        if (
-            first is None
-            or first.kind is inspect.Parameter.KEYWORD_ONLY
-            or hints.get(first.name) is not model
-        ):
-            raise WorkflowError(
-                f"@event {label} must take the state as its first parameter, "
-                f"annotated with {model.__name__}"
-            )
+        parameters = _data_parameter(cls, label, "@event", function)
         found[name] = Event(
             name=name,
             function=function,
-            arguments=_arguments_model(label, parameters[1:], hints),
+            arguments=_arguments_model(label, parameters, _hints(label, function)),
             description=inspect.getdoc(function) or "",
-            source=states[0],
-            dest=states[1],
-        )
-    without = [name for name, item in found.items() if item.source is None]
-    if without and len(without) != len(found):
-        raise WorkflowError(
-            f"Declare source and dest for every event of {cls.__name__} or for "
-            f"none; missing for {', '.join(without)}"
+            source=source,
+            dest=dest,
         )
     return found
 
 
-@cache
-def workflow_states(cls: type[Workflow]) -> States | None:
-    """Return the states of a workflow class, or ``None`` if it has none.
+def _marked(cls: type[Workflow], marker: str) -> list[tuple[str, Any, Any]]:
+    """Return the methods of a class that carry a marker, in definition order."""
+    names: dict[str, None] = {}
+    for klass in reversed(cls.__mro__):
+        names.update(dict.fromkeys(vars(klass)))
+    found = []
+    for name in names:
+        function = inspect.getattr_static(cls, name, None)
+        value = getattr(function, marker, None)
+        if value is None:
+            continue
+        kind = "@state" if marker == _STATE_MARKER else "@event"
+        if name == "start" or hasattr(Workflow, name):
+            raise WorkflowError(
+                f"{kind} {cls.__name__}.{name} is named like a Workflow method; "
+                "rename it"
+            )
+        if not inspect.isfunction(function):
+            raise WorkflowError(f"{kind} {cls.__name__}.{name} must be a method")
+        found.append((name, function, value))
+    return found
 
-    A workflow has states when its events declare ``source`` and ``dest``.
-    The ``state`` field of its state model lists them as a ``Literal`` and
-    defaults to the start state.
+
+def _data_parameter(
+    cls: type[Workflow], label: str, kind: str, function: Callable[..., Any]
+) -> list[inspect.Parameter]:
+    """Check a method's data parameter; return the parameters after it."""
+    parameters = _parameters(label, function)
+    model = data_model(cls)
+    if model is None:
+        return parameters
+    first = parameters[0] if parameters else None
+    if (
+        first is None
+        or first.kind is inspect.Parameter.KEYWORD_ONLY
+        or _hints(label, function).get(first.name) is not model
+    ):
+        raise WorkflowError(
+            f"{kind} {label} must take the workflow's data as its first parameter, "
+            f"annotated with {model.__name__}"
+        )
+    return parameters[1:]
+
+
+@cache
+def check_workflow(cls: type[Workflow]) -> None:
+    """Check that a workflow class declares a consistent state machine.
 
     Raises:
-        hiraku.errors.WorkflowError: If the states are inconsistent: no typed
-            ``state`` field, an unknown or malformed state, or a state that
-            cannot be reached from the start state.
+        hiraku.errors.WorkflowError: If ``start``, a state, or an event is
+            invalid; there is not exactly one start state or no final state;
+            an event names an unknown state; a final state accepts events or
+            another state accepts none; or a state cannot be reached from the
+            start state.
     """
+    # The start arguments are checked per instance by start_arguments(), which
+    # PromptWorkflow takes from its front matter instead of the signature.
+    data_model(cls)
+    states = state_methods(cls)
     events = event_methods(cls)
-    if not events or any(item.source is None for item in events.values()):
-        return None
-    model = state_model(cls)
-    field = model.model_fields.get("state")
-    names = (
-        typing.get_args(field.annotation)
-        if field is not None and typing.get_origin(field.annotation) is Literal
-        else ()
-    )
-    if not names or not all(isinstance(name, str) for name in names):
+    if not states:
         raise WorkflowError(
-            f"The events of {cls.__name__} declare states, so {model.__name__} "
-            "needs a state field listing them, e.g. "
-            'state: Literal["running", "finished"] = "running"'
+            f"Workflow {cls.__name__} declares no states; mark the methods that "
+            'build instructions with @state("name")'
         )
-    malformed = [name for name in names if not _STATE.fullmatch(name)]
-    if malformed:
+    starts = [name for name, item in states.items() if item.start]
+    if len(starts) != 1:
         raise WorkflowError(
-            f"State names use letters, digits, and '_': {', '.join(malformed)}"
+            f"Workflow {cls.__name__} needs exactly one state with start=True; it "
+            f"has {', '.join(starts) or 'none'}"
         )
-    assert field is not None
-    start = field.default
-    if start not in names:
+    if not any(item.final for item in states.values()):
         raise WorkflowError(
-            f"{model.__name__}.state needs a default, the start state; one of "
-            f"{', '.join(names)}"
+            f"Workflow {cls.__name__} needs a state with final=True, where sessions end"
         )
     for item in events.values():
-        unknown = [
-            name
-            for name in (*(item.source or ()), *(item.dest or ()))
-            if name not in names
-        ]
+        unknown = [name for name in (*item.source, *item.dest) if name not in states]
         if unknown:
             raise WorkflowError(
                 f"@event {cls.__name__}.{item.name} names unknown states "
-                f"{', '.join(unknown)}; states are {', '.join(names)}"
+                f"{', '.join(unknown)}; states are {', '.join(states)}"
             )
-    reached = {start}
-    frontier = [start]
+    for name, item in states.items():
+        leaving = [event.name for event in events.values() if name in event.source]
+        if item.final and leaving:
+            raise WorkflowError(
+                f"Final state {name!r} of {cls.__name__} accepts {', '.join(leaving)}; "
+                "a final state accepts no events"
+            )
+        if not item.final and not leaving:
+            raise WorkflowError(
+                f"State {name!r} of {cls.__name__} accepts no events; add an event "
+                "with it as source, or mark it final=True"
+            )
+    reached = {starts[0]}
+    frontier = [starts[0]]
     while frontier:
-        state = frontier.pop()
+        current = frontier.pop()
         for item in events.values():
-            if state in (item.source or ()):
-                for target in item.dest or ():
+            if current in item.source:
+                for target in item.dest:
                     if target not in reached:
                         reached.add(target)
                         frontier.append(target)
-    unreachable = [name for name in names if name not in reached]
+    unreachable = [name for name in states if name not in reached]
     if unreachable:
         raise WorkflowError(
-            f"States of {cls.__name__} cannot be reached from {start!r}: "
+            f"States of {cls.__name__} cannot be reached from {starts[0]!r}: "
             f"{', '.join(unreachable)}"
         )
-    final = tuple(
-        name
-        for name in names
-        if not any(name in (item.source or ()) for item in events.values())
-    )
-    return States(names=names, start=start, final=final)
+
+
+def start_state(cls: type[Workflow]) -> str:
+    """Return the name of a workflow class's start state."""
+    return next(name for name, item in state_methods(cls).items() if item.start)
 
 
 def workflow_graph(
     workflow: Workflow | type[Workflow], *, current: str | None = None
 ) -> str:
-    """Draw the states of a workflow as a Mermaid state diagram.
+    """Draw the states and events of a workflow as a Mermaid state diagram.
 
     Each event becomes an edge from each of its source states to each of its
     destination states, labelled with the event's name.
@@ -926,23 +940,17 @@ def workflow_graph(
     Args:
         workflow: A workflow, or its class.
         current: A state to highlight, e.g. a session's current state.
-
-    Raises:
-        hiraku.errors.WorkflowError: If the workflow has no states.
     """
     cls = workflow if isinstance(workflow, type) else type(workflow)
-    states = workflow_states(cls)
-    if states is None:
-        raise WorkflowError(
-            f"Workflow {cls.__name__} has no states to draw; declare source and "
-            "dest on its events, e.g. @event(source=..., dest=...)"
-        )
-    lines = ["stateDiagram-v2", f"  [*] --> {states.start}"]
+    check_workflow(cls)
+    lines = ["stateDiagram-v2", f"  [*] --> {start_state(cls)}"]
     for name, item in event_methods(cls).items():
-        for source in item.source or ():
-            for dest in item.dest or ():
+        for source in item.source:
+            for dest in item.dest:
                 lines.append(f"  {source} --> {dest}: {name}")
-    lines.extend(f"  {name} --> [*]" for name in states.final)
+    lines.extend(
+        f"  {name} --> [*]" for name, item in state_methods(cls).items() if item.final
+    )
     if current is not None:
         lines += ["  classDef current fill:#fdff32", f"  class {current} current"]
     return "\n".join(lines) + "\n"
@@ -1001,7 +1009,7 @@ def _arguments_model(
     return model
 
 
-# Running start, next, and events --------------------------------------------------
+# Running start, states, and events --------------------------------------------------
 
 
 def _validate(
@@ -1035,22 +1043,69 @@ def _invoke(
         }
 
 
-def _event_result(
-    workflow: Workflow, method: Event, returned: Any, state: Any
-) -> str | None:
-    """Describe what an event did wrong, or return ``None``."""
-    if returned is not None:
-        return (
-            f"Event {method.name!r} of workflow {workflow.id!r} returned "
-            f"{type(returned).__name__}; events change the state and return nothing"
+def _accepted(cls: type[Workflow], current: str, listed: list[str]) -> list[str]:
+    """Return the events a state accepts, narrowed to those listed."""
+    accepted = [
+        name for name, item in event_methods(cls).items() if current in item.source
+    ]
+    extra = [name for name in listed if name not in accepted]
+    if extra:
+        raise WorkflowError(
+            f"State {current!r} does not accept {', '.join(extra)}; it accepts "
+            f"{', '.join(accepted)}"
         )
-    current = getattr(state, "state", None)
-    if method.dest is not None and current not in method.dest:
-        return (
-            f"Event {method.name!r} of workflow {workflow.id!r} moved to state "
-            f"{current!r}; it declares dest {', '.join(method.dest)}"
+    return listed or accepted
+
+
+def _load_data(cls: type[Workflow], raw: dict[str, Any] | None) -> Any:
+    """Return a session's stored data as the workflow's data model."""
+    model = data_model(cls)
+    return None if model is None else model.model_validate(raw)
+
+
+def _dump_data(cls: type[Workflow], data: Any) -> dict[str, Any] | None:
+    """Return the workflow's data as JSON, checking its type and round trip."""
+    model = data_model(cls)
+    if model is None:
+        if data is not None:
+            raise WorkflowError(
+                f"Workflow {cls.__name__} declares no data (start returns None) but "
+                f"produced a {type(data).__name__}"
+            )
+        return None
+    if type(data) is not model:
+        raise WorkflowError(
+            f"Workflow {cls.__name__} produced {type(data).__name__} data; start "
+            f"must return a {model.__name__}"
         )
-    return None
+    try:
+        dumped = data.model_dump(mode="json")
+        model.model_validate(dumped)
+    except (TypeError, ValueError) as exc:
+        raise WorkflowError(
+            f"Data of workflow {cls.__name__} does not round-trip through JSON: {exc}"
+        ) from exc
+    return dumped
+
+
+def _destination(
+    workflow: Workflow, method: Event, returned: Any
+) -> tuple[str, str | None]:
+    """Return the state an event moves to, or a description of its mistake."""
+    label = f"Event {method.name!r} of workflow {workflow.id!r}"
+    if len(method.dest) == 1:
+        if returned is None or returned == method.dest[0]:
+            return method.dest[0], None
+        return "", (
+            f"{label} returned {returned!r}; it moves to {method.dest[0]!r} and "
+            "returns nothing"
+        )
+    if isinstance(returned, str) and returned in method.dest:
+        return returned, None
+    return "", (
+        f"{label} must return the state it moves to, one of "
+        f"{', '.join(method.dest)}; got {returned!r}"
+    )
 
 
 def compatibility_problem(workflow: Workflow, session: Session) -> str | None:
@@ -1061,6 +1116,11 @@ def compatibility_problem(workflow: Workflow, session: Session) -> str | None:
         continue. Sessions continue with the currently loaded code; authors are
         responsible for keeping it compatible with existing sessions.
     """
+    if session.state not in state_methods(type(workflow)):
+        return (
+            f"The loaded workflow no longer declares the state {session.state!r}. "
+            "Inspect the session and start a new one."
+        )
     registered = event_methods(type(workflow))
     missing = [name for name in session.events if name not in registered]
     if missing:
@@ -1069,7 +1129,7 @@ def compatibility_problem(workflow: Workflow, session: Session) -> str | None:
             f"{', '.join(missing)}. Inspect the session and start a new one."
         )
     try:
-        state_model(type(workflow)).model_validate(session.data)
+        _load_data(type(workflow), session.data)
     except PydanticValidationError as exc:
         return _incompatible(exc)
     return None
@@ -1077,7 +1137,7 @@ def compatibility_problem(workflow: Workflow, session: Session) -> str | None:
 
 def _incompatible(exc: PydanticValidationError) -> str:
     return (
-        "The stored state no longer matches the loaded workflow: "
+        "The stored data no longer matches the loaded workflow: "
         f"{validation_message(exc)}. Inspect the session and start a new one."
     )
 
@@ -1151,17 +1211,21 @@ __all__ = [
     "EventRejected",
     "Instruction",
     "NotReady",
-    "States",
-    "PromptState",
+    "PromptArguments",
     "PromptWorkflow",
     "Session",
+    "State",
     "Workflow",
+    "check_workflow",
+    "data_model",
     "discover_workflows",
     "event",
     "event_methods",
     "list_workflows",
     "load_workflow",
     "load_workflows",
+    "start_state",
+    "state",
+    "state_methods",
     "workflow_graph",
-    "workflow_states",
 ]

@@ -40,64 +40,60 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from hiraku.errors import NotReady, EventRejected
-from hiraku.workflow import Instruction, Workflow, event
+from hiraku.errors import EventRejected, NotReady
+from hiraku.workflow import Instruction, Workflow, event, state
 
 
-class ToyState(BaseModel):
+class Answers(BaseModel):
     items: int
     answers: list[str] = Field(default_factory=list)
-    gate: bool = False
-    stopped: bool = False
 
 
 class Toy(Workflow):
     def start(
         self, items: Annotated[int, Field(gt=0, description="Items.")] = 2
-    ) -> ToyState:
-        return ToyState(items=items)
+    ) -> Answers:
+        return Answers(items=items)
 
-    def next(self, state: ToyState) -> Instruction:
-        if state.stopped or len(state.answers) == state.items:
-            return Instruction(
-                self.markdown.section("## Done"),
-                context={"answers": state.answers},
-                final=True,
-            )
-        if state.gate:
-            return Instruction(
-                self.markdown.section("## Gate"),
-                context={"answers": state.answers},
-                requires_user_response=True,
-                events=[self.approve, self.stop],
-            )
+    @state("work", start=True)
+    def work(self, answers: Answers) -> Instruction:
         return Instruction(
-            self.markdown.section("## Work"),
-            context={"done": len(state.answers)},
-            events=[self.answer, self.stop],
+            self.markdown.section("## Work"), context={"done": len(answers.answers)}
         )
 
-    @event
+    @state("gate")
+    def gate(self, answers: Answers) -> Instruction:
+        return Instruction(
+            self.markdown.section("## Gate"),
+            context={"answers": answers.answers},
+            requires_user_response=True,
+        )
+
+    @state("done", final=True)
+    def done(self, answers: Answers) -> Instruction:
+        return Instruction(
+            self.markdown.section("## Done"), context={"answers": answers.answers}
+        )
+
+    @event(source="work", dest=["gate", "done"])
     def answer(
-        self, state: ToyState, value: Annotated[str, Field(description="Value.")]
-    ) -> None:
+        self, answers: Answers, value: Annotated[str, Field(description="Value.")]
+    ) -> str:
         """Answer the current item."""
         if value == "bad":
             raise EventRejected("bad is not an answer")
         if value == "wait" and not (self.config.root / "ready").exists():
             raise NotReady("not ready yet")
-        state.answers.append(value)
-        state.gate = True
+        answers.answers.append(value)
+        return "done" if len(answers.answers) == answers.items else "gate"
 
-    @event
-    def approve(self, state: ToyState) -> None:
+    @event(source="gate", dest="work")
+    def approve(self, answers: Answers) -> None:
         """Go on with the next item."""
-        state.gate = False
 
-    @event
-    def stop(self, state: ToyState) -> None:
+    @event(source=["work", "gate"], dest="done")
+    def stop(self, answers: Answers) -> None:
         """Stop early."""
-        state.stopped = True
 
 
 WORKFLOW = Toy
