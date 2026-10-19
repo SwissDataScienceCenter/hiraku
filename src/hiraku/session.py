@@ -186,8 +186,8 @@ class Session(BaseModel):
     def show(self, workflow: Workflow | None = None) -> dict[str, Any]:
         """Describe the session: status, pending instruction or result, and data.
 
-        Pass the loaded workflow to include its orientation and to check that
-        the session can still continue with the current code.
+        Pass the loaded workflow to check that the session can still continue
+        with the current code.
         """
         result: dict[str, Any] = {
             "session_id": self.id,
@@ -203,8 +203,6 @@ class Session(BaseModel):
             },
             "response": self.response,
         }
-        if workflow is not None:
-            result["orientation"] = workflow.orientation
         if self.status == "cancelled":
             result["note"] = (
                 "This session is cancelled. Its last instruction is no longer "

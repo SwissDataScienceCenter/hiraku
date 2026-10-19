@@ -53,7 +53,7 @@ class CountSteps(Workflow):
             return self._done(session)
         return self.instruction(
             session,
-            self.section("next"),
+            self.markdown.section("## Next"),
             context={
                 "done": session.step,
                 "remaining": session.count - session.step,
@@ -72,7 +72,7 @@ class CountSteps(Workflow):
         session.token = secrets.token_hex(4)
         return self.instruction(
             session,
-            self.section("step"),
+            self.markdown.section("## Step"),
             context={
                 "step": session.step,
                 "count": session.count,

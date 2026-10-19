@@ -130,10 +130,14 @@ def test_collaborative_steps_reviews_and_budget(config: HirakuConfig) -> None:
     started = harness.start("collaborative", task="task", rounds=2)
     assert started["status"] == "accepted"
     assert harness.section() == "## Draft"
+    assert harness.instruction["text"].endswith(
+        "Never delete records or rewrite Git history."
+    )
     assert harness.replies == ["drafted", "finish"]
 
     draft(harness, "c1")
     assert harness.section() == "## Review"
+    assert "Never delete records" not in harness.instruction["text"]
     assert harness.instruction["requires_user_response"] is True
     assert harness.instruction["context"]["result"]["record_id"] == "c1"
     assert harness.replies == ["implement", "revise", "finish"]

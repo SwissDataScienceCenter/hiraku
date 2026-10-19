@@ -12,11 +12,12 @@ from hiraku.config import HirakuConfig
 from hiraku.errors import (
     HirakuError,
     RecordNotFoundError,
+    SectionNotFoundError,
     SessionNotFoundError,
     ValidationError,
     WorkflowError,
 )
-from hiraku.markdown import normalize_anchor
+from hiraku.markdown import Markdown
 from hiraku.session import Session
 from hiraku.workflow import (
     Completion,
@@ -95,7 +96,7 @@ class Toy(Workflow):
     def ask(self, session):
         return self.instruction(
             session,
-            self.section("add"),
+            self.markdown.section("## Add"),
             context={"total": session.total},
             replies=[self.add, self.wait, self.boom],
         )
@@ -300,13 +301,16 @@ def test_prompts_are_snapshotted_with_the_code(config: HirakuConfig) -> None:
     (config.workflows_dir / "toy" / "workflow.md").write_text(
         document("toy", "# Changed\n\n## Add\n\nNew\n")
     )
-    assert workflow.section("add") == "## Add\n\nAdd a number."
-    assert toy(config).section("add") == "## Add\n\nNew"
+    assert workflow.markdown.section("## Add") == "## Add\n\nAdd a number."
+    assert toy(config).markdown.section("## Add") == "## Add\n\nNew"
 
 
-def test_start_returns_orientation_and_explicit_replies(config: HirakuConfig) -> None:
+def test_start_returns_the_first_section_and_explicit_replies(
+    config: HirakuConfig,
+) -> None:
     response = started(toy(config))
-    assert response["orientation"] == "# Toy\n\nAdd numbers."
+    # The text before the first section is not sent; instructions stand alone.
+    assert "orientation" not in response
     assert response["instruction_id"] == 1
     instruction = response["instruction"]
     assert instruction["text"] == "## Add\n\nAdd a number."
@@ -445,7 +449,6 @@ def test_restart_recovery_continues_from_disk(config: HirakuConfig) -> None:
     restarted = load_workflow("toy", config=HirakuConfig.discover(config.root))
     shown = Session.load(first["session_id"], config=config).show(restarted)
     assert shown["response"]["instruction"] == first["instruction"]
-    assert shown["orientation"] == first["orientation"]
     assert reply(restarted.bind(config), "add", first, amount=1)["status"] == (
         "accepted"
     )
@@ -580,7 +583,6 @@ def test_cli_matches_the_runtime(
     assert response == {
         **Session.load(session_id, config=config).show()["response"],
         "status": "accepted",
-        "orientation": "# Toy\n\nAdd numbers.",
     }
 
     result = runner.invoke(
@@ -672,7 +674,7 @@ def test_bound_copies_are_isolated(config: HirakuConfig) -> None:
     first.markdown = "# Changed\n"
     second = loaded.bind(config)
     assert second.step == 1
-    assert second.section("add") == "## Add\n\nAdd a number."
+    assert second.markdown.section("## Add") == "## Add\n\nAdd a number."
     assert (
         not (config.workflows_dir / "toy" / "workflow.md")
         .read_text()
@@ -702,7 +704,6 @@ def test_markdown_only_workflows_send_the_whole_prompt(config: HirakuConfig) -> 
     workflow = loaded.bind(config)
     first = workflow.run_start({"task": "sep10", "iterations": "3"})
     assert first["status"] == "accepted"
-    assert first["orientation"] == ""
     assert first["instruction"]["text"].startswith(
         "# Loop\n\nRun 3 experiments on sep10 (quick: false)."
     )
@@ -744,7 +745,7 @@ Introduction text.
 
 ### Not a section boundary
 
-Still orientation.
+Still introduction.
 
 ## Select
 
@@ -768,34 +769,74 @@ def research() -> Workflow:
     return Workflow(id="research", markdown=DOCUMENT)
 
 
-def test_normalize_anchor() -> None:
-    assert normalize_anchor("Approve the Launch!") == "approve-the-launch"
-    assert normalize_anchor("  Step  1:  Select ") == "step-1-select"
-    assert normalize_anchor("keep-hyphens") == "keep-hyphens"
+def test_headings_are_top_level_sections_with_their_lines() -> None:
+    assert [str(item) for item in Markdown(DOCUMENT).headings] == [
+        "# Research",
+        "### Not a section boundary",
+        "## Select",
+        "### Details",
+        "## Approve the Launch!",
+    ]
+    nested = Markdown("- item\n\n  ## In a list\n\n> ## Quoted\n")
+    assert nested.headings == ()
 
 
-def test_orientation_ends_at_first_second_level_heading() -> None:
-    document = Workflow(id="research", markdown=DOCUMENT)
-    assert document.orientation.startswith("# Research")
-    assert "Still orientation." in document.orientation
-    assert "Pick one." not in document.orientation
-    assert Workflow(id="x", markdown="# Only\n\nText\n").orientation == (
-        "# Only\n\nText"
-    )
+def test_first_level_section_contains_the_whole_document() -> None:
+    document = research().markdown.section("# Research")
+    assert document.startswith("# Research\n\nIntroduction text.")
+    assert document.endswith("Ask first.")
 
 
 def test_section_includes_subsections_and_ignores_fenced_headings() -> None:
-    workflow = research()
-    select = workflow.section("select")
+    markdown = research().markdown
+    select = markdown.section("## Select")
     assert select.startswith("## Select")
     assert "Nested detail." in select
     assert "## Not a heading" in select
     assert "Ask first." not in select
-    details = workflow.section("details")
+    details = markdown.section("### Details")
     assert details.startswith("### Details\n\nNested detail.")
     assert details.endswith("```")
-    assert workflow.section("approve-the-launch").endswith("Ask first.")
-    assert "not-a-heading" not in Workflow(id="r", markdown=DOCUMENT).anchors
+    assert markdown.section("## Approve the Launch!").endswith("Ask first.")
+    assert markdown.section("  ##  Approve  the Launch! ##").endswith("Ask first.")
+    with pytest.raises(SectionNotFoundError):
+        markdown.section("## Not a heading")
+
+
+def test_section_level_must_match() -> None:
+    with pytest.raises(SectionNotFoundError, match="headings: '# Research'"):
+        research().markdown.section("## Details")
+
+
+@pytest.mark.parametrize("selector", ["select", "Select", "#Select", "####### X", "##"])
+def test_section_selector_must_be_a_heading_line(selector: str) -> None:
+    with pytest.raises(ValidationError, match="Select a section by its heading"):
+        research().markdown.section(selector)
+
+
+def test_underlined_headings_are_selected_as_heading_lines() -> None:
+    markdown = Markdown("Title\n=====\n\nIntro.\n\nStep\n----\n\nDo it.\n")
+    assert markdown.section("## Step") == "Step\n----\n\nDo it."
+    assert markdown.section("# Title").startswith("Title\n=====\n\nIntro.")
+
+
+def test_section_lines_follow_markdown_line_endings() -> None:
+    markdown = Markdown("# A\r\n\r\n## B\r\nb \u2028 still b\r\n## C\r\n")
+    assert markdown.section("## B") == "## B\nb \u2028 still b"
+
+
+def test_records_may_repeat_headings_but_selecting_one_is_ambiguous() -> None:
+    markdown = Markdown("## Notes\n\nA\n\n## Notes\n\nB\n")
+    with pytest.raises(ValidationError, match="Several sections"):
+        markdown.section("## Notes")
+
+
+def test_markdown_field_stays_a_string() -> None:
+    record = Workflow(id="doc", markdown="## Old\n")
+    record.markdown = "## New\n"
+    assert isinstance(record.markdown, Markdown)
+    assert record.markdown == "## New\n"
+    assert type(record.model_dump()["markdown"]) is str
 
 
 def test_whole_document_text() -> None:
@@ -803,23 +844,26 @@ def test_whole_document_text() -> None:
 
 
 def test_missing_section() -> None:
-    with pytest.raises(WorkflowError, match="#missing not found"):
-        research().section("missing")
+    with pytest.raises(SectionNotFoundError, match="'## Missing' not found"):
+        research().markdown.section("## Missing")
 
 
-def test_anchors_that_normalize_to_the_same_name_are_rejected() -> None:
-    with pytest.raises(ValidationError, match="share the anchor #select"):
-        Workflow(id="dup", markdown="## Select\n\n## select!\n")
+def test_workflow_headings_must_be_unique() -> None:
+    with pytest.raises(ValidationError, match="several sections '## Select'"):
+        Workflow(id="dup", markdown="## Select\n\n## Select\n")
+    Workflow(id="levels", markdown="## Select\n\n### Select\n\n## select\n")
     document = Workflow(id="ok", markdown="## Select\n")
-    with pytest.raises(ValidationError, match="share the anchor"):
-        document.markdown = "## A\n\n## a\n"
+    with pytest.raises(ValidationError, match="several sections '## A'"):
+        document.markdown = "## A\n\n## A\n"
 
 
 def test_sections_follow_markdown_changes() -> None:
     document = Workflow(id="doc", markdown="## Old\n\nText\n")
     document.markdown = "# Intro\n\n## New\n\nText\n"
-    assert document.anchors == ["intro", "new"]
-    assert document.orientation == "# Intro"
+    assert [str(item) for item in document.markdown.headings] == [
+        "# Intro",
+        "## New",
+    ]
 
 
 def test_workflow_md_is_a_registry_record(tmp_path: Path) -> None:
@@ -837,9 +881,13 @@ def test_workflow_md_is_a_registry_record(tmp_path: Path) -> None:
     assert reloaded.to_dict() == {
         "id": "collaborative",
         "description": document.to_dict()["description"],
+        "rules": document.rules,
         "summary": "Bounded research",
     }
-    assert reloaded.section("review") == document.section("review")
+    assert reloaded.rules.endswith("Never delete records or rewrite Git history.")
+    assert reloaded.markdown.section("## Review") == document.markdown.section(
+        "## Review"
+    )
 
 
 @pytest.mark.parametrize(

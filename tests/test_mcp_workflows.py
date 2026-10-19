@@ -217,7 +217,7 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
     session_id = result["started"]["session_id"]
     assert result["listing"][0]["session_id"] == session_id
     assert result["shown"]["response"]["instruction_id"] == 1
-    assert result["shown"]["orientation"].startswith("# Autodataset")
+    assert "orientation" not in result["shown"]
     assert "session_show" in result["shown"]["guide"]
     assert result["resource"]["session_id"] == session_id
     assert result["workflow"].startswith("# Autodataset")

@@ -4,10 +4,6 @@ description: Check that the harness follows numbered instructions and stops for 
 ---
 # Count steps
 
-This workflow checks that your harness follows Hiraku instructions exactly. It
-does no research work and changes no files. Each step carries a random token;
-reply with the token of the current step, never one from an earlier step.
-
 ## Step
 
 Print the step line from the context to the user, for example

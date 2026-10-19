@@ -1,16 +1,12 @@
 ---
 id: collaborative
 description: Draft, implement, launch, and analyze experiments with the user, step by step.
+rules: >-
+  Use Hiraku's record and run tools, or the `hiraku` CLI (`hiraku record show`,
+  `hiraku record list`, `hiraku runs`), to read the task and earlier
+  experiments. Never delete records or rewrite Git history.
 ---
 # Collaborative research
-
-You run experiments on a task together with the user, one step at a time:
-draft, implement, launch, and analyze. You do the work of each step; the user
-reviews its result and chooses the next step.
-
-Use Hiraku's record and run tools, or the `hiraku` CLI (`hiraku record show`,
-`hiraku record list`, `hiraku runs`), to read the task and earlier experiments.
-Never delete records or rewrite Git history.
 
 ## Draft
 

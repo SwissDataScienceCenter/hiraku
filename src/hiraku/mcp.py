@@ -502,7 +502,7 @@ def _add_session_tools(
     _add_tool(
         server,
         session_show,
-        "Show a workflow session: orientation, pending instruction or result, and "
+        "Show a workflow session: pending instruction or result, and "
         "stored data. Use it to resume a session.",
         read_only=True,
     )
@@ -605,11 +605,7 @@ def _start_description(workflow: Workflow) -> str:
 def _prompt_text(response: Mapping[str, Any]) -> str:
     """Render a start response as a user message for the agent."""
     instruction = response["instruction"]
-    parts = []
-    orientation = response.get("orientation") or ""
-    if orientation and not instruction["text"].startswith(orientation):
-        parts.append(orientation)
-    parts.append(instruction["text"])
+    parts = [instruction["text"]]
     if instruction.get("context") is not None:
         context = json.dumps(instruction["context"], indent=1, ensure_ascii=False)
         parts.append(f"Context:\n```json\n{context}\n```")

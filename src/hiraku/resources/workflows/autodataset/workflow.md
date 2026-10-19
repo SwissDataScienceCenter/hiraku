@@ -3,11 +3,6 @@ id: autodataset
 ---
 # Autodataset
 
-You find datasets that suit a Hiraku task and document each one as a
-source-backed record. Hiraku checks the records' structure and that sources are
-recorded; it does not verify licensing or scientific suitability, so state what
-you could and could not confirm.
-
 ## Instructions
 
 Find `count` datasets for the task in the context. Datasets listed in

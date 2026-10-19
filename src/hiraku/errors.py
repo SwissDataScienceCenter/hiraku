@@ -53,6 +53,10 @@ class WorkflowError(HirakuError):
     """A workflow, its code, or one of its tools is invalid."""
 
 
+class SectionNotFoundError(HirakuError):
+    """A Markdown body has no section with the requested heading."""
+
+
 class SessionNotFoundError(HirakuError):
     """A workflow session does not exist."""
 

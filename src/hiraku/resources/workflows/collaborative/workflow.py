@@ -42,6 +42,9 @@ class Collaborative(Workflow):
     attribution, and stops offering new experiments after ``rounds``.
     """
 
+    # Setting: rules for every step, added to each step's instruction.
+    rules: str = ""
+
     def start(
         self,
         task: Annotated[
@@ -220,9 +223,10 @@ class Collaborative(Workflow):
             "launch": self.launched,
             "analyze": self.analyzed,
         }
+        text = self.markdown.section(f"## {session.step.title()}")
         return self.instruction(
             session,
-            self.section(session.step),
+            f"{text}\n\n{self.rules}" if self.rules else text,
             context=self._context(session),
             replies=[reports[session.step], self.finish],
         )
@@ -235,7 +239,7 @@ class Collaborative(Workflow):
         steps = [getattr(self, following)] if more else []
         return self.instruction(
             session,
-            self.section("review"),
+            self.markdown.section("## Review"),
             context={
                 "step": session.step,
                 "result": result,

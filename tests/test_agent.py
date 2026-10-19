@@ -64,7 +64,7 @@ class Toy(Workflow):
             return self.completion(session, {"answers": session.answers})
         return self.instruction(
             session,
-            self.section("gate"),
+            self.markdown.section("## Gate"),
             context={"answers": session.answers},
             requires_user_response=True,
             replies=[self.approve, self.stop],
@@ -83,7 +83,7 @@ class Toy(Workflow):
     def _work(self, session: ToySession) -> Instruction:
         return self.instruction(
             session,
-            self.section("work"),
+            self.markdown.section("## Work"),
             context={"done": len(session.answers)},
             replies=[self.answer, self.stop],
         )

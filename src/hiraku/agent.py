@@ -460,7 +460,7 @@ def _run_agent(
     prompt_file = directory / "prompt.md"
     instruction_file = directory / "instruction.json"
     prompt_file.write_text(
-        render_prompt(workflow, response, reply_file, error, options.interactive),
+        render_prompt(response, reply_file, error, options.interactive),
         encoding="utf-8",
     )
     instruction_file.write_text(
@@ -598,7 +598,6 @@ def _resend(
 
 
 def render_prompt(
-    workflow: Workflow,
     response: dict[str, Any],
     reply_file: Path,
     error: str | None = None,
@@ -606,12 +605,7 @@ def render_prompt(
 ) -> str:
     """Render a pending instruction as a self-contained prompt for an agent."""
     instruction = response["instruction"]
-    parts = []
-    if workflow.orientation and not instruction["text"].startswith(
-        workflow.orientation
-    ):
-        parts.append(workflow.orientation)
-    parts.append(instruction["text"])
+    parts = [instruction["text"]]
     if instruction.get("context") is not None:
         context = json.dumps(instruction["context"], indent=1, ensure_ascii=False)
         parts.append(f"Context:\n```json\n{context}\n```")

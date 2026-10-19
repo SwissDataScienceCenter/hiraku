@@ -83,7 +83,7 @@ class Autodataset(Workflow):
         session.shortfall_reason = reason
         return self.instruction(
             session,
-            self.section("shortfall"),
+            self.markdown.section("## Shortfall"),
             context={
                 "requested": session.count,
                 "found": session.found,
@@ -122,7 +122,7 @@ class Autodataset(Workflow):
     def _search(self, session: DatasetSession) -> Instruction:
         return self.instruction(
             session,
-            self.section("instructions"),
+            self.markdown.section("## Instructions"),
             context={
                 "task": session.task,
                 "count": session.count,

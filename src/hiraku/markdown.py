@@ -1,98 +1,127 @@
-"""Markdown section parsing for record bodies."""
+"""Markdown bodies: section selection by heading and placeholder rendering."""
 
 from __future__ import annotations
 
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
-from .errors import ValidationError
+from markdown_it import MarkdownIt
+from pydantic import GetCoreSchemaHandler
+from pydantic_core import CoreSchema, core_schema
 
-_HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
-_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-_PUNCTUATION = re.compile(r"[^\w\s-]", re.UNICODE)
-_WHITESPACE = re.compile(r"\s+")
+from .errors import SectionNotFoundError, ValidationError
 
-
-def normalize_anchor(heading: str) -> str:
-    """Return the anchor used to reference a Markdown heading.
-
-    Lowercases the heading text, removes punctuation, and replaces runs of
-    whitespace with single hyphens.
-
-    Example:
-        ``normalize_anchor("Approve the Launch!") == "approve-the-launch"``
-    """
-    text = _PUNCTUATION.sub("", heading.strip().lower())
-    return _WHITESPACE.sub("-", text.strip())
+_PARSER = MarkdownIt("commonmark")
+# A heading line; like in Markdown, a closing sequence of # is not part of it.
+_SELECTOR = re.compile(r"^(#{1,6})[ \t]+(\S.*?)(?:[ \t]+#+)?$")
 
 
 @dataclass(frozen=True)
-class Section:
-    """Location of one heading's section within a Markdown body."""
+class Heading:
+    """A top-level heading of a Markdown body and the lines of its section.
+
+    Attributes:
+        level: Heading level, 1 to 6, for both ``#`` and underlined headings.
+        title: Heading text as written, with runs of whitespace collapsed.
+        start: Index of the heading's first line.
+        end: Index of the first line after the section; the section includes
+            its subsections.
+    """
 
     level: int
+    title: str
     start: int
     end: int
 
-
-@dataclass(frozen=True)
-class ParsedMarkdown:
-    """Lines, sections by anchor, and orientation boundary of a Markdown body."""
-
-    lines: list[str]
-    sections: dict[str, Section]
-    orientation_end: int
+    def __str__(self) -> str:
+        return f"{'#' * self.level} {self.title}"
 
 
-def parse_markdown(markdown: str, *, label: str) -> ParsedMarkdown:
-    """Index the sections of a workflow's Markdown body.
+class Markdown(str):
+    """A Markdown body: a string that can select its sections by heading.
 
-    Headings inside fenced code blocks are ignored. A section runs to the next
-    heading of equal or higher level. The orientation ends at the first
-    second-level heading.
+    Headings are found with a CommonMark parser, so headings in code blocks,
+    lists, and block quotes do not start sections. Sections are returned as
+    written in the source.
 
-    Raises:
-        hiraku.errors.ValidationError: If two headings share a normalized anchor.
+    Example:
+        ``Markdown("# Intro\\n\\n## Step\\nDo it.").section("## Step")``
+        returns ``"## Step\\nDo it."``.
     """
-    lines = markdown.splitlines(keepends=True)
-    sections: dict[str, Section] = {}
-    orientation_end = len(lines)
-    headings: list[tuple[int, int, str]] = []
-    fence: str | None = None
-    for index, line in enumerate(lines):
-        fence_match = _FENCE.match(line)
-        if fence is not None:
-            if fence_match and fence_match.group(1).startswith(fence):
-                fence = None
-            continue
-        if fence_match:
-            fence = fence_match.group(1)
-            continue
-        heading = _HEADING.match(line.rstrip("\r\n"))
-        if heading:
-            headings.append((index, len(heading.group(1)), heading.group(2) or ""))
-    for position, (index, level, title) in enumerate(headings):
-        if level == 2 and orientation_end == len(lines):
-            orientation_end = index
-        anchor = normalize_anchor(title)
-        if not anchor:
-            continue
-        if anchor in sections:
-            raise ValidationError(
-                f"Headings in {label} share the anchor #{anchor}; rename one"
-            )
-        end = next(
-            (
-                following
-                for following, following_level, _ in headings[position + 1 :]
-                if following_level <= level
-            ),
-            len(lines),
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(
+            cls,
+            core_schema.str_schema(),
+            serialization=core_schema.plain_serializer_function_ser_schema(str),
         )
-        sections[anchor] = Section(level, index, end)
-    return ParsedMarkdown(lines, sections, orientation_end)
+
+    @cached_property
+    def _lines(self) -> list[str]:
+        # Count lines as markdown-it does: it treats \r\n and \r as \n, while
+        # str.splitlines would also split at characters such as \u2028.
+        return self.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+    @cached_property
+    def headings(self) -> tuple[Heading, ...]:
+        """Return the headings that start sections, in document order."""
+        tokens = _PARSER.parse(str(self))
+        found: list[tuple[int, str, int]] = []
+        for index, token in enumerate(tokens):
+            # Nested headings, e.g. in a list item, belong to the section above.
+            if token.type != "heading_open" or token.level != 0 or not token.map:
+                continue
+            title = " ".join(tokens[index + 1].content.split())
+            found.append((int(token.tag[1:]), title, token.map[0]))
+        headings = []
+        for position, (level, title, start) in enumerate(found):
+            # A section ends at the next heading of the same or a higher level.
+            following = (
+                line for depth, _, line in found[position + 1 :] if depth <= level
+            )
+            headings.append(
+                Heading(level, title, start, next(following, len(self._lines)))
+            )
+        return tuple(headings)
+
+    def section(self, heading: str) -> str:
+        """Return a section, including its subsections, selected by its heading.
+
+        Args:
+            heading: The heading as a ``#`` line, e.g. ``"## Step"``. The level
+                must match; whitespace in the title is collapsed. Underlined
+                headings are selected the same way.
+
+        Raises:
+            hiraku.errors.ValidationError: If ``heading`` is not a ``#`` line or
+                several sections have that heading.
+            hiraku.errors.SectionNotFoundError: If no section has that heading.
+        """
+        match = _SELECTOR.match(heading.strip()) if isinstance(heading, str) else None
+        if match is None:
+            raise ValidationError(
+                f"Select a section by its heading, e.g. '## Step'; got {heading!r}"
+            )
+        level, title = len(match.group(1)), " ".join(match.group(2).split())
+        found = [
+            item
+            for item in self.headings
+            if item.level == level and item.title == title
+        ]
+        if len(found) > 1:
+            raise ValidationError(f"Several sections have the heading {heading!r}")
+        if not found:
+            available = ", ".join(f"'{item}'" for item in self.headings) or "none"
+            raise SectionNotFoundError(
+                f"Section {heading!r} not found; headings: {available}"
+            )
+        return "\n".join(self._lines[found[0].start : found[0].end]).strip()
 
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")

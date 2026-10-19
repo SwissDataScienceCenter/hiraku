@@ -37,7 +37,7 @@ from .errors import (
     ValidationError,
     WorkflowError,
 )
-from .markdown import ParsedMarkdown, parse_markdown, placeholders, render
+from .markdown import placeholders, render
 from .session import (
     Completion,
     HistoryEntry,
@@ -97,9 +97,10 @@ class Workflow(BaseRecord):
 
     An instance is the loaded ``workflow.md``: the front matter holds the
     workflow ``id``, which must match the directory name, and any settings the
-    subclass declares as annotated fields; the Markdown body holds orientation
-    and prompt sections. The base class alone loads any ``workflow.md`` without
-    importing project code. The runtime loads each workflow once and gives
+    subclass declares as annotated fields; the Markdown body holds the prompt
+    sections, selected by heading with ``self.markdown.section("## Step")``.
+    The base class alone loads any ``workflow.md`` without importing project
+    code. The runtime loads each workflow once and gives
     every call a fresh copy bound to the project; changes to an instance are
     not persisted.
 
@@ -108,12 +109,19 @@ class Workflow(BaseRecord):
         fields, constants need ``ClassVar``, and ``__init__`` is not overridden.
     """
 
-    _parsed: ParsedMarkdown | None = PrivateAttr(default=None)
     _config: HirakuConfig | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
-    def parse_sections(self) -> Self:
-        self._parsed = parse_markdown(self.markdown, label=f"workflow {self.id!r}")
+    def check_headings(self) -> Self:
+        # Records may repeat headings; a workflow selects its prompts by heading,
+        # so a repeated one is an authoring error, reported when it loads.
+        seen: set[str] = set()
+        for heading in map(str, self.markdown.headings):
+            if heading in seen:
+                raise ValidationError(
+                    f"Workflow {self.id!r} has several sections '{heading}'; rename one"
+                )
+            seen.add(heading)
         return self
 
     def bind(self, config: HirakuConfig) -> Self:
@@ -168,11 +176,7 @@ class Workflow(BaseRecord):
         )
         session.advance(response, _reply_specs(self), call)
         session.save(config=self.config)
-        return {
-            "status": "accepted",
-            "orientation": self.orientation,
-            **session.response,
-        }
+        return {"status": "accepted", **session.response}
 
     def run_reply(
         self,
@@ -275,39 +279,6 @@ class Workflow(BaseRecord):
     def text(self) -> str:
         """Return the Markdown body without front matter."""
         return self.markdown.strip()
-
-    @property
-    def anchors(self) -> list[str]:
-        """Return all section anchors in document order."""
-        return list(self._sections().sections)
-
-    @property
-    def orientation(self) -> str:
-        """Return the introduction before the first second-level heading."""
-        parsed = self._sections()
-        return "".join(parsed.lines[: parsed.orientation_end]).strip()
-
-    def section(self, anchor: str) -> str:
-        """Return a section of the body, including its subsections.
-
-        Raises:
-            hiraku.errors.WorkflowError: If the anchor does not exist.
-        """
-        parsed = self._sections()
-        try:
-            section = parsed.sections[anchor]
-        except KeyError as exc:
-            available = ", ".join(f"#{name}" for name in parsed.sections) or "none"
-            raise WorkflowError(
-                f"Prompt section #{anchor} not found in workflow {self.id!r}; "
-                f"available sections: {available}"
-            ) from exc
-        return "".join(parsed.lines[section.start : section.end]).strip()
-
-    def _sections(self) -> ParsedMarkdown:
-        if self._parsed is None:
-            self._parsed = parse_markdown(self.markdown, label=f"workflow {self.id!r}")
-        return self._parsed
 
     def instruction(
         self,
@@ -429,11 +400,6 @@ class PromptWorkflow(Workflow):
                 f"arguments: {', '.join(undeclared)}"
             )
         return self
-
-    @property
-    def orientation(self) -> str:
-        """Return nothing: the whole body is the first instruction."""
-        return ""
 
     def start(self, **arguments: Any) -> Instruction:
         """Start the workflow; its whole prompt arrives as one instruction."""

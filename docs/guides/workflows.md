@@ -256,7 +256,7 @@ class Review(Workflow):
         session = ReviewSession(topic=topic)
         return self.instruction(
             session,
-            self.section("search"),
+            self.markdown.section("## Search"),
             context={"topic": topic},
             replies=[self.propose],
         )
@@ -269,7 +269,7 @@ class Review(Workflow):
         session.questions = questions
         return self.instruction(
             session,
-            self.section("choose"),
+            self.markdown.section("## Choose"),
             context={"questions": questions},
             requires_user_response=True,
             replies=[self.choose],
@@ -292,8 +292,6 @@ id: review
 min_questions: 3
 ---
 # Literature review
-
-Introductory guidance shown when the session starts.
 
 ## Search
 
@@ -324,7 +322,7 @@ The rules are deliberately small:
   Hiraku loads the session, checks that the reply answers the pending
   instruction and that its arguments match, calls the method, and saves the
   result atomically. A reply cannot be named like a `Workflow` method such as
-  `save` or `section`.
+  `save` or `instruction`.
 - A `Session` subclass declares the workflow's own data. The base fields, such
   as `id`, `status`, `instruction_id`, and `history`, belong to the runtime and
   cannot be redefined.
@@ -335,10 +333,16 @@ The rules are deliberately small:
   refers to evidence that has not arrived yet. Nothing is saved in either case.
   A valid alternative, such as revising, skipping, or stopping, is a normal
   reply that returns the next instruction.
-- `self.section("name")` returns a section of this workflow's `workflow.md`,
-  and `self.text` the whole body. Section names are lowercase heading text
-  with punctuation removed and spaces replaced by hyphens. The text before the
-  first `##` heading is the orientation shown at start.
+- `self.markdown.section("## Search")` returns a section of this workflow's
+  `workflow.md`, including its subsections, and `self.text` the whole body.
+  Select a section by its heading line as written: the level must match, so
+  `"### Search"` is a different section. Headings in code blocks, lists, and
+  block quotes do not start sections, and each heading may appear only once in
+  a `workflow.md`. Hiraku sends only the instruction text you pass, so each
+  instruction must stand on its own: text before the first `##` heading is not
+  sent. To repeat guidance in several instructions, declare it as a setting,
+  as the bundled `collaborative` workflow does with `rules`, and add it to the
+  instruction text.
 - Each call gets a fresh copy of the loaded workflow, bound to the project
   configuration as currently saved; changing `self` during a
   call is not persisted. To run a workflow from Python, for example in a
