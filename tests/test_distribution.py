@@ -51,6 +51,9 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
             "assets/sdsc-logo-white.svg",
             "studio/dashboard/view.toml",
             "studio/dashboard/index.html",
+            "studio/dashboard/style.css",
+            "studio/dashboard/tokens.css",
+            "studio/dashboard/ui.css",
         )
     }
     assert dashboard <= packaged, f"Missing dashboard files: {dashboard - packaged}"

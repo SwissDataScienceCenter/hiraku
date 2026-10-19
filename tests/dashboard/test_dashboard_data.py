@@ -21,6 +21,7 @@ from hiraku.dashboard.data import (
     run_text,
     safe_url,
     subtree,
+    tradeoff_frame,
     tree_rows,
     within,
 )
@@ -90,6 +91,28 @@ def test_execution_order_breaks_ties_by_id_and_puts_untimed_runs_last() -> None:
     ]
 
     assert [run.id for run in execution_order(runs)] == ["a", "b", "untimed"]
+
+
+def test_tradeoff_frame_identifies_non_dominated_runs() -> None:
+    runs = pd.DataFrame(
+        [
+            {"run": "best", "record": "a", "metric.cost": 1, "metric.score": 9},
+            {"run": "tradeoff", "record": "b", "metric.cost": 2, "metric.score": 10},
+            {"run": "dominated", "record": "a", "metric.cost": 3, "metric.score": 8},
+            {"run": "missing", "record": "b", "metric.cost": None, "metric.score": 12},
+            {
+                "run": "infinite",
+                "record": "b",
+                "metric.cost": 0,
+                "metric.score": float("inf"),
+            },
+        ]
+    )
+
+    points, excluded = tradeoff_frame(runs, "cost", "score", "minimize", "maximize")
+
+    assert points.loc[points["non_dominated"], "run"].tolist() == ["best", "tradeoff"]
+    assert excluded == 2
 
 
 def test_record_rows_list_records_in_tree_order() -> None:

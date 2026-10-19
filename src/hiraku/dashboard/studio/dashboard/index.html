@@ -3,35 +3,60 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hiraku dashboard</title>
-    <style>
-      /* The notebook's cells bring theme.css; this matches marimo's wide app. */
-      #app-shell {
-        display: grid;
-        gap: 1.75rem;
-        max-width: 1100px;
-        margin: 0 auto;
-        padding: 3rem 1rem;
-      }
-      /* Studio places cells in <marimo-cell> hosts, not marimo's .marimo-cell. */
-      marimo-cell:has(.hk-section-heading[data-section="tree"]:not([open])) ~ marimo-cell:has(.hk-section-body[data-section="tree"]),
-      marimo-cell:has(.hk-section-heading[data-section="run"]:not([open])) ~ marimo-cell:has(.hk-section-body[data-section="run"]),
-      marimo-cell:has(.hk-section-heading[data-section="plot"]:not([open])) ~ marimo-cell:has(.hk-section-body[data-section="plot"]) {
-        display: none;
-      }
-    </style>
+    <title>Runs · Hiraku</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./tokens.css">
+    <link rel="stylesheet" href="./ui.css">
+    <link rel="stylesheet" href="./style.css">
   </head>
   <body>
     <main id="app-shell">
-      <marimo-cell name="header"></marimo-cell>
-      <marimo-cell name="refresh_button"></marimo-cell>
-      <marimo-cell name="tree_heading"></marimo-cell>
-      <marimo-cell name="tree_section"></marimo-cell>
-      <marimo-cell name="run_heading"></marimo-cell>
-      <marimo-cell name="run_section"></marimo-cell>
-      <marimo-cell name="plot_heading"></marimo-cell>
-      <marimo-cell name="plot_section"></marimo-cell>
+      <header class="topbar">
+        <marimo-cell name="header"></marimo-cell>
+        <marimo-cell name="refresh_button"></marimo-cell>
+      </header>
+      <p class="eyebrow">Experiment workspace</p>
+      <h1>Inspect runs</h1>
+      <p class="intro">Explore records, select a run, and review its provenance and metric history.</p>
+      <section class="card">
+        <h2>Records and runs</h2>
+        <marimo-cell name="tree_heading"></marimo-cell>
+        <marimo-cell name="tree_section"></marimo-cell>
+      </section>
+      <div class="workspace">
+        <section class="card">
+          <h2>Selected run</h2>
+          <marimo-cell name="run_heading"></marimo-cell>
+          <marimo-cell name="run_section"></marimo-cell>
+        </section>
+        <section class="card">
+          <h2>Metric analysis</h2>
+          <marimo-cell name="plot_heading"></marimo-cell>
+          <marimo-cell name="plot_section"></marimo-cell>
+        </section>
+      </div>
       <marimo-cell name="footer"></marimo-cell>
     </main>
+    <script>
+      (() => {
+        const header = document.querySelector(".topbar");
+        const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+        let previousY = window.scrollY;
+        let pending = false;
+        window.addEventListener("scroll", () => {
+          if (pending || reducedMotion.matches) return;
+          pending = true;
+          requestAnimationFrame(() => {
+            const currentY = window.scrollY;
+            header.classList.toggle("is-hidden", currentY > 80 && currentY > previousY);
+            previousY = currentY;
+            pending = false;
+          });
+        }, { passive: true });
+      })();
+    </script>
   </body>
 </html>

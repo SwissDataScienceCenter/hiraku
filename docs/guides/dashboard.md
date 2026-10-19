@@ -2,9 +2,8 @@
 
 `hiraku dashboard` serves a local page for browsing records and the runs
 attributed to them. The page is a [marimo](https://marimo.io) notebook served
-through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view:
-you can use it as it is, read its code, or copy it into your project and
-change it.
+through [Marimo Studio](https://marimo-team.github.io/marimo-studio/). Its
+metric analysis can show either performance over run order or metric trade-offs.
 
 Install the optional dependencies first:
 
@@ -46,8 +45,8 @@ above its output. The code is read-only here; use the edit mode to change it.
 hiraku dashboard --init
 ```
 
-Copies the bundled notebook to `hiraku/dashboard/app.py` and its Studio view
-to `hiraku/dashboard/studio/dashboard/`, with a `.gitignore` for marimo's
+Copies the bundled notebook to `hiraku/dashboard/app.py` and both Studio views
+to `hiraku/dashboard/studio/`, with a `.gitignore` for marimo's
 `__marimo__/` caches and Studio's build state. From then on,
 `hiraku dashboard` serves this copy instead of the bundled notebook, so commit
 it with the project. `--init`
@@ -89,11 +88,14 @@ location.
     and metrics, plus a link to the run in its tracking backend when one is
     available.
 
-**Performance**
-:   Every run under the selected record, numbered 1 to N by start time on the
-    x axis, with a metric you choose on the y axis. Colours mark the record and
-    a ring marks the selected run. Selecting a run inside the current subtree
-    keeps that comparison; selecting one outside switches to the run's record.
+**Metric analysis**
+:   Choose **Performance over runs** to see runs in the selected record subtree
+    in execution order, with a metric on the y axis. Colours mark the record
+    and a ring marks the selected run. Choose **Metric trade-offs** to compare
+    two metrics in that same subtree; set whether each should be minimized or
+    maximized. Diamonds mark runs for which no comparable run matches or
+    improves both metrics while improving at least one. Runs without finite
+    numeric values for both metrics are excluded.
 
 Use **Refresh** to re-read records and tracking sources after new launches.
 
@@ -116,8 +118,7 @@ Apache Arrow, and every view on the page is computed from them:
 | --- | --- |
 | Runs table | `records_df` rows, each followed by its runs from `runs_df` |
 | Run details | the selected run's row of `runs_df` |
-| Metric choice | the `metric.*` columns of `runs_df`; the default is the first metric declared in `records_df` |
-| Performance plot | the rows of `runs_df` in the selected record's subtree |
+| Metric analysis | selected record subtree in `runs_df`; choose one metric for performance or two numeric metrics for trade-offs |
 
 `record_path` is the record's ancestry, such as `digits/weak-l2`.
 `subtree(runs_df, "digits")` selects every run of `digits` and the records

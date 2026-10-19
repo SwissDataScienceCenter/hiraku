@@ -43,17 +43,18 @@ def test_build_command(options: dict, flags: list[str]) -> None:
     ]
 
 
-def test_bundled_view_places_every_displayed_cell() -> None:
+def test_bundled_views_place_all_interactive_cells() -> None:
     from marimo._ast.load import load_app
 
     app = load_app(str(launcher.BUNDLED_NOTEBOOK))
     view = (launcher.BUNDLED_VIEWS / "dashboard" / "index.html").read_text(
         encoding="utf-8"
     )
-    placed = re.findall(r'<marimo-cell name="([^"]+)">', view)
+    placed = set(re.findall(r'<marimo-cell name="([^"]+)">', view))
     named = [cell.name for cell in app._cell_manager.cells() if cell.name != "_"]
 
-    assert placed == named
+    assert placed <= set(named)
+    assert placed == set(named)
 
 
 def test_init_dashboard_copies_the_notebook(project: HirakuConfig) -> None:

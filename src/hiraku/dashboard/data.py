@@ -326,6 +326,50 @@ def plot_frame(runs_df: pd.DataFrame, metric: str | None) -> tuple[pd.DataFrame,
     return plotted, len(frame) - len(plotted)
 
 
+def tradeoff_frame(
+    runs_df: pd.DataFrame,
+    x_metric: str,
+    y_metric: str,
+    x_objective: str,
+    y_objective: str,
+) -> tuple[pd.DataFrame, int]:
+    """Return comparable runs with a trade-off highlight and excluded count."""
+    x_values = pd.to_numeric(runs_df[f"metric.{x_metric}"], errors="coerce")
+    y_values = pd.to_numeric(runs_df[f"metric.{y_metric}"], errors="coerce")
+    valid = (
+        x_values.notna()
+        & y_values.notna()
+        & x_values.map(math.isfinite)
+        & y_values.map(math.isfinite)
+    )
+    points = pd.DataFrame(
+        {
+            "run": runs_df.loc[valid, "run"].astype(str).to_numpy(),
+            "record": runs_df.loc[valid, "record"].astype(str).to_numpy(),
+            "x": x_values.loc[valid].to_numpy(),
+            "y": y_values.loc[valid].to_numpy(),
+        }
+    ).reset_index(drop=True)
+    if points.empty:
+        points["non_dominated"] = pd.Series(dtype=bool)
+        return points, len(runs_df)
+
+    x_score = points["x"] * (1 if x_objective == "minimize" else -1)
+    y_score = points["y"] * (1 if y_objective == "minimize" else -1)
+    ordered = points.assign(_x_score=x_score, _y_score=y_score)
+    non_dominated_indices: list[int] = []
+    best_y = math.inf
+    for _, group in ordered.groupby("_x_score", sort=True):
+        group_best_y = group["_y_score"].min()
+        if group_best_y <= best_y:
+            non_dominated_indices.extend(
+                group.index[group["_y_score"] == group_best_y].tolist()
+            )
+            best_y = min(best_y, group_best_y)
+    points["non_dominated"] = points.index.isin(non_dominated_indices)
+    return points, len(runs_df) - len(points)
+
+
 def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
     """Return the rows of ``frame`` as dicts of Python values, ``None`` if missing."""
     return pa.Table.from_pandas(frame, preserve_index=False).to_pylist()

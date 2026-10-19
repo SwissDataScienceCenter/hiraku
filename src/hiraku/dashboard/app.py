@@ -48,6 +48,7 @@ def _():
         run_text,
         safe_url,
         subtree,
+        tradeoff_frame,
         tree_rows,
         within,
     )
@@ -74,6 +75,7 @@ def _():
         logo_data_uri,
         metric_names,
         mo,
+        tradeoff_frame,
         palette,
         plot_frame,
         RECORD_COLUMNS,
@@ -110,7 +112,7 @@ def header(config, logo_data_uri, mo, theme_css):
 
 @app.cell
 def refresh_button(mo):
-    refresh = mo.ui.button(label="↻ Refresh", value=0, on_click=lambda count: count + 1)
+    refresh = mo.ui.button(label="Refresh", value=0, on_click=lambda count: count + 1)
     mo.hstack([refresh], justify="end")
     return (refresh,)
 
@@ -198,7 +200,7 @@ def tree_section(
         _rows,
         selection="single",
         initial_selection=_initial,
-        hidden_columns=["key", "depth"],
+        hidden_columns=["key", "depth"] if _rows else None,
         page_size=50,
         show_column_summaries=False,
         show_data_types=False,
@@ -272,14 +274,46 @@ def run_section(
 
 @app.cell
 def plot_heading(section_heading):
-    section_heading("plot", "Performance")
+    section_heading("plot", "Metric analysis")
     return
 
 
 @app.cell
-def _(metrics, mo, tree_metric):
+def _(metrics, mo, records_df, tree_metric):
+    plot_mode = mo.ui.dropdown(
+        ["Performance over runs", "Metric trade-offs"],
+        value="Performance over runs",
+        label="View",
+    )
     metric = mo.ui.dropdown(metrics, value=tree_metric, label="Metric (y axis)")
-    return (metric,)
+    x_default = metrics[0] if metrics else None
+    y_default = metrics[1] if len(metrics) > 1 else x_default
+    x_metric = mo.ui.dropdown(metrics, value=x_default, label="X metric")
+    y_metric = mo.ui.dropdown(metrics, value=y_default, label="Y metric")
+
+    def direction(metric_name):
+        return next(
+            (
+                item["direction"]
+                for declared in records_df["metrics"]
+                if isinstance(declared, list)
+                for item in declared
+                if item["name"] == metric_name
+            ),
+            "minimize",
+        )
+
+    x_objective = mo.ui.dropdown(
+        ["minimize", "maximize"],
+        value=direction(x_default) if x_default else "minimize",
+        label="X objective",
+    )
+    y_objective = mo.ui.dropdown(
+        ["minimize", "maximize"],
+        value=direction(y_default) if y_default else "minimize",
+        label="Y objective",
+    )
+    return plot_mode, metric, x_metric, x_objective, y_metric, y_objective
 
 
 @app.cell
@@ -295,52 +329,154 @@ def plot_section(
     section_body,
     selected_run,
     subtree,
+    tradeoff_frame,
+    plot_mode,
+    x_metric,
+    x_objective,
+    y_metric,
+    y_objective,
 ):
-    # The runs under the selected record, numbered in execution order.
+    _controls = [plot_mode]
     _scoped = subtree(runs_df, paths.get(scope))
-    _points, _missing = plot_frame(_scoped, metric.value)
-    _notes = [f"{len(_scoped)} runs under **{scope}**, numbered by execution order."]
-    if _missing:
-        _notes.append(f"{_missing} without a numeric `{metric.value}` are not shown.")
-    if _points.empty:
-        _chart = mo.md("No runs to plot.")
-    else:
-        _base = alt.Chart(_points).encode(
-            x=alt.X(
-                "number:Q",
-                title="Run number (execution order)",
-                axis=alt.Axis(format="d", tickMinStep=1),
-                scale=alt.Scale(nice=False, padding=16),
-            ),
-            y=alt.Y("value:Q", title=metric.value, scale=alt.Scale(zero=False)),
-        )
-        _line = _base.mark_line(color="#dddeec", strokeWidth=2)
-        _dots = _base.mark_point(filled=True, size=90, opacity=1).encode(
-            color=alt.Color("record:N", scale=alt.Scale(range=palette), title="Record"),
-            tooltip=[
-                alt.Tooltip("number:Q", title="Run #"),
-                alt.Tooltip("run:N", title="Run"),
-                alt.Tooltip("record:N", title="Record"),
-                alt.Tooltip("started:N", title="Started"),
-                alt.Tooltip("value:Q", title=metric.value, format=".4g"),
-            ],
-        )
-        _layers = [_line, _dots]
-        if selected_run is not None:
-            _layers.append(
-                _base.transform_filter(alt.datum.run == selected_run["run"]).mark_point(
-                    size=320, strokeWidth=3, color="#f59e0b", filled=False
-                )
+    if plot_mode.value == "Performance over runs":
+        _controls.append(metric)
+        _points, _missing = plot_frame(_scoped, metric.value)
+        _notes = [
+            f"{len(_scoped)} runs under **{scope}**, numbered by execution order."
+        ]
+        if _missing:
+            _notes.append(
+                f"{_missing} without a numeric `{metric.value}` are not shown."
             )
-        _chart = (
-            alt.layer(*_layers)
-            .properties(width="container", height=340)
-            .configure(background="transparent")
-            .configure_axis(labelColor="#848484", titleColor="#848484")
-            .configure_legend(labelColor="#848484", titleColor="#848484")
-            .configure_view(stroke=None)
-        )
-    section_body("plot", mo.vstack([metric, mo.md(" ".join(_notes)), _chart]))
+        if _points.empty:
+            _chart = mo.md("No runs to plot.")
+        else:
+            _base = alt.Chart(_points).encode(
+                x=alt.X(
+                    "number:Q",
+                    title="Run number (execution order)",
+                    axis=alt.Axis(format="d", tickMinStep=1),
+                    scale=alt.Scale(nice=False, padding=16),
+                ),
+                y=alt.Y("value:Q", title=metric.value, scale=alt.Scale(zero=False)),
+            )
+            _line = _base.mark_line(color="#dddeec", strokeWidth=2)
+            _dots = _base.mark_point(filled=True, size=90, opacity=1).encode(
+                color=alt.Color(
+                    "record:N", scale=alt.Scale(range=palette), title="Record"
+                ),
+                tooltip=[
+                    alt.Tooltip("number:Q", title="Run #"),
+                    alt.Tooltip("run:N", title="Run"),
+                    alt.Tooltip("record:N", title="Record"),
+                    alt.Tooltip("started:N", title="Started"),
+                    alt.Tooltip("value:Q", title=metric.value, format=".4g"),
+                ],
+            )
+            _layers = [_line, _dots]
+            if selected_run is not None:
+                _layers.append(
+                    _base.transform_filter(
+                        alt.datum.run == selected_run["run"]
+                    ).mark_point(size=320, strokeWidth=3, color="#f59e0b", filled=False)
+                )
+            _chart = (
+                alt.layer(*_layers)
+                .properties(width="container", height=340)
+                .configure(background="transparent")
+                .configure_axis(labelColor="#848484", titleColor="#848484")
+                .configure_legend(labelColor="#848484", titleColor="#848484")
+                .configure_view(stroke=None)
+            )
+        _content = mo.vstack([*_controls, mo.md(" ".join(_notes)), _chart])
+    else:
+        _controls.extend([x_metric, x_objective, y_metric, y_objective])
+        if not x_metric.value or not y_metric.value:
+            _comparison = mo.md("No numeric metrics are available to compare.")
+        elif x_metric.value == y_metric.value:
+            _comparison = mo.callout("Choose two different metrics.", kind="info")
+        else:
+            _points, _missing = tradeoff_frame(
+                _scoped,
+                x_metric.value,
+                y_metric.value,
+                x_objective.value,
+                y_objective.value,
+            )
+            if _points.empty:
+                _comparison = mo.callout(
+                    "No runs have numeric values for both metrics "
+                    f"({_missing} excluded).",
+                    kind="info",
+                )
+            else:
+                _highlighted = _points.loc[_points["non_dominated"]]
+                _note = (
+                    f"**{len(_points)} comparable runs** · "
+                    f"**{len(_highlighted)} strong trade-offs**"
+                )
+                if _missing:
+                    _note += (
+                        f" · {_missing} runs excluded for missing or non-finite values"
+                    )
+                _base = alt.Chart(_points).encode(
+                    x=alt.X(
+                        "x:Q",
+                        title=f"{x_metric.value} ({x_objective.value})",
+                        scale=alt.Scale(zero=False),
+                    ),
+                    y=alt.Y(
+                        "y:Q",
+                        title=f"{y_metric.value} ({y_objective.value})",
+                        scale=alt.Scale(zero=False),
+                    ),
+                    color=alt.Color(
+                        "record:N", scale=alt.Scale(range=palette), title="Record"
+                    ),
+                    tooltip=[
+                        alt.Tooltip("run:N", title="Run"),
+                        alt.Tooltip("record:N", title="Record"),
+                        alt.Tooltip("x:Q", title=x_metric.value, format=".4g"),
+                        alt.Tooltip("y:Q", title=y_metric.value, format=".4g"),
+                        alt.Tooltip("non_dominated:N", title="Strong trade-off"),
+                    ],
+                )
+                _chart = (
+                    alt.layer(
+                        _base.mark_circle(size=100, opacity=0.55),
+                        _base.transform_filter(alt.datum.non_dominated).mark_point(
+                            shape="diamond", filled=True, size=220, strokeWidth=1
+                        ),
+                    )
+                    .properties(width="container", height=420)
+                    .interactive()
+                    .configure(background="transparent")
+                    .configure_axis(labelColor="#848484", titleColor="#848484")
+                    .configure_legend(labelColor="#848484", titleColor="#848484")
+                    .configure_view(stroke=None)
+                )
+                _table = _highlighted.drop(columns="non_dominated").rename(
+                    columns={
+                        "run": "Run",
+                        "record": "Record",
+                        "x": x_metric.value,
+                        "y": y_metric.value,
+                    }
+                )
+                _comparison = mo.vstack(
+                    [
+                        mo.md(_note),
+                        mo.md(
+                            "A highlighted run has a strong trade-off: no comparable "
+                            "run matches or improves both metrics while improving "
+                            "at least one."
+                        ),
+                        _chart,
+                        mo.ui.table(_table, selection=None, show_download=False),
+                    ]
+                )
+        _content = mo.vstack([*_controls, _comparison])
+    section_body("plot", _content)
     return
 
 
