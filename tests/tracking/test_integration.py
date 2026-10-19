@@ -67,6 +67,7 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
                 "hiraku.record_id": "exp",
                 "hiraku.commit": "a" * 40,
                 "hiraku.entrypoint": "train",
+                "hiraku.job_id": "job-mlflow",
                 "unmapped": "kept",
             }
         )
@@ -85,6 +86,7 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     assert run.record_id == "exp"
     assert run.commit == "a" * 40
     assert run.entrypoint == "train"
+    assert run.job_id == "job-mlflow"
     assert run.params == {"seed": "7"}
     assert run.metrics["loss"] == 1.0
     assert run.timestamp is not None and run.timestamp.tzinfo is UTC

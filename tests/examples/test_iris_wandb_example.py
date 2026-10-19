@@ -110,6 +110,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
 
     invoke(runner, ["example", "create", "iris-wandb", "."])
     git(project, "add", ".")
+    git(project, "add", "-f", "hiraku/dispatch")
     git(project, "commit", "-m", "initialize Iris W&B example")
     source_commit = git(project, "rev-parse", "HEAD")
 
@@ -150,19 +151,27 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "--commit",
             "HEAD",
             "--set",
-            f"entrypoints={{train: {{command: [{sys.executable}, train.py], args: "
-            "{model: logistic, seed: 42, test-size: 0.25}}}",
+            f"command=[{sys.executable}, train.py, --model, logistic, "
+            "--seed, '42', --test-size, '0.25']",
         ],
     )
     record = load_record("logistic", config=config)
     assert record.commit == source_commit
-    assert record.entrypoint("train", config=config).args == {
-        "model": "logistic",
-        "seed": 42,
-        "test-size": 0.25,
-    }
+    assert record.command == [
+        sys.executable,
+        "train.py",
+        "--model",
+        "logistic",
+        "--seed",
+        "42",
+        "--test-size",
+        "0.25",
+    ]
 
-    invoke(runner, ["launch", "train", "--record", "logistic"])
+    job_id = invoke(
+        runner, ["run", "--target", "local", "--record", "logistic"]
+    ).output.strip()
+    invoke(runner, ["job", "wait", job_id])
     rows = json.loads(
         invoke(runner, ["runs", "--record", "iris", "--all", "--json"]).output
     )
@@ -170,7 +179,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     row = rows[0]
     assert row["record_id"] == "logistic"
     assert row["commit"] == source_commit
-    assert row["entrypoint"] == "train"
+    assert row["job_id"]
     assert row["params"]["model"] == "logistic"
     assert row["params"]["seed"] == 42
     assert row["params"]["test_size"] == 0.25

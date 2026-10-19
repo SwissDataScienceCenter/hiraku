@@ -198,6 +198,7 @@ class WandbBackend(TrackingBackend):
             # W&B keeps a run's wall-clock seconds in the ``_runtime`` summary key.
             duration=(run.summary or {}).get("_runtime"),
             entrypoint=config.get("hiraku.entrypoint"),
+            job_id=config.get("hiraku.job_id"),
             url=run.url,
             raw=cls._run_raw(run),
         )

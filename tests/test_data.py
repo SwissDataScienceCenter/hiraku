@@ -6,40 +6,31 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.config import HirakuConfig
-from hiraku.errors import EntrypointNotFoundError, ValidationError
+from hiraku.errors import ValidationError
 from hiraku.record import Record, load_record
 from hiraku.run import Run
 
 
-def test_inheritance_entrypoints_and_guarded_delete(tmp_path: Path) -> None:
+def test_inheritance_commands_and_guarded_delete(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     parent = Record.create(
         "task",
         config=config,
         metrics=[{"name": "loss", "direction": "minimize"}],
-        entrypoints={
-            "train": {"command": ["python", "train.py"]},
-            "evaluate": {"command": ["python", "evaluate.py"]},
-        },
+        command=["python", "train.py"],
     )
     child = Record.create(
         "exp",
         parent_id=parent.id,
         config=config,
-        entrypoints={"train": {"command": ["python", "special.py"]}},
+        command=["python", "special.py"],
     )
     effective = child.resolve(config=config)
     assert (
         effective.values["metrics"] == parent.resolve(config=config).values["metrics"]
     )
-    assert child.entrypoint("train", config=config).command == ["python", "special.py"]
-    assert child.entrypoint("evaluate", config=config).command == [
-        "python",
-        "evaluate.py",
-    ]
-    assert effective.sources["entrypoints"] == {"train": "exp", "evaluate": "task"}
-    with pytest.raises(EntrypointNotFoundError):
-        child.entrypoint("missing", config=config)
+    assert child.resolve_command(config=config) == ["python", "special.py"]
+    assert effective.sources["command"] == "exp"
     with pytest.raises(ValidationError):
         parent.delete(config=config)
     with pytest.raises(PydanticValidationError):

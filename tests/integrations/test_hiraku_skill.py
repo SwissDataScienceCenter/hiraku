@@ -46,6 +46,7 @@ def _new_project(tmp_path: Path) -> tuple[Path, HirakuConfig, str]:
         example="heart-disease",
     )
     _git(project, "add", ".")
+    _git(project, "add", "-f", "hiraku/dispatch")
     _git(project, "commit", "-m", "initialize Heart Disease example")
     commit = _git(project, "rev-parse", "HEAD")
     return project, config, commit
@@ -137,16 +138,16 @@ def _create_logistic_experiment(
         commit=commit,
         summary="Logistic regression baseline",
         hypothesis="Regularized logistic regression provides a calibrated baseline",
-        entrypoints={
-            "train": {
-                "command": [sys.executable, "train.py"],
-                "args": {
-                    "model": "logistic",
-                    "seed": 42,
-                    "validation-fraction": 0.25,
-                },
-            }
-        },
+        command=[
+            sys.executable,
+            "train.py",
+            "--model",
+            "logistic",
+            "--seed",
+            str(42),
+            "--validation-fraction",
+            str(0.25),
+        ],
     )
 
 
@@ -210,17 +211,18 @@ verify the record; do not run it.""",
         "Regularized logistic regression provides a calibrated baseline"
     )
     assert experiment.commit == commit
-    assert list(experiment.entrypoints) == ["train"]
-    entrypoint = experiment.entrypoints["train"]
-    assert entrypoint.command == ["uv", "run", "python", "train.py"]
-    normalized_args = {
-        key.replace("_", "-"): value for key, value in entrypoint.args.items()
-    }
-    assert normalized_args == {
-        "model": "logistic",
-        "seed": 42,
-        "validation-fraction": 0.25,
-    }
+    assert experiment.command == [
+        "uv",
+        "run",
+        "python",
+        "train.py",
+        "--model",
+        "logistic",
+        "--seed",
+        "42",
+        "--validation-fraction",
+        "0.25",
+    ]
     assert CSVBackend(config).list_runs(record_id=task.id) == []
     assert _git(project, "status", "--porcelain") == ""
 
@@ -249,7 +251,7 @@ report its tracked validation metrics. Do not create or update other records."""
     run = runs[0]
     assert run.record_id == experiment.id
     assert run.commit == commit
-    assert run.entrypoint == "train"
+    assert run.job_id
     assert run.params == {
         "model": "logistic",
         "seed": "42",

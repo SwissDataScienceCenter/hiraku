@@ -48,8 +48,8 @@ Once you get confirmation, kick off the experimentation.
 
 Each experiment runs on a single GPU. The training script runs for a **fixed
 time budget of 5 minutes** (wall clock training time, excluding
-startup/compilation). You launch it as:
-`hiraku launch train --record <experiment-id>`.
+startup/compilation). Submit the invocation directly:
+`hiraku run --record <experiment-id> --target local -- uv run python train.py`.
 
 **The first run**: Your very first run should always be to establish the
 baseline, so you will run the training script as is. If no successful baseline
@@ -63,7 +63,9 @@ hiraku record create baseline --parent <root-id> --type experiment \
   --set 'summary=Unmodified upstream baseline' \
   --set 'hypothesis=The upstream implementation establishes the reference val_bpb' \
   --commit HEAD
-hiraku launch train --record baseline > run.log 2>&1
+job_id=$(hiraku run --record baseline --target local -- uv run python train.py)
+hiraku job wait "$job_id"
+hiraku job logs "$job_id"
 hiraku runs --record baseline --json
 ```
 
@@ -104,11 +106,11 @@ LOOP FOREVER:
    --set 'summary=<summary>' --set 'hypothesis=<hypothesis>' --commit HEAD`.
    Never rebind a completed attempt to another commit.
 5. Run the experiment:
-   `hiraku launch train --record <experiment-id> > run.log 2>&1` (redirect everything —
-   do NOT use tee or let output flood your context).
+   save the ID returned by `hiraku run --record <experiment-id> --target local -- uv run python train.py`,
+   then run `hiraku job wait JOB_ID` before inspecting measurements.
 6. Inspect the result with
    `hiraku runs --record <experiment-id> --json`.
-7. If the recorded execution crashed or timed out, run `tail -n 50 run.log` to
+7. If the recorded execution crashed or timed out, use `hiraku job logs JOB_ID --stream stderr` to
    read the Python stack trace or final diagnostics. If the dispatcher did not
    record a row, inspect the log and treat the missing result as a failure.
 8. Update the experiment record with its decision and evidence-backed

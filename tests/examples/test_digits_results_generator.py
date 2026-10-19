@@ -8,8 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from hiraku import HirakuConfig
-from hiraku.launch import launch
+from hiraku import HirakuConfig, submit_job, wait_job
 from hiraku.record import load_record
 
 
@@ -31,7 +30,7 @@ def test_digits_refuses_existing_output_and_partial_export(
     def fail(*args, **kwargs):
         raise RuntimeError("failed training")
 
-    monkeypatch.setitem(generator["generate"].__globals__, "launch", fail)
+    monkeypatch.setitem(generator["generate"].__globals__, "submit_job", fail)
     output = tmp_path / "results"
     with pytest.raises(RuntimeError, match="failed training"):
         generator["generate_results"](output)
@@ -96,15 +95,32 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
     backend = weak.resolve_tracking_backend(config=config)
     runs = backend.list_runs()
     assert Counter(r.record_id for r in runs) == {"weak-l2": 3, "strong-l2": 3}
-    launch(
-        weak.entrypoint("train", config=config),
-        name="train",
+    import subprocess
+
+    for arguments in (
+        ["init", "-q"],
+        ["add", "."],
+        ["add", "-f", "hiraku/dispatch"],
+        [
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "relocated source",
+        ],
+    ):
+        subprocess.run(["git", *arguments], cwd=config.root, check=True)
+    command = [*weak.command, "--seed", "4", "--epochs", "1"]
+    job = submit_job(
+        command,
         record_id=weak.id,
-        args={"seed": 4, "epochs": 1},
         config=config,
         env={
             "MLFLOW_TRACKING_URI": f"sqlite:///{config.root / 'mlflow.db'}",
             "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
         },
     )
+    assert wait_job(job.id, timeout=60, config=config).status == "succeeded"
     assert len(backend.list_runs()) == 7

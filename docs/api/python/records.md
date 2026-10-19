@@ -16,7 +16,7 @@ loading are rejected. This check does not lock the file against concurrent write
 ::: hiraku.record.Record
 
 `Record` is the research entity. It adds a single parent, optional related
-records, inheritance, entrypoints, run queries, and project registry methods.
+records, inheritance, commands, run queries, and project registry methods.
 
 ## Registry helpers
 

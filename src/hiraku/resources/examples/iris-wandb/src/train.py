@@ -17,12 +17,12 @@ from sklearn.model_selection import train_test_split
 HIRAKU_VARIABLES = (
     "HIRAKU_RECORD_ID",
     "HIRAKU_COMMIT",
-    "HIRAKU_ENTRYPOINT",
+    "HIRAKU_JOB_ID",
 )
 
 
 def provenance() -> dict[str, str]:
-    """Read the provenance injected by ``hiraku launch``."""
+    """Read the provenance injected by ``hiraku run``."""
     missing = [name for name in HIRAKU_VARIABLES if name not in os.environ]
     if missing:
         raise RuntimeError(f"Missing Hiraku provenance variables: {', '.join(missing)}")
@@ -62,7 +62,7 @@ def main() -> None:
         config={
             "hiraku.record_id": attribution["HIRAKU_RECORD_ID"],
             "hiraku.commit": attribution["HIRAKU_COMMIT"],
-            "hiraku.entrypoint": attribution["HIRAKU_ENTRYPOINT"],
+            "hiraku.job_id": attribution["HIRAKU_JOB_ID"],
             "dataset.name": "scikit-learn iris",
             "dataset.samples": 150,
             "dataset.features": 4,

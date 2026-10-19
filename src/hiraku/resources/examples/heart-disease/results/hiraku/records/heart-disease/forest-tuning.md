@@ -4,16 +4,15 @@ parent_id: random-forest
 related_to: []
 type: diagnostic
 status: concluded
-entrypoints:
-  train:
-    command:
-    - uv
-    - run
-    - python
-    - train.py
-    args:
-      model: random_forest
-      validation_fraction: 0.3
+command:
+- uv
+- run
+- python
+- train.py
+- --model
+- random_forest
+- --validation-fraction
+- '0.3'
 ---
 ## forest-tuning
 

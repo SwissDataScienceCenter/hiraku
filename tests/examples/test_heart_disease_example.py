@@ -42,6 +42,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
     invoke(runner, ["example", "create", "heart-disease", "."])
     git(project, "add", ".")
+    git(project, "add", "-f", "hiraku/dispatch")
     git(project, "commit", "-m", "initialize")
     source_commit = git(project, "rev-parse", "HEAD")
     invoke(
@@ -61,13 +62,17 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         ("logistic-baseline", "logistic"),
         ("random-forest", "random_forest"),
     ):
-        entrypoints = json.dumps(
-            {
-                "train": {
-                    "command": [sys.executable, "train.py"],
-                    "args": {"model": model, "seed": 42, "validation-fraction": 0.25},
-                }
-            }
+        command = json.dumps(
+            [
+                sys.executable,
+                "train.py",
+                "--model",
+                model,
+                "--seed",
+                "42",
+                "--validation-fraction",
+                "0.25",
+            ]
         )
         invoke(
             runner,
@@ -82,11 +87,14 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
                 "--commit",
                 "HEAD",
                 "--set",
-                f"entrypoints={entrypoints}",
+                f"command={command}",
             ],
         )
         assert load_record(record_id).commit == source_commit
-        invoke(runner, ["launch", "train", "--record", record_id])
+        job_id = invoke(
+            runner, ["run", "--target", "local", "--record", record_id]
+        ).output.strip()
+        invoke(runner, ["job", "wait", job_id])
 
     config = HirakuConfig.discover(project)
     root = load_record("heart-disease", config=config)

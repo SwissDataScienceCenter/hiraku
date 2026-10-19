@@ -40,6 +40,7 @@ class CSVBackend(TrackingBackend):
     STANDARD = {
         "id",
         "record_id",
+        "job_id",
         "commit",
         "timestamp",
         "duration",
@@ -118,6 +119,7 @@ class CSVBackend(TrackingBackend):
                         run = Run(
                             id=run_id,
                             record_id=normalized.get("record_id"),
+                            job_id=normalized.get("job_id"),
                             commit=normalized.get("commit"),
                             timestamp=self._timestamp(
                                 normalized.get("timestamp"),

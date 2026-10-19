@@ -6,12 +6,14 @@ import json
 import os
 import runpy
 import shlex
+import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from importlib.resources import as_file, files
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import click
@@ -25,7 +27,14 @@ from .context import Context, list_contexts, load_context
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .launch import _dispatcher, launch, render_arguments
+from .job import (
+    cancel_job,
+    job_logs,
+    job_status,
+    list_jobs,
+    submit_job,
+    wait_job,
+)
 from .record import Record, list_records, load_record
 from .run import Run
 from .validation import validate_identifier
@@ -59,6 +68,7 @@ def _json_value(value: Any) -> Any:
             "metrics": _json_value(value.metrics),
             "params": _json_value(value.params),
             "record_id": value.record_id,
+            "job_id": value.job_id,
             "commit": value.commit,
             "timestamp": _json_value(value.timestamp),
             "duration": value.duration,
@@ -161,34 +171,6 @@ def _edit_recoverable(
         )
     _edit(path)
     return loader()
-
-
-def _overrides(tokens: Sequence[str]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if not token.startswith("--") or token == "--":
-            raise ValidationError(f"Invalid entrypoint argument: {token!r}")
-        key, separator, raw = token[2:].partition("=")
-        if not key:
-            raise ValidationError("Entrypoint argument name must be non-empty")
-        if not separator:
-            if index + 1 < len(tokens) and not tokens[index + 1].startswith("--"):
-                index += 1
-                raw = tokens[index]
-            else:
-                raw = True
-        key = key.replace("-", "_")
-        if key in result:
-            previous = result[key]
-            result[key] = (
-                [*previous, raw] if isinstance(previous, list) else [previous, raw]
-            )
-        else:
-            result[key] = raw
-        index += 1
-    return result
 
 
 def _update_fields(
@@ -348,7 +330,27 @@ def example_create_command(
     if generator is not None:
         with as_file(generator) as source:
             try:
-                runpy.run_path(str(source))["generate"](config)
+                namespace = runpy.run_path(str(source))
+                if "generate_results" not in namespace:
+                    namespace["generate"](config)
+                else:
+                    # Fresh projects have no source commit yet. The generator's
+                    # export mode executes jobs in its own committed repository.
+                    with TemporaryDirectory(prefix="hiraku-generated-") as staging:
+                        overlay = Path(staging) / "results"
+                        namespace["generate_results"](overlay)
+                        generated = HirakuConfig.load(overlay / "hiraku.yml")
+                        shutil.copytree(
+                            generated.records_dir,
+                            config.records_dir,
+                            dirs_exist_ok=True,
+                        )
+                        for result in overlay.iterdir():
+                            if result.is_file() and result.name != "hiraku.yml":
+                                shutil.copyfile(result, config.root / result.name)
+                        config.active_record_id = generated.active_record_id
+                        config.tracking_backend = generated.tracking_backend
+                        config.save()
             except Exception as exc:
                 raise click.ClickException(
                     "Generation failed; initialized project and completed runs kept: "
@@ -581,35 +583,6 @@ def record_tree(state: CLIContext, json_output: bool) -> None:
             visit(child.id, depth + 1)
 
     visit(None, 0)
-
-
-@record_group.command("entrypoints")
-@click.argument("record_id", required=False)
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def record_entrypoints(
-    state: CLIContext, record_id: str | None, json_output: bool
-) -> None:
-    """List effective entrypoints and their defining records."""
-    resolved = _active(state.config, record_id).resolve(config=state.config)
-    entries = resolved.values.get("entrypoints") or {}
-    sources = resolved.sources.get("entrypoints") or {}
-    if json_output:
-        _emit_json({"entrypoints": entries, "sources": sources})
-    else:
-        click.echo(
-            _table(
-                ("name", "command", "source"),
-                [
-                    (
-                        name,
-                        shlex.join([*entry.command, *render_arguments(entry.args)]),
-                        sources.get(name),
-                    )
-                    for name, entry in entries.items()
-                ],
-            )
-        )
 
 
 def _install_generic(
@@ -908,46 +881,147 @@ def session_cancel(state: CLIContext, session_id: str) -> None:
     click.echo(f"Session {session_id} is {result['status']}. {result['note']}")
 
 
-@main.command("launch")
-@click.argument("entrypoint_name")
-@click.argument("entrypoint_overrides", nargs=-1, type=click.UNPROCESSED)
+@main.group("job")
+def job_group() -> None:
+    """Inspect and control submitted jobs."""
+
+
+@main.command("run")
+@click.argument("command", nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
+@click.option(
+    "--backend",
+    "--target",
+    "backend",
+    type=click.Choice(["local", "slurm"]),
+    default="local",
+    show_default=True,
+    help="Execution backend. --target remains as a compatibility alias.",
+)
 @click.option("--commit")
-@click.option("--dispatch")
+@click.option(
+    "--dispatch",
+    help="Dispatcher name from the project's dispatch directory.",
+)
 @click.option("--dry-run", is_flag=True)
-@click.pass_obj
-def launch_command(
-    state: CLIContext,
-    entrypoint_name: str,
-    entrypoint_overrides: tuple[str, ...],
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def run_command(
+    context: click.Context,
+    command: tuple[str, ...],
     record_id: str | None,
+    backend: str,
     commit: str | None,
     dispatch: str | None,
     dry_run: bool,
+    json_output: bool,
 ) -> None:
-    """Launch an effective record entrypoint."""
-    record = _active(state.config, record_id)
-    entrypoint = record.entrypoint(entrypoint_name, config=state.config)
-    overrides = _overrides(entrypoint_overrides)
-    if dry_run:
-        click.echo(f"Dispatcher: {_dispatcher(state.config, dispatch)}")
-        arguments = dict(entrypoint.args)
-        arguments.update(overrides)
-        command = [*entrypoint.command, *render_arguments(arguments)]
-        click.echo(f"Command: {shlex.join(command)}")
+    """Run a project command as a durable local job."""
+    state: CLIContext = context.obj
+    if not command and all(
+        context.get_parameter_source(name) == click.core.ParameterSource.DEFAULT
+        for name in (
+            "record_id",
+            "backend",
+            "commit",
+            "dispatch",
+            "dry_run",
+            "json_output",
+        )
+    ):
+        click.echo(context.get_help())
         return
-    result = launch(
-        entrypoint,
-        name=entrypoint_name,
-        args=overrides,
-        record_id=record.id,
+    result = submit_job(
+        command or None,
+        record_id=record_id,
+        backend=backend,
         commit=commit,
         dispatch=dispatch,
-        check=False,
+        dry_run=dry_run,
         config=state.config,
     )
-    if result.returncode:
-        raise click.exceptions.Exit(result.returncode)
+    if dry_run or json_output:
+        _emit_json(result)
+    else:
+        click.echo(result.id)
+
+
+@job_group.command("status")
+@click.argument("job_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_status_command(state: CLIContext, job_id: str, json_output: bool) -> None:
+    """Inspect a saved job, refreshing its backend state."""
+    job = job_status(job_id, config=state.config)
+    if json_output:
+        _emit_json(job)
+    else:
+        click.echo(f"{job.id}  {job.status}")
+        if job.error:
+            click.echo(job.error, err=True)
+
+
+@job_group.command("list")
+@click.option("--record", "record_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_list_command(
+    state: CLIContext,
+    record_id: str | None,
+    json_output: bool,
+) -> None:
+    """List jobs for the project or a selected record."""
+    jobs = list_jobs(record_id=record_id, config=state.config)
+    if json_output:
+        _emit_json(jobs)
+    else:
+        click.echo(
+            _table(
+                ("id", "record", "status", "command"),
+                [(j.id, j.record_id, j.status, shlex.join(j.command)) for j in jobs],
+            )
+        )
+
+
+@job_group.command("wait")
+@click.argument("job_id")
+@click.option("--timeout", type=click.FloatRange(min=0))
+@click.pass_obj
+def job_wait_command(state: CLIContext, job_id: str, timeout: float | None) -> None:
+    """Wait for completion and return the program's exit code."""
+    job = wait_job(job_id, timeout=timeout, config=state.config)
+    click.echo(f"{job.id}  {job.status}")
+    if job.error:
+        click.echo(job.error, err=True)
+    code = job.exit_code
+    if code is None:
+        code = 0 if job.status == "succeeded" else 1
+    raise click.exceptions.Exit(128 - code if code < 0 else code)
+
+
+@job_group.command("cancel")
+@click.argument("job_id")
+@click.pass_obj
+def job_cancel_command(state: CLIContext, job_id: str) -> None:
+    """Request cancellation; repeated requests are harmless."""
+    job = cancel_job(job_id, config=state.config)
+    click.echo(f"{job.id}  {job.status}")
+
+
+@job_group.command("logs")
+@click.argument("job_id")
+@click.option("--follow", is_flag=True)
+@click.option("--stream", type=click.Choice(["stdout", "stderr"]), default="stdout")
+@click.pass_obj
+def job_logs_command(
+    state: CLIContext,
+    job_id: str,
+    follow: bool,
+    stream: str,
+) -> None:
+    """Read saved stdout or stderr, optionally following until completion."""
+    for chunk in job_logs(job_id, stream=stream, follow=follow, config=state.config):
+        click.echo(chunk, nl=False)
 
 
 @main.command("runs")

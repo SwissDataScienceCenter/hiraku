@@ -50,6 +50,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     assert not (project / "README.md").exists()
     assert not (project / "example.yml").exists()
     git(project, "add", ".")
+    git(project, "add", "-f", "hiraku/dispatch")
     git(project, "commit", "-m", "initialize Digits MLflow example")
     source_commit = git(project, "rev-parse", "HEAD")
     invoke(
@@ -77,13 +78,16 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
                 "--commit",
                 "HEAD",
                 "--set",
-                f"entrypoints={{train: {{command: [{sys.executable}, train.py], args: "
-                f"{{alpha: {alpha}, epochs: 8, hidden-units: 64, seed: 42, "
-                "validation-fraction: 0.25}}}",
+                f"command=[{sys.executable}, train.py, --alpha, '{alpha}', "
+                "--epochs, '8', --hidden-units, '64', --seed, '42', "
+                "--validation-fraction, '0.25']",
             ],
         )
     for record_id in ("weak-l2", "strong-l2"):
-        invoke(runner, ["launch", "train", "--record", record_id])
+        job_id = invoke(
+            runner, ["run", "--target", "local", "--record", record_id]
+        ).output.strip()
+        invoke(runner, ["job", "wait", job_id])
     rows = json.loads(
         invoke(
             runner,
@@ -107,7 +111,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     client = MlflowClient(tracking_uri=uri)
     for row in rows:
         assert row["commit"] == source_commit
-        assert row["entrypoint"] == "train"
+        assert row["job_id"]
         assert row["raw"]["status"] == "FINISHED"
         assert row["params"]["epochs"] == "8"
         assert row["params"]["seed"] == "42"
@@ -174,7 +178,7 @@ def test_digits_requires_root_for_default_tracking(tmp_path):
         {
             "HIRAKU_RECORD_ID": "baseline",
             "HIRAKU_COMMIT": "a" * 40,
-            "HIRAKU_ENTRYPOINT": "train",
+            "HIRAKU_JOB_ID": "test-job",
         }
     )
     result = subprocess.run(

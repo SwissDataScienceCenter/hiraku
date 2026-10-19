@@ -17,7 +17,7 @@ A tool such as Hiraku should define a clear **Goal** with:
 - a direction;
 - an evaluation protocol;
 - constraints;
-- entrypoints;
+- commands;
 - resource limits; and
 - stop conditions.
 

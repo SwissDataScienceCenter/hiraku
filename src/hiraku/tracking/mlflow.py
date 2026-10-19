@@ -154,6 +154,7 @@ class MLflowBackend(TrackingBackend):
                     "hiraku.record_id",
                     "hiraku.commit",
                     "hiraku.entrypoint",
+                    "hiraku.job_id",
                 }
                 raw = {
                     "status": info.status,
@@ -171,6 +172,7 @@ class MLflowBackend(TrackingBackend):
                         record_id=native_record,
                         commit=tags.get("hiraku.commit"),
                         entrypoint=tags.get("hiraku.entrypoint"),
+                        job_id=tags.get("hiraku.job_id"),
                         timestamp=self._timestamp(
                             info.start_time,
                             backend="mlflow",

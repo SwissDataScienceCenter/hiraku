@@ -24,6 +24,7 @@ class Run(BaseModel):
     metrics: Mapping[str, Any] = Field(default_factory=dict)
     params: Mapping[str, Any] = Field(default_factory=dict)
     record_id: str | None = None
+    job_id: str | None = None
     commit: str | None = None
     timestamp: datetime | None = None
     duration: float | None = None

@@ -32,6 +32,7 @@ Install the example's training dependencies and commit the code.
 ```bash
 uv sync
 git add .
+git add hiraku/dispatch
 git commit -m "initialize Heart Disease example"
 ```
 
@@ -77,18 +78,17 @@ backend set to CSV.
 hiraku record create logistic-baseline --parent heart-disease --type experiment \
   --set "summary=Logistic regression baseline" \
   --set "hypothesis=Regularized logistic regression provides a calibrated baseline" \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: logistic, seed: 42, validation-fraction: 0.25}}}'
+  --commit HEAD
 
 hiraku record show logistic-baseline
 
-# show entrypoint definitions
-hiraku record entrypoints logistic-baseline
+# preview and submit the command
+hiraku run --record logistic-baseline --target local --dry-run -- \
+  uv run python train.py --model logistic --seed 42 --validation-fraction 0.25
 
-# preview the command
-hiraku launch train --record logistic-baseline --dry-run
-
-hiraku launch train --record logistic-baseline
+job_id=$(hiraku run --record logistic-baseline --target local -- \
+  uv run python train.py --model logistic --seed 42 --validation-fraction 0.25)
+hiraku job wait "$job_id"
 
 # query all runs under the root's tracking source
 hiraku runs --record heart-disease --all
@@ -97,7 +97,7 @@ hiraku runs --record logistic-baseline
 ```
 
 Expect one run with `val/log_loss` and `val/accuracy`. The default dispatcher
-runs the current working state and reports its commit and clean/dirty state. The
+executes a snapshot of the Git-visible source. The
 training program writes the CSV row to project-root `runs.csv`.
 
 ??? tip "Tracking backends: CSV, Weights & Biases, MLflow and custom backends"
@@ -109,15 +109,11 @@ training program writes the CSV row to project-root `runs.csv`.
     Hiraku only **queries the tracking backend for existing runs and metrics**. This means the same training and logging setup can be used with or without Hiraku.
 
 
-??? note "Launch dispatchers and isolated execution"
-    By default `hiraku launch train --record logistic-baseline` passes the entrypoint command to a bash script in `hiraku/dispatch/launch.sh`, which executes the command. Launch scripts are project data that can be modified to support custom launch dispatch behaviour, e.g. submitting a job to a compute platform.
-
-    Hiraku ships a second default `worktree` dispatcher, which runs the entrypoint in a separate worktree at the commit specified by the record. Try the following:
-    ```bash
-    hiraku launch train --record logistic-baseline --dispatch worktree
-    hiraku launch train --record logistic-baseline --dispatch worktree --commit <sha>
-    ```
-
+??? note "Dispatchers and isolated execution"
+    Hiraku creates an isolated source snapshot and invokes
+    the optional `hiraku/dispatch/launch.sh` runtime setup hook.
+    `--commit REF` records a base revision; the source digest identifies the
+    exact files captured for this execution.
 
 ## 4. Run a second experiment
 
@@ -125,10 +121,12 @@ training program writes the CSV row to project-root `runs.csv`.
 hiraku record create random-forest --parent heart-disease --type experiment \
   --set "summary=Random forest comparison" \
   --set "hypothesis=Nonlinear feature interactions improve validation log loss" \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: random_forest, seed: 42, validation-fraction: 0.25}}}'
+  --commit HEAD
 
-hiraku launch train --record random-forest
+job_id=$(hiraku run --record random-forest --target local -- \
+  uv run python train.py --model random_forest --seed 42 \
+  --validation-fraction 0.25)
+hiraku job wait "$job_id"
 hiraku runs --record heart-disease --all --sort val/log_loss
 ```
 
@@ -280,3 +278,7 @@ the new implementation commit and use the same evaluation settings.
 
     These tests invoke `codex exec` with GPT-5.6 Luna and require local Codex
     authentication. They are skipped during the normal test suite and CI.
+
+### Job execution
+
+Jobs capture committed and dirty Git-visible source in an isolated snapshot. Ignored datasets and environments are not copied; configure access through an optional dispatcher. Submission returns a job ID; wait before querying runs. Use `hiraku job logs JOB_ID` for output. Arguments after `--` replace the complete default command.

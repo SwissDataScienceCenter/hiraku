@@ -33,16 +33,20 @@ class NoActiveRecordError(HirakuError):
     """An operation requires an active research record."""
 
 
-class EntrypointNotFoundError(HirakuError):
-    """A named entrypoint is absent from a record."""
-
-
 class GitError(HirakuError):
     """A Git operation failed."""
 
 
-class LaunchError(HirakuError):
-    """A launch could not be completed successfully."""
+class JobError(HirakuError):
+    """A job could not be submitted, inspected, or controlled."""
+
+
+class BackendSubmissionError(JobError):
+    """A backend submission failed, with whether acceptance is uncertain."""
+
+    def __init__(self, message: str, *, uncertain: bool = False) -> None:
+        super().__init__(message)
+        self.uncertain = uncertain
 
 
 class BackendError(HirakuError):

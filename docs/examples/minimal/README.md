@@ -26,6 +26,7 @@ project. Commit the evaluation code before creating records:
 
 ```bash
 git add .
+git add hiraku/dispatch
 git commit -m "initial commit"
 ```
 
@@ -45,16 +46,18 @@ hiraku record create my-task --type task \
 
 hiraku record create baseline --parent my-task --type experiment \
   --set "hypothesis=The existing representation establishes a reference." \
-  --commit HEAD \
-  --set 'entrypoints={evaluate: {command: [uv, run, python, evaluate.py], args: {seed: 0}}}'
+  --commit HEAD
 
-hiraku launch evaluate --record baseline
-hiraku launch evaluate --record baseline -- --seed 1
+job_id=$(hiraku run --record baseline --target local -- \
+  uv run python evaluate.py --seed 0)
+hiraku job wait "$job_id"
+job_id=$(hiraku run --record baseline --target local -- uv run python evaluate.py --seed 1)
+hiraku job wait "$job_id"
 hiraku record list
 hiraku runs --record baseline
 ```
 
-The entrypoint runs `uv run python evaluate.py --seed 0`. The script writes its
+The command runs `uv run python evaluate.py --seed 0`. The script writes its
 score and launch attribution to the project-root `runs.csv`, so the final
 command lists the baseline result. Metric declarations describe how to compare
 results; the evaluation script is responsible for calculating and logging.
@@ -63,3 +66,7 @@ For other tracking backends, see [W&B](../../guides/tracking-wandb.md) or
 
 For the next experiment, implement and commit the source changes, then create a
 new experiment bound to that commit.
+
+### Job execution
+
+Jobs capture committed and dirty Git-visible source in an isolated snapshot. Ignored datasets and environments are not copied; configure access through an optional dispatcher. Submission returns a job ID; wait before querying runs. Use `hiraku job logs JOB_ID` for output. Arguments after `--` replace the complete default command.

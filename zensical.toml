@@ -64,10 +64,10 @@ nav = [
           { "Record" = "api/python/records.md" },
           { "Run" = "api/python/run.md" },
           { "Metric" = "api/python/metric.md" },
-          { "Entrypoint" = "api/python/entrypoint.md" },
+          { "Job" = "api/python/job.md" },
       ] },
       { "Tracking" = "api/python/tracking.md" },
-      { "Launching" = "api/python/launch.md" },
+      { "Jobs" = "guides/jobs.md" },
       ] },
 ]
 

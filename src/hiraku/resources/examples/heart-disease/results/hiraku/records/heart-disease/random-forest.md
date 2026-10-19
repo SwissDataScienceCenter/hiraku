@@ -4,16 +4,15 @@ parent_id: heart-disease
 related_to: []
 type: hypothesis
 status: concluded
-entrypoints:
-  train:
-    command:
-    - uv
-    - run
-    - python
-    - train.py
-    args:
-      model: random_forest
-      validation_fraction: 0.2
+command:
+- uv
+- run
+- python
+- train.py
+- --model
+- random_forest
+- --validation-fraction
+- '0.2'
 ---
 ## random-forest
 

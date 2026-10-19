@@ -6,7 +6,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    model_validator,
+)
 
 from .errors import ProjectNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
@@ -50,6 +56,7 @@ class HirakuConfig(BaseModel):
         default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
     )
     active_record_id: str | None = DEFAULTS["active_record_id"]
+    command: list[str] | None = None
     _hiraku_dir: Path = PrivateAttr()
 
     @model_validator(mode="before")
@@ -249,6 +256,11 @@ class HirakuConfig(BaseModel):
     def dispatch_dir(self) -> Path:
         """Return the directory containing launcher dispatch scripts."""
         return self.hiraku_dir / "dispatch"
+
+    @property
+    def jobs_dir(self) -> Path:
+        """Return the ignored directory of durable local job state."""
+        return self.hiraku_dir / ".jobs"
 
     def set_active_record(self, record: str | Any) -> None:
         """Persist the active research record."""

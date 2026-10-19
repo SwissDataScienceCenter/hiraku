@@ -258,6 +258,7 @@ def test_find_run_and_run_text(project: HirakuConfig) -> None:
         "id: r0\n"
         "record: a\n"
         "entrypoint: train\n"
+        "job_id: null\n"
         "commit: null\n"
         "started: '2026-10-14T10:00:00+00:00'\n"
         "duration: 4.5\n"

@@ -87,7 +87,7 @@ def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
         status="accepted",
         decision="keep",
         type="task",
-        entrypoints={"train": {"command": ["echo", "root"]}},
+        command=["echo", "root"],
     )
     child = Record.create("child", parent_id=root.id, config=config, goal=None)
     resolved = child.resolve(config=config)
@@ -98,7 +98,7 @@ def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
     assert "status" not in resolved.values
     assert "decision" not in resolved.values
     assert "type" not in resolved.values
-    assert resolved.sources["entrypoints"] == {"train": "root"}
+    assert resolved.sources["command"] == "root"
 
 
 def test_runs_list_attributed_runs_from_current_backend(tmp_path: Path) -> None:

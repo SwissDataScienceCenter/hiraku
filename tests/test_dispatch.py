@@ -109,39 +109,25 @@ def test_launch_dispatcher_preserves_context_and_reports_unavailable_git(
     assert result.stdout == "stale-record||unavailable"
 
 
-def test_worktree_dispatcher_isolates_and_cleans_up(tmp_path: Path) -> None:
+def test_jobs_isolate_revision_and_retain_outputs(tmp_path: Path) -> None:
+    from hiraku import Record, job_logs, submit_job, wait_job
+
     config = _repository(tmp_path)
+    Record.create("test", config=config)
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "record")
     commit = _git(tmp_path, "rev-parse", "HEAD")
-    (tmp_path / "marker.txt").write_text("working", encoding="utf-8")
-    before = _git(tmp_path, "worktree", "list", "--porcelain")
-
-    result = _run(
-        config.dispatch_dir / "worktree.sh",
-        "--commit",
-        commit,
-        "--",
-        "/bin/sh",
-        "-c",
-        'printf "%s|%s|%s|%s" "$(cat marker.txt)" "$HIRAKU_COMMIT" '
-        '"$HIRAKU_GIT_STATE" "$HIRAKU_ROOT"',
-        env={**os.environ, "HIRAKU_ROOT": str(tmp_path)},
+    (tmp_path / "marker.txt").write_text("newer")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "newer source")
+    job = submit_job(
+        ["/bin/sh", "-c", "cat marker.txt; printf output > result.txt"],
+        record_id="test",
+        commit=commit,
+        config=config,
     )
-
-    assert result.returncode == 0
-    assert result.stdout == f"committed|{commit}|clean|{tmp_path}"
-    assert "worktree.sh: created temporary worktree at " in result.stderr
-    assert f" ({commit})" in result.stderr
-    assert "worktree.sh: running from " in result.stderr
-    assert _git(tmp_path, "worktree", "list", "--porcelain") == before
-
-    failed = _run(
-        config.dispatch_dir / "worktree.sh",
-        "--commit",
-        commit,
-        "--",
-        "/bin/sh",
-        "-c",
-        "exit 7",
-    )
-    assert failed.returncode == 7
-    assert _git(tmp_path, "worktree", "list", "--porcelain") == before
+    assert wait_job(job.id, timeout=10, config=config).status == "succeeded"
+    assert "".join(job_logs(job.id, config=config)) == "committed"
+    assert (job.working_directory / "result.txt").read_text() == "output"
+    assert (tmp_path / "marker.txt").read_text() == "newer"
+    assert not (tmp_path / "result.txt").exists()
