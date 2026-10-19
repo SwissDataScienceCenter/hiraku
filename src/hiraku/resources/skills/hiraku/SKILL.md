@@ -330,19 +330,19 @@ cost, or hardware budget.
 Workflows are project-defined procedures under `hiraku/workflows/` that guide
 you step by step through the Hiraku MCP server. The user may start one with
 its prompt, which shows the first instruction directly, or you start it with
-the tool named after it. Each response contains one instruction and the replies
-that continue it:
+the tool named after it. Each response contains one instruction: its text, its
+`context`, and, unless it is final, a `reply` block that says how to answer it:
 
-1. Carry out the instruction, using its `context`.
-2. If `requires_user_response` is true, ask the user and wait for their answer
-   before replying. Otherwise decide yourself.
-3. Reply with the `workflow_reply` tool: one listed reply, its arguments as the
-   reply's schema describes, and the `session_id` and `instruction_id`
-   unchanged. Repeating an identical reply is safe; a `stale` status means the
-   instruction moved on, so continue from the one returned.
+1. Carry out the instruction text, using its `context`.
+2. If `reply.requires_user_response` is true, ask the user and wait for their
+   answer before replying. Otherwise decide yourself.
+3. Reply with the `workflow_reply` tool: one of `reply.options`, its arguments
+   as the option's schema describes, and the reply block's `session_id` and
+   `instruction_id` unchanged. Repeating an identical reply is safe; a `stale`
+   status means the instruction moved on, so continue from the one returned.
 4. A `rejected` or `not_ready` response keeps the same instruction pending; fix
-   the input or check again later. A response with `completed: true` holds the
-   final instruction: carry it out, then stop; it takes no reply.
+   the input or check again later. An instruction without a `reply` block is
+   final: carry it out, then stop.
 
 To resume, find the session with `session_list` and read its pending
 instruction with `session_show`; do not start a new session. Before repeating

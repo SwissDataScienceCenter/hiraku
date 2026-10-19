@@ -381,10 +381,14 @@ def test_start_returns_the_first_section_and_explicit_replies(
     instruction = response["instruction"]
     assert instruction["text"] == "## Add\n\nAdd a number."
     assert instruction["context"] == {"total": 0}
-    assert instruction["requires_user_response"] is False
-    assert [item["reply"] for item in instruction["replies"]] == ["add", "wait", "boom"]
-    assert instruction["replies"][0]["description"] == "Add an amount."
-    assert instruction["replies"][0]["arguments"] == {
+    reply_block = instruction["reply"]
+    assert reply_block["session_id"] == response["session_id"]
+    assert reply_block["instruction_id"] == 1
+    assert reply_block["requires_user_response"] is False
+    options = reply_block["options"]
+    assert [item["reply"] for item in options] == ["add", "wait", "boom"]
+    assert options[0]["description"] == "Add an amount."
+    assert options[0]["arguments"] == {
         "properties": {"amount": {"type": "integer"}},
         "required": ["amount"],
     }

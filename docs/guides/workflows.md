@@ -43,8 +43,10 @@ server runs `hiraku mcp`, so the `hiraku` command must be on the agent's
   `collaborative` tool. Codex has no MCP prompts, so this is how it starts
   workflows.
 
-Every response names the replies that continue the session. The agent answers
-with the `workflow_reply` tool, for example
+Every instruction has text, context, and, unless it is final, a `reply` block
+that says how to answer it: whether you must answer first, the reply options
+with their argument schemas, and the session and instruction IDs to pass. The
+agent answers with the `workflow_reply` tool, for example
 `workflow_reply(reply="revise", arguments={"feedback": "Keep SGD"}, ...)`:
 
 ```json
@@ -59,22 +61,29 @@ with the `workflow_reply` tool, for example
       "result": {"record_id": "exp-wd", "summary": "Add weight decay", ...},
       "rounds_left": 3
     },
-    "requires_user_response": true,
-    "replies": [
-      {"reply": "implement", "description": "Implement the drafted experiment.",
-       "arguments": {"properties": {}}},
-      {"reply": "revise", "description": "Redo the reviewed step with ...",
-       "arguments": {"properties": {"feedback": {"type": "string"}},
-                     "required": ["feedback"]}},
-      {"reply": "finish", "description": "End the session and summarize ...",
-       "arguments": {"properties": {}}}
-    ]
+    "reply": {
+      "session_id": "collaborative-3f9a1c2b4d5e",
+      "instruction_id": 2,
+      "requires_user_response": true,
+      "options": [
+        {"reply": "implement", "description": "Implement the drafted experiment.",
+         "arguments": {"properties": {}}},
+        {"reply": "revise", "description": "Redo the reviewed step with ...",
+         "arguments": {"properties": {"feedback": {"type": "string"}},
+                       "required": ["feedback"]}},
+        {"reply": "finish", "description": "End the session and summarize ...",
+         "arguments": {"properties": {}}}
+      ]
+    }
   }
 }
 ```
 
-When `requires_user_response` is true, the agent asks you before replying. This
-is a conversational contract; it does not authenticate approval.
+When `reply.requires_user_response` is true, the agent asks you before
+replying. This is a conversational contract; it does not authenticate approval.
+The `workflow_reply` tool's description explains this protocol to the agent,
+and an MCP prompt hands over the instruction as text with its context and reply
+block.
 
 A reply passes the `instruction_id` of the instruction it answers, so a late or
 repeated call cannot be applied to a later step. `session_id` may be left out
@@ -383,8 +392,8 @@ The MCP server loads workflow code and prompts when it starts. A workflow that
 fails to load is logged to the server's stderr and left out;
 `hiraku workflow list` in a terminal shows the error. After editing a workflow,
 reconnect the MCP server. Existing sessions
-continue with the new code if their stored data still validates against the
-session model and their pending replies still exist; otherwise their replies
+continue with the new code if their stored state still validates against the
+state model and their pending replies still exist; otherwise their replies
 are rejected, and they remain inspectable.
 Keep workflows compatible with existing sessions, or start new ones.
 Workflow code is trusted project code: loading it executes it.

@@ -760,7 +760,8 @@ def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
             click.echo("\nResult:")
             click.echo(json.dumps(instruction["context"], indent=2, sort_keys=True))
         else:
-            replies = ", ".join(reply["reply"] for reply in instruction["replies"])
+            options = instruction["reply"]["options"]
+            replies = ", ".join(option["reply"] for option in options)
             click.echo(f"\nReplies: {replies}")
 
 

@@ -256,7 +256,9 @@ class Session(BaseModel):
         Args:
             call: The accepted call, appended to the history.
             data: The workflow's state after the call, as JSON.
-            instruction: The next instruction, as JSON.
+            instruction: The next instruction, as JSON. Unless it is final, its
+                ``reply`` block describes how to answer it; the session adds
+                the IDs a reply must pass.
             replies: Replies allowed for the instruction; none for a final
                 instruction, which completes the session.
         """
@@ -265,7 +267,10 @@ class Session(BaseModel):
         self.instruction_id += 1
         self.replies = list(replies)
         self.response = {"session_id": self.id, "instruction_id": self.instruction_id}
-        if not replies:
+        if replies:
+            reply = {"session_id": self.id, "instruction_id": self.instruction_id}
+            instruction = {**instruction, "reply": {**reply, **instruction["reply"]}}
+        else:
             self.status = "completed"
             self.response["completed"] = True
         self.response["instruction"] = instruction

@@ -43,7 +43,7 @@ class Harness:
 
     @property
     def replies(self) -> list[str]:
-        return [item["reply"] for item in self.instruction["replies"]]
+        return [item["reply"] for item in self.instruction["reply"]["options"]]
 
     def section(self) -> str:
         return self.instruction["text"].splitlines()[0]
@@ -138,7 +138,7 @@ def test_collaborative_steps_reviews_and_budget(config: HirakuConfig) -> None:
     draft(harness, "c1")
     assert harness.section() == "## Review"
     assert "Never delete records" not in harness.instruction["text"]
-    assert harness.instruction["requires_user_response"] is True
+    assert harness.instruction["reply"]["requires_user_response"] is True
     assert harness.instruction["context"]["result"]["record_id"] == "c1"
     assert harness.replies == ["implement", "revise", "finish"]
     assert load_record("c1", config=config).status == "drafted"

@@ -75,7 +75,8 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
         assert instruction["text"].startswith("## Step")
         assert f"`Step {step}/3: token {context['token']}`" in instruction["text"]
         assert "{{" not in instruction["text"]
-        assert [item["reply"] for item in instruction["replies"]] == ["ack"]
+        options = instruction["reply"]["options"]
+        assert [item["reply"] for item in options] == ["ack"]
         if tokens:
             stale = reply(runner, response, "ack", token=tokens[-1])
             assert stale["status"] == "rejected"
@@ -86,9 +87,10 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
             break
         gate = response["instruction"]
         assert gate["text"].startswith("## Next")
-        assert gate["requires_user_response"] is True
+        assert gate["reply"]["requires_user_response"] is True
         assert gate["context"] == {"done": step, "remaining": 3 - step}
-        assert [item["reply"] for item in gate["replies"]] == ["step", "finish"]
+        gate_options = gate["reply"]["options"]
+        assert [item["reply"] for item in gate_options] == ["step", "finish"]
         response = reply(runner, response, "step")
 
     assert response["completed"] is True
@@ -127,7 +129,7 @@ if response.get("completed"):
     print("Ran", instruction["context"]["steps"], "steps")
     raise SystemExit
 print(re.search(r"`(Step .*?)`", instruction["text"]).group(1))
-reply = {"reply": instruction["replies"][0]["reply"],
+reply = {"reply": instruction["reply"]["options"][0]["reply"],
          "arguments": {"token": instruction["context"]["token"]}}
 Path(os.environ["HIRAKU_REPLY_FILE"]).write_text(json.dumps(reply))
 """
@@ -179,7 +181,7 @@ def test_greet_is_one_final_prompt_filled_from_its_arguments(
     assert instruction["text"].startswith("# Greet\n\nPrint 3 greetings to Ada")
     assert "Greet formally:\nfalse." in instruction["text"]
     assert instruction["context"] == {"name": "Ada", "times": 3, "formal": False}
-    assert "replies" not in instruction
+    assert "reply" not in instruction
 
     missing = start(runner, "greet", {})
     assert missing["status"] == "rejected"

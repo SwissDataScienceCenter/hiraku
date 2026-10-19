@@ -117,7 +117,7 @@ if response.get("completed"):
     sys.exit(0)
 reply_file = os.environ["HIRAKU_REPLY_FILE"]
 print("prompt names reply file:", reply_file in prompt)
-first = response["instruction"]["replies"][0]
+first = response["instruction"]["reply"]["options"][0]
 arguments = {}
 if "value" in first["arguments"].get("properties", {}):
     answers = Path(os.environ["FAKE_ANSWERS"])

@@ -156,14 +156,39 @@ def test_prompts_start_sessions(config: HirakuConfig) -> None:
 
     started, invalid, listing = run(server, scenario)
     text = started.messages[0].content.text
-    assert text.startswith("# Loop\n\nRun 3 experiments on sep10.")
-    assert "final instruction" in text
-    assert "workflow_reply" not in text
-    assert f"session `{listing[0]['session_id']}`" in text
+    # A final instruction is the workflow's text and context, with no reply.
+    assert text == (
+        "# Loop\n\nRun 3 experiments on sep10.\n\nContext:\n```json\n"
+        '{\n "task": "sep10",\n "iterations": 3\n}\n```'
+    )
     assert listing[0]["status"] == "completed"
     assert len(listing) == 1
     assert "did not start" in invalid.messages[0].content.text
     assert "iterations" in invalid.messages[0].content.text
+
+
+def test_prompts_render_the_reply_block_and_tools_explain_it(
+    config: HirakuConfig,
+) -> None:
+    write_echo(config)
+    server = create_server(config)
+
+    async def scenario(client: Client, notifications: list[str]) -> Any:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+        started = await client.get_prompt("echo", {"task": "a"})
+        listing = items(await client.call_tool("session_list", {}))
+        return tools, started.messages[0].content.text, listing
+
+    tools, text, listing = run(server, scenario)
+    session_id = listing[0]["session_id"]
+    assert text.startswith("Work on a.\n\nReply:\n```json\n")
+    block = json.loads(text.split("```json\n", 1)[1].rsplit("\n```", 1)[0])
+    assert block["session_id"] == session_id
+    assert block["instruction_id"] == 1
+    assert [option["reply"] for option in block["options"]] == ["complete"]
+    description = tools["workflow_reply"].description
+    assert "reply block" in description
+    assert "An instruction without a" in description
 
 
 def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
@@ -216,11 +241,13 @@ def test_workflow_reply_continues_any_session(config: HirakuConfig) -> None:
         }
 
     result = run(server, scenario)
-    replies = result["first"]["instruction"]["replies"]
+    reply_block = result["first"]["instruction"]["reply"]
     assert "No session is active" in result["none"]["message"]
-    assert "workflow_reply" in result["first"]["guide"]
-    assert replies[0]["reply"] == "complete"
-    assert replies[0]["arguments"]["required"] == ["summary"]
+    assert "guide" not in result["first"]
+    assert reply_block["session_id"] == result["first"]["session_id"]
+    assert reply_block["instruction_id"] == 1
+    assert reply_block["options"][0]["reply"] == "complete"
+    assert reply_block["options"][0]["arguments"]["required"] == ["summary"]
     assert result["wrong"]["status"] == "rejected"
     assert "accepts: complete" in result["wrong"]["message"]
     assert result["invalid"]["status"] == "rejected"
@@ -268,7 +295,7 @@ def test_session_tools_and_resources(config: HirakuConfig) -> None:
     assert result["listing"][0]["session_id"] == session_id
     assert result["shown"]["response"]["instruction_id"] == 1
     assert "orientation" not in result["shown"]
-    assert "session_show" in result["shown"]["guide"]
+    assert "guide" not in result["shown"]
     assert result["resource"]["session_id"] == session_id
     assert result["workflow"] == "# Echo"
     assert result["templates"] >= {

@@ -374,11 +374,12 @@ class Workflow(BaseRecord):
             "context": _ensure_json(instruction.context, "Instruction context"),
         }
         if names:
+            # How to answer; the session adds its session and instruction IDs.
             specs = _reply_specs(self)
-            rendered["requires_user_response"] = bool(
-                instruction.requires_user_response
-            )
-            rendered["replies"] = [{"reply": name, **specs[name]} for name in names]
+            rendered["reply"] = {
+                "requires_user_response": bool(instruction.requires_user_response),
+                "options": [{"reply": name, **specs[name]} for name in names],
+            }
         return rendered, names
 
     def _reply_name(self, method: Callable[..., Any]) -> str:
@@ -870,6 +871,20 @@ def _compact_schema(model: type[BaseModel]) -> dict[str, Any]:
 
 def _keywords(validated: BaseModel) -> dict[str, Any]:
     return {name: getattr(validated, name) for name in type(validated).model_fields}
+
+
+def instruction_text(instruction: Mapping[str, Any]) -> str:
+    """Render an instruction of a response as text for an agent.
+
+    The text comes first, then the context and, unless the instruction is
+    final, the reply block as JSON.
+    """
+    parts = [instruction["text"]]
+    for label, key in (("Context", "context"), ("Reply", "reply")):
+        if instruction.get(key) is not None:
+            value = json.dumps(instruction[key], indent=1, ensure_ascii=False)
+            parts.append(f"{label}:\n```json\n{value}\n```")
+    return "\n\n".join(parts)
 
 
 def summary(text: str) -> str:

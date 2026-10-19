@@ -38,6 +38,7 @@ from .record import Record, list_records, load_record
 from .session import Session
 from .workflow import (
     Workflow,
+    instruction_text,
     list_workflows,
     load_workflows,
     summary,
@@ -48,27 +49,29 @@ INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, and runs workflows that guide you step by step.
 Start a workflow with the tool named after it (workflow_list lists them), and
-answer its instructions with workflow_reply. Use session_list and session_show
-to resume earlier sessions.\
+answer its instructions with workflow_reply, as its description explains. Use
+session_list and session_show to resume earlier sessions.\
 """
 
-GUIDE = """\
-How to follow a Hiraku workflow session:
-1. Carry out the instruction. Its context holds the data it refers to.
-2. If requires_user_response is true, ask the user and wait for their answer
-   before replying; otherwise decide yourself.
-3. Continue with the workflow_reply tool: pass one of the listed replies as
-   reply, its arguments as described by the reply's schema, and the
-   instruction_id and session_id of the response unchanged.
-4. Each accepted reply returns the next instruction. A response with
-   completed: true holds the final instruction: carry it out, then stop; it
-   takes no reply.
+REPLY_GUIDE = """\
+Answer the current instruction of a Hiraku workflow session.
+
+An instruction has text to carry out, context with the data it refers to, and,
+unless it is final, a reply block that says how to answer it:
+1. Carry out the instruction text, using its context.
+2. If reply.requires_user_response is true, ask the user and wait for their
+   answer before replying; otherwise decide yourself.
+3. Call this tool with one of reply.options as reply, its arguments as the
+   option's schema describes, and the reply block's session_id and
+   instruction_id unchanged.
+4. An accepted reply returns the next instruction. An instruction without a
+   reply block is final: carry it out, then stop.
 5. A response with status rejected or not_ready keeps the same instruction
    pending: fix the input, or check again later for not_ready. Status stale
    means the reply answered an instruction that is no longer pending; continue
    from the current instruction in the response.
 6. Repeating an identical reply is safe; it returns the same response.
-7. To resume, call session_show with the session_id; it returns the pending
+7. To resume, call session_show with the session_id; it returns the current
    instruction. Do not start a new session to resume an existing one.
 Before repeating consequential work such as creating records or launching
 experiments, check whether it already exists.\
@@ -412,10 +415,10 @@ def _add_workflow_tools(
 
     def workflow_reply(
         reply: Annotated[
-            str, Field(description="One of the replies the instruction lists.")
+            str, Field(description="One of the reply options of the instruction.")
         ],
         instruction_id: Annotated[
-            int, Field(description="instruction_id of the pending instruction.")
+            int, Field(description="instruction_id from the reply block.")
         ],
         arguments: Annotated[
             dict[str, Any] | None,
@@ -424,8 +427,8 @@ def _add_workflow_tools(
         session_id: Annotated[
             str | None,
             Field(
-                description="session_id of the instruction; may be omitted when "
-                "only one session is active."
+                description="session_id from the reply block; may be omitted "
+                "when only one session is active."
             ),
         ] = None,
     ) -> dict[str, Any]:
@@ -468,8 +471,7 @@ def _add_workflow_tools(
     _add_tool(
         server,
         workflow_reply,
-        "Reply to the pending instruction of a workflow session with one of the "
-        "replies it lists.",
+        REPLY_GUIDE,
         read_only=False,
     )
     for workflow_id, workflow in sorted(workflows.items()):
@@ -516,17 +518,14 @@ def _add_session_tools(
 
 
 def _show(session: Session, workflows: Mapping[str, Workflow]) -> dict[str, Any]:
-    return {**session.show(workflows.get(session.workflow)), "guide": GUIDE}
+    return session.show(workflows.get(session.workflow))
 
 
 def _start_tool(workflow: Workflow, project: Project) -> Callable[..., Any]:
     """Return a function whose signature is the workflow's start arguments."""
 
     def run(**arguments: Any) -> dict[str, Any]:
-        response = workflow.bind(project()).run_start(arguments)
-        if response["status"] != "accepted":
-            return response
-        return {"status": "accepted", "guide": GUIDE, **response}
+        return workflow.bind(project()).run_start(arguments)
 
     parameters = []
     for name, field in workflow.start_arguments().model_fields.items():
@@ -568,7 +567,7 @@ def _start_prompt(workflow: Workflow, project: Project) -> Callable[..., str]:
                 f"{response.get('message')}. Tell the user and ask for corrected "
                 "arguments."
             )
-        return _prompt_text(response)
+        return instruction_text(response["instruction"])
 
     parameters = [
         inspect.Parameter(
@@ -601,30 +600,6 @@ def _start_description(workflow: Workflow) -> str:
         prefix += f" {text}"
     start = inspect.getdoc(getattr(type(workflow), "start", None)) or ""
     return f"{prefix}\n\n{start}" if start else prefix
-
-
-def _prompt_text(response: Mapping[str, Any]) -> str:
-    """Render a start response as a user message for the agent."""
-    instruction = response["instruction"]
-    parts = [instruction["text"]]
-    if instruction.get("context") is not None:
-        context = json.dumps(instruction["context"], indent=1, ensure_ascii=False)
-        parts.append(f"Context:\n```json\n{context}\n```")
-    if response.get("completed"):
-        parts.append(
-            f"---\nThis is the final instruction of Hiraku workflow session "
-            f"`{response['session_id']}`; it takes no reply."
-        )
-        return "\n\n".join(parts)
-    replies = json.dumps(instruction["replies"], indent=1, ensure_ascii=False)
-    parts.append(
-        f"---\nThis is Hiraku workflow session `{response['session_id']}`, "
-        f"instruction {response['instruction_id']}. Reply with the workflow_reply "
-        f"tool, passing session_id `{response['session_id']}`, instruction_id "
-        f"{response['instruction_id']}, one of these replies, and its "
-        f"arguments:\n```json\n{replies}\n```\n\n{GUIDE}"
-    )
-    return "\n\n".join(parts)
 
 
 # Workflow resources and helpers ----------------------------------------------

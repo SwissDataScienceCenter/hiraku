@@ -40,6 +40,7 @@ from .session import Session
 from .workflow import (
     Workflow,
     discover_workflows,
+    instruction_text,
     load_workflow,
     reply_methods,
     summary,
@@ -405,7 +406,7 @@ def _drive(
             click.echo(f"{session.status}: {json.dumps(context, ensure_ascii=False)}")
             return 0
         instruction = response["instruction"]
-        if instruction["requires_user_response"]:
+        if instruction["reply"]["requires_user_response"]:
             _show_gate(workflow, response)
             return EXIT_WAITING
         pending = _pending(workflow, response)
@@ -634,11 +635,7 @@ def render_prompt(
 
     Without a reply file, the instruction is final and takes no reply.
     """
-    instruction = response["instruction"]
-    parts = [instruction["text"]]
-    if instruction.get("context") is not None:
-        context = json.dumps(instruction["context"], indent=1, ensure_ascii=False)
-        parts.append(f"Context:\n```json\n{context}\n```")
+    parts = [instruction_text(response["instruction"])]
     if interactive:
         # As a conversation, the user decides when the step is carried out.
         mode = (
@@ -653,23 +650,18 @@ def render_prompt(
             "The user sees your output but cannot answer; decide yourself and do "
             "not ask questions."
         )
-    header = (
-        f"---\nThis is instruction {response['instruction_id']} of Hiraku workflow "
-        f"session `{response['session_id']}`. {mode}"
-    )
     if reply_file is None:
         parts.append(
-            f"{header}\n\nThis is the final instruction of the session; it takes no "
-            "reply. Stop when you are done."
+            f"---\n{mode}\n\nThis is the final instruction of the session; it "
+            "takes no reply. Stop when you are done."
         )
         return "\n\n".join(parts) + "\n"
-    replies = json.dumps(instruction["replies"], indent=1, ensure_ascii=False)
     parts.append(
-        f"{header}\n\n"
-        f"When you are done, write exactly one reply as a JSON object to "
-        f"`{reply_file}`:\n"
-        '`{"reply": "<one of the replies below>", "arguments": {...}}`, with the '
-        f"arguments the reply's schema describes. Replies:\n```json\n{replies}\n```"
+        f"---\n{mode}\n\nWhen you are done, write exactly one reply as a JSON "
+        f"object to `{reply_file}`:\n"
+        '`{"reply": "<one of reply.options>", "arguments": {...}}`, with the '
+        "arguments the option's schema describes. The session and instruction "
+        "IDs are not needed."
     )
     if error is not None:
         parts.append(
@@ -702,7 +694,7 @@ def _show_gate(workflow: Workflow, response: dict[str, Any]) -> None:
         context = json.dumps(instruction["context"], indent=1, ensure_ascii=False)
         click.echo("\n".join(f"  {line}" for line in context.splitlines()))
     click.echo("Reply with one of:")
-    for item in instruction["replies"]:
+    for item in instruction["reply"]["options"]:
         flags = " ".join(
             f"--{name.replace('_', '-')} …"
             for name in item.get("arguments", {}).get("properties", {})
