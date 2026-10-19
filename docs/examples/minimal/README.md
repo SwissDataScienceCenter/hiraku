@@ -48,10 +48,10 @@ hiraku record create baseline --parent my-task --type experiment \
   --set "hypothesis=The existing representation establishes a reference." \
   --commit HEAD
 
-job_id=$(hiraku run --record baseline --target local -- \
+job_id=$(hiraku run --record baseline --backend local -- \
   uv run python evaluate.py --seed 0)
 hiraku job wait "$job_id"
-job_id=$(hiraku run --record baseline --target local -- uv run python evaluate.py --seed 1)
+job_id=$(hiraku run --record baseline --backend local -- uv run python evaluate.py --seed 1)
 hiraku job wait "$job_id"
 hiraku record list
 hiraku runs --record baseline

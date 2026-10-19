@@ -126,6 +126,17 @@ def test_bare_run_shows_help_without_submitting(project, monkeypatch):
     assert len(list_jobs(config=project)) == 1
 
 
+def test_run_rejects_target_alias(project, monkeypatch):
+    monkeypatch.chdir(project.root)
+    result = CliRunner().invoke(
+        main,
+        ["run", "--record", "root", "--target", "local"],
+    )
+    assert result.exit_code == 2
+    assert "No such option '--target'" in result.output
+    assert not project.jobs_dir.exists()
+
+
 def test_cli_detaches_and_preserves_literal_arguments(project):
     environment = {**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")}
     result = subprocess.run(
@@ -136,7 +147,7 @@ def test_cli_detaches_and_preserves_literal_arguments(project):
             "run",
             "--record",
             "root",
-            "--target",
+            "--backend",
             "local",
             "--",
             sys.executable,

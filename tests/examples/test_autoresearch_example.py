@@ -14,15 +14,12 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
-from hiraku.workflows.session import Session, load_session
-from hiraku.workflows.workflow import list_workflows
 
 REPOSITORY = Path(__file__).parents[2]
 DOCS_EXAMPLE = REPOSITORY / "docs" / "examples" / "autoresearch"
 EXAMPLE = REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "autoresearch"
 OVERLAY = EXAMPLE / "src"
-WORKFLOW = REPOSITORY / "src" / "hiraku" / "resources" / "workflows" / "collaborative"
-LOOP = OVERLAY / "hiraku" / "workflows" / "autoresearch" / "workflow.md"
+PROGRAM = OVERLAY / "hiraku" / "programs" / "autoresearch" / "program.md"
 DISPATCHER = OVERLAY / "hiraku" / "dispatch" / "autoresearch.sh"
 LINUX_ONLY = pytest.mark.skipif(
     sys.platform != "linux",
@@ -33,7 +30,7 @@ UPSTREAM_FILES = {
     "prepare.py": "# upstream preparation\n",
     "train.py": "# upstream training\n",
     "program.md": "# upstream program\n",
-    ".gitignore": "results.tsv\n",
+    ".gitignore": "results.tsv\n__pycache__/\n",
 }
 
 
@@ -67,8 +64,7 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
     gitignore.write_text(
         gitignore.read_text(encoding="utf-8")
         + "\n# Hiraku local files and run artifacts\n"
-        + "/.agents/\n/.claude/\n/.codex/\n/.mcp.json\n/hiraku/*\n/hiraku.yml\n"
-        + "/task.md\n"
+        + "/.agents/\n/.claude/\n/hiraku/*\n!/hiraku/dispatch/\n/hiraku.yml\n/task.md\n"
         + "/runs.csv\n/run.log\n",
         encoding="utf-8",
     )
@@ -95,11 +91,11 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
             "--markdown-file",
             "task.md",
             "--set",
+            "program=autoresearch",
+            "--set",
             "metrics=[{name: val_bpb, direction: minimize}]",
             "--set",
-            f"entrypoints={{train: {{command: [uv, run, python, train.py]}}, "
-            f"mock: {{command: [{sys.executable}, cpu_mock.py], "
-            "args: {val-bpb: 1.0}}}",
+            "command=[uv, run, python, train.py]",
         ],
     )
     return project, runner
@@ -113,7 +109,7 @@ def test_autoresearch_is_an_overlay() -> None:
         "src/task.md",
         "src/cpu_mock.py",
         "src/hiraku/dispatch/autoresearch.sh",
-        "src/hiraku/workflows/autoresearch/workflow.md",
+        "src/hiraku/programs/autoresearch/program.md",
     }
     actual = {
         str(path.relative_to(EXAMPLE))
@@ -129,15 +125,10 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "/hiraku/*" in readme
     assert "/.agents/" in readme
     assert "/.claude/" in readme
-    assert "/.mcp.json" in readme
-    assert "/.codex/" in readme
-    assert "`/mcp__hiraku__autoresearch`" in readme
-    assert "`collaborative`" in readme
-    assert "hiraku program" not in readme
     assert "--markdown-file task.md" in readme
     assert "hiraku record create sep10" in readme
     assert "branch=autoresearch/sep10" in readme
-    assert "hiraku session show" in readme
+    assert "hiraku record show sep10 --json" in readme
     assert "hiraku record update cpu-test" in readme
     assert "--set decision=discard" in readme
 
@@ -151,16 +142,17 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "run.log" not in task_template
     assert "Changelog" not in task_template
 
-    loop = LOOP.read_text(encoding="utf-8")
-    assert loop.startswith("---\nid: autoresearch\n")
-    assert "hiraku status --json" in loop
-    assert "hiraku record tree" in loop
-    assert "hiraku runs --record <id> --json" in loop
-    assert "--commit HEAD" in loop
-    assert "Never rebind a completed attempt" in loop
-    assert "## Finishing" in loop
-    assert "results.tsv" not in loop
-    assert "hiraku program" not in loop
+    program = PROGRAM.read_text(encoding="utf-8")
+    assert "hiraku status --json" in program
+    assert "hiraku record tree" in program
+    assert "hiraku runs --record <id> --json" in program
+    assert "--commit HEAD" in program
+    assert "Never rebind a completed attempt" in program
+    assert "results.tsv" not in program
+    assert "grep " not in program
+    assert "Choose the history mode" not in program
+    assert "hiraku experiment" not in program
+    assert "Changelog" not in program
 
 
 def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
@@ -181,50 +173,31 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert "/hiraku/*" in gitignore
     assert "/.agents/" in gitignore
     assert "/.claude/" in gitignore
-    mcp_config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
-    assert mcp_config["mcpServers"]["hiraku"] == {
-        "command": "hiraku",
-        "args": ["mcp"],
-    }
-    codex_config = (project / ".codex/config.toml").read_text(encoding="utf-8")
-    assert 'command = "hiraku"' in codex_config
     assert "/runs.csv" in gitignore
     assert (project / "program.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "program.md"
     ]
-    installed = project / "hiraku/workflows/collaborative"
-    assert (installed / "workflow.py").read_text(encoding="utf-8") == (
-        WORKFLOW / "workflow.py"
-    ).read_text(encoding="utf-8")
-    assert not (project / "hiraku/programs").exists()
+    installed_program = (project / "hiraku/programs/autoresearch/program.md").read_text(
+        encoding="utf-8"
+    )
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
+    assert installed_program == PROGRAM.read_text(encoding="utf-8")
     assert (project / "task.md").read_text(encoding="utf-8") == task_template
     assert task.markdown == task_template
     assert task.path == project / "hiraku/records/sep10/sep10.md"
+    assert task.markdown not in installed_program
+    assert installed_program not in task.markdown
     assert task.branch == "autoresearch/sep10"
     assert task.goal == (
         "Find the best architecture, optimizer, and hyperparameters to minimize "
         "`val_bpb` within the fixed 5-minute training budget."
     )
     assert task.type == "task"
-    assert task.entrypoints["train"].command == ["uv", "run", "python", "train.py"]
-    assert task.entrypoints["mock"].command[-1] == "cpu_mock.py"
+    assert task.program == "autoresearch"
+    assert task.command == ["uv", "run", "python", "train.py"]
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
-    workflows = {workflow.id: workflow for workflow in list_workflows(config=config)}
-    result = Session.run_start(workflows["autoresearch"])
-    response = {
-        **result.model_dump(),
-        **load_session(
-            result.session_id, config=workflows["autoresearch"].config
-        ).get_instruction(workflows["autoresearch"]),
-    }
-    assert response["status"] == "accepted"
-    assert response["session_status"] == "completed"
-    assert response["instruction"]["text"] == workflows["autoresearch"].markdown.strip()
-    assert not (project / "hiraku/workflows/autoresearch/workflow.py").exists()
-    assert "collaborative" in workflows
-    assert json.loads((project / ".mcp.json").read_text())["mcpServers"]["hiraku"]
+    assert config.default_program == "autoresearch"
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111
     assert git(project, "status", "--porcelain") == ""
 
@@ -238,12 +211,27 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
         ["record", "create", "cpu-test", "--parent", "sep10", "--commit", "HEAD"],
     )
 
-    invoke(
+    submitted = invoke(
         runner,
-        ["launch", "mock", "--record", "cpu-test", "--", "--val-bpb", "0.9"],
+        [
+            "run",
+            "--backend",
+            "local",
+            "--record",
+            "cpu-test",
+            "--",
+            sys.executable,
+            "cpu_mock.py",
+            "--val-bpb",
+            "0.9",
+        ],
     )
+    invoke(runner, ["job", "wait", submitted.output.strip()])
 
-    assert "val_bpb: 0.900000" in capfd.readouterr().out
+    assert (
+        "val_bpb: 0.900000"
+        in invoke(runner, ["job", "logs", submitted.output.strip()]).output
+    )
     rows = json.loads(
         invoke(
             runner,
@@ -259,12 +247,10 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     row = rows[0]
     assert row["record_id"] == "cpu-test"
     assert row["commit"] == commit
-    assert row["entrypoint"] == "mock"
+    assert row["job_id"] == submitted.output.strip()
     assert row["raw"]["git_state"] == "clean"
     assert row["raw"]["status"] == "finished"
     assert float(row["metrics"]["val_bpb"]) == 0.9
-    assert row["timestamp"] is not None
-    assert row["duration"] >= 0
 
 
 @LINUX_ONLY
@@ -274,12 +260,27 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
         runner, ["record", "create", "failure", "--parent", "sep10", "--commit", "HEAD"]
     )
 
-    failed = runner.invoke(
-        main, ["launch", "mock", "--record", "failure", "--", "--fail"]
+    submitted = invoke(
+        runner,
+        [
+            "run",
+            "--backend",
+            "local",
+            "--record",
+            "failure",
+            "--",
+            sys.executable,
+            "cpu_mock.py",
+            "--fail",
+        ],
     )
+    failed = runner.invoke(main, ["job", "wait", submitted.output.strip()])
 
     assert failed.exit_code != 0
-    assert "val_bpb: 0.000000" in capfd.readouterr().out
+    assert (
+        "val_bpb: 0.000000"
+        in invoke(runner, ["job", "logs", submitted.output.strip()]).output
+    )
     rows = json.loads(
         invoke(
             runner,
@@ -300,8 +301,9 @@ def dispatcher_environment(root: Path) -> dict[str, str]:
     return {
         **os.environ,
         "HIRAKU_ROOT": str(root),
+        "HIRAKU_TRACKING_ROOT": str(root),
         "HIRAKU_RECORD_ID": "cpu-test",
-        "HIRAKU_ENTRYPOINT": "test",
+        "HIRAKU_JOB_ID": "test-job",
     }
 
 
@@ -340,8 +342,6 @@ def test_autoresearch_dispatcher_records_timeout_and_invalid_output(tmp_path):
     with (tmp_path / "runs.csv").open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     assert [row["status"] for row in rows] == ["timeout", "crashed"]
-    # The timed-out command ran for the full one-second limit.
-    assert float(rows[0]["duration"]) >= 1
     assert rows[0]["metric.val_bpb"] == ""
     assert len({row["id"] for row in rows}) == 2
 

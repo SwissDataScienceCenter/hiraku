@@ -68,11 +68,11 @@ hiraku record create strong-l2 --parent digits --type experiment \
 
 hiraku record list
 
-job_id=$(hiraku run --record weak-l2 --target local -- \
+job_id=$(hiraku run --record weak-l2 --backend local -- \
   uv run python train.py --alpha 0.0001 --epochs 40 --hidden-units 64 \
   --seed 42 --validation-fraction 0.25)
 hiraku job wait "$job_id"
-job_id=$(hiraku run --record strong-l2 --target local -- \
+job_id=$(hiraku run --record strong-l2 --backend local -- \
   uv run python train.py --alpha 1.0 --epochs 40 --hidden-units 64 \
   --seed 42 --validation-fraction 0.25)
 hiraku job wait "$job_id"

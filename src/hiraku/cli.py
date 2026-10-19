@@ -891,12 +891,11 @@ def job_group() -> None:
 @click.option("--record", "record_id")
 @click.option(
     "--backend",
-    "--target",
     "backend",
     type=click.Choice(["local", "slurm"]),
     default="local",
     show_default=True,
-    help="Execution backend. --target remains as a compatibility alias.",
+    help="Execution backend.",
 )
 @click.option("--commit")
 @click.option(

@@ -49,7 +49,7 @@ Once you get confirmation, kick off the experimentation.
 Each experiment runs on a single GPU. The training script runs for a **fixed
 time budget of 5 minutes** (wall clock training time, excluding
 startup/compilation). Submit the invocation directly:
-`hiraku run --record <experiment-id> --target local -- uv run python train.py`.
+`hiraku run --record <experiment-id> --backend local -- uv run python train.py`.
 
 **The first run**: Your very first run should always be to establish the
 baseline, so you will run the training script as is. If no successful baseline
@@ -63,7 +63,7 @@ hiraku record create baseline --parent <root-id> --type experiment \
   --set 'summary=Unmodified upstream baseline' \
   --set 'hypothesis=The upstream implementation establishes the reference val_bpb' \
   --commit HEAD
-job_id=$(hiraku run --record baseline --target local -- uv run python train.py)
+job_id=$(hiraku run --record baseline --backend local -- uv run python train.py)
 hiraku job wait "$job_id"
 hiraku job logs "$job_id"
 hiraku runs --record baseline --json
@@ -106,7 +106,7 @@ LOOP FOREVER:
    --set 'summary=<summary>' --set 'hypothesis=<hypothesis>' --commit HEAD`.
    Never rebind a completed attempt to another commit.
 5. Run the experiment:
-   save the ID returned by `hiraku run --record <experiment-id> --target local -- uv run python train.py`,
+   save the ID returned by `hiraku run --record <experiment-id> --backend local -- uv run python train.py`,
    then run `hiraku job wait JOB_ID` before inspecting measurements.
 6. Inspect the result with
    `hiraku runs --record <experiment-id> --json`.

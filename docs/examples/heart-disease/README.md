@@ -83,10 +83,10 @@ hiraku record create logistic-baseline --parent heart-disease --type experiment 
 hiraku record show logistic-baseline
 
 # preview and submit the command
-hiraku run --record logistic-baseline --target local --dry-run -- \
+hiraku run --record logistic-baseline --backend local --dry-run -- \
   uv run python train.py --model logistic --seed 42 --validation-fraction 0.25
 
-job_id=$(hiraku run --record logistic-baseline --target local -- \
+job_id=$(hiraku run --record logistic-baseline --backend local -- \
   uv run python train.py --model logistic --seed 42 --validation-fraction 0.25)
 hiraku job wait "$job_id"
 
@@ -123,7 +123,7 @@ hiraku record create random-forest --parent heart-disease --type experiment \
   --set "hypothesis=Nonlinear feature interactions improve validation log loss" \
   --commit HEAD
 
-job_id=$(hiraku run --record random-forest --target local -- \
+job_id=$(hiraku run --record random-forest --backend local -- \
   uv run python train.py --model random_forest --seed 42 \
   --validation-fraction 0.25)
 hiraku job wait "$job_id"

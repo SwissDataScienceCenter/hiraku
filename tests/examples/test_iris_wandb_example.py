@@ -169,7 +169,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     ]
 
     job_id = invoke(
-        runner, ["run", "--target", "local", "--record", "logistic"]
+        runner, ["run", "--backend", "local", "--record", "logistic"]
     ).output.strip()
     invoke(runner, ["job", "wait", job_id])
     rows = json.loads(

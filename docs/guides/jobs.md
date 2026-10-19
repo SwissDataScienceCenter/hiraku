@@ -36,7 +36,7 @@ The nearest record command replaces the inherited command. Otherwise Hiraku
 uses an ancestor command and then the project default.
 
 ```bash
-job_id=$(hiraku run --record experiment-1 --target local)
+job_id=$(hiraku run --record experiment-1 --backend local)
 hiraku job status "$job_id" --json
 hiraku job wait "$job_id"
 hiraku job logs "$job_id"
@@ -49,7 +49,7 @@ The nearest record command replaces the complete inherited argv. An explicit
 command after `--` always takes precedence and replaces that default:
 
 ```bash
-hiraku run --record experiment-1 --target local -- \
+hiraku run --record experiment-1 --backend local -- \
   uv run --locked python analyze.py --seed 7
 ```
 

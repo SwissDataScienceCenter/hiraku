@@ -70,10 +70,10 @@ hiraku record create mlp --parent eurosat --type experiment \
 hiraku record show mlp
 hiraku record show mlp
 
-hiraku run --record mlp --target local --dry-run -- \
+hiraku run --record mlp --backend local --dry-run -- \
   uv run python train.py --model mlp --seed 42 --epochs 10 --batch-size 64 \
   --learning-rate 0.001 --validation-fraction 0.2
-job_id=$(hiraku run --record mlp --target local -- \
+job_id=$(hiraku run --record mlp --backend local -- \
   uv run python train.py --model mlp --seed 42 --epochs 10 --batch-size 64 \
   --learning-rate 0.001 --validation-fraction 0.2)
 hiraku job wait "$job_id"
@@ -99,7 +99,7 @@ hiraku record create cnn --parent eurosat --type experiment \
 hiraku record show cnn
 hiraku record show cnn
 
-job_id=$(hiraku run --record cnn --target local -- \
+job_id=$(hiraku run --record cnn --backend local -- \
   uv run python train.py --model cnn --seed 42 --epochs 10 --batch-size 64 \
   --learning-rate 0.001 --validation-fraction 0.2)
 hiraku job wait "$job_id"

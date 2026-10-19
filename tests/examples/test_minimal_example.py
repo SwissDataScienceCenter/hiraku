@@ -70,7 +70,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     )
 
     job_id = invoke(
-        runner, ["run", "--target", "local", "--record", "baseline"]
+        runner, ["run", "--backend", "local", "--record", "baseline"]
     ).output.strip()
     invoke(runner, ["job", "wait", job_id])
 

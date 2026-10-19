@@ -17,21 +17,22 @@ This fragmentation creates an inherent barrier for effective Human-AI collaborat
 
 ## Records and runs
 
-Hiraku uses two lightweight data structures to track the model-development lifecycle: records and runs.
+Hiraku uses records, jobs, and tracked runs to document the model-development lifecycle.
 
-Only records are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
+Records and jobs are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
-A root *record* defines a working scope and goal, and documents the research progress. Child records are focused, reproducible units within that scope that can link code, execution entrypoints, and runs. Records carry no required semantic type; users may create them for baselines, hypotheses, diagnostics, model runs, ablations, hyperparameter optimization, etc. *Runs* record execution traces attributed to one record and, when available, a code commit.
+A root *record* defines a working scope and goal, and documents the research progress. Child records are focused, reproducible units within that scope that can link code, execution commands, and runs. Records carry no required semantic type; users may create them for baselines, hypotheses, diagnostics, model runs, ablations, hyperparameter optimization, etc. *Runs* record execution traces attributed to one record and, when available, a code commit.
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared fields and entrypoints. |
-| **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit and entrypoints. A proposed investigation may have no commit. |
+| **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared fields and commands. |
+| **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit and commands. A proposed investigation may have no commit. |
+| **Job** | ignored local receipt store plus executor state | Execution identity, lifecycle, logs, and either a managed snapshot or existing workspace reference. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
 Records are stored as Markdown with YAML front matter. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent, and all descendants are stored flat in their root's folder. IDs are unique across the project.
 
-Fields inherit through `parent_id` by default: the nearest definition wins, an explicit `null` clears an inherited field, and entrypoints merge by name. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
+Fields inherit through `parent_id` by default: the nearest definition wins, an explicit `null` clears an inherited field, and commands replace inherited argv lists. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
 At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. The current status can be queried with `hiraku status`.
 
@@ -72,7 +73,7 @@ Hiraku data records are managed by the [Python API](api/python/index.md). All ot
 
 ```python
 from hiraku.base import BaseRecord
-from hiraku.record import Entrypoint, Metric, Record, list_records, load_record
+from hiraku.record import Metric, Record, list_records, load_record
 from hiraku.run import Run
 ```
 
@@ -82,7 +83,7 @@ from hiraku.run import Run
 A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters; additional adapters can be registered by users. The backend needs to:
 
 - List runs from the tracking source selected by a record.
-- Return normalized runs with a required run ID, metrics, and parameters; record ID, commit, start timestamp, duration in seconds, entrypoint, and URL attribution may be absent.
+- Return normalized runs with a required run ID, metrics, and parameters; record ID, job ID, commit, timestamp, historical entrypoint, and URL attribution may be absent.
 
 CSV is the default project backend. A record may set `tracking_backend` to
 override the project default. Backend configuration uses one common mapping
@@ -95,52 +96,28 @@ tracking_backend:
 
 `hiraku runs` lists runs attributed to the active record, or to the record given with `--record ID`. Add `--all` to list every attributed run from the tracking source resolved for that record, for example to compare sibling records under a root. In Python, `record.runs(config=config)` returns the record's own runs, and `record.resolve_tracking_backend(config=config).list_runs()` lists the whole source. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
 
-## Entrypoints
+## Commands and jobs
 
-Records can define named **entrypoints** for launching runs. Entrypoints document reproducible code invocations, including default hyperparameters or command-line arguments, and provide convenient functions for users and agents to run or dispatch code.
-
-Entrypoints are defined in record YAML front matter with the `entrypoints` key, e.g.,
+Records and projects define one optional command argv list:
 
 ```yaml
-entrypoints:
-  train:
-    command: ["uv", "run", "python", "train.py"]
-    args:
-      model: logistic
-      seed: 42
+command: [uv, run, --locked, python, train.py, --seed, "42"]
 ```
 
-Entrypoints can be invoked via the CLI:
+The nearest record command wins, followed by ancestors and the project default.
+An explicit null clears the inherited command and uses the project default.
+Arguments after `--` replace the complete invocation.
 
 ```bash
-hiraku launch <entrypoint>  # uses the active record
-hiraku launch <entrypoint> --record <record-id>  # explicit attribution
-hiraku launch <entrypoint> --record <record-id> -- --seed 1  # override defaults
+job_id=$(hiraku run --record baseline --backend local)
+hiraku job wait "$job_id"
+hiraku job logs "$job_id"
+hiraku runs --record baseline --json
 ```
 
-The project-owned dispatcher controls Git behavior:
-```bash
-hiraku launch <entrypoint> --record <record-id>                      # current working state
-hiraku launch <entrypoint> --record <record-id> --dispatch worktree  # exact commit
-```
-
-Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`,
-and `HIRAKU_ENTRYPOINT`. The
-dispatcher reports `HIRAKU_COMMIT` and `HIRAKU_GIT_STATE`: `launch.sh` reports
-the current HEAD and whether the tree is clean or dirty, while `worktree.sh`
-reports the exact checked-out commit and a clean state.
-
-The user can define custom dispatch scripts, e.g.
-
-```bash
-hiraku launch <entrypoint> --record <record-id> --dispatch runai
-```
-
-This invokes the project-owned `hiraku/dispatch/runai.sh`, which inherits the
-launch context in its environment and receives the full command after `--`.
-The default `launch.sh` runs the current state, while `worktree.sh` creates an
-isolated checkout. Child stdout and stderr stream directly to the terminal.
-Dispatcher names may omit `.sh`, so `--dispatch worktree` selects `worktree.sh`.
+Jobs own execution and provenance; tracked runs own measurements. One job may
+produce zero, one, or multiple tracking runs. See [Jobs](guides/jobs.md) for
+execution, cancellation, provenance, and migration from named entrypoints.
 
 ## Agent Skill
 
@@ -151,30 +128,29 @@ shared directory. For Claude Code, initialization creates
 systems that cannot create directory symlinks). Invoke it as `$hiraku` in Codex
 or `/hiraku` in Claude Code.
 
-## Workflows and context
+## Actions, Programs, Context
 
-A *workflow* is a project-defined research procedure that runs inside your
-coding agent. Its Python code decides what happens next and validates what the
-agent reports; its Markdown holds the guidance the agent follows. The agent
-starts a workflow and continues it through the Hiraku MCP server, which
-`hiraku init` configures for Claude Code and Codex. *Context* files provide
-project-relevant information to the agent.
+!!! info
+    Version 0.1.0 only implements the data model and not yet the agent integration. See github issues for the planned features.
+
+Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state.  A *program* defines complex research workflows and loops end-to-end, with defined permissions and limits. Actions and programs are executed by the `hiraku-agent`. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to provide project-relevant information to the agent.
+
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A record with an `id`, settings, and prompts (`workflow.md`) whose class adds the operations (`workflow.py`). |
-| **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its state, history, and current instruction. Sessions are local and not committed. |
+| **Action** | `hiraku/actions/{entity}/{action_id}/{action.md,action.py}` | A named action that can be invoked by the hiraku-agent agent. |
+| **Program** | `hiraku/programs/{program_id}/{program.md,program.py}` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
-Hiraku ships the `collaborative` workflow as an editable copy in your
-project. See the [Workflows guide](guides/workflows.md) for how
-sessions work and how to write your own.
+Programs, action and context records are managed via CLI, e.g.
 
 ```bash
-hiraku workflow list
-hiraku session list
+hiraku program create <program-id>
+hiraku program list
 hiraku context create <context-id>
 hiraku context list
+hiraku action create <entity>/<action-id>
+hiraku action list
 ```
 
 
@@ -192,7 +168,7 @@ hiraku status
 
 # 1. optionally, initialize context (not implement yet)
 hiraku context create literature
-# Ask your coding agent to create a curated literature review.
+hiraku-agent context update literature "Create a curated literature review for heart-disease prediction"
 
 # add literature to the active context
 hiraku context set literature
@@ -219,11 +195,12 @@ hiraku record create logistic-baseline --parent heart-disease \
 # /hiraku "implement the logistic baseline record"
 # implement and commit the code change, then bind the resulting commit
 git commit -m "implement logistic baseline"
-hiraku record update logistic-baseline --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py]}}'
+hiraku record update logistic-baseline --commit HEAD
 
-# 4. launch the entrypoint and list attributed runs
-hiraku launch train --record logistic-baseline
+# 4. run an arbitrary command and list attributed runs
+job_id=$(hiraku run --record logistic-baseline --backend local -- \
+  uv run python train.py)
+hiraku job wait "$job_id"
 hiraku runs --record logistic-baseline --sort val/log_loss --ascending
 
 # 5. review the runs and document the conclusion on the child record
@@ -239,23 +216,19 @@ The same workflow can be carried out through the installed Hiraku skill in a
 coding agent. The [Heart Disease example](examples/heart-disease/README.md)
 shows prompts for both a complete investigation and individual steps.
 
-### Collaborative workflow
+### Autoresearch workflow
 
-The bundled `collaborative` workflow runs experiments on a task record together
-with you. Invoke its prompt `/mcp__hiraku__collaborative`, or ask your coding
-agent, for example "start Hiraku collaborative research on heart-disease for
-two experiments"; the agent then calls the `collaborative` MCP tool. The agent
-drafts, implements, launches, and analyzes each experiment, and you review the
-result of every step before choosing the next one.
-
-Inspect the session and its attributed runs from the terminal:
+The packaged program describes an autonomous loop. Read its instructions and
+the research history before starting it in a coding agent; agree on the
+objective, branch, budget, and stopping condition with the user.
 
 ```bash
-hiraku session list
-hiraku session show <session-id>
+hiraku program show autoresearch
+hiraku program show interactive
+hiraku record tree
 hiraku runs --record heart-disease --all --json
 ```
 
-The [Autoresearch example](examples/autoresearch/README.md) runs an autonomous
-single-instruction workflow on Karpathy's autoresearch repository with a bounded
-dispatcher.
+The [Autoresearch example](examples/autoresearch/README.md) shows how to use
+the program with the project-local skill and a bounded dispatcher. The skill
+can be invoked with `/hiraku "run the autoresearch program for heart-disease"`.
