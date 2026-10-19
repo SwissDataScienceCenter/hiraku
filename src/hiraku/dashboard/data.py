@@ -36,6 +36,11 @@ RUN_COLUMNS = (
     "entrypoint",
     "commit",
     "url",
+    "status",
+    "declared_inputs",
+    "declared_outputs",
+    "inputs",
+    "outputs",
 )
 RECORD_COLUMNS = (
     "record",
@@ -137,6 +142,11 @@ def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
             "entrypoint": run.entrypoint,
             "commit": run.commit,
             "url": run.url,
+            "status": run.status,
+            "declared_inputs": list(run.declared_inputs),
+            "declared_outputs": list(run.declared_outputs),
+            "inputs": [item.model_dump() for item in run.inputs],
+            "outputs": [item.model_dump() for item in run.outputs],
             **{f"metric.{name}": value for name, value in run.metrics.items()},
             **{f"param.{name}": value for name, value in run.params.items()},
         }
@@ -328,18 +338,23 @@ def run_text(run: Mapping[str, Any]) -> str:
         }
 
     started = run.get("started")
-    return dump_yaml(
-        {
-            "id": run["run"],
-            "record": run.get("record"),
-            "entrypoint": run.get("entrypoint"),
-            "commit": run.get("commit"),
-            "started": started.isoformat() if started else None,
-            "duration": run.get("duration"),
-            "params": prefixed("param."),
-            "metrics": prefixed("metric."),
-        }
-    )
+    details = {
+        "id": run["run"],
+        "record": run.get("record"),
+        "entrypoint": run.get("entrypoint"),
+        "commit": run.get("commit"),
+        "started": started.isoformat() if started else None,
+        "duration": run.get("duration"),
+        "params": prefixed("param."),
+        "metrics": prefixed("metric."),
+    }
+    if run.get("status") is not None:
+        details["status"] = run["status"]
+        details["declared_inputs"] = run.get("declared_inputs") or []
+        details["declared_outputs"] = run.get("declared_outputs") or []
+        details["inputs"] = run.get("inputs") or []
+        details["outputs"] = run.get("outputs") or []
+    return dump_yaml(details)
 
 
 def plot_frame(runs_df: pd.DataFrame, metric: str | None) -> tuple[pd.DataFrame, int]:

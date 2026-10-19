@@ -10,6 +10,7 @@ from ..errors import BackendError
 from .base import TrackingBackend
 from .csv import CSVBackend, CSVBackendConfig
 from .mlflow import MLflowBackend, MLflowBackendConfig
+from .snakemake import SnakemakeBackend, SnakemakeBackendConfig
 from .wandb import WandbBackend, WandbBackendConfig
 
 BackendFactory = Callable[[HirakuConfig, Any], TrackingBackend]
@@ -33,10 +34,17 @@ def _wandb_factory(config: HirakuConfig, parsed: WandbBackendConfig) -> Tracking
     return WandbBackend(config, **parsed.model_dump(exclude={"type"}))
 
 
+def _snakemake_factory(
+    config: HirakuConfig, parsed: SnakemakeBackendConfig
+) -> TrackingBackend:
+    return SnakemakeBackend(config, path=parsed.path)
+
+
 _BACKENDS: dict[str, tuple[type[Any], BackendFactory]] = {
     "csv": (CSVBackendConfig, _csv_factory),
     "mlflow": (MLflowBackendConfig, _mlflow_factory),
     "wandb": (WandbBackendConfig, _wandb_factory),
+    "snakemake": (SnakemakeBackendConfig, _snakemake_factory),
 }
 
 

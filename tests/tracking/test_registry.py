@@ -8,7 +8,7 @@ from hiraku.tracking.csv import CSVBackend
 
 
 def test_builtin_backends_are_registered() -> None:
-    assert available_backends() == ("csv", "mlflow", "wandb")
+    assert available_backends() == ("csv", "mlflow", "snakemake", "wandb")
 
 
 def test_registry_constructs_csv_backend_from_mapping(tmp_path: Path) -> None:

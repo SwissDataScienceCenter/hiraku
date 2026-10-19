@@ -9,6 +9,7 @@ The examples are runnable projects that show the Hiraku lifecycle with different
 - [EuroSAT RGB](eurosat-rgb/README.md) — investigate image-specific architectural inductive biases with a flattened-image MLP baseline and follow-up experiments.
 - [Workflow examples](workflows/README.md) — a Python workflow that checks that a coding harness follows Hiraku workflow instructions and stops for the user, a prompt-only workflow with arguments, and a scheduler that picks its next step from records by priority.
 - [Autoresearch](autoresearch/README.md) — add a Hiraku research loop and tracked dispatcher to the original autoresearch repository.
+- [Snakemake](snakemake/README.md) — track a small two-rule workflow with declared and observed files.
 
 ??? note "Optional initialization flags"
 

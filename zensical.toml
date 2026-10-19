@@ -40,6 +40,7 @@ nav = [
       { "EuroSAT RGB" = "examples/eurosat-rgb/README.md" },
       { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
       { "Workflow Examples" = "examples/workflows/README.md" },
+      { "Snakemake" = "examples/snakemake/README.md" },
   ] },
   { "Guides" = [
       { "Overview" = "guides/index.md" },
@@ -49,6 +50,7 @@ nav = [
         { "CSV" = "guides/tracking-csv.md" },
         { "W&B" = "guides/tracking-wandb.md" },
         { "MLflow" = "guides/tracking-mlflow.md" },
+        { "Snakemake" = "guides/tracking-snakemake.md" },
         { "Custom Backend" = "guides/tracking-custom.md"}
       ] },
       { "MCP server" = "guides/mcp.md" },

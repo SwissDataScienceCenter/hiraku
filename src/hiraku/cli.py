@@ -64,6 +64,11 @@ def _json_value(value: Any) -> Any:
             "duration": value.duration,
             "entrypoint": value.entrypoint,
             "url": value.url,
+            "status": value.status,
+            "declared_inputs": _json_value(value.declared_inputs),
+            "declared_outputs": _json_value(value.declared_outputs),
+            "inputs": _json_value(value.inputs),
+            "outputs": _json_value(value.outputs),
             "raw": _json_value(value.raw),
         }
     if isinstance(value, BaseModel):
@@ -897,6 +902,63 @@ def launch_command(
     )
     if result.returncode:
         raise click.exceptions.Exit(result.returncode)
+
+
+@main.group("snakemake")
+def snakemake_group() -> None:
+    """Run a Snakemake workflow with Hiraku tracking."""
+
+
+@snakemake_group.command("run")
+@click.option("--record", "record_id", required=True)
+@click.option("--snakefile", type=click.Path(path_type=Path), default=Path("Snakefile"))
+@click.option("--cores", type=click.IntRange(min=1), default=1)
+@click.option("--dry-run", is_flag=True)
+@click.option("--command", default="snakemake", help="Snakemake executable.")
+@click.option("--command-arg", multiple=True, help="Argument before Snakemake options.")
+@click.option("--force", is_flag=True)
+@click.option("--forceall", is_flag=True)
+@click.option("--keep-going", is_flag=True)
+@click.argument("targets", nargs=-1)
+@click.pass_obj
+def snakemake_run(
+    state: CLIContext,
+    record_id: str,
+    snakefile: Path,
+    cores: int,
+    dry_run: bool,
+    command: str,
+    command_arg: tuple[str, ...],
+    force: bool,
+    forceall: bool,
+    keep_going: bool,
+    targets: tuple[str, ...],
+) -> None:
+    """Execute TARGETS and save their declared inputs and outputs."""
+    from .tracking.snakemake import execute
+
+    run, exit_code = execute(
+        state.config,
+        record_id=record_id,
+        snakefile=snakefile,
+        targets=targets,
+        cores=cores,
+        dry_run=dry_run,
+        command=command,
+        command_args=command_arg,
+        options=tuple(
+            option
+            for enabled, option in (
+                (force, "--force"),
+                (forceall, "--forceall"),
+                (keep_going, "--keep-going"),
+            )
+            if enabled
+        ),
+    )
+    click.echo(f"Recorded Snakemake run {run.id}: {run.status}")
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
 
 
 @main.command("runs")

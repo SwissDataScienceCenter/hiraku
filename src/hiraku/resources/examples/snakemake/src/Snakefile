@@ -1,0 +1,8 @@
+rule all:
+    input: "greeting.txt"
+
+
+rule greeting:
+    input: "data/message.txt"
+    output: "greeting.txt"
+    shell: "cp {input} {output}"

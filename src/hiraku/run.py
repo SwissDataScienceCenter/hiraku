@@ -12,6 +12,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .errors import ValidationError
 
 
+class RunFile(BaseModel):
+    """A declared workflow file and its observed state."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    path: str = Field(min_length=1)
+    state: str = Field(pattern="^(file|directory|missing|unavailable)$")
+    size: int | None = Field(default=None, ge=0)
+
+
 class Run(BaseModel):
     """An immutable run returned by a tracking backend.
 
@@ -29,6 +38,11 @@ class Run(BaseModel):
     duration: float | None = None
     entrypoint: str | None = None
     url: str | None = None
+    status: str | None = None
+    declared_inputs: tuple[str, ...] = ()
+    declared_outputs: tuple[str, ...] = ()
+    inputs: tuple[RunFile, ...] = ()
+    outputs: tuple[RunFile, ...] = ()
     raw: Mapping[str, Any] = Field(default_factory=dict, repr=False)
 
     @field_validator("id")

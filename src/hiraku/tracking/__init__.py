@@ -55,9 +55,12 @@ from .base import TrackingBackend
 from .csv import CSVBackend, CSVBackendConfig
 from .mlflow import MLflowBackend, MLflowBackendConfig
 from .registry import available_backends, create_backend, register_backend
+from .snakemake import SnakemakeBackend, SnakemakeBackendConfig
 from .wandb import WandbBackend, WandbBackendConfig
 
-BackendConfig = CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig
+BackendConfig = (
+    CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig | SnakemakeBackendConfig
+)
 
 
 __all__ = [
@@ -66,6 +69,8 @@ __all__ = [
     "CSVBackendConfig",
     "MLflowBackend",
     "MLflowBackendConfig",
+    "SnakemakeBackend",
+    "SnakemakeBackendConfig",
     "WandbBackend",
     "WandbBackendConfig",
     "TrackingBackend",

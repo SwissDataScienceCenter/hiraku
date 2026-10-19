@@ -8,6 +8,7 @@ Choose the backend that matches the stage of your project:
 - [CSV](guides/tracking-csv.md) for local and offline work;
 - [W&B](guides/tracking-wandb.md) for hosted run tracking and collaboration;
 - [MLflow](guides/tracking-mlflow.md) for local SQLite or a remote MLflow server.
+- [Snakemake](guides/tracking-snakemake.md) for local workflow executions and file observations.
 - [Custom](guides/tracking-custom.md) for a backend of your choice.
 
 The task-level `tracking_backend` setting overrides the project default. The
