@@ -14,7 +14,6 @@ from ..config import HirakuConfig
 from ..errors import ValidationError
 from ..record import load_record
 
-DEFAULT_PORT = 8765
 DEFAULT_HOST = "127.0.0.1"
 BUNDLED_NOTEBOOK = Path(__file__).with_name("app.py")
 # marimo-studio serves the notebook through the view in this folder.
@@ -55,7 +54,7 @@ def build_command(
     python: str,
     notebook: Path,
     *,
-    port: int = DEFAULT_PORT,
+    port: int | None = None,
     no_browser: bool = False,
     edit: bool = False,
     include_code: bool = False,
@@ -64,10 +63,13 @@ def build_command(
 
     The read-only app runs without a token; the editor executes arbitrary code,
     so it keeps marimo's access token. ``include_code`` only affects the app,
-    since the editor always shows the code.
+    since the editor always shows the code. Without ``port``, marimo selects
+    a free port automatically.
     """
     command = [python, "-m", "marimo", "edit" if edit else "run"]
-    command.extend(["--host", DEFAULT_HOST, "--port", str(port)])
+    command.extend(["--host", DEFAULT_HOST])
+    if port is not None:
+        command.extend(["--port", str(port)])
     if edit:
         command.append("--watch")
     else:
@@ -84,7 +86,7 @@ def serve_dashboard(
     config: HirakuConfig,
     *,
     record_id: str | None = None,
-    port: int = DEFAULT_PORT,
+    port: int | None = None,
     no_browser: bool = False,
     edit: bool = False,
     include_code: bool = False,

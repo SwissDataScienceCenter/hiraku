@@ -43,6 +43,15 @@ def test_build_command(options: dict, flags: list[str]) -> None:
     ]
 
 
+@pytest.mark.parametrize("edit", [False, True])
+def test_build_command_leaves_automatic_port_selection_to_marimo(edit: bool) -> None:
+    command = launcher.build_command("python", Path("app.py"), edit=edit)
+
+    assert "--port" not in command
+    assert command[3] == ("edit" if edit else "run")
+    assert command[command.index("--host") + 1] == "127.0.0.1"
+
+
 def test_bundled_views_place_all_interactive_cells() -> None:
     from marimo._ast.load import load_app
 
@@ -215,3 +224,21 @@ def test_dashboard_cli_propagates_server_exit_code(
     monkeypatch.chdir(project.root)
 
     assert CliRunner().invoke(main, ["dashboard"]).exit_code == 3
+
+
+def test_dashboard_cli_defaults_to_automatic_port_selection(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    received = {}
+
+    def serve(config, **options):
+        received.update(options)
+        return 0
+
+    monkeypatch.setattr(launcher, "serve_dashboard", serve)
+    monkeypatch.chdir(project.root)
+
+    result = CliRunner().invoke(main, ["dashboard"])
+
+    assert result.exit_code == 0, result.output
+    assert received["port"] is None

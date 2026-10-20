@@ -871,7 +871,11 @@ def run_list(
 
 @main.command("dashboard")
 @click.option("--record", "record_id", help="Record selected when the page opens.")
-@click.option("--port", type=click.IntRange(1, 65535), default=8765, show_default=True)
+@click.option(
+    "--port",
+    type=click.IntRange(1, 65535),
+    help="Use this port; otherwise automatically choose a free port from 2718.",
+)
 @click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
 @click.option(
     "--init",
@@ -891,7 +895,7 @@ def run_list(
 def dashboard_command(
     state: CLIContext,
     record_id: str | None,
-    port: int,
+    port: int | None,
     no_browser: bool,
     initialize: bool,
     edit: bool,

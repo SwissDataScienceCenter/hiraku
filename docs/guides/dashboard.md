@@ -30,8 +30,9 @@ Run every command from inside a Hiraku project.
 hiraku dashboard --record digits
 ```
 
-The page is served at <http://127.0.0.1:8765> and opens in your browser.
-`--port` changes the port, `--no-browser` only prints the URL, and `--record`
+The page is served on localhost and opens in your browser. A free port is
+selected automatically, starting at 2718; the terminal prints the URL.
+`--port` requests a specific port, `--no-browser` only prints the URL, and `--record`
 selects a record when the page opens (default: the active record). Press
 Ctrl-C to stop the server. Viewing never writes to the project.
 
