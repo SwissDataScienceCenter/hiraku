@@ -74,6 +74,8 @@ submission before starting another worker. Interactive workers that finish
 without an event file pause execution (exit 3); headless workers that do so fail.
 Subprocess failures propagate, including for final instructions. A failed worker's
 event file is retained but is not submitted or reused on resume.
+If a final worker fails, retry it with `hiraku-agent WORKFLOW --session ID`.
+The driver records successful final assignments and does not repeat them on resume.
 
 `--interactive` asks the worker to explain its intended work and wait for your
 go-ahead. Exit without writing an event file to pause. Workers are instructed to

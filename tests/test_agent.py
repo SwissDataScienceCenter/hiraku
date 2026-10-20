@@ -484,3 +484,14 @@ def test_subprocess_failure_does_not_submit_worker_output(
     else:
         assert session.status == "completed"
         assert session.state.answers == ["one"]
+        directory = config.sessions_dir / session.id / "2"
+        assert not (directory / "completed").exists()
+        monkeypatch.delenv("FAKE_FINAL_EXIT")
+        resumed = agent("toy", "--session", session.id)
+        assert resumed.exit_code == 0, resumed.output
+        assert "saw ## Done" in resumed.output
+        assert (directory / "2/prompt.md").exists()
+        assert (directory / "completed").is_file()
+        shown = agent("toy", "--session", session.id)
+        assert shown.exit_code == 0, shown.output
+        assert "saw" not in shown.output

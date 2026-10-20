@@ -157,16 +157,7 @@ def _workflow_command(workflow: Workflow, config: HirakuConfig) -> click.Group:
             else {}
         )
         session_id = _start_or_resume(workflow, options, arguments)
-        # A session that --session names after it ended is shown, not run again.
-        ended = load_session(session_id, config=options.config).status != "active"
-        ctx.exit(
-            _drive(
-                workflow,
-                session_id,
-                options,
-                run_final=not options.session or not ended,
-            )
-        )
+        ctx.exit(_drive(workflow, session_id, options))
 
     group = click.Group(
         name=workflow.id,
@@ -371,8 +362,6 @@ def _drive(
     workflow: Workflow,
     session_id: str,
     options: Options,
-    *,
-    run_final: bool = True,
 ) -> int:
     """Fetch assignments and submit event files after successful worker exits."""
     while True:
@@ -383,11 +372,12 @@ def _drive(
                 response.get("message", "No instruction available")
             )
         final = response["session_status"] == "completed"
-        if final and not run_final:
+        directory = _directory(options.config, response)
+        completed = directory / "completed"
+        if final and completed.is_file():
             context = response["instruction"].get("context")
             click.echo(f"completed: {json.dumps(context, ensure_ascii=False)}")
             return 0
-        directory = _directory(options.config, response)
         pending = directory / "pending.json"
         event_file = (
             pending
@@ -395,6 +385,7 @@ def _drive(
             else _run_agent(response, directory, options)
         )
         if final:
+            completed.touch()
             context = response["instruction"].get("context")
             click.echo(f"completed: {json.dumps(context, ensure_ascii=False)}")
             return 0
