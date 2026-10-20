@@ -7,7 +7,7 @@ MLP baseline, then use the evidence and baseline results to select follow-up
 architectures. Keep the split, optimizer, seed, and training budget fixed
 across experiments.
 
-The project files copied by `hiraku init --example eurosat-rgb` are stored in
+The project files copied by `hiraku clone eurosat-rgb` are stored in
 `src/`. See `docs/examples/eurosat-rgb/README.md` in the Hiraku repository for
 setup and the research workflow. The first training run downloads EuroSAT RGB
 through `torchvision.datasets.EuroSAT`.

@@ -1,6 +1,6 @@
 # Digits MLflow example
 
-The project files copied by `hiraku init --example digits-mlflow` are stored in
+The project files copied by `hiraku clone digits-mlflow` are stored in
 `src/`. See `docs/examples/digits-mlflow/README.md` in the Hiraku repository for
 the complete setup and usage guide.
 
@@ -13,13 +13,13 @@ Use Hiraku's `mlflow` extra to query these results.
 Generate fresh runs immediately with:
 
 ```bash
-hiraku init . --example digits-mlflow --generate
+hiraku clone digits-mlflow . --generate
 ```
 
 Or copy the generator for a separate step:
 
 ```bash
-hiraku init . --example digits-mlflow --with-generator
+hiraku clone digits-mlflow . --with-generator
 uv run --with hiraku python generate_results.py
 ```
 

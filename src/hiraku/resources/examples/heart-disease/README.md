@@ -1,6 +1,6 @@
 # Heart Disease example
 
-The project files copied by `hiraku init --example heart-disease` are stored in
+The project files copied by `hiraku clone heart-disease` are stored in
 `src/`. See `docs/examples/heart-disease/README.md` in the Hiraku repository for
 the complete walkthrough.
 
@@ -9,7 +9,7 @@ Add `--with-results` to include prepared research records and measured tracked r
 Initialize in an empty directory (Git is optional):
 
 ```bash
-uv run hiraku init . --example heart-disease --with-results
+uv run hiraku clone heart-disease . --with-results
 ```
 
 The results overlay includes four records and nine runs in `runs.csv`.
@@ -23,14 +23,14 @@ uv run hiraku runs --record random-forest --all
 ```
 
 To generate fresh runs directly during initialization instead of copying bundled
-results, use `hiraku init --example heart-disease --generate` in a new project.
+results, use `hiraku clone heart-disease --generate` in a new project.
 This cannot be combined with `--with-results`, and existing projects are rejected.
 Failed generation keeps the initialized project and any completed runs.
 
 For two steps, opt into copying the generator:
 
 ```bash
-hiraku init . --example heart-disease --with-generator
+hiraku clone heart-disease . --with-generator
 uv run --with hiraku python generate_results.py
 ```
 

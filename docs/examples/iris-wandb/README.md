@@ -21,7 +21,7 @@ dataset, and dependencies for this example.
 mkdir iris-wandb
 cd iris-wandb
 git init
-hiraku init . --example iris-wandb
+hiraku clone iris-wandb .
 uv sync
 git add .
 git commit -m "initialize Iris W&B example"

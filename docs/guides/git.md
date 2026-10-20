@@ -3,7 +3,7 @@
 Hiraku initialization does not depend on Git:
 
 ```bash
-hiraku init --example heart-disease
+hiraku clone heart-disease
 cd heart-disease
 ```
 

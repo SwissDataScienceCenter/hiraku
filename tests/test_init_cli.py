@@ -6,22 +6,22 @@ from hiraku.config import HirakuConfig
 
 
 @pytest.mark.parametrize(
-    ("arguments", "destination"),
+    ("arguments", "destination", "example"),
     [
-        ([], "."),
-        (["my-project"], "my-project"),
-        (["--example", "minimal"], "minimal"),
-        (["my-project", "--example", "minimal"], "my-project"),
-        ([".", "--example", "minimal"], "."),
+        (["init"], ".", False),
+        (["init", "my-project"], "my-project", False),
+        (["clone", "minimal"], "minimal", True),
+        (["clone", "minimal", "my-project"], "my-project", True),
+        (["clone", "minimal", "."], ".", True),
     ],
 )
-def test_init_destination(tmp_path, monkeypatch, arguments, destination):
+def test_project_destination(tmp_path, monkeypatch, arguments, destination, example):
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["init", *arguments])
+    result = CliRunner().invoke(main, arguments)
     assert result.exit_code == 0, result.output
     root = (tmp_path / destination).resolve()
     assert HirakuConfig.load(root / "hiraku.yml").root == root
-    assert (root / "evaluate.py").is_file() == ("--example" in arguments)
+    assert (root / "evaluate.py").is_file() == example
     assert (tmp_path / "hiraku.yml").exists() == (destination == ".")
     if destination == "my-project":
         assert not (tmp_path / "minimal").exists()
@@ -66,13 +66,13 @@ def test_plain_reinitialization_leaves_project_unchanged(
 
 
 @pytest.mark.parametrize(
-    "options",
-    [["--example", "minimal"], ["--tracking-backend", "mlflow"]],
+    "command",
+    [["clone", "minimal"], ["init", "--tracking-backend", "mlflow"]],
 )
-def test_reinitialization_with_options_is_rejected(tmp_path, options):
+def test_reinitialization_with_options_is_rejected(tmp_path, command):
     config = HirakuConfig.init(tmp_path)
     before = config.path.read_bytes()
-    result = CliRunner().invoke(main, ["init", str(tmp_path), *options])
+    result = CliRunner().invoke(main, [*command, str(tmp_path)])
     assert result.exit_code == 1
     assert "already exists" in result.output
     assert config.path.read_bytes() == before
@@ -84,7 +84,7 @@ def test_example_collision_leaves_destination_unchanged(tmp_path, monkeypatch):
     root.mkdir()
     (root / "evaluate.py").write_text("existing code\n")
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["init", "--example", "minimal"])
+    result = CliRunner().invoke(main, ["clone", "minimal"])
     assert result.exit_code == 1
     assert "overwrite" in result.output
     assert list(root.iterdir()) == [root / "evaluate.py"]
@@ -94,7 +94,7 @@ def test_example_collision_leaves_destination_unchanged(tmp_path, monkeypatch):
 @pytest.mark.parametrize("example", ["missing", "../outside"])
 def test_invalid_example_creates_no_destination(tmp_path, monkeypatch, example):
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["init", "--example", example])
+    result = CliRunner().invoke(main, ["clone", example])
     assert result.exit_code == 1
     assert list(tmp_path.iterdir()) == []
 
@@ -110,3 +110,30 @@ def test_template_keeps_current_directory_default(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert (root / "hello.txt").read_text() == "hello"
     assert (root / "hiraku.yml").is_file()
+
+
+@pytest.mark.parametrize(
+    "option", ["--example", "--generate", "--with-results", "--with-generator"]
+)
+def test_init_rejects_example_options(tmp_path, monkeypatch, option):
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["init", option])
+    assert result.exit_code == 2
+    assert "No such option" in result.output
+    assert not list(tmp_path.iterdir())
+
+
+def test_clone_can_initialize_git(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["clone", "minimal", "--git"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "minimal/.git").is_dir()
+    assert (tmp_path / "minimal/evaluate.py").is_file()
+
+
+def test_clone_requires_example_and_rejects_template(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    assert runner.invoke(main, ["clone"]).exit_code == 2
+    assert runner.invoke(main, ["clone", "minimal", "--template", "."]).exit_code == 2
+    assert not list(tmp_path.iterdir())

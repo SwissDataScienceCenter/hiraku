@@ -249,7 +249,37 @@ def mcp_command() -> None:
 @click.argument("path", required=False, type=click.Path(path_type=Path))
 @click.option("--tracking-backend")
 @click.option("--template", type=click.Path(path_type=Path))
-@click.option("--example")
+@click.option(
+    "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
+)
+def init_command(
+    path: Path | None,
+    tracking_backend: str | None,
+    template: Path | None,
+    init_git: bool,
+) -> None:
+    """Initialize PATH (default: current directory)."""
+    root = path if path is not None else Path.cwd()
+    marker = root.expanduser().absolute() / "hiraku.yml"
+    if init_git:
+        require_git()
+    if marker.is_file() and tracking_backend is None and template is None:
+        config = HirakuConfig.load(marker)
+        message = "Hiraku project already initialized"
+    else:
+        config = HirakuConfig.init(
+            root, tracking_backend=tracking_backend, template=template
+        )
+        message = "Initialized Hiraku project"
+    if init_git:
+        init_code_repository(config)
+    click.echo(f"{message} at {config.path}")
+
+
+@main.command("clone")
+@click.argument("example")
+@click.argument("path", required=False, type=click.Path(path_type=Path))
+@click.option("--tracking-backend")
 @click.option("--with-generator", is_flag=True, help="Copy the example generator.")
 @click.option(
     "--generate", is_flag=True, help="Generate example runs after initialization."
@@ -263,46 +293,25 @@ def mcp_command() -> None:
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
 )
-def init_command(
+def clone_command(
+    example: str,
     path: Path | None,
     tracking_backend: str | None,
-    template: Path | None,
-    example: str | None,
     results: bool,
     with_generator: bool,
     generate: bool,
     init_git: bool,
 ) -> None:
-    """Initialize PATH (default: current directory, or NAME with --example NAME)."""
-    if template is not None and example is not None:
-        raise click.UsageError("--template and --example are mutually exclusive")
-    if generate and (not example or results):
-        raise click.UsageError(
-            "--generate requires --example and cannot use --with-results"
-        )
-    if example is not None:
-        validate_identifier(example, label="example name")
-    root = path
-    if root is None:
-        root = Path(example) if example is not None else Path.cwd()
-    marker = root.expanduser().absolute() / "hiraku.yml"
+    """Create PATH from a bundled EXAMPLE (default: ./EXAMPLE).
+
+    Copies example files without Git history or network access.
+    """
+    if generate and results:
+        raise click.UsageError("--generate cannot use --with-results")
+    validate_identifier(example, label="example name")
+    root = path if path is not None else Path(example)
     if init_git:
         require_git()
-    if marker.is_file() and not any(
-        (
-            tracking_backend is not None,
-            template is not None,
-            example is not None,
-            results,
-            with_generator,
-            generate,
-        )
-    ):
-        config = HirakuConfig.load(marker)
-        if init_git:
-            init_code_repository(config)
-        click.echo(f"Hiraku project already initialized at {config.path}")
-        return
     generator = None
     if generate:
         generator = (
@@ -313,7 +322,6 @@ def init_command(
     config = HirakuConfig.init(
         root,
         tracking_backend=tracking_backend,
-        template=template,
         example=example,
         results=results,
         with_generator=with_generator,
