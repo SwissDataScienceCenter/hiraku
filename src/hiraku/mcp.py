@@ -13,7 +13,6 @@ import inspect
 import json
 import mimetypes
 from collections.abc import Callable, Mapping
-from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote, unquote
 
@@ -707,57 +706,3 @@ def _deliver(workflow: Workflow, result: EventResult) -> dict[str, Any]:
     if result.session_id is not None and result.status in ("accepted", "stale"):
         response.update(workflow.get_instruction(result.session_id))
     return _over_mcp(response)
-
-
-def _create_worker_server(
-    workflow: Workflow,
-    session_id: str,
-    instruction_id: int,
-    journal: Path,
-) -> MCPServer:
-    """One assignment's submission-only interface; no instruction retrieval."""
-    from filelock import FileLock
-
-    from .io import atomic_write
-
-    server = MCPServer("HirakuWorker")
-
-    @server.tool()
-    def workflow_send_event(
-        event: str,
-        arguments: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Submit this assignment. Correct rejected input; stop after acceptance.
-
-        This connection is bound to one instruction. It never delivers another
-        assignment. For not_ready, stop so the parent can retry later.
-        """
-        with FileLock(str(journal) + ".lock"):
-            entries = json.loads(journal.read_text()) if journal.exists() else []
-            payload = {"event": event, "arguments": arguments or {}}
-            accepted = next(
-                (entry for entry in entries if entry["result"]["status"] == "accepted"),
-                None,
-            )
-            if (
-                accepted is None
-                and sum(e["result"]["status"] == "rejected" for e in entries) >= 3
-            ):
-                result = EventResult(
-                    status="rejected",
-                    session_id=session_id,
-                    message="Three rejected submissions; stop and inspect.",
-                )
-            else:
-                result = workflow.run_event(
-                    session_id,
-                    instruction_id,
-                    event,
-                    arguments,
-                )
-            response = result.model_dump(exclude_none=True)
-            entries.append({**payload, "result": response})
-            atomic_write(journal, json.dumps(entries, indent=2) + "\n")
-            return response
-
-    return server

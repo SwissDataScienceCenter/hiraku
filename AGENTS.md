@@ -130,6 +130,9 @@ Generated or transient paths:
   models. The graph module must not import workflow implementation modules,
   including under `TYPE_CHECKING`. The default `Workflow.build_graph()` adds
   State/Instruction and reserved-handler-name checks after compilation.
+  Terminal workers write event files; the parent in `agent.py` validates and
+  submits them through the workflow API after successful worker exit. There is
+  no worker-specific MCP server or submission journal.
   Markdown-only workflows infer arguments from YAML scalar defaults and build
   their graph directly. Python events declare annotated keyword-only inputs;
   graph construction generates their argument models. Python workflows use

@@ -44,33 +44,40 @@ The CLI and MCP prompt adapters use `EventArguments.from_text(values)` to decode
 these string inputs and validate the model. Regular JSON tools and Python calls
 use normal model validation.
 
-The parent reads one saved instruction and starts a worker. The worker gets a
-dedicated stdio MCP connection exposing only `workflow_send_event` for that
-session and instruction. It submits directly, receives only an event result,
-and stops. The parent retrieves and dispatches the next instruction.
+The parent reads one saved instruction and starts a worker. The worker writes
+one event file and exits. After a successful exit, the parent validates the file,
+submits the event against the dispatched session and instruction, and retrieves
+the next instruction.
 
-The default worker is Claude Code, configured with the generated MCP file and
-the submission tool. Override headless execution with `HIRAKU_AGENT_CMD` or
-`--agent-cmd`, and interactive execution with `HIRAKU_AGENT_INTERACTIVE_CMD`.
-Custom commands must configure their MCP client using the JSON file named by
-`HIRAKU_MCP_CONFIG`. The file contains a standard `mcpServers` mapping with the
-stdio server command and arguments. There is no event-file fallback.
+The default worker is Claude Code. Override headless execution with
+`HIRAKU_AGENT_CMD` or `--agent-cmd`, and interactive execution with
+`HIRAKU_AGENT_INTERACTIVE_CMD`. Workers receive `HIRAKU_PROMPT_FILE`,
+`HIRAKU_INSTRUCTION_FILE`, `HIRAKU_SESSION_ID`, and `HIRAKU_EVENT_FILE`. The prompt
+is sent on standard input in headless mode and appended as a message in
+interactive mode. Custom commands need only write the event file:
 
-Workers receive `HIRAKU_PROMPT_FILE`, `HIRAKU_INSTRUCTION_FILE`, and
-`HIRAKU_SESSION_ID`. Final assignments have no submission connection or
-`HIRAKU_MCP_CONFIG`. Prompt, instruction, configuration, output, and submission
-journal files are stored beneath the session's instruction/attempt directory.
+~~~json
+{"event": "answer", "arguments": {"value": "one"}}
+~~~
 
-A worker can correct rejected input up to three times within its conversation.
-A not-ready submission pauses execution (exit 4); resuming retries the saved
+`event` must be a string; `arguments` is an object and defaults to `{}` when
+omitted. Other fields are rejected. The parent supplies session and instruction
+IDs; the file cannot override them. Final assignments have no `HIRAKU_EVENT_FILE`.
+Prompt, instruction, event, and headless output files are stored beneath the
+session's instruction/attempt directory. Each new attempt has its own event file.
+
+Malformed files and rejected events stop execution with an error; the event file
+remains available for inspection. Resume explicitly to launch another attempt,
+or submit a corrected event through the CLI. There is no automatic correction
+loop. A not-ready submission pauses execution (exit 4); resuming retries the saved
 submission before starting another worker. Interactive workers that finish
-without submitting pause execution (exit 3); headless workers that do so fail.
-Subprocess failures propagate, including for final instructions. Accepted events
-remain saved even if their worker subsequently exits unsuccessfully.
+without an event file pause execution (exit 3); headless workers that do so fail.
+Subprocess failures propagate, including for final instructions. A failed worker's
+event file is retained but is not submitted or reused on resume.
 
 `--interactive` asks the worker to explain its intended work and wait for your
-go-ahead. Exit without submitting to pause. Submission-only tool exposure defines
-the worker interface; workers with shell access are not sandboxed from other
+go-ahead. Exit without writing an event file to pause. Workers are instructed to
+leave event submission to the parent; shell access is not a sandbox against other
 project commands.
 
 ## Author a workflow

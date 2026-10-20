@@ -1,8 +1,4 @@
-"""Terminal workflow driver: fetch assignments and dispatch MCP-enabled workers.
-
-Workers submit directly through an assignment-scoped connection. The parent
-owns instruction retrieval and dispatch; no event files are used.
-"""
+"""Terminal workflow driver: dispatch workers and submit their event files."""
 
 from __future__ import annotations
 
@@ -10,14 +6,13 @@ import json
 import os
 import shlex
 import subprocess
-import sys
 import typing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import click
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic.fields import FieldInfo
 
@@ -39,12 +34,18 @@ EXIT_NOT_READY = 4
 
 # Instructions such as implementing or launching need editing and the shell.
 _TOOLS = "Read,Glob,Grep,Write,Edit,Bash"
-# Add the interactive -- separator after generated MCP options.
 DEFAULT_COMMANDS = {
-    False: f"claude -p --allowedTools {_TOOLS},mcp__hiraku__workflow_send_event",
-    True: f"claude --allowedTools {_TOOLS},mcp__hiraku__workflow_send_event",
+    False: f"claude -p --allowedTools {_TOOLS}",
+    True: f"claude --allowedTools {_TOOLS}",
 }
 COMMAND_VARIABLES = {False: "HIRAKU_AGENT_CMD", True: "HIRAKU_AGENT_INTERACTIVE_CMD"}
+
+
+class _Submission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -373,7 +374,7 @@ def _drive(
     *,
     run_final: bool = True,
 ) -> int:
-    """Fetch assignments in the parent; workers receive only submission results."""
+    """Fetch assignments and submit event files after successful worker exits."""
     while True:
         response = workflow.get_instruction(session_id)
         if "instruction" not in response:
@@ -387,27 +388,16 @@ def _drive(
             return 0
         directory = _directory(options.config, response)
         pending = directory / "pending.json"
-        if pending.exists() and not final:
-            submission = json.loads(pending.read_text())
-            result = workflow.run_event(
-                session_id,
-                response["instruction_id"],
-                submission["event"],
-                submission["arguments"],
-            ).model_dump(exclude_none=True)
-            if result["status"] != "not_ready":
-                pending.unlink()
-            if result["status"] == "rejected":
-                result = None
-        else:
-            result = None
-        if result is None:
-            result = _run_agent(workflow, response, directory, options)
+        event_file = (
+            pending
+            if pending.exists() and not final
+            else _run_agent(response, directory, options)
+        )
         if final:
             context = response["instruction"].get("context")
             click.echo(f"completed: {json.dumps(context, ensure_ascii=False)}")
             return 0
-        if result is None:
+        if event_file is None:
             if options.interactive:
                 click.echo(
                     f"No event was submitted; instruction {response['instruction_id']} "
@@ -415,20 +405,43 @@ def _drive(
                 )
                 return EXIT_WAITING
             raise click.ClickException("Agent submitted no event")
+        try:
+            submission = _Submission.model_validate_json(event_file.read_text())
+        except (OSError, PydanticValidationError) as exc:
+            raise click.ClickException(
+                f"Invalid event file {event_file}: {exc}"
+            ) from exc
+        result = workflow.run_event(
+            session_id,
+            response["instruction_id"],
+            submission.event,
+            submission.arguments,
+        ).model_dump(exclude_none=True)
+        _report(
+            response["instruction_id"],
+            _heading(response),
+            "agent",
+            submission.event,
+            result,
+        )
         status = result["status"]
         if status == "not_ready":
+            pending.write_text(submission.model_dump_json())
             click.echo("Waiting for evidence; check again later.")
             return EXIT_NOT_READY
+        if pending.exists():
+            pending.unlink()
         if status != "accepted":
-            raise click.ClickException(result.get("message", status))
+            raise click.ClickException(
+                f"{result.get('message', status)}; see {directory}"
+            )
 
 
 def _run_agent(
-    workflow: Workflow,
     response: dict[str, Any],
     directory: Path,
     options: Options,
-) -> dict[str, Any] | None:
+) -> Path | None:
     final = response["session_status"] == "completed"
     directory.mkdir(parents=True, exist_ok=True)
     attempt = directory / str(
@@ -441,40 +454,11 @@ def _run_agent(
     attempt.mkdir()
     prompt_file = attempt / "prompt.md"
     instruction_file = attempt / "instruction.json"
-    journal = attempt / "submissions.json"
-    mcp_file = attempt / "mcp.json"
+    event_file = attempt / "event.json"
     prompt_file.write_text(render_prompt(response, interactive=options.interactive))
     instruction_file.write_text(json.dumps(response, indent=2))
-    if not final:
-        mcp_file.write_text(
-            json.dumps(
-                {
-                    "mcpServers": {
-                        "hiraku": {
-                            "command": sys.executable,
-                            "args": [
-                                "-m",
-                                "hiraku.agent",
-                                "_worker-mcp",
-                                "--config",
-                                str(options.config.path),
-                                "--session",
-                                response["session_id"],
-                                "--instruction-id",
-                                str(response["instruction_id"]),
-                                "--journal",
-                                str(journal),
-                            ],
-                        }
-                    }
-                },
-                indent=2,
-            )
-        )
     custom = options.agent_cmd or os.environ.get(COMMAND_VARIABLES[options.interactive])
     command = shlex.split(custom or DEFAULT_COMMANDS[options.interactive])
-    if not custom and not final:
-        command.extend(["--mcp-config", str(mcp_file), "--strict-mcp-config"])
     env = {
         **os.environ,
         "HIRAKU_SESSION_ID": response["session_id"],
@@ -484,7 +468,7 @@ def _run_agent(
     env.pop("HIRAKU_EVENT_FILE", None)
     env.pop("HIRAKU_MCP_CONFIG", None)
     if not final:
-        env["HIRAKU_MCP_CONFIG"] = str(mcp_file)
+        env["HIRAKU_EVENT_FILE"] = str(event_file)
     if final:
         click.echo(f"[{response['instruction_id']} {_heading(response)}] final")
     try:
@@ -524,57 +508,11 @@ def _run_agent(
         ) from exc
     if code:
         raise click.ClickException(
-            f"Agent exited with status {code}; accepted submissions remain saved. "
-            f"See {attempt}"
+            f"Agent exited with status {code}; no event was submitted. See {attempt}"
         )
-    if final or not journal.exists():
+    if final or not event_file.exists():
         return None
-    entries = json.loads(journal.read_text())
-    if not entries:
-        return None
-    entry = next(
-        (item for item in entries if item["result"]["status"] == "accepted"),
-        entries[-1],
-    )
-    result = entry["result"]
-    _report(
-        response["instruction_id"],
-        _heading(response),
-        "agent",
-        entry["event"],
-        result,
-    )
-    if result["status"] == "not_ready":
-        (directory / "pending.json").write_text(
-            json.dumps(
-                {
-                    "event": entry["event"],
-                    "arguments": entry["arguments"],
-                }
-            )
-        )
-    return result
-
-
-@main.command("_worker-mcp", hidden=True)
-@click.option("--config", "config_path", type=click.Path(path_type=Path), required=True)
-@click.option("--session", "session_id", required=True)
-@click.option("--instruction-id", type=int, required=True)
-@click.option("--journal", type=click.Path(path_type=Path), required=True)
-def _worker_mcp(
-    config_path: Path,
-    session_id: str,
-    instruction_id: int,
-    journal: Path,
-) -> None:
-    from .mcp import _create_worker_server
-
-    config = HirakuConfig.load(config_path)
-    session = load_session(session_id, config=config)
-    workflow = load_workflow(session.workflow, config=config)
-    _create_worker_server(workflow, session_id, instruction_id, journal).run(
-        transport="stdio"
-    )
+    return event_file
 
 
 def _directory(config: HirakuConfig, response: dict[str, Any]) -> Path:
@@ -584,7 +522,7 @@ def _directory(config: HirakuConfig, response: dict[str, Any]) -> Path:
 
 
 def render_prompt(response: dict[str, Any], *, interactive: bool = False) -> str:
-    """Render one assignment and its submission-only protocol."""
+    """Render one assignment and its event-file output protocol."""
     instruction = Instruction.model_validate(response["instruction"])
     parts = [instruction.to_text()]
     if interactive:
@@ -601,9 +539,11 @@ def render_prompt(response: dict[str, Any], *, interactive: bool = False) -> str
         )
     else:
         parts.append(
-            "Submit the result with mcp__hiraku__workflow_send_event. Correct rejected "
-            "input (at most three rejections). After accepted or not_ready, stop. "
-            "Do not retrieve or execute another assignment."
+            'Write one JSON object {"event": "EVENT_NAME", "arguments": {...}} '
+            "to the file named by HIRAKU_EVENT_FILE, using one of the accepted "
+            "events above, then stop. The parent will validate and submit it. "
+            "Do not submit events through MCP or the CLI, or retrieve another "
+            "assignment."
         )
     return "\n\n".join(parts) + "\n"
 

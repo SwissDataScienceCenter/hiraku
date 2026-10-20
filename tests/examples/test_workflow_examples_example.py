@@ -144,19 +144,7 @@ print(re.search(r"`(Step .*?)`", instruction["text"]).group(1))
 event = {"event": instruction["events"]["accepted"][0]["event"],
          "arguments": {"token": instruction["context"]["token"]}}
 
-async def submit(event):
-    from mcp import Client, StdioServerParameters
-    settings = json.loads(
-        Path(os.environ["HIRAKU_MCP_CONFIG"]).read_text()
-    )["mcpServers"]["hiraku"]
-    async with Client(StdioServerParameters(**settings), mode="legacy") as client:
-        result = await client.call_tool("workflow_send_event", event)
-        data = json.loads(result.content[0].text)
-        assert "instruction" not in data
-        assert data["status"] == "accepted", data
-
-import anyio
-anyio.run(submit, event)
+Path(os.environ["HIRAKU_EVENT_FILE"]).write_text(json.dumps(event))
 
 """
 
@@ -328,19 +316,7 @@ command = ["record", "update", context["record"], "--set", f"count={context['nex
 subprocess.run([sys.executable, "-m", "hiraku.cli", *command], check=True)
 event = {"event": "incremented", "arguments": {"record_id": context["record"]}}
 
-async def submit(event):
-    from mcp import Client, StdioServerParameters
-    settings = json.loads(
-        Path(os.environ["HIRAKU_MCP_CONFIG"]).read_text()
-    )["mcpServers"]["hiraku"]
-    async with Client(StdioServerParameters(**settings), mode="legacy") as client:
-        result = await client.call_tool("workflow_send_event", event)
-        data = json.loads(result.content[0].text)
-        assert "instruction" not in data
-        assert data["status"] == "accepted", data
-
-import anyio
-anyio.run(submit, event)
+Path(os.environ["HIRAKU_EVENT_FILE"]).write_text(json.dumps(event))
 
 """
 

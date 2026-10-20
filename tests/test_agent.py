@@ -106,8 +106,6 @@ WORKFLOW = Toy
 # other events with the first accepted event; writes nothing when out of answers.
 FAKE_AGENT = r"""import json, os, sys
 from pathlib import Path
-import anyio
-from mcp import Client, StdioServerParameters
 
 response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
 print("saw", response["instruction"]["text"].splitlines()[0])
@@ -120,58 +118,21 @@ if response["instruction"]["text"].startswith("## Gate") and os.environ.get(
     sys.exit(0)
 
 
-async def submit():
-    settings = json.loads(Path(os.environ["HIRAKU_MCP_CONFIG"]).read_text())[
-        "mcpServers"
-    ]["hiraku"]
-    async with Client(StdioServerParameters(**settings), mode="legacy") as client:
-        tools = await client.list_tools()
-        assert [t.name for t in tools.tools] == ["workflow_send_event"]
-        assert not (await client.list_resources()).resources
-        assert not (await client.list_prompts()).prompts
-        for attempt in range(3):
-            first = response["instruction"]["events"]["accepted"][0]
-            arguments = {}
-            if "value" in first["arguments"].get("properties", {}):
-                answers = Path(os.environ["FAKE_ANSWERS"])
-                lines = answers.read_text().splitlines() if answers.exists() else []
-                if not lines:
-                    return
-                answers.write_text("".join(line + "\n" for line in lines[1:]))
-                arguments = {"value": lines[0]}
-            result = await client.call_tool(
-                "workflow_send_event",
-                {
-                    "event": first["event"],
-                    "arguments": arguments,
-                },
-            )
-            value = json.loads(result.content[0].text)
-            assert "instruction" not in value, value
-            if value["status"] == "rejected":
-                print(f"agent → {first['event']}  rejected: {value['message']}")
-            else:
-                break
-        if os.environ.get("FAKE_DOUBLE_SUBMIT") and value["status"] == "accepted":
-            duplicate = await client.call_tool(
-                "workflow_send_event",
-                {
-                    "event": first["event"],
-                    "arguments": arguments,
-                },
-            )
-            assert json.loads(duplicate.content[0].text) == value
-            other = await client.call_tool(
-                "workflow_send_event",
-                {
-                    "event": "stop",
-                    "arguments": {},
-                },
-            )
-            assert json.loads(other.content[0].text)["status"] == "stale"
-
-
-anyio.run(submit)
+assert "HIRAKU_MCP_CONFIG" not in os.environ
+event_file = Path(os.environ["HIRAKU_EVENT_FILE"])
+if "FAKE_EVENT_JSON" in os.environ:
+    event_file.write_text(os.environ["FAKE_EVENT_JSON"])
+else:
+    first = response["instruction"]["events"]["accepted"][0]
+    arguments = {}
+    if "value" in first["arguments"].get("properties", {}):
+        answers = Path(os.environ["FAKE_ANSWERS"])
+        lines = answers.read_text().splitlines() if answers.exists() else []
+        if not lines:
+            sys.exit(0)
+        answers.write_text("".join(line + "\n" for line in lines[1:]))
+        arguments = {"value": lines[0]}
+    event_file.write_text(json.dumps({"event": first["event"], "arguments": arguments}))
 sys.exit(int(os.environ.get("FAKE_WORKER_EXIT", "0")))
 """
 
@@ -208,23 +169,25 @@ def sessions(config: HirakuConfig) -> list[dict]:
     ]
 
 
-def test_runs_through_states_and_retries_rejected_events(
+def test_runs_through_states_and_submits_event_files(
     config: HirakuConfig,
 ) -> None:
-    answers(config, "bad", "one", "two")
+    answers(config, "one", "two")
     started = agent("toy", "--items", "2")
     assert started.exit_code == 0, started.output
     assert "session toy-" in started.output
     assert "saw ## Work" in started.output
-    assert "agent → answer  rejected: bad is not an answer" in started.output
     assert "agent → answer  accepted" in started.output
     assert "agent → approve  accepted" in started.output
 
     (session,) = sessions(config)
     logs = config.sessions_dir / session["session_id"] / "1"
-    entries = json.loads((logs / "1/submissions.json").read_text())
-    assert [e["result"]["status"] for e in entries] == ["rejected", "accepted"]
-    assert entries[1]["arguments"] == {"value": "one"}
+    assert json.loads((logs / "1/event.json").read_text()) == {
+        "event": "answer",
+        "arguments": {"value": "one"},
+    }
+    assert not list(logs.rglob("mcp.json"))
+    assert not list(logs.rglob("submissions.json"))
 
     # The agent carries out the final instruction, which takes no event.
     assert "[4 Done] final" in started.output
@@ -238,20 +201,27 @@ def test_runs_through_states_and_retries_rejected_events(
     shown = agent("toy", "--session", session["session_id"])
     assert shown.exit_code == 0, shown.output
     assert "saw" not in shown.output
-    assert "saw" not in shown.output
 
 
-def test_rejected_events_stop_after_three_attempts(config: HirakuConfig) -> None:
-    answers(config, "bad", "bad", "bad", "one")
+def test_rejected_event_stops_and_can_be_retried_explicitly(
+    config: HirakuConfig,
+) -> None:
+    answers(config, "bad", "one", "two")
     result = agent("toy")
     assert result.exit_code == 1
     assert "bad is not an answer" in result.output
-    assert (config.root / "answers.txt").read_text() == "one\n"
+    assert (config.root / "answers.txt").read_text() == "one\ntwo\n"
     (session,) = sessions(config)
     stored = load_session(session["session_id"], config=config)
     assert stored.status == "active"
     assert stored.instruction_id == 1
     assert stored.state["answers"] == []
+    event_file = config.sessions_dir / stored.id / "1/1/event.json"
+    assert json.loads(event_file.read_text())["arguments"] == {"value": "bad"}
+    assert not (event_file.parents[1] / "pending.json").exists()
+    resumed = agent("toy")
+    assert resumed.exit_code == 0, resumed.output
+    assert load_session(stored.id, config=config).state["answers"] == ["one", "two"]
 
 
 @pytest.mark.parametrize("command", [("toy",), ("toy", "approve")])
@@ -284,6 +254,71 @@ def test_not_ready_events_are_sent_again_without_the_agent(
     assert "completed" in ready.output
     assert "saw ## Work" not in ready.output
     assert "saw ## Done" in ready.output
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not json",
+        "[]",
+        "{}",
+        '{"event": "answer", "arguments": []}',
+        '{"event": "answer", "arguments": {}, "session_id": "other"}',
+    ],
+)
+def test_invalid_event_file_stops_without_transition(config, monkeypatch, content):
+    monkeypatch.setenv("FAKE_EVENT_JSON", content)
+    result = agent("toy")
+    assert result.exit_code == 1, result.output
+    assert "Invalid event file" in result.output
+    (session,) = list_sessions(config=config)
+    assert session.instruction_id == 1
+    assert session.state["answers"] == []
+    assert (config.sessions_dir / session.id / "1/1/event.json").read_text() == content
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"event": "missing"},
+        {"event": "answer", "arguments": {}},
+    ],
+)
+def test_invalid_event_is_rejected_by_workflow(config, monkeypatch, payload):
+    monkeypatch.setenv("FAKE_EVENT_JSON", json.dumps(payload))
+    result = agent("toy")
+    assert result.exit_code == 1, result.output
+    assert "rejected" in result.output
+    assert "Invalid event file" not in result.output
+    (session,) = list_sessions(config=config)
+    assert session.instruction_id == 1
+    assert session.state["answers"] == []
+
+
+def test_rejected_pending_submission_stops_without_relaunch(config):
+    answers(config, "wait")
+    assert agent("toy", "--items", "1").exit_code == 4
+    path = config.workflows_dir / "toy/workflow.py"
+    path.write_text(WORKFLOW_PY.replace('value == "bad"', 'value in ("bad", "wait")'))
+    resumed = agent("toy")
+    assert resumed.exit_code == 1, resumed.output
+    assert "rejected: bad is not an answer" in resumed.output
+    assert "saw" not in resumed.output
+    (session,) = list_sessions(config=config)
+    assert not (config.sessions_dir / session.id / "1/pending.json").exists()
+    assert (config.sessions_dir / session.id / "1/1/event.json").exists()
+
+
+def test_worker_environment_does_not_leak_inherited_submission_paths(
+    config, monkeypatch
+):
+    monkeypatch.setenv("HIRAKU_MCP_CONFIG", "old-mcp-config.json")
+    monkeypatch.setenv("HIRAKU_EVENT_FILE", "old-event.json")
+    answers(config, "one")
+    result = agent("toy", "--items", "1")
+    assert result.exit_code == 0, result.output
+    assert "final, event file given: False" in result.output
+    assert not (config.root / "old-event.json").exists()
 
 
 def test_sessions_are_selected_by_workflow_and_pending_event(
@@ -370,7 +405,7 @@ def test_arguments_are_validated_by_the_workflow(config: HirakuConfig) -> None:
 
 def test_default_interactive_command_ends_its_options() -> None:
     # Otherwise the variadic --allowedTools takes the opening message as a tool.
-    assert "mcp__hiraku__workflow_send_event" in DEFAULT_COMMANDS[True]
+    assert "mcp" not in DEFAULT_COMMANDS[True]
     assert "--" not in shlex.split(DEFAULT_COMMANDS[False])
 
 
@@ -396,9 +431,8 @@ def test_event_subcommands_use_method_names(
     assert "No such command 'revise'" in removed.output
 
 
-def test_worker_only_submits_one_assignment(config, monkeypatch):
+def test_worker_file_is_bound_to_the_dispatched_instruction(config):
     answers(config, "one")
-    monkeypatch.setenv("FAKE_DOUBLE_SUBMIT", "1")
     result = agent("toy", "--items", "1")
     assert result.exit_code == 0, result.output
     (session,) = list_sessions(config=config)
@@ -427,7 +461,7 @@ def test_markdown_only_cli_inputs_and_final_assignment(config):
 
 
 @pytest.mark.parametrize("variable", ["FAKE_WORKER_EXIT", "FAKE_FINAL_EXIT"])
-def test_subprocess_failure_is_propagated_after_saved_submission(
+def test_subprocess_failure_does_not_submit_worker_output(
     config, monkeypatch, variable
 ):
     answers(config, "one")
@@ -436,5 +470,16 @@ def test_subprocess_failure_is_propagated_after_saved_submission(
     assert result.exit_code == 1, result.output
     assert "Agent exited with status 7" in result.output
     (session,) = list_sessions(config=config)
-    assert session.status == "completed"
-    assert session.state["answers"] == ["one"]
+    if variable == "FAKE_WORKER_EXIT":
+        assert session.status == "active"
+        assert session.state["answers"] == []
+        assert (config.sessions_dir / session.id / "1/1/event.json").exists()
+        monkeypatch.delenv("FAKE_WORKER_EXIT")
+        answers(config, "two")
+        resumed = agent("toy")
+        assert resumed.exit_code == 0, resumed.output
+        assert load_session(session.id, config=config).state["answers"] == ["two"]
+        assert (config.sessions_dir / session.id / "1/2/event.json").exists()
+    else:
+        assert session.status == "completed"
+        assert session.state["answers"] == ["one"]
