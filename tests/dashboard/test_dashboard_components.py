@@ -6,8 +6,80 @@ import pytest
 pytest.importorskip("marimo")
 pytest.importorskip("altair")
 
+from hiraku.agent import Action, Context, Program
+from hiraku.base import BaseRecord
 from hiraku.dashboard import components as hc
 from hiraku.dashboard.data import RECORD_COLUMNS, RUN_COLUMNS, arrow_frame
+from hiraku.record import Record
+
+
+def test_markdown_view_renders_generic_content_and_preserves_placeholders() -> None:
+    content = hc.markdown_view(
+        BaseRecord(
+            id="workflow",
+            markdown="## Workflow\n\nRun **training**.\n\n"
+            "- Keep {{record_id}}\n\n```python\nx = 1\n```",
+        ),
+    ).text
+
+    assert "Workflow" in content
+    assert "<strong>training</strong>" in content
+    assert "<li>" in content
+    assert "{{record_id}}" in content
+    assert "<code" in content
+    assert "Front matter" not in content
+
+
+@pytest.mark.parametrize("body", ["", " \n\t"])
+def test_markdown_view_handles_empty_bodies_without_hiding_metadata(body: str) -> None:
+    content = hc.markdown_view(
+        BaseRecord(id="context", markdown=body), empty_message="No notes yet."
+    ).text
+
+    assert "No notes yet." in content
+    assert "Front matter" not in content
+    assert "id: context" in content
+    assert content.index("id: context") < content.index("No notes yet.")
+
+
+def test_markdown_front_matter_is_displayed_as_text() -> None:
+    content = hc.markdown_view(
+        BaseRecord(id="notes", markdown="Notes", title="<script>bad()</script>")
+    ).text
+
+    assert "id: notes" in content
+    assert "bad()" in content
+    assert "<script>bad()</script>" not in content
+
+
+@pytest.mark.parametrize("record_type", [BaseRecord, Context, Record, Program, Action])
+def test_markdown_view_accepts_any_record(record_type) -> None:
+    fields = {"entity": "record"} if record_type is Action else {}
+    record = record_type(
+        id="notes",
+        markdown="## Findings\n\n**Useful** results.",
+        custom="metadata",
+        **fields,
+    )
+    original = record.model_dump()
+
+    content = hc.markdown_view(record).text
+
+    assert "<h3>notes</h3>" not in content
+    assert "Findings" in content
+    assert "<strong>Useful</strong>" in content
+    assert "Front matter" not in content
+    assert "id: notes" in content
+    assert "custom: metadata" in content
+    assert content.index("id: notes") < content.index("Findings")
+    assert record.model_dump() == original
+
+
+def test_markdown_view_handles_missing_or_empty_records() -> None:
+    assert "No record selected." in hc.markdown_view(None).text
+    empty = hc.markdown_view(BaseRecord(id="empty")).text
+    assert "This record has no Markdown." in empty
+    assert "id: empty" in empty
 
 
 def test_run_table_retains_initial_record_and_selection_keys() -> None:

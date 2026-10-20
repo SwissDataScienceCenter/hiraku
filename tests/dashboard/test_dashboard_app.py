@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from hiraku.config import HirakuConfig
@@ -22,6 +24,7 @@ def test_app_runs_every_cell_against_a_project(
     assert "numbered by execution order." in rendered
 
     assert definitions["scope"] == "a"
+    assert definitions["selected_record"].id == "a"
     assert definitions["selected_run"] is None
     assert definitions["tree"].value[0]["key"] == "record:a"
     assert definitions["metric"].value == "loss"
@@ -35,6 +38,29 @@ def test_app_runs_every_cell_against_a_project(
         "root/a/a1",
         "root/b",
     ]
+
+
+@pytest.mark.parametrize(
+    ("key", "scope", "record_id"),
+    [("record:a", "a", "a"), ("run:r2", "a", "a1"), ("run:r1", "b", "b")],
+)
+def test_record_details_follow_selection_without_changing_subtree_semantics(
+    project: HirakuConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    scope: str,
+    record_id: str,
+) -> None:
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "a")
+    from hiraku.dashboard.app import app
+
+    outputs, definitions = app.run(defs={"tree": SimpleNamespace(value=[{"key": key}])})
+
+    assert definitions["scope"] == scope
+    assert definitions["selected_record"].id == record_id
+    rendered = "\n".join(getattr(output, "text", "") for output in outputs)
+    assert f"id: {record_id}" in rendered
 
 
 def test_project_copy_finds_its_project_without_the_launcher(

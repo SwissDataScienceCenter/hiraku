@@ -68,6 +68,7 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "project_name",
         "refresh_control",
         "run_table",
+        "record_details",
         "run_details",
         "metric_analysis",
     }

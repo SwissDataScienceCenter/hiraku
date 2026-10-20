@@ -1,10 +1,10 @@
 """Data for the dashboard: two tables and the views built from them.
 
 ``load`` reads the records and the runs of their tracking backends. ``run_rows``
-and ``record_rows`` flatten them into ``runs_df`` and ``records_df``, and every
-view on the page (run tree, run details, metric choice, plot) is computed from
-those two tables only. Nothing here imports marimo, so it can be tested without
-a notebook runtime.
+and ``record_rows`` flatten them into ``runs_df`` and ``records_df`` for the
+run tree, run details, metric choice, and plots. Markdown details use the same
+loaded records to retain their complete front matter. Nothing here imports
+marimo, so it can be tested without a notebook runtime.
 """
 
 from __future__ import annotations

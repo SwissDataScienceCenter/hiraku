@@ -107,6 +107,12 @@ location.
     and metrics, plus a link to the run in its tracking backend when one is
     available.
 
+**Record**
+:   Expandable YAML front matter labeled with the selected record's ID,
+    followed by its Markdown body.
+    Selecting a run shows its owning record, while the metric analysis keeps
+    the selected comparison subtree when that run lies within it.
+
 **Metric analysis**
 :   Choose **Performance over runs** to see runs in the selected record subtree
     in execution order, with a metric on the y axis. Colours mark the record
@@ -118,10 +124,27 @@ location.
 
 Use **Refresh** to re-read records and tracking sources after new launches.
 
+### Reusing Markdown rendering
+
+`hiraku.dashboard.components.markdown_view(record)` accepts any `BaseRecord`
+subtype, including research records, contexts, programs, and actions. It reads
+the ID, front matter, and Markdown body directly from the object, displaying
+collapsed metadata labeled with the ID above the body. For example:
+
+```python
+hc.markdown_view(record)
+hc.markdown_view(context)
+```
+
+Loading and persistence remain with the caller. The component does not load,
+parse, or save files, and rendering and selection do not change record objects
+or Markdown files. Passing `None` displays the empty selection state.
+
 ## Run and record tables
 
-The notebook reads your project once into two pandas DataFrames backed by
-Apache Arrow, and every view on the page is computed from them:
+The notebook reads your project once and builds two pandas DataFrames backed
+by Apache Arrow for the run table, run details, and metric analysis. Record
+details use the already loaded record objects to retain complete front matter.
 
 `runs_df`
 :   One row per run in execution order: `run`, `record`, `record_path`,

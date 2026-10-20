@@ -1,8 +1,9 @@
 """Reusable marimo widgets and rendering for Hiraku dashboards.
 
-Components consume the tables prepared by ``hiraku.dashboard.data`` and never
-query tracking sources. The notebook owns reactive state and reads widget
-values before passing them to the renderers. Branding stays in the Studio view.
+Components consume prepared tables or BaseRecord objects without loading or
+saving files or querying tracking sources. The notebook owns reactive state
+and reads widget values before passing them to the renderers. Branding stays
+in the Studio view.
 """
 
 from __future__ import annotations
@@ -15,7 +16,26 @@ import altair as alt
 import marimo as mo
 import pandas as pd
 
+from ..base import BaseRecord
+from ..io import dump_yaml
 from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
+
+
+def markdown_view(
+    record: BaseRecord | None,
+    *,
+    empty_message: str = "This record has no Markdown.",
+) -> mo.Html:
+    """Render a BaseRecord's front matter and Markdown body.
+
+    Accept any subtype, including contexts and research records. Loading,
+    parsing, and persistence belong to the caller.
+    """
+    if record is None:
+        return mo.md("No record selected.")
+    body = mo.md(record.markdown if record.markdown.strip() else empty_message)
+    metadata = mo.Html(f"<pre>{html.escape(dump_yaml(record.to_dict()))}</pre>")
+    return mo.vstack([mo.accordion({record.id: metadata}), body])
 
 
 def run_table(

@@ -94,7 +94,7 @@ def run_table(initial_record, project, records_df, runs_df, tree_metric):
 
 
 @app.cell
-def selected_context(get_scope, paths, runs_df, set_scope, tree):
+def selected_context(get_scope, paths, project, runs_df, set_scope, tree):
     _key = tree.value[0]["key"] if tree.value else f"record:{get_scope()}"
     _kind, _, _identifier = _key.partition(":")
     selected_run = hd.find_run(runs_df, _identifier) if _kind == "run" else None
@@ -105,7 +105,17 @@ def selected_context(get_scope, paths, runs_df, set_scope, tree):
     ):
         scope = selected_run["record"]
     set_scope(scope)
-    return scope, selected_run
+    _record_id = selected_run["record"] if selected_run is not None else scope
+    selected_record = next(
+        (record for record in project.records if record.id == _record_id), None
+    )
+    return scope, selected_record, selected_run
+
+
+@app.cell
+def record_details(selected_record):
+    hc.markdown_view(selected_record)
+    return
 
 
 @app.cell
