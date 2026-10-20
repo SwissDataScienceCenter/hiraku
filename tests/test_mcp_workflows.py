@@ -10,8 +10,10 @@ import pytest
 from mcp import Client, StdioServerParameters
 
 from hiraku.config import HirakuConfig
+from hiraku.errors import WorkflowError
 from hiraku.mcp import create_server
 from hiraku.record import Record
+from hiraku.workflows.workflow import load_workflow
 
 BUILTINS = {
     "workflow_list",
@@ -436,6 +438,28 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     names, result = anyio.run(main)
     assert "noisy" in names
     assert json.loads(result.content[0].text)["instruction"]["context"] == {"ok": True}
+
+
+def test_runs_workflow_id_is_reserved(config, caplog):
+    directory = config.workflows_dir / "runs"
+    directory.mkdir()
+    (directory / "workflow.md").write_text("---\nid: runs\n---\nRun a task.")
+    with pytest.raises(WorkflowError, match="reserved"):
+        load_workflow("runs", config=config)
+    server = create_server(config)
+
+    async def scenario(client, notifications):
+        tools = (await client.list_tools()).tools
+        workflows = items(await client.call_tool("workflow_list", {}))
+        return tools, workflows
+
+    tools, workflows = run(server, scenario)
+    assert "reserved" in caplog.text
+    assert all(workflow["id"] != "runs" for workflow in workflows)
+    assert (
+        "record_id"
+        in next(t for t in tools if t.name == "runs").input_schema["properties"]
+    )
 
 
 def test_workflows_read_current_project_state(config: HirakuConfig) -> None:

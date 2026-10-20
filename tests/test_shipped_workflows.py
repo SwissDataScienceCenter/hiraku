@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -242,17 +243,60 @@ def test_collaborative_rejects_invalid_input(config: HirakuConfig) -> None:
     assert harness.send("implemented", commit="HEAD")["status"] == "accepted"
 
     path = config.root / "runs.csv"
-    path.write_text("id,record_id,commit,metric.val\nr1,c1," + "0" * 40 + ",0.5\n")
+    path.write_text(
+        "id,record_id,entrypoint,commit,metric.val\nr1,c1,train," + "0" * 40 + ",0.5\n"
+    )
     wrong = harness.send("launched")
     assert wrong["status"] == "rejected"
     assert "another commit" in wrong["message"]
 
     # Entering analyze needs metrics, so the launch report waits for them.
-    path.write_text("id,record_id,metric.val\nr1,c1,\n")
+    path.write_text("id,record_id,entrypoint,metric.val\nr1,c1,train,\n")
     early = harness.send("launched")
     assert early["status"] == "not_ready"
     assert "no metrics yet" in early["message"]
     assert harness.section() == "## Launch"
+
+
+@pytest.mark.parametrize("record_id", ["experiment one", "experiment;echo unsafe"])
+def test_collaborative_quotes_launch_arguments(config, record_id):
+    harness = Harness(config)
+    harness.start("collaborative", task="task")
+    assert draft(harness, record_id)["status"] == "accepted"
+    sha = commit(config, "implementation")
+    assert harness.send("implemented", commit=sha)["status"] == "accepted"
+    assert shlex.split(harness.instruction["context"]["command"]) == [
+        "hiraku",
+        "launch",
+        "train",
+        "--record",
+        record_id,
+        "--commit",
+        sha,
+    ]
+
+
+@pytest.mark.parametrize("entrypoint", ["mock", ""])
+def test_collaborative_uses_only_requested_entrypoint_runs(config, entrypoint):
+    harness = Harness(config)
+    harness.start("collaborative", task="task")
+    draft(harness, "c1")
+    sha = commit(config, "implementation")
+    harness.send("implemented", commit=sha)
+    path = config.root / "runs.csv"
+    unrelated = f"other,c1,{entrypoint},{'0' * 40},0.9\n"
+    header = "id,record_id,entrypoint,commit,metric.val\n"
+    path.write_text(header + unrelated)
+    assert harness.send("launched")["status"] == "not_ready"
+    path.write_text(header + unrelated + f"pending,c1,train,{sha},\n")
+    waiting = harness.send("launched")
+    assert waiting["status"] == "not_ready"
+    assert "no metrics yet" in waiting["message"]
+    path.write_text(header + unrelated + f"ready,c1,train,{sha},0.8\n")
+    assert harness.send("launched")["status"] == "accepted"
+    assert harness.instruction["context"]["runs"] == [
+        {"run_id": "ready", "metrics": {"val": "0.8"}}
+    ]
 
 
 def test_collaborative_draws_its_experiment_loop(config: HirakuConfig) -> None:

@@ -482,6 +482,8 @@ def test_returned_state_is_validated_before_saving(config, replacement):
     [
         "None",
         'Instruction(" ")',
+        'Instruction("valid").model_copy(update={"text": ""})',
+        'Instruction("valid").model_copy(update={"text": " "})',
         'Instruction("x", context=object())',
         'Instruction("x", events={"accepted": []})',
     ],
@@ -831,9 +833,14 @@ def test_incompatible_code_is_inspectable_and_cancellable(config):
     result = submit(updated, first)
     assert result.status == "rejected"
     assert "instruction" not in load_session(first.session_id).get_instruction(updated)
-    assert "Incompatible" in load_session(first.session_id).show(updated)["message"]
+    shown = load_session(first.session_id).show(updated)
+    assert "Incompatible" in shown["message"]
+    assert "instruction" not in shown
+    assert shown["history"]
     (config.workflows_dir / "toy" / "workflow.py").unlink()
-    assert load_session(first.session_id).show()["state"]["total"] == 0
+    shown = load_session(first.session_id).show()
+    assert shown["state"]["total"] == 0
+    assert "instruction" not in shown
     assert load_session(first.session_id).cancel()["status"] == "cancelled"
 
 

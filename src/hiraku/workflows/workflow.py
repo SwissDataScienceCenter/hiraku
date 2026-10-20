@@ -141,7 +141,9 @@ class Workflow(BaseRecord):
                 else None,
             }
         )
-        json.dumps(instruction.model_dump(mode="json"), allow_nan=False)
+        raw = instruction.model_dump(mode="json")
+        json.dumps(raw, allow_nan=False)
+        instruction = Instruction.model_validate(raw)
         return state, instruction
 
     @model_validator(mode="after")
@@ -213,6 +215,10 @@ def load_workflow(workflow_id: str, *, config: HirakuConfig | None = None) -> Wo
         Importing a workflow executes trusted project Python code.
     """
     selected = config or HirakuConfig.discover()
+    if workflow_id == "runs":
+        raise WorkflowError(
+            "Workflow ID 'runs' is reserved for Hiraku's run-query tool"
+        )
     if not isinstance(workflow_id, str) or not _WORKFLOW_ID.fullmatch(workflow_id):
         raise WorkflowError(
             f"Invalid workflow ID {workflow_id!r}: use letters, digits and '-', "

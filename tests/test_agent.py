@@ -257,6 +257,28 @@ def test_not_ready_events_are_sent_again_without_the_agent(
     assert "saw ## Done" in ready.output
 
 
+def test_manual_not_ready_event_is_retained_for_resume(config):
+    answers(config)
+    assert agent("toy", "--items", "1").exit_code == 1
+    (session,) = list_sessions(config=config)
+    waiting = agent("toy", "answer", "--value", "wait", "--session", session.id)
+    assert waiting.exit_code == 4, waiting.output
+    pending = config.sessions_dir / session.id / "1/pending.json"
+    assert json.loads(pending.read_text()) == {
+        "event": "answer",
+        "arguments": {"value": "wait"},
+    }
+    still = agent("toy", "--session", session.id)
+    assert still.exit_code == 4, still.output
+    assert "saw" not in still.output
+    (config.root / "ready").touch()
+    ready = agent("toy", "--session", session.id)
+    assert ready.exit_code == 0, ready.output
+    assert "saw ## Work" not in ready.output
+    assert load_session(session.id, config=config).state.answers == ["wait"]
+    assert not pending.exists()
+
+
 @pytest.mark.parametrize(
     "content",
     [

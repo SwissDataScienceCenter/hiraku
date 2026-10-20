@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Annotated, Any, Literal
 
 from pydantic import Field
@@ -9,6 +10,7 @@ from pydantic import Field
 from hiraku.errors import EventRejected, HirakuError, NotReady
 from hiraku.git import GitRepository
 from hiraku.record import Record, load_record
+from hiraku.run import Run
 from hiraku.workflows.graph import State, event, node, start
 from hiraku.workflows.workflow import Instruction, Workflow
 
@@ -78,24 +80,31 @@ class Collaborative(Workflow):
     def launching(self, experiments: Experiments) -> Instruction:
         context = self._experiment_context(experiments)
         record = self._experiment(experiments)
-        context["command"] = (
-            f"hiraku launch {experiments.entrypoint} --record {record.id} "
-            f"--commit {record.commit}"
+        context["command"] = shlex.join(
+            [
+                "hiraku",
+                "launch",
+                experiments.entrypoint,
+                "--record",
+                record.id,
+                "--commit",
+                str(record.commit),
+            ]
         )
         return self._step(experiments, "## Launch", context)
 
     @node("analyze")
     def analyzing(self, experiments: Experiments) -> Instruction:
         record = self._experiment(experiments)
-        runs = _runs(record, self)
-        if not any(run["metrics"] for run in runs):
+        runs = _runs(record, self, experiments.entrypoint)
+        if not any(run.metrics for run in runs):
             raise NotReady(
                 f"The runs of {record.id!r} have no metrics yet; "
                 "analyze once they finish"
             )
         context = {
             **self._experiment_context(experiments),
-            "runs": runs,
+            "runs": [{"run_id": run.id, "metrics": dict(run.metrics)} for run in runs],
             "previous": experiments.results,
         }
         return self._step(experiments, "## Analyze", context)
@@ -166,7 +175,7 @@ class Collaborative(Workflow):
         """Report that the experiment's run is tracked."""
         try:
             record = self._experiment(experiments)
-            runs = record.runs(config=self.config)
+            runs = _runs(record, self, experiments.entrypoint)
             if not runs:
                 raise NotReady(
                     f"No run is attributed to {record.id!r} yet; "
@@ -280,10 +289,11 @@ class Collaborative(Workflow):
         return load_record(experiments.experiment, config=self.config)
 
 
-def _runs(record: Record, workflow: Workflow) -> list[dict[str, Any]]:
+def _runs(record: Record, workflow: Workflow, entrypoint: str) -> list[Run]:
     return [
-        {"run_id": run.id, "metrics": dict(run.metrics)}
+        run
         for run in record.runs(config=workflow.config)
+        if run.entrypoint == entrypoint
     ]
 
 

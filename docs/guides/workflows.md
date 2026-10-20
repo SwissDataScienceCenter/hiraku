@@ -4,6 +4,8 @@ A workflow is a project-defined Python state machine that gives an agent one
 instruction at a time. Its directory contains
 `hiraku/workflows/<id>/workflow.md`. Add a `workflow.py` sidecar for a Python
 state machine, or use front-matter argument defaults for a Markdown-only prompt.
+Workflow IDs use letters, digits, and hyphens, starting with a letter or digit.
+The ID `runs` is reserved for Hiraku's run-query tool.
 
 A workflow tracks a typed **state**, whose `node` identifies a node in its
 declared graph. Events validate submitted evidence and return a complete next
@@ -76,6 +78,7 @@ Subprocess failures propagate, including for final instructions. A failed worker
 event file is retained but is not submitted or reused on resume.
 If a final worker fails, retry it with `hiraku-agent WORKFLOW --session ID`.
 The driver records successful final assignments and does not repeat them on resume.
+Manual event subcommands also retain not-ready submissions for retry on resume.
 
 `--interactive` asks the worker to explain its intended work and wait for your
 go-ahead. Exit without writing an event file to pause. Workers are instructed to
@@ -318,6 +321,8 @@ unsupported; start a new session.
 `session.show(workflow)` inspects compatibility; `session.cancel()` does not
 require working workflow code. Session persistence retains its file location,
 not a configuration object.
+Inspection omits instructions for active sessions whose workflow is missing or
+incompatible, while retaining state, history, and an explanation.
 
 Session loading uses `State`, which validates the
 string `node` and preserves all other saved fields. Read the current position
@@ -399,6 +404,9 @@ Collaborative research runs draft, implement, launch, and analyze nodes with
 revision events and early completion. It writes experiment records, verifies
 commits and run attribution, and records verdicts. Approval is conversational;
 use MCP or the interactive driver.
+Launch validation and analysis use only runs attributed to the requested
+entrypoint; runs with missing entrypoint attribution are ignored. Generated
+launch commands quote their arguments for the shell.
 
 Count-steps checks numbered instructions with random tokens and an explicit user
 decision between steps. Greet renders one final prompt. Scheduler selects records

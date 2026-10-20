@@ -185,17 +185,18 @@ def _event_command(
     def run(ctx: click.Context, **values: Any) -> None:
         options = _options(ctx, config)
         session = _select_for_event(workflow, name, options)
+        arguments = model.from_text(
+            {
+                name: values[name]
+                for name in model.model_fields
+                if values.get(name) is not None
+            }
+        ).model_dump(mode="json", exclude_unset=True)
         result = session.run_event(
             workflow,
             session.instruction_id,
             name,
-            model.from_text(
-                {
-                    name: values[name]
-                    for name in model.model_fields
-                    if values.get(name) is not None
-                }
-            ).model_dump(mode="json", exclude_unset=True),
+            arguments,
         )
         result = result.model_dump(exclude_none=True)
         _report(
@@ -207,6 +208,11 @@ def _event_command(
         )
         status = result["status"]
         if status == "not_ready":
+            directory = _directory(options.config, session._instruction_response())
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "pending.json").write_text(
+                _Submission(event=name, arguments=arguments).model_dump_json()
+            )
             ctx.exit(EXIT_NOT_READY)
         if status != "accepted":
             raise click.ClickException(result.get("message", status))

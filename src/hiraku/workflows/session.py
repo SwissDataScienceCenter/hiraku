@@ -229,11 +229,13 @@ class Session(BaseModel):
         if self.status == "cancelled":
             result.pop("instruction", None)
         elif workflow is None and self.status == "active":
-            result["message"] = "Workflow unavailable; instruction is historical."
+            result.pop("instruction", None)
+            result["message"] = "Workflow unavailable; no actionable instruction."
         elif workflow is not None and self.status == "active":
             try:
                 self.validate_workflow(workflow)
             except Exception as exc:
+                result.pop("instruction", None)
                 result["message"] = f"Incompatible workflow: {exc}"
         return result
 
