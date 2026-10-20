@@ -72,22 +72,22 @@ class CountSteps(Workflow):
                 f"Token {token!r} does not match step {counter.step}; "
                 "send the token from the current instruction"
             )
-        counter = counter.model_copy(
-            update={"node": "finished" if counter.step >= counter.count else "waiting"}
-        )
+        counter.node = "finished" if counter.step >= counter.count else "waiting"
         return counter
 
     @event(source="waiting", dest="running")
     def step(self, counter: Counter) -> Counter:
         """Run the next step."""
-        counter = counter.model_copy(update={"step": counter.step + 1})
-        counter = counter.model_copy(update={"token": _token()})
-        return counter.model_copy(update={"node": "running"})
+        counter.step += 1
+        counter.token = _token()
+        counter.node = "running"
+        return counter
 
     @event(source="waiting", dest="finished")
     def finish(self, counter: Counter) -> Counter:
         """End the session after the current step."""
-        return counter.model_copy(update={"node": "finished"})
+        counter.node = "finished"
+        return counter
 
 
 WORKFLOW = CountSteps

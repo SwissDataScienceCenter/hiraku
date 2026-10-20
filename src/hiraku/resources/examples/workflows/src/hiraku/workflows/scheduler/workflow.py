@@ -103,24 +103,20 @@ class Scheduler(Workflow):
             raise EventRejected(
                 f"The count of {record_id!r} is {count}; set it to {queue.baseline + 1}"
             )
-        queue = self._assign(queue)
-        return queue
+        return self._assign(queue)
 
     def _assign(self, queue: Queue) -> Queue:
-        """Assign the open record with the highest priority; False if none."""
+        """Assign the highest-priority open record, or finish when none remain."""
         open_records = [
             item for item in self._children(queue) if _count(item) < queue.target
         ]
         pick = max(
             open_records, key=lambda item: (_priority(item), item.id), default=None
         )
-        return queue.model_copy(
-            update={
-                "node": "working" if pick is not None else "finished",
-                "current": pick.id if pick is not None else None,
-                "baseline": _count(pick) if pick is not None else 0,
-            }
-        )
+        queue.node = "working" if pick is not None else "finished"
+        queue.current = pick.id if pick is not None else None
+        queue.baseline = _count(pick) if pick is not None else 0
+        return queue
 
     def _children(self, queue: Queue) -> list[Record]:
         parent = load_record(queue.parent, config=self.config)

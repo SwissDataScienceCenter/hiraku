@@ -135,6 +135,9 @@ Generated or transient paths:
   Instruction and reserved-handler-name checks after compilation.
   `Session.state` is a `State` snapshot with extra fields allowed,
   loadable independently of workflow code. Read its node as `session.state.node`.
+  State is mutable; events may update it in place and return it. Session executes
+  with detached state, validates results before saving, and gives instruction
+  handlers a deep copy. Direct Workflow.run calls may mutate their supplied state.
   `Workflow.run(event, arguments, state=None)` executes a step with validated
   inputs and returns its validated state and Instruction without persistence.
   Session owns submission outcomes, history, locking, and persistence. Dependencies

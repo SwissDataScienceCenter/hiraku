@@ -23,7 +23,7 @@ _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 class State(BaseModel):
     """Complete state-machine data, including the current node's label."""
 
-    model_config = ConfigDict(extra="allow", frozen=True)
+    model_config = ConfigDict(extra="allow")
     node: str
 
 

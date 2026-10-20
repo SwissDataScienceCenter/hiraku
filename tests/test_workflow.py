@@ -68,17 +68,14 @@ class Toy(Workflow):
             raise EventRejected("Try another amount")
         if note == "bug":
             raise RuntimeError("broken handler")
-        total = state.total + amount
-        return state.model_copy(
-            update={
-                "total": total,
-                "node": "done" if total >= state.target else "adding",
-            }
-        )
+        state.total += amount
+        state.node = "done" if state.total >= state.target else "adding"
+        return state
 
     @event(source="adding", dest="done")
     def finish(self, state: Total) -> Total:
-        return state.model_copy(update={"node": "done"})
+        state.node = "done"
+        return state
 
 
 WORKFLOW = Toy
@@ -127,8 +124,8 @@ def test_graph_and_models_are_the_only_registry(config):
     with pytest.raises(TypeError):
         graph.nodes["other"] = graph.nodes["done"]
     state = graph.state_model(target=3)
-    with pytest.raises(PydanticValidationError):
-        state.total = 5
+    state.total = 5
+    assert state.total == 5
     assert workflow.start(target=2).target == 2
     assert isinstance(result, EventResult)
     assert "instruction" not in result.model_dump()
@@ -157,7 +154,8 @@ def test_workflow_run_executes_steps_without_persisting_a_session(config):
     done, instruction = workflow.run(
         event, event.arguments.model_validate({"amount": 2}), state
     )
-    assert state.total == 0
+    assert state.total == 2
+    assert state.node == "done"
     assert done.node == "done"
     assert done.total == 2
     assert instruction.context == {"total": 2}
@@ -246,13 +244,14 @@ def test_event_reuses_state_returned_by_session_validation(config, monkeypatch):
     def validate(self, workflow):
         state = original(self, workflow)
         calls.append(state)
-        return state.model_copy(update={"total": 10})
+        state.total = 10
+        return state
 
     monkeypatch.setattr(Session, "validate_workflow", validate)
     result = submit(workflow, first)
     assert result.status == "accepted", result.message
     assert len(calls) == 1
-    assert calls[0].total == 0
+    assert calls[0].total == 11
     assert load_session(first.session_id).state.total == 11
 
 
@@ -281,14 +280,14 @@ def test_validate_session_rejects_incompatible_snapshots(config, problem):
         session.workflow = "other"
         message = "another workflow"
     elif problem == "model":
-        session.state = session.state.model_copy(update={"total": "invalid"})
+        session.state.total = "invalid"
         expected = PydanticValidationError
         message = "total"
     elif problem == "node":
         source = TOY.replace('Literal["adding", "done"]', "str")
         write_workflow(config, source)
         workflow = load_workflow("toy")
-        session.state = session.state.model_copy(update={"node": "missing"})
+        session.state.node = "missing"
         message = "Unknown node"
     else:
         session.instruction = session.instruction.model_copy(
@@ -473,18 +472,13 @@ def test_failed_save_preserves_previous_session(config, monkeypatch):
         'return state.model_copy(update={"total": "invalid"})',
         "return None",
         'return state.model_copy(update={"node": "done", "total": float("nan")})',
+        'state.node = "unknown"\n        return state',
+        'state.total = "invalid"\n        return state',
+        'state.total = float("nan")\n        return state',
     ],
 )
 def test_returned_state_is_validated_before_saving(config, replacement):
-    source = TOY.replace(
-        """return state.model_copy(
-            update={
-                "total": total,
-                "node": "done" if total >= state.target else "adding",
-            }
-        )""",
-        replacement,
-    )
+    source = TOY.replace("return state", replacement, 1)
     assert source != TOY
     write_workflow(config, source)
     workflow, first = started(config)
@@ -516,12 +510,30 @@ def test_bad_instruction_saves_nothing(config, expression):
 def test_instruction_mutation_cannot_change_saved_state(config):
     source = TOY.replace(
         'return Instruction(self.markdown.section("## Add"),',
-        'object.__setattr__(state, "total", 99)\n'
-        '        return Instruction(self.markdown.section("## Add"),',
+        'state.total = 99\n        return Instruction(self.markdown.section("## Add"),',
     )
     write_workflow(config, source)
     workflow, first = started(config)
     assert load_session(first.session_id).state.total == 0
+
+
+@pytest.mark.parametrize(
+    ("note", "status"),
+    [("wait", "not_ready"), ("reject", "rejected"), ("bug", "error")],
+)
+def test_mutation_before_failure_does_not_change_saved_state(config, note, status):
+    source = TOY.replace(
+        '        if note == "wait":',
+        '        state.total = 99\n        if note == "wait":',
+    )
+    write_workflow(config, source)
+    workflow, first = started(config)
+    session = load_session(first.session_id)
+    before = session._path.read_bytes()
+    result = session.run_event(workflow, 1, "add", {"amount": 1, "note": note})
+    assert result.status == status
+    assert session.state.total == 0
+    assert session._path.read_bytes() == before
 
 
 def test_config_reloads_and_is_bound_to_project(config, tmp_path, monkeypatch):
@@ -789,7 +801,9 @@ def test_inherited_graph_is_independent(config):
         """class Child(Toy):
     @event(source="adding", dest="done")
     def finish(self, state: Total) -> Total:
-        return state.model_copy(update={"node": "done", "total": 42})
+        state.node = "done"
+        state.total = 42
+        return state
 
 
 WORKFLOW = Child

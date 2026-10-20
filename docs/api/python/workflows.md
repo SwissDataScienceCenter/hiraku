@@ -29,6 +29,9 @@ Validation uses the workflow definition available now, not its historical model.
 `State` allows extra fields, including in authored subclasses. Declared fields
 are still validated. A subclass can opt into rejecting unknown fields with
 `model_config = ConfigDict(extra="forbid")`.
+State is mutable: event handlers may assign fields or update collections and
+return the same instance. Assignments are checked when the returned state is
+revalidated, rather than individually on assignment.
 
 Dependencies run from `session.py` to `workflow.py` to `graph.py`.
 `workflow.py` owns the definition and `Instruction`; `session.py` owns execution,
@@ -41,6 +44,9 @@ omit state for start. It validates returned states and transitions, builds the
 instruction with accepted-event schemas, and returns `(state, instruction)`.
 Errors propagate to the caller. Session uses this method and converts failures
 into `EventResult` outcomes while handling correlation, history, and persistence.
+Direct calls may mutate the supplied state even on failure. Session supplies
+detached working state, so failures leave its saved snapshot unchanged.
+Instruction handlers receive a deep copy of the next state.
 
 `Session.run_start(workflow, arguments=None)` returns an `EventResult`, including
 when start fails before a session exists. `session.run_event(workflow,

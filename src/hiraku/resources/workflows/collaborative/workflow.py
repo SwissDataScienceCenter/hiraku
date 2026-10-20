@@ -129,13 +129,10 @@ class Collaborative(Workflow):
                 activate=False,
                 config=self.config,
             )
-            return experiments.model_copy(
-                update={
-                    "node": "implement",
-                    "experiment": record.id,
-                    "feedback": None,
-                }
-            )
+            experiments.node = "implement"
+            experiments.experiment = record.id
+            experiments.feedback = None
+            return experiments
         except EventRejected:
             raise
         except HirakuError as exc:
@@ -155,7 +152,9 @@ class Collaborative(Workflow):
             record.commit = sha
             record.status = "implemented"
             record.save()
-            return experiments.model_copy(update={"node": "launch", "feedback": None})
+            experiments.node = "launch"
+            experiments.feedback = None
+            return experiments
         except EventRejected:
             raise
         except HirakuError as exc:
@@ -178,7 +177,9 @@ class Collaborative(Workflow):
                 )
             record.status = "launched"
             record.save()
-            return experiments.model_copy(update={"node": "analyze", "feedback": None})
+            experiments.node = "analyze"
+            experiments.feedback = None
+            return experiments
         except EventRejected:
             raise
         except HirakuError as exc:
@@ -199,22 +200,11 @@ class Collaborative(Workflow):
             record.verdict = verdict
             record.conclusion = conclusion
             record.save()
-            experiments = experiments.model_copy(
-                update={
-                    "results": [
-                        *experiments.results,
-                        {"record_id": record.id, "verdict": verdict},
-                    ]
-                }
-            )
-            experiments = experiments.model_copy(update={"experiment": None})
-            experiments = experiments.model_copy(update={"feedback": None})
-            experiments = experiments.model_copy(
-                update={
-                    "node": "draft"
-                    if len(experiments.results) < experiments.rounds
-                    else "finished"
-                }
+            experiments.results.append({"record_id": record.id, "verdict": verdict})
+            experiments.experiment = None
+            experiments.feedback = None
+            experiments.node = (
+                "draft" if len(experiments.results) < experiments.rounds else "finished"
             )
             return experiments
         except EventRejected:
@@ -227,33 +217,38 @@ class Collaborative(Workflow):
         self, experiments: Experiments, *, feedback: Feedback
     ) -> Experiments:
         """Redraft the experiment with the user's feedback."""
-        return experiments.model_copy(update={"feedback": feedback})
+        experiments.feedback = feedback
+        return experiments
 
     @event(source="implement", dest="implement")
     def revise_implementation(
         self, experiments: Experiments, *, feedback: Feedback
     ) -> Experiments:
         """Rework the implementation with the user's feedback."""
-        return experiments.model_copy(update={"feedback": feedback})
+        experiments.feedback = feedback
+        return experiments
 
     @event(source="launch", dest="launch")
     def revise_launch(
         self, experiments: Experiments, *, feedback: Feedback
     ) -> Experiments:
         """Change how the experiment is launched, with the user's feedback."""
-        return experiments.model_copy(update={"feedback": feedback})
+        experiments.feedback = feedback
+        return experiments
 
     @event(source="analyze", dest="analyze")
     def revise_analysis(
         self, experiments: Experiments, *, feedback: Feedback
     ) -> Experiments:
         """Redo the analysis with the user's feedback."""
-        return experiments.model_copy(update={"feedback": feedback})
+        experiments.feedback = feedback
+        return experiments
 
     @event(source=STEPS, dest="finished")
     def finish(self, experiments: Experiments) -> Experiments:
         """End the session early and summarize the results."""
-        return experiments.model_copy(update={"node": "finished"})
+        experiments.node = "finished"
+        return experiments
 
     def _step(
         self, experiments: Experiments, section: str, context: dict[str, Any]

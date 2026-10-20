@@ -266,8 +266,8 @@ def test_state_is_a_graph_abstraction():
         "extra": 1,
     }
     stored = State(node="working")
-    with pytest.raises(PydanticValidationError):
-        stored.node = "done"
+    stored.node = "done"
+    assert stored.node == "done"
 
 
 def test_graph_has_no_imports_from_workflow_implementation():

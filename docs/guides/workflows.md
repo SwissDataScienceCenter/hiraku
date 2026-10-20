@@ -114,11 +114,9 @@ class Count(Workflow):
 
     @event(source="counting", dest=["counting", "done"])
     def counted(self, state: Counter) -> Counter:
-        step = state.step + 1
-        return state.model_copy(update={
-            "step": step,
-            "node": "done" if step >= state.count else "counting",
-        })
+        state.step += 1
+        state.node = "done" if state.step >= state.count else "counting"
+        return state
 
     @node("done", final=True)
     def done(self, state: Counter) -> Instruction:
@@ -154,10 +152,10 @@ Print the next number, then submit counted.
   Nested Pydantic models can define shared input structures
   and validators; cross-field event checks can raise `EventRejected`.
 - `State` is the graph's complete runtime data, including the current `node` label.
-  Workflow sessions persist it. Fields are frozen,
-  although nested collections are not deeply frozen. Return a new state with
-  `model_copy(update=...)` or construct one. The runtime serializes and validates
-  the returned state, including otherwise unvalidated copy updates.
+  Workflow sessions persist it. Event handlers can update fields and nested
+  collections in place and return the state, or construct a new state.
+  The runtime serializes and validates the returned state before saving;
+  assignments are not validated individually.
 - The method named `start` must use `@start(dest=...)` and return a concrete
   `State` subclass. It has no previous state.
   Every other event takes that same state model, then keyword-only inputs,
@@ -283,10 +281,14 @@ Workflow defines handlers and instructions; Session executes them and owns saved
 progress. Session calls `workflow.run(event, arguments, state=None)` to invoke
 handlers, validate their outputs and transitions, and build the next instruction.
 This lower-level method expects validated inputs and returns `(state, instruction)`;
-it neither saves sessions nor catches execution errors.
+it neither saves sessions nor catches execution errors. Event handlers can mutate
+the supplied state, including before raising an error. Instruction handlers
+receive a separate deep copy so they cannot change the result's state.
 Loaded sessions are snapshots. Submission reloads current state under
 the session lock without changing the caller's snapshot; reload to inspect the
 new state. Neither object caches the other.
+Session execution uses a detached state; rejected, not-ready, or failed steps
+leave saved progress unchanged even if an event has mutated its working state.
 
 `EventResult` contains `status`, available `session_id` and `instruction_id`,
 and optional `message`. The instruction ID is the current revision after

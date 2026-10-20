@@ -103,6 +103,7 @@ class Workflow(BaseRecord):
 
         Arguments and incoming state must already be validated against the graph.
         Omit state for the start event. Handler and validation errors propagate.
+        Event handlers may mutate the supplied state.
         """
         parameters = [] if state is None else [state]
         inputs = {
@@ -110,7 +111,7 @@ class Workflow(BaseRecord):
         }
         returned = event.handler(self, *parameters, **inputs)
         self.graph.check_transition(event, returned)
-        # Validate JSON, including updates made through model_copy(update=...).
+        # Revalidate assignments and copy updates before using the returned state.
         raw = returned.model_dump(mode="json", warnings=False)
         json.dumps(raw, allow_nan=False)
         state = self.graph.state_model.model_validate(raw)
