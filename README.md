@@ -145,9 +145,8 @@ the tree, ready for your own plots or marimo's AI assistant.
 Try every dashboard mode without training by loading the bundled Digits runs:
 
 ```bash
-mkdir digits-dashboard && cd digits-dashboard
-git init
-hiraku clone digits-mlflow . --with-results
+hiraku clone digits-mlflow digits-dashboard --with-results
+cd digits-dashboard
 hiraku dashboard --record digits                 # read-only
 hiraku dashboard --include-code --record digits  # read-only, with source
 hiraku dashboard --init --edit --record digits   # copy and edit

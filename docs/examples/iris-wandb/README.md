@@ -18,10 +18,8 @@ Then create a project and let Hiraku install the training script, processed
 dataset, and dependencies for this example.
 
 ```bash
-mkdir iris-wandb
+hiraku clone iris-wandb --git
 cd iris-wandb
-git init
-hiraku clone iris-wandb .
 uv sync
 git add .
 git commit -m "initialize Iris W&B example"
