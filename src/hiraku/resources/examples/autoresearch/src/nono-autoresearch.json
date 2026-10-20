@@ -1,0 +1,33 @@
+{
+  "$schema": "https://nono.sh/schemas/nono-profile.schema.json",
+  "meta": {
+    "name": "autoresearch",
+    "description": "Restrict autoresearch agents to training code and research metadata"
+  },
+  "workdir": {
+    "access": "read"
+  },
+  "filesystem": {
+    "allow": [
+      "$WORKDIR/.git",
+      "$WORKDIR/hiraku"
+    ],
+    "read": [
+      "$HOME/.cache/autoresearch"
+    ],
+    "read_file": [
+      "/proc/sys/kernel/random/uuid"
+    ],
+    "allow_file": [
+      "$WORKDIR/train.py",
+      "$WORKDIR/runs.csv",
+      "$WORKDIR/run.log"
+    ]
+  },
+  "environment": {
+    "set_vars": {
+      "GIT_CONFIG_NOSYSTEM": "1"
+    }
+  },
+  "allow_gpu": true
+}
