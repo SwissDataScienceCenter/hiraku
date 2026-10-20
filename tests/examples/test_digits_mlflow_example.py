@@ -45,7 +45,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     git(project, "config", "user.email", "test@example.invalid")
     git(project, "config", "user.name", "Test")
     runner = CliRunner()
-    initialized = invoke(runner, ["init", "--example", "digits-mlflow"])
+    initialized = invoke(runner, ["clone", "digits-mlflow", "."])
     assert initialized.exit_code == 0
     assert not (project / "README.md").exists()
     assert not (project / "example.yml").exists()

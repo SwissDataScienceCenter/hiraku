@@ -17,12 +17,10 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     result = runner.invoke(
         main,
         [
-            "init",
-            str(project),
-            "--example",
+            "clone",
             "heart-disease",
+            str(project),
             "--with-results",
-            "--ignore-git",
         ],
     )
     assert result.exit_code == 0, result.output

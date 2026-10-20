@@ -13,18 +13,18 @@ uv tool install ".[mlflow,wandb]"
 
 ## Initialize
 
-If the project is new, initialize Git first.
+Git is optional for initialization. This walkthrough uses commits for run
+attribution, so initialize the code repository with `--git`:
 
 ```bash
-mkdir my-project
+hiraku clone minimal my-project --git
 cd my-project
-git init
 ```
 
-Then initialize Hiraku in the project root. The `--example` option copies the `src/` tree of a packaged example into the project.
+The `clone` command copies the `src/` tree of a packaged example into the
+project. Commit the evaluation code before creating records:
 
 ```bash
-hiraku init --example minimal
 git add .
 git commit -m "initial commit"
 ```
