@@ -15,7 +15,7 @@ branding and layout. Keep loading, selection, and reactive widget reads here.
 import marimo
 
 __generated_with = "0.25.1"
-app = marimo.App()
+app = marimo.App(css_file="studio/dashboard/components.css")
 
 
 with app.setup:
@@ -78,13 +78,30 @@ def selection_state(config, records_df, requested_record, runs_df):
         ),
         next(iter(paths), None),
     )
-    get_scope, set_scope = mo.state(initial_record)
-    return get_scope, initial_record, metrics, paths, set_scope, tree_metric
+    get_selection, _set_selection = mo.state(
+        (f"record:{initial_record}" if initial_record else None, initial_record)
+    )
+
+    def select_key(key):
+        _set_selection(
+            lambda previous: (
+                key,
+                hd.selection_scope(key, previous[1], paths, runs_df),
+            )
+        )
+
+    return get_selection, initial_record, metrics, paths, select_key, tree_metric
 
 
 @app.cell
-def run_table(initial_record, project, records_df, runs_df, tree_metric):
-    tree = hc.run_table(records_df, runs_df, tree_metric, initial_record)
+def run_table(get_selection, project, records_df, runs_df, select_key, tree_metric):
+    tree = hc.run_table(
+        records_df,
+        runs_df,
+        tree_metric,
+        selected_key=get_selection()[0],
+        on_select=select_key,
+    )
     _messages = [mo.callout(mo.md(error), kind="warn") for error in project.errors]
     if records_df.empty:
         _messages.append(
@@ -95,22 +112,27 @@ def run_table(initial_record, project, records_df, runs_df, tree_metric):
 
 
 @app.cell
-def selected_context(get_scope, paths, project, runs_df, set_scope, tree):
-    _key = tree.value[0]["key"] if tree.value else f"record:{get_scope()}"
+def selected_context(get_selection, project, runs_df):
+    _key, scope = get_selection()
+    _key = _key or ""
     _kind, _, _identifier = _key.partition(":")
     selected_run = hd.find_run(runs_df, _identifier) if _kind == "run" else None
-    scope = _identifier if _kind == "record" else get_scope()
-    # Keep comparing against the chosen record unless the run lies outside it.
-    if selected_run is not None and (
-        scope is None or not hd.within(selected_run["record_path"], paths[scope])
-    ):
-        scope = selected_run["record"]
-    set_scope(scope)
     _record_id = selected_run["record"] if selected_run is not None else scope
     selected_record = next(
         (record for record in project.records if record.id == _record_id), None
     )
     return scope, selected_record, selected_run
+
+
+@app.cell
+def record_navigation(project, select_key, selected_record):
+    _navigation, record_buttons = hc.record_tree(
+        project.records,
+        selected_record.id if selected_record else None,
+        on_select=lambda record_id: select_key(f"record:{record_id}"),
+    )
+    mo.vstack([_navigation])
+    return (record_buttons,)
 
 
 @app.cell

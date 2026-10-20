@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from hiraku.config import HirakuConfig
+from hiraku.dashboard.data import tree_rows
 
 pytest.importorskip("marimo")
 pytest.importorskip("altair")
@@ -55,12 +54,58 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
     monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "a")
     from hiraku.dashboard.app import app
 
-    outputs, definitions = app.run(defs={"tree": SimpleNamespace(value=[{"key": key}])})
+    _, initial = app.run()
+    rows = tree_rows(initial["records_df"], initial["runs_df"], initial["tree_metric"])
+    index = next(index for index, row in enumerate(rows) if row["key"] == key)
+    initial["tree"]._update([str(index)])
+    assert initial["get_selection"]() == (key, scope)
+    outputs, definitions = app.run(
+        defs={
+            name: initial[name]
+            for name in (
+                "get_selection",
+                "initial_record",
+                "metrics",
+                "paths",
+                "select_key",
+                "tree_metric",
+            )
+        }
+    )
 
     assert definitions["scope"] == scope
     assert definitions["selected_record"].id == record_id
+    assert definitions["tree"].value[0]["key"] == key
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
     assert f"id: {record_id}" in rendered
+
+
+def test_navigation_selection_updates_table_and_clears_run(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    from hiraku.dashboard.app import app
+
+    _, initial = app.run()
+    initial["select_key"]("run:r1")
+    initial["record_buttons"]["a"]._update(1)
+    assert initial["get_selection"]() == ("record:a", "a")
+    _, definitions = app.run(
+        defs={
+            name: initial[name]
+            for name in (
+                "get_selection",
+                "initial_record",
+                "metrics",
+                "paths",
+                "select_key",
+                "tree_metric",
+            )
+        }
+    )
+    assert definitions["tree"].value[0]["key"] == "record:a"
+    assert definitions["selected_record"].id == "a"
+    assert definitions["selected_run"] is None
 
 
 def test_project_copy_finds_its_project_without_the_launcher(

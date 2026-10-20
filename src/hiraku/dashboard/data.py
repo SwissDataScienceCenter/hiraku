@@ -280,6 +280,25 @@ def find_run(runs_df: pd.DataFrame, run_id: str) -> dict[str, Any] | None:
     return next(iter(_records(runs_df[runs_df["run"] == run_id])), None)
 
 
+def selection_scope(
+    key: str | None,
+    current_scope: str | None,
+    paths: Mapping[str, str],
+    runs_df: pd.DataFrame,
+) -> str | None:
+    """Resolve the comparison subtree after a record or run selection."""
+    kind, _, identifier = (key or "").partition(":")
+    if kind == "record" and identifier in paths:
+        return identifier
+    selected_run = find_run(runs_df, identifier) if kind == "run" else None
+    if selected_run is not None and (
+        current_scope not in paths
+        or not within(selected_run["record_path"], paths[current_scope])
+    ):
+        return selected_run["record"]
+    return current_scope
+
+
 def run_text(run: Mapping[str, Any]) -> str:
     """Render a ``runs_df`` row's provenance, parameters, and metrics as YAML."""
 

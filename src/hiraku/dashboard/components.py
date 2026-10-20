@@ -1,7 +1,7 @@
 """Reusable marimo widgets and rendering for Hiraku dashboards.
 
 Components consume prepared tables or BaseRecord objects without loading or
-saving files or querying tracking sources. The notebook owns selection state;
+saving project files or querying tracking sources. The notebook owns selection state;
 the optional Markdown editor owns drafts and delegates saves to a callback.
 Branding stays in the Studio view.
 """
@@ -21,6 +21,7 @@ import pandas as pd
 from ..base import BaseRecord
 from ..errors import HirakuError
 from ..io import dump_yaml
+from ..record import Record
 from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
 
 
@@ -154,11 +155,68 @@ class MarkdownEditor:
         )
 
 
+def record_tree(
+    records: Sequence[Record],
+    selected_id: str | None,
+    on_select: Callable[[str], Any],
+) -> tuple[mo.Html, dict[str, mo.ui.button]]:
+    """Render optional record navigation and return its live button references.
+
+    Keep the buttons in a notebook variable. Selection is supplied by the
+    caller so this tree can share state with other components.
+    """
+    children: dict[str | None, list[Record]] = {}
+    for record in records:
+        children.setdefault(record.parent_id, []).append(record)
+    buttons: dict[str, mo.ui.button] = {}
+    fragments = ["<ul>"]
+    stack = [(record, False) for record in reversed(children.get(None, []))]
+    while stack:
+        record, closing = stack.pop()
+        if closing:
+            fragments.append("</ul></li>")
+            continue
+        badges = " ".join(
+            f'<span class="badge">{html.escape(value)}</span>'
+            for value in (record.type, record.status)
+            if value
+        )
+        button = mo.ui.button(
+            label=(
+                '<span class="hiraku-record-node">'
+                '<span class="dot" aria-hidden="true"></span>'
+                f'<span class="record-id">{html.escape(record.id)}</span> {badges}'
+                "</span>"
+            ),
+            full_width=True,
+            on_click=lambda _, identifier=record.id: on_select(identifier),
+        )
+        buttons[record.id] = button
+        selected = ' aria-current="true"' if record.id == selected_id else ""
+        fragments.append(f'<li><div class="record-row"{selected}>{button.text}</div>')
+        nested = children.get(record.id, [])
+        if nested:
+            fragments.append("<ul>")
+            stack.append((record, True))
+            stack.extend((child, False) for child in reversed(nested))
+        else:
+            fragments.append("</li>")
+    fragments.append("</ul>")
+    content = "".join(fragments) if buttons else "No records yet."
+    return (
+        mo.Html(f'<nav class="record-tree" aria-label="Records">{content}</nav>'),
+        buttons,
+    )
+
+
 def run_table(
     records_df: pd.DataFrame,
     runs_df: pd.DataFrame,
     metric: str | None,
     initial_record: str | None = None,
+    *,
+    selected_key: str | None = None,
+    on_select: Callable[[str | None], Any] | None = None,
 ) -> mo.ui.table:
     """Build the selectable record/run table, retaining its hidden row keys."""
     _rows = tree_rows(records_df, runs_df, metric)
@@ -172,12 +230,15 @@ def run_table(
     _initial = [
         index
         for index, row in enumerate(_rows)
-        if row["key"] == f"record:{initial_record}"
+        if row["key"] == (selected_key or f"record:{initial_record}")
     ]
     tree = mo.ui.table(
         _rows,
         selection="single",
         initial_selection=_initial,
+        on_change=(lambda rows: on_select(rows[0]["key"] if rows else None))
+        if on_select
+        else None,
         hidden_columns=["key", "depth"] if _rows else None,
         page_size=50,
         show_column_summaries=False,

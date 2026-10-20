@@ -54,6 +54,14 @@ dev = [
   "bump-my-version>=1.5.1",
 ]
 
+[tool.uv.build-backend]
+source-exclude = [
+    "**/.artifacts",
+    "**/.locks",
+    "**/.owners",
+    "**/__marimo__",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/hiraku"]
 

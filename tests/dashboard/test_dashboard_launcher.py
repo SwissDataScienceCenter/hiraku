@@ -57,6 +57,8 @@ def test_bundled_views_place_all_interactive_cells() -> None:
     from marimo._ast.load import load_app
 
     app = load_app(str(launcher.BUNDLED_NOTEBOOK))
+    assert app._config.css_file
+    assert (launcher.BUNDLED_NOTEBOOK.parent / app._config.css_file).is_file()
     view = (launcher.BUNDLED_VIEWS / "dashboard" / "index.html").read_text(
         encoding="utf-8"
     )
@@ -69,6 +71,7 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "refresh_control",
         "run_table",
         "record_details",
+        "record_navigation",
         "run_details",
         "metric_analysis",
     }
@@ -87,6 +90,9 @@ def test_init_dashboard_copies_the_notebook(project: HirakuConfig) -> None:
     assert notebook.read_text(encoding="utf-8") == (
         launcher.BUNDLED_NOTEBOOK.read_text(encoding="utf-8")
     )
+    assert (notebook.parent / "studio/dashboard/components.css").read_bytes() == (
+        launcher.BUNDLED_VIEWS / "dashboard/components.css"
+    ).read_bytes()
     view = notebook.parent / "studio" / "dashboard" / "index.html"
     assert view.read_text(encoding="utf-8") == (
         (launcher.BUNDLED_VIEWS / "dashboard" / "index.html").read_text(

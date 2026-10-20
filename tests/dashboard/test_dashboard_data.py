@@ -20,6 +20,7 @@ from hiraku.dashboard.data import (
     run_rows,
     run_text,
     safe_url,
+    selection_scope,
     subtree,
     tradeoff_frame,
     tree_rows,
@@ -37,6 +38,18 @@ def tables(project: HirakuConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
         arrow_frame(record_rows(loaded.records), RECORD_COLUMNS),
         arrow_frame(run_rows(loaded), RUN_COLUMNS),
     )
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [("record:b", "b"), ("run:r2", "a"), ("run:r1", "b"), (None, "a")],
+)
+def test_selection_scope_preserves_subtree_for_descendant_runs(
+    project: HirakuConfig, key: str | None, expected: str
+) -> None:
+    records, runs = tables(project)
+    paths = dict(zip(records["record"], records["record_path"], strict=True))
+    assert selection_scope(key, "a", paths, runs) == expected
 
 
 def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:

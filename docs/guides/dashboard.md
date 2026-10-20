@@ -96,6 +96,14 @@ location.
 
 ## Sections
 
+**Record navigation**
+:   An optional, initially collapsed tree of records with type and status
+    badges. Expand it to navigate the hierarchy. Choosing a record
+    selects the same row in the runs table, clears any selected run, and compares
+    that record's subtree. Table selections highlight the corresponding record
+    in the tree; selecting a run highlights its owning record while preserving
+    the current comparison subtree when the run lies within it.
+
 **Runs**
 :   Records and their runs in one indented table. Runs appear under the record
     they are attributed to, in execution order, with the value of the first
@@ -128,6 +136,29 @@ location.
     numeric values for both metrics are excluded.
 
 Use **Refresh** to re-read records and tracking sources after new launches.
+
+### Reusing record navigation
+
+`hc.record_tree(records, selected_id, on_select)` renders record navigation and
+returns `(tree, buttons)`. Keep `buttons` in a notebook variable so their callbacks
+remain live. The component loads no data and owns no selection state. Wire
+`on_select` into the same selection callback used by the run table; the bundled
+notebook uses `select_key("record:" + record_id)` and passes the resulting key to
+`hc.run_table(..., selected_key=key, on_select=select_key)`.
+
+The Studio entry document places the `record_navigation` cell inside a collapsed
+`<details>` element. Remove that element from a project copy to omit navigation;
+table selection and the remaining components continue to work independently.
+
+Reusable component styling lives in `studio/dashboard/components.css` beside the
+Studio view's other stylesheets. The notebook loads it through
+`marimo.App(css_file="studio/dashboard/components.css")` for notebook mode.
+The Studio HTML links the same file with `crossorigin="anonymous"`, allowing
+Marimo to read and adopt its rules into widget shadow roots in the isolated
+presentation. No styles are injected into button labels. `--init` copies the
+stylesheet with the view for customization. Its rules target only record
+navigation buttons; other controls retain their normal styling. The outer
+hierarchy and selection styling remain in the Studio view's `style.css`.
 
 ### Reusing Markdown rendering
 
