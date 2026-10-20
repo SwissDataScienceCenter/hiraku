@@ -20,7 +20,7 @@ initialize a new project:
 mkdir digits-mlflow
 cd digits-mlflow
 git init
-hiraku init --example digits-mlflow
+hiraku init . --example digits-mlflow
 uv sync
 git add .
 git commit -m "initialize Digits MLflow example"
@@ -33,7 +33,7 @@ extra too and initialize a separate project with the six bundled runs:
 mkdir digits-dashboard
 cd digits-dashboard
 git init
-hiraku init --example digits-mlflow --with-results
+hiraku init . --example digits-mlflow --with-results
 hiraku dashboard --record digits
 ```
 

@@ -24,7 +24,7 @@ git init
 Then initialize Hiraku in the project root. The `--example` option copies the `src/` tree of a packaged example into the project.
 
 ```bash
-hiraku init --example minimal
+hiraku init . --example minimal
 git add .
 git commit -m "initial commit"
 ```

@@ -19,7 +19,7 @@ dataset, and dependencies for this example.
 mkdir heart-disease
 cd heart-disease
 git init
-hiraku init --example heart-disease
+hiraku init . --example heart-disease
 ```
 Initialization creates `hiraku.yml`, metadata directories, and the agent
 skill. The `heart-disease` example also copies `train.py`, `pyproject.toml`, and

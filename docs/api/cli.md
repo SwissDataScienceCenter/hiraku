@@ -14,10 +14,28 @@ hiraku runs --record <record-id>
 
 `hiraku record list` includes each record's local `status` in its table.
 
-`hiraku init` requires its target to be a Git repository root. Use
+Initialization uses the following destinations, creating missing directories:
+
+| Command | Destination |
+| --- | --- |
+| `hiraku init` | Current directory |
+| `hiraku init my-project` | `./my-project` |
+| `hiraku init --example minimal` | `./minimal` |
+| `hiraku init my-project --example minimal` | `./my-project` |
+| `hiraku init . --example minimal` | Current directory |
+
+An explicit path always takes precedence. Plain initialization supports existing
+directories and preserves unrelated files. Repeating plain `hiraku init` reports
+that the project is already initialized and leaves every file unchanged; it does
+not reinstall missing resources. Initialization with an example, template, or
+configuration options still rejects an already initialized project.
+
+`hiraku init` still requires its target to be a Git repository root. Use
 `hiraku init PATH --ignore-git` to intentionally initialize a nested or non-Git
 location. Python initialization is permissive by default; callers can request
-the CLI policy with `ignore_git=False`.
+the CLI policy with `ignore_git=False`. For example, create an example directory
+without first setting up Git with `hiraku init --example minimal --ignore-git`.
+Otherwise, initialize Git at the intended destination first.
 
 Initialize from an arbitrary local project overlay with `--template`:
 
@@ -29,7 +47,7 @@ Packaged examples use `--example NAME`. For example, start with the minimal
 local evaluation project using:
 
 ```bash
-hiraku init --example minimal
+hiraku init --example minimal --ignore-git
 ```
 
 Each example copies only its bundled
@@ -37,7 +55,7 @@ Each example copies only its bundled
 overlay with sample records and tracked runs:
 
 ```bash
-hiraku init --example heart-disease --with-results
+hiraku init --example heart-disease --with-results --ignore-git
 ```
 
 Results may override base files and configuration keys, but neither layer
@@ -46,7 +64,7 @@ The flag requires a packaged example with a `results/` directory.
 Use `--with-generator` to copy an example's optional `generate_results.py` for
 running later, or `--generate` to execute it immediately after initialization.
 Both flags require an example with a generator; `--generate` cannot accompany
-`--with-results`. Existing projects are rejected. Generation failures retain the new
+`--with-results`. Already initialized projects are rejected. Generation failures retain the new
 project and completed runs. `--generate` alone does not copy the script.
 Sibling documentation and metadata are not copied:
 
@@ -62,8 +80,8 @@ The two options are mutually exclusive. Templates may replace files installed
 by the same initialization, but initialization refuses to overwrite files that
 already existed in the target. Explicit options such as `--tracking-backend`
 take precedence over values from a template-provided `hiraku.yml`.
-After successful initialization, the command lists every file and directory it
-created before printing the final project location.
+After successful initialization, the command prints the project configuration
+location.
 
 Use `hiraku --help` or the generated command sections below for all options.
 The command reference is generated from Hiraku's Click command tree.

@@ -38,7 +38,7 @@ From the root of the autoresearch repository, install the example. Initializatio
 separate program at `hiraku/programs/autoresearch/program.md`.
 
 ```bash
-hiraku init --example autoresearch
+hiraku init . --example autoresearch
 ```
 
 Keep the local Hiraku installation and run artifacts out of

@@ -13,13 +13,13 @@ Use Hiraku's `mlflow` extra to query these results.
 Generate fresh runs immediately with:
 
 ```bash
-hiraku init --example digits-mlflow --generate
+hiraku init . --example digits-mlflow --generate
 ```
 
 Or copy the generator for a separate step:
 
 ```bash
-hiraku init --example digits-mlflow --with-generator
+hiraku init . --example digits-mlflow --with-generator
 uv run --with hiraku python generate_results.py
 ```
 
