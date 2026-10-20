@@ -271,29 +271,17 @@ def run_details(selected_run: Mapping[str, Any] | None) -> mo.Html:
     return mo.as_html(_content)
 
 
-def metric_controls(
-    records_df: pd.DataFrame,
-    metrics: Sequence[str],
-    default_metric: str | None,
-) -> tuple[
-    mo.ui.dropdown,
-    mo.ui.dropdown,
-    mo.ui.dropdown,
-    mo.ui.dropdown,
-    mo.ui.dropdown,
-    mo.ui.dropdown,
-]:
-    """Create the mode, metric, and trade-off selectors for metric analysis.
+def performance_controls(
+    metrics: Sequence[str], default_metric: str | None
+) -> mo.ui.dropdown:
+    """Create the metric selector for the performance plot."""
+    return mo.ui.dropdown(metrics, value=default_metric, label="Metric (y axis)")
 
-    Return the widgets so the notebook can retain them and read their values
-    in a downstream cell; rendering a chart does not create new controls.
-    """
-    plot_mode = mo.ui.dropdown(
-        ["Performance over runs", "Metric trade-offs"],
-        value="Performance over runs",
-        label="View",
-    )
-    metric = mo.ui.dropdown(metrics, value=default_metric, label="Metric (y axis)")
+
+def tradeoff_controls(
+    records_df: pd.DataFrame, metrics: Sequence[str]
+) -> tuple[mo.ui.dropdown, mo.ui.dropdown, mo.ui.dropdown, mo.ui.dropdown]:
+    """Create independent metric and objective selectors for the trade-off plot."""
     x_default = metrics[0] if metrics else None
     y_default = metrics[1] if len(metrics) > 1 else x_default
     x_metric = mo.ui.dropdown(metrics, value=x_default, label="X metric")
@@ -321,146 +309,146 @@ def metric_controls(
         value=direction(y_default) if y_default else "minimize",
         label="Y objective",
     )
-    return plot_mode, metric, x_metric, x_objective, y_metric, y_objective
+    return x_metric, x_objective, y_metric, y_objective
 
 
-def metric_analysis(
+def performance_plot(
     runs_df: pd.DataFrame,
     *,
     scope: str | None,
-    mode: str,
     metric: str | None,
-    x_metric: str | None,
-    y_metric: str | None,
-    x_objective: str,
-    y_objective: str,
     selected_run: Mapping[str, Any] | None = None,
 ) -> mo.Html:
-    """Render the current analysis mode for an already scoped table of runs."""
-    if mode == "Performance over runs":
-        _points, _missing = plot_frame(runs_df, metric)
-        _notes = [
-            f"{len(runs_df)} runs under **{scope}**, numbered by execution order."
-        ]
-        if _missing:
-            _notes.append(f"{_missing} without a numeric `{metric}` are not shown.")
+    """Plot one metric over execution order for an already scoped run table."""
+    _points, _missing = plot_frame(runs_df, metric)
+    _notes = [f"{len(runs_df)} runs under **{scope}**, numbered by execution order."]
+    if _missing:
+        _notes.append(f"{_missing} without a numeric `{metric}` are not shown.")
+    if _points.empty:
+        _chart = mo.md("No runs to plot.")
+    else:
+        _base = alt.Chart(_points).encode(
+            x=alt.X(
+                "number:Q",
+                title="Run number (execution order)",
+                axis=alt.Axis(format="d", tickMinStep=1),
+                scale=alt.Scale(nice=False, padding=16),
+            ),
+            y=alt.Y("value:Q", title=metric, scale=alt.Scale(zero=False)),
+        )
+        _line = _base.mark_line(strokeWidth=2, opacity=0.3)
+        _dots = _base.mark_point(filled=True, size=90, opacity=1).encode(
+            color=alt.Color("record:N", title="Record"),
+            tooltip=[
+                alt.Tooltip("number:Q", title="Run #"),
+                alt.Tooltip("run:N", title="Run"),
+                alt.Tooltip("record:N", title="Record"),
+                alt.Tooltip("started:N", title="Started"),
+                alt.Tooltip("value:Q", title=metric, format=".4g"),
+            ],
+        )
+        _layers = [_line, _dots]
+        if selected_run is not None:
+            _layers.append(
+                _base.transform_filter(alt.datum.run == selected_run["run"]).mark_point(
+                    size=320, strokeWidth=3, color="#f59e0b", filled=False
+                )
+            )
+        _chart = (
+            alt.layer(*_layers)
+            .properties(width="container", height=340)
+            .configure(background="transparent")
+            .configure_view(stroke=None)
+        )
+    _content = mo.vstack([mo.md(" ".join(_notes)), _chart])
+    return mo.as_html(_content)
+
+
+def tradeoff_plot(
+    runs_df: pd.DataFrame,
+    *,
+    x_metric: str | None,
+    y_metric: str | None,
+    x_objective: str = "minimize",
+    y_objective: str = "minimize",
+) -> mo.Html:
+    """Compare two metrics and highlight non-dominated runs in the supplied table."""
+    if not x_metric or not y_metric:
+        _comparison = mo.md("No numeric metrics are available to compare.")
+    elif x_metric == y_metric:
+        _comparison = mo.callout("Choose two different metrics.", kind="info")
+    else:
+        _points, _missing = tradeoff_frame(
+            runs_df,
+            x_metric,
+            y_metric,
+            x_objective,
+            y_objective,
+        )
         if _points.empty:
-            _chart = mo.md("No runs to plot.")
+            _comparison = mo.callout(
+                f"No runs have numeric values for both metrics ({_missing} excluded).",
+                kind="info",
+            )
         else:
+            _highlighted = _points.loc[_points["non_dominated"]]
+            _note = (
+                f"**{len(_points)} comparable runs** · "
+                f"**{len(_highlighted)} strong trade-offs**"
+            )
+            if _missing:
+                _note += f" · {_missing} runs excluded for missing or non-finite values"
             _base = alt.Chart(_points).encode(
                 x=alt.X(
-                    "number:Q",
-                    title="Run number (execution order)",
-                    axis=alt.Axis(format="d", tickMinStep=1),
-                    scale=alt.Scale(nice=False, padding=16),
+                    "x:Q",
+                    title=f"{x_metric} ({x_objective})",
+                    scale=alt.Scale(zero=False),
                 ),
-                y=alt.Y("value:Q", title=metric, scale=alt.Scale(zero=False)),
-            )
-            _line = _base.mark_line(strokeWidth=2, opacity=0.3)
-            _dots = _base.mark_point(filled=True, size=90, opacity=1).encode(
+                y=alt.Y(
+                    "y:Q",
+                    title=f"{y_metric} ({y_objective})",
+                    scale=alt.Scale(zero=False),
+                ),
                 color=alt.Color("record:N", title="Record"),
                 tooltip=[
-                    alt.Tooltip("number:Q", title="Run #"),
                     alt.Tooltip("run:N", title="Run"),
                     alt.Tooltip("record:N", title="Record"),
-                    alt.Tooltip("started:N", title="Started"),
-                    alt.Tooltip("value:Q", title=metric, format=".4g"),
+                    alt.Tooltip("x:Q", title=x_metric, format=".4g"),
+                    alt.Tooltip("y:Q", title=y_metric, format=".4g"),
+                    alt.Tooltip("non_dominated:N", title="Strong trade-off"),
                 ],
             )
-            _layers = [_line, _dots]
-            if selected_run is not None:
-                _layers.append(
-                    _base.transform_filter(
-                        alt.datum.run == selected_run["run"]
-                    ).mark_point(size=320, strokeWidth=3, color="#f59e0b", filled=False)
-                )
             _chart = (
-                alt.layer(*_layers)
-                .properties(width="container", height=340)
+                alt.layer(
+                    _base.mark_circle(size=100, opacity=0.55),
+                    _base.transform_filter(alt.datum.non_dominated).mark_point(
+                        shape="diamond", filled=True, size=220, strokeWidth=1
+                    ),
+                )
+                .properties(width="container", height=420)
+                .interactive()
                 .configure(background="transparent")
                 .configure_view(stroke=None)
             )
-        _content = mo.vstack([mo.md(" ".join(_notes)), _chart])
-    else:
-        if not x_metric or not y_metric:
-            _comparison = mo.md("No numeric metrics are available to compare.")
-        elif x_metric == y_metric:
-            _comparison = mo.callout("Choose two different metrics.", kind="info")
-        else:
-            _points, _missing = tradeoff_frame(
-                runs_df,
-                x_metric,
-                y_metric,
-                x_objective,
-                y_objective,
+            _table = _highlighted.drop(columns="non_dominated").rename(
+                columns={
+                    "run": "Run",
+                    "record": "Record",
+                    "x": x_metric,
+                    "y": y_metric,
+                }
             )
-            if _points.empty:
-                _comparison = mo.callout(
-                    "No runs have numeric values for both metrics "
-                    f"({_missing} excluded).",
-                    kind="info",
-                )
-            else:
-                _highlighted = _points.loc[_points["non_dominated"]]
-                _note = (
-                    f"**{len(_points)} comparable runs** · "
-                    f"**{len(_highlighted)} strong trade-offs**"
-                )
-                if _missing:
-                    _note += (
-                        f" · {_missing} runs excluded for missing or non-finite values"
-                    )
-                _base = alt.Chart(_points).encode(
-                    x=alt.X(
-                        "x:Q",
-                        title=f"{x_metric} ({x_objective})",
-                        scale=alt.Scale(zero=False),
+            _comparison = mo.vstack(
+                [
+                    mo.md(_note),
+                    mo.md(
+                        "A highlighted run has a strong trade-off: no comparable "
+                        "run matches or improves both metrics while improving "
+                        "at least one."
                     ),
-                    y=alt.Y(
-                        "y:Q",
-                        title=f"{y_metric} ({y_objective})",
-                        scale=alt.Scale(zero=False),
-                    ),
-                    color=alt.Color("record:N", title="Record"),
-                    tooltip=[
-                        alt.Tooltip("run:N", title="Run"),
-                        alt.Tooltip("record:N", title="Record"),
-                        alt.Tooltip("x:Q", title=x_metric, format=".4g"),
-                        alt.Tooltip("y:Q", title=y_metric, format=".4g"),
-                        alt.Tooltip("non_dominated:N", title="Strong trade-off"),
-                    ],
-                )
-                _chart = (
-                    alt.layer(
-                        _base.mark_circle(size=100, opacity=0.55),
-                        _base.transform_filter(alt.datum.non_dominated).mark_point(
-                            shape="diamond", filled=True, size=220, strokeWidth=1
-                        ),
-                    )
-                    .properties(width="container", height=420)
-                    .interactive()
-                    .configure(background="transparent")
-                    .configure_view(stroke=None)
-                )
-                _table = _highlighted.drop(columns="non_dominated").rename(
-                    columns={
-                        "run": "Run",
-                        "record": "Record",
-                        "x": x_metric,
-                        "y": y_metric,
-                    }
-                )
-                _comparison = mo.vstack(
-                    [
-                        mo.md(_note),
-                        mo.md(
-                            "A highlighted run has a strong trade-off: no comparable "
-                            "run matches or improves both metrics while improving "
-                            "at least one."
-                        ),
-                        _chart,
-                        mo.ui.table(_table, selection=None, show_download=False),
-                    ]
-                )
-        _content = _comparison
+                    _chart,
+                    mo.ui.table(_table, selection=None, show_download=False),
+                ]
+            )
+    _content = _comparison
     return mo.as_html(_content)

@@ -3,7 +3,7 @@
 `hiraku dashboard` serves a local page for browsing records and the runs
 attributed to them. The page is a [marimo](https://marimo.io) notebook served
 through [Marimo Studio](https://marimo-team.github.io/marimo-studio/). Its
-metric analysis can show either performance over run order or metric trade-offs.
+performance and metric trade-off plots are separate, independently placeable cells.
 
 Install the optional dependencies first:
 
@@ -126,16 +126,40 @@ location.
     Selecting a run shows its owning record, while the metric analysis keeps
     the selected comparison subtree when that run lies within it.
 
-**Metric analysis**
-:   Choose **Performance over runs** to see runs in the selected record subtree
+**Performance over runs**
+:   Shows runs in the selected record subtree
     in execution order, with a metric on the y axis. Colours mark the record
-    and a ring marks the selected run. Choose **Metric trade-offs** to compare
-    two metrics in that same subtree; set whether each should be minimized or
+    and a ring marks the selected run. Choose its y-axis metric independently
+    of the trade-off plot.
+
+**Metric trade-offs**
+:   Compares two metrics in the selected subtree; set whether each should be minimized or
     maximized. Diamonds mark runs for which no comparable run matches or
     improves both metrics while improving at least one. Runs without finite
     numeric values for both metrics are excluded.
 
 Use **Refresh** to re-read records and tracking sources after new launches.
+
+### Reusing plots
+
+`hc.performance_plot(runs, scope=scope, metric="loss", selected_run=selected_run)`
+plots one metric over execution order. `hc.tradeoff_plot(runs, x_metric="loss",
+y_metric="accuracy", x_objective="minimize", y_objective="maximize")` compares
+two metrics and lists non-dominated runs. Both accept an already scoped run table
+and create no controls or selection state.
+
+Use `hc.performance_controls(metrics, default_metric)` for the first plot's
+metric selector and `hc.tradeoff_controls(records_df, metrics)` for the second
+plot's four selectors. Keep the returned widgets in notebook variables and pass
+their values to the corresponding plot.
+
+The bundled notebook displays both plots without a mode selector. Each has its
+own named cell and can be placed, moved, or omitted independently in Studio:
+
+```html
+<marimo-cell name="performance_plot"></marimo-cell>
+<marimo-cell name="tradeoff_plot"></marimo-cell>
+```
 
 ### Reusing record navigation
 
@@ -207,7 +231,8 @@ details use the already loaded record objects to retain complete front matter.
 | --- | --- |
 | Runs table | `records_df` rows, each followed by its runs from `runs_df` |
 | Run details | the selected run's row of `runs_df` |
-| Metric analysis | selected record subtree in `runs_df`; choose one metric for performance or two numeric metrics for trade-offs |
+| Performance plot | selected record subtree in `runs_df`; choose one metric |
+| Trade-off plot | selected record subtree in `runs_df`; choose two metrics and their objectives |
 
 `record_path` is the record's ancestry, such as `digits/weak-l2`.
 `subtree(runs_df, "digits")` selects every run of `digits` and the records

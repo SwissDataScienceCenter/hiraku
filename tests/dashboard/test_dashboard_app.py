@@ -27,6 +27,8 @@ def test_app_runs_every_cell_against_a_project(
     assert definitions["selected_run"] is None
     assert definitions["tree"].value[0]["key"] == "record:a"
     assert definitions["metric"].value == "loss"
+    assert "plot_mode" not in definitions
+    assert "Choose two different metrics." in rendered
     runs_df = definitions["runs_df"]
     assert list(runs_df["run"]) == ["r0", "r1", "r2", "r3", "r4"]
     assert {"record_path", "metric.loss"} <= set(runs_df.columns)

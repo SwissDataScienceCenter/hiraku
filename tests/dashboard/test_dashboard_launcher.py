@@ -73,7 +73,8 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "record_details",
         "record_navigation",
         "run_details",
-        "metric_analysis",
+        "performance_plot",
+        "tradeoff_plot",
     }
     assert {
         "data_setup",

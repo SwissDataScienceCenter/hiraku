@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Separate dashboard performance and trade-off plots into independently placeable components and named cells with their own controls, removing the analysis mode selector.
 - Exclude generated Marimo and Studio session/build caches from distribution archives.
 - Extract reusable dashboard widgets and rendering into `hiraku.dashboard.components`, keeping notebook cells focused on data and reactive selection wiring.
 - Move dashboard branding and layout into the Studio HTML, CSS, and assets, leaving notebook cells for data and interactive outputs.

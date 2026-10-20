@@ -159,43 +159,43 @@ def run_details(selected_run):
 
 
 @app.cell
-def metric_controls(metrics, records_df, tree_metric):
-    plot_mode, metric, x_metric, x_objective, y_metric, y_objective = (
-        hc.metric_controls(records_df, metrics, tree_metric)
-    )
-    return plot_mode, metric, x_metric, x_objective, y_metric, y_objective
+def performance_controls(metrics, tree_metric):
+    metric = hc.performance_controls(metrics, tree_metric)
+    return (metric,)
 
 
 @app.cell
-def metric_analysis(
-    metric,
-    paths,
-    runs_df,
-    scope,
-    selected_run,
-    plot_mode,
-    x_metric,
-    x_objective,
-    y_metric,
-    y_objective,
-):
-    _controls = (
-        [plot_mode, metric]
-        if plot_mode.value == "Performance over runs"
-        else [plot_mode, x_metric, x_objective, y_metric, y_objective]
-    )
-    _content = hc.metric_analysis(
+def performance_plot(metric, paths, runs_df, scope, selected_run):
+    _content = hc.performance_plot(
         hd.subtree(runs_df, paths.get(scope)),
         scope=scope,
-        mode=plot_mode.value,
         metric=metric.value,
+        selected_run=selected_run,
+    )
+    mo.vstack([metric, _content])
+    return
+
+
+@app.cell
+def tradeoff_controls(metrics, records_df):
+    x_metric, x_objective, y_metric, y_objective = hc.tradeoff_controls(
+        records_df, metrics
+    )
+    return x_metric, x_objective, y_metric, y_objective
+
+
+@app.cell
+def tradeoff_plot(paths, runs_df, scope, x_metric, x_objective, y_metric, y_objective):
+    _content = hc.tradeoff_plot(
+        hd.subtree(runs_df, paths.get(scope)),
         x_metric=x_metric.value,
         y_metric=y_metric.value,
         x_objective=x_objective.value,
         y_objective=y_objective.value,
-        selected_run=selected_run,
     )
-    mo.vstack([*_controls, _content])
+    mo.vstack(
+        [mo.hstack([x_metric, x_objective, y_metric, y_objective], wrap=True), _content]
+    )
     return
 
 

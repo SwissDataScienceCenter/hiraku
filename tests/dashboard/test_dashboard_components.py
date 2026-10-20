@@ -170,7 +170,7 @@ def test_run_details_escapes_content_and_only_links_safe_urls(
     assert "javascript:alert" not in details
 
 
-def test_metric_controls_return_widgets_with_declared_defaults() -> None:
+def test_independent_plot_controls_use_declared_defaults() -> None:
     records = pd.DataFrame(
         {
             "metrics": [
@@ -182,11 +182,11 @@ def test_metric_controls_return_widgets_with_declared_defaults() -> None:
         }
     )
 
-    controls = hc.metric_controls(records, ["loss", "accuracy"], "loss")
+    metric = hc.performance_controls(["loss", "accuracy"], "loss")
+    controls = hc.tradeoff_controls(records, ["loss", "accuracy"])
 
+    assert metric.value == "loss"
     assert [control.value for control in controls] == [
-        "Performance over runs",
-        "loss",
         "loss",
         "minimize",
         "accuracy",
@@ -195,24 +195,20 @@ def test_metric_controls_return_widgets_with_declared_defaults() -> None:
 
 
 @pytest.mark.parametrize(
-    ("mode", "x_metric", "y_metric", "message"),
+    ("x_metric", "y_metric", "message"),
     [
-        ("Performance over runs", "loss", "accuracy", "No runs to plot."),
-        ("Metric trade-offs", None, None, "No numeric metrics are available"),
-        ("Metric trade-offs", "loss", "loss", "Choose two different metrics."),
-        ("Metric trade-offs", "loss", "accuracy", "No runs have numeric values"),
+        (None, None, "No numeric metrics are available"),
+        ("loss", "loss", "Choose two different metrics."),
+        ("loss", "accuracy", "No runs have numeric values"),
     ],
 )
-def test_metric_analysis_handles_empty_or_unusable_inputs(
-    mode: str, x_metric: str | None, y_metric: str | None, message: str
+def test_tradeoff_plot_handles_empty_or_unusable_inputs(
+    x_metric: str | None, y_metric: str | None, message: str
 ) -> None:
     runs = arrow_frame([], [*RUN_COLUMNS, "metric.loss", "metric.accuracy"])
 
-    content = hc.metric_analysis(
+    content = hc.tradeoff_plot(
         runs,
-        scope="root",
-        mode=mode,
-        metric="loss",
         x_metric=x_metric,
         y_metric=y_metric,
         x_objective="minimize",
@@ -222,8 +218,14 @@ def test_metric_analysis_handles_empty_or_unusable_inputs(
     assert message in content.text
 
 
-@pytest.mark.parametrize("mode", ["Performance over runs", "Metric trade-offs"])
-def test_metric_analysis_renders_runs_and_reports_excluded_values(mode: str) -> None:
+def test_performance_plot_handles_empty_runs() -> None:
+    runs = arrow_frame([], [*RUN_COLUMNS, "metric.loss"])
+    content = hc.performance_plot(runs, scope="root", metric="loss").text
+    assert "No runs to plot." in content
+
+
+@pytest.mark.parametrize("plot", [hc.performance_plot, hc.tradeoff_plot])
+def test_independent_plots_render_runs_and_report_excluded_values(plot) -> None:
     runs = arrow_frame(
         [
             {
@@ -243,23 +245,25 @@ def test_metric_analysis_renders_runs_and_reports_excluded_values(mode: str) -> 
         RUN_COLUMNS,
     )
 
-    content = hc.metric_analysis(
-        runs,
-        scope="root",
-        mode=mode,
-        metric="loss",
-        x_metric="loss",
-        y_metric="accuracy",
-        x_objective="minimize",
-        y_objective="maximize",
-        selected_run={"run": "best"},
-    ).text
+    if plot is hc.performance_plot:
+        content = plot(
+            runs, scope="root", metric="loss", selected_run={"run": "best"}
+        ).text
+    else:
+        content = plot(
+            runs,
+            x_metric="loss",
+            y_metric="accuracy",
+            x_objective="minimize",
+            y_objective="maximize",
+        ).text
 
     assert "best" in content
     assert "other" in content
-    if mode == "Performance over runs":
+    if plot is hc.performance_plot:
         assert "3 runs under" in content
         assert "1 without a numeric" in content
+        assert "f59e0b" in content
     else:
         assert "2 comparable runs" in content
         assert "1 strong trade-offs" in content

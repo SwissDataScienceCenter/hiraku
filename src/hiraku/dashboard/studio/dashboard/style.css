@@ -9,7 +9,7 @@
 }
 .workspace {
   display: grid;
-  grid-template-columns: minmax(19rem, 0.9fr) minmax(0, 1.5fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.5rem;
   margin-top: 1.5rem;
   align-items: start;
@@ -17,6 +17,7 @@
 .eyebrow { margin-bottom: 0.75rem; }
 h1 { margin: 0 0 1rem; }
 .intro { margin-bottom: 2rem; }
+.run-details { margin-top: 1.5rem; }
 .record-navigation { margin-bottom: 1.5rem; }
 .record-navigation > summary { cursor: pointer; color: var(--secondary-color); }
 .record-navigation[open] > summary { margin-bottom: 1rem; }
