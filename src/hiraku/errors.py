@@ -47,3 +47,7 @@ class LaunchError(HirakuError):
 
 class BackendError(HirakuError):
     """A tracking backend failed to return normalized runs."""
+
+
+class SectionNotFoundError(HirakuError):
+    """A Markdown body has no section with the requested heading."""

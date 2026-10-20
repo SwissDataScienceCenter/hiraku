@@ -50,6 +50,7 @@ nav = [
         { "Custom Backend" = "guides/tracking-custom.md"}
       ] },
       { "MCP server" = "guides/mcp.md" },
+      { "Dashboard" = "guides/dashboard.md" },
   ] },
   { "CLI" = "api/cli.md" },
   { "Python API" = [

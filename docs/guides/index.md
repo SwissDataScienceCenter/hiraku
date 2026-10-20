@@ -10,5 +10,6 @@ working with research records.
     - [MLflow](tracking-mlflow.md)
     - [Custom backend](tracking-custom.md)
 - [MCP server](mcp.md)
+- [Dashboard](dashboard.md)
 - Advanced usage:
     - [Branches and record provenance](experiment-branches.md)

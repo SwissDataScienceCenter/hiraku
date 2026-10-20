@@ -175,6 +175,19 @@ def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> Non
     assert ids("--record", "root", "--all") == {"a", "b"}
 
 
+@pytest.mark.parametrize("value", ["null", "42"])
+def test_program_update_rejects_invalid_markdown(
+    value: str, tmp_path: Path, monkeypatch
+) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    assert invoke("program", "create", "test").exit_code == 0
+    result = invoke("program", "update", "test", "--set", f"markdown={value}")
+    assert result.exit_code != 0
+    assert "Input should be a valid string" in result.output
+    assert invoke("program", "show", "test").exit_code == 0
+
+
 def test_generic_agent_commands_still_work(tmp_path: Path, monkeypatch) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)

@@ -26,6 +26,23 @@ git add .
 git commit -m "initialize Digits MLflow example"
 ```
 
+Alternatively, to browse the example without training, install the `dashboard`
+extra too and initialize a separate project with the six bundled runs:
+
+```bash
+mkdir digits-dashboard
+cd digits-dashboard
+git init
+hiraku init --example digits-mlflow --with-results
+hiraku dashboard --record digits
+```
+
+The dashboard reads the prepared `mlflow.db` directly, so an MLflow server is
+not required. Use `hiraku dashboard --init --edit --record digits` to copy the
+notebook into the project and edit it. Run details only show an MLflow link
+after you start the MLflow UI and set
+`ui_url: http://127.0.0.1:5000` in the `tracking_backend` configuration.
+
 MLflow creates `mlflow.db` in the project root on the first launch. The training
 script uses the Hiraku project root to keep that location stable for local and
 worktree dispatchers. Set `MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
@@ -87,6 +104,15 @@ value of each metric. Full epoch histories remain in MLflow and its UI.
 You can list the same runs using Hiraku:
 ```
 hiraku runs --record digits --all
+```
+
+Or browse them, with a per-run plot and links into the MLflow UI, in the
+[dashboard](../../guides/dashboard.md). Add
+`ui_url: http://127.0.0.1:5000` to the root record's `tracking_backend` so
+each run links to the MLflow UI started above:
+
+```bash
+hiraku dashboard --record digits
 ```
 
 ??? info "Example run results"

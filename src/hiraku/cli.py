@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import shlex
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
+from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Any
 
@@ -255,25 +257,61 @@ def mcp_command() -> None:
 @click.option("--tracking-backend")
 @click.option("--template", type=click.Path(path_type=Path))
 @click.option("--example")
+@click.option("--with-generator", is_flag=True, help="Copy the example generator.")
+@click.option(
+    "--generate", is_flag=True, help="Generate example runs after initialization."
+)
+@click.option(
+    "--with-results",
+    "results",
+    is_flag=True,
+    help="Copy bundled research records and tracked runs.",
+)
 @click.option("--ignore-git", is_flag=True)
 def init_command(
     path: Path | None,
     tracking_backend: str | None,
     template: Path | None,
     example: str | None,
+    results: bool,
+    with_generator: bool,
+    generate: bool,
     ignore_git: bool,
 ) -> None:
     """Initialize a project."""
     if template is not None and example is not None:
         raise click.UsageError("--template and --example are mutually exclusive")
+    if generate and (not example or results):
+        raise click.UsageError(
+            "--generate requires --example and cannot use --with-results"
+        )
+    generator = None
+    if generate:
+        validate_identifier(example, label="example name")
+        generator = (
+            files("hiraku.resources") / "examples" / example / "generate_results.py"
+        )
+        if not generator.is_file():
+            raise click.UsageError(f"Example {example!r} has no generator")
     config = HirakuConfig.init(
         path or Path.cwd(),
         tracking_backend=tracking_backend,
         template=template,
         example=example,
+        results=results,
+        with_generator=with_generator,
         ignore_git=ignore_git,
     )
     click.echo(f"Initialized Hiraku project at {config.path}")
+    if generator is not None:
+        with as_file(generator) as source:
+            try:
+                runpy.run_path(str(source))["generate"](config)
+            except Exception as exc:
+                raise click.ClickException(
+                    "Generation failed; initialized project and completed runs kept: "
+                    f"{exc}"
+                ) from exc
 
 
 @main.command("status")
@@ -845,6 +883,53 @@ def run_list(
             for run in runs
         ]
         click.echo(_table(columns, rows))
+
+
+@main.command("dashboard")
+@click.option("--record", "record_id", help="Record selected when the page opens.")
+@click.option("--port", type=click.IntRange(1, 65535), default=8765, show_default=True)
+@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
+@click.option(
+    "--init",
+    "initialize",
+    is_flag=True,
+    help="Copy the dashboard notebook into the project; exit unless --edit is given.",
+)
+@click.option(
+    "--edit", is_flag=True, help="Open the project's notebook in the marimo editor."
+)
+@click.option(
+    "--include-code",
+    is_flag=True,
+    help="Let the read-only dashboard show its notebook code.",
+)
+@click.pass_obj
+def dashboard_command(
+    state: CLIContext,
+    record_id: str | None,
+    port: int,
+    no_browser: bool,
+    initialize: bool,
+    edit: bool,
+    include_code: bool,
+) -> None:
+    """Browse records and tracked runs in a local, read-only dashboard."""
+    from .dashboard.launcher import init_dashboard, serve_dashboard
+
+    if initialize:
+        click.echo(f"Created dashboard: {init_dashboard(state.config)}")
+        if not edit:
+            return
+    exit_code = serve_dashboard(
+        state.config,
+        record_id=record_id,
+        port=port,
+        no_browser=no_browser,
+        edit=edit,
+        include_code=include_code,
+    )
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
 
 
 if __name__ == "__main__":

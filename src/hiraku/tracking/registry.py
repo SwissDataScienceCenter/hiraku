@@ -25,6 +25,7 @@ def _mlflow_factory(config: HirakuConfig, parsed: Any) -> TrackingBackend:
         tracking_uri=parsed.tracking_uri,
         experiment_name=parsed.experiment_name,
         database=parsed.database,
+        ui_url=parsed.ui_url,
     )
 
 

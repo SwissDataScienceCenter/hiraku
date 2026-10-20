@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import quote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -23,6 +24,7 @@ class MLflowBackendConfig(BaseModel):
         tracking_uri: Optional remote MLflow URI.
         experiment_name: Optional MLflow experiment name.
         database: Optional project-relative SQLite database path.
+        ui_url: Optional absolute HTTP(S) base URL of the MLflow web UI.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -30,12 +32,18 @@ class MLflowBackendConfig(BaseModel):
     tracking_uri: str | None = Field(default=None, min_length=1)
     experiment_name: str | None = Field(default=None, min_length=1)
     database: Path | None = None
+    ui_url: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def validate_sources(self) -> MLflowBackendConfig:
         if self.tracking_uri and self.database:
             raise BackendError(
                 "mlflow backend cannot set both tracking_uri and database"
+            )
+        if self.ui_url is not None and not _is_web_base(self.ui_url):
+            raise BackendError(
+                "mlflow ui_url must be an absolute HTTP(S) URL without "
+                "credentials, query, or fragment"
             )
         return self
 
@@ -48,6 +56,7 @@ class MLflowBackend(TrackingBackend):
         tracking_uri: Optional MLflow tracking URI.
         experiment_name: Optional MLflow experiment name.
         database: Optional project-relative SQLite database path.
+        ui_url: Optional base URL of the MLflow web UI used for run links.
     """
 
     def __init__(
@@ -57,6 +66,7 @@ class MLflowBackend(TrackingBackend):
         tracking_uri: str | None = None,
         experiment_name: str | None = None,
         database: Path | None = None,
+        ui_url: str | None = None,
     ) -> None:
         """Create an MLflow adapter from validated settings.
 
@@ -65,20 +75,28 @@ class MLflowBackend(TrackingBackend):
             tracking_uri: Optional remote tracking URI.
             experiment_name: Optional experiment name.
             database: Optional local database path.
+            ui_url: Optional web UI base URL. Defaults to an HTTP(S)
+                ``tracking_uri``, which MLflow servers also serve the UI from.
 
         Raises:
-            hiraku.errors.BackendError: If URI and database settings conflict.
+            hiraku.errors.BackendError: If URI and database settings conflict
+                or ``ui_url`` is not a plain HTTP(S) URL.
         """
         self.config = config
         settings = MLflowBackendConfig(
             tracking_uri=tracking_uri,
             experiment_name=experiment_name,
             database=database,
+            ui_url=ui_url,
         )
         self.tracking_uri = settings.tracking_uri or _mlflow_uri(
             config, settings.database
         )
         self.experiment_name = settings.experiment_name
+        # Credential-bearing tracking URIs stay usable but never become links.
+        self.ui_url = settings.ui_url or (
+            self.tracking_uri if _is_web_base(self.tracking_uri) else None
+        )
 
     def _read_source_runs(self, **options: Any) -> list[Run]:
         from ..run import Run
@@ -97,10 +115,27 @@ class MLflowBackend(TrackingBackend):
                     return []
                 experiment_ids = [experiment.experiment_id]
             else:
-                experiment_ids = [
-                    item.experiment_id for item in client.search_experiments()
-                ]
-            native_runs = client.search_runs(experiment_ids=experiment_ids)
+                experiment_ids = []
+                token = None
+                while True:
+                    page = client.search_experiments(page_token=token)
+                    experiment_ids.extend(item.experiment_id for item in page)
+                    token = getattr(page, "token", None)
+                    if not token:
+                        break
+            if not experiment_ids:
+                return []
+            # MLflow returns at most one page of runs per search call.
+            native_runs: list[Any] = []
+            token = None
+            while True:
+                page = client.search_runs(
+                    experiment_ids=experiment_ids, max_results=1000, page_token=token
+                )
+                native_runs.extend(page)
+                token = getattr(page, "token", None)
+                if not token:
+                    break
             runs: list[Run] = []
             for native in native_runs:
                 info, data = native.info, native.data
@@ -132,7 +167,7 @@ class MLflowBackend(TrackingBackend):
                             backend="mlflow",
                             context=f"run {info.run_id}",
                         ),
-                        url=None,
+                        url=self._run_url(info.experiment_id, info.run_id),
                         metrics=dict(data.metrics),
                         params=dict(data.params),
                         raw=raw,
@@ -143,6 +178,28 @@ class MLflowBackend(TrackingBackend):
         except Exception as exc:
             raise BackendError(f"mlflow backend query failed: {exc}") from exc
         return runs
+
+    def _run_url(self, experiment_id: str, run_id: str) -> str | None:
+        if not self.ui_url:
+            return None
+        experiment = quote(str(experiment_id), safe="")
+        run = quote(str(run_id), safe="")
+        return f"{self.ui_url.rstrip('/')}/#/experiments/{experiment}/runs/{run}"
+
+
+def _is_web_base(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.query
+        and not parsed.fragment
+    )
 
 
 def _mlflow_uri(config: HirakuConfig, database: Path | None = None) -> str:

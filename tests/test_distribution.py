@@ -38,3 +38,17 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         packaged = set(wheel.namelist())
 
     assert expected <= packaged, f"Missing packaged resources: {expected - packaged}"
+
+    dashboard = {
+        f"hiraku/dashboard/{name}"
+        for name in (
+            "app.py",
+            "branding.py",
+            "data.py",
+            "launcher.py",
+            "theme.css",
+            "assets/sdsc-logo.svg",
+            "assets/sdsc-logo-white.svg",
+        )
+    }
+    assert dashboard <= packaged, f"Missing dashboard files: {dashboard - packaged}"
