@@ -4,8 +4,7 @@
 
 ::: hiraku.base.BaseRecord
 
-`BaseRecord` provides generic Markdown/YAML persistence. Programs, actions,
-and contexts extend it.
+`BaseRecord` provides generic Markdown/YAML persistence. Contexts extend it.
 
 ## `Record`
 

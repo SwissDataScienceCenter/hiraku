@@ -85,8 +85,6 @@ resources are loaded on each request, including after changes made outside MCP.
 | --- | --- |
 | `hiraku://records/{record_id}` | Record fields and Markdown as JSON. |
 | `hiraku://contexts/{context_id}` | Curated context Markdown. |
-| `hiraku://programs/{program_id}` | Project program instructions. |
-| `hiraku://actions/{entity}/{action_id}` | Project action instructions. |
 | `hiraku://sources/{context_id}/{source_path}` | Attached file as an MCP blob with its inferred MIME type. |
 
 Place PDFs, literature reviews and other source files inside a context directory,

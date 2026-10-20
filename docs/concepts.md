@@ -151,29 +151,19 @@ shared directory. For Claude Code, initialization creates
 systems that cannot create directory symlinks). Invoke it as `$hiraku` in Codex
 or `/hiraku` in Claude Code.
 
-## Actions, Programs, Context
+## Context
 
-!!! info
-    Version 0.1.0 only implements the data model and not yet the agent integration. See github issues for the planned features.
-
-Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state.  A *program* defines complex research workflows and loops end-to-end, with defined permissions and limits. Actions and programs are executed by the `hiraku-agent`. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to provide project-relevant information to the agent.
-
+*Context* files provide project-relevant information to the agent.
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Action** | `hiraku/actions/{entity}/{action_id}/{action.md,action.py}` | A named action that can be invoked by the hiraku-agent agent. |
-| **Program** | `hiraku/programs/{program_id}/{program.md,program.py}` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
-Programs, action and context records are managed via CLI, e.g.
+Context records are managed via CLI, e.g.
 
 ```bash
-hiraku program create <program-id>
-hiraku program list
 hiraku context create <context-id>
 hiraku context list
-hiraku action create <entity>/<action-id>
-hiraku action list
 ```
 
 
@@ -240,17 +230,14 @@ shows prompts for both a complete investigation and individual steps.
 
 ### Autoresearch workflow
 
-The packaged program describes an autonomous loop. Read its instructions and
-the research history before starting it in a coding agent; agree on the
-objective, branch, budget, and stopping condition with the user.
+An autonomous loop needs the research history before it starts in a coding
+agent; agree on the objective, branch, budget, and stopping condition with the
+user.
 
 ```bash
-hiraku program show autoresearch
-hiraku program show interactive
 hiraku record tree
 hiraku runs --record heart-disease --all --json
 ```
 
-The [Autoresearch example](examples/autoresearch/README.md) shows how to use
-the program with the project-local skill and a bounded dispatcher. The skill
-can be invoked with `/hiraku "run the autoresearch program for heart-disease"`.
+The [Autoresearch example](examples/autoresearch/README.md) shows how to run
+an autonomous loop with the project-local skill and a bounded dispatcher.

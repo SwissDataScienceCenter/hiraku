@@ -88,8 +88,8 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/launch.py` | Entrypoint argument rendering and dispatch execution |
 | `src/hiraku/tracking/` | Tracking backend adapters and run normalization |
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
-| `src/hiraku/agent.py` | Programs, actions, and agent-facing resources |
-| `src/hiraku/resources/` | Bundled programs, actions, dispatchers, skills, and examples |
+| `src/hiraku/context.py` | Curated context records |
+| `src/hiraku/resources/` | Bundled dispatchers, skills, and examples |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
 | `docs/` | Documentation sources |
 | `scripts/` | Development and release utilities |

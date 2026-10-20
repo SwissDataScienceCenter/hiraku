@@ -67,7 +67,6 @@ hiraku record create sep10 --type task \
   --set 'branch=autoresearch/sep10' \
   --set "goal=Find the best architecture, optimizer, and hyperparameters to minimize `val_bpb` within the fixed 5-minute training budget." \
   --markdown-file task.md \
-  --set 'program=autoresearch' \
   --set 'metrics=[{name: val_bpb, direction: minimize}]' \
   --set 'entrypoints={train: {command: [uv, run, python, train.py]}, mock: {command: [uv, run, python, cpu_mock.py], args: {val-bpb: 1.0}}}'
 
@@ -116,16 +115,15 @@ Claude Code uses `.claude/skills/hiraku/`, which links to the canonical skill
 when directory symlinks are available. Invoke it as `$hiraku` in Codex or
 `/hiraku` in Claude Code.
 
-Currently, Hiraku records the program association but does not automatically inject its Markdown into an agent prompt. Start an agent in the repository and ask it to
-load the root record and installed program with:
+Hiraku does not inject the program into an agent prompt. Start an agent in the
+repository and ask it to read the root record and the installed program:
 
 
 ```bash
 Use the Hiraku skill and start the autoresearch program.
 
-To read the root record and program, run:
-hiraku record show sep10 --json
-hiraku program show autoresearch
+Read the root record with `hiraku record show sep10 --json` and follow
+hiraku/programs/autoresearch/program.md.
 ```
 
 Track the agent's progress with:

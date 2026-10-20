@@ -49,9 +49,8 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
 
     assert HirakuConfig.discover(root).root == root
     assert HirakuConfig.discover(nested).root == root
-    assert (config.programs_dir / "interactive/program.md").is_file()
-    assert (config.programs_dir / "autoresearch/program.md").is_file()
-    assert (config.actions_dir / "record/propose/action.md").is_file()
+    assert not (config.hiraku_dir / "programs").exists()
+    assert not (config.hiraku_dir / "actions").exists()
     for name in ("launch.sh", "worktree.sh"):
         assert (config.dispatch_dir / name).stat().st_mode & 0o111
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
@@ -206,7 +205,7 @@ def test_init_from_packaged_example_copies_only_src(
     tmp_path: Path, monkeypatch
 ) -> None:
     resources = tmp_path / "resources"
-    for name in ("programs", "actions", "dispatch"):
+    for name in ("dispatch",):
         (resources / name).mkdir(parents=True)
     example = resources / "examples/demo"
     (example / "src").mkdir(parents=True)
@@ -286,3 +285,11 @@ def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
     assert codex.read_text() == original
     assert not (tmp_path / "hiraku.yml").exists()
     assert not (tmp_path / ".mcp.json").exists()
+
+
+def test_legacy_default_program_is_rejected_with_migration_message(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "hiraku.yml").write_text("default_program: interactive\n")
+    with pytest.raises(ValidationError, match="default_program.*programs were removed"):
+        HirakuConfig.discover(tmp_path)

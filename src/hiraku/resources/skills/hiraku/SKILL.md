@@ -55,8 +55,6 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set`, `entrypoints` |
 | Launch an entrypoint | `hiraku launch ENTRYPOINT [--record ID] [--commit REF] [--dispatch NAME]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
-| Manage program records | `hiraku program list`, `hiraku program show PROGRAM` |
-| Manage action records | `hiraku action ...` |
 | Manage context records | `hiraku context ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
@@ -110,10 +108,9 @@ Classify the request before acting:
 - **Bounded workflow:** Complete every requested stage in order, such as creating
   a research root, defining child records, running them, and comparing results.
   Do not add stages the user did not request.
-- **Autonomous or program workflow:** Start or continue a research loop only when
-  the user explicitly requests it. Read the selected program with
-  `hiraku program show <program-id>` and follow both that program and the user's
-  constraints, permissions, budgets, checkpoints, and stopping condition.
+- **Autonomous research loop:** Start or continue a research loop only when
+  the user explicitly requests it, and follow the user's constraints,
+  permissions, budgets, checkpoints, and stopping condition.
 
 Infer routine identifiers, summaries, hypotheses, metrics, and entrypoint
 arguments from the user's request and the repository. Ask a question only when
@@ -366,6 +363,6 @@ attribution explicitly. Stop when the user's requested scope is complete.
 The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
 `Entrypoint`, `Metric`, loaders, and listing functions in `hiraku.record`;
 `BaseRecord` in `hiraku.base`; `Run` in `hiraku.run`;
-and `hiraku.launch.launch` for scripted use. `hiraku context`, `hiraku action`,
-and `hiraku program` manage supporting material and instructions. V1 does not
-provide a `hiraku-agent` runner; the current coding agent executes the skill.
+and `hiraku.launch.launch` for scripted use. `hiraku context` manages
+supporting material. V1 does not provide a `hiraku-agent` runner; the current
+coding agent executes the skill.

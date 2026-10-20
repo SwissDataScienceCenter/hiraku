@@ -98,8 +98,6 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
             "--markdown-file",
             "task.md",
             "--set",
-            "program=autoresearch",
-            "--set",
             "metrics=[{name: val_bpb, direction: minimize}]",
             "--set",
             f"entrypoints={{train: {{command: [uv, run, python, train.py]}}, "
@@ -209,12 +207,10 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
         "`val_bpb` within the fixed 5-minute training budget."
     )
     assert task.type == "task"
-    assert task.program == "autoresearch"
     assert task.entrypoints["train"].command == ["uv", "run", "python", "train.py"]
     assert task.entrypoints["mock"].command[-1] == "cpu_mock.py"
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
-    assert config.default_program == "autoresearch"
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111
     assert git(project, "status", "--porcelain") == ""
 
