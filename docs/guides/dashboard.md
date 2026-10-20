@@ -88,6 +88,23 @@ independently. The reusable `record_selector(records, label="Context")` componen
 accepts loaded records and returns their selected ID; `markdown_view` renders
 the matching context.
 
+### Workflows
+
+The **Workflows** selector lists loadable Python and Markdown-only project
+workflows. Its read-only Markdown view shows the selected workflow's front
+matter and body; **Workflow graph** renders its declared states and transitions
+with Mermaid. Selection is independent of contexts and records/runs. Viewing a
+workflow does not start a session or call its event or instruction handlers.
+
+**Refresh** reloads workflow definitions and selects the first available one.
+Loading Python workflows imports trusted project code, just like
+`hiraku workflow list`. Invalid workflows are logged and skipped by the workflow
+loader; if none load, the dashboard shows an empty-state message.
+
+Place `workflow_list`, `workflow_details`, and `workflow_graph` cells separately
+in custom Studio layouts. They use `record_selector`, `markdown_view`, and
+`workflow_graph(graph)` from `hiraku.dashboard.components`.
+
 ### Edit
 
 ```bash

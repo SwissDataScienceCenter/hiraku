@@ -30,6 +30,7 @@ with app.setup:
     from hiraku.dashboard import components as hc
     from hiraku.dashboard import data as hd
     from hiraku.errors import HirakuError
+    from hiraku.workflows.workflow import list_workflows
 
 
 @app.cell
@@ -105,6 +106,49 @@ def context_details(context_selector, contexts):
     )
     mo.vstack([_content])
     return (selected_context,)
+
+
+@app.cell
+def workflow_data(config, refresh):
+    _refreshes = refresh.value
+    workflows = list_workflows(config=config)
+    return (workflows,)
+
+
+@app.cell
+def workflow_list(workflows):
+    workflow_selector = hc.record_selector(workflows, label="Workflow")
+    _messages = []
+    if not workflows:
+        _messages.append(mo.md("No loadable workflows in this project."))
+    mo.vstack([*_messages, workflow_selector])
+    return (workflow_selector,)
+
+
+@app.cell
+def workflow_selection(workflow_selector, workflows):
+    selected_workflow = next(
+        (workflow for workflow in workflows if workflow.id == workflow_selector.value),
+        None,
+    )
+    return (selected_workflow,)
+
+
+@app.cell
+def workflow_details(selected_workflow):
+    _content = (
+        mo.md("No workflow selected.")
+        if selected_workflow is None
+        else hc.markdown_view(selected_workflow)
+    )
+    mo.vstack([_content])
+    return
+
+
+@app.cell
+def workflow_graph(selected_workflow):
+    hc.workflow_graph(selected_workflow.graph if selected_workflow else None)
+    return
 
 
 @app.cell
