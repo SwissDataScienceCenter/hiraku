@@ -9,9 +9,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 - **Breaking:** `hiraku runs` and `Record.runs()` now list only runs attributed to the selected record (the active record, or `--record ID`). Previously they returned every attributed run from the record's tracking source ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
+- **Breaking:** Rename the `hiraku.agent` module to `hiraku.context`; import `Context`, `load_context`, and `list_contexts` from `hiraku.context`.
 
 ### Added
 
+- Workflow instructions now separate inline `data` from research `context` references (`contexts` and `records`). MCP returns native resource links for attached research material. **Breaking:** move previous arbitrary instruction `context` values to `data`; old saved instructions are not migrated.
+
+- Add the local stdio MCP server (`hiraku mcp`) with record and context CRUD, attributed launches, run queries, curated source resources, and an evidence-based proposal prompt; `hiraku init` registers it for Claude Code and Codex ([issue #80](https://github.com/SwissDataScienceCenter/hiraku/issues/80)).
+- Add project-defined workflows under `hiraku/workflows/<id>/`: Python state machines with typed mutable state, annotated event inputs, node instructions, and immutable graphs, or Markdown-only prompts with arguments inferred from YAML scalar defaults. Import APIs from their defining modules under `hiraku.workflows`.
+- Add persistent workflow sessions with validated events, stored instructions, retry-safe continuation, locking, inspection, and cancellation. `Session.run_start()` and `session.run_event()` return `EventResult`; retrieve assignments separately with `session.get_instruction()`. Sessions can be inspected and cancelled without loading workflow code.
+- Add `hiraku workflow list|start|send-event|graph`, `hiraku session list|show|cancel`, and workflow/session MCP tools, prompts, and resources. Conversational MCP attaches instructions after accepted or stale submissions. Workflow tools are fixed when the server starts; bound project configuration reloads on access.
+- Add `hiraku-agent` to start or resume sessions and run one coding-agent worker per assignment, headless or interactive. Workers write event files; the parent validates and submits them after successful exit. Rejected submissions stop execution; not-ready submissions are retained for explicit resume.
+- Add the bundled `collaborative` research workflow and the `workflows` example with count-steps, greet, and scheduler. Autoresearch becomes a Markdown-only workflow. Approval requests are conversational contracts.
 - Record bodies are `hiraku.markdown.Markdown` strings that select a section by its heading line, e.g. `record.markdown.section("## Change")`, including its subsections. Headings are found with a CommonMark parser (the new `markdown-it-py` dependency), so headings in code blocks, lists, and block quotes do not start sections.
 - Add `Record.resolve_tracking_backend()` to build the tracking backend inherited by a record; `TrackingBackend.list_runs()` now lists all attributed runs when `record_id` is omitted.
 - Add `hiraku runs --all` to list all attributed runs from the tracking source resolved for a record ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
@@ -21,11 +30,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- Fix `hiraku record list`, `context list`, `program list`, `action list` (and other table output) crashing when there are no rows ([issue #96](https://github.com/SwissDataScienceCenter/hiraku/issues/96)).
+- Retain manual not-ready events for retry, reject the reserved workflow ID `runs`, validate instructions before saving, and hide instructions for incompatible or unavailable active workflows. Collaborative research now quotes launch arguments and requires matching entrypoint attribution for run evidence.
+- Retry failed final assignments with `hiraku-agent WORKFLOW --session ID`; successful final assignments are recorded and skipped on resume.
+- Fix `hiraku record list`, `context list` (and other table output) crashing when there are no rows ([issue #96](https://github.com/SwissDataScienceCenter/hiraku/issues/96)).
 - Read every page of MLflow experiments and runs; projects with more than 1,000 runs previously lost the rest.
 
 ### Removed
 
+- **Breaking:** Remove Programs and Actions, including `hiraku program`, `hiraku action`, `hiraku.agent.Program`, `hiraku.agent.Action`, their `hiraku://programs` and `hiraku://actions` MCP resources, and their bundled resources. Contexts are unchanged.
+- **Breaking:** Remove the `default_program` configuration key; `hiraku.yml` files that still contain it are rejected with a migration message.
 - **Breaking:** Remove the `hiraku runs list` subcommand; use `hiraku runs` ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 - **Breaking:** Remove `TrackingBackend.list_all_recorded_runs()` and the `backend` argument of `Record.runs()`; use `record.resolve_tracking_backend().list_runs()`. Replace `select_backend` with `Record.resolve_tracking_backend()` and rename `backend_for` to `create_backend`.
 - **Breaking:** Remove the undocumented `mlflow_experiment` record field fallback; set `experiment_name` in the MLflow `tracking_backend` mapping instead.

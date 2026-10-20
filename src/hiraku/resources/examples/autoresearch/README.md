@@ -1,6 +1,6 @@
 # Autoresearch overlay
 
-This example adds Hiraku's record workflow, program, CPU mock, and run dispatcher to an
+This example adds Hiraku tracking, a CPU mock, and a run dispatcher to an
 existing checkout of [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch).
 
 From the upstream repository root, run:
