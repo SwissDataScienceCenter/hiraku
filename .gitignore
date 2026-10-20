@@ -41,3 +41,6 @@ htmlcov/
 scratch/
 worktrees/
 __marimo__/
+# marimo-studio build state and locks beside its views
+.artifacts/
+.locks/

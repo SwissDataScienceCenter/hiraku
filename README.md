@@ -69,14 +69,14 @@ take time and may install the example's dependencies.
 
 ## Dashboard
 
-`hiraku dashboard` serves a local [marimo](https://marimo.io) page with the record tree, the runs attributed to each record, run details with links to the tracking backend, and a performance plot. It needs the `dashboard` extra.
+`hiraku dashboard` serves a local [marimo](https://marimo.io) notebook through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view with the record tree, the runs attributed to each record, run details with links to the tracking backend, and a performance plot. It needs the `dashboard` extra.
 
 | Command | What it does |
 | --- | --- |
 | `hiraku dashboard` | Serve the read-only dashboard at <http://127.0.0.1:8765> |
 | `hiraku dashboard --include-code` | Also let the page show its notebook code (marimo menu, **⋯**) |
 | `hiraku dashboard --init` | Copy the notebook to `hiraku/dashboard/app.py` so you can customize it |
-| `hiraku dashboard --edit` | Open that copy in the marimo editor |
+| `hiraku dashboard --edit` | Open that copy in marimo-studio |
 | `hiraku dashboard --init --edit` | Both in one step |
 
 After `--init`, `hiraku dashboard` serves your copy. In the editor, the

@@ -10,6 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **Breaking:** `hiraku init` no longer requires Git or a repository root; remove the obsolete `--ignore-git` flag. Add `--git` to initialize the code repository explicitly.
 - **Breaking:** Replace `hiraku init --example NAME` with `hiraku clone NAME [PATH]`, which copies a bundled example into `./NAME` by default without Git history or network access. Move `--with-results`, `--with-generator`, and `--generate` to `clone`. `hiraku init [PATH]` targets the current or explicit directory, and repeating plain initialization leaves the project unchanged ([issue #104](https://github.com/SwissDataScienceCenter/hiraku/issues/104)).
+- Separate dashboard performance and trade-off plots into independently placeable components and named cells with their own controls, removing the analysis mode selector.
+- Exclude generated Marimo and Studio session/build caches from distribution archives.
+- Extract reusable dashboard widgets and rendering into `hiraku.dashboard.components`, keeping notebook cells focused on data and reactive selection wiring.
+- Move dashboard branding and layout into the Studio HTML, CSS, and assets, leaving notebook cells for data and interactive outputs.
+- `hiraku dashboard` automatically selects a free port when `--port` is omitted, in both view and edit modes.
+- The dashboard is served through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view with the same layout, and `hiraku dashboard --edit` opens the copy in marimo-studio. `--init` also copies the view to `hiraku/dashboard/studio/`. The `dashboard` extra now installs `marimo-studio`.
 - **Breaking:** `hiraku runs` and `Record.runs()` now list only runs attributed to the selected record (the active record, or `--record ID`). Previously they returned every attributed run from the record's tracking source ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 - **Breaking:** Rename the `hiraku.agent` module to `hiraku.context`; import `Context`, `load_context`, and `list_contexts` from `hiraku.context`.
 
@@ -24,7 +30,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Add `hiraku-agent` to start or resume sessions and run one coding-agent worker per assignment, headless or interactive. Workers write event files; the parent validates and submits them after successful exit. Rejected submissions stop execution; not-ready submissions are retained for explicit resume.
 - Add the bundled `collaborative` research workflow and the `workflows` example with count-steps, greet, and scheduler. Autoresearch becomes a Markdown-only workflow. Approval requests are conversational contracts.
 - Add `hiraku git setup ignore|repo|submodule` and `hiraku git status [--json]` for optional metadata versioning after initialization. Submodule setup registers an existing metadata repository with a commit and records `--url` without network access; setup never clones, merges, commits, or pushes.
+- Add optional, collapsible dashboard record navigation sharing selection with the run table and highlighting a selected run's owning record.
+- Add a generic dashboard Markdown viewer accepting any `BaseRecord` subtype with expandable front matter, and show the selected record's Markdown or a selected run's owning record in the dashboard.
+- Add optional dashboard Markdown editing with explicit Save/Cancel, session-local drafts, and detection of external record changes before saving.
+- Add `BaseRecord.save_markdown()` for saving a replacement body with metadata preserved and checking for external changes, independent of dashboard dependencies.
 - Record bodies are `hiraku.markdown.Markdown` strings that select a section by its heading line, e.g. `record.markdown.section("## Change")`, including its subsections. Headings are found with a CommonMark parser (the new `markdown-it-py` dependency), so headings in code blocks, lists, and block quotes do not start sections.
+- Add a trade-off view for comparing two metrics across project runs in Marimo Studio and highlighting runs with strong trade-offs.
 - Add `Record.resolve_tracking_backend()` to build the tracking backend inherited by a record; `TrackingBackend.list_runs()` now lists all attributed runs when `record_id` is omitted.
 - Add `hiraku runs --all` to list all attributed runs from the tracking source resolved for a record ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 - Add `hiraku dashboard`, a local read-only dashboard with a record and run tree, run details with a link to the tracking backend, and a performance plot of runs in execution order. Install it with the `dashboard` extra.
@@ -36,6 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Retain manual not-ready events for retry, reject the reserved workflow ID `runs`, validate instructions before saving, and hide instructions for incompatible or unavailable active workflows. Collaborative research now quotes launch arguments and requires matching entrypoint attribution for run evidence.
 - Retry failed final assignments with `hiraku-agent WORKFLOW --session ID`; successful final assignments are recorded and skipped on resume.
 - Fix `hiraku record list`, `context list` (and other table output) crashing when there are no rows ([issue #96](https://github.com/SwissDataScienceCenter/hiraku/issues/96)).
+- Embed dashboard logos in the HTML entry document so Studio can build the branded view without rejecting local image references.
 - Read every page of MLflow experiments and runs; projects with more than 1,000 runs previously lost the rest.
 
 ### Removed

@@ -235,6 +235,34 @@ class BaseRecord(BaseModel):
         self._persisted_id = self.id
         return target
 
+    def save_markdown(self, markdown: str) -> Self:
+        """Save a new body and return the saved copy, leaving this object unchanged.
+
+        The record must already have a path. Reject changes to its body or
+        metadata on disk since loading, then save through the subtype's API.
+        This check does not lock out concurrent writers during the save.
+
+        Args:
+            markdown: Replacement Markdown body.
+
+        Returns:
+            A saved record of the same subtype with the new body.
+
+        Raises:
+            hiraku.errors.ValidationError: If the record is detached, changed
+                on disk, or fails validation or persistence.
+            hiraku.errors.RecordNotFoundError: If its file no longer exists.
+            pydantic.ValidationError: If the replacement body is invalid.
+        """
+        if self.path is None:
+            raise ValidationError("Save this record to a file before editing it.")
+        current = type(self).load(self.path)
+        if current.to_dict() != self.to_dict() or current.markdown != self.markdown:
+            raise ValidationError("This record changed on disk. Reload before saving.")
+        current.markdown = markdown
+        current.save()
+        return current
+
     def delete(self) -> None:
         """Delete this persisted record from disk.
 

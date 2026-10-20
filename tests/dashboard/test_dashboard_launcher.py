@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import re
 import subprocess
 from pathlib import Path
 
@@ -42,6 +44,46 @@ def test_build_command(options: dict, flags: list[str]) -> None:
     ]
 
 
+@pytest.mark.parametrize("edit", [False, True])
+def test_build_command_leaves_automatic_port_selection_to_marimo(edit: bool) -> None:
+    command = launcher.build_command("python", Path("app.py"), edit=edit)
+
+    assert "--port" not in command
+    assert command[3] == ("edit" if edit else "run")
+    assert command[command.index("--host") + 1] == "127.0.0.1"
+
+
+def test_bundled_views_place_all_interactive_cells() -> None:
+    from marimo._ast.load import load_app
+
+    app = load_app(str(launcher.BUNDLED_NOTEBOOK))
+    assert app._config.css_file
+    assert (launcher.BUNDLED_NOTEBOOK.parent / app._config.css_file).is_file()
+    view = (launcher.BUNDLED_VIEWS / "dashboard" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    placed = set(re.findall(r'<marimo-cell name="([^"]+)">', view))
+    named = {cell.name for cell in app._cell_manager.cells()}
+
+    assert placed <= set(named)
+    assert placed == {
+        "project_name",
+        "refresh_control",
+        "run_table",
+        "record_details",
+        "record_navigation",
+        "run_details",
+        "performance_plot",
+        "tradeoff_plot",
+    }
+    assert {
+        "data_setup",
+        "project_data",
+        "selection_state",
+        "selected_context",
+    } <= named
+
+
 def test_init_dashboard_copies_the_notebook(project: HirakuConfig) -> None:
     notebook = launcher.init_dashboard(project)
 
@@ -49,9 +91,38 @@ def test_init_dashboard_copies_the_notebook(project: HirakuConfig) -> None:
     assert notebook.read_text(encoding="utf-8") == (
         launcher.BUNDLED_NOTEBOOK.read_text(encoding="utf-8")
     )
-    assert (notebook.parent / ".gitignore").read_text() == "__marimo__/\n"
+    assert (notebook.parent / "studio/dashboard/components.css").read_bytes() == (
+        launcher.BUNDLED_VIEWS / "dashboard/components.css"
+    ).read_bytes()
+    view = notebook.parent / "studio" / "dashboard" / "index.html"
+    assert view.read_text(encoding="utf-8") == (
+        (launcher.BUNDLED_VIEWS / "dashboard" / "index.html").read_text(
+            encoding="utf-8"
+        )
+    )
+    for logo in ("sdsc-logo.svg", "sdsc-logo-white.svg"):
+        relative = Path("dashboard") / "assets" / logo
+        assert (notebook.parent / "studio" / relative).read_bytes() == (
+            launcher.BUNDLED_VIEWS / relative
+        ).read_bytes()
+    assert (notebook.parent / ".gitignore").read_text() == (
+        "__marimo__/\nstudio/.locks/\nstudio/*/.artifacts/\n"
+    )
     with pytest.raises(ValidationError, match="already exists"):
         launcher.init_dashboard(project)
+
+
+def test_initialized_studio_view_builds(project: HirakuConfig) -> None:
+    pytest.importorskip("marimo_studio")
+    from marimo_studio.authoring import open_workspace
+
+    notebook = launcher.init_dashboard(project)
+    view = open_workspace(notebook).view("dashboard")
+
+    built = asyncio.run(view.build())
+
+    assert built.revision
+    assert not [issue for issue in built.issues if issue.severity == "error"]
 
 
 @pytest.fixture
@@ -68,6 +139,7 @@ def popen(monkeypatch: pytest.MonkeyPatch) -> dict:
                 env=env,
                 copied=notebook.read_text(encoding="utf-8"),
                 notebook=notebook,
+                view=(notebook.parent / "studio" / "dashboard" / "view.toml").is_file(),
             )
 
         def wait(self, timeout=None):
@@ -88,6 +160,7 @@ def test_serve_dashboard_runs_a_copy_outside_the_project(
     assert popen["notebook"].parent == popen["cwd"]
     assert not popen["cwd"].is_relative_to(project.root)
     assert popen["copied"].startswith("# /// script")
+    assert popen["view"]
     assert popen["env"]["HIRAKU_PROJECT_ROOT"] == str(project.root)
     assert popen["env"]["HIRAKU_DASHBOARD_RECORD"] == "a"
     assert "9000" in popen["command"]
@@ -190,3 +263,21 @@ def test_dashboard_cli_propagates_server_exit_code(
     monkeypatch.chdir(project.root)
 
     assert CliRunner().invoke(main, ["dashboard"]).exit_code == 3
+
+
+def test_dashboard_cli_defaults_to_automatic_port_selection(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    received = {}
+
+    def serve(config, **options):
+        received.update(options)
+        return 0
+
+    monkeypatch.setattr(launcher, "serve_dashboard", serve)
+    monkeypatch.chdir(project.root)
+
+    result = CliRunner().invoke(main, ["dashboard"])
+
+    assert result.exit_code == 0, result.output
+    assert received["port"] is None
