@@ -15,7 +15,7 @@
 import marimo
 
 __generated_with = "0.25.1"
-app = marimo.App(width="wide")
+app = marimo.App()
 
 
 @app.cell
@@ -28,12 +28,6 @@ def _():
     import marimo as mo
 
     from hiraku.config import HirakuConfig
-    from hiraku.dashboard.branding import (
-        logo_data_uri,
-        section_body,
-        section_heading,
-        theme_css,
-    )
     from hiraku.dashboard.data import (
         RECORD_COLUMNS,
         RUN_COLUMNS,
@@ -61,9 +55,6 @@ def _():
         else HirakuConfig.discover(mo.notebook_dir())
     )
     requested_record = os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
-    # Brand colours from theme.css that stay visible on light and dark pages;
-    # the warning orange is reserved for the selected-run ring.
-    palette = ["#5461a6", "#90ca42", "#848484", "#3b82f6", "#ef4444", "#10b981"]
     return (
         alt,
         arrow_frame,
@@ -72,11 +63,9 @@ def _():
         find_run,
         html,
         load,
-        logo_data_uri,
         metric_names,
         mo,
         tradeoff_frame,
-        palette,
         plot_frame,
         RECORD_COLUMNS,
         record_rows,
@@ -85,28 +74,15 @@ def _():
         run_rows,
         run_text,
         safe_url,
-        section_body,
-        section_heading,
         subtree,
-        theme_css,
         tree_rows,
         within,
     )
 
 
 @app.cell
-def header(config, logo_data_uri, mo, theme_css):
-    mo.Html(
-        f"<style>{theme_css()}</style>"
-        '<header class="hk-header"><div class="hk-shell hk-header-inner">'
-        f'<img class="hk-brand-logo hk-logo-light" src="{logo_data_uri()}" '
-        'alt="Swiss Data Science Center">'
-        f'<img class="hk-brand-logo hk-logo-dark" '
-        f'src="{logo_data_uri(reversed_logo=True)}" alt="Swiss Data Science Center">'
-        '<div><h1 class="hk-brand-title">Hiraku dashboard</h1>'
-        '<p class="hk-brand-subtitle">Research records and tracked runs · '
-        f"{config.root.name}</p></div></div></header>"
-    )
+def project_name(config, mo):
+    mo.plain_text(config.root.name)
     return
 
 
@@ -167,19 +143,12 @@ def _(
 
 
 @app.cell
-def tree_heading(section_heading):
-    section_heading("tree", "Runs", open=True)
-    return
-
-
-@app.cell
 def tree_section(
     initial_record,
     mo,
     project,
     records_df,
     runs_df,
-    section_body,
     tree_metric,
     tree_rows,
 ):
@@ -219,7 +188,7 @@ def tree_section(
         _messages.append(
             mo.md("No records yet. Create one with `hiraku record create`.")
         )
-    section_body("tree", mo.vstack([*_messages, tree]))
+    mo.vstack([*_messages, tree])
     return (tree,)
 
 
@@ -239,18 +208,11 @@ def _(find_run, get_scope, paths, runs_df, set_scope, tree, within):
 
 
 @app.cell
-def run_heading(section_heading):
-    section_heading("run", "Run")
-    return
-
-
-@app.cell
 def run_section(
     html,
     mo,
     run_text,
     safe_url,
-    section_body,
     selected_run,
 ):
     if selected_run is None:
@@ -262,19 +224,10 @@ def run_section(
         _content = mo.vstack(
             [
                 mo.md(f"[Open in {_source} ↗]({_url})") if _url else mo.md(""),
-                mo.Html(
-                    f'<pre class="hk-run-text">{html.escape(run_text(selected_run))}'
-                    "</pre>"
-                ),
+                mo.Html(f"<pre>{html.escape(run_text(selected_run))}</pre>"),
             ]
         )
-    section_body("run", _content)
-    return
-
-
-@app.cell
-def plot_heading(section_heading):
-    section_heading("plot", "Metric analysis")
+    mo.as_html(_content)
     return
 
 
@@ -321,12 +274,10 @@ def plot_section(
     alt,
     metric,
     mo,
-    palette,
     paths,
     plot_frame,
     runs_df,
     scope,
-    section_body,
     selected_run,
     subtree,
     tradeoff_frame,
@@ -360,11 +311,9 @@ def plot_section(
                 ),
                 y=alt.Y("value:Q", title=metric.value, scale=alt.Scale(zero=False)),
             )
-            _line = _base.mark_line(color="#dddeec", strokeWidth=2)
+            _line = _base.mark_line(strokeWidth=2, opacity=0.3)
             _dots = _base.mark_point(filled=True, size=90, opacity=1).encode(
-                color=alt.Color(
-                    "record:N", scale=alt.Scale(range=palette), title="Record"
-                ),
+                color=alt.Color("record:N", title="Record"),
                 tooltip=[
                     alt.Tooltip("number:Q", title="Run #"),
                     alt.Tooltip("run:N", title="Run"),
@@ -384,8 +333,6 @@ def plot_section(
                 alt.layer(*_layers)
                 .properties(width="container", height=340)
                 .configure(background="transparent")
-                .configure_axis(labelColor="#848484", titleColor="#848484")
-                .configure_legend(labelColor="#848484", titleColor="#848484")
                 .configure_view(stroke=None)
             )
         _content = mo.vstack([*_controls, mo.md(" ".join(_notes)), _chart])
@@ -430,9 +377,7 @@ def plot_section(
                         title=f"{y_metric.value} ({y_objective.value})",
                         scale=alt.Scale(zero=False),
                     ),
-                    color=alt.Color(
-                        "record:N", scale=alt.Scale(range=palette), title="Record"
-                    ),
+                    color=alt.Color("record:N", title="Record"),
                     tooltip=[
                         alt.Tooltip("run:N", title="Run"),
                         alt.Tooltip("record:N", title="Record"),
@@ -451,8 +396,6 @@ def plot_section(
                     .properties(width="container", height=420)
                     .interactive()
                     .configure(background="transparent")
-                    .configure_axis(labelColor="#848484", titleColor="#848484")
-                    .configure_legend(labelColor="#848484", titleColor="#848484")
                     .configure_view(stroke=None)
                 )
                 _table = _highlighted.drop(columns="non_dominated").rename(
@@ -476,19 +419,7 @@ def plot_section(
                     ]
                 )
         _content = mo.vstack([*_controls, _comparison])
-    section_body("plot", _content)
-    return
-
-
-@app.cell
-def footer(logo_data_uri, mo):
-    mo.Html(
-        '<footer class="hk-footer"><div class="hk-shell hk-footer-inner">'
-        f'<img src="{logo_data_uri(reversed_logo=True)}" '
-        'alt="Swiss Data Science Center">'
-        '<p class="hk-footer-label">Swiss Data Science Center</p>'
-        "</div></footer>"
-    )
+    mo.as_html(_content)
     return
 
 

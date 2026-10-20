@@ -15,7 +15,11 @@ def test_app_runs_every_cell_against_a_project(
     monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "a")
     from hiraku.dashboard.app import app
 
-    _, definitions = app.run()
+    outputs, definitions = app.run()
+
+    rendered = "\n".join(getattr(output, "text", "") for output in outputs)
+    assert "Select a run in the tree to see its details." in rendered
+    assert "numbered by execution order." in rendered
 
     assert definitions["scope"] == "a"
     assert definitions["selected_run"] is None

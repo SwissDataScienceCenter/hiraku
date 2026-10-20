@@ -43,12 +43,10 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         f"hiraku/dashboard/{name}"
         for name in (
             "app.py",
-            "branding.py",
             "data.py",
             "launcher.py",
-            "theme.css",
-            "assets/sdsc-logo.svg",
-            "assets/sdsc-logo-white.svg",
+            "studio/dashboard/assets/sdsc-logo.svg",
+            "studio/dashboard/assets/sdsc-logo-white.svg",
             "studio/dashboard/view.toml",
             "studio/dashboard/index.html",
             "studio/dashboard/style.css",

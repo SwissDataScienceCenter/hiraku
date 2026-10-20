@@ -77,16 +77,22 @@ nav a[aria-current="page"] { background: var(--primary-color); color: var(--whit
   transition: transform 300ms ease-in-out;
 }
 .topbar.is-hidden { transform: translateY(-100%); }
-.topbar .hk-header { background: transparent; border: 0; }
-.topbar .hk-header-inner { min-height: 72px; gap: 1rem; }
-.topbar .hk-brand-logo { height: 40px; }
+.topbar .hk-header-inner { min-height: 72px; display: flex; align-items: center; gap: 1rem; }
+.topbar .hk-brand-logo { height: 40px; width: auto; }
+.hk-logo-dark { display: none; }
 .topbar .hk-brand-title { color: var(--secondary-color); font: 500 1.25rem/1.3 var(--font-heading); }
 .topbar .hk-brand-subtitle {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem;
   margin-top: 0.125rem;
   color: var(--text-secondary-accessible);
   font-size: 0.8rem;
 }
 .topbar marimo-cell { margin: 0; }
+.topbar marimo-cell[name="project_name"] pre { margin: 0; font: inherit; white-space: pre-wrap; }
+.topbar .hk-brand-title { margin: 0; }
 .topbar button { white-space: nowrap; }
 .eyebrow {
   margin: 0;
@@ -101,9 +107,7 @@ nav a[aria-current="page"] { background: var(--primary-color); color: var(--whit
 .card { min-width: 0; padding: 1.5rem; background: var(--card); }
 .card h2 { margin: 0 0 1rem; }
 marimo-cell { display: block; --marimo-output-max-height: none; }
-marimo-cell:has(.hk-section-heading) { display: none; }
-.hk-section-body { color: var(--foreground); }
-.hk-run-text {
+marimo-cell[name="run_section"] pre {
   padding: 1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-input);
@@ -112,7 +116,8 @@ marimo-cell:has(.hk-section-heading) { display: none; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.hk-footer { margin-top: 3rem; background: var(--secondary-color); }
+.hk-footer { margin-top: 3rem; padding: 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 2rem; background: var(--secondary-color); }
+.hk-footer img { height: 36px; width: auto; max-width: 180px; }
 .hk-footer-label { color: var(--white); }
 body.dark-theme { color-scheme: dark; }
 body.dark-theme #app-shell h1, body.dark-theme #app-shell h2,
@@ -120,7 +125,8 @@ body.dark-theme #app-shell h3, body.dark-theme #app-shell h4,
 body.dark-theme #app-shell h5, body.dark-theme #app-shell h6,
 body.dark-theme .topbar .hk-brand-title { color: var(--foreground); }
 body.dark-theme nav a:hover { background: var(--card); color: var(--white); }
-body.dark-theme .topbar .hk-header { background: transparent; }
+body.dark-theme .hk-logo-light { display: none; }
+body.dark-theme .hk-logo-dark { display: block; }
 body.dark-theme button { border-color: var(--primary-color); }
 @media (max-width: 760px) {
   .topbar .hk-header-inner { min-height: 60px; }

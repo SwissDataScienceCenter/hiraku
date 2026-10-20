@@ -46,16 +46,22 @@ above its output. The code is read-only here; use the edit mode to change it.
 hiraku dashboard --init
 ```
 
-Copies the bundled notebook to `hiraku/dashboard/app.py` and both Studio views
-to `hiraku/dashboard/studio/`, with a `.gitignore` for marimo's
-`__marimo__/` caches and Studio's build state. From then on,
+Copies the bundled notebook to `hiraku/dashboard/app.py` and the Studio view,
+including its HTML, CSS, and logos, to `hiraku/dashboard/studio/`, with a
+`.gitignore` for marimo's `__marimo__/` caches and Studio's build state. From then on,
 `hiraku dashboard` serves this copy instead of the bundled notebook, so commit
 it with the project. `--init`
 refuses to overwrite an existing copy; delete `hiraku/dashboard/` to start
 over from the bundled version.
 
-The copy imports its data and styling helpers from the installed
-`hiraku.dashboard` package, so it stays short and picks up fixes to them.
+The notebook imports data helpers from the installed `hiraku.dashboard`
+package. Branding and page layout live in `studio/dashboard/index.html` and
+its CSS and assets; edit those files to customize the presentation. Notebook
+cells handle data loading, selection, controls, and computed outputs.
+
+Studio permits local CSS and JavaScript references in the HTML entry document;
+images must be inline. The bundled HTML embeds its logos as SVG data URLs.
+Keep replacement images inline when customizing the view.
 
 ### Edit
 

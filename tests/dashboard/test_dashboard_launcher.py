@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import subprocess
 from pathlib import Path
@@ -79,11 +80,29 @@ def test_init_dashboard_copies_the_notebook(project: HirakuConfig) -> None:
             encoding="utf-8"
         )
     )
+    for logo in ("sdsc-logo.svg", "sdsc-logo-white.svg"):
+        relative = Path("dashboard") / "assets" / logo
+        assert (notebook.parent / "studio" / relative).read_bytes() == (
+            launcher.BUNDLED_VIEWS / relative
+        ).read_bytes()
     assert (notebook.parent / ".gitignore").read_text() == (
         "__marimo__/\nstudio/.locks/\nstudio/*/.artifacts/\n"
     )
     with pytest.raises(ValidationError, match="already exists"):
         launcher.init_dashboard(project)
+
+
+def test_initialized_studio_view_builds(project: HirakuConfig) -> None:
+    pytest.importorskip("marimo_studio")
+    from marimo_studio.authoring import open_workspace
+
+    notebook = launcher.init_dashboard(project)
+    view = open_workspace(notebook).view("dashboard")
+
+    built = asyncio.run(view.build())
+
+    assert built.revision
+    assert not [issue for issue in built.issues if issue.severity == "error"]
 
 
 @pytest.fixture
