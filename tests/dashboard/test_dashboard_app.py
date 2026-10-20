@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from hiraku.config import HirakuConfig
+from hiraku.context import Context
 from hiraku.dashboard.data import tree_rows
 
 pytest.importorskip("marimo")
@@ -127,3 +128,51 @@ def test_project_copy_finds_its_project_without_the_launcher(
     _, definitions = app.run()
 
     assert definitions["config"].root == project.root
+
+
+def test_context_selection_renders_body_independently_and_refreshes(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    for identifier in ("alpha", "beta"):
+        Context(id=identifier, markdown=f"## Context {identifier}").save(
+            project.contexts_dir / identifier / "context.md"
+        )
+    from hiraku.dashboard.app import app
+
+    _, initial = app.run()
+    assert initial["selected_context"].id == "alpha"
+    initial["context_selector"]._update(["beta"])
+    outputs, selected = app.run(defs={"context_selector": initial["context_selector"]})
+    assert selected["selected_context"].id == "beta"
+    assert selected["scope"] == initial["scope"]
+    assert "Context beta" in "\n".join(getattr(o, "text", "") for o in outputs)
+
+    context = Context.load(project.contexts_dir / "beta" / "context.md")
+    context.markdown = "Updated context"
+    context.save()
+    initial["refresh"]._update(1)
+    _, refreshed = app.run(defs={"refresh": initial["refresh"]})
+    assert next(c for c in refreshed["contexts"] if c.id == "beta").markdown == (
+        "Updated context"
+    )
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_context_views_handle_missing_and_invalid_contexts(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch, invalid: bool
+) -> None:
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    if invalid:
+        path = project.contexts_dir / "broken" / "context.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("---\nid: [\n---\n")
+    from hiraku.dashboard.app import app
+
+    outputs, definitions = app.run()
+    text = "\n".join(getattr(o, "text", "") for o in outputs)
+    assert definitions["selected_context"] is None
+    assert definitions["context_selector"].value is None
+    assert ("Contexts unavailable" if invalid else "No contexts yet") in text
+    assert "No context selected." in text
+    assert len(definitions["runs_df"]) == 5

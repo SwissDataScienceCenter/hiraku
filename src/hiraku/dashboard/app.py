@@ -26,8 +26,10 @@ with app.setup:
 
     from hiraku.base import BaseRecord
     from hiraku.config import HirakuConfig
+    from hiraku.context import list_contexts
     from hiraku.dashboard import components as hc
     from hiraku.dashboard import data as hd
+    from hiraku.errors import HirakuError
 
 
 @app.cell
@@ -63,6 +65,46 @@ def project_data(config, refresh):
     runs_df = hd.arrow_frame(hd.run_rows(project), hd.RUN_COLUMNS)
     records_df = hd.arrow_frame(hd.record_rows(project.records), hd.RECORD_COLUMNS)
     return project, records_df, runs_df
+
+
+@app.cell
+def context_data(config, refresh):
+    _refreshes = refresh.value
+    context_error = ""
+    try:
+        contexts = list_contexts(config=config)
+    except (HirakuError, OSError, ValueError) as _exc:
+        contexts = []
+        context_error = f"Contexts unavailable: {_exc}"
+    return context_error, contexts
+
+
+@app.cell
+def context_list(context_error, contexts):
+    context_selector = hc.record_selector(contexts, label="Context")
+    _messages = []
+    if context_error:
+        _messages.append(mo.callout(mo.plain_text(context_error), kind="warn"))
+    elif not contexts:
+        _messages.append(
+            mo.md("No contexts yet. Create one with `hiraku context create`.")
+        )
+    mo.vstack([*_messages, context_selector])
+    return (context_selector,)
+
+
+@app.cell
+def context_details(context_selector, contexts):
+    selected_context = next(
+        (context for context in contexts if context.id == context_selector.value), None
+    )
+    _content = (
+        mo.md("No context selected.")
+        if selected_context is None
+        else hc.markdown_view(selected_context)
+    )
+    mo.vstack([_content])
+    return (selected_context,)
 
 
 @app.cell
@@ -112,7 +154,7 @@ def run_table(get_selection, project, records_df, runs_df, select_key, tree_metr
 
 
 @app.cell
-def selected_context(get_selection, project, runs_df):
+def record_selection(get_selection, project, runs_df):
     _key, scope = get_selection()
     _key = _key or ""
     _kind, _, _identifier = _key.partition(":")

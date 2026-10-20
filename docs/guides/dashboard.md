@@ -75,6 +75,19 @@ Studio permits local CSS and JavaScript references in the HTML entry document;
 images must be inline. The bundled HTML embeds its logos as SVG data URLs.
 Keep replacement images inline when customizing the view.
 
+### Contexts
+
+The **Contexts** selector lists project contexts independently of the record/run
+selection. Select a context to read its Markdown and expandable front matter.
+The view is read-only. **Refresh** reloads contexts after files change on disk;
+the selector starts with the first available context. Empty projects show a
+creation hint, and invalid context files show an error without hiding runs.
+
+In a custom Studio layout, place the `context_list` and `context_details` cells
+independently. The reusable `record_selector(records, label="Context")` component
+accepts loaded records and returns their selected ID; `markdown_view` renders
+the matching context.
+
 ### Edit
 
 ```bash

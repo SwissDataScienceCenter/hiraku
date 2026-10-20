@@ -25,6 +25,19 @@ from ..record import Record
 from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
 
 
+def record_selector(records: Sequence[BaseRecord], *, label: str) -> mo.ui.dropdown:
+    """Select a record ID independently of other dashboard selections."""
+    identifiers = [record.id for record in records]
+    return mo.ui.dropdown(
+        identifiers,
+        value=next(iter(identifiers), None),
+        label=label,
+        searchable=True,
+        full_width=True,
+        disabled=not identifiers,
+    )
+
+
 def markdown_view(
     record: BaseRecord | None,
     *,
