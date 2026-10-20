@@ -24,6 +24,7 @@ with app.setup:
 
     import marimo as mo
 
+    from hiraku.base import BaseRecord
     from hiraku.config import HirakuConfig
     from hiraku.dashboard import components as hc
     from hiraku.dashboard import data as hd
@@ -113,8 +114,19 @@ def selected_context(get_scope, paths, project, runs_df, set_scope, tree):
 
 
 @app.cell
-def record_details(selected_record):
-    hc.markdown_view(selected_record)
+def record_editor():
+    get_editor_revision, _set_editor_revision = mo.state(0, allow_self_loops=True)
+    markdown_editor = hc.MarkdownEditor(
+        on_save=BaseRecord.save_markdown,
+        on_change=lambda: _set_editor_revision(lambda revision: revision + 1),
+    )
+    return get_editor_revision, markdown_editor
+
+
+@app.cell
+def record_details(get_editor_revision, markdown_editor, selected_record):
+    get_editor_revision()
+    hc.markdown_view(selected_record, editor=markdown_editor)
     return
 
 

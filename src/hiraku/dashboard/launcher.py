@@ -61,7 +61,7 @@ def build_command(
 ) -> list[str]:
     """Return the marimo command serving ``notebook`` on localhost.
 
-    The read-only app runs without a token; the editor executes arbitrary code,
+    The app runs without a token; the notebook editor executes arbitrary code,
     so it keeps marimo's access token. ``include_code`` only affects the app,
     since the editor always shows the code. Without ``port``, marimo selects
     a free port automatically.

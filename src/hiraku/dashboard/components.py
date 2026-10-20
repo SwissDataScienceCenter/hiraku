@@ -1,15 +1,17 @@
 """Reusable marimo widgets and rendering for Hiraku dashboards.
 
 Components consume prepared tables or BaseRecord objects without loading or
-saving files or querying tracking sources. The notebook owns reactive state
-and reads widget values before passing them to the renderers. Branding stays
-in the Studio view.
+saving files or querying tracking sources. The notebook owns selection state;
+the optional Markdown editor owns drafts and delegates saves to a callback.
+Branding stays in the Studio view.
 """
 
 from __future__ import annotations
 
 import html
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import altair as alt
@@ -17,6 +19,7 @@ import marimo as mo
 import pandas as pd
 
 from ..base import BaseRecord
+from ..errors import HirakuError
 from ..io import dump_yaml
 from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
 
@@ -24,18 +27,131 @@ from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
 def markdown_view(
     record: BaseRecord | None,
     *,
+    editor: MarkdownEditor | None = None,
     empty_message: str = "This record has no Markdown.",
 ) -> mo.Html:
     """Render a BaseRecord's front matter and Markdown body.
 
     Accept any subtype, including contexts and research records. Loading,
-    parsing, and persistence belong to the caller.
+    parsing, and persistence belong to the caller. Pass an editor to opt into
+    editing; without one this is a read-only viewer.
     """
+    if editor is not None:
+        return editor.render(record, empty_message=empty_message)
     if record is None:
         return mo.md("No record selected.")
     body = mo.md(record.markdown if record.markdown.strip() else empty_message)
     metadata = mo.Html(f"<pre>{html.escape(dump_yaml(record.to_dict()))}</pre>")
     return mo.vstack([mo.accordion({record.id: metadata}), body])
+
+
+@dataclass
+class _MarkdownDraft:
+    record: BaseRecord
+    markdown: str
+    error: str = ""
+
+
+class MarkdownEditor:
+    """Session-local Markdown drafts with explicit Save and Cancel controls.
+
+    Create once in a notebook cell, then pass to ``markdown_view`` in another.
+    The callback persists a draft and returns the saved record. Only persisted
+    records are editable; front matter remains read-only.
+    """
+
+    def __init__(
+        self,
+        on_save: Callable[[BaseRecord, str], BaseRecord],
+        on_change: Callable[[], None] = lambda: None,
+    ) -> None:
+        self._on_save = on_save
+        self._on_change = on_change
+        self._drafts: dict[Path, _MarkdownDraft] = {}
+        # Marimo's widget registry holds weak references.
+        self._widgets: list[Any] = []
+
+    def _refresh(self) -> None:
+        self._on_change()
+
+    def _start(self, record: BaseRecord) -> None:
+        assert record.path is not None
+        self._drafts[record.path] = _MarkdownDraft(
+            record.model_copy(deep=True), str(record.markdown)
+        )
+        self._refresh()
+
+    def _cancel(self, path: Path) -> None:
+        self._drafts.pop(path, None)
+        self._refresh()
+
+    def _save(self, record: BaseRecord) -> None:
+        draft = self._drafts[record.path]
+        try:
+            saved = self._on_save(draft.record, draft.markdown)
+        except (HirakuError, OSError, ValueError) as exc:
+            draft.error = str(exc)
+            self._refresh()
+            return
+        record.markdown = saved.markdown
+        self._cancel(record.path)
+
+    def render(
+        self,
+        record: BaseRecord | None,
+        *,
+        empty_message: str = "This record has no Markdown.",
+    ) -> mo.Html:
+        """Show the record or its draft, retaining drafts across selections."""
+        if record is None:
+            self._widgets = []
+            return markdown_view(None)
+        draft = self._drafts.get(record.path)
+        if draft is None:
+            edit = mo.ui.button(
+                label="✎",
+                tooltip="Edit Markdown",
+                disabled=record.path is None,
+                on_click=lambda _: self._start(record),
+            )
+            self._widgets = [edit]
+            controls = mo.hstack([edit], justify="end")
+            return mo.vstack(
+                [
+                    mo.Html(f'<div class="hiraku-markdown-controls">{controls}</div>'),
+                    markdown_view(record, empty_message=empty_message),
+                ]
+            )
+        editor = mo.ui.code_editor(
+            value=draft.markdown,
+            language="markdown",
+            min_height=250,
+            on_change=lambda value: setattr(draft, "markdown", value),
+        )
+        cancel = mo.ui.button(
+            label="Cancel", on_click=lambda _: self._cancel(record.path)
+        )
+        save = mo.ui.button(
+            label="Save", kind="success", on_click=lambda _: self._save(record)
+        )
+        self._widgets = [editor, cancel, save]
+        controls = mo.hstack([cancel, save], justify="end")
+        metadata = mo.Html(
+            f"<pre>{html.escape(dump_yaml(draft.record.to_dict()))}</pre>"
+        )
+        message = (
+            mo.callout(mo.plain_text(draft.error), kind="danger")
+            if draft.error
+            else mo.md("Draft — changes are saved only when you click Save.")
+        )
+        return mo.vstack(
+            [
+                mo.Html(f'<div class="hiraku-markdown-controls">{controls}</div>'),
+                mo.accordion({record.id: metadata}),
+                editor,
+                message,
+            ]
+        )
 
 
 def run_table(

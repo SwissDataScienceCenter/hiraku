@@ -18,7 +18,7 @@ Run every command from inside a Hiraku project.
 
 | Command | Mode | What it does |
 | --- | --- | --- |
-| `hiraku dashboard` | View | Serves the read-only dashboard. |
+| `hiraku dashboard` | View | Serves the dashboard with record Markdown editing. |
 | `hiraku dashboard --include-code` | View with code | Same page; marimo's menu can also show each cell's code. |
 | `hiraku dashboard --init` | Customize | Copies the notebook to `hiraku/dashboard/app.py` and exits. |
 | `hiraku dashboard --edit` | Edit | Opens that copy in marimo-studio. |
@@ -88,7 +88,7 @@ named cells on the page; add a named cell there to show it on the dashboard. `--
 run `--init` first, or both at once with `hiraku dashboard --init --edit`.
 Saved changes appear the next time you run `hiraku dashboard`.
 
-The editor runs arbitrary code, so, unlike the read-only page, it is protected
+The notebook editor runs arbitrary code, so, unlike the dashboard, it is protected
 by marimo's access token, which is part of the URL it prints and opens. You can
 also open the copy without Hiraku's CLI, with
 `marimo edit hiraku/dashboard/app.py`; it then finds its project from its own
@@ -110,6 +110,11 @@ location.
 **Record**
 :   Expandable YAML front matter labeled with the selected record's ID,
     followed by its Markdown body.
+    Click the pen to edit the body, then **Save** to write it back or **Cancel**
+    to discard the draft. Front matter stays read-only. Drafts remain available
+    when switching between records in the same session. Save errors keep the
+    draft open; if the file changed externally, copy your draft before canceling
+    and refreshing to load the latest version.
     Selecting a run shows its owning record, while the metric analysis keeps
     the selected comparison subtree when that run lies within it.
 
@@ -139,6 +144,17 @@ hc.markdown_view(context)
 Loading and persistence remain with the caller. The component does not load,
 parse, or save files, and rendering and selection do not change record objects
 or Markdown files. Passing `None` displays the empty selection state.
+
+For editing, create `hc.MarkdownEditor(on_save=BaseRecord.save_markdown, on_change=...)` once
+in a notebook cell and call `hc.markdown_view(record, editor=editor)` in a
+separate display cell. Omitting `editor` keeps the viewer read-only.
+Wire `on_change` to a `mo.state` setter with `allow_self_loops=True`, and read
+its getter in the display cell so button actions rerender it. The core
+`BaseRecord.save_markdown` method saves through the record's own API and rejects
+changes made on disk since editing began. The editor changes
+the displayed object's body only after a successful save. Detached records
+remain read-only until saved to a path. Drafts are held in memory, so reloading
+or closing the session discards them.
 
 ## Run and record tables
 

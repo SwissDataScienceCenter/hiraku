@@ -17,7 +17,14 @@
 .eyebrow { margin-bottom: 0.75rem; }
 h1 { margin: 0 0 1rem; }
 .intro { margin-bottom: 2rem; }
-.record-details { margin-top: 1.5rem; }
+.record-details { position: relative; margin-top: 1.5rem; }
+.record-details > h2 { min-height: 2rem; padding-right: 10rem; }
+.record-details marimo-cell[name="record_details"] .output { position: static; }
+.record-details .hiraku-markdown-controls {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+}
 @media (max-width: 900px) {
   #app-shell { padding: 0 1.5rem 2.5rem; }
   .topbar { margin: 0 -1.5rem 2rem; padding: 0.5rem 1.5rem; }
@@ -27,4 +34,5 @@ h1 { margin: 0 0 1rem; }
   #app-shell { padding: 0 1rem 2rem; }
   .topbar { margin: 0 -1rem 2rem; padding: 0.5rem 1rem; }
   .card { padding: 1rem; }
+  .record-details .hiraku-markdown-controls { top: 1rem; right: 1rem; }
 }

@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError as ModelValidationError
 
+from hiraku.agent import Context
 from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
 from hiraku.errors import RecordExistsError, ValidationError
@@ -50,3 +52,71 @@ def test_malformed_records_are_rejected(tmp_path: Path, content: str) -> None:
     path.write_text(content)
     with pytest.raises(ValidationError):
         Record.load(path)
+
+
+@pytest.mark.parametrize("record_type", [BaseRecord, Context, Record])
+def test_save_markdown_preserves_metadata_and_type(record_type, tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    record = record_type(id="notes", markdown="Original", custom=["value"])
+    record.save(config.records_dir / "notes" / "notes.md")
+    metadata = record.to_dict()
+
+    saved = record.save_markdown("## New body\n\n{{placeholder}}")
+
+    assert type(saved) is record_type
+    assert record.markdown == "Original"
+    assert saved.to_dict() == metadata
+    loaded = record_type.load(record.path)
+    assert loaded.markdown == "## New body\n\n{{placeholder}}"
+    assert loaded.to_dict() == metadata
+
+
+@pytest.mark.parametrize("field", ["markdown", "title"])
+def test_save_markdown_rejects_external_changes(tmp_path: Path, field: str) -> None:
+    record = BaseRecord(id="notes", markdown="Original")
+    record.save(tmp_path / "notes.md")
+    external = BaseRecord.load(record.path)
+    setattr(external, field, "External change")
+    external.save()
+    contents = record.path.read_bytes()
+
+    with pytest.raises(ValidationError, match="changed on disk"):
+        record.save_markdown("My draft")
+
+    assert record.path.read_bytes() == contents
+    assert record.markdown == "Original"
+
+
+def test_save_markdown_rejects_detached_records() -> None:
+    with pytest.raises(ValidationError, match="before editing"):
+        BaseRecord(id="notes").save_markdown("Draft")
+
+
+def test_save_markdown_validates_body_before_writing(tmp_path: Path) -> None:
+    record = BaseRecord(id="notes", markdown="Original")
+    record.save(tmp_path / "notes.md")
+    contents = record.path.read_bytes()
+
+    with pytest.raises(ModelValidationError, match="valid string"):
+        record.save_markdown(None)
+
+    assert record.path.read_bytes() == contents
+    assert record.markdown == "Original"
+
+
+def test_save_markdown_leaves_original_unchanged_on_save_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = BaseRecord(id="notes", markdown="Original")
+    record.save(tmp_path / "notes.md")
+    contents = record.path.read_bytes()
+
+    def fail_save(self) -> None:
+        raise ValidationError("Cannot save record")
+
+    monkeypatch.setattr(BaseRecord, "save", fail_save)
+    with pytest.raises(ValidationError, match="Cannot save record"):
+        record.save_markdown("Draft")
+
+    assert record.path.read_bytes() == contents
+    assert record.markdown == "Original"
