@@ -6,10 +6,11 @@ the complete walkthrough.
 
 Add `--with-results` to include prepared research records and measured tracked runs.
 
-Initialize in an empty directory (Git is optional):
+Create the example project (Git is optional):
 
 ```bash
-uv run hiraku clone heart-disease . --with-results
+hiraku clone heart-disease --with-results
+cd heart-disease
 ```
 
 The results overlay includes four records and nine runs in `runs.csv`.
@@ -30,7 +31,8 @@ Failed generation keeps the initialized project and any completed runs.
 For two steps, opt into copying the generator:
 
 ```bash
-hiraku clone heart-disease . --with-generator
+hiraku clone heart-disease --with-generator
+cd heart-disease
 uv run --with hiraku python generate_results.py
 ```
 

@@ -17,10 +17,8 @@ Hiraku checkout: `uv tool install --force '.[mlflow]'`). Then create and
 initialize a new project:
 
 ```bash
-mkdir digits-mlflow
+hiraku clone digits-mlflow --git
 cd digits-mlflow
-git init
-hiraku clone digits-mlflow .
 uv sync
 git add .
 git commit -m "initialize Digits MLflow example"
@@ -30,10 +28,8 @@ Alternatively, to browse the example without training, install the `dashboard`
 extra too and initialize a separate project with the six bundled runs:
 
 ```bash
-mkdir digits-dashboard
+hiraku clone digits-mlflow digits-dashboard --with-results
 cd digits-dashboard
-git init
-hiraku clone digits-mlflow . --with-results
 hiraku dashboard --record digits
 ```
 
