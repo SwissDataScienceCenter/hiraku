@@ -70,9 +70,8 @@ Run {{iterations}} experiments on {{task}}.
 
 
 LOOP_PY = r"""from typing import Annotated
-from pydantic import BaseModel, Field
 from hiraku.markdown import render
-from hiraku.workflows import Arguments, State, Instruction, Workflow, event, phase
+from hiraku.workflows import State, Instruction, Workflow, event, phase
 
 
 class Inputs(State):
@@ -81,16 +80,14 @@ class Inputs(State):
     iterations: int
 
 
-class StartArguments(Arguments):
-    task: Annotated[str, Field(description="Task record")]
-    iterations: Annotated[int, Field(description="Experiments to run")] = 5
-
-
 class Loop(Workflow):
     @event(source=None, dest="done")
-    def start(self, args: StartArguments) -> Inputs:
-        task = args.task
-        iterations = args.iterations
+    def start(
+        self,
+        *,
+        task: Annotated[str, "Task record"],
+        iterations: Annotated[int, "Experiments to run"] = 5,
+    ) -> Inputs:
         return Inputs(task=task, iterations=iterations)
 
     @phase("done", final=True)
@@ -103,9 +100,8 @@ WORKFLOW = Loop
 """
 
 
-ECHO_PY = r'''from pydantic import BaseModel
-from hiraku.errors import EventRejected
-from hiraku.workflows import Arguments, State, Instruction, Workflow, event, phase
+ECHO_PY = r'''from hiraku.errors import EventRejected
+from hiraku.workflows import State, Instruction, Workflow, event, phase
 
 
 class Task(State):
@@ -114,19 +110,10 @@ class Task(State):
     summary: str | None = None
 
 
-class StartArguments(Arguments):
-    task: str
-
-
-class CompleteArguments(Arguments):
-    summary: str
-
-
 class Echo(Workflow):
     @event(source=None, dest="working")
-    def start(self, args: StartArguments) -> Task:
+    def start(self, *, task: str) -> Task:
         """Start working on a task."""
-        task = args.task
         return Task(task=task)
 
     @phase("working")
@@ -138,9 +125,8 @@ class Echo(Workflow):
         return Instruction("Report the summary.", context={"summary": task.summary})
 
     @event(source="working", dest="done")
-    def complete(self, task: Task, args: CompleteArguments) -> Task:
+    def complete(self, task: Task, *, summary: str) -> Task:
         """Report what was done."""
-        summary = args.summary
         if not summary.strip():
             raise EventRejected("Summarize what was done")
         task = task.model_copy(update={"summary": summary})
@@ -219,6 +205,9 @@ def test_tools_and_prompts_are_fixed_per_workflow(config: HirakuConfig) -> None:
     loop = tools["loop"].input_schema
     assert loop["required"] == ["task"]
     assert loop["properties"]["iterations"]["default"] == 5
+    assert loop["properties"]["task"]["description"] == "Task record"
+    assert loop["properties"]["iterations"]["description"] == "Experiments to run"
+    assert prompts["loop"].arguments[0].description == "Task record"
     arguments = {item.name: item.required for item in prompts["loop"].arguments}
     assert arguments == {"task": True, "iterations": False}
     assert tools["collaborative"].description.startswith("Start a collaborative")

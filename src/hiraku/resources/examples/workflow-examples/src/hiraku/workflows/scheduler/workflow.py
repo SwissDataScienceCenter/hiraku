@@ -11,7 +11,7 @@ from pydantic import Field
 from hiraku.errors import EventRejected
 from hiraku.markdown import render
 from hiraku.record import Record, load_record
-from hiraku.workflows import Arguments, Instruction, State, Workflow, event, phase
+from hiraku.workflows import Instruction, State, Workflow, event, phase
 
 
 class Queue(State):
@@ -20,19 +20,6 @@ class Queue(State):
     target: int
     current: str | None = None
     baseline: int = 0
-
-
-class StartArguments(Arguments):
-    records: Annotated[
-        int, Field(gt=0, le=20, description="Number of records to create.")
-    ] = 3
-    target: Annotated[
-        int, Field(gt=0, le=10, description="Count each record must reach.")
-    ] = 2
-
-
-class IncrementedArguments(Arguments):
-    record_id: Annotated[str, Field(description="ID of the assigned record.")]
 
 
 class Scheduler(Workflow):
@@ -45,10 +32,13 @@ class Scheduler(Workflow):
     """
 
     @event(source=None, dest="working")
-    def start(self, args: StartArguments) -> Queue:
+    def start(
+        self,
+        *,
+        records: Annotated[int, "Number of records to create.", Field(gt=0, le=20)] = 3,
+        target: Annotated[int, "Count each record must reach.", Field(gt=0, le=10)] = 2,
+    ) -> Queue:
         """Create records with random priorities and start working through them."""
-        records = args.records
-        target = args.target
         parent = Record.create(
             f"scheduler-{secrets.token_hex(3)}",
             type="task",
@@ -97,9 +87,13 @@ class Scheduler(Workflow):
         )
 
     @event(source="working", dest=["working", "finished"])
-    def incremented(self, queue: Queue, args: IncrementedArguments) -> Queue:
+    def incremented(
+        self,
+        queue: Queue,
+        *,
+        record_id: Annotated[str, "ID of the assigned record."],
+    ) -> Queue:
         """Report that the assigned record's count is one higher."""
-        record_id = args.record_id
         if record_id != queue.current:
             raise EventRejected(
                 f"Work on the assigned record {queue.current!r}, not {record_id!r}"

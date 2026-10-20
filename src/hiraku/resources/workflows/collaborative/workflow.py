@@ -9,10 +9,10 @@ from pydantic import Field
 from hiraku.errors import EventRejected, HirakuError, NotReady
 from hiraku.git import GitRepository
 from hiraku.record import Record, load_record
-from hiraku.workflows import Arguments, Instruction, State, Workflow, event, phase
+from hiraku.workflows import Instruction, State, Workflow, event, phase
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
-Feedback = Annotated[str, Field(description="What the user wants changed.")]
+Feedback = Annotated[str, "What the user wants changed."]
 STEPS = ["draft", "implement", "launch", "analyze"]
 
 
@@ -24,38 +24,6 @@ class Experiments(State):
     experiment: str | None = None
     feedback: str | None = None
     results: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class StartArguments(Arguments):
-    task: Annotated[
-        str | None, Field(description="Task record; defaults to the active record.")
-    ] = None
-    entrypoint: Annotated[
-        str, Field(description="Entrypoint of the task to launch.")
-    ] = "train"
-    rounds: Annotated[int, Field(gt=0, description="Most experiments to run.")] = 3
-
-
-class DraftedArguments(Arguments):
-    record_id: Annotated[str, Field(description="Short ID of the experiment record.")]
-    summary: Annotated[str, Field(description="The experiment in one line.")]
-    hypothesis: Annotated[str, Field(description="What the experiment tests.")]
-    change: Annotated[str, Field(description="The planned code change.")]
-
-
-class ImplementedArguments(Arguments):
-    commit: Annotated[str, Field(description="Commit with the change.")]
-
-
-class AnalyzedArguments(Arguments):
-    verdict: Annotated[
-        Verdict, Field(description="Whether the runs support the hypothesis.")
-    ]
-    conclusion: Annotated[str, Field(description="A few sentences.")]
-
-
-class FeedbackArguments(Arguments):
-    feedback: Feedback
 
 
 class Collaborative(Workflow):
@@ -71,12 +39,17 @@ class Collaborative(Workflow):
     rules: str = ""
 
     @event(source=None, dest="draft")
-    def start(self, args: StartArguments) -> Experiments:
+    def start(
+        self,
+        *,
+        task: Annotated[
+            str | None, "Task record; defaults to the active record."
+        ] = None,
+        entrypoint: Annotated[str, "Entrypoint of the task to launch."] = "train",
+        rounds: Annotated[int, "Most experiments to run.", Field(gt=0)] = 3,
+    ) -> Experiments:
         """Start collaborative research on a task record."""
         try:
-            task = args.task
-            entrypoint = args.entrypoint
-            rounds = args.rounds
             task = task or self.config.active_record_id
             if task is None:
                 raise EventRejected("No active record; pass the task record ID")
@@ -134,13 +107,17 @@ class Collaborative(Workflow):
         )
 
     @event(source="draft", dest="implement")
-    def drafted(self, experiments: Experiments, args: DraftedArguments) -> Experiments:
+    def drafted(
+        self,
+        experiments: Experiments,
+        *,
+        record_id: Annotated[str, "Short ID of the experiment record."],
+        summary: Annotated[str, "The experiment in one line."],
+        hypothesis: Annotated[str, "What the experiment tests."],
+        change: Annotated[str, "The planned code change."],
+    ) -> Experiments:
         """Submit the drafted experiment the user approved."""
         try:
-            record_id = args.record_id
-            summary = args.summary
-            hypothesis = args.hypothesis
-            change = args.change
             record = Record.create(
                 record_id,
                 parent_id=experiments.task,
@@ -166,11 +143,13 @@ class Collaborative(Workflow):
 
     @event(source="implement", dest="launch")
     def implemented(
-        self, experiments: Experiments, args: ImplementedArguments
+        self,
+        experiments: Experiments,
+        *,
+        commit: Annotated[str, "Commit with the change."],
     ) -> Experiments:
         """Submit the commit that implements the experiment."""
         try:
-            commit = args.commit
             sha = GitRepository(self.config).resolve(commit)
             record = self._experiment(experiments)
             record.commit = sha
@@ -207,12 +186,14 @@ class Collaborative(Workflow):
 
     @event(source="analyze", dest=["draft", "finished"])
     def analyzed(
-        self, experiments: Experiments, args: AnalyzedArguments
+        self,
+        experiments: Experiments,
+        *,
+        verdict: Annotated[Verdict, "Whether the runs support the hypothesis."],
+        conclusion: Annotated[str, "A few sentences."],
     ) -> Experiments:
         """Submit the verdict and conclusion of the experiment."""
         try:
-            verdict = args.verdict
-            conclusion = args.conclusion
             record = self._experiment(experiments)
             record.status = "analyzed"
             record.verdict = verdict
@@ -243,31 +224,31 @@ class Collaborative(Workflow):
 
     @event(source="draft", dest="draft")
     def revise_draft(
-        self, experiments: Experiments, args: FeedbackArguments
+        self, experiments: Experiments, *, feedback: Feedback
     ) -> Experiments:
         """Redraft the experiment with the user's feedback."""
-        return experiments.model_copy(update={"feedback": args.feedback})
+        return experiments.model_copy(update={"feedback": feedback})
 
     @event(source="implement", dest="implement")
     def revise_implementation(
-        self, experiments: Experiments, args: FeedbackArguments
+        self, experiments: Experiments, *, feedback: Feedback
     ) -> Experiments:
         """Rework the implementation with the user's feedback."""
-        return experiments.model_copy(update={"feedback": args.feedback})
+        return experiments.model_copy(update={"feedback": feedback})
 
     @event(source="launch", dest="launch")
     def revise_launch(
-        self, experiments: Experiments, args: FeedbackArguments
+        self, experiments: Experiments, *, feedback: Feedback
     ) -> Experiments:
         """Change how the experiment is launched, with the user's feedback."""
-        return experiments.model_copy(update={"feedback": args.feedback})
+        return experiments.model_copy(update={"feedback": feedback})
 
     @event(source="analyze", dest="analyze")
     def revise_analysis(
-        self, experiments: Experiments, args: FeedbackArguments
+        self, experiments: Experiments, *, feedback: Feedback
     ) -> Experiments:
         """Redo the analysis with the user's feedback."""
-        return experiments.model_copy(update={"feedback": args.feedback})
+        return experiments.model_copy(update={"feedback": feedback})
 
     @event(source=STEPS, dest="finished")
     def finish(self, experiments: Experiments) -> Experiments:

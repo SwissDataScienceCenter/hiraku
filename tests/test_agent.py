@@ -35,9 +35,9 @@ Tell the user the answers.
 
 WORKFLOW_PY = r'''from __future__ import annotations
 from typing import Annotated
-from pydantic import BaseModel, Field
+from pydantic import Field
 from hiraku.errors import EventRejected, NotReady
-from hiraku.workflows import Arguments, State, Instruction, Workflow, event, phase
+from hiraku.workflows import State, Instruction, Workflow, event, phase
 
 
 class Answers(State):
@@ -46,18 +46,11 @@ class Answers(State):
     answers: list[str] = Field(default_factory=list)
 
 
-class StartArguments(Arguments):
-    items: Annotated[int, Field(gt=0, description="Items.")] = 2
-
-
-class AnswerArguments(Arguments):
-    value: Annotated[str, Field(description="Value.")]
-
-
 class Toy(Workflow):
     @event(source=None, dest="work")
-    def start(self, args: StartArguments) -> Answers:
-        items = args.items
+    def start(
+        self, *, items: Annotated[int, Field(gt=0, description="Items.")] = 2
+    ) -> Answers:
         return Answers(items=items)
 
     @phase("work")
@@ -79,9 +72,10 @@ class Toy(Workflow):
         )
 
     @event(source="work", dest=["gate", "done"])
-    def answer(self, answers: Answers, args: AnswerArguments) -> Answers:
+    def answer(
+        self, answers: Answers, *, value: Annotated[str, Field(description="Value.")]
+    ) -> Answers:
         """Answer the current item."""
-        value = args.value
         if value == "bad":
             raise EventRejected("bad is not an answer")
         if value == "wait" and (not (self.config.root / "ready").exists()):

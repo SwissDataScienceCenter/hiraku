@@ -26,59 +26,59 @@ from hiraku.workflows import (
     load_workflow,
 )
 
-TOY = '''
-from typing import Literal
+TOY = '''from typing import Annotated, Literal
 from pydantic import Field
 from hiraku.errors import EventRejected, NotReady
-from hiraku.workflows import Arguments, State, Instruction, Workflow, phase, event
+from hiraku.workflows import State, Instruction, Workflow, phase, event
 
-class Start(Arguments):
-    target: int = Field(default=3, gt=0)
-
-class Add(Arguments):
-    amount: int = Field(gt=0)
-    note: str = ""
 
 class Total(State):
     phase: Literal["adding", "done"] = "adding"
     total: int = 0
     target: int
 
+
 class Toy(Workflow):
     minimum: int = 1
 
     @event(source=None, dest=["adding", "done"])
-    def start(self, args: Start) -> Total:
+    def start(self, *, target: Annotated[int, Field(gt=0)] = 3) -> Total:
         """Start counting."""
-        return Total(target=args.target)
+        return Total(target=target)
 
     @phase("adding")
     def adding(self, state: Total) -> Instruction:
-        return Instruction(self.markdown.section("## Add"),
-                           context={"total": state.total})
+        return Instruction(
+            self.markdown.section("## Add"), context={"total": state.total}
+        )
 
     @phase("done", final=True)
     def done(self, state: Total) -> Instruction:
         return Instruction("Report the total.", context={"total": state.total})
 
     @event(source="adding", dest=["adding", "done"])
-    def add(self, state: Total, args: Add) -> Total:
+    def add(
+        self, state: Total, *, amount: Annotated[int, Field(gt=0)], note: str = ""
+    ) -> Total:
         """Submit an amount."""
-        if args.note == "wait":
+        if note == "wait":
             raise NotReady("Evidence pending")
-        if args.note == "reject":
+        if note == "reject":
             raise EventRejected("Try another amount")
-        if args.note == "bug":
+        if note == "bug":
             raise RuntimeError("broken handler")
-        total = state.total + args.amount
-        return state.model_copy(update={
-            "total": total,
-            "phase": "done" if total >= state.target else "adding",
-        })
+        total = state.total + amount
+        return state.model_copy(
+            update={
+                "total": total,
+                "phase": "done" if total >= state.target else "adding",
+            }
+        )
 
     @event(source="adding", dest="done")
     def finish(self, state: Total) -> Total:
         return state.model_copy(update={"phase": "done"})
+
 
 WORKFLOW = Toy
 '''
@@ -121,7 +121,7 @@ def test_graph_and_models_are_the_only_registry(config):
     graph = workflow.graph
     assert load_workflow("toy").graph is not graph
     assert graph.start is graph.events["start"]
-    assert graph.start.arguments.__name__ == "Start"
+    assert graph.start.arguments.__name__ == "startArguments"
     assert graph.state_model.__name__ == "Total"
     assert [e.name for e in graph.events_from("adding")] == ["add", "finish"]
     with pytest.raises(TypeError):
@@ -129,7 +129,7 @@ def test_graph_and_models_are_the_only_registry(config):
     state = graph.state_model(target=3)
     with pytest.raises(PydanticValidationError):
         state.total = 5
-    assert workflow.start(graph.start.arguments(target=2)).target == 2
+    assert workflow.start(target=2).target == 2
     assert isinstance(result, EventResult)
     assert "instruction" not in result.model_dump()
     assert (
@@ -290,12 +290,15 @@ def test_failed_save_preserves_previous_session(config, monkeypatch):
 )
 def test_returned_state_is_validated_before_saving(config, replacement):
     source = TOY.replace(
-        """return state.model_copy(update={
-            "total": total,
-            "phase": "done" if total >= state.target else "adding",
-        })""",
+        """return state.model_copy(
+            update={
+                "total": total,
+                "phase": "done" if total >= state.target else "adding",
+            }
+        )""",
         replacement,
     )
+    assert source != TOY
     write_workflow(config, source)
     workflow, first = started(config)
     before = load_session(first.session_id).model_dump()
@@ -404,16 +407,16 @@ def test_incomplete_workflows_and_listing(config, caplog):
         ('@phase("done", final=True)', '@phase("done")'),
         ('@phase("done", final=True)', '@phase("adding", final=True)'),
         (
-            "def start(self, args: Start) -> Total:",
-            "def start(self, args: Start) -> None:",
+            "def start(self, *, target: Annotated[int, Field(gt=0)] = 3) -> Total:",
+            "def start(self, *, target: Annotated[int, Field(gt=0)] = 3) -> None:",
         ),
         (
-            "def add(self, state: Total, args: Add) -> Total:",
-            "def add(self, state: Total, args: int) -> Total:",
+            '*, amount: Annotated[int, Field(gt=0)], note: str = ""',
+            'amount: Annotated[int, Field(gt=0)], note: str = ""',
         ),
         (
-            "def add(self, state: Total, args: Add) -> Total:",
-            "async def add(self, state: Total, args: Add) -> Total:",
+            "def add(",
+            "async def add(",
         ),
         (
             "def finish(self, state: Total) -> Total:",
@@ -441,9 +444,114 @@ def test_incomplete_workflows_and_listing(config, caplog):
     ],
 )
 def test_invalid_declarations_fail_when_loaded(config, old, new):
+    assert old in TOY
     write_workflow(config, TOY.replace(old, new))
     with pytest.raises(WorkflowError):
         load_workflow("toy")
+
+
+@pytest.mark.parametrize(
+    "parameter",
+    [
+        "value",
+        "value: int",
+        "*values: int",
+        "**values: int",
+        "*, value",
+        "*, _private: int",
+        "*, model_dump: str",
+    ],
+)
+def test_invalid_event_input_parameters(config, parameter):
+    source = TOY.replace("*, target: Annotated[int, Field(gt=0)] = 3", parameter)
+    write_workflow(config, source)
+    with pytest.raises(WorkflowError):
+        load_workflow("toy")
+
+
+def test_generated_inputs_preserve_constraints_and_defaults(config):
+    workflow = load_workflow("toy")
+    start = workflow.graph.start.arguments
+    assert start.model_validate({}).target == 3
+    assert workflow.start().target == 3
+    assert start.model_json_schema()["properties"]["target"]["exclusiveMinimum"] == 0
+    add = workflow.graph.events["add"].arguments
+    assert add.model_json_schema()["required"] == ["amount"]
+    assert add.model_validate({"amount": 1}).note == ""
+    assert workflow.run_start({"target": 0}).status == "rejected"
+    assert workflow.run_start({"extra": 1}).status == "rejected"
+    assert workflow.run_start().status == "accepted"
+
+
+def test_generated_inputs_preserve_nested_models_and_metadata(config):
+    source = (
+        TOY.replace(
+            "from pydantic import Field", "from pydantic import BaseModel, Field"
+        )
+        .replace(
+            "class Total(State):",
+            "class Settings(BaseModel):\n    target: int\n\nclass Total(State):",
+        )
+        .replace(
+            "target: Annotated[int, Field(gt=0)] = 3",
+            'settings: Annotated[Settings, "Counter settings"]',
+        )
+        .replace("return Total(target=target)", "return Total(target=settings.target)")
+    )
+    write_workflow(config, source)
+    workflow = load_workflow("toy")
+    inputs = workflow.graph.start.arguments
+    assert inputs.model_json_schema()["properties"]["settings"]["description"] == (
+        "Counter settings"
+    )
+    parsed = inputs.from_text({"settings": '{"target": 2}'})
+    assert parsed.settings.target == 2
+    result = workflow.run_start({"settings": {"target": 2}})
+    assert result.status == "accepted", result.message
+    assert load_session(result.session_id).state["target"] == 2
+    assert workflow.run_start({"settings": {}}).status == "rejected"
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        'Annotated[int, "Target count", Field(gt=0)]',
+        'Annotated[int, Field(gt=0), "Target count"]',
+        'Annotated[int, "Target count", Field(gt=0, description="Old description")]',
+        'Annotated[Annotated[int, "Target count"], Field(gt=0)]',
+    ],
+)
+def test_string_descriptions_preserve_other_metadata(config, annotation):
+    source = TOY.replace("Annotated[int, Field(gt=0)] = 3", f"{annotation} = 3")
+    write_workflow(config, source)
+    workflow = load_workflow("toy")
+    field = workflow.graph.start.arguments.model_json_schema()["properties"]["target"]
+    assert field["description"] == "Target count"
+    assert field["exclusiveMinimum"] == 0
+    assert field["default"] == 3
+    assert workflow.run_start({"target": 0}).status == "rejected"
+    assert workflow.run_start().status == "accepted"
+
+
+def test_multiple_string_descriptions_rejected(config):
+    source = TOY.replace(
+        "Annotated[int, Field(gt=0)] = 3",
+        'Annotated[int, "First", "Second"] = 3',
+    )
+    write_workflow(config, source)
+    with pytest.raises(WorkflowError, match="start.target has multiple descriptions"):
+        load_workflow("toy")
+
+
+def test_start_without_inputs(config):
+    source = TOY.replace(
+        "self, *, target: Annotated[int, Field(gt=0)] = 3", "self"
+    ).replace("return Total(target=target)", "return Total(target=3)")
+    write_workflow(config, source)
+    workflow = load_workflow("toy")
+    assert workflow.graph.start.arguments.model_fields == {}
+    assert workflow.run_start().status == "accepted"
+    assert workflow.run_start({"target": 3}).status == "rejected"
 
 
 def test_inherited_graph_is_independent(config):
@@ -454,7 +562,9 @@ def test_inherited_graph_is_independent(config):
     def finish(self, state: Total) -> Total:
         return state.model_copy(update={"phase": "done", "total": 42})
 
-WORKFLOW = Child""",
+
+WORKFLOW = Child
+""",
     )
     write_workflow(config, source)
     workflow, first = started(config)
@@ -508,8 +618,8 @@ def test_unsupported_or_invalid_storage(config, content, caplog):
 
 def test_single_final_phase_and_dynamic_entry(config):
     source = TOY.replace(
-        "return Total(target=args.target)",
-        'return Total(target=args.target, phase="done")',
+        "return Total(target=target)",
+        'return Total(target=target, phase="done")',
     )
     write_workflow(config, source)
     workflow, first = started(config)

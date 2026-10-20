@@ -231,9 +231,10 @@ class Workflow(BaseRecord):
             parameters = []
             if session is not None:
                 parameters.append(self.graph.state_model.model_validate(session.state))
-            if method.arguments is not None:
-                parameters.append(arguments)
-            returned = method.handler(self, *parameters)
+            inputs = {
+                name: getattr(arguments, name) for name in type(arguments).model_fields
+            }
+            returned = method.handler(self, *parameters, **inputs)
             if type(returned) is not self.graph.state_model:
                 raise WorkflowError(
                     f"{method.name} must return {self.graph.state_model.__name__}"

@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from pydantic import Field, create_model
+
 from ..errors import WorkflowError
 
 if TYPE_CHECKING:
@@ -212,13 +214,13 @@ class WorkflowGraph:
                     raise WorkflowError(f"{name} cannot be both a phase and event")
                 if name in reserved or not inspect.isfunction(function):
                     raise WorkflowError(f"Invalid workflow handler: {name}")
-                hints = typing.get_type_hints(function)
+                hints = typing.get_type_hints(function, include_extras=True)
                 parameters = list(inspect.signature(function).parameters.values())
                 if (
                     inspect.iscoroutinefunction(function)
                     or not parameters
                     or parameters[0].name != "self"
-                    or any(p.kind is not p.POSITIONAL_OR_KEYWORD for p in parameters)
+                    or parameters[0].kind is not parameters[0].POSITIONAL_OR_KEYWORD
                 ):
                     raise WorkflowError(f"{name} must be a synchronous instance method")
                 parameters = parameters[1:]
@@ -234,15 +236,43 @@ class WorkflowGraph:
                     source, dest = edge
                     if (source is None) != (name == "start"):
                         raise WorkflowError("Only start must have source=None")
-                    arguments = None
-                    if len(parameters) == len(expected) + 1:
-                        arguments = hints.get(parameters[-1].name)
-                        if not isinstance(arguments, type) or not issubclass(
-                            arguments, Arguments
+                    inputs = parameters[len(expected) :]
+                    fields = {}
+                    for parameter in inputs:
+                        if (
+                            parameter.kind is not parameter.KEYWORD_ONLY
+                            or parameter.name not in hints
+                            or parameter.name.startswith("_")
+                            or hasattr(Arguments, parameter.name)
                         ):
-                            raise WorkflowError(f"{name} needs an Arguments model")
-                        arguments.model_json_schema()
-                        expected.append(arguments)
+                            raise WorkflowError(
+                                f"{name}: inputs must be annotated keyword-only "
+                                "parameters with valid argument names"
+                            )
+                        annotation = hints[parameter.name]
+                        if typing.get_origin(annotation) is typing.Annotated:
+                            base, *metadata = typing.get_args(annotation)
+                            descriptions = [m for m in metadata if isinstance(m, str)]
+                            if len(descriptions) > 1:
+                                raise WorkflowError(
+                                    f"{name}.{parameter.name} has multiple descriptions"
+                                )
+                            if descriptions:
+                                annotation = typing.Annotated[
+                                    base,
+                                    *(m for m in metadata if not isinstance(m, str)),
+                                    Field(description=descriptions[0]),
+                                ]
+                        fields[parameter.name] = (
+                            annotation,
+                            ...
+                            if parameter.default is parameter.empty
+                            else parameter.default,
+                        )
+                    arguments = create_model(
+                        f"{name}Arguments", __base__=Arguments, **fields
+                    )
+                    parameters = parameters[: len(expected)]
                     events[name] = EventDefinition(
                         name,
                         source,
@@ -254,6 +284,7 @@ class WorkflowGraph:
                     result = model
                 if (
                     [hints.get(p.name) for p in parameters] != expected
+                    or any(p.kind is not p.POSITIONAL_OR_KEYWORD for p in parameters)
                     or hints.get("return") is not result
                     or any(p.default is not p.empty for p in parameters)
                 ):

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Use string metadata in workflow event `Annotated` inputs as MCP argument descriptions, while preserving optional Pydantic constraints.
+- Infer Python workflow event arguments from annotated keyword-only parameters, including defaults and Pydantic constraints, instead of requiring explicit argument classes.
 - Build immutable workflow graphs per instance through `build_graph()`. Decorator-based and explicit definitions share structural validation; graph handlers are public definition fields.
 
 - Replace workflow authoring with typed `Arguments` and `State` models, `@phase` instructions, and `@event` transitions registered into an immutable `Workflow.graph`. Import the public API from `hiraku.workflows`.

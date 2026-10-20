@@ -24,6 +24,16 @@ methods. Graph construction validates and freezes both forms. Without a Python
 sidecar, loading selects `MarkdownWorkflow`, which infers inputs from scalar
 YAML defaults and retains the optional `description` field.
 
+Python events declare inputs as annotated keyword-only parameters, after the
+state parameter for ordinary events. Graph construction generates an `Arguments`
+model per event. Python defaults supply defaults; `Annotated[T, "Description"]`
+supplies parameter descriptions. Optional `Field(...)` metadata supplies
+constraints. Multiple description strings are rejected; a string description
+takes precedence over a `Field` description, and other metadata is preserved.
+`EventDefinition.arguments` exposes the generated
+model for validation and schema inspection. Handlers receive validated keyword
+values, including nested model instances.
+
 ::: hiraku.workflows.workflow.Arguments
 
 ::: hiraku.workflows.workflow.State

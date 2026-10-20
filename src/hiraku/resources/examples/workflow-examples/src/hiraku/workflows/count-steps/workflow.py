@@ -9,7 +9,7 @@ from pydantic import Field
 
 from hiraku.errors import EventRejected
 from hiraku.markdown import render
-from hiraku.workflows import Arguments, Instruction, State, Workflow, event, phase
+from hiraku.workflows import Instruction, State, Workflow, event, phase
 
 
 def _token() -> str:
@@ -23,14 +23,6 @@ class Counter(State):
     token: str = Field(default_factory=_token)
 
 
-class StartArguments(Arguments):
-    count: Annotated[int, Field(gt=0, description="Number of steps.")] = 5
-
-
-class AckArguments(Arguments):
-    token: Annotated[str, Field(description="Token of the current step.")]
-
-
 class CountSteps(Workflow):
     """Check that the harness follows numbered instructions and stops for the user.
 
@@ -40,9 +32,10 @@ class CountSteps(Workflow):
     """
 
     @event(source=None, dest="running")
-    def start(self, args: StartArguments) -> Counter:
+    def start(
+        self, *, count: Annotated[int, "Number of steps.", Field(gt=0)] = 5
+    ) -> Counter:
         """Start counting steps to check the harness; runs the first step."""
-        count = args.count
         return Counter(count=count)
 
     @phase("running")
@@ -67,9 +60,13 @@ class CountSteps(Workflow):
         )
 
     @event(source="running", dest=["waiting", "finished"])
-    def ack(self, counter: Counter, args: AckArguments) -> Counter:
+    def ack(
+        self,
+        counter: Counter,
+        *,
+        token: Annotated[str, "Token of the current step."],
+    ) -> Counter:
         """Acknowledge the current step with its token."""
-        token = args.token
         if token != counter.token:
             raise EventRejected(
                 f"Token {token!r} does not match step {counter.step}; "

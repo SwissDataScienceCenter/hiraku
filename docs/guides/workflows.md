@@ -76,17 +76,13 @@ project commands.
 ## Author a workflow
 
 ~~~python
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
 
 from hiraku.workflows import (
-    Arguments, Instruction, State, Workflow, event, phase,
+    Instruction, State, Workflow, event, phase,
 )
-
-
-class StartArguments(Arguments):
-    count: int = Field(default=3, gt=0)
 
 
 class Counter(State):
@@ -97,8 +93,10 @@ class Counter(State):
 
 class Count(Workflow):
     @event(source=None, dest="counting")
-    def start(self, args: StartArguments) -> Counter:
-        return Counter(count=args.count)
+    def start(
+        self, *, count: Annotated[int, "Number of steps.", Field(gt=0)] = 3
+    ) -> Counter:
+        return Counter(count=count)
 
     @phase("counting")
     def counting(self, state: Counter) -> Instruction:
@@ -139,16 +137,22 @@ Print the next number, then submit counted.
 
 ### Models, phases, and events
 
-- `Arguments` rejects unknown input fields. Use normal Pydantic defaults, field
-  descriptions, constraints, and validators. Declare one argument model per
-  distinct input shape; reuse it between events where appropriate.
+- Event inputs are annotated keyword-only parameters. Hiraku generates an
+  `Arguments` model from each signature and rejects unknown fields. Use Python
+  defaults for optional inputs and `Annotated[T, "Description"]` for input
+  descriptions. Add `Field(...)` metadata only when constraints are needed,
+  e.g. `Annotated[int, "Number of steps.", Field(gt=0)]`. Each parameter accepts
+  at most one description string; it takes precedence over a `Field` description.
+  Other metadata passes through to Pydantic unchanged.
+  Nested Pydantic models can define shared input structures
+  and validators; cross-field event checks can raise `EventRejected`.
 - `State` is the complete persisted state, including `phase`. Fields are frozen,
   although nested collections are not deeply frozen. Return a new state with
   `model_copy(update=...)` or construct one. The runtime serializes and validates
   the returned state, including otherwise unvalidated copy updates.
 - `start` must be an event with `source=None` and return a concrete `State`
-  subclass. Its argument parameter is optional; it has no previous state.
-  Every other event takes that same state model, an optional `Arguments` model,
+  subclass. It has no previous state.
+  Every other event takes that same state model, then keyword-only inputs,
   and returns the state model. There are no destination-string or `None` returns.
 - `@phase(name, final=False)` registers an instruction method taking only the
   state. Final phases accept no events. Nonfinal phases accept at least one.
@@ -156,11 +160,13 @@ Print the next number, then submit counted.
 - `@event(source=..., dest=...)` declares possible graph edges. Sources and
   destinations can each be a name or sequence of names. The returned state's
   phase must be one of the declared destinations.
-- An omitted argument parameter accepts only an empty input object. A declared
-  parameter receives its validated model. Omitted inputs are validated from `{}`.
+- An event without input parameters accepts only an empty input object. Omitted
+  inputs are validated from `{}`; parameters without defaults are required.
 - Models are defined at module scope before their workflow. Handlers are
-  synchronous instance methods with ordinary positional parameters and no
-  parameter defaults. Use defaults on the input model instead.
+  synchronous instance methods. `self` and the state are positional parameters
+  without defaults; external inputs follow `*`. Variadic parameters are rejected.
+  Direct Python method calls bypass validation; use `run_start` and `run_event`
+  for validated execution and session persistence.
 - Raise `EventRejected` for invalid submissions and `NotReady` for valid input
   awaiting evidence. Unexpected failures are execution errors. These outcomes
   do not save session advancement.

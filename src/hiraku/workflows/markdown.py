@@ -15,7 +15,7 @@ from .workflow import Arguments, Instruction, State, Workflow
 
 class MarkdownState(State):
     phase: str = "done"
-    values: dict[str, Any]
+    arguments: dict[str, Any]
 
 
 class MarkdownWorkflow(Workflow):
@@ -62,10 +62,12 @@ class MarkdownWorkflow(Workflow):
             },
         )
 
-    def start(self, args: Arguments) -> MarkdownState:
+    def start(self, **arguments: Any) -> MarkdownState:
         """Start the Markdown instruction with validated argument values."""
-        return MarkdownState(values=args.model_dump(mode="json"))
+        return MarkdownState(arguments=arguments)
 
     def prompt(self, state: MarkdownState) -> Instruction:
         """Render the complete Markdown body as the final assignment."""
-        return Instruction(render(self.markdown, state.values), context=state.values)
+        return Instruction(
+            render(self.markdown, state.arguments), context=state.arguments
+        )
