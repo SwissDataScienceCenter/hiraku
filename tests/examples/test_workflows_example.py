@@ -80,7 +80,7 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
     tokens = []
     for step in range(1, 4):
         instruction = response["instruction"]
-        context = instruction["context"]
+        context = instruction["data"]
         assert instruction["text"].startswith("## Step")
         assert f"`Step {step}/3: token {context['token']}`" in instruction["text"]
         assert "{{" not in instruction["text"]
@@ -97,14 +97,14 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
         gate = response["instruction"]
         assert gate["text"].startswith("## Next")
         assert "Send `step` only if the user agrees" in gate["text"]
-        assert gate["context"] == {"done": step, "remaining": 3 - step}
+        assert gate["data"] == {"done": step, "remaining": 3 - step}
         gate_options = gate["events"]["accepted"]
         assert [item["event"] for item in gate_options] == ["step", "finish"]
         response = send(runner, response, "step")
 
     assert response["session_status"] == "completed"
     assert response["instruction"]["text"].startswith("## Done")
-    assert response["instruction"]["context"] == {"steps": 3, "count": 3}
+    assert response["instruction"]["data"] == {"steps": 3, "count": 3}
     assert len(set(tokens)) == 3
 
 
@@ -119,12 +119,10 @@ def test_count_steps_rejects_wrong_tokens_and_finishes_early(
     early = send(runner, response, "finish")
     assert early["status"] == "rejected"
     assert "not an event the current instruction accepts" in early["message"]
-    gate = send(
-        runner, response, "ack", token=response["instruction"]["context"]["token"]
-    )
+    gate = send(runner, response, "ack", token=response["instruction"]["data"]["token"])
     done = send(runner, gate, "finish")
     assert done["session_status"] == "completed"
-    assert done["instruction"]["context"] == {"steps": 1, "count": 2}
+    assert done["instruction"]["data"] == {"steps": 1, "count": 2}
 
 
 # A scripted harness: prints the step line and echoes the step's token.
@@ -135,14 +133,14 @@ from pathlib import Path
 response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
 instruction = response["instruction"]
 if response.get("session_status") == "completed":
-    print("Ran", instruction["context"]["steps"], "steps")
+    print("Ran", instruction["data"]["steps"], "steps")
     raise SystemExit
-if "token" not in instruction["context"]:
+if "token" not in instruction["data"]:
     # Simulate ending the interactive conversation at the approval prompt.
     raise SystemExit
 print(re.search(r"`(Step .*?)`", instruction["text"]).group(1))
 event = {"event": instruction["events"]["accepted"][0]["event"],
-         "arguments": {"token": instruction["context"]["token"]}}
+         "arguments": {"token": instruction["data"]["token"]}}
 
 Path(os.environ["HIRAKU_EVENT_FILE"]).write_text(json.dumps(event))
 
@@ -197,12 +195,12 @@ def test_greet_is_one_final_prompt_filled_from_its_arguments(
     instruction = response["instruction"]
     assert instruction["text"].startswith("# Greet\n\nPrint 3 greetings to Ada")
     assert "Greet formally:\nfalse." in instruction["text"]
-    assert instruction["context"] == {"name": "Ada", "times": 3, "formal": False}
+    assert instruction["data"] == {"name": "Ada", "times": 3, "formal": False}
     assert "events" not in instruction
 
     default = start(runner, "greet", {})
     assert default["status"] == "accepted"
-    assert default["instruction"]["context"] == {
+    assert default["instruction"]["data"] == {
         "name": "World",
         "times": 2,
         "formal": False,
@@ -252,7 +250,7 @@ def test_scheduler_works_by_priority_until_every_record_reaches_the_target(
 ) -> None:
     response = start(runner, "scheduler", {"records": 3, "target": 2})
     assert response["status"] == "accepted"
-    parent = response["instruction"]["context"]["record"].rsplit("-", 1)[0]
+    parent = response["instruction"]["data"]["record"].rsplit("-", 1)[0]
     records = children(parent)
     assert len(records) == 3
     assert all(1 <= item.priority <= 9 and item.count == 0 for item in records)
@@ -262,7 +260,7 @@ def test_scheduler_works_by_priority_until_every_record_reaches_the_target(
 
     for done, record_id in enumerate(expected):
         instruction = response["instruction"]
-        context = instruction["context"]
+        context = instruction["data"]
         assert context["record"] == record_id
         assert context["remaining"] == 6 - done
         count = context["count"]
@@ -285,21 +283,21 @@ def test_scheduler_works_by_priority_until_every_record_reaches_the_target(
 
     assert response["session_status"] == "completed"
     assert response["instruction"]["text"].startswith("## Done")
-    summary = response["instruction"]["context"]["records"]
+    summary = response["instruction"]["data"]["records"]
     assert [item["record"] for item in summary] == [item.id for item in records]
     assert {item["count"] for item in summary} == {2}
 
 
 def test_scheduler_rejects_a_count_raised_too_far(runner: CliRunner) -> None:
     response = start(runner, "scheduler", {"records": 1, "target": 3})
-    record_id = response["instruction"]["context"]["record"]
+    record_id = response["instruction"]["data"]["record"]
     set_count(runner, record_id, 2)
     skipped = send(runner, response, "incremented", record_id=record_id)
     assert skipped["status"] == "rejected"
     assert "is 2; set it to 1" in skipped["message"]
     set_count(runner, record_id, 1)
     accepted = send(runner, response, "incremented", record_id=record_id)
-    assert accepted["instruction"]["context"]["count"] == 1
+    assert accepted["instruction"]["data"]["count"] == 1
 
 
 # A scripted harness: raises the assigned count with the CLI, then sends an event.
@@ -308,7 +306,7 @@ import json, os, subprocess, sys
 from pathlib import Path
 
 response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
-context = response["instruction"]["context"]
+context = response["instruction"]["data"]
 if response.get("session_status") == "completed":
     print("final:", [(item["record"], item["count"]) for item in context["records"]])
     raise SystemExit

@@ -10,7 +10,9 @@ from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
+from hiraku.context import Context
 from hiraku.errors import SessionNotFoundError, ValidationError, WorkflowError
+from hiraku.record import Record
 from hiraku.workflows.graph import Event, EventArguments, Node, State, WorkflowGraph
 from hiraku.workflows.markdown import MarkdownWorkflow
 from hiraku.workflows.session import EventResult, Session, list_sessions, load_session
@@ -40,12 +42,12 @@ class Toy(Workflow):
     @node("adding")
     def adding(self, state: Total) -> Instruction:
         return Instruction(
-            self.markdown.section("## Add"), context={"total": state.total}
+            self.markdown.section("## Add"), data={"total": state.total}
         )
 
     @node("done", final=True)
     def done(self, state: Total) -> Instruction:
-        return Instruction("Report the total.", context={"total": state.total})
+        return Instruction("Report the total.", data={"total": state.total})
 
     @event(source="adding", dest=["adding", "done"])
     def add(
@@ -135,7 +137,7 @@ def test_workflow_run_executes_steps_without_persisting_a_session(config):
     )
     assert type(state) is workflow.graph.state_model
     assert state.total == 0
-    assert instruction.context == {"total": 0}
+    assert instruction.data == {"total": 0}
     assert [item["event"] for item in instruction.events["accepted"]] == [
         "add",
         "finish",
@@ -148,7 +150,7 @@ def test_workflow_run_executes_steps_without_persisting_a_session(config):
     assert state.node == "done"
     assert done.node == "done"
     assert done.total == 2
-    assert instruction.context == {"total": 2}
+    assert instruction.data == {"total": 2}
     assert instruction.events is None
     assert not list(config.sessions_dir.rglob("*.json"))
 
@@ -158,7 +160,7 @@ def test_state_updates_and_reads_are_snapshots(config):
     read = load_session(first.session_id).get_instruction(workflow)
     assert read == load_session(first.session_id).get_instruction(workflow)
     assert read["node"] == "adding"
-    assert read["instruction"]["context"] == {"total": 0}
+    assert read["instruction"]["data"] == {"total": 0}
     assert read["instruction"]["events"]["instruction_id"] == 1
     second = submit(workflow, first)
     assert second.status == "accepted"
@@ -167,7 +169,7 @@ def test_state_updates_and_reads_are_snapshots(config):
     session = load_session(first.session_id, config=config)
     assert session.state.model_dump() == {"node": "adding", "total": 1, "target": 3}
     assert session.state.node == "adding"
-    assert session.instruction.context == {"total": 1}
+    assert session.instruction.data == {"total": 1}
     assert len(session.history) == 2
     assert list_sessions(config=config)[0].id == first.session_id
 
@@ -324,7 +326,7 @@ def test_completion_and_retry(config):
     read = load_session(done.session_id).get_instruction(workflow)
     assert read["session_status"] == "completed"
     assert "events" not in read["instruction"]
-    assert read["instruction"]["context"] == {"total": 1}
+    assert read["instruction"]["data"] == {"total": 1}
     assert submit(workflow, done).status == "rejected"
     with pytest.raises(ValidationError):
         load_session(done.session_id).cancel()
@@ -484,13 +486,13 @@ def test_returned_state_is_validated_before_saving(config, replacement):
         'Instruction(" ")',
         'Instruction("valid").model_copy(update={"text": ""})',
         'Instruction("valid").model_copy(update={"text": " "})',
-        'Instruction("x", context=object())',
+        'Instruction("x", data=object())',
         'Instruction("x", events={"accepted": []})',
     ],
 )
 def test_bad_instruction_saves_nothing(config, expression):
     source = TOY.replace(
-        'return Instruction("Report the total.", context={"total": state.total})',
+        'return Instruction("Report the total.", data={"total": state.total})',
         f"return {expression}",
     )
     write_workflow(config, source)
@@ -900,10 +902,83 @@ def test_graph_cli_and_receipt_only_submission(config):
 
 
 def test_instruction_renders_itself():
-    text = Instruction("Do work", context={"x": 1}, events={"accepted": []}).to_text()
-    assert text.startswith("Do work\n\nContext:")
+    text = Instruction("Do work", data={"x": 1}, events={"accepted": []}).to_text()
+    assert text.startswith("Do work\n\nData:")
     assert "Events:" in text
     assert Instruction("Only text").to_text() == "Only text"
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"documents": ["protocol"]},
+        {"records": "task"},
+        {"contexts": [42]},
+        {"contexts": None},
+    ],
+)
+def test_instruction_rejects_invalid_context_shape(context):
+    with pytest.raises(PydanticValidationError):
+        Instruction("Work", context=context)
+
+
+def test_instruction_context_roundtrip():
+    instruction = Instruction(
+        "Work", data=[1, "value"], context={"contexts": ["protocol"]}
+    )
+    restored = Instruction.model_validate_json(instruction.model_dump_json())
+    assert restored == instruction
+    assert restored.context == {"contexts": ["protocol"]}
+    assert "Context:" in restored.to_text()
+    assert Instruction("Work", context={}).context == {}
+
+
+@pytest.mark.parametrize("kind", ["contexts", "records"])
+@pytest.mark.parametrize("identifier", ["missing", "../outside"])
+def test_missing_or_invalid_instruction_reference(config, kind, identifier):
+    source = TOY.replace(
+        'data={"total": state.total}',
+        f'data={{"total": state.total}}, context={{{kind!r}: [{identifier!r}]}}',
+    )
+    write_workflow(config, source)
+    result = Session.run_start(load_workflow("toy", config=config))
+    assert result.status == "error"
+    assert result.session_id is None
+    assert list_sessions(config=config) == []
+
+
+def test_workflow_context_validation_before_persistence(config, tmp_path, monkeypatch):
+    Context(id="protocol", markdown="Protocol").save(
+        config.contexts_dir / "protocol" / "context.md"
+    )
+    Record.create("task", type="task", config=config)
+    source = TOY.replace(
+        'data={"total": state.total}',
+        'data={"total": state.total}, '
+        'context={"contexts": ["protocol", "protocol"], "records": ["task"]}',
+    )
+    write_workflow(config, source)
+    workflow = load_workflow("toy", config=config)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    result = Session.run_start(workflow)
+    assert result.status == "accepted"
+    session = load_session(result.session_id, config=config)
+    assert session.instruction.context == {
+        "contexts": ["protocol"],
+        "records": ["task"],
+    }
+    before = session.model_dump(mode="json")
+    (config.contexts_dir / "protocol" / "context.md").unlink()
+    failed = session.run_event(workflow, result.instruction_id, "add", {"amount": 1})
+    assert failed.status == "error"
+    assert "protocol" in failed.message
+    assert (
+        load_session(result.session_id, config=config).model_dump(mode="json") == before
+    )
+    assert Session.run_start(workflow).status == "error"
+    assert len(list_sessions(config=config)) == 1
 
 
 def test_event_arguments_reject_extras():
@@ -1078,7 +1153,7 @@ def test_markdown_overrides_and_text_inputs(config):
     args = workflow.graph.start.arguments.from_text({"count": "2", "enabled": "false"})
     result = Session.run_start(workflow, args.model_dump())
     assert load_session(result.session_id).get_instruction(workflow)["instruction"][
-        "context"
+        "data"
     ] == {
         "count": 2,
         "enabled": False,
@@ -1094,7 +1169,7 @@ def test_markdown_without_arguments_and_saved_snapshot(config):
     assert workflow.description is None
     result = Session.run_start(workflow)
     before = load_session(result.session_id).get_instruction(workflow)
-    assert before["instruction"]["context"] == {}
+    assert before["instruction"]["data"] == {}
     (directory / "workflow.md").write_text("---\nid: markdown\n---\nChanged prompt.")
     assert (
         load_session(result.session_id).get_instruction(load_workflow("markdown"))

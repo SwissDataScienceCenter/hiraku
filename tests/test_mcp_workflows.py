@@ -10,6 +10,7 @@ import pytest
 from mcp import Client, StdioServerParameters
 
 from hiraku.config import HirakuConfig
+from hiraku.context import Context
 from hiraku.errors import WorkflowError
 from hiraku.mcp import create_server
 from hiraku.record import Record
@@ -96,7 +97,7 @@ class Loop(Workflow):
     @node("done", final=True)
     def prompt(self, data: Inputs) -> Instruction:
         values = data.model_dump(mode="json", exclude={"node"})
-        return Instruction(render(self.markdown, values), context=values)
+        return Instruction(render(self.markdown, values), data=values)
 
 
 WORKFLOW = Loop
@@ -126,7 +127,7 @@ class Echo(Workflow):
 
     @node("done", final=True)
     def done(self, task: Task) -> Instruction:
-        return Instruction("Report the summary.", context={"summary": task.summary})
+        return Instruction("Report the summary.", data={"summary": task.summary})
 
     @event(source="working", dest="done")
     def complete(self, task: Task, *, summary: str) -> Task:
@@ -146,6 +147,86 @@ def write_loop(config: HirakuConfig) -> None:
     directory.mkdir()
     (directory / "workflow.md").write_text(LOOP, encoding="utf-8")
     (directory / "workflow.py").write_text(LOOP_PY, encoding="utf-8")
+
+
+def test_instruction_research_resources(config):
+    context_path = config.contexts_dir / "protocol" / "context.md"
+    Context(id="protocol", markdown="Original protocol").save(context_path)
+    directory = config.workflows_dir / "echo"
+    directory.mkdir()
+    (directory / "workflow.md").write_text("---\nid: echo\n---\nEcho")
+    source = ECHO_PY.replace(
+        'return Instruction(f"Work on {task.task}.")',
+        'return Instruction(f"Work on {task.task}.", '
+        'context={"contexts": ["protocol"], "records": ["task"]})',
+    ).replace(
+        'data={"summary": task.summary}',
+        'data={"summary": task.summary}, '
+        'context={"contexts": ["protocol"], "records": ["task"]}',
+    )
+    (directory / "workflow.py").write_text(source)
+
+    async def scenario(client, notifications):
+        started = await client.call_tool("echo", {"task": "task"})
+        response = payload(started)
+        assert started.structured_content == response
+        assert response["instruction"]["context"] == {
+            "contexts": ["protocol"],
+            "records": ["task"],
+        }
+
+        async def check_resources(result, protocol):
+            assert [item.type for item in result.content] == [
+                "text",
+                "resource_link",
+                "resource_link",
+            ]
+            for block, uri, mime in zip(
+                result.content[1:],
+                ["hiraku://contexts/protocol", "hiraku://records/task"],
+                ["text/markdown", "application/json"],
+                strict=True,
+            ):
+                assert str(block.uri) == uri
+                assert block.mime_type == mime
+                read = await client.read_resource(uri)
+                if mime == "text/markdown":
+                    assert read.contents[0].text == protocol
+                else:
+                    assert json.loads(read.contents[0].text)["id"] == "task"
+
+        await check_resources(started, "Original protocol")
+        Context(id="protocol", markdown="Updated protocol").save(
+            context_path, overwrite=True
+        )
+        shown = await client.call_tool(
+            "session_show", {"session_id": response["session_id"]}
+        )
+        assert payload(shown)["instruction"] == response["instruction"]
+        await check_resources(shown, "Updated protocol")
+        event = {
+            "session_id": response["session_id"],
+            "instruction_id": response["instruction_id"],
+            "event": "complete",
+            "arguments": {"summary": "Done"},
+        }
+        completed = await client.call_tool("workflow_send_event", event)
+        assert payload(completed)["session_status"] == "completed"
+        await check_resources(completed, "Updated protocol")
+        stale = await client.call_tool(
+            "workflow_send_event", {**event, "arguments": {"summary": "Other"}}
+        )
+        assert payload(stale)["status"] == "stale"
+        await check_resources(stale, "Updated protocol")
+        context_path.unlink()
+        missing = await client.call_tool(
+            "session_show", {"session_id": response["session_id"]}
+        )
+        assert payload(missing)["session_status"] == "completed"
+        assert missing.content[1].type == "resource_link"
+        assert "unavailable" in missing.content[2].text
+
+    run(create_server(config), scenario)
 
 
 def test_markdown_only_tools_prompts_and_description(config):
@@ -229,9 +310,9 @@ def test_prompts_start_sessions(config: HirakuConfig) -> None:
 
     started, invalid, listing = run(server, scenario)
     text = started.messages[0].content.text
-    # A final instruction is the workflow's text and context, with no events.
+    # A final instruction is the workflow's text and data, with no events.
     assert text == (
-        "# Loop\n\nRun 3 experiments on sep10.\n\nContext:\n```json\n"
+        "# Loop\n\nRun 3 experiments on sep10.\n\nData:\n```json\n"
         '{\n "task": "sep10",\n "iterations": 3\n}\n```'
     )
     assert listing[0]["status"] == "completed"
@@ -341,7 +422,7 @@ def test_workflow_send_event_continues_any_session(config: HirakuConfig) -> None
     assert "instruction" not in result["invalid"]
     assert result["done"]["instruction"] == {
         "text": "Report the summary.",
-        "context": {"summary": "Tried three ideas"},
+        "data": {"summary": "Tried three ideas"},
     }
     assert result["ambiguous"]["status"] == "rejected"
     assert "pass session_id" in result["ambiguous"]["message"]
@@ -418,7 +499,7 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
         '        return State(node="done")\n'
         "    @node('done', final=True)\n"
         "    def done(self, state: State) -> Instruction:\n"
-        "        return Instruction('Done.', context={'ok': True})\n"
+        "        return Instruction('Done.', data={'ok': True})\n"
         "WORKFLOW = Noisy\n",
         encoding="utf-8",
     )
@@ -437,7 +518,7 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
 
     names, result = anyio.run(main)
     assert "noisy" in names
-    assert json.loads(result.content[0].text)["instruction"]["context"] == {"ok": True}
+    assert json.loads(result.content[0].text)["instruction"]["data"] == {"ok": True}
 
 
 def test_runs_workflow_id_is_reserved(config, caplog):

@@ -57,19 +57,19 @@ class Toy(Workflow):
     @node("work")
     def work(self, answers: Answers) -> Instruction:
         return Instruction(
-            self.markdown.section("## Work"), context={"done": len(answers.answers)}
+            self.markdown.section("## Work"), data={"done": len(answers.answers)}
         )
 
     @node("gate")
     def gate(self, answers: Answers) -> Instruction:
         return Instruction(
-            self.markdown.section("## Gate"), context={"answers": answers.answers}
+            self.markdown.section("## Gate"), data={"answers": answers.answers}
         )
 
     @node("done", final=True)
     def done(self, answers: Answers) -> Instruction:
         return Instruction(
-            self.markdown.section("## Done"), context={"answers": answers.answers}
+            self.markdown.section("## Done"), data={"answers": answers.answers}
         )
 
     @event(source="work", dest=["gate", "done"])

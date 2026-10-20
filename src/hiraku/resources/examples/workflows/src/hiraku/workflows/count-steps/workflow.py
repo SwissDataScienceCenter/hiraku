@@ -43,21 +43,21 @@ class CountSteps(Workflow):
     def run_step(self, counter: Counter) -> Instruction:
         values = {"step": counter.step, "count": counter.count, "token": counter.token}
         return Instruction(
-            render(self.markdown.section("## Step"), values), context=values
+            render(self.markdown.section("## Step"), values), data=values
         )
 
     @node("waiting")
     def ask_to_continue(self, counter: Counter) -> Instruction:
         return Instruction(
             self.markdown.section("## Next"),
-            context={"done": counter.step, "remaining": counter.count - counter.step},
+            data={"done": counter.step, "remaining": counter.count - counter.step},
         )
 
     @node("finished", final=True)
     def report(self, counter: Counter) -> Instruction:
         return Instruction(
             self.markdown.section("## Done"),
-            context={"steps": counter.step, "count": counter.count},
+            data={"steps": counter.step, "count": counter.count},
         )
 
     @event(source="running", dest=["waiting", "finished"])

@@ -11,40 +11,61 @@ import re
 import sys
 import typing
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    model_validator,
+)
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
 from ..base import BaseRecord
 from ..config import HirakuConfig
+from ..context import load_context
 from ..errors import ValidationError, WorkflowError
+from ..record import load_record
 from .graph import Event, EventArguments, State, WorkflowGraph
 
 logger = logging.getLogger(__name__)
 
 
 class Instruction(BaseModel):
-    """An assignment, its context, and the events that can answer it."""
+    """An assignment, inline data, research references, and accepted events."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     text: str = Field(min_length=1)
-    context: Any = None
+    data: Any = None
+    context: dict[Literal["contexts", "records"], list[str]] | None = None
     events: dict[str, Any] | None = None
 
-    def __init__(self, text: str, context: Any = None, **values: Any) -> None:
+    def __init__(
+        self,
+        text: str,
+        *,
+        data: Any = None,
+        context: dict[Literal["contexts", "records"], list[str]] | None = None,
+        **values: Any,
+    ) -> None:
         super().__init__(
             text=text.strip() if isinstance(text, str) else text,
+            data=data,
             context=context,
             **values,
         )
 
     def to_text(self) -> str:
-        """Render this instruction, context, and accepted events for an agent."""
+        """Render text, data, research references, and accepted events."""
         parts = [self.text]
         fence = chr(96) * 3
-        for label, value in (("Context", self.context), ("Events", self.events)):
+        for label, value in (
+            ("Data", self.data),
+            ("Context", self.context),
+            ("Events", self.events),
+        ):
             if value is not None:
                 rendered = json.dumps(to_jsonable_python(value), indent=1)
                 parts.append(f"{label}:\n{fence}json\n{rendered}\n{fence}")
@@ -126,7 +147,7 @@ class Workflow(BaseRecord):
         events = self.graph.events_from(state.node)
         instruction = instruction.model_copy(
             update={
-                "context": to_jsonable_python(instruction.context),
+                "data": to_jsonable_python(instruction.data),
                 "events": {
                     "accepted": [
                         {
@@ -144,6 +165,13 @@ class Workflow(BaseRecord):
         raw = instruction.model_dump(mode="json")
         json.dumps(raw, allow_nan=False)
         instruction = Instruction.model_validate(raw)
+        if instruction.context:
+            config = self.config
+            for key, loader in (("contexts", load_context), ("records", load_record)):
+                identifiers = instruction.context.get(key, [])
+                identifiers[:] = dict.fromkeys(identifiers)
+                for identifier in identifiers:
+                    loader(identifier, config=config)
         return state, instruction
 
     @model_validator(mode="after")

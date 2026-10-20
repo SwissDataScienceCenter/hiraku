@@ -381,8 +381,8 @@ def _drive(
         directory = _directory(options.config, response)
         completed = directory / "completed"
         if final and completed.is_file():
-            context = response["instruction"].get("context")
-            click.echo(f"completed: {json.dumps(context, ensure_ascii=False)}")
+            data = response["instruction"].get("data")
+            click.echo(f"completed: {json.dumps(data, ensure_ascii=False)}")
             return 0
         pending = directory / "pending.json"
         event_file = (
@@ -392,8 +392,8 @@ def _drive(
         )
         if final:
             completed.touch()
-            context = response["instruction"].get("context")
-            click.echo(f"completed: {json.dumps(context, ensure_ascii=False)}")
+            data = response["instruction"].get("data")
+            click.echo(f"completed: {json.dumps(data, ensure_ascii=False)}")
             return 0
         if event_file is None:
             if options.interactive:

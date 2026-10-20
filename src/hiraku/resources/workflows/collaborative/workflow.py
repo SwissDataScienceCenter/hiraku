@@ -113,7 +113,7 @@ class Collaborative(Workflow):
     def summarizing(self, experiments: Experiments) -> Instruction:
         return Instruction(
             self.markdown.section("## Done"),
-            context={"task": experiments.task, "results": experiments.results},
+            data={"task": experiments.task, "results": experiments.results},
         )
 
     @event(source="draft", dest="implement")
@@ -267,7 +267,7 @@ class Collaborative(Workflow):
         if experiments.feedback is not None:
             context = {**context, "feedback": experiments.feedback}
         return Instruction(
-            f"{text}\n\n{self.rules}" if self.rules else text, context=context
+            f"{text}\n\n{self.rules}" if self.rules else text, data=context
         )
 
     def _experiment_context(self, experiments: Experiments) -> dict[str, Any]:

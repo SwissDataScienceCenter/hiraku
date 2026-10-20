@@ -9,6 +9,16 @@ so each client starts it in the project it is working on:
 uv run hiraku mcp
 ```
 
+Workflow start, event, and session-show tools return attached research contexts
+and records as native MCP resource links alongside their JSON response. Read
+those resources before carrying out the instruction. Resources provide live
+contents; stored instructions contain only references.
+Attached contexts use `text/markdown`; records use `application/json`. Their
+canonical `hiraku://contexts/...` and `hiraku://records/...` URIs remain readable.
+Source files and parent records are not attached automatically. A deleted
+attachment is returned as a link with an unavailability diagnostic; accepted
+session progress is retained. Prompts remain text-based and list the same IDs.
+
 There is no project-path flag; the process uses its working directory. Each
 initialized project gets its own host configuration, and agents connected from
 that project receive the same Hiraku tools and resources.

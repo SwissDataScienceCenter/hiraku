@@ -331,10 +331,12 @@ Workflows are project-defined procedures under `hiraku/workflows/` that guide
 you step by step through the Hiraku MCP server. The user may start one with
 its prompt, which shows the first instruction directly, or you start it with
 the tool named after it. Start and accepted-event responses contain one instruction: its text, its
-`context`, and, unless it is final, an `events` block that says which events
-it accepts:
+inline `data`, optional research `context`, and, unless it is final, an `events`
+block that says which events it accepts:
 
-1. Carry out the instruction text, using its `context`.
+1. Read attached research contexts and records, then carry out the instruction
+   text using its `data`. MCP returns native resource links by default; fetch
+   them before use to retrieve their current contents.
 2. Follow any requests for user approval in the instruction text before sending
    an event. Approval is a conversational contract.
 3. Send one of `events.accepted` with the `workflow_send_event` tool, never in

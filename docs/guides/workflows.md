@@ -20,8 +20,9 @@ state. Methods registered with `@node` turn that data into an instruction.
 
 Over MCP, start with the tool or prompt named after the workflow. The start
 wrapper runs the entry event and delivers the first instruction. An instruction
-contains text, context, and an events block with accepted event schemas and the
-session/instruction IDs. Carry out the text and send an event through
+contains text, inline data, optional research context, and an events block with
+accepted event schemas and the session/instruction IDs. Carry out the text and
+send an event through
 `workflow_send_event`. The conversational MCP wrapper returns the submission
 outcome and, after acceptance or a stale submission, the saved current instruction.
 
@@ -113,7 +114,7 @@ class Count(Workflow):
     def counting(self, state: Counter) -> Instruction:
         return Instruction(
             self.markdown.section("## Count"),
-            context={"next": state.step + 1},
+            data={"next": state.step + 1},
         )
 
     @event(source="counting", dest=["counting", "done"])
@@ -124,7 +125,7 @@ class Count(Workflow):
 
     @node("done", final=True)
     def done(self, state: Counter) -> Instruction:
-        return Instruction("Report the count.", context={"count": state.step})
+        return Instruction("Report the count.", data={"count": state.step})
 
 
 WORKFLOW = Count
@@ -192,7 +193,7 @@ Generate tokens and choose assignments in events, not in instruction methods.
 
 A final node completes the session when its instruction is stored. The driver
 still carries out that final instruction. Completion means no more events are
-accepted; its context can describe successful, partial, or stopped results.
+accepted; its data can describe successful, partial, or stopped results.
 
 ### Definition settings and project configuration
 
@@ -203,7 +204,34 @@ for constants. Authors do not override the framework-owned constructor.
 `self.markdown` is the document body. Select sections with their exact heading
 line, for example `self.markdown.section("## Count")`. Workflow headings must be
 unique. Use `hiraku.markdown.render(text, values)` for explicit placeholder
-substitution. `Instruction.to_text()` renders the instruction, context, and events.
+substitution. `Instruction.to_text()` renders the instruction, data, context
+references, and events.
+
+### Attaching research context
+
+Use `data` for inline values and `context` for project-local research references:
+
+```python
+Instruction(
+    "Evaluate the experiment.",
+    data={"metric": "accuracy"},
+    context={
+        "contexts": ["evaluation-protocol"],
+        "records": ["experiment-42"],
+    },
+)
+```
+
+Both context lists are optional. Unknown keys and non-string IDs are rejected.
+References are resolved against the workflow's project before session progress is
+saved; missing references fail the step. Duplicate IDs are removed in order.
+Sessions store IDs rather than content snapshots. Reading a reference later sees
+the current contents, including edits since the instruction was issued.
+
+`Instruction.context` previously held arbitrary inline values; move those values
+to `Instruction.data`. Existing saved instructions using the previous format are
+not migrated. `data` retains the existing JSON serialization behavior and can be
+any JSON-serializable value.
 
 `load_workflow(id, config=...)` binds the instance to that configuration file's
 absolute path. Direct construction also accepts `config=...`; omission discovers
@@ -386,7 +414,7 @@ workflow for required inputs, complex types, or additional validation.
 
 The complete body is rendered with the validated values using
 `hiraku.markdown.render`. Booleans render as `true`/`false`; missing
-placeholders fail without creating a session. Values are also instruction context.
+placeholders fail without creating a session. Values are also instruction data.
 The graph is `start → done`, with `done` final. The session completes when
 the instruction is saved; the agent then carries it out. Later reads retrieve
 that saved instruction, even if the Markdown or defaults have changed.

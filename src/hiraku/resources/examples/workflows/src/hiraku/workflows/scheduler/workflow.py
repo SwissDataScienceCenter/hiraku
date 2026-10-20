@@ -70,7 +70,7 @@ class Scheduler(Workflow):
         }
         return Instruction(
             render(self.markdown.section("## Work"), values),
-            context={
+            data={
                 **values,
                 "priority": _priority(record),
                 "remaining": sum(
@@ -84,7 +84,7 @@ class Scheduler(Workflow):
     @node("finished", final=True)
     def report(self, queue: Queue) -> Instruction:
         return Instruction(
-            self.markdown.section("## Done"), context={"records": self._summary(queue)}
+            self.markdown.section("## Done"), data={"records": self._summary(queue)}
         )
 
     @event(source="working", dest=["working", "finished"])

@@ -24,7 +24,12 @@ from mcp.server.mcpserver.exceptions import (
     UnexpectedToolError,
 )
 from mcp.server.mcpserver.prompts import Prompt
-from mcp.types import ToolAnnotations
+from mcp.types import (
+    CallToolResult,
+    ResourceLink,
+    TextContent,
+    ToolAnnotations,
+)
 from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
@@ -55,9 +60,10 @@ sessions.\
 EVENT_GUIDE = """\
 Send an event to the current instruction of a Hiraku workflow session.
 
-An instruction has text to carry out, context with the data it refers to, and,
+An instruction has text to carry out, inline data, research context, and,
 unless it is final, an events block that says which events it accepts:
-1. Carry out the instruction text, using its context.
+1. Read attached research resources, then carry out the text using its data.
+   Fetch resource links before using them.
 2. Follow any requests for user approval in the instruction text before
    sending an event. Approval is a conversational contract.
 3. Call this tool with one of events.accepted as event, its arguments as the
@@ -337,11 +343,11 @@ def create_server(config: HirakuConfig | None = None) -> Any:
 
     @server.resource("hiraku://records/{record_id}", mime_type="application/json")
     def record_resource(record_id: str) -> str:
-        return json.dumps(_data(load_record(record_id, config=selected)))
+        return _research_content("records", record_id, selected)
 
-    @server.resource("hiraku://contexts/{context_id}")
+    @server.resource("hiraku://contexts/{context_id}", mime_type="text/markdown")
     def context_resource(context_id: str) -> str:
-        return load_context(context_id, config=selected).markdown
+        return _research_content("contexts", context_id, selected)
 
     @server.resource("hiraku://sources/{context_id}/{source_path}")
     def source_resource(context_id: str, source_path: str) -> bytes:
@@ -389,8 +395,11 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
 
     workflows = {workflow.id: workflow for workflow in list_workflows(config=config)}
 
-    _add_workflow_tools(server, project, workflows)
-    _add_session_tools(server, project, workflows)
+    def render(response: Mapping[str, Any]) -> CallToolResult:
+        return _instruction_result(response, project())
+
+    _add_workflow_tools(server, project, workflows, render)
+    _add_session_tools(server, project, workflows, render)
     for workflow_id, workflow in sorted(workflows.items()):
         server.add_prompt(
             Prompt.from_function(
@@ -407,7 +416,10 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
 
 
 def _add_workflow_tools(
-    server: MCPServer, project: Project, workflows: Mapping[str, Workflow]
+    server: MCPServer,
+    project: Project,
+    workflows: Mapping[str, Workflow],
+    render: Callable[[Mapping[str, Any]], CallToolResult],
 ) -> None:
     def workflow_list() -> list[dict[str, Any]]:
         return [
@@ -433,33 +445,39 @@ def _add_workflow_tools(
                 "when only one session is active."
             ),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> CallToolResult:
         config = project()
         if session_id is None:
             active = [
                 s.id for s in list_sessions(config=config) if s.status == "active"
             ]
             if len(active) != 1:
-                return {
-                    "status": "rejected",
-                    "message": (
-                        f"Several sessions are active ({', '.join(active)}); pass "
-                        "session_id"
-                        if active
-                        else "No session is active; start a workflow first"
-                    ),
-                }
+                return render(
+                    {
+                        "status": "rejected",
+                        "message": (
+                            f"Several sessions are active ({', '.join(active)}); pass "
+                            "session_id"
+                            if active
+                            else "No session is active; start a workflow first"
+                        ),
+                    }
+                )
             session_id = active[0]
         session = load_session(session_id, config=config)
         workflow = workflows.get(session.workflow)
         if workflow is None:
-            return _over_mcp(
-                session._result(
-                    "rejected", "Workflow unavailable; reconnect after fixing it"
-                ).model_dump(exclude_none=True)
+            return render(
+                _over_mcp(
+                    session._result(
+                        "rejected", "Workflow unavailable; reconnect after fixing it"
+                    ).model_dump(exclude_none=True)
+                )
             )
-        return _deliver(
-            workflow, session.run_event(workflow, instruction_id, event, arguments)
+        return render(
+            _deliver(
+                workflow, session.run_event(workflow, instruction_id, event, arguments)
+            )
         )
 
     server.add_tool(
@@ -476,7 +494,7 @@ def _add_workflow_tools(
     )
     for workflow_id, workflow in sorted(workflows.items()):
         server.add_tool(
-            _start_tool(workflow),
+            _start_tool(workflow, render),
             description=_start_description(workflow),
             annotations=ToolAnnotations(read_only_hint=False),
             name=workflow_id,
@@ -484,7 +502,10 @@ def _add_workflow_tools(
 
 
 def _add_session_tools(
-    server: MCPServer, project: Project, workflows: Mapping[str, Workflow]
+    server: MCPServer,
+    project: Project,
+    workflows: Mapping[str, Workflow],
+    render: Callable[[Mapping[str, Any]], CallToolResult],
 ) -> None:
     def session_list() -> list[dict[str, Any]]:
         return [
@@ -499,8 +520,8 @@ def _add_session_tools(
             for s in list_sessions(config=project())
         ]
 
-    def session_show(session_id: SessionId) -> dict[str, Any]:
-        return _show(load_session(session_id, config=project()), workflows)
+    def session_show(session_id: SessionId) -> CallToolResult:
+        return render(_show(load_session(session_id, config=project()), workflows))
 
     def session_cancel(session_id: SessionId) -> dict[str, Any]:
         return load_session(session_id, config=project()).cancel()
@@ -542,11 +563,14 @@ def _over_mcp(response: Mapping[str, Any]) -> dict[str, Any]:
     return {**response, "instruction": {**instruction, "events": events}}
 
 
-def _start_tool(workflow: Workflow) -> Callable[..., Any]:
+def _start_tool(
+    workflow: Workflow,
+    render: Callable[[Mapping[str, Any]], CallToolResult],
+) -> Callable[..., Any]:
     """Return a function whose signature is the workflow's start arguments."""
 
-    def run(**arguments: Any) -> dict[str, Any]:
-        return _deliver(workflow, Session.run_start(workflow, arguments))
+    def run(**arguments: Any) -> CallToolResult:
+        return render(_deliver(workflow, Session.run_start(workflow, arguments)))
 
     parameters = []
     for name, field in workflow.graph.start.arguments.model_fields.items():
@@ -679,6 +703,39 @@ def _register_resources(
             return workflows[workflow_id].graph.to_mermaid()
         except WorkflowError as exc:
             raise ResourceError(str(exc)) from exc
+
+
+def _research_content(kind: str, identifier: str, config: HirakuConfig) -> str:
+    """Read the same live representation for resources and tool attachments."""
+    if kind == "contexts":
+        return str(load_context(identifier, config=config).markdown)
+    return json.dumps(_data(load_record(identifier, config=config)))
+
+
+def _instruction_result(
+    response: Mapping[str, Any], config: HirakuConfig
+) -> CallToolResult:
+    """Attach native research resources without changing the stored instruction."""
+    content: list[Any] = [
+        TextContent(type="text", text=json.dumps(dict(response), ensure_ascii=False))
+    ]
+    instruction = response.get("instruction")
+    context = instruction.get("context") if isinstance(instruction, Mapping) else None
+    for kind, identifiers in (context or {}).items():
+        mime = "text/markdown" if kind == "contexts" else "application/json"
+        for identifier in identifiers:
+            uri = f"hiraku://{kind}/{quote(identifier, safe='')}"
+            link = ResourceLink(
+                type="resource_link", uri=uri, name=identifier, mime_type=mime
+            )
+            content.append(link)
+            try:
+                _research_content(kind, identifier, config)
+            except (HirakuError, PydanticValidationError) as exc:
+                content.append(
+                    TextContent(type="text", text=f"Resource {uri} unavailable: {exc}")
+                )
+    return CallToolResult(content=content, structured_content=dict(response))
 
 
 def _deliver(workflow: Workflow, result: EventResult) -> dict[str, Any]:

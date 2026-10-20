@@ -70,6 +70,4 @@ class MarkdownWorkflow(Workflow):
 
     def prompt(self, state: MarkdownState) -> Instruction:
         """Render the complete Markdown body as the final assignment."""
-        return Instruction(
-            render(self.markdown, state.arguments), context=state.arguments
-        )
+        return Instruction(render(self.markdown, state.arguments), data=state.arguments)

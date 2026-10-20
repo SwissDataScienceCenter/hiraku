@@ -16,4 +16,4 @@ the next step. Send `step` only if the user agrees, or `finish` to stop.
 
 ## Done
 
-Tell the user how many of the steps in the context ran.
+Tell the user how many of the steps in the data ran.

@@ -274,3 +274,17 @@ def test_cli_project_error(tmp_path: Path) -> None:
         result = runner.invoke(main, ["mcp"])
     assert result.exit_code == 1
     assert "No hiraku.yml" in result.output
+
+
+def test_cli_serves_project(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    factory = Mock()
+    monkeypatch.setattr("hiraku.mcp.create_server", factory)
+    result = CliRunner().invoke(main, ["mcp"])
+    assert result.exit_code == 0, result.output
+    assert factory.call_args.kwargs == {}
+    assert factory.call_args.args[0].path == config.path
+    factory.return_value.run.assert_called_once_with(transport="stdio")
