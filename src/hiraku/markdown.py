@@ -83,7 +83,9 @@ class Markdown(str):
         for position, (level, title, start) in enumerate(found):
             # A section ends at the next heading of the same or a higher level.
             following = (
-                line for depth, _, line in found[position + 1 :] if depth <= level
+                found[index][2]
+                for index in range(position + 1, len(found))
+                if found[index][0] <= level
             )
             headings.append(
                 Heading(level, title, start, next(following, len(self._lines)))
@@ -92,6 +94,8 @@ class Markdown(str):
 
     def section(self, heading: str) -> str:
         """Return a section, including its subsections, selected by its heading.
+
+        Boundary newlines are trimmed; other content whitespace is preserved.
 
         Args:
             heading: The heading as a ``#`` line, e.g. ``"## Step"``. The level
@@ -121,7 +125,7 @@ class Markdown(str):
             raise SectionNotFoundError(
                 f"Section {heading!r} not found; headings: {available}"
             )
-        return "\n".join(self._lines[found[0].start : found[0].end]).strip()
+        return "\n".join(self._lines[found[0].start : found[0].end]).strip("\n")
 
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")

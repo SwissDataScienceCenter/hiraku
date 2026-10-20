@@ -1,8 +1,9 @@
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.base import BaseRecord
 from hiraku.errors import SectionNotFoundError, ValidationError
-from hiraku.markdown import Markdown
+from hiraku.markdown import Markdown, placeholders, render
 
 DOCUMENT = """\
 # Research
@@ -122,3 +123,52 @@ def test_markdown_field_stays_a_string() -> None:
     assert isinstance(record.markdown, Markdown)
     assert record.markdown == "## New\n"
     assert type(record.model_dump()["markdown"]) is str
+
+
+@pytest.mark.parametrize("value", [None, 42])
+def test_markdown_field_rejects_invalid_values(value) -> None:
+    with pytest.raises(PydanticValidationError, match="Input should be a valid string"):
+        BaseRecord(id="doc", markdown=value)
+    record = BaseRecord(id="doc", markdown="## Original\n")
+    with pytest.raises(PydanticValidationError, match="Input should be a valid string"):
+        record.markdown = value
+    assert record.markdown == "## Original\n"
+
+
+@pytest.mark.parametrize("ending", ["", "\n\n## Next\nOther."])
+def test_section_preserves_content_whitespace(ending: str) -> None:
+    section = "  ## Code\n\n    payload  \t"
+    markdown = Markdown(section + "\n\n" + ending)
+    assert markdown.section("## Code") == section
+
+
+def test_many_peer_headings_have_adjacent_boundaries() -> None:
+    markdown = Markdown("".join(f"## Step {index}\n" for index in range(4000)))
+    assert len(markdown.headings) == 4000
+    assert [(item.start, item.end) for item in markdown.headings] == [
+        (index, index + 1) for index in range(3999)
+    ] + [(3999, 4001)]
+
+
+def test_placeholders_discovers_unique_valid_names() -> None:
+    text = "{{name}} {{ name }} {{\t_other2\t}} {{2bad}} {{bad-name}}"
+    assert placeholders(text) == {"name", "_other2"}
+    assert placeholders("No placeholders.") == set()
+
+
+def test_render_replaces_repeated_and_padded_placeholders() -> None:
+    assert render("{{name}} / {{ name }}", {"name": "Ada", "unused": 1}) == "Ada / Ada"
+    assert render("No placeholders.", {}) == "No placeholders."
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(True, "true"), (False, "false"), (None, ""), ("text", "text"), (42, "42")],
+)
+def test_render_value_conversions(value, expected: str) -> None:
+    assert render("{{value}}", {"value": value}) == expected
+
+
+def test_render_reports_all_missing_values() -> None:
+    with pytest.raises(ValidationError, match="No value for placeholders: a, z$"):
+        render("{{z}} {{a}} {{ z }} {{provided}}", {"provided": "yes"})

@@ -75,7 +75,7 @@ class BaseRecord(BaseModel):
         validate_identifier(value, label="record ID")
         return value
 
-    @field_validator("markdown", mode="before")
+    @field_validator("markdown")
     @classmethod
     def validate_markdown(cls, value: Any) -> str:
         if not isinstance(value, str):
