@@ -9,7 +9,7 @@ from pydantic import Field
 
 from hiraku.errors import EventRejected
 from hiraku.markdown import render
-from hiraku.workflows import Instruction, State, Workflow, event, phase
+from hiraku.workflows import Instruction, State, Workflow, event, phase, start
 
 
 def _token() -> str:
@@ -31,7 +31,7 @@ class CountSteps(Workflow):
     decides whether to run the next one.
     """
 
-    @event(source=None, dest="running")
+    @start(dest="running")
     def start(
         self, *, count: Annotated[int, "Number of steps.", Field(gt=0)] = 5
     ) -> Counter:

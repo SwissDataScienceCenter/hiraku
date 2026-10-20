@@ -8,11 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Declare workflow entry methods with `@start(dest=...)`, require argument models for every event, and make graph reachability an explicit `check_reachability()` check. Direct graph construction validates structure while trusting typed definitions.
 - Use string metadata in workflow event `Annotated` inputs as MCP argument descriptions, while preserving optional Pydantic constraints.
 - Infer Python workflow event arguments from annotated keyword-only parameters, including defaults and Pydantic constraints, instead of requiring explicit argument classes.
 - Build immutable workflow graphs per instance through `build_graph()`. Decorator-based and explicit definitions share structural validation; graph handlers are public definition fields.
 
-- Replace workflow authoring with typed `Arguments` and `State` models, `@phase` instructions, and `@event` transitions registered into an immutable `Workflow.graph`. Import the public API from `hiraku.workflows`.
+- Replace workflow authoring with typed `EventArguments` and `State` models, `@phase` instructions, and `@event` transitions registered into an immutable `Workflow.graph`. Import the public API from `hiraku.workflows`.
 - Workflow descriptions come from the optional `description` field, which defaults to `None`; class docstrings are not used as descriptions.
 - Use `load_workflow(id, config=...)` for one workflow and `list_workflows(config=...)` for a list of loaded `Workflow` objects. Directory discovery and importing are internal; CLI and MCP format their own listings.
 - Remove `Instruction.requires_user_response` and its protocol flag. Approval is expressed in workflow text; the interactive agent driver pauses when the agent exits without an event.

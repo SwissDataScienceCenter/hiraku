@@ -12,12 +12,12 @@ from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.errors import SessionNotFoundError, ValidationError, WorkflowError
 from hiraku.workflows import (
-    Arguments,
-    EventDefinition,
+    Event,
+    EventArguments,
     EventResult,
     Instruction,
     MarkdownWorkflow,
-    PhaseDefinition,
+    Phase,
     State,
     WorkflowGraph,
     list_sessions,
@@ -29,7 +29,7 @@ from hiraku.workflows import (
 TOY = '''from typing import Annotated, Literal
 from pydantic import Field
 from hiraku.errors import EventRejected, NotReady
-from hiraku.workflows import State, Instruction, Workflow, phase, event
+from hiraku.workflows import State, Instruction, Workflow, phase, event, start
 
 
 class Total(State):
@@ -41,7 +41,7 @@ class Total(State):
 class Toy(Workflow):
     minimum: int = 1
 
-    @event(source=None, dest=["adding", "done"])
+    @start(dest=["adding", "done"])
     def start(self, *, target: Annotated[int, Field(gt=0)] = 3) -> Total:
         """Start counting."""
         return Total(target=target)
@@ -121,8 +121,10 @@ def test_graph_and_models_are_the_only_registry(config):
     graph = workflow.graph
     assert load_workflow("toy").graph is not graph
     assert graph.start is graph.events["start"]
-    assert graph.start.arguments.__name__ == "startArguments"
+    assert graph.start.arguments.__name__ == "startEventArguments"
     assert graph.state_model.__name__ == "Total"
+    assert graph.events["finish"].arguments.model_fields == {}
+    graph.check_reachability()
     assert [e.name for e in graph.events_from("adding")] == ["add", "finish"]
     with pytest.raises(TypeError):
         graph.phases["other"] = graph.phases["done"]
@@ -401,7 +403,12 @@ def test_incomplete_workflows_and_listing(config, caplog):
 @pytest.mark.parametrize(
     ("old", "new"),
     [
-        ("source=None", 'source="adding"'),
+        (
+            '@start(dest=["adding", "done"])',
+            '@event(source="adding", dest=["adding", "done"])',
+        ),
+        ("def start(", "def begin("),
+        ("def start(", "async def start("),
         ('source="adding", dest="done"', 'source=None, dest="done"'),
         ('dest="done"', 'dest="missing"'),
         ('@phase("done", final=True)', '@phase("done")'),
@@ -440,7 +447,7 @@ def test_incomplete_workflows_and_listing(config, caplog):
             '@phase("done", final=True)',
             '@phase("done", final=True)\n    @event(source="adding", dest="done")',
         ),
-        ('@event(source=None, dest=["adding", "done"])', ""),
+        ('@start(dest=["adding", "done"])', ""),
     ],
 )
 def test_invalid_declarations_fail_when_loaded(config, old, new):
@@ -466,6 +473,18 @@ def test_invalid_event_input_parameters(config, parameter):
     source = TOY.replace("*, target: Annotated[int, Field(gt=0)] = 3", parameter)
     write_workflow(config, source)
     with pytest.raises(WorkflowError):
+        load_workflow("toy")
+
+
+def test_start_decorator_requires_start_method_name(config):
+    source = TOY.replace(
+        "phase, event, start", "phase, event, start as workflow_start"
+    ).replace("@start(", "@workflow_start(")
+    source = source.replace(
+        '@event(source="adding", dest="done")', '@workflow_start(dest="done")'
+    )
+    write_workflow(config, source)
+    with pytest.raises(WorkflowError, match="Only the start method can use @start"):
         load_workflow("toy")
 
 
@@ -668,13 +687,13 @@ def test_instruction_renders_itself():
 
 def test_base_models_reject_extras():
     with pytest.raises(PydanticValidationError):
-        Arguments(extra=1)
+        EventArguments(extra=1)
     with pytest.raises(PydanticValidationError):
         State(phase="x", extra=1)
 
 
 def test_arguments_from_text_preserves_strings_and_decodes_structured_values():
-    class Inputs(Arguments):
+    class Inputs(EventArguments):
         name: str
         count: int = 3
         enabled: bool = False
@@ -890,7 +909,6 @@ def test_markdown_instances_have_independent_schemas(config):
         "missing_start",
         "bad_source",
         "unknown",
-        "unreachable",
         "final_event",
         "empty_dest",
         "wrong_name",
@@ -903,40 +921,38 @@ def test_explicit_graphs_share_structural_validation(config, problem):
     if problem == "missing_start":
         events.clear()
     elif problem == "bad_source":
-        events["start"] = EventDefinition(
+        events["start"] = Event(
             "start",
             ("done",),
             ("done",),
-            None,
+            EventArguments,
             "",
             MarkdownWorkflow.start,
         )
     elif problem == "unknown":
-        events["start"] = EventDefinition(
+        events["start"] = Event(
             "start",
             None,
             ("missing",),
-            None,
+            EventArguments,
             "",
             MarkdownWorkflow.start,
         )
-    elif problem == "unreachable":
-        phases["other"] = PhaseDefinition("other", True, MarkdownWorkflow.prompt)
     elif problem == "final_event":
-        events["again"] = EventDefinition(
+        events["again"] = Event(
             "again",
             ("done",),
             ("done",),
-            None,
+            EventArguments,
             "",
             MarkdownWorkflow.start,
         )
     elif problem == "empty_dest":
-        events["start"] = EventDefinition(
+        events["start"] = Event(
             "start",
             None,
             (),
-            None,
+            EventArguments,
             "",
             MarkdownWorkflow.start,
         )
@@ -956,3 +972,37 @@ def test_explicit_graph_copies_definition_mappings(config):
     assert set(graph.events) == {"start"}
     with pytest.raises(TypeError):
         graph.events["other"] = graph.start
+
+
+@pytest.mark.parametrize("final", [True, False])
+def test_reachability_is_an_optional_check(config, final):
+    workflow = MarkdownWorkflow(id="direct", config=config)
+    phases, events = dict(workflow.graph.phases), dict(workflow.graph.events)
+    phases["unused"] = Phase("unused", final, MarkdownWorkflow.prompt)
+    if not final:
+        events["again"] = Event(
+            "again",
+            ("unused",),
+            ("unused",),
+            EventArguments,
+            "",
+            MarkdownWorkflow.start,
+        )
+    graph = WorkflowGraph(workflow.graph.state_model, phases, events)
+    assert "unused" in graph.phases
+    with pytest.raises(WorkflowError, match="Unreachable phases: .*unused"):
+        graph.check_reachability()
+
+
+def test_decorated_workflow_can_load_with_unreachable_phase(config):
+    source = TOY.replace(
+        "    minimum: int = 1",
+        """    @phase("unused", final=True)
+    def unused(self, state: Total) -> Instruction:
+        return Instruction("Unused.")""",
+    )
+    write_workflow(config, source)
+    workflow, result = started(config)
+    assert result.status == "accepted"
+    with pytest.raises(WorkflowError, match="Unreachable phases: .*unused"):
+        workflow.graph.check_reachability()

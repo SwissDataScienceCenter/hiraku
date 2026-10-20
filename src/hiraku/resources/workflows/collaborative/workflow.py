@@ -9,7 +9,7 @@ from pydantic import Field
 from hiraku.errors import EventRejected, HirakuError, NotReady
 from hiraku.git import GitRepository
 from hiraku.record import Record, load_record
-from hiraku.workflows import Instruction, State, Workflow, event, phase
+from hiraku.workflows import Instruction, State, Workflow, event, phase, start
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
 Feedback = Annotated[str, "What the user wants changed."]
@@ -38,7 +38,7 @@ class Collaborative(Workflow):
 
     rules: str = ""
 
-    @event(source=None, dest="draft")
+    @start(dest="draft")
     def start(
         self,
         *,

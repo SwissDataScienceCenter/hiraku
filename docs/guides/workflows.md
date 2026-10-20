@@ -40,7 +40,7 @@ uv run hiraku-agent count-steps finish --interactive
 `hiraku-agent WORKFLOW` starts or resumes an active session. Use `--new` to start
 another or `--session ID` to select one. Event subcommands use argument-model
 fields as options. Strings are literal text; other values are JSON.
-The CLI and MCP prompt adapters use `Arguments.from_text(values)` to decode
+The CLI and MCP prompt adapters use `EventArguments.from_text(values)` to decode
 these string inputs and validate the model. Regular JSON tools and Python calls
 use normal model validation.
 
@@ -81,7 +81,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from hiraku.workflows import (
-    Instruction, State, Workflow, event, phase,
+    Instruction, State, Workflow, event, phase, start,
 )
 
 
@@ -92,7 +92,7 @@ class Counter(State):
 
 
 class Count(Workflow):
-    @event(source=None, dest="counting")
+    @start(dest="counting")
     def start(
         self, *, count: Annotated[int, "Number of steps.", Field(gt=0)] = 3
     ) -> Counter:
@@ -138,7 +138,7 @@ Print the next number, then submit counted.
 ### Models, phases, and events
 
 - Event inputs are annotated keyword-only parameters. Hiraku generates an
-  `Arguments` model from each signature and rejects unknown fields. Use Python
+  `EventArguments` model from each signature and rejects unknown fields. Use Python
   defaults for optional inputs and `Annotated[T, "Description"]` for input
   descriptions. Add `Field(...)` metadata only when constraints are needed,
   e.g. `Annotated[int, "Number of steps.", Field(gt=0)]`. Each parameter accepts
@@ -150,8 +150,8 @@ Print the next number, then submit counted.
   although nested collections are not deeply frozen. Return a new state with
   `model_copy(update=...)` or construct one. The runtime serializes and validates
   the returned state, including otherwise unvalidated copy updates.
-- `start` must be an event with `source=None` and return a concrete `State`
-  subclass. It has no previous state.
+- The method named `start` must use `@start(dest=...)` and return a concrete
+  `State` subclass. It has no previous state.
   Every other event takes that same state model, then keyword-only inputs,
   and returns the state model. There are no destination-string or `None` returns.
 - `@phase(name, final=False)` registers an instruction method taking only the
@@ -159,7 +159,8 @@ Print the next number, then submit counted.
   Instruction methods read state; they must not perform transitions.
 - `@event(source=..., dest=...)` declares possible graph edges. Sources and
   destinations can each be a name or sequence of names. The returned state's
-  phase must be one of the declared destinations.
+  phase must be one of the declared destinations. Ordinary events always require
+  a source; only `@start` declares an entry edge.
 - An event without input parameters accepts only an empty input object. Omitted
   inputs are validated from `{}`; parameters without defaults are required.
 - Models are defined at module scope before their workflow. Handlers are
@@ -167,6 +168,9 @@ Print the next number, then submit counted.
   without defaults; external inputs follow `*`. Variadic parameters are rejected.
   Direct Python method calls bypass validation; use `run_start` and `run_event`
   for validated execution and session persistence.
+- Graph construction checks phase references and final-phase rules. Unreachable
+  phases are allowed; call `workflow.graph.check_reachability()` to reject them
+  explicitly. The check raises `WorkflowError` and does not change the graph.
 - Raise `EventRejected` for invalid submissions and `NotReady` for valid input
   awaiting evidence. Unexpected failures are execution errors. These outcomes
   do not save session advancement.

@@ -10,8 +10,6 @@ import logging
 import re
 import secrets
 import sys
-import types
-import typing
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
@@ -30,36 +28,12 @@ from pydantic_core import to_jsonable_python
 from ..base import BaseRecord
 from ..config import HirakuConfig
 from ..errors import EventRejected, NotReady, ValidationError, WorkflowError
-from .graph import EventDefinition, WorkflowGraph
+from .graph import Event, EventArguments, WorkflowGraph
 
 if TYPE_CHECKING:
     from .session import Session
 
 logger = logging.getLogger(__name__)
-
-
-class Arguments(BaseModel):
-    """Typed event inputs. Unknown arguments are rejected."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    @classmethod
-    def from_text(cls, values: Mapping[str, str]) -> Self:
-        """Parse text-only inputs: strings stay literal; other fields require JSON.
-
-        Missing fields use model defaults. Unknown fields and decoded values
-        are validated by the argument model.
-        """
-        arguments = {}
-        for name, value in values.items():
-            field = cls.model_fields.get(name)
-            if field is not None and not _is_text(field.annotation):
-                try:
-                    value = json.loads(value)
-                except json.JSONDecodeError as exc:
-                    raise ValidationError(f"{name}: expected JSON ({exc.msg})") from exc
-            arguments[name] = value
-        return cls.model_validate(arguments)
 
 
 class State(BaseModel):
@@ -146,7 +120,7 @@ class Workflow(BaseRecord):
     def run_start(self, arguments: Mapping[str, Any] | None = None) -> EventResult:
         """Run the entry event and store its instruction; return an outcome."""
         try:
-            validated = (self.graph.start.arguments or Arguments).model_validate(
+            validated = self.graph.start.arguments.model_validate(
                 {} if arguments is None else arguments
             )
         except PydanticValidationError as exc:
@@ -181,7 +155,7 @@ class Workflow(BaseRecord):
                 if method is None or method.source is None:
                     return session._result("rejected", f"Unknown event {event!r}")
                 try:
-                    validated = (method.arguments or Arguments).model_validate(
+                    validated = method.arguments.model_validate(
                         {} if arguments is None else arguments
                     )
                     values = validated.model_dump(mode="json")
@@ -217,8 +191,8 @@ class Workflow(BaseRecord):
 
     def _run(
         self,
-        method: EventDefinition,
-        arguments: Arguments,
+        method: Event,
+        arguments: EventArguments,
         session: Session | None = None,
     ) -> EventResult:
         from .session import HistoryEntry, Session, _session_path
@@ -264,9 +238,7 @@ class Workflow(BaseRecord):
                             {
                                 "event": item.name,
                                 "description": summary(item.description),
-                                "arguments": (
-                                    item.arguments or Arguments
-                                ).model_json_schema(),
+                                "arguments": item.arguments.model_json_schema(),
                             }
                             for item in events
                         ]
@@ -478,15 +450,3 @@ def _import_workflow(directory: Path) -> type[Workflow]:
             "hiraku.workflows.workflow.Workflow"
         )
     return cls
-
-
-def _is_text(annotation: Any) -> bool:
-    if annotation is str:
-        return True
-    origin = typing.get_origin(annotation)
-    arguments = [item for item in typing.get_args(annotation) if item is not type(None)]
-    if origin is Literal:
-        return all(isinstance(item, str) for item in arguments)
-    if origin in (typing.Union, types.UnionType):
-        return any(_is_text(item) for item in arguments)
-    return False

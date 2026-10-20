@@ -37,7 +37,7 @@ WORKFLOW_PY = r'''from __future__ import annotations
 from typing import Annotated
 from pydantic import Field
 from hiraku.errors import EventRejected, NotReady
-from hiraku.workflows import State, Instruction, Workflow, event, phase
+from hiraku.workflows import State, Instruction, Workflow, event, phase, start
 
 
 class Answers(State):
@@ -47,7 +47,7 @@ class Answers(State):
 
 
 class Toy(Workflow):
-    @event(source=None, dest="work")
+    @start(dest="work")
     def start(
         self, *, items: Annotated[int, Field(gt=0, description="Items.")] = 2
     ) -> Answers:

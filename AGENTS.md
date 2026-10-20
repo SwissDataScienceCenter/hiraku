@@ -128,7 +128,11 @@ Generated or transient paths:
   `Workflow.graph` through `build_graph()`. Python workflows use decorators;
   Markdown-only workflows infer arguments from YAML scalar defaults and build
   their graph directly. Python events declare annotated keyword-only inputs;
-  graph construction generates their argument models. Python sidecars are
+  graph construction generates their argument models. Python workflows use
+  `@start` for the entry method, `@event` for transitions, and
+  `@phase` for instructions. Every event has an argument model, even without
+  inputs. Graph structure is checked on construction; reachability is optional
+  through `graph.check_reachability()`. Python sidecars are
   optional; events return typed states. `Workflow.config` reloads
   the bound project config on access. Session lookup uses module-level
   `load_session` and `list_sessions`. All MCP code, including the

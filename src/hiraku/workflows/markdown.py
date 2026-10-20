@@ -9,8 +9,8 @@ from pydantic import Field, create_model
 
 from ..errors import WorkflowError
 from ..markdown import render
-from .graph import EventDefinition, PhaseDefinition, WorkflowGraph
-from .workflow import Arguments, Instruction, State, Workflow
+from .graph import Event, EventArguments, Phase, WorkflowGraph
+from .workflow import Instruction, State, Workflow
 
 
 class MarkdownState(State):
@@ -34,7 +34,7 @@ class MarkdownWorkflow(Workflow):
                 not name.isidentifier()
                 or name.startswith("_")
                 or keyword.iskeyword(name)
-                or hasattr(Arguments, name)
+                or hasattr(EventArguments, name)
             ):
                 raise WorkflowError(f"Invalid argument name: {name!r}")
             if type(default) not in (str, int, float, bool):
@@ -44,14 +44,16 @@ class MarkdownWorkflow(Workflow):
                 )
             fields[name] = (type(default), default)
         try:
-            inputs = create_model("MarkdownArguments", __base__=Arguments, **fields)
+            inputs = create_model(
+                "MarkdownEventArguments", __base__=EventArguments, **fields
+            )
         except (TypeError, ValueError) as exc:
             raise WorkflowError(f"Invalid Markdown arguments: {exc}") from exc
         return WorkflowGraph(
             state_model=MarkdownState,
-            phases={"done": PhaseDefinition("done", True, type(self).prompt)},
+            phases={"done": Phase("done", True, type(self).prompt)},
             events={
-                "start": EventDefinition(
+                "start": Event(
                     "start",
                     None,
                     ("done",),

@@ -38,7 +38,6 @@ from .launch import launch, render_arguments
 from .record import Record, list_records, load_record
 from .workflows.session import Session, list_sessions, load_session
 from .workflows.workflow import (
-    Arguments,
     EventResult,
     Instruction,
     Workflow,
@@ -554,9 +553,7 @@ def _start_tool(workflow: Workflow, project: Project) -> Callable[..., Any]:
         return _deliver(workflow, workflow.run_start(arguments))
 
     parameters = []
-    for name, field in (
-        workflow.graph.start.arguments or Arguments
-    ).model_fields.items():
+    for name, field in workflow.graph.start.arguments.model_fields.items():
         default = (
             inspect.Parameter.empty
             if field.is_required()
@@ -588,7 +585,7 @@ def _start_prompt(workflow: Workflow, project: Project) -> Callable[..., str]:
     def run(**arguments: Any) -> str:
         values = {key: value for key, value in arguments.items() if value is not None}
         try:
-            model = workflow.graph.start.arguments or Arguments
+            model = workflow.graph.start.arguments
             inputs = model.from_text(values).model_dump(mode="json")
         except (ValidationError, PydanticValidationError) as exc:
             response = {"status": "rejected", "message": str(exc)}
@@ -623,9 +620,7 @@ def _start_prompt(workflow: Workflow, project: Project) -> Callable[..., str]:
                 Field(description=field.description),
             ],
         )
-        for name, field in (
-            workflow.graph.start.arguments or Arguments
-        ).model_fields.items()
+        for name, field in workflow.graph.start.arguments.model_fields.items()
     ]
     return _with_signature(run, workflow.id, parameters)
 

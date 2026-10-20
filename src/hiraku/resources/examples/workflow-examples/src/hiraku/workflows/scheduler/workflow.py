@@ -11,7 +11,7 @@ from pydantic import Field
 from hiraku.errors import EventRejected
 from hiraku.markdown import render
 from hiraku.record import Record, load_record
-from hiraku.workflows import Instruction, State, Workflow, event, phase
+from hiraku.workflows import Instruction, State, Workflow, event, phase, start
 
 
 class Queue(State):
@@ -31,7 +31,7 @@ class Scheduler(Workflow):
     next step comes from the records, not from a fixed sequence.
     """
 
-    @event(source=None, dest="working")
+    @start(dest="working")
     def start(
         self,
         *,

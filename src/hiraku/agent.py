@@ -23,13 +23,11 @@ from pydantic.fields import FieldInfo
 
 from .config import HirakuConfig
 from .errors import HirakuError, ProjectNotFoundError, WorkflowError
-from .workflows.graph import EventDefinition
+from .workflows.graph import Event, _is_text
 from .workflows.session import Session, list_sessions, load_session
 from .workflows.workflow import (
-    Arguments,
     Instruction,
     Workflow,
-    _is_text,
     _workflow_ids,
     load_workflow,
     summary,
@@ -131,7 +129,7 @@ def _driver_params() -> list[click.Parameter]:
 
 
 def _workflow_command(workflow: Workflow, config: HirakuConfig) -> click.Group:
-    arguments_model = workflow.graph.start.arguments or Arguments
+    arguments_model = workflow.graph.start.arguments
     driver = _driver_params()
     new = click.Option(
         ["--new", "new"],
@@ -185,11 +183,11 @@ def _workflow_command(workflow: Workflow, config: HirakuConfig) -> click.Group:
 
 
 def _event_command(
-    workflow: Workflow, method: EventDefinition, config: HirakuConfig
+    workflow: Workflow, method: Event, config: HirakuConfig
 ) -> click.Command:
     """Return the subcommand that sends an event."""
     driver = _driver_params()
-    name, model = method.name, method.arguments or Arguments
+    name, model = method.name, method.arguments
 
     @click.pass_context
     def run(ctx: click.Context, **values: Any) -> None:
