@@ -210,21 +210,30 @@ not a Markdown field. Workflow execution methods do not take `config=`.
 Each loaded workflow instance owns an immutable `workflow.graph`, built once
 during construction. It is the source for dispatch, accepted events, schemas,
 and Mermaid diagrams. The default `build_graph()` calls
-`WorkflowGraph.from_decorated_methods(type(self))`; inherited declarations are
+`WorkflowGraph.from_class(type(self))`; inherited declarations are
 collected in method-resolution order, honoring overrides. There is no class-level
 execution graph.
+
+`from_class()` can compile ordinary Python classes with Pydantic state and phase
+output models, independently of Workflow. It validates synchronous instance
+method signatures and generates event input models. The default
+`Workflow.build_graph()` then requires a `State` subclass and `Instruction` phase
+return annotations, and rejects handlers that override its infrastructure
+methods. These checks run when the workflow is loaded.
 
 Subclasses may override `build_graph()` and construct `WorkflowGraph` directly,
 as `MarkdownWorkflow` does. Supply a state model and mappings of phase and event
 definitions. Their public `handler` fields hold unbound methods, such as
-`type(self).start`; execution supplies the workflow instance.
+`type(self).start`; execution supplies the workflow instance. Explicit builders
+are trusted to supply the Workflow-specific handler contracts; execution still
+validates returned states and instructions.
 
-Decorator discovery checks method signatures and duplicate phases. Both paths
-share graph validation: entry event, names, input schemas, known phases,
-final/outgoing-event consistency, and reachability. Definition mappings are copied
-and frozen. Invalid definitions fail when constructed or loaded. Multiple start
-destinations are supported. Graph edges describe possible paths, not proof
-that Python conditions will take every path.
+Both paths share structural graph validation: entry event, names, known phases,
+and final/outgoing-event consistency. Definition mappings are copied and frozen.
+Unreachable phases are allowed; call `graph.check_reachability()` to reject them.
+Invalid structural definitions fail when constructed or loaded. Multiple start
+destinations are supported. Graph edges describe possible paths, not proof that
+Python conditions will take every path.
 
 ~~~bash
 uv run hiraku workflow graph count

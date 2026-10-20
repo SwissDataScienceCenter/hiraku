@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Compile standalone decorated classes with `WorkflowGraph.from_class()`; graph compilation no longer imports the workflow implementation. `Workflow.build_graph()` applies State, Instruction, and reserved-handler-name checks after compilation.
 - Declare workflow entry methods with `@start(dest=...)`, require argument models for every event, and make graph reachability an explicit `check_reachability()` check. Direct graph construction validates structure while trusting typed definitions.
 - Use string metadata in workflow event `Annotated` inputs as MCP argument descriptions, while preserving optional Pydantic constraints.
 - Infer Python workflow event arguments from annotated keyword-only parameters, including defaults and Pydantic constraints, instead of requiring explicit argument classes.

@@ -18,15 +18,27 @@ reloads that file on access. `load_session` and `list_sessions` follow the same
 project lookup convention as records and contexts.
 
 A loaded workflow owns its graph. `Workflow.build_graph()` defaults to
-`WorkflowGraph.from_decorated_methods()`; subclasses can build explicit graphs
-using `Phase` and `Event` with unbound `handler`
-methods. Direct graph construction is a typed Python API: callers supply valid
+`WorkflowGraph.from_class(type(self))`, followed by Workflow-specific checks.
+The compiler accepts any class with decorated instance methods: start defines
+the Pydantic state model, ordinary events accept and return that same model,
+and phases accept it and return a Pydantic model. It does not require `Workflow`
+inheritance or a `phase` field on the model. `Workflow.build_graph()` additionally
+requires a `State` subclass, exact `Instruction` phase return annotations, and
+handler names that do not override Workflow infrastructure.
+
+Subclasses can build explicit graphs using `Phase` and `Event` with unbound
+`handler` methods. Direct graph construction is a typed Python API: callers supply valid
 model classes and synchronous handlers. Construction freezes the mappings and
 checks graph structure. Unreachable phases are allowed; use
 `workflow.graph.check_reachability()` for an optional check that raises
 `WorkflowError`. Without a Python sidecar, loading selects `MarkdownWorkflow`,
 which infers inputs from scalar
 YAML defaults and retains the optional `description` field.
+
+An explicit `build_graph()` override is trusted to supply the Workflow-specific
+contracts. All execution paths still validate actual returned states and
+instructions. Graph compilation and topology live entirely in `graph.py`, which
+has no dependency on the workflow implementation.
 
 Python events declare inputs as annotated keyword-only parameters, after the
 state parameter for ordinary events. The method named `start` uses

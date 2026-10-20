@@ -457,6 +457,29 @@ def test_invalid_declarations_fail_when_loaded(config, old, new):
         load_workflow("toy")
 
 
+def test_workflow_requires_state_subclass(config):
+    source = TOY.replace(
+        "from pydantic import Field", "from pydantic import BaseModel, Field"
+    ).replace("class Total(State):", "class Total(BaseModel):")
+    write_workflow(config, source)
+    with pytest.raises(WorkflowError, match="start must return a concrete State model"):
+        load_workflow("toy")
+
+
+def test_workflow_requires_instruction_phase_return(config):
+    write_workflow(
+        config, TOY.replace("state: Total) -> Instruction:", "state: Total) -> Total:")
+    )
+    with pytest.raises(WorkflowError, match="Phase adding must return Instruction"):
+        load_workflow("toy")
+
+
+def test_workflow_rejects_reserved_phase_handler_name(config):
+    write_workflow(config, TOY.replace("def adding(", "def save("))
+    with pytest.raises(WorkflowError, match="Invalid workflow handler: save"):
+        load_workflow("toy")
+
+
 @pytest.mark.parametrize(
     "parameter",
     [

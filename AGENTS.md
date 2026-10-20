@@ -126,6 +126,10 @@ Generated or transient paths:
   `Workflow.run_start` and `Workflow.run_event`, which return `EventResult`.
   Instructions are retrieved separately. Each instance builds an immutable
   `Workflow.graph` through `build_graph()`. Python workflows use decorators;
+  `WorkflowGraph.from_class()` compiles generic decorated classes with Pydantic
+  models. The graph module must not import workflow implementation modules,
+  including under `TYPE_CHECKING`. The default `Workflow.build_graph()` adds
+  State/Instruction and reserved-handler-name checks after compilation.
   Markdown-only workflows infer arguments from YAML scalar defaults and build
   their graph directly. Python events declare annotated keyword-only inputs;
   graph construction generates their argument models. Python workflows use

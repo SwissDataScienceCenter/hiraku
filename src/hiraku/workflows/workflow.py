@@ -10,6 +10,7 @@ import logging
 import re
 import secrets
 import sys
+import typing
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
@@ -102,8 +103,26 @@ class Workflow(BaseRecord):
         return self._graph
 
     def build_graph(self) -> WorkflowGraph:
-        """Build from decorators; subclasses may construct a graph explicitly."""
-        return WorkflowGraph.from_decorated_methods(type(self))
+        """Compile decorators and validate Workflow-specific handler contracts.
+
+        Subclasses may construct a graph explicitly instead; execution still
+        validates returned states and instructions.
+        """
+        graph = WorkflowGraph.from_class(type(self))
+        if not issubclass(graph.state_model, State):
+            raise WorkflowError("start must return a concrete State model")
+        reserved = set(dir(Workflow))
+        for item in (*graph.events.values(), *graph.phases.values()):
+            if item.handler.__name__ in reserved:
+                raise WorkflowError(
+                    f"Invalid workflow handler: {item.handler.__name__}"
+                )
+        for node in graph.phases.values():
+            if typing.get_type_hints(node.handler).get("return") is not Instruction:
+                raise WorkflowError(
+                    f"Phase {node.handler.__name__} must return Instruction"
+                )
+        return graph
 
     @model_validator(mode="after")
     def check_headings(self) -> Self:

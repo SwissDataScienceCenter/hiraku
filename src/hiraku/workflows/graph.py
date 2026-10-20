@@ -10,14 +10,11 @@ import typing
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar
+from typing import Any, Literal, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from ..errors import ValidationError, WorkflowError
-
-if TYPE_CHECKING:
-    from .workflow import Instruction, State
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -112,7 +109,7 @@ class Phase:
 
     name: str
     final: bool
-    handler: Callable[..., Instruction] = field(repr=False)
+    handler: Callable[..., BaseModel] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -124,7 +121,7 @@ class Event:
     dest: tuple[str, ...]
     arguments: type[EventArguments]
     description: str
-    handler: Callable[..., State] = field(repr=False)
+    handler: Callable[..., BaseModel] = field(repr=False)
 
     def __post_init__(self) -> None:
         if self.source is not None:
@@ -136,7 +133,7 @@ class Event:
 class WorkflowGraph:
     """Immutable registry used by execution, tools, and diagrams."""
 
-    state_model: type[State]
+    state_model: type[BaseModel]
     phases: Mapping[str, Phase]
     events: Mapping[str, Event]
 
@@ -224,14 +221,15 @@ class WorkflowGraph:
         return "\n".join(lines) + "\n"
 
     @classmethod
-    def from_decorated_methods(cls, workflow: type) -> WorkflowGraph:
-        """Build a graph from a workflow class's decorated instance methods."""
-        from .workflow import Instruction, State, Workflow
+    def from_class(cls, definition: type) -> WorkflowGraph:
+        """Compile decorated instance methods into a graph.
 
-        reserved = set(dir(Workflow))
-
+        The start return annotation defines the Pydantic state model. Events
+        accept and return that model; phases accept it and return any Pydantic
+        model. No Workflow inheritance or execution semantics are required.
+        """
         methods = {}
-        for base in reversed(workflow.__mro__):
+        for base in reversed(definition.__mro__):
             methods.update(vars(base))
         entry = methods.get("start")
         declaration = getattr(entry, "__hiraku_event__", None)
@@ -243,8 +241,8 @@ class WorkflowGraph:
             raise WorkflowError("The start method must be decorated with @start")
         try:
             model = typing.get_type_hints(entry).get("return")
-            if not isinstance(model, type) or not issubclass(model, State):
-                raise WorkflowError("start must return a concrete State model")
+            if not isinstance(model, type) or not issubclass(model, BaseModel):
+                raise WorkflowError("start must return a Pydantic model")
             phases = {}
             events = {}
             for name, function in methods.items():
@@ -254,8 +252,8 @@ class WorkflowGraph:
                     continue
                 if node is not None and edge is not None:
                     raise WorkflowError(f"{name} cannot be both a phase and event")
-                if name in reserved or not inspect.isfunction(function):
-                    raise WorkflowError(f"Invalid workflow handler: {name}")
+                if not inspect.isfunction(function):
+                    raise WorkflowError(f"Invalid graph handler: {name}")
                 hints = typing.get_type_hints(function, include_extras=True)
                 parameters = list(inspect.signature(function).parameters.values())
                 if (
@@ -271,7 +269,13 @@ class WorkflowGraph:
                     if node[0] in phases:
                         raise WorkflowError(f"Duplicate phase: {node[0]}")
                     phases[node[0]] = Phase(*node, function)
-                    result = Instruction
+                    result = hints.get("return")
+                    if not isinstance(result, type) or not issubclass(
+                        result, BaseModel
+                    ):
+                        raise WorkflowError(
+                            f"Phase {name} must return a Pydantic model"
+                        )
                 else:
                     source, dest = edge
                     if (source is None) != (name == "start"):
@@ -297,7 +301,7 @@ class WorkflowGraph:
                 ):
                     raise WorkflowError(f"Invalid signature for {name}")
         except (NameError, TypeError, ValueError) as exc:
-            raise WorkflowError(f"Invalid workflow {workflow.__name__}: {exc}") from exc
+            raise WorkflowError(f"Invalid graph {definition.__name__}: {exc}") from exc
         return cls(model, phases, events)
 
 
