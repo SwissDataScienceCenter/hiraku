@@ -462,24 +462,23 @@ def _add_workflow_tools(
             workflow, session.run_event(workflow, instruction_id, event, arguments)
         )
 
-    _add_tool(
-        server,
+    server.add_tool(
         workflow_list,
-        "List the project's workflows. Start one with the tool named after it.",
-        read_only=True,
+        description=(
+            "List the project's workflows. Start one with the tool named after it."
+        ),
+        annotations=ToolAnnotations(read_only_hint=True),
     )
-    _add_tool(
-        server,
+    server.add_tool(
         workflow_send_event,
-        EVENT_GUIDE,
-        read_only=False,
+        description=EVENT_GUIDE,
+        annotations=ToolAnnotations(read_only_hint=False),
     )
     for workflow_id, workflow in sorted(workflows.items()):
-        _add_tool(
-            server,
+        server.add_tool(
             _start_tool(workflow, project),
-            _start_description(workflow),
-            read_only=False,
+            description=_start_description(workflow),
+            annotations=ToolAnnotations(read_only_hint=False),
             name=workflow_id,
         )
 
@@ -506,24 +505,23 @@ def _add_session_tools(
     def session_cancel(session_id: SessionId) -> dict[str, Any]:
         return load_session(session_id, config=project()).cancel()
 
-    _add_tool(
-        server,
+    server.add_tool(
         session_list,
-        "List workflow sessions with their status, newest first.",
-        read_only=True,
+        description="List workflow sessions with their status, newest first.",
+        annotations=ToolAnnotations(read_only_hint=True),
     )
-    _add_tool(
-        server,
+    server.add_tool(
         session_show,
-        "Show a workflow session: pending instruction or result, and "
-        "stored data. Use it to resume a session.",
-        read_only=True,
+        description=(
+            "Show a workflow session: pending instruction or result, and "
+            "stored data. Use it to resume a session."
+        ),
+        annotations=ToolAnnotations(read_only_hint=True),
     )
-    _add_tool(
-        server,
+    server.add_tool(
         session_cancel,
-        "Cancel a workflow session. Records, code, and runs are kept.",
-        read_only=False,
+        description="Cancel a workflow session. Records, code, and runs are kept.",
+        annotations=ToolAnnotations(read_only_hint=False),
     )
 
 
@@ -681,22 +679,6 @@ def _register_resources(
             return workflows[workflow_id].graph.to_mermaid()
         except WorkflowError as exc:
             raise ResourceError(str(exc)) from exc
-
-
-def _add_tool(
-    server: MCPServer,
-    function: Callable[..., Any],
-    description: str,
-    *,
-    read_only: bool,
-    name: str | None = None,
-) -> None:
-    server.add_tool(
-        function,
-        name=name,
-        description=description,
-        annotations=ToolAnnotations(read_only_hint=read_only),
-    )
 
 
 def _deliver(workflow: Workflow, result: EventResult) -> dict[str, Any]:
