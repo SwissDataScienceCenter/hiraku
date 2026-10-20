@@ -37,13 +37,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class State(BaseModel):
-    """Complete persisted workflow state, including its graph phase."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    phase: str
-
-
 class Instruction(BaseModel):
     """An assignment, its context, and the events that can answer it."""
 
@@ -109,18 +102,16 @@ class Workflow(BaseRecord):
         validates returned states and instructions.
         """
         graph = WorkflowGraph.from_class(type(self))
-        if not issubclass(graph.state_model, State):
-            raise WorkflowError("start must return a concrete State model")
         reserved = set(dir(Workflow))
-        for item in (*graph.events.values(), *graph.phases.values()):
+        for item in (*graph.events.values(), *graph.nodes.values()):
             if item.handler.__name__ in reserved:
                 raise WorkflowError(
                     f"Invalid workflow handler: {item.handler.__name__}"
                 )
-        for node in graph.phases.values():
+        for node in graph.nodes.values():
             if typing.get_type_hints(node.handler).get("return") is not Instruction:
                 raise WorkflowError(
-                    f"Phase {node.handler.__name__} must return Instruction"
+                    f"Node handler {node.handler.__name__} must return Instruction"
                 )
         return graph
 
@@ -189,7 +180,7 @@ class Workflow(BaseRecord):
                     return session._result("rejected", f"Session is {session.status}")
                 if instruction_id != session.instruction_id:
                     return session._result("stale", "Instruction is no longer pending")
-                if event not in session.events or session.phase not in method.source:
+                if event not in session.events or session.node not in method.source:
                     return session._result(
                         "rejected",
                         f"{event!r} is not an event the current instruction accepts",
@@ -228,27 +219,23 @@ class Workflow(BaseRecord):
                 name: getattr(arguments, name) for name in type(arguments).model_fields
             }
             returned = method.handler(self, *parameters, **inputs)
-            if type(returned) is not self.graph.state_model:
-                raise WorkflowError(
-                    f"{method.name} must return {self.graph.state_model.__name__}"
-                )
+            self.graph.check_transition(method, returned)
             # Validate JSON, including updates made through model_copy(update=...).
             raw = returned.model_dump(mode="json", warnings=False)
             json.dumps(raw, allow_nan=False)
             state = self.graph.state_model.model_validate(raw)
             raw = state.model_dump(mode="json")
-            if state.phase not in method.dest:
-                raise WorkflowError(
-                    f"{method.name} returned phase {state.phase!r}; "
-                    f"expected {method.dest}"
-                )
-            node = self.graph.phases[state.phase]
+            # Model validators can also change the selected node.
+            self.graph.check_transition(method, state)
+            node = self.graph.nodes[state.node]
             instruction = node.handler(self, state.model_copy(deep=True))
             if not isinstance(instruction, Instruction):
-                raise WorkflowError(f"Phase {state.phase!r} must return Instruction")
+                raise WorkflowError(
+                    f"Node handler {state.node!r} must return Instruction"
+                )
             if instruction.events is not None:
-                raise WorkflowError("Phase instructions cannot override graph events")
-            events = self.graph.events_from(state.phase)
+                raise WorkflowError("State instructions cannot override graph events")
+            events = self.graph.events_from(state.node)
             instruction = instruction.model_copy(
                 update={
                     "context": to_jsonable_python(instruction.context),
@@ -304,10 +291,10 @@ class Workflow(BaseRecord):
         if session.workflow != self.id:
             raise WorkflowError("Session belongs to another workflow")
         state = self.graph.state_model.model_validate(session.state)
-        if state.phase not in self.graph.phases:
-            raise WorkflowError(f"Unknown phase {state.phase!r}")
+        if state.node not in self.graph.nodes:
+            raise WorkflowError(f"Unknown node {state.node!r}")
         if not set(session.events).issubset(
-            item.name for item in self.graph.events_from(state.phase)
+            item.name for item in self.graph.events_from(state.node)
         ):
             raise WorkflowError("Pending events no longer match the graph")
 

@@ -5,9 +5,8 @@ execution, and stored sessions are described in the [Workflows guide](../../guid
 
 ~~~python
 from hiraku.workflows import (
-    EventArguments, Event, EventResult, Instruction, MarkdownWorkflow,
-    Phase,
-    Session, State, Workflow, WorkflowGraph, event, phase, start,
+    EventArguments, Event, EventResult, Instruction, MarkdownWorkflow, Node,
+    Session, State, Workflow, WorkflowGraph, event, node, start,
     list_sessions, list_workflows, load_session, load_workflow,
 )
 ~~~
@@ -19,31 +18,51 @@ project lookup convention as records and contexts.
 
 A loaded workflow owns its graph. `Workflow.build_graph()` defaults to
 `WorkflowGraph.from_class(type(self))`, followed by Workflow-specific checks.
-The compiler accepts any class with decorated instance methods: start defines
-the Pydantic state model, ordinary events accept and return that same model,
-and phases accept it and return a Pydantic model. It does not require `Workflow`
-inheritance or a `phase` field on the model. `Workflow.build_graph()` additionally
-requires a `State` subclass, exact `Instruction` phase return annotations, and
-handler names that do not override Workflow infrastructure.
+The compiler accepts any class with decorated instance methods. Start defines
+the `State` subclass; ordinary events accept and return that same model.
+`@node` handlers accept the model and return any Pydantic model. No `Workflow`
+inheritance is needed. `State` belongs to the graph abstraction; its `node`
+field selects the current node, while other fields hold the complete runtime
+data. `Workflow.build_graph()` additionally requires exact `Instruction` return
+annotations for node handlers and rejects reserved Workflow handler names.
 
-Subclasses can build explicit graphs using `Phase` and `Event` with unbound
-`handler` methods. Direct graph construction is a typed Python API: callers supply valid
-model classes and synchronous handlers. Construction freezes the mappings and
-checks graph structure. Unreachable phases are allowed; use
+Subclasses can construct graphs explicitly with a `state_model`, a `nodes`
+mapping of labels to immutable `Node` definitions, and an `events` mapping of
+names to `Event` definitions. `Node(name, final, handler)` groups a graph
+position's label, terminal flag, and unbound output handler.
+`graph.nodes["done"].handler` retrieves its handler, and
+`graph.nodes["done"].final` checks whether it is terminal. `State` is the
+evolving runtime data; `Node` is its position in the graph.
+Direct construction trusts valid model classes and synchronous handlers.
+Construction checks graph structure and freezes copied mappings.
+Unreachable nodes are allowed; use
 `workflow.graph.check_reachability()` for an optional check that raises
 `WorkflowError`. Without a Python sidecar, loading selects `MarkdownWorkflow`,
-which infers inputs from scalar
-YAML defaults and retains the optional `description` field.
+which infers inputs from scalar YAML defaults and retains the optional
+`description` field.
 
 An explicit `build_graph()` override is trusted to supply the Workflow-specific
 contracts. All execution paths still validate actual returned states and
 instructions. Graph compilation and topology live entirely in `graph.py`, which
 has no dependency on the workflow implementation.
 
+`graph.check_transition(event, next_state)` checks that the result has exactly
+the graph's state model and its `node` is one of the event's destinations.
+Workflow execution uses this check before persistence; it separately validates
+serialized state data and checks instruction outputs. Stored state and session
+inspection use `node` for the current position. Session format version 2 rejects
+older files; start a new session rather than migrating the old `phase` field.
+
 Python events declare inputs as annotated keyword-only parameters, after the
 state parameter for ordinary events. The method named `start` uses
 `@start(dest=...)`; ordinary events use `@event(source=..., dest=...)`.
 Graph construction generates an `EventArguments` model per event.
+`EventArguments.from_function(function)` builds that model class from the
+function's keyword-only parameters. It resolves annotations and preserves
+defaults and metadata; positional and variadic parameters are ignored by the
+factory. `WorkflowGraph.from_class()` separately validates the complete handler
+signature, including rejection of positional external inputs and variadics.
+`from_text()` then creates a validated instance of the generated model.
 Python defaults supply defaults; `Annotated[T, "Description"]`
 supplies parameter descriptions. Optional `Field(...)` metadata supplies
 constraints. Multiple description strings are rejected; a string description
@@ -57,7 +76,7 @@ event without inputs. Manually constructed definitions must also supply a model.
 
 ::: hiraku.workflows.graph.EventArguments
 
-::: hiraku.workflows.workflow.State
+::: hiraku.workflows.graph.State
 
 ::: hiraku.workflows.workflow.Instruction
 
@@ -67,7 +86,7 @@ event without inputs. Manually constructed definitions must also supply a model.
 
 ::: hiraku.workflows.markdown.MarkdownWorkflow
 
-::: hiraku.workflows.graph.phase
+::: hiraku.workflows.graph.node
 
 ::: hiraku.workflows.graph.start
 
@@ -75,7 +94,8 @@ event without inputs. Manually constructed definitions must also supply a model.
 
 ::: hiraku.workflows.graph.WorkflowGraph
 
-::: hiraku.workflows.graph.Phase
+::: hiraku.workflows.graph.Node
+
 
 ::: hiraku.workflows.graph.Event
 

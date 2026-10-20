@@ -11,11 +11,11 @@ from pydantic import Field
 from hiraku.errors import EventRejected
 from hiraku.markdown import render
 from hiraku.record import Record, load_record
-from hiraku.workflows import Instruction, State, Workflow, event, phase, start
+from hiraku.workflows import Instruction, State, Workflow, event, node, start
 
 
 class Queue(State):
-    phase: str = "working"
+    node: str = "working"
     parent: str
     target: int
     current: str | None = None
@@ -59,7 +59,7 @@ class Scheduler(Workflow):
         queue = Queue(parent=parent.id, target=target)
         return self._assign(queue)
 
-    @phase("working")
+    @node("working")
     def work(self, queue: Queue) -> Instruction:
         record = load_record(str(queue.current), config=self.config)
         values = {
@@ -80,7 +80,7 @@ class Scheduler(Workflow):
             },
         )
 
-    @phase("finished", final=True)
+    @node("finished", final=True)
     def report(self, queue: Queue) -> Instruction:
         return Instruction(
             self.markdown.section("## Done"), context={"records": self._summary(queue)}
@@ -116,7 +116,7 @@ class Scheduler(Workflow):
         )
         return queue.model_copy(
             update={
-                "phase": "working" if pick is not None else "finished",
+                "node": "working" if pick is not None else "finished",
                 "current": pick.id if pick is not None else None,
                 "baseline": _count(pick) if pick is not None else 0,
             }

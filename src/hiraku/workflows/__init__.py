@@ -3,10 +3,11 @@
 from .graph import (
     Event,
     EventArguments,
-    Phase,
+    Node,
+    State,
     WorkflowGraph,
     event,
-    phase,
+    node,
     start,
 )
 from .markdown import MarkdownWorkflow
@@ -14,7 +15,6 @@ from .session import Session, list_sessions, load_session
 from .workflow import (
     EventResult,
     Instruction,
-    State,
     Workflow,
     list_workflows,
     load_workflow,
@@ -26,13 +26,13 @@ __all__ = [
     "EventResult",
     "Instruction",
     "MarkdownWorkflow",
-    "Phase",
+    "Node",
     "Session",
     "State",
     "Workflow",
     "WorkflowGraph",
     "event",
-    "phase",
+    "node",
     "start",
     "list_sessions",
     "list_workflows",

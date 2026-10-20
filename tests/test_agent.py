@@ -37,11 +37,11 @@ WORKFLOW_PY = r'''from __future__ import annotations
 from typing import Annotated
 from pydantic import Field
 from hiraku.errors import EventRejected, NotReady
-from hiraku.workflows import State, Instruction, Workflow, event, phase, start
+from hiraku.workflows import State, Instruction, Workflow, event, node, start
 
 
 class Answers(State):
-    phase: str = "work"
+    node: str = "work"
     items: int
     answers: list[str] = Field(default_factory=list)
 
@@ -53,19 +53,19 @@ class Toy(Workflow):
     ) -> Answers:
         return Answers(items=items)
 
-    @phase("work")
+    @node("work")
     def work(self, answers: Answers) -> Instruction:
         return Instruction(
             self.markdown.section("## Work"), context={"done": len(answers.answers)}
         )
 
-    @phase("gate")
+    @node("gate")
     def gate(self, answers: Answers) -> Instruction:
         return Instruction(
             self.markdown.section("## Gate"), context={"answers": answers.answers}
         )
 
-    @phase("done", final=True)
+    @node("done", final=True)
     def done(self, answers: Answers) -> Instruction:
         return Instruction(
             self.markdown.section("## Done"), context={"answers": answers.answers}
@@ -83,7 +83,7 @@ class Toy(Workflow):
         answers = answers.model_copy(update={"answers": [*answers.answers, value]})
         answers = answers.model_copy(
             update={
-                "phase": "done" if len(answers.answers) == answers.items else "gate"
+                "node": "done" if len(answers.answers) == answers.items else "gate"
             }
         )
         return answers
@@ -91,12 +91,12 @@ class Toy(Workflow):
     @event(source="gate", dest="work")
     def approve(self, answers: Answers) -> Answers:
         """Go on with the next item."""
-        return answers.model_copy(update={"phase": "work"})
+        return answers.model_copy(update={"node": "work"})
 
     @event(source=["work", "gate"], dest="done")
     def stop(self, answers: Answers) -> Answers:
         """Stop early."""
-        return answers.model_copy(update={"phase": "done"})
+        return answers.model_copy(update={"node": "done"})
 
 
 WORKFLOW = Toy
@@ -164,7 +164,7 @@ def agent(*arguments: str) -> Result:
 
 def sessions(config: HirakuConfig) -> list[dict]:
     return [
-        {"session_id": s.id, "status": s.status, "state": s.phase}
+        {"session_id": s.id, "status": s.status, "state": s.node}
         for s in list_sessions(config=config)
     ]
 

@@ -38,10 +38,10 @@ class HistoryEntry(BaseModel):
 
 
 class Session(BaseModel):
-    """A saved execution. The state owns its phase; instructions are snapshots."""
+    """A saved execution. The state owns its node; instructions are snapshots."""
 
     model_config = ConfigDict(extra="forbid")
-    format_version: Literal[1] = 1
+    format_version: Literal[2] = 2
     id: str
     workflow: str
     status: Literal["active", "completed", "cancelled"] = "active"
@@ -55,14 +55,14 @@ class Session(BaseModel):
 
     @field_validator("state")
     @classmethod
-    def _state_has_phase(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(value.get("phase"), str):
-            raise ValueError("Session state needs a string phase")
+    def _state_has_node(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value.get("node"), str):
+            raise ValueError("Session state needs a string node")
         return value
 
     @property
-    def phase(self) -> str:
-        return self.state["phase"]
+    def node(self) -> str:
+        return self.state["node"]
 
     @property
     def events(self) -> list[str]:
@@ -92,7 +92,7 @@ class Session(BaseModel):
             "session_id": self.id,
             "instruction_id": self.instruction_id,
             "session_status": self.status,
-            "phase": self.phase,
+            "node": self.node,
         }
         if self.status == "cancelled":
             return {
@@ -158,7 +158,7 @@ def _load(path: Path) -> Session:
         raise SessionNotFoundError(f"Session {path.stem!r} not found")
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict) or raw.get("format_version") != 1:
+        if not isinstance(raw, dict) or raw.get("format_version") != 2:
             raise ValidationError("Unsupported session format; start a new session")
         session = Session.model_validate(raw)
         if not session.history or session.instruction_id != len(session.history):

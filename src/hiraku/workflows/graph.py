@@ -1,4 +1,4 @@
-"""Compile explicit workflow declarations and render their phase graph."""
+"""Compile explicit workflow declarations and render their node graph."""
 
 from __future__ import annotations
 
@@ -20,10 +20,58 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+class State(BaseModel):
+    """Complete state-machine data, including the current node's label."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    node: str
+
+
 class EventArguments(BaseModel):
     """Typed event inputs. Unknown arguments are rejected."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @classmethod
+    def from_function(cls, function: Callable[..., Any]) -> type[Self]:
+        """Build a model class from a function's annotated keyword-only inputs.
+
+        Positional and variadic parameters are ignored; handler signature
+        validation belongs to the graph compiler.
+        """
+        hints = typing.get_type_hints(function, include_extras=True)
+        fields = {}
+        for parameter in inspect.signature(function).parameters.values():
+            if parameter.kind is not parameter.KEYWORD_ONLY:
+                continue
+            name = f"{function.__name__}.{parameter.name}"
+            if (
+                parameter.name not in hints
+                or parameter.name.startswith("_")
+                or hasattr(cls, parameter.name)
+            ):
+                raise WorkflowError(f"{name} must be an annotated keyword-only input")
+            annotation = hints[parameter.name]
+            if typing.get_origin(annotation) is typing.Annotated:
+                base, *metadata = typing.get_args(annotation)
+                descriptions = [m for m in metadata if isinstance(m, str)]
+                if len(descriptions) > 1:
+                    raise WorkflowError(f"{name} has multiple descriptions")
+                if descriptions:
+                    annotation = typing.Annotated[
+                        base,
+                        *(m for m in metadata if not isinstance(m, str)),
+                        Field(description=descriptions[0]),
+                    ]
+            fields[parameter.name] = (
+                annotation,
+                ... if parameter.default is parameter.empty else parameter.default,
+            )
+        model = create_model(
+            f"{function.__name__}EventArguments", __base__=cls, **fields
+        )
+        model.model_json_schema()
+        return model
 
     @classmethod
     def from_text(cls, values: Mapping[str, str]) -> Self:
@@ -56,32 +104,32 @@ def _is_text(annotation: Any) -> bool:
     return False
 
 
-def phase(name: str, *, final: bool = False) -> Callable[[_F], _F]:
-    """Register an instruction method for a named phase."""
+def node(name: str, *, final: bool = False) -> Callable[[_F], _F]:
+    """Register an output handler for a named state-machine node."""
     if not isinstance(name, str) or not _NAME.fullmatch(name):
-        raise WorkflowError(f"Invalid phase name: {name!r}")
+        raise WorkflowError(f"Invalid node name: {name!r}")
 
     def mark(function: _F) -> _F:
-        function.__hiraku_phase__ = name, final
+        function.__hiraku_node__ = name, final
         return function
 
     return mark
 
 
-def _phase_names(value: str | Sequence[str]) -> tuple[str, ...]:
+def _node_names(value: str | Sequence[str]) -> tuple[str, ...]:
     if not isinstance(value, (str, Sequence)):
-        raise WorkflowError(f"Invalid event phases: {value!r}")
+        raise WorkflowError(f"Invalid event nodes: {value!r}")
     result = (value,) if isinstance(value, str) else tuple(value)
     if not result or any(
         not isinstance(name, str) or not _NAME.fullmatch(name) for name in result
     ):
-        raise WorkflowError(f"Invalid event phases: {value!r}")
+        raise WorkflowError(f"Invalid event nodes: {value!r}")
     return tuple(dict.fromkeys(result))
 
 
 def start(*, dest: str | Sequence[str]) -> Callable[[_F], _F]:
-    """Register the start method and its possible initial phases."""
-    destinations = _phase_names(dest)
+    """Register the start method and its possible initial nodes."""
+    destinations = _node_names(dest)
 
     def mark(function: _F) -> _F:
         function.__hiraku_event__ = None, destinations
@@ -94,7 +142,7 @@ def event(
     *, source: str | Sequence[str], dest: str | Sequence[str]
 ) -> Callable[[_F], _F]:
     """Register an ordinary event's possible graph edges."""
-    sources, destinations = _phase_names(source), _phase_names(dest)
+    sources, destinations = _node_names(source), _node_names(dest)
 
     def mark(function: _F) -> _F:
         function.__hiraku_event__ = sources, destinations
@@ -104,8 +152,8 @@ def event(
 
 
 @dataclass(frozen=True)
-class Phase:
-    """A registered phase and whether it ends the session."""
+class Node:
+    """A graph position, its output handler, and whether it is terminal."""
 
     name: str
     final: bool
@@ -121,7 +169,7 @@ class Event:
     dest: tuple[str, ...]
     arguments: type[EventArguments]
     description: str
-    handler: Callable[..., BaseModel] = field(repr=False)
+    handler: Callable[..., State] = field(repr=False)
 
     def __post_init__(self) -> None:
         if self.source is not None:
@@ -133,19 +181,19 @@ class Event:
 class WorkflowGraph:
     """Immutable registry used by execution, tools, and diagrams."""
 
-    state_model: type[BaseModel]
-    phases: Mapping[str, Phase]
+    state_model: type[State]
+    nodes: Mapping[str, Node]
     events: Mapping[str, Event]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "phases", MappingProxyType(dict(self.phases)))
+        object.__setattr__(self, "nodes", MappingProxyType(dict(self.nodes)))
         object.__setattr__(self, "events", MappingProxyType(dict(self.events)))
-        for definitions in (self.phases, self.events):
+        for definitions in (self.nodes, self.events):
             for name, item in definitions.items():
                 if (
                     not isinstance(name, str)
-                    or name != item.name
                     or not _NAME.fullmatch(name)
+                    or name != item.name
                 ):
                     raise WorkflowError(f"Invalid graph definition name: {name!r}")
         if "start" not in self.events or self.start.source is not None:
@@ -153,23 +201,32 @@ class WorkflowGraph:
         for item in self.events.values():
             if not item.dest or (item.name != "start" and not item.source):
                 raise WorkflowError(f"{item.name} needs sources and destinations")
-        phases, events = self.phases, self.events
-        if not any(item.final for item in phases.values()):
-            raise WorkflowError("A workflow needs a final phase")
+        nodes, events = self.nodes, self.events
+        if not any(node.final for node in nodes.values()):
+            raise WorkflowError("A graph needs a final node")
         for item in events.values():
-            unknown = set((item.source or ()) + item.dest) - phases.keys()
+            unknown = set((item.source or ()) + item.dest) - nodes.keys()
             if unknown:
                 raise WorkflowError(
-                    f"{item.name} names unknown phases: {sorted(unknown)}"
+                    f"{item.name} names unknown nodes: {sorted(unknown)}"
                 )
-        for item in phases.values():
-            if bool(self.events_from(item.name)) == item.final:
+        for name, node in nodes.items():
+            if bool(self.events_from(name)) == node.final:
                 raise WorkflowError(
-                    f"Phase {item.name!r} must accept events exactly when nonfinal"
+                    f"Node {name!r} must accept events exactly when nonfinal"
                 )
 
+    def check_transition(self, event: Event, next_state: State) -> None:
+        """Check the exact state model and destination of an event result."""
+        if type(next_state) is not self.state_model:
+            raise WorkflowError(f"{event.name} must return {self.state_model.__name__}")
+        if next_state.node not in event.dest:
+            raise WorkflowError(
+                f"{event.name} returned node {next_state.node!r}; expected {event.dest}"
+            )
+
     def check_reachability(self) -> None:
-        """Raise WorkflowError if any declared phases cannot be reached from start."""
+        """Raise WorkflowError if any declared nodes cannot be reached from start."""
         reached = set(self.start.dest)
         while True:
             expanded = reached | {
@@ -181,25 +238,25 @@ class WorkflowGraph:
             if expanded == reached:
                 break
             reached = expanded
-        if reached != self.phases.keys():
+        if reached != self.nodes.keys():
             raise WorkflowError(
-                f"Unreachable phases: {sorted(self.phases.keys() - reached)}"
+                f"Unreachable nodes: {sorted(self.nodes.keys() - reached)}"
             )
 
     @property
     def start(self) -> Event:
         return self.events["start"]
 
-    def events_from(self, phase: str) -> tuple[Event, ...]:
+    def events_from(self, node: str) -> tuple[Event, ...]:
         """Return accepted events in declaration order."""
         return tuple(
             item
             for item in self.events.values()
-            if item.source is not None and phase in item.source
+            if item.source is not None and node in item.source
         )
 
     def to_mermaid(self, *, current: str | None = None) -> str:
-        """Render declared edges, optionally highlighting a phase."""
+        """Render declared edges, optionally highlighting a node."""
         lines = ["stateDiagram-v2"]
         for item in self.events.values():
             for source in item.source or ("[*]",):
@@ -207,11 +264,11 @@ class WorkflowGraph:
                     label = "" if item.source is None else f": {item.name}"
                     lines.append(f"  {source} --> {dest}{label}")
         lines.extend(
-            f"  {item.name} --> [*]" for item in self.phases.values() if item.final
+            f"  {node.name} --> [*]" for node in self.nodes.values() if node.final
         )
         if current is not None:
-            if current not in self.phases:
-                raise WorkflowError(f"Unknown phase: {current!r}")
+            if current not in self.nodes:
+                raise WorkflowError(f"Unknown node: {current!r}")
             lines.extend(
                 (
                     "  classDef current fill:#fdff32",
@@ -224,8 +281,8 @@ class WorkflowGraph:
     def from_class(cls, definition: type) -> WorkflowGraph:
         """Compile decorated instance methods into a graph.
 
-        The start return annotation defines the Pydantic state model. Events
-        accept and return that model; phases accept it and return any Pydantic
+        The start return annotation defines the State subclass. Events
+        accept and return that model; node handlers return any Pydantic
         model. No Workflow inheritance or execution semantics are required.
         """
         methods = {}
@@ -241,17 +298,17 @@ class WorkflowGraph:
             raise WorkflowError("The start method must be decorated with @start")
         try:
             model = typing.get_type_hints(entry).get("return")
-            if not isinstance(model, type) or not issubclass(model, BaseModel):
-                raise WorkflowError("start must return a Pydantic model")
-            phases = {}
+            if not isinstance(model, type) or not issubclass(model, State):
+                raise WorkflowError("start must return a concrete State model")
+            nodes = {}
             events = {}
             for name, function in methods.items():
-                node = getattr(function, "__hiraku_phase__", None)
+                node = getattr(function, "__hiraku_node__", None)
                 edge = getattr(function, "__hiraku_event__", None)
                 if node is None and edge is None:
                     continue
                 if node is not None and edge is not None:
-                    raise WorkflowError(f"{name} cannot be both a phase and event")
+                    raise WorkflowError(f"{name} cannot be both a node and event")
                 if not inspect.isfunction(function):
                     raise WorkflowError(f"Invalid graph handler: {name}")
                 hints = typing.get_type_hints(function, include_extras=True)
@@ -266,23 +323,29 @@ class WorkflowGraph:
                 parameters = parameters[1:]
                 expected = [] if name == "start" else [model]
                 if node is not None:
-                    if node[0] in phases:
-                        raise WorkflowError(f"Duplicate phase: {node[0]}")
-                    phases[node[0]] = Phase(*node, function)
+                    label, final = node
+                    if label in nodes:
+                        raise WorkflowError(f"Duplicate node: {label}")
+                    nodes[label] = Node(label, final, function)
                     result = hints.get("return")
                     if not isinstance(result, type) or not issubclass(
                         result, BaseModel
                     ):
                         raise WorkflowError(
-                            f"Phase {name} must return a Pydantic model"
+                            f"Node handler {name} must return a Pydantic model"
                         )
                 else:
                     source, dest = edge
                     if (source is None) != (name == "start"):
                         raise WorkflowError("Only the start method can use @start")
-                    arguments = _event_arguments(
-                        function, parameters[len(expected) :], hints
-                    )
+                    if any(
+                        p.kind is not p.KEYWORD_ONLY
+                        for p in parameters[len(expected) :]
+                    ):
+                        raise WorkflowError(
+                            f"{name}: external inputs must be keyword-only parameters"
+                        )
+                    arguments = EventArguments.from_function(function)
                     parameters = parameters[: len(expected)]
                     events[name] = Event(
                         name,
@@ -302,43 +365,4 @@ class WorkflowGraph:
                     raise WorkflowError(f"Invalid signature for {name}")
         except (NameError, TypeError, ValueError) as exc:
             raise WorkflowError(f"Invalid graph {definition.__name__}: {exc}") from exc
-        return cls(model, phases, events)
-
-
-def _event_arguments(
-    function: Callable[..., Any],
-    parameters: Sequence[inspect.Parameter],
-    hints: Mapping[str, Any],
-) -> type[EventArguments]:
-    """Compile annotated keyword inputs into a model for validation and schemas."""
-    fields = {}
-    for parameter in parameters:
-        name = f"{function.__name__}.{parameter.name}"
-        if (
-            parameter.kind is not parameter.KEYWORD_ONLY
-            or parameter.name not in hints
-            or parameter.name.startswith("_")
-            or hasattr(EventArguments, parameter.name)
-        ):
-            raise WorkflowError(f"{name} must be an annotated keyword-only input")
-        annotation = hints[parameter.name]
-        if typing.get_origin(annotation) is typing.Annotated:
-            base, *metadata = typing.get_args(annotation)
-            descriptions = [m for m in metadata if isinstance(m, str)]
-            if len(descriptions) > 1:
-                raise WorkflowError(f"{name} has multiple descriptions")
-            if descriptions:
-                annotation = typing.Annotated[
-                    base,
-                    *(m for m in metadata if not isinstance(m, str)),
-                    Field(description=descriptions[0]),
-                ]
-        fields[parameter.name] = (
-            annotation,
-            ... if parameter.default is parameter.empty else parameter.default,
-        )
-    model = create_model(
-        f"{function.__name__}EventArguments", __base__=EventArguments, **fields
-    )
-    model.model_json_schema()
-    return model
+        return cls(model, nodes, events)

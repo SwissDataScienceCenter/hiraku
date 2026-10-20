@@ -9,7 +9,7 @@ from pydantic import Field
 
 from hiraku.errors import EventRejected
 from hiraku.markdown import render
-from hiraku.workflows import Instruction, State, Workflow, event, phase, start
+from hiraku.workflows import Instruction, State, Workflow, event, node, start
 
 
 def _token() -> str:
@@ -17,7 +17,7 @@ def _token() -> str:
 
 
 class Counter(State):
-    phase: str = "running"
+    node: str = "running"
     count: int
     step: int = 1
     token: str = Field(default_factory=_token)
@@ -38,21 +38,21 @@ class CountSteps(Workflow):
         """Start counting steps to check the harness; runs the first step."""
         return Counter(count=count)
 
-    @phase("running")
+    @node("running")
     def run_step(self, counter: Counter) -> Instruction:
         values = {"step": counter.step, "count": counter.count, "token": counter.token}
         return Instruction(
             render(self.markdown.section("## Step"), values), context=values
         )
 
-    @phase("waiting")
+    @node("waiting")
     def ask_to_continue(self, counter: Counter) -> Instruction:
         return Instruction(
             self.markdown.section("## Next"),
             context={"done": counter.step, "remaining": counter.count - counter.step},
         )
 
-    @phase("finished", final=True)
+    @node("finished", final=True)
     def report(self, counter: Counter) -> Instruction:
         return Instruction(
             self.markdown.section("## Done"),
@@ -73,7 +73,7 @@ class CountSteps(Workflow):
                 "send the token from the current instruction"
             )
         counter = counter.model_copy(
-            update={"phase": "finished" if counter.step >= counter.count else "waiting"}
+            update={"node": "finished" if counter.step >= counter.count else "waiting"}
         )
         return counter
 
@@ -82,12 +82,12 @@ class CountSteps(Workflow):
         """Run the next step."""
         counter = counter.model_copy(update={"step": counter.step + 1})
         counter = counter.model_copy(update={"token": _token()})
-        return counter.model_copy(update={"phase": "running"})
+        return counter.model_copy(update={"node": "running"})
 
     @event(source="waiting", dest="finished")
     def finish(self, counter: Counter) -> Counter:
         """End the session after the current step."""
-        return counter.model_copy(update={"phase": "finished"})
+        return counter.model_copy(update={"node": "finished"})
 
 
 WORKFLOW = CountSteps

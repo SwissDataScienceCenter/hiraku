@@ -126,10 +126,13 @@ Generated or transient paths:
   `Workflow.run_start` and `Workflow.run_event`, which return `EventResult`.
   Instructions are retrieved separately. Each instance builds an immutable
   `Workflow.graph` through `build_graph()`. Python workflows use decorators;
-  `WorkflowGraph.from_class()` compiles generic decorated classes with Pydantic
-  models. The graph module must not import workflow implementation modules,
+  `WorkflowGraph.from_class()` compiles decorated classes using its `State`
+  abstraction and Pydantic output models. `State.node` selects the current graph
+  position. The graph owns transition validation and immutable `Node` definitions
+  in `graph.nodes`, with each node's name, handler, and explicit final flag.
+  The graph module must not import workflow implementation modules,
   including under `TYPE_CHECKING`. The default `Workflow.build_graph()` adds
-  State/Instruction and reserved-handler-name checks after compilation.
+  Instruction and reserved-handler-name checks after compilation.
   Terminal workers write event files; the parent in `agent.py` validates and
   submits them through the workflow API after successful worker exit. There is
   no worker-specific MCP server or submission journal.
@@ -137,7 +140,7 @@ Generated or transient paths:
   their graph directly. Python events declare annotated keyword-only inputs;
   graph construction generates their argument models. Python workflows use
   `@start` for the entry method, `@event` for transitions, and
-  `@phase` for instructions. Every event has an argument model, even without
+  `@node` for instructions. Every event has an argument model, even without
   inputs. Graph structure is checked on construction; reachability is optional
   through `graph.check_reachability()`. Python sidecars are
   optional; events return typed states. `Workflow.config` reloads

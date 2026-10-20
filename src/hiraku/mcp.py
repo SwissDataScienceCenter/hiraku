@@ -494,7 +494,7 @@ def _add_session_tools(
                 "session_id": s.id,
                 "workflow": s.workflow,
                 "status": s.status,
-                "phase": s.phase,
+                "node": s.node,
                 "instruction_id": s.instruction_id,
                 "updated_at": s.updated_at.isoformat(),
             }

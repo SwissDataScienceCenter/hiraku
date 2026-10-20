@@ -771,7 +771,7 @@ def workflow_graph_command(
             raise ValidationError(
                 f"Session {session_id!r} belongs to workflow {session.workflow!r}"
             )
-        current = session.phase
+        current = session.node
     click.echo(workflow.graph.to_mermaid(current=current), nl=False)
 
 
@@ -792,7 +792,7 @@ def session_list(state: CLIContext, json_output: bool) -> None:
             "session_id": s.id,
             "workflow": s.workflow,
             "status": s.status,
-            "phase": s.phase,
+            "node": s.node,
             "updated_at": s.updated_at.isoformat(),
         }
         for s in list_sessions(config=state.config)

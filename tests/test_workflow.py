@@ -17,7 +17,7 @@ from hiraku.workflows import (
     EventResult,
     Instruction,
     MarkdownWorkflow,
-    Phase,
+    Node,
     State,
     WorkflowGraph,
     list_sessions,
@@ -29,11 +29,11 @@ from hiraku.workflows import (
 TOY = '''from typing import Annotated, Literal
 from pydantic import Field
 from hiraku.errors import EventRejected, NotReady
-from hiraku.workflows import State, Instruction, Workflow, phase, event, start
+from hiraku.workflows import State, Instruction, Workflow, node, event, start
 
 
 class Total(State):
-    phase: Literal["adding", "done"] = "adding"
+    node: Literal["adding", "done"] = "adding"
     total: int = 0
     target: int
 
@@ -46,13 +46,13 @@ class Toy(Workflow):
         """Start counting."""
         return Total(target=target)
 
-    @phase("adding")
+    @node("adding")
     def adding(self, state: Total) -> Instruction:
         return Instruction(
             self.markdown.section("## Add"), context={"total": state.total}
         )
 
-    @phase("done", final=True)
+    @node("done", final=True)
     def done(self, state: Total) -> Instruction:
         return Instruction("Report the total.", context={"total": state.total})
 
@@ -71,13 +71,13 @@ class Toy(Workflow):
         return state.model_copy(
             update={
                 "total": total,
-                "phase": "done" if total >= state.target else "adding",
+                "node": "done" if total >= state.target else "adding",
             }
         )
 
     @event(source="adding", dest="done")
     def finish(self, state: Total) -> Total:
-        return state.model_copy(update={"phase": "done"})
+        return state.model_copy(update={"node": "done"})
 
 
 WORKFLOW = Toy
@@ -127,7 +127,7 @@ def test_graph_and_models_are_the_only_registry(config):
     graph.check_reachability()
     assert [e.name for e in graph.events_from("adding")] == ["add", "finish"]
     with pytest.raises(TypeError):
-        graph.phases["other"] = graph.phases["done"]
+        graph.nodes["other"] = graph.nodes["done"]
     state = graph.state_model(target=3)
     with pytest.raises(PydanticValidationError):
         state.total = 5
@@ -146,19 +146,45 @@ def test_state_updates_and_reads_are_snapshots(config):
     workflow, first = started(config)
     read = workflow.get_instruction(first.session_id)
     assert read == workflow.get_instruction(first.session_id)
-    assert read["phase"] == "adding"
+    assert read["node"] == "adding"
     assert read["instruction"]["context"] == {"total": 0}
     assert read["instruction"]["events"]["instruction_id"] == 1
     second = submit(workflow, first)
     assert second.status == "accepted"
     assert second.instruction_id == 2
-    assert workflow.get_instruction(first.session_id)["phase"] == "adding"
+    assert workflow.get_instruction(first.session_id)["node"] == "adding"
     session = load_session(first.session_id, config=config)
-    assert session.state == {"phase": "adding", "total": 1, "target": 3}
-    assert session.phase == "adding"
+    assert session.state == {"node": "adding", "total": 1, "target": 3}
+    assert session.node == "adding"
     assert session.instruction.context == {"total": 1}
     assert len(session.history) == 2
     assert list_sessions(config=config)[0].id == first.session_id
+
+
+def test_node_is_used_in_session_storage_and_inspection(config):
+    workflow, result = started(config)
+    session = load_session(result.session_id)
+    stored = json.loads((config.sessions_dir / f"{session.id}.json").read_text())
+    assert stored["format_version"] == 2
+    assert stored["state"]["node"] == "adding"
+    shown = session.show(workflow)
+    assert shown["node"] == "adding"
+    assert "phase" not in shown
+    assert "phase" not in stored["state"]
+    listing = CliRunner().invoke(main, ["session", "list", "--json"])
+    assert listing.exit_code == 0, listing.output
+    assert json.loads(listing.output)[0]["node"] == "adding"
+
+
+def test_old_session_format_is_rejected(config):
+    _, result = started(config)
+    path = config.sessions_dir / f"{result.session_id}.json"
+    stored = json.loads(path.read_text())
+    stored["format_version"] = 1
+    stored["state"]["phase"] = stored["state"].pop("node")
+    path.write_text(json.dumps(stored))
+    with pytest.raises(ValidationError, match="Unsupported session format"):
+        load_session(result.session_id)
 
 
 def test_completion_and_retry(config):
@@ -203,7 +229,7 @@ def test_invalid_start_creates_no_session(config, arguments):
     assert list_sessions(config=config) == []
 
 
-def test_omitted_arguments_and_wrong_phase(config):
+def test_omitted_arguments_and_wrong_node(config):
     workflow, first = started(config)
     wrong = workflow.run_event(first.session_id, 1, "finish", {"extra": True})
     assert wrong.status == "rejected"
@@ -284,10 +310,10 @@ def test_failed_save_preserves_previous_session(config, monkeypatch):
 @pytest.mark.parametrize(
     "replacement",
     [
-        'return state.model_copy(update={"phase": "unknown"})',
+        'return state.model_copy(update={"node": "unknown"})',
         'return state.model_copy(update={"total": "invalid"})',
         "return None",
-        'return state.model_copy(update={"phase": "done", "total": float("nan")})',
+        'return state.model_copy(update={"node": "done", "total": float("nan")})',
     ],
 )
 def test_returned_state_is_validated_before_saving(config, replacement):
@@ -295,7 +321,7 @@ def test_returned_state_is_validated_before_saving(config, replacement):
         """return state.model_copy(
             update={
                 "total": total,
-                "phase": "done" if total >= state.target else "adding",
+                "node": "done" if total >= state.target else "adding",
             }
         )""",
         replacement,
@@ -411,8 +437,8 @@ def test_incomplete_workflows_and_listing(config, caplog):
         ("def start(", "async def start("),
         ('source="adding", dest="done"', 'source=None, dest="done"'),
         ('dest="done"', 'dest="missing"'),
-        ('@phase("done", final=True)', '@phase("done")'),
-        ('@phase("done", final=True)', '@phase("adding", final=True)'),
+        ('@node("done", final=True)', '@node("done")'),
+        ('@node("done", final=True)', '@node("adding", final=True)'),
         (
             "def start(self, *, target: Annotated[int, Field(gt=0)] = 3) -> Total:",
             "def start(self, *, target: Annotated[int, Field(gt=0)] = 3) -> None:",
@@ -441,11 +467,11 @@ def test_incomplete_workflows_and_listing(config, caplog):
             "def finish(self, state: Total) -> Total:",
             "def save(self, state: Total) -> Total:",
         ),
-        ('@phase("adding")', '@phase("bad-name")'),
-        ('@phase("adding")', '@phase("unused")'),
+        ('@node("adding")', '@node("bad-name")'),
+        ('@node("adding")', '@node("unused")'),
         (
-            '@phase("done", final=True)',
-            '@phase("done", final=True)\n    @event(source="adding", dest="done")',
+            '@node("done", final=True)',
+            '@node("done", final=True)\n    @event(source="adding", dest="done")',
         ),
         ('@start(dest=["adding", "done"])', ""),
     ],
@@ -466,15 +492,17 @@ def test_workflow_requires_state_subclass(config):
         load_workflow("toy")
 
 
-def test_workflow_requires_instruction_phase_return(config):
+def test_workflow_requires_instruction_node_return(config):
     write_workflow(
         config, TOY.replace("state: Total) -> Instruction:", "state: Total) -> Total:")
     )
-    with pytest.raises(WorkflowError, match="Phase adding must return Instruction"):
+    with pytest.raises(
+        WorkflowError, match="Node handler adding must return Instruction"
+    ):
         load_workflow("toy")
 
 
-def test_workflow_rejects_reserved_phase_handler_name(config):
+def test_workflow_rejects_reserved_node_handler_name(config):
     write_workflow(config, TOY.replace("def adding(", "def save("))
     with pytest.raises(WorkflowError, match="Invalid workflow handler: save"):
         load_workflow("toy")
@@ -501,7 +529,7 @@ def test_invalid_event_input_parameters(config, parameter):
 
 def test_start_decorator_requires_start_method_name(config):
     source = TOY.replace(
-        "phase, event, start", "phase, event, start as workflow_start"
+        "node, event, start", "node, event, start as workflow_start"
     ).replace("@start(", "@workflow_start(")
     source = source.replace(
         '@event(source="adding", dest="done")', '@workflow_start(dest="done")'
@@ -602,7 +630,7 @@ def test_inherited_graph_is_independent(config):
         """class Child(Toy):
     @event(source="adding", dest="done")
     def finish(self, state: Total) -> Total:
-        return state.model_copy(update={"phase": "done", "total": 42})
+        return state.model_copy(update={"node": "done", "total": 42})
 
 
 WORKFLOW = Child
@@ -658,15 +686,15 @@ def test_unsupported_or_invalid_storage(config, content, caplog):
     assert "unavailable" in caplog.text
 
 
-def test_single_final_phase_and_dynamic_entry(config):
+def test_single_final_node_and_dynamic_entry(config):
     source = TOY.replace(
         "return Total(target=target)",
-        'return Total(target=target, phase="done")',
+        'return Total(target=target, node="done")',
     )
     write_workflow(config, source)
     workflow, first = started(config)
     assert load_session(first.session_id).status == "completed"
-    assert workflow.get_instruction(first.session_id)["phase"] == "done"
+    assert workflow.get_instruction(first.session_id)["node"] == "done"
 
 
 def test_graph_cli_and_receipt_only_submission(config):
@@ -712,7 +740,7 @@ def test_base_models_reject_extras():
     with pytest.raises(PydanticValidationError):
         EventArguments(extra=1)
     with pytest.raises(PydanticValidationError):
-        State(phase="x", extra=1)
+        State(node="x", extra=1)
 
 
 def test_arguments_from_text_preserves_strings_and_decodes_structured_values():
@@ -935,11 +963,14 @@ def test_markdown_instances_have_independent_schemas(config):
         "final_event",
         "empty_dest",
         "wrong_name",
+        "missing_final",
+        "wrong_node_name",
+        "nonfinal_without_events",
     ],
 )
 def test_explicit_graphs_share_structural_validation(config, problem):
     workflow = MarkdownWorkflow(id="direct", config=config)
-    phases = dict(workflow.graph.phases)
+    nodes = dict(workflow.graph.nodes)
     events = dict(workflow.graph.events)
     if problem == "missing_start":
         events.clear()
@@ -980,19 +1011,28 @@ def test_explicit_graphs_share_structural_validation(config, problem):
             MarkdownWorkflow.start,
         )
     elif problem == "wrong_name":
-        phases["other"] = phases.pop("done")
+        events["other"] = events.pop("start")
+    elif problem == "missing_final":
+        nodes["done"] = Node("done", False, MarkdownWorkflow.prompt)
+    elif problem == "wrong_node_name":
+        nodes["other"] = nodes.pop("done")
+    elif problem == "nonfinal_without_events":
+        nodes["unused"] = Node("unused", False, MarkdownWorkflow.prompt)
     with pytest.raises(WorkflowError):
-        WorkflowGraph(workflow.graph.state_model, phases, events)
+        WorkflowGraph(workflow.graph.state_model, nodes, events)
 
 
 def test_explicit_graph_copies_definition_mappings(config):
     workflow = MarkdownWorkflow(id="direct", config=config)
-    phases, events = dict(workflow.graph.phases), dict(workflow.graph.events)
-    graph = WorkflowGraph(workflow.graph.state_model, phases, events)
-    phases.clear()
+    nodes, events = dict(workflow.graph.nodes), dict(workflow.graph.events)
+    graph = WorkflowGraph(workflow.graph.state_model, nodes, events)
+    nodes.clear()
     events.clear()
-    assert set(graph.phases) == {"done"}
+    assert set(graph.nodes) == {"done"}
     assert set(graph.events) == {"start"}
+    assert graph.nodes["done"].final is True
+    with pytest.raises(TypeError):
+        graph.nodes["other"] = graph.nodes["done"]
     with pytest.raises(TypeError):
         graph.events["other"] = graph.start
 
@@ -1000,8 +1040,8 @@ def test_explicit_graph_copies_definition_mappings(config):
 @pytest.mark.parametrize("final", [True, False])
 def test_reachability_is_an_optional_check(config, final):
     workflow = MarkdownWorkflow(id="direct", config=config)
-    phases, events = dict(workflow.graph.phases), dict(workflow.graph.events)
-    phases["unused"] = Phase("unused", final, MarkdownWorkflow.prompt)
+    nodes, events = dict(workflow.graph.nodes), dict(workflow.graph.events)
+    nodes["unused"] = Node("unused", final, MarkdownWorkflow.prompt)
     if not final:
         events["again"] = Event(
             "again",
@@ -1011,21 +1051,21 @@ def test_reachability_is_an_optional_check(config, final):
             "",
             MarkdownWorkflow.start,
         )
-    graph = WorkflowGraph(workflow.graph.state_model, phases, events)
-    assert "unused" in graph.phases
-    with pytest.raises(WorkflowError, match="Unreachable phases: .*unused"):
+    graph = WorkflowGraph(workflow.graph.state_model, nodes, events)
+    assert "unused" in graph.nodes
+    with pytest.raises(WorkflowError, match="Unreachable nodes: .*unused"):
         graph.check_reachability()
 
 
-def test_decorated_workflow_can_load_with_unreachable_phase(config):
+def test_decorated_workflow_can_load_with_unreachable_node(config):
     source = TOY.replace(
         "    minimum: int = 1",
-        """    @phase("unused", final=True)
+        """    @node("unused", final=True)
     def unused(self, state: Total) -> Instruction:
         return Instruction("Unused.")""",
     )
     write_workflow(config, source)
     workflow, result = started(config)
     assert result.status == "accepted"
-    with pytest.raises(WorkflowError, match="Unreachable phases: .*unused"):
+    with pytest.raises(WorkflowError, match="Unreachable nodes: .*unused"):
         workflow.graph.check_reachability()

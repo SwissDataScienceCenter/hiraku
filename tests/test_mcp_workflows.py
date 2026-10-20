@@ -71,11 +71,11 @@ Run {{iterations}} experiments on {{task}}.
 
 LOOP_PY = r"""from typing import Annotated
 from hiraku.markdown import render
-from hiraku.workflows import State, Instruction, Workflow, event, phase, start
+from hiraku.workflows import State, Instruction, Workflow, event, node, start
 
 
 class Inputs(State):
-    phase: str = "done"
+    node: str = "done"
     task: str
     iterations: int
 
@@ -90,9 +90,9 @@ class Loop(Workflow):
     ) -> Inputs:
         return Inputs(task=task, iterations=iterations)
 
-    @phase("done", final=True)
+    @node("done", final=True)
     def prompt(self, data: Inputs) -> Instruction:
-        values = data.model_dump(mode="json", exclude={"phase"})
+        values = data.model_dump(mode="json", exclude={"node"})
         return Instruction(render(self.markdown, values), context=values)
 
 
@@ -101,11 +101,11 @@ WORKFLOW = Loop
 
 
 ECHO_PY = r'''from hiraku.errors import EventRejected
-from hiraku.workflows import State, Instruction, Workflow, event, phase, start
+from hiraku.workflows import State, Instruction, Workflow, event, node, start
 
 
 class Task(State):
-    phase: str = "working"
+    node: str = "working"
     task: str
     summary: str | None = None
 
@@ -116,11 +116,11 @@ class Echo(Workflow):
         """Start working on a task."""
         return Task(task=task)
 
-    @phase("working")
+    @node("working")
     def working(self, task: Task) -> Instruction:
         return Instruction(f"Work on {task.task}.")
 
-    @phase("done", final=True)
+    @node("done", final=True)
     def done(self, task: Task) -> Instruction:
         return Instruction("Report the summary.", context={"summary": task.summary})
 
@@ -130,7 +130,7 @@ class Echo(Workflow):
         if not summary.strip():
             raise EventRejected("Summarize what was done")
         task = task.model_copy(update={"summary": summary})
-        return task.model_copy(update={"phase": "done"})
+        return task.model_copy(update={"node": "done"})
 
 
 WORKFLOW = Echo
@@ -405,13 +405,13 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     noisy = config.workflows_dir / "noisy"
     noisy.mkdir()
     (noisy / "workflow.py").write_text(
-        "from hiraku.workflows import State, Instruction, Workflow, phase, start\n"
+        "from hiraku.workflows import State, Instruction, Workflow, node, start\n"
         "class Noisy(Workflow):\n"
         '    @start(dest="done")\n'
         "    def start(self) -> State:\n"
         "        print('stray output')\n"
-        '        return State(phase="done")\n'
-        "    @phase('done', final=True)\n"
+        '        return State(node="done")\n'
+        "    @node('done', final=True)\n"
         "    def done(self, state: State) -> Instruction:\n"
         "        return Instruction('Done.', context={'ok': True})\n"
         "WORKFLOW = Noisy\n",

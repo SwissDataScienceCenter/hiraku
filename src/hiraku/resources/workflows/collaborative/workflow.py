@@ -9,7 +9,7 @@ from pydantic import Field
 from hiraku.errors import EventRejected, HirakuError, NotReady
 from hiraku.git import GitRepository
 from hiraku.record import Record, load_record
-from hiraku.workflows import Instruction, State, Workflow, event, phase, start
+from hiraku.workflows import Instruction, State, Workflow, event, node, start
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
 Feedback = Annotated[str, "What the user wants changed."]
@@ -17,7 +17,7 @@ STEPS = ["draft", "implement", "launch", "analyze"]
 
 
 class Experiments(State):
-    phase: str = "draft"
+    node: str = "draft"
     task: str
     entrypoint: str
     rounds: int
@@ -62,18 +62,18 @@ class Collaborative(Workflow):
         except HirakuError as exc:
             raise EventRejected(str(exc)) from exc
 
-    @phase("draft")
+    @node("draft")
     def drafting(self, experiments: Experiments) -> Instruction:
         context = {"task": experiments.task, "previous": experiments.results}
         return self._step(experiments, "## Draft", context)
 
-    @phase("implement")
+    @node("implement")
     def implementing(self, experiments: Experiments) -> Instruction:
         return self._step(
             experiments, "## Implement", self._experiment_context(experiments)
         )
 
-    @phase("launch")
+    @node("launch")
     def launching(self, experiments: Experiments) -> Instruction:
         context = self._experiment_context(experiments)
         record = self._experiment(experiments)
@@ -83,7 +83,7 @@ class Collaborative(Workflow):
         )
         return self._step(experiments, "## Launch", context)
 
-    @phase("analyze")
+    @node("analyze")
     def analyzing(self, experiments: Experiments) -> Instruction:
         record = self._experiment(experiments)
         runs = _runs(record, self)
@@ -99,7 +99,7 @@ class Collaborative(Workflow):
         }
         return self._step(experiments, "## Analyze", context)
 
-    @phase("finished", final=True)
+    @node("finished", final=True)
     def summarizing(self, experiments: Experiments) -> Instruction:
         return Instruction(
             self.markdown.section("## Done"),
@@ -131,7 +131,7 @@ class Collaborative(Workflow):
             )
             return experiments.model_copy(
                 update={
-                    "phase": "implement",
+                    "node": "implement",
                     "experiment": record.id,
                     "feedback": None,
                 }
@@ -155,7 +155,7 @@ class Collaborative(Workflow):
             record.commit = sha
             record.status = "implemented"
             record.save()
-            return experiments.model_copy(update={"phase": "launch", "feedback": None})
+            return experiments.model_copy(update={"node": "launch", "feedback": None})
         except EventRejected:
             raise
         except HirakuError as exc:
@@ -178,7 +178,7 @@ class Collaborative(Workflow):
                 )
             record.status = "launched"
             record.save()
-            return experiments.model_copy(update={"phase": "analyze", "feedback": None})
+            return experiments.model_copy(update={"node": "analyze", "feedback": None})
         except EventRejected:
             raise
         except HirakuError as exc:
@@ -211,7 +211,7 @@ class Collaborative(Workflow):
             experiments = experiments.model_copy(update={"feedback": None})
             experiments = experiments.model_copy(
                 update={
-                    "phase": "draft"
+                    "node": "draft"
                     if len(experiments.results) < experiments.rounds
                     else "finished"
                 }
@@ -253,7 +253,7 @@ class Collaborative(Workflow):
     @event(source=STEPS, dest="finished")
     def finish(self, experiments: Experiments) -> Experiments:
         """End the session early and summarize the results."""
-        return experiments.model_copy(update={"phase": "finished"})
+        return experiments.model_copy(update={"node": "finished"})
 
     def _step(
         self, experiments: Experiments, section: str, context: dict[str, Any]
