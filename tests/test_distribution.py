@@ -38,7 +38,7 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
     assert any(path.endswith("collaborative/workflow.md") for path in expected)
     expected.update(
         f"hiraku/workflows/{module}.py"
-        for module in ("__init__", "workflow", "session", "graph")
+        for module in ("__init__", "workflow", "session", "graph", "markdown")
     )
     expected.add("hiraku/agent.py")
     with ZipFile(wheels[0]) as wheel:

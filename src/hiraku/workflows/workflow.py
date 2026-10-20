@@ -14,10 +14,16 @@ import types
 import typing
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from filelock import Timeout
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    model_validator,
+)
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
@@ -102,23 +108,28 @@ class EventResult(BaseModel):
 class Workflow(BaseRecord):
     """A Markdown definition bound to a project's configuration file.
 
-    Decorated methods register its immutable graph at class creation.
+    Construction builds its immutable graph from decorated methods.
     Configuration is reloaded on access; evolving data belongs in State.
     """
 
     description: str | None = None
-    graph: ClassVar[WorkflowGraph]
+    _graph: WorkflowGraph = PrivateAttr()
     _config_path: Path = PrivateAttr()
 
     def __init__(self, *, config: HirakuConfig | None = None, **values: Any) -> None:
         selected = config if config is not None else HirakuConfig.discover()
         super().__init__(**values)
         self._config_path = selected.path.absolute()
+        self._graph = self.build_graph()
 
-    @classmethod
-    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
-        super().__pydantic_init_subclass__(**kwargs)
-        cls.graph = WorkflowGraph._compile(cls, set(dir(Workflow)))
+    @property
+    def graph(self) -> WorkflowGraph:
+        """Return this loaded definition's immutable execution graph."""
+        return self._graph
+
+    def build_graph(self) -> WorkflowGraph:
+        """Build from decorators; subclasses may construct a graph explicitly."""
+        return WorkflowGraph.from_decorated_methods(type(self))
 
     @model_validator(mode="after")
     def check_headings(self) -> Self:
@@ -222,7 +233,7 @@ class Workflow(BaseRecord):
                 parameters.append(self.graph.state_model.model_validate(session.state))
             if method.arguments is not None:
                 parameters.append(arguments)
-            returned = method._handler(self, *parameters)
+            returned = method.handler(self, *parameters)
             if type(returned) is not self.graph.state_model:
                 raise WorkflowError(
                     f"{method.name} must return {self.graph.state_model.__name__}"
@@ -238,7 +249,7 @@ class Workflow(BaseRecord):
                     f"expected {method.dest}"
                 )
             node = self.graph.phases[state.phase]
-            instruction = node._handler(self, state.model_copy(deep=True))
+            instruction = node.handler(self, state.model_copy(deep=True))
             if not isinstance(instruction, Instruction):
                 raise WorkflowError(f"Phase {state.phase!r} must return Instruction")
             if instruction.events is not None:
@@ -361,17 +372,17 @@ def _workflow_ids(config: HirakuConfig) -> list[str]:
 def load_workflow(workflow_id: str, *, config: HirakuConfig | None = None) -> Workflow:
     """Load a project workflow: its class and its ``workflow.md`` record.
 
-    Requires ``workflow.py`` exporting ``WORKFLOW``, a `Workflow` subclass,
-    and a ``workflow.md`` record. Each call imports the code again. Configuration
-    binds the loaded workflow to the selected project's configuration file.
+    A Python sidecar exports WORKFLOW, a Workflow subclass. Without a sidecar,
+    load MarkdownWorkflow and infer its inputs from front-matter defaults.
+    Configuration binds the definition to the selected project's config file.
 
     Args:
         workflow_id: Workflow directory name.
         config: Project configuration; discovered when omitted.
 
     Raises:
-        hiraku.errors.WorkflowError: If the ID is invalid, the sidecar is
-            missing or cannot be imported, or ``start``, an event, or the states
+        hiraku.errors.WorkflowError: If the ID is invalid, a sidecar
+            cannot be imported, or ``start``, an event, or the states
             are invalid.
         hiraku.errors.RecordNotFoundError: If the workflow has no workflow.md.
         hiraku.errors.ValidationError: If the record is invalid or its ID does
@@ -393,9 +404,12 @@ def load_workflow(workflow_id: str, *, config: HirakuConfig | None = None) -> Wo
             f"Unknown workflow {workflow_id!r}; available workflows: {available}"
         )
     sidecar = directory / "workflow.py"
-    if not sidecar.is_file():
-        raise WorkflowError(f"Workflow {workflow_id!r} requires {sidecar}")
-    cls = _import_workflow(directory)
+    if sidecar.is_file():
+        cls = _import_workflow(directory)
+    else:
+        from .markdown import MarkdownWorkflow
+
+        cls = MarkdownWorkflow
     path = directory / "workflow.md"
     try:
         if not path.is_file():

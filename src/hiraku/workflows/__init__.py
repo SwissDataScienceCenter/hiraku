@@ -1,6 +1,7 @@
 """Public authoring, graph, and session APIs for workflows."""
 
 from .graph import EventDefinition, PhaseDefinition, WorkflowGraph, event, phase
+from .markdown import MarkdownWorkflow
 from .session import Session, list_sessions, load_session
 from .workflow import (
     Arguments,
@@ -17,6 +18,7 @@ __all__ = [
     "EventDefinition",
     "EventResult",
     "Instruction",
+    "MarkdownWorkflow",
     "PhaseDefinition",
     "Session",
     "State",

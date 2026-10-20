@@ -412,6 +412,26 @@ def test_worker_only_submits_one_assignment(config, monkeypatch):
     assert session.state["answers"] == ["one"]
 
 
+def test_markdown_only_cli_inputs_and_final_assignment(config):
+    directory = config.workflows_dir / "markdown"
+    directory.mkdir()
+    (directory / "workflow.md").write_text(
+        "---\nid: markdown\ndescription: A standalone prompt.\n"
+        "arguments:\n  count: 5\n  enabled: true\n"
+        "---\nCount {{count}}; enabled={{enabled}}."
+    )
+    help_text = agent("markdown", "--help")
+    assert help_text.exit_code == 0
+    assert "A standalone prompt." in help_text.output
+    assert "--count JSON" in help_text.output
+    assert "--enabled JSON" in help_text.output
+    result = agent("markdown", "--count", "2", "--enabled", "false")
+    assert result.exit_code == 0, result.output
+    assert "Count 2; enabled=false." in result.output
+    assert 'completed: {"count": 2, "enabled": false}' in result.output
+    assert not (directory / "workflow.py").exists()
+
+
 @pytest.mark.parametrize("variable", ["FAKE_WORKER_EXIT", "FAKE_FINAL_EXIT"])
 def test_subprocess_failure_is_propagated_after_saved_submission(
     config, monkeypatch, variable

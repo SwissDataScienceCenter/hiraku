@@ -158,6 +158,42 @@ def write_loop(config: HirakuConfig) -> None:
     (directory / "workflow.py").write_text(LOOP_PY, encoding="utf-8")
 
 
+def test_markdown_only_tools_prompts_and_description(config):
+    directory = config.workflows_dir / "markdown"
+    directory.mkdir()
+    (directory / "workflow.md").write_text(
+        "---\nid: markdown\ndescription: A Markdown research prompt.\n"
+        "arguments:\n  num_iterations: 5\n  max_val: 0.5\n  gate: true\n"
+        "---\nRun {{num_iterations}} iterations at {{max_val}}; gate={{gate}}."
+    )
+
+    async def scenario(client, notifications):
+        tools = await client.list_tools()
+        tool = next(tool for tool in tools.tools if tool.name == "markdown")
+        started = payload(
+            await client.call_tool(
+                "markdown",
+                {"num_iterations": 2, "gate": False},
+            )
+        )
+        prompted = await client.get_prompt(
+            "markdown",
+            {"num_iterations": "3", "max_val": "0.25", "gate": "false"},
+        )
+        invalid = await client.get_prompt("markdown", {"num_iterations": "invalid"})
+        return tool, started, prompted, invalid
+
+    tool, started, prompted, invalid = run(create_server(config), scenario)
+    assert "A Markdown research prompt." in tool.description
+    assert tool.input_schema["properties"]["num_iterations"]["type"] == "integer"
+    assert tool.input_schema["properties"]["max_val"]["type"] == "number"
+    assert tool.input_schema["properties"]["gate"]["type"] == "boolean"
+    assert started["session_status"] == "completed"
+    assert started["instruction"]["text"] == "Run 2 iterations at 0.5; gate=false."
+    assert "Run 3 iterations at 0.25; gate=false." in prompted.messages[0].content.text
+    assert "did not start" in invalid.messages[0].content.text
+
+
 def write_echo(config: HirakuConfig) -> None:
     directory = config.workflows_dir / "echo"
     directory.mkdir()

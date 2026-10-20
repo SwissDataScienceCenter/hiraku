@@ -100,15 +100,17 @@ mode is intended for workflows that do not need a user conversation.
 
 ## Greet
 
-`hiraku/workflows/greet/workflow.py` declares the typed `start` arguments
-`name: str`, `times: int = 2`, and `formal: bool = False`. It returns those
-values as session data. Its single final state renders `workflow.md` with
-`hiraku.markdown.render`:
+`hiraku/workflows/greet/workflow.md` is a Markdown-only workflow with no Python
+sidecar. Front-matter defaults define its inputs and their types:
 
 ```markdown
 ---
 id: greet
 description: Greet someone a few times; a prompt-only workflow with arguments.
+arguments:
+  name: World
+  times: 2
+  formal: false
 ---
 # Greet
 
@@ -116,7 +118,8 @@ Print {{times}} greetings to {{name}}, one per line. Greet formally:
 {{formal}}. Do not change any files.
 ```
 
-The sidecar explicitly supplies the values for the placeholders. Start it with
+Validated values fill the placeholders. With no overrides, it greets World twice.
+Start it with
 the MCP prompt
 `/mcp__hiraku__greet name=Ada times=3`, by asking your agent to greet Ada with
 the Hiraku greet workflow, or from the terminal:

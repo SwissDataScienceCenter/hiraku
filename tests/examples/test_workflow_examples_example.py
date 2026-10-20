@@ -44,7 +44,7 @@ def runner(tmp_path: Path, monkeypatch) -> CliRunner:
     assert (workflows / "count-steps" / "workflow.py").is_file()
     assert (workflows / "greet" / "workflow.md").is_file()
     assert (workflows / "scheduler" / "workflow.py").is_file()
-    assert (workflows / "greet" / "workflow.py").is_file()
+    assert not (workflows / "greet" / "workflow.py").exists()
     assert not (project / "example.yml").exists()
     return selected
 
@@ -212,9 +212,13 @@ def test_greet_is_one_final_prompt_filled_from_its_arguments(
     assert instruction["context"] == {"name": "Ada", "times": 3, "formal": False}
     assert "events" not in instruction
 
-    missing = start(runner, "greet", {})
-    assert missing["status"] == "rejected"
-    assert "name" in missing["message"]
+    default = start(runner, "greet", {})
+    assert default["status"] == "accepted"
+    assert default["instruction"]["context"] == {
+        "name": "World",
+        "times": 2,
+        "formal": False,
+    }
 
 
 # A scripted harness for a final instruction: there is no event to send.

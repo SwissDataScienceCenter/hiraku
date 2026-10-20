@@ -13,9 +13,13 @@ from hiraku.config import HirakuConfig
 from hiraku.errors import SessionNotFoundError, ValidationError, WorkflowError
 from hiraku.workflows import (
     Arguments,
+    EventDefinition,
     EventResult,
     Instruction,
+    MarkdownWorkflow,
+    PhaseDefinition,
     State,
+    WorkflowGraph,
     list_sessions,
     list_workflows,
     load_session,
@@ -115,7 +119,7 @@ def submit(workflow, result, amount=1, **arguments):
 def test_graph_and_models_are_the_only_registry(config):
     workflow, result = started(config)
     graph = workflow.graph
-    assert type(workflow).graph is graph
+    assert load_workflow("toy").graph is not graph
     assert graph.start is graph.events["start"]
     assert graph.start.arguments.__name__ == "Start"
     assert graph.state_model.__name__ == "Total"
@@ -380,8 +384,8 @@ def test_invalid_workflow_ids(config, name):
 
 def test_incomplete_workflows_and_listing(config, caplog):
     directory = write_workflow(config, TOY, name="broken")
-    (directory / "workflow.py").unlink()
-    with pytest.raises(WorkflowError):
+    (directory / "workflow.py").write_text("raise RuntimeError('broken sidecar')")
+    with pytest.raises(WorkflowError, match="broken sidecar"):
         load_workflow("broken")
     assert "toy" in [w.id for w in list_workflows(config=config)]
     assert "broken" in caplog.text
@@ -436,7 +440,7 @@ def test_incomplete_workflows_and_listing(config, caplog):
         ('@event(source=None, dest=["adding", "done"])', ""),
     ],
 )
-def test_invalid_declarations_fail_during_registration(config, old, new):
+def test_invalid_declarations_fail_when_loaded(config, old, new):
     write_workflow(config, TOY.replace(old, new))
     with pytest.raises(WorkflowError):
         load_workflow("toy")
@@ -450,11 +454,16 @@ def test_inherited_graph_is_independent(config):
     def finish(self, state: Total) -> Total:
         return state.model_copy(update={"phase": "done", "total": 42})
 
-assert Child.graph is not Toy.graph
 WORKFLOW = Child""",
     )
     write_workflow(config, source)
     workflow, first = started(config)
+    parent = type(workflow).__mro__[1](id="parent", config=config)
+    assert parent.graph is not workflow.graph
+    assert (
+        parent.graph.events["finish"].handler
+        is not workflow.graph.events["finish"].handler
+    )
     workflow.run_event(first.session_id, 1, "finish")
     assert load_session(first.session_id).state["total"] == 42
 
@@ -645,3 +654,195 @@ def test_failed_save_result_reports_the_saved_revision(config, monkeypatch):
     result = submit(workflow, first)
     assert result.status == "error"
     assert result.instruction_id == first.instruction_id
+
+
+def write_markdown(
+    config, arguments="", body="Hello.", name="markdown", description=None
+):
+    directory = config.workflows_dir / name
+    directory.mkdir(exist_ok=True)
+    metadata = f"id: {name}\n"
+    if description is not None:
+        metadata += f"description: {description}\n"
+    (directory / "workflow.md").write_text(f"---\n{metadata}{arguments}---\n{body}")
+    return directory
+
+
+def test_markdown_defaults_types_description_and_graph(config):
+    write_markdown(
+        config,
+        "arguments:\n  name: World\n  num_iterations: 5\n"
+        "  max_val: 0.5\n  gate: true\n",
+        "{{name}}: {{num_iterations}}, {{max_val}}, {{gate}}.",
+        description="A research prompt.",
+    )
+    workflow = load_workflow("markdown")
+    assert isinstance(workflow, MarkdownWorkflow)
+    assert workflow.description == "A research prompt."
+    assert workflow.to_dict()["description"] == "A research prompt."
+    assert workflow.graph.start.description == "A research prompt."
+    model = workflow.graph.start.arguments
+    assert {name: field.annotation for name, field in model.model_fields.items()} == {
+        "name": str,
+        "num_iterations": int,
+        "max_val": float,
+        "gate": bool,
+    }
+    assert "required" not in model.model_json_schema()
+    result = workflow.run_start()
+    assert result.status == "accepted"
+    response = workflow.get_instruction(result.session_id)
+    assert response["session_status"] == "completed"
+    assert response["instruction"]["text"] == "World: 5, 0.5, true."
+    assert "events" not in response["instruction"]
+    assert workflow.graph.to_mermaid() == (
+        "stateDiagram-v2\n  [*] --> done\n  done --> [*]\n"
+    )
+
+
+def test_markdown_overrides_and_text_inputs(config):
+    write_markdown(
+        config,
+        "arguments:\n  count: 5\n  enabled: true\n",
+        "{{count}} {{enabled}}",
+    )
+    workflow = load_workflow("markdown")
+    args = workflow.graph.start.arguments.from_text({"count": "2", "enabled": "false"})
+    result = workflow.run_start(args.model_dump())
+    assert workflow.get_instruction(result.session_id)["instruction"]["context"] == {
+        "count": 2,
+        "enabled": False,
+    }
+    assert workflow.run_start({"extra": True}).status == "rejected"
+    assert workflow.run_start({"count": "invalid"}).status == "rejected"
+    assert len(list_sessions()) == 1
+
+
+def test_markdown_without_arguments_and_saved_snapshot(config):
+    directory = write_markdown(config, body="Original prompt.")
+    workflow = load_workflow("markdown")
+    assert workflow.description is None
+    result = workflow.run_start()
+    before = workflow.get_instruction(result.session_id)
+    assert before["instruction"]["context"] == {}
+    (directory / "workflow.md").write_text("---\nid: markdown\n---\nChanged prompt.")
+    assert load_workflow("markdown").get_instruction(result.session_id) == before
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        "arguments:\n  value: null\n",
+        "arguments:\n  value: []\n",
+        "arguments:\n  value: {}\n",
+        "arguments:\n  _private: 1\n",
+        "arguments:\n  bad-name: 1\n",
+        "arguments:\n  class: 1\n",
+        "arguments:\n  model_dump: 1\n",
+        "arguments:\n  from_text: 1\n",
+        "arguments: []\n",
+    ],
+)
+def test_invalid_markdown_arguments_fail_when_loaded(config, arguments):
+    write_markdown(config, arguments)
+    with pytest.raises((WorkflowError, ValidationError)):
+        load_workflow("markdown")
+
+
+def test_markdown_missing_placeholder_saves_nothing(config):
+    write_markdown(config, body="{{missing}}")
+    result = load_workflow("markdown").run_start()
+    assert result.status == "error"
+    assert "No value for placeholders" in result.message
+    assert list_sessions() == []
+
+
+def test_python_sidecar_takes_precedence(config):
+    directory = write_workflow(config, TOY, name="markdown")
+    assert not isinstance(load_workflow("markdown"), MarkdownWorkflow)
+    (directory / "workflow.py").write_text("raise RuntimeError('broken sidecar')")
+    with pytest.raises(WorkflowError, match="broken sidecar"):
+        load_workflow("markdown")
+
+
+def test_markdown_instances_have_independent_schemas(config):
+    write_markdown(config, "arguments:\n  count: 1\n", name="first")
+    write_markdown(config, "arguments:\n  label: text\n", name="second")
+    first, second = load_workflow("first"), load_workflow("second")
+    assert first.graph is not second.graph
+    assert set(first.graph.start.arguments.model_fields) == {"count"}
+    assert set(second.graph.start.arguments.model_fields) == {"label"}
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "missing_start",
+        "bad_source",
+        "unknown",
+        "unreachable",
+        "final_event",
+        "empty_dest",
+        "wrong_name",
+    ],
+)
+def test_explicit_graphs_share_structural_validation(config, problem):
+    workflow = MarkdownWorkflow(id="direct", config=config)
+    phases = dict(workflow.graph.phases)
+    events = dict(workflow.graph.events)
+    if problem == "missing_start":
+        events.clear()
+    elif problem == "bad_source":
+        events["start"] = EventDefinition(
+            "start",
+            ("done",),
+            ("done",),
+            None,
+            "",
+            MarkdownWorkflow.start,
+        )
+    elif problem == "unknown":
+        events["start"] = EventDefinition(
+            "start",
+            None,
+            ("missing",),
+            None,
+            "",
+            MarkdownWorkflow.start,
+        )
+    elif problem == "unreachable":
+        phases["other"] = PhaseDefinition("other", True, MarkdownWorkflow.prompt)
+    elif problem == "final_event":
+        events["again"] = EventDefinition(
+            "again",
+            ("done",),
+            ("done",),
+            None,
+            "",
+            MarkdownWorkflow.start,
+        )
+    elif problem == "empty_dest":
+        events["start"] = EventDefinition(
+            "start",
+            None,
+            (),
+            None,
+            "",
+            MarkdownWorkflow.start,
+        )
+    elif problem == "wrong_name":
+        phases["other"] = phases.pop("done")
+    with pytest.raises(WorkflowError):
+        WorkflowGraph(workflow.graph.state_model, phases, events)
+
+
+def test_explicit_graph_copies_definition_mappings(config):
+    workflow = MarkdownWorkflow(id="direct", config=config)
+    phases, events = dict(workflow.graph.phases), dict(workflow.graph.events)
+    graph = WorkflowGraph(workflow.graph.state_model, phases, events)
+    phases.clear()
+    events.clear()
+    assert set(graph.phases) == {"done"}
+    assert set(graph.events) == {"start"}
+    with pytest.raises(TypeError):
+        graph.events["other"] = graph.start

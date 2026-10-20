@@ -113,7 +113,6 @@ def test_autoresearch_is_an_overlay() -> None:
         "src/cpu_mock.py",
         "src/hiraku/dispatch/autoresearch.sh",
         "src/hiraku/workflows/autoresearch/workflow.md",
-        "src/hiraku/workflows/autoresearch/workflow.py",
     }
     actual = {
         str(path.relative_to(EXAMPLE))
@@ -220,6 +219,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert response["status"] == "accepted"
     assert response["session_status"] == "completed"
     assert response["instruction"]["text"] == workflows["autoresearch"].markdown.strip()
+    assert not (project / "hiraku/workflows/autoresearch/workflow.py").exists()
     assert "collaborative" in workflows
     assert json.loads((project / ".mcp.json").read_text())["mcpServers"]["hiraku"]
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111

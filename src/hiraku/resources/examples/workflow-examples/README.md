@@ -4,8 +4,8 @@ This example installs three small workflows that do no research work:
 
 - `count-steps`, a Python workflow that checks that a coding harness follows
   Hiraku workflow instructions and stops for the user after each step;
-- `greet`, a single-instruction workflow whose Python sidecar declares typed
-  inputs and fills `{{name}}` placeholders in `workflow.md`;
+- `greet`, a Markdown-only workflow whose YAML defaults define typed inputs
+  and fill `{{name}}` placeholders in `workflow.md`;
 - `scheduler`, which creates experiment records with random priorities and
   lets the agent raise their counts, highest priority first, until each
   reaches a target.

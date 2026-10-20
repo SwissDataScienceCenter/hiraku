@@ -1,6 +1,10 @@
 ---
 id: greet
 description: Greet someone a few times; a prompt-only workflow with arguments.
+arguments:
+  name: World
+  times: 2
+  formal: false
 ---
 # Greet
 

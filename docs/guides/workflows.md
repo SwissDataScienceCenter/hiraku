@@ -1,8 +1,9 @@
 # Workflows
 
 A workflow is a project-defined Python state machine that gives an agent one
-instruction at a time. Its directory contains both
-`hiraku/workflows/<id>/workflow.py` and `workflow.md`.
+instruction at a time. Its directory contains
+`hiraku/workflows/<id>/workflow.md`. Add a `workflow.py` sidecar for a Python
+state machine, or use front-matter argument defaults for a Markdown-only prompt.
 
 A workflow tracks a typed **state**, whose `phase` identifies a node in its
 declared graph. Events validate submitted evidence and return a complete next
@@ -174,7 +175,7 @@ accepted; its context can describe successful, partial, or stopped results.
 
 ### Definition settings and project configuration
 
-`Workflow` extends `BaseRecord` with optional `description` and a class-level
+`Workflow` extends `BaseRecord` with optional `description` and an instance-owned
 `graph`. Additional annotated fields are front-matter settings. Use `ClassVar`
 for constants. Authors do not override the framework-owned constructor.
 
@@ -194,16 +195,25 @@ Inside a handler, use `config = self.config` when several operations should shar
 one snapshot, then pass it to record/run APIs. Config is private execution context,
 not a Markdown field. Workflow execution methods do not take `config=`.
 
-### Graph registration
+### Graph construction
 
-Decorators register a graph once at class creation. `workflow.graph` is immutable
-and is the source for dispatch, accepted events, schemas, and Mermaid diagrams.
-Inheritance collects declarations in method-resolution order, honoring overrides,
-and constructs an independent graph for each subclass.
+Each loaded workflow instance owns an immutable `workflow.graph`, built once
+during construction. It is the source for dispatch, accepted events, schemas,
+and Mermaid diagrams. The default `build_graph()` calls
+`WorkflowGraph.from_decorated_methods(type(self))`; inherited declarations are
+collected in method-resolution order, honoring overrides. There is no class-level
+execution graph.
 
-Registration checks signatures, input schemas, duplicate and unknown phases,
-the start event, final/outgoing-event consistency, and reachability. Multiple
-start destinations are supported. Graph edges describe possible paths, not proof
+Subclasses may override `build_graph()` and construct `WorkflowGraph` directly,
+as `MarkdownWorkflow` does. Supply a state model and mappings of phase and event
+definitions. Their public `handler` fields hold unbound methods, such as
+`type(self).start`; execution supplies the workflow instance.
+
+Decorator discovery checks method signatures and duplicate phases. Both paths
+share graph validation: entry event, names, input schemas, known phases,
+final/outgoing-event consistency, and reachability. Definition mappings are copied
+and frozen. Invalid definitions fail when constructed or loaded. Multiple start
+destinations are supported. Graph edges describe possible paths, not proof
 that Python conditions will take every path.
 
 ~~~bash
@@ -274,33 +284,45 @@ practical.
 Sessions use a versioned format. Old-format sessions cannot continue and must be
 restarted; their files are left untouched. They are not migrated.
 
-## Single-instruction workflows
+## Markdown-only workflows
 
-A prompt-only workflow still has typed state and one final phase:
+For one final instruction, create only a workflow.md file:
 
-~~~python
-from hiraku.workflows import Instruction, State, Workflow, event, phase
-
-
-class PromptState(State):
-    phase: str = "done"
-
-
-class LiteratureScan(Workflow):
-    @event(source=None, dest="done")
-    def start(self) -> PromptState:
-        return PromptState()
-
-    @phase("done", final=True)
-    def prompt(self, state: PromptState) -> Instruction:
-        return Instruction(self.markdown)
-
-
-WORKFLOW = LiteratureScan
+~~~yaml
+---
+id: research
+description: Run a bounded research task.
+arguments:
+  num_iterations: 5
+  max_val: 0.5
+  gate: true
+---
+Run {{num_iterations}} iterations, targeting {{max_val}}.
+Ask for approval: {{gate}}.
 ~~~
 
-For typed prompt inputs, store needed values in state and render the Markdown
-explicitly, as greet does.
+The `description` field is optional and has the same meaning as in Python
+workflows: it describes the workflow in listings, tools, and prompts.
+
+`MarkdownWorkflow` infers each argument's type from its YAML default:
+strings, integers, floats, and booleans. Every argument has a default and can be
+overridden. Omitted `arguments` means no inputs. Null, collection defaults, and
+argument names that are not public Python identifiers are rejected. Use a Python
+workflow for required inputs, complex types, or additional validation.
+
+The complete body is rendered with the validated values using
+`hiraku.markdown.render`. Booleans render as `true`/`false`; missing
+placeholders fail without creating a session. Values are also instruction context.
+The graph is `start → done`, with `done` final. The session completes when
+the instruction is saved; the agent then carries it out. Later reads retrieve
+that saved instruction, even if the Markdown or defaults have changed.
+
+An argument named `gate` is an ordinary prompt value; it does not create an
+authenticated approval gate. Keep such requests explicit in the prompt.
+
+A present Python sidecar takes precedence. A broken sidecar is an error and never
+falls back to Markdown-only behavior. Both forms require `workflow.md` and use
+the same config, session, graph, CLI, MCP, and agent execution paths.
 
 ## Bundled workflows
 

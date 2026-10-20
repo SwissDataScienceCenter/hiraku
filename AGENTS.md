@@ -93,7 +93,8 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/context.py` | Curated context records |
 | `src/hiraku/workflows/workflow.py` | Workflow definitions, loading, and execution |
 | `src/hiraku/workflows/session.py` | Stored workflow state, data, and event correlation |
-| `src/hiraku/workflows/graph.py` | Mermaid state diagrams |
+| `src/hiraku/workflows/graph.py` | Graph construction, validation, and Mermaid diagrams |
+| `src/hiraku/workflows/markdown.py` | Markdown-only workflow definitions and YAML argument inference |
 | `src/hiraku/agent.py` | `hiraku-agent`: runs workflow sessions with a coding agent from the terminal |
 | `src/hiraku/mcp.py` | Stdio MCP server (`MCPServer`); `add_workflow_tools` adds the workflow and session tools, prompts, and resources |
 | `src/hiraku/resources/` | Bundled workflows, dispatchers, skills, and examples |
@@ -123,8 +124,10 @@ Generated or transient paths:
   and `workflows/session.py` and
   are transport independent: a `Workflow` starts and continues its `Session`s through
   `Workflow.run_start` and `Workflow.run_event`, which return `EventResult`.
-  Instructions are retrieved separately. Decorators compile `Workflow.graph` at
-  class creation; events return complete typed states. `Workflow.config` reloads
+  Instructions are retrieved separately. Each instance builds an immutable
+  `Workflow.graph` through `build_graph()`. Python workflows use decorators;
+  Markdown-only workflows infer arguments from YAML scalar defaults and build
+  their graph directly. Python sidecars are optional; events return typed states. `Workflow.config` reloads
   the bound project config on access. Session lookup uses module-level
   `load_session` and `list_sessions`. All MCP code, including the
   tools and prompts for records, sessions, and workflows, lives in `mcp.py`;

@@ -60,7 +60,7 @@ class PhaseDefinition:
 
     name: str
     final: bool
-    _handler: Callable[..., Instruction] = field(repr=False)
+    handler: Callable[..., Instruction] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,12 @@ class EventDefinition:
     dest: tuple[str, ...]
     arguments: type[Arguments] | None
     description: str
-    _handler: Callable[..., State] = field(repr=False)
+    handler: Callable[..., State] = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if self.source is not None:
+            object.__setattr__(self, "source", tuple(self.source))
+        object.__setattr__(self, "dest", tuple(self.dest))
 
 
 @dataclass(frozen=True)
@@ -82,6 +87,68 @@ class WorkflowGraph:
     state_model: type[State]
     phases: Mapping[str, PhaseDefinition]
     events: Mapping[str, EventDefinition]
+
+    def __post_init__(self) -> None:
+        from .workflow import Arguments, State
+
+        object.__setattr__(self, "phases", MappingProxyType(dict(self.phases)))
+        object.__setattr__(self, "events", MappingProxyType(dict(self.events)))
+        if not isinstance(self.state_model, type) or not issubclass(
+            self.state_model, State
+        ):
+            raise WorkflowError("A graph needs a State model")
+        for definitions in (self.phases, self.events):
+            for name, item in definitions.items():
+                if (
+                    not isinstance(name, str)
+                    or name != item.name
+                    or not _NAME.fullmatch(name)
+                ):
+                    raise WorkflowError(f"Invalid graph definition name: {name!r}")
+                if not callable(item.handler) or inspect.iscoroutinefunction(
+                    item.handler
+                ):
+                    raise WorkflowError(f"{name} needs a synchronous handler")
+        if "start" not in self.events or self.start.source is not None:
+            raise WorkflowError("A graph needs a start event with source=None")
+        for item in self.events.values():
+            if not item.dest or (item.name != "start" and not item.source):
+                raise WorkflowError(f"{item.name} needs sources and destinations")
+            if item.arguments is not None:
+                if not isinstance(item.arguments, type) or not issubclass(
+                    item.arguments, Arguments
+                ):
+                    raise WorkflowError(f"{item.name} needs an Arguments model")
+                item.arguments.model_json_schema()
+        phases, events = self.phases, self.events
+        if not any(item.final for item in phases.values()):
+            raise WorkflowError("A workflow needs a final phase")
+        for item in events.values():
+            unknown = set((item.source or ()) + item.dest) - phases.keys()
+            if unknown:
+                raise WorkflowError(
+                    f"{item.name} names unknown phases: {sorted(unknown)}"
+                )
+        for item in phases.values():
+            if bool(self.events_from(item.name)) == item.final:
+                raise WorkflowError(
+                    f"Phase {item.name!r} must accept events exactly when nonfinal"
+                )
+        reached = set(self.start.dest)
+        while True:
+            expanded = reached | {
+                dest
+                for item in events.values()
+                if item.source and reached.intersection(item.source)
+                for dest in item.dest
+            }
+            if expanded == reached:
+                break
+            reached = expanded
+        if reached != phases.keys():
+            raise WorkflowError(
+                f"Unreachable phases: {sorted(phases.keys() - reached)}"
+            )
 
     @property
     def start(self) -> EventDefinition:
@@ -118,8 +185,11 @@ class WorkflowGraph:
         return "\n".join(lines) + "\n"
 
     @classmethod
-    def _compile(cls, workflow: type, reserved: set[str]) -> WorkflowGraph:
-        from .workflow import Arguments, Instruction, State
+    def from_decorated_methods(cls, workflow: type) -> WorkflowGraph:
+        """Build a graph from a workflow class's decorated instance methods."""
+        from .workflow import Arguments, Instruction, State, Workflow
+
+        reserved = set(dir(Workflow))
 
         methods = {}
         for base in reversed(workflow.__mro__):
@@ -192,33 +262,4 @@ class WorkflowGraph:
             raise WorkflowError(f"Invalid workflow {workflow.__name__}: {exc}") from exc
         if "start" not in events:
             raise WorkflowError("start must be decorated with @event(source=None, ...)")
-        graph = cls(model, MappingProxyType(phases), MappingProxyType(events))
-        if not any(item.final for item in phases.values()):
-            raise WorkflowError("A workflow needs a final phase")
-        for item in events.values():
-            unknown = set((item.source or ()) + item.dest) - phases.keys()
-            if unknown:
-                raise WorkflowError(
-                    f"{item.name} names unknown phases: {sorted(unknown)}"
-                )
-        for item in phases.values():
-            if bool(graph.events_from(item.name)) == item.final:
-                raise WorkflowError(
-                    f"Phase {item.name!r} must accept events exactly when nonfinal"
-                )
-        reached = set(graph.start.dest)
-        while True:
-            expanded = reached | {
-                dest
-                for item in events.values()
-                if item.source and reached.intersection(item.source)
-                for dest in item.dest
-            }
-            if expanded == reached:
-                break
-            reached = expanded
-        if reached != phases.keys():
-            raise WorkflowError(
-                f"Unreachable phases: {sorted(phases.keys() - reached)}"
-            )
-        return graph
+        return cls(model, phases, events)

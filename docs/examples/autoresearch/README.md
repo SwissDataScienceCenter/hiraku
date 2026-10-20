@@ -13,8 +13,8 @@ The overlay contains:
 - `task.md` — the Markdown body used to create the research root.
 - `cpu_mock.py` — a fast CPU-only check with the same summary format as training.
 - `hiraku/workflows/autoresearch/workflow.md` — the upstream research loop
-  adapted to Hiraku records and runs. A small `workflow.py` sidecar sends the
-  whole body as one final instruction.
+  adapted to Hiraku records and runs. This Markdown-only workflow sends the
+  whole body as one final instruction without a Python sidecar.
 - `hiraku/dispatch/autoresearch.sh` — timeout, output parsing, and CSV tracking.
   It records an explicit run `status` (`finished`, `crashed`, or `timeout`).
 
