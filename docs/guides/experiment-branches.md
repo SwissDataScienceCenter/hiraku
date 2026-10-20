@@ -5,10 +5,9 @@ commit. The `branch` field inherits through `parent_id`, so a child may share
 its parent's working branch or override it. `commit` never inherits: bind each
 record to the exact source commit used for its own runs.
 
-The Git repository remains responsible for creating branches, committing
-changes, and merging. Hiraku's `branch` configuration provides a
-default branch name for code using `GitRepository.create_record_branch`; the
-CLI also accepts a branch as a stored field:
+Use Git directly to create branches, commit changes, and merge. Hiraku stores
+record branches as metadata and resolves commit references without managing
+branches:
 
 ```bash
 git switch -c hiraku/records/baseline

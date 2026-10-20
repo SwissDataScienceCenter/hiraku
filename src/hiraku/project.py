@@ -90,7 +90,6 @@ class ProjectInitializer:
     ) -> _InitializationResult:
         """Initialize a project and report paths created by the operation."""
         from .config import HirakuConfig
-        from .git import GitRepository
 
         if template is not None and example is not None:
             raise ValidationError("template and example are mutually exclusive")
@@ -100,6 +99,8 @@ class ProjectInitializer:
             raise ValidationError("with_generator requires a packaged example")
         project_root = Path(root).expanduser().absolute()
         if not ignore_git:
+            from .git import GitRepository
+
             try:
                 repository = GitRepository(project_root)
             except GitError as exc:

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from hiraku.config import HirakuConfig
-from hiraku.errors import GitError, ValidationError
+from hiraku.errors import GitError
 from hiraku.git import GitRepository
 
 
@@ -28,38 +28,30 @@ def _repository(tmp_path: Path) -> tuple[HirakuConfig, GitRepository]:
     return config, GitRepository(config)
 
 
-def test_git_resolution_and_branches(tmp_path: Path) -> None:
+def test_git_resolution_and_current_branch(tmp_path: Path) -> None:
     config, repository = _repository(tmp_path)
     assert len(repository.resolve("HEAD")) == 40
     assert repository.current_branch is not None
-    branch = repository.create_record_branch("demo")
-    assert branch == "hiraku/records/demo"
-    assert repository.branch_exists(branch)
-    with pytest.raises(ValidationError):
-        repository.validate_branch("bad..branch")
-
+    sha = repository.resolve("HEAD")
+    _git(tmp_path, "switch", "-c", "research")
+    assert repository.current_branch == "research"
+    assert repository.resolve("research") == sha
     assert config.root == tmp_path
 
 
-def test_custom_and_reusable_record_branches(tmp_path: Path) -> None:
+def test_detached_head_has_no_current_branch(tmp_path: Path) -> None:
     _, repository = _repository(tmp_path)
-    current = repository.current_branch
-    assert current is not None
-    assert repository.create_record_branch("demo", branch=current) == current
-    assert repository.create_record_branch("demo", branch="main-copy") == "main-copy"
-    assert repository.branch_exists("main-copy")
-    with pytest.raises(ValidationError):
-        repository.create_record_branch("demo", branch="")
+    sha = repository.resolve("HEAD")
+    _git(tmp_path, "checkout", "--detach", sha)
+    assert repository.current_branch is None
+    assert repository.resolve("HEAD") == sha
 
-    default = repository.create_record_branch("baseline", start_ref="HEAD")
-    assert default == "hiraku/records/baseline"
-    assert repository.create_record_branch("baseline") == default
 
-    repository.create_branch("shared-record")
-    assert (
-        repository.create_record_branch("second", branch="shared-record")
-        == "shared-record"
-    )
+@pytest.mark.parametrize("ref", ["", "missing", "--invalid"])
+def test_invalid_commit_reference(tmp_path: Path, ref: str) -> None:
+    _, repository = _repository(tmp_path)
+    with pytest.raises(GitError):
+        repository.resolve(ref)
 
 
 def test_git_errors_outside_repository(tmp_path: Path) -> None:

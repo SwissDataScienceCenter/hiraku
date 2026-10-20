@@ -17,7 +17,7 @@ from hiraku.config import HirakuConfig
 )
 def test_init_destination(tmp_path, monkeypatch, arguments, destination):
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["init", *arguments, "--ignore-git"])
+    result = CliRunner().invoke(main, ["init", *arguments])
     assert result.exit_code == 0, result.output
     root = (tmp_path / destination).resolve()
     assert HirakuConfig.load(root / "hiraku.yml").root == root
@@ -36,7 +36,7 @@ def test_init_existing_directory_preserves_unrelated_files(
     (root / "notes.txt").write_text("keep me")
     monkeypatch.chdir(tmp_path)
     destination = str(root) if absolute else "project"
-    result = CliRunner().invoke(main, ["init", destination, "--ignore-git"])
+    result = CliRunner().invoke(main, ["init", destination])
     assert result.exit_code == 0, result.output
     assert (root / "notes.txt").read_text() == "keep me"
     assert (root / "hiraku.yml").is_file()
@@ -54,7 +54,7 @@ def test_plain_reinitialization_leaves_project_unchanged(
         p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()
     }
     monkeypatch.chdir(tmp_path)
-    arguments = ["init", "--ignore-git"]
+    arguments = ["init"]
     if destination is not None:
         arguments.append(destination)
     result = CliRunner().invoke(main, arguments)
@@ -72,7 +72,7 @@ def test_plain_reinitialization_leaves_project_unchanged(
 def test_reinitialization_with_options_is_rejected(tmp_path, options):
     config = HirakuConfig.init(tmp_path)
     before = config.path.read_bytes()
-    result = CliRunner().invoke(main, ["init", str(tmp_path), "--ignore-git", *options])
+    result = CliRunner().invoke(main, ["init", str(tmp_path), *options])
     assert result.exit_code == 1
     assert "already exists" in result.output
     assert config.path.read_bytes() == before
@@ -84,7 +84,7 @@ def test_example_collision_leaves_destination_unchanged(tmp_path, monkeypatch):
     root.mkdir()
     (root / "evaluate.py").write_text("existing code\n")
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["init", "--example", "minimal", "--ignore-git"])
+    result = CliRunner().invoke(main, ["init", "--example", "minimal"])
     assert result.exit_code == 1
     assert "overwrite" in result.output
     assert list(root.iterdir()) == [root / "evaluate.py"]
@@ -94,7 +94,7 @@ def test_example_collision_leaves_destination_unchanged(tmp_path, monkeypatch):
 @pytest.mark.parametrize("example", ["missing", "../outside"])
 def test_invalid_example_creates_no_destination(tmp_path, monkeypatch, example):
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["init", "--example", example, "--ignore-git"])
+    result = CliRunner().invoke(main, ["init", "--example", example])
     assert result.exit_code == 1
     assert list(tmp_path.iterdir()) == []
 
@@ -106,9 +106,7 @@ def test_template_keeps_current_directory_default(tmp_path, monkeypatch):
     root = tmp_path / "project"
     root.mkdir()
     monkeypatch.chdir(root)
-    result = CliRunner().invoke(
-        main, ["init", "--template", str(template), "--ignore-git"]
-    )
+    result = CliRunner().invoke(main, ["init", "--template", str(template)])
     assert result.exit_code == 0, result.output
     assert (root / "hello.txt").read_text() == "hello"
     assert (root / "hiraku.yml").is_file()
