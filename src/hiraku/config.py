@@ -240,6 +240,16 @@ class HirakuConfig(BaseModel):
         return self.hiraku_dir / "records"
 
     @property
+    def workflows_dir(self) -> Path:
+        """Return the directory containing project workflows."""
+        return self.hiraku_dir / "workflows"
+
+    @property
+    def sessions_dir(self) -> Path:
+        """Return the directory containing persisted workflow sessions."""
+        return self.hiraku_dir / "sessions"
+
+    @property
     def contexts_dir(self) -> Path:
         """Return the directory containing curated context records."""
         return self.hiraku_dir / "contexts"

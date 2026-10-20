@@ -646,6 +646,220 @@ def _install_generic(
 _install_generic("context", Context, load_context, list_contexts, "contexts_dir")
 
 
+@main.group("workflow")
+def workflow_group() -> None:
+    """List, start, and reply to project workflows."""
+
+
+@workflow_group.command("list")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def workflow_list(state: CLIContext, json_output: bool) -> None:
+    """List the project's workflows."""
+    from .workflows.workflow import list_workflows
+
+    workflows = list_workflows(config=state.config)
+    if json_output:
+        _emit_json(
+            [
+                {"id": workflow.id, "description": workflow.description}
+                for workflow in workflows
+            ]
+        )
+        return
+    click.echo(
+        _table(
+            ("id", "description"),
+            [
+                (workflow.id, (workflow.description or "").split("\n", 1)[0])
+                for workflow in workflows
+            ],
+        )
+    )
+
+
+_ARGUMENTS_FILE = click.option(
+    "--arguments-file",
+    type=click.File("r", encoding="utf-8"),
+    help="JSON object with the arguments; use - for standard input.",
+)
+
+
+def _arguments(arguments_file: Any) -> dict[str, Any]:
+    if arguments_file is None:
+        return {}
+    try:
+        arguments = json.load(arguments_file)
+    except ValueError as exc:
+        raise ValidationError(f"Cannot read arguments: {exc}") from exc
+    if not isinstance(arguments, dict):
+        raise ValidationError("Arguments must be a JSON object")
+    return arguments
+
+
+@workflow_group.command("start")
+@click.argument("workflow_id")
+@_ARGUMENTS_FILE
+@click.pass_obj
+def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> None:
+    """Start a workflow session and print the JSON response."""
+    from .workflows.workflow import load_workflow
+
+    workflow = load_workflow(workflow_id, config=state.config)
+    result = workflow.run_start(_arguments(arguments_file))
+    response = result.model_dump(exclude_none=True)
+    if result.status == "accepted":
+        response.update(workflow.get_instruction(result.session_id))
+    _emit_json(response)
+
+
+@workflow_group.command("send-event")
+@click.argument("session_id")
+@click.argument("event")
+@click.option(
+    "--instruction-id",
+    type=int,
+    required=True,
+    help="ID of the current instruction the event answers.",
+)
+@_ARGUMENTS_FILE
+@click.pass_obj
+def workflow_send_event(
+    state: CLIContext,
+    session_id: str,
+    event: str,
+    instruction_id: int,
+    arguments_file: Any,
+) -> None:
+    """Send EVENT to a session's current instruction and print the response."""
+    from .workflows.session import load_session
+    from .workflows.workflow import load_workflow
+
+    session = load_session(session_id, config=state.config)
+    workflow = load_workflow(session.workflow, config=state.config)
+    _emit_json(
+        workflow.run_event(
+            session_id,
+            instruction_id,
+            event,
+            _arguments(arguments_file),
+        ).model_dump(exclude_none=True)
+    )
+
+
+@workflow_group.command("graph")
+@click.argument("workflow_id")
+@click.option(
+    "--session",
+    "session_id",
+    default=None,
+    help="Highlight the current state of this session.",
+)
+@click.pass_obj
+def workflow_graph_command(
+    state: CLIContext, workflow_id: str, session_id: str | None
+) -> None:
+    """Print a workflow's states and events as a Mermaid state diagram."""
+    from .workflows.session import load_session
+    from .workflows.workflow import load_workflow
+
+    workflow = load_workflow(workflow_id, config=state.config)
+    current = None
+    if session_id is not None:
+        session = load_session(session_id, config=state.config)
+        if session.workflow != workflow_id:
+            raise ValidationError(
+                f"Session {session_id!r} belongs to workflow {session.workflow!r}"
+            )
+        current = session.phase
+    click.echo(workflow.graph.to_mermaid(current=current), nl=False)
+
+
+@main.group("session")
+def session_group() -> None:
+    """Inspect and cancel workflow sessions."""
+
+
+@session_group.command("list")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def session_list(state: CLIContext, json_output: bool) -> None:
+    """List workflow sessions, newest first."""
+    from .workflows.session import list_sessions
+
+    sessions = [
+        {
+            "session_id": s.id,
+            "workflow": s.workflow,
+            "status": s.status,
+            "phase": s.phase,
+            "updated_at": s.updated_at.isoformat(),
+        }
+        for s in list_sessions(config=state.config)
+    ]
+    if json_output:
+        _emit_json(sessions)
+        return
+    click.echo(
+        _table(
+            ("session", "workflow", "status", "updated"),
+            [
+                (
+                    item["session_id"],
+                    item.get("workflow"),
+                    item.get("status", f"ERROR: {item.get('error')}"),
+                    item.get("updated_at"),
+                )
+                for item in sessions
+            ],
+        )
+    )
+
+
+@session_group.command("show")
+@click.argument("session_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
+    """Show a session's status, pending instruction or result, and data."""
+    from .workflows.session import load_session
+    from .workflows.workflow import load_workflow
+
+    session = load_session(session_id, config=state.config)
+    try:
+        workflow = load_workflow(session.workflow, config=state.config)
+    except HirakuError:
+        workflow = None
+    result = session.show(workflow)
+    if json_output:
+        _emit_json(result)
+        return
+    click.echo(f"Session:  {result['session_id']}")
+    click.echo(f"Workflow: {result['workflow']}")
+    click.echo(f"Status:   {result['status']}")
+    click.echo(f"State:    {result['state']}")
+    for key in ("note", "compatibility"):
+        if key in result:
+            click.echo(f"Note:     {result[key]}")
+    if "message" in result:
+        click.echo(result["message"])
+    if "instruction" in result:
+        from .workflows import Instruction
+
+        click.echo(Instruction.model_validate(result["instruction"]).to_text())
+
+
+@session_group.command("cancel")
+@click.argument("session_id")
+@click.pass_obj
+def session_cancel(state: CLIContext, session_id: str) -> None:
+    """Cancel a session; records, code, and runs are kept."""
+    from .workflows.session import load_session
+
+    result = load_session(session_id, config=state.config).cancel()
+    click.echo(f"Session {session_id} is {result['status']}. {result['note']}")
+
+
 @main.command("launch")
 @click.argument("entrypoint_name")
 @click.argument("entrypoint_overrides", nargs=-1, type=click.UNPROCESSED)

@@ -55,6 +55,8 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set`, `entrypoints` |
 | Launch an entrypoint | `hiraku launch ENTRYPOINT [--record ID] [--commit REF] [--dispatch NAME]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
+| Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_send_event`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow send-event SESSION EVENT` |
+| Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
 | Manage context records | `hiraku context ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
@@ -108,9 +110,11 @@ Classify the request before acting:
 - **Bounded workflow:** Complete every requested stage in order, such as creating
   a research root, defining child records, running them, and comparing results.
   Do not add stages the user did not request.
-- **Autonomous research loop:** Start or continue a research loop only when
-  the user explicitly requests it, and follow the user's constraints,
-  permissions, budgets, checkpoints, and stopping condition.
+- **Hiraku workflow:** Start or continue a workflow, such as
+  `collaborative`, only when the user explicitly requests it. Discover
+  workflows with the `workflow_list` MCP tool, start one with the tool named
+  after it, and follow the user's constraints, permissions, budgets, and
+  stopping condition in addition to the workflow's instructions.
 
 Infer routine identifiers, summaries, hypotheses, metrics, and entrypoint
 arguments from the user's request and the repository. Ask a question only when
@@ -257,7 +261,7 @@ hiraku record entrypoints <record-id> --json
 Creating a record activates it by default. Several children may share a
 commit and differ by entrypoint arguments. Follow the effective record branch
 recorded for implementation; create or change that branch assignment only when
-the user or selected program asks for it. Ordinary Git operations remain
+the user or the active workflow asks for it. Ordinary Git operations remain
 responsible for commits and merges.
 
 Use repeatable `--set 'key=<YAML value>'` for custom metadata and `--unset key`
@@ -321,10 +325,35 @@ commit when appropriate, launch it, inspect its attributed run, and record an
 evidence-backed result. Respect any requested maximum experiments, runs, time,
 cost, or hardware budget.
 
-For a named autonomous program, inspect the root, program, child history,
-runs, Git state, and required files before entering its loop. Resume incomplete
-work safely and follow the program's own checkpoints and stopping rules. User
-instructions override program defaults.
+## Hiraku workflows
+
+Workflows are project-defined procedures under `hiraku/workflows/` that guide
+you step by step through the Hiraku MCP server. The user may start one with
+its prompt, which shows the first instruction directly, or you start it with
+the tool named after it. Start and accepted-event responses contain one instruction: its text, its
+`context`, and, unless it is final, an `events` block that says which events
+it accepts:
+
+1. Carry out the instruction text, using its `context`.
+2. Follow any requests for user approval in the instruction text before sending
+   an event. Approval is a conversational contract.
+3. Send one of `events.accepted` with the `workflow_send_event` tool, never in
+   the chat: its arguments as the event's schema describes, and the events
+   block's `session_id` and `instruction_id` unchanged. Sending an identical
+   event again is safe; a `stale` status means the instruction moved on, so
+   continue from the one returned.
+4. A `rejected` or `not_ready` response keeps the same instruction current; fix
+   the input or check again later. An instruction without an `events` block is
+   final: carry it out, then stop.
+
+To resume, find the session with `session_list` and read its current
+instruction with `session_show`; do not start a new session. Before repeating
+consequential work such as creating records or launching experiments, check
+whether it already exists. User instructions override workflow defaults; if
+they conflict with the workflow, explain the conflict, or stop the session with
+its `stop` or `finish` event when it has one. If a workflow's tool is missing, the workflow
+may have failed to load or been added after the MCP server started; ask the
+user to reconnect the MCP server.
 
 ## Entrypoints, dispatch, and tracking details
 
@@ -364,5 +393,7 @@ The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
 `Entrypoint`, `Metric`, loaders, and listing functions in `hiraku.record`;
 `BaseRecord` in `hiraku.base`; `Run` in `hiraku.run`;
 and `hiraku.launch.launch` for scripted use. `hiraku context` manages
-supporting material. V1 does not provide a `hiraku-agent` runner; the current
-coding agent executes the skill.
+supporting material. Workflows run in the current coding agent through the
+Hiraku MCP server (`hiraku mcp`); `hiraku-agent` also runs one-assignment workers from the terminal. Those workers
+submit through their scoped MCP connection, receive only the event result, and
+stop. The parent retrieves the next instruction.

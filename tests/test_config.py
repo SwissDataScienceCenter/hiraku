@@ -49,6 +49,11 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
 
     assert HirakuConfig.discover(root).root == root
     assert HirakuConfig.discover(nested).root == root
+    assert sorted(path.name for path in config.workflows_dir.iterdir()) == [
+        "collaborative"
+    ]
+    assert (config.workflows_dir / "collaborative" / "workflow.py").is_file()
+    assert (config.workflows_dir / "collaborative" / "workflow.md").is_file()
     assert not (config.hiraku_dir / "programs").exists()
     assert not (config.hiraku_dir / "actions").exists()
     for name in ("launch.sh", "worktree.sh"):
@@ -205,7 +210,7 @@ def test_init_from_packaged_example_copies_only_src(
     tmp_path: Path, monkeypatch
 ) -> None:
     resources = tmp_path / "resources"
-    for name in ("dispatch",):
+    for name in ("workflows", "dispatch"):
         (resources / name).mkdir(parents=True)
     example = resources / "examples/demo"
     (example / "src").mkdir(parents=True)

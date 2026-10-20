@@ -1,7 +1,13 @@
 ---
 id: autoresearch
+description: >-
+  The upstream autoresearch loop as one prompt: experiment autonomously until
+  the user stops you.
 ---
-# autoresearch
+# autoresearch loop
+
+This is the upstream autoresearch procedure adapted to Hiraku records and runs.
+It arrives as one instruction; Hiraku does not check budgets or evidence.
 
 ## Setup
 
@@ -142,3 +148,9 @@ As an example use case, a user might leave you running while they sleep. If each
 experiment takes you ~5 minutes then you can run approx 12/hour, for a total of
 about 100 over the duration of the average human sleep. The user then wakes up
 to experimental results, all completed by you while they slept!
+
+## Finishing
+
+When the user stops the loop, report what you tried: the experiments, their
+decisions, the best retained `val_bpb` with its run ID and commit, and ideas
+you did not get to.

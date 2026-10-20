@@ -165,12 +165,14 @@ class ProjectInitializer:
                 created_files.append(marker)
                 for directory in (
                     config.records_dir,
+                    config.workflows_dir,
                     config.contexts_dir,
                     config.dispatch_dir,
                 ):
                     cls._ensure_directory(directory, created_dirs)
                 resource_root = files("hiraku.resources")
                 copies = [
+                    (resource_root / "workflows", config.workflows_dir),
                     (resource_root / "dispatch", config.dispatch_dir),
                 ]
                 if install_skill:

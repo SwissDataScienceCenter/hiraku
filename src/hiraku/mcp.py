@@ -1,10 +1,20 @@
-"""Optional local MCP interface to a single Hiraku project."""
+"""Optional local MCP interface to a single Hiraku project.
+
+Workflows add their tools, prompts, and resources with `add_workflow_tools`.
+They are fixed when the server starts, because coding agents do not reliably
+pick up changes to the tool list. Each workflow is started by a tool and a
+prompt named after it, and every event goes through one
+``workflow_send_event`` tool.
+"""
 
 from __future__ import annotations
 
+import inspect
 import json
 import mimetypes
-from typing import Any
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import Annotated, Any
 from urllib.parse import quote, unquote
 
 from mcp.server.mcpserver import MCPServer
@@ -14,15 +24,63 @@ from mcp.server.mcpserver.exceptions import (
     UnexpectedResourceError,
     UnexpectedToolError,
 )
+from mcp.server.mcpserver.prompts import Prompt
+from mcp.types import ToolAnnotations
+from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
 from .base import BaseRecord
 from .config import HirakuConfig
 from .context import Context, list_contexts, load_context
-from .errors import HirakuError, ValidationError
+from .errors import HirakuError, ValidationError, WorkflowError
 from .launch import launch, render_arguments
 from .record import Record, list_records, load_record
+from .workflows.session import Session, list_sessions, load_session
+from .workflows.workflow import (
+    Arguments,
+    EventResult,
+    Instruction,
+    Workflow,
+    list_workflows,
+    summary,
+)
+
+INSTRUCTIONS = """\
+Hiraku documents research in records (goals, hypotheses, experiments, findings),
+attributes tracked runs to them, and runs workflows that guide you step by step.
+Start a workflow with the tool named after it (workflow_list lists them), and
+answer its instructions by sending events with workflow_send_event, as its
+description explains. Use session_list and session_show to resume earlier
+sessions.\
+"""
+
+EVENT_GUIDE = """\
+Send an event to the current instruction of a Hiraku workflow session.
+
+An instruction has text to carry out, context with the data it refers to, and,
+unless it is final, an events block that says which events it accepts:
+1. Carry out the instruction text, using its context.
+2. Follow any requests for user approval in the instruction text before
+   sending an event. Approval is a conversational contract.
+3. Call this tool with one of events.accepted as event, its arguments as the
+   event's schema describes, and the events block's session_id and
+   instruction_id unchanged. Answering in the chat does not reach the workflow.
+4. An accepted event returns the next instruction. An instruction without an
+   events block is final: carry it out, then stop.
+5. A response with status rejected or not_ready keeps the same instruction
+   current: fix the input, or check again later for not_ready. Status stale
+   means the event answered an instruction that is no longer current; continue
+   from the current instruction in the response.
+6. Sending an identical event again is safe; it never applies the event twice.
+7. To resume, call session_show with the session_id; it returns the current
+   instruction. Do not start a new session to resume an existing one.
+Before repeating consequential work such as creating records or launching
+experiments, check whether it already exists.\
+"""
+
+Project = Callable[[], HirakuConfig]
+SessionId = Annotated[str, Field(description="Session ID from session_list.")]
 
 
 def _data(record: BaseRecord) -> dict[str, Any]:
@@ -83,7 +141,7 @@ def create_server(config: HirakuConfig | None = None) -> Any:
                     item.mime_type = mime or "application/octet-stream"
             return contents
 
-    server = ProjectMCP("Hiraku")
+    server = ProjectMCP("Hiraku", instructions=INSTRUCTIONS)
 
     @server.tool()
     def record_list() -> list[dict[str, Any]]:
@@ -314,5 +372,397 @@ def create_server(config: HirakuConfig | None = None) -> Any:
             "through hiraku://catalog when needed.\n\n"
             f"Record: {json.dumps(_data(record))}\n\nContexts:\n{evidence}"
         )
+
+    add_workflow_tools(server, selected)
+    return server
+
+
+def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
+    """Add the workflow and session tools, prompts, and resources to a server.
+
+    Workflows are loaded once; a workflow added or changed later needs a new
+    server, e.g. by reconnecting it in the coding agent. Each call reads the
+    project configuration as currently saved, so changes made elsewhere, such
+    as a new active record, are visible to a long-running server.
+    """
+    path = config.path
+
+    def project() -> HirakuConfig:
+        return HirakuConfig.load(path)
+
+    workflows = {workflow.id: workflow for workflow in list_workflows(config=config)}
+
+    _add_workflow_tools(server, project, workflows)
+    _add_session_tools(server, project, workflows)
+    for workflow_id, workflow in sorted(workflows.items()):
+        server.add_prompt(
+            Prompt.from_function(
+                _start_prompt(workflow, project),
+                name=workflow_id,
+                description=summary(workflow.description)
+                or f"Start the {workflow_id} workflow.",
+            )
+        )
+    _register_resources(server, project, workflows)
+
+
+# Workflows and sessions -------------------------------------------------------
+
+
+def _add_workflow_tools(
+    server: MCPServer, project: Project, workflows: Mapping[str, Workflow]
+) -> None:
+    def workflow_list() -> list[dict[str, Any]]:
+        return [
+            {"id": workflow.id, "description": workflow.description}
+            for _, workflow in sorted(workflows.items())
+        ]
+
+    def workflow_send_event(
+        event: Annotated[
+            str, Field(description="One of the events the instruction accepts.")
+        ],
+        instruction_id: Annotated[
+            int, Field(description="instruction_id from the events block.")
+        ],
+        arguments: Annotated[
+            dict[str, Any] | None,
+            Field(description="The event's arguments, as its schema describes."),
+        ] = None,
+        session_id: Annotated[
+            str | None,
+            Field(
+                description="session_id from the events block; may be omitted "
+                "when only one session is active."
+            ),
+        ] = None,
+    ) -> dict[str, Any]:
+        config = project()
+        if session_id is None:
+            active = [
+                s.id for s in list_sessions(config=config) if s.status == "active"
+            ]
+            if len(active) != 1:
+                return {
+                    "status": "rejected",
+                    "message": (
+                        f"Several sessions are active ({', '.join(active)}); pass "
+                        "session_id"
+                        if active
+                        else "No session is active; start a workflow first"
+                    ),
+                }
+            session_id = active[0]
+        session = load_session(session_id, config=config)
+        workflow = workflows.get(session.workflow)
+        if workflow is None:
+            return _over_mcp(
+                session._result(
+                    "rejected", "Workflow unavailable; reconnect after fixing it"
+                ).model_dump(exclude_none=True)
+            )
+        return _deliver(
+            workflow, workflow.run_event(session_id, instruction_id, event, arguments)
+        )
+
+    _add_tool(
+        server,
+        workflow_list,
+        "List the project's workflows. Start one with the tool named after it.",
+        read_only=True,
+    )
+    _add_tool(
+        server,
+        workflow_send_event,
+        EVENT_GUIDE,
+        read_only=False,
+    )
+    for workflow_id, workflow in sorted(workflows.items()):
+        _add_tool(
+            server,
+            _start_tool(workflow, project),
+            _start_description(workflow),
+            read_only=False,
+            name=workflow_id,
+        )
+
+
+def _add_session_tools(
+    server: MCPServer, project: Project, workflows: Mapping[str, Workflow]
+) -> None:
+    def session_list() -> list[dict[str, Any]]:
+        return [
+            {
+                "session_id": s.id,
+                "workflow": s.workflow,
+                "status": s.status,
+                "phase": s.phase,
+                "instruction_id": s.instruction_id,
+                "updated_at": s.updated_at.isoformat(),
+            }
+            for s in list_sessions(config=project())
+        ]
+
+    def session_show(session_id: SessionId) -> dict[str, Any]:
+        return _show(load_session(session_id, config=project()), workflows)
+
+    def session_cancel(session_id: SessionId) -> dict[str, Any]:
+        return load_session(session_id, config=project()).cancel()
+
+    _add_tool(
+        server,
+        session_list,
+        "List workflow sessions with their status, newest first.",
+        read_only=True,
+    )
+    _add_tool(
+        server,
+        session_show,
+        "Show a workflow session: pending instruction or result, and "
+        "stored data. Use it to resume a session.",
+        read_only=True,
+    )
+    _add_tool(
+        server,
+        session_cancel,
+        "Cancel a workflow session. Records, code, and runs are kept.",
+        read_only=False,
+    )
+
+
+def _show(session: Session, workflows: Mapping[str, Workflow]) -> dict[str, Any]:
+    return _over_mcp(session.show(workflows.get(session.workflow)))
+
+
+def _over_mcp(response: Mapping[str, Any]) -> dict[str, Any]:
+    """Name the tool that sends events in an instruction's events block.
+
+    The runtime does not know the transport; over MCP, events go through
+    workflow_send_event, while hiraku-agent asks for an event file instead.
+    """
+    instruction = response.get("instruction")
+    if not isinstance(instruction, Mapping) or "events" not in instruction:
+        return dict(response)
+    events = {"tool": "workflow_send_event", **instruction["events"]}
+    return {**response, "instruction": {**instruction, "events": events}}
+
+
+def _start_tool(workflow: Workflow, project: Project) -> Callable[..., Any]:
+    """Return a function whose signature is the workflow's start arguments."""
+
+    def run(**arguments: Any) -> dict[str, Any]:
+        return _deliver(workflow, workflow.run_start(arguments))
+
+    parameters = []
+    for name, field in (
+        workflow.graph.start.arguments or Arguments
+    ).model_fields.items():
+        default = (
+            inspect.Parameter.empty
+            if field.is_required()
+            else field.get_default(call_default_factory=True)
+        )
+        parameters.append(
+            inspect.Parameter(
+                name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=default,
+                annotation=Annotated[
+                    (
+                        field.annotation,  # ty: ignore[invalid-type-form]
+                        *field.metadata,
+                        Field(description=field.description),
+                    )
+                ],
+            )
+        )
+    return _with_signature(run, workflow.id, parameters)
+
+
+def _start_prompt(workflow: Workflow, project: Project) -> Callable[..., str]:
+    """Return a function that starts a session and renders its instruction.
+
+    Prompt arguments are strings; the start arguments' model converts them.
+    """
+
+    def run(**arguments: Any) -> str:
+        values = {key: value for key, value in arguments.items() if value is not None}
+        try:
+            model = workflow.graph.start.arguments or Arguments
+            inputs = model.from_text(values).model_dump(mode="json")
+        except (ValidationError, PydanticValidationError) as exc:
+            response = {"status": "rejected", "message": str(exc)}
+        else:
+            response = _deliver(workflow, workflow.run_start(inputs))
+        if response["status"] != "accepted":
+            # The SDK hides exception messages from prompts, so explain in text.
+            return (
+                f"The Hiraku workflow `{workflow.id}` did not start: "
+                f"{response.get('message')}. Tell the user and ask for corrected "
+                "arguments."
+            )
+        instruction = _over_mcp(response)["instruction"]
+        text = Instruction.model_validate(instruction).to_text()
+        if "events" not in instruction:
+            return text
+        # A prompt is a user message: say how to answer, or agents answer in chat.
+        return (
+            f"{text}\n\nSend one of the accepted events with the "
+            "workflow_send_event tool, passing the events block's session_id and "
+            "instruction_id, and the event's arguments. Answering in the chat does "
+            "not reach the workflow."
+        )
+
+    parameters = [
+        inspect.Parameter(
+            name,
+            inspect.Parameter.KEYWORD_ONLY,
+            default=inspect.Parameter.empty if field.is_required() else None,
+            annotation=Annotated[
+                str if field.is_required() else str | None,  # ty: ignore[invalid-type-form]
+                Field(description=field.description),
+            ],
+        )
+        for name, field in (
+            workflow.graph.start.arguments or Arguments
+        ).model_fields.items()
+    ]
+    return _with_signature(run, workflow.id, parameters)
+
+
+def _with_signature(
+    function: Callable[..., Any], workflow_id: str, parameters: list[inspect.Parameter]
+) -> Callable[..., Any]:
+    function.__name__ = workflow_id.replace("-", "_")  # ty: ignore[unresolved-attribute]
+    function.__signature__ = inspect.Signature(parameters)  # ty: ignore[unresolved-attribute]
+    # Pydantic's validate_call, used for prompts, reads the annotations.
+    function.__annotations__ = {item.name: item.annotation for item in parameters}
+    return function
+
+
+def _start_description(workflow: Workflow) -> str:
+    prefix = f"Start a {workflow.id} workflow session."
+    if text := summary(workflow.description):
+        prefix += f" {text}"
+    start = inspect.getdoc(getattr(type(workflow), "start", None)) or ""
+    return f"{prefix}\n\n{start}" if start else prefix
+
+
+# Workflow resources and helpers ----------------------------------------------
+
+
+def _register_resources(
+    server: MCPServer, project: Project, workflows: Mapping[str, Workflow]
+) -> None:
+    @server.resource(
+        "hiraku://sessions/{session_id}",
+        name="session",
+        description="Full stored state of a workflow session",
+        mime_type="application/json",
+    )
+    def session(session_id: str) -> str:
+        stored = load_session(session_id, config=project())
+        return json.dumps(_show(stored, workflows), ensure_ascii=False, indent=1)
+
+    @server.resource(
+        "hiraku://workflows/{workflow_id}",
+        name="workflow",
+        description="Prompt document of a workflow",
+        mime_type="text/markdown",
+    )
+    def workflow(workflow_id: str) -> str:
+        if workflow_id not in workflows:
+            raise ResourceError(f"Unknown workflow {workflow_id!r}")
+        return str(workflows[workflow_id].markdown).strip()
+
+    @server.resource(
+        "hiraku://workflows/{workflow_id}/graph",
+        name="workflow_graph",
+        description="States and events of a workflow as a Mermaid state diagram",
+        mime_type="text/vnd.mermaid",
+    )
+    def graph(workflow_id: str) -> str:
+        if workflow_id not in workflows:
+            raise ResourceError(f"Unknown workflow {workflow_id!r}")
+        try:
+            return workflows[workflow_id].graph.to_mermaid()
+        except WorkflowError as exc:
+            raise ResourceError(str(exc)) from exc
+
+
+def _add_tool(
+    server: MCPServer,
+    function: Callable[..., Any],
+    description: str,
+    *,
+    read_only: bool,
+    name: str | None = None,
+) -> None:
+    server.add_tool(
+        function,
+        name=name,
+        description=description,
+        annotations=ToolAnnotations(read_only_hint=read_only),
+    )
+
+
+def _deliver(workflow: Workflow, result: EventResult) -> dict[str, Any]:
+    """Conversational delivery policy: attach an assignment after submission."""
+    response = result.model_dump(exclude_none=True)
+    if result.session_id is not None and result.status in ("accepted", "stale"):
+        response.update(workflow.get_instruction(result.session_id))
+    return _over_mcp(response)
+
+
+def _create_worker_server(
+    workflow: Workflow,
+    session_id: str,
+    instruction_id: int,
+    journal: Path,
+) -> MCPServer:
+    """One assignment's submission-only interface; no instruction retrieval."""
+    from filelock import FileLock
+
+    from .io import atomic_write
+
+    server = MCPServer("HirakuWorker")
+
+    @server.tool()
+    def workflow_send_event(
+        event: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Submit this assignment. Correct rejected input; stop after acceptance.
+
+        This connection is bound to one instruction. It never delivers another
+        assignment. For not_ready, stop so the parent can retry later.
+        """
+        with FileLock(str(journal) + ".lock"):
+            entries = json.loads(journal.read_text()) if journal.exists() else []
+            payload = {"event": event, "arguments": arguments or {}}
+            accepted = next(
+                (entry for entry in entries if entry["result"]["status"] == "accepted"),
+                None,
+            )
+            if (
+                accepted is None
+                and sum(e["result"]["status"] == "rejected" for e in entries) >= 3
+            ):
+                result = EventResult(
+                    status="rejected",
+                    session_id=session_id,
+                    message="Three rejected submissions; stop and inspect.",
+                )
+            else:
+                result = workflow.run_event(
+                    session_id,
+                    instruction_id,
+                    event,
+                    arguments,
+                )
+            response = result.model_dump(exclude_none=True)
+            entries.append({**payload, "result": response})
+            atomic_write(journal, json.dumps(entries, indent=2) + "\n")
+            return response
 
     return server

@@ -151,17 +151,28 @@ shared directory. For Claude Code, initialization creates
 systems that cannot create directory symlinks). Invoke it as `$hiraku` in Codex
 or `/hiraku` in Claude Code.
 
-## Context
+## Workflows and context
 
-*Context* files provide project-relevant information to the agent.
+A *workflow* is a project-defined research procedure that runs inside your
+coding agent. Its Python code decides what happens next and validates what the
+agent reports; its Markdown holds the guidance the agent follows. The agent
+starts a workflow and continues it through the Hiraku MCP server, which
+`hiraku init` configures for Claude Code and Codex. *Context* files provide
+project-relevant information to the agent.
 
 | Term | Data | Summary |
 | --- | ---  | --- |
+| **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A record with an `id`, settings, and prompts (`workflow.md`) whose class adds the operations (`workflow.py`). |
+| **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its state, history, and current instruction. Sessions are local and not committed. |
 | **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
 
-Context records are managed via CLI, e.g.
+Hiraku ships the `collaborative` workflow as an editable copy in your
+project. See the [Workflows guide](guides/workflows.md) for how
+sessions work and how to write your own.
 
 ```bash
+hiraku workflow list
+hiraku session list
 hiraku context create <context-id>
 hiraku context list
 ```
@@ -228,16 +239,27 @@ The same workflow can be carried out through the installed Hiraku skill in a
 coding agent. The [Heart Disease example](examples/heart-disease/README.md)
 shows prompts for both a complete investigation and individual steps.
 
-### Autoresearch workflow
+### Collaborative workflow
 
-An autonomous loop needs the research history before it starts in a coding
-agent; agree on the objective, branch, budget, and stopping condition with the
-user.
+The bundled `collaborative` workflow runs experiments on a task record together
+with you. Invoke its prompt `/mcp__hiraku__collaborative`, or ask your coding
+agent, for example "start Hiraku collaborative research on heart-disease for
+two experiments"; the agent then calls the `collaborative` MCP tool. The agent
+drafts, implements, launches, and analyzes each experiment, and you review the
+result of every step before choosing the next one.
+
+From a terminal, use `hiraku-agent collaborative --interactive` so you can review
+and approve each step in conversation:
 
 ```bash
-hiraku record tree
+hiraku-agent collaborative --task heart-disease --rounds 2 --interactive
+# Resume after stopping an agent conversation before it submits an event:
+hiraku-agent collaborative --interactive
+hiraku session list
+hiraku session show <session-id>
 hiraku runs --record heart-disease --all --json
 ```
 
-The [Autoresearch example](examples/autoresearch/README.md) shows how to run
-an autonomous loop with the project-local skill and a bounded dispatcher.
+The [Autoresearch example](examples/autoresearch/README.md) runs an autonomous
+single-instruction workflow on Karpathy's autoresearch repository with a bounded
+dispatcher.

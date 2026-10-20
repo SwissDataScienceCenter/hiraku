@@ -85,6 +85,8 @@ resources are loaded on each request, including after changes made outside MCP.
 | --- | --- |
 | `hiraku://records/{record_id}` | Record fields and Markdown as JSON. |
 | `hiraku://contexts/{context_id}` | Curated context Markdown. |
+| `hiraku://workflows/{workflow_id}` | Prompt document of a workflow. |
+| `hiraku://sessions/{session_id}` | Stored state of a workflow session as JSON. |
 | `hiraku://sources/{context_id}/{source_path}` | Attached file as an MCP blob with its inferred MIME type. |
 
 Place PDFs, literature reviews and other source files inside a context directory,
@@ -93,6 +95,19 @@ for example `hiraku/contexts/literature/papers/study.pdf`, alongside its
 slashes for nested directories. Use those URIs directly. File access rejects
 paths and symlinks escaping the selected context directory. PDF bytes are served
 with `application/pdf`; interpretation depends on the MCP client's capabilities.
+
+## Workflows
+
+Each project workflow is a tool and a prompt named after it, and events go
+through `workflow_send_event`. `workflow_list` and the `session_*` tools list
+workflows and inspect, resume, or cancel sessions. See the
+[Workflows guide](workflows.md).
+
+The conversational server wraps core event execution and attaches the saved next
+instruction after accepted or stale submissions. Core execution returns only a
+typed event result. Terminal workers use a separate assignment-scoped MCP server
+with a submission-only tool, receiving no next instruction. Workflow instances
+reload their bound project configuration on access.
 
 ## Prompt template
 
