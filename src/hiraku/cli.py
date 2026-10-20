@@ -805,9 +805,9 @@ def session_list(state: CLIContext, json_output: bool) -> None:
             [
                 (
                     item["session_id"],
-                    item.get("workflow"),
-                    item.get("status", f"ERROR: {item.get('error')}"),
-                    item.get("updated_at"),
+                    item["workflow"],
+                    item["status"],
+                    item["updated_at"],
                 )
                 for item in sessions
             ],
@@ -837,9 +837,6 @@ def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
     click.echo(f"Workflow: {result['workflow']}")
     click.echo(f"Status:   {result['status']}")
     click.echo(f"State:    {result['state']}")
-    for key in ("note", "compatibility"):
-        if key in result:
-            click.echo(f"Note:     {result[key]}")
     if "message" in result:
         click.echo(result["message"])
     if "instruction" in result:

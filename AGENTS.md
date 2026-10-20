@@ -120,49 +120,19 @@ Generated or transient paths:
   specific behavior inside `src/hiraku/tracking/`.
 - Launches go through the configured dispatcher and must preserve attribution
   such as record, entrypoint, and commit metadata.
-- Workflow semantics live in `workflows/workflow.py`, `workflows/graph.py`,
-  and `workflows/session.py` and
-  are transport independent: `Session.run_start(workflow)` and
-  `session.run_event(workflow, ...)` execute workflow handlers and return `EventResult`.
-  Instructions are retrieved separately. Each instance builds an immutable
-  `Workflow.graph` through `build_graph()`. Python workflows use decorators;
-  `WorkflowGraph.from_class()` compiles decorated classes using its `State`
-  abstraction and Pydantic output models. `State.node` selects the current graph
-  position. The graph owns transition validation and immutable `Node` definitions
-  in `graph.nodes`, with each node's name, handler, and explicit final flag.
-  The graph module must not import workflow implementation modules,
-  including under `TYPE_CHECKING`. The default `Workflow.build_graph()` adds
-  Instruction and reserved-handler-name checks after compilation.
-  `Session.state` is a `State` snapshot with extra fields allowed,
-  loadable independently of workflow code. Read its node as `session.state.node`.
-  State is mutable; events may update it in place and return it. Session executes
-  with detached state, validates results before saving, and gives instruction
-  handlers a deep copy. Direct Workflow.run calls may mutate their supplied state.
-  `Workflow.run(event, arguments, state=None)` executes a step with validated
-  inputs and returns its validated state and Instruction without persistence.
-  Session owns submission outcomes, history, locking, and persistence. Dependencies
-  run Session -> Workflow -> Graph. Workflow must not import session, including
-  under TYPE_CHECKING. Sessions are snapshots; submission reloads under the lock
-  without changing the caller's snapshot.
-  Import APIs from their defining modules; workflows/__init__.py has no re-exports
-  or eager module imports.
-  `Session.validate_workflow()` returns a detached concrete State after ownership
-  and compatibility checks; event execution reuses it without reparsing the snapshot.
-  Terminal workers write event files; the parent in `agent.py` validates and
-  submits them through the session API after successful worker exit. There is
-  no worker-specific MCP server or submission journal.
-  Markdown-only workflows infer arguments from YAML scalar defaults and build
-  their graph directly. Python events declare annotated keyword-only inputs;
-  graph construction generates their argument models. Python workflows use
-  `@start` for the entry method, `@event` for transitions, and
-  `@node` for instructions. Every event has an argument model, even without
-  inputs. Graph structure is checked on construction; reachability is optional
-  through `graph.check_reachability()`. Python sidecars are
-  optional; events return typed states. `Workflow.config` reloads
-  the bound project config on access. Session lookup uses module-level
-  `load_session` and `list_sessions`. All MCP code, including the
-  tools and prompts for records, sessions, and workflows, lives in `mcp.py`;
-  no other module imports the MCP SDK.
+- Workflow code is transport independent, with dependencies running
+  Session -> Workflow -> Graph. Graph owns declarations and transition rules;
+  Workflow executes handlers and builds instructions; Session owns locking,
+  correlation, history, and persistence. Keep these dependency boundaries,
+  including imports under `TYPE_CHECKING`.
+- Session loading, inspection, and cancellation must work without workflow code.
+  Execute events with detached state and validate outputs before saving; reads
+  return stored instructions without rerunning handlers.
+- Import workflow APIs from their defining modules; keep `workflows/__init__.py`
+  free of re-exports and eager imports. Keep MCP SDK imports in `mcp.py`.
+- Terminal workers write event files; the parent validates and submits them after
+  successful worker exit. See [the workflow guide](docs/guides/workflows.md) for
+  authoring and execution contracts.
 - Bundled resources under `src/hiraku/resources/` are installed by
   `hiraku init`; changes to them may affect newly initialized projects and
   should include appropriate example or integration coverage.

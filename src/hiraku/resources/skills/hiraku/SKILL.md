@@ -394,6 +394,7 @@ The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
 `BaseRecord` in `hiraku.base`; `Run` in `hiraku.run`;
 and `hiraku.launch.launch` for scripted use. `hiraku context` manages
 supporting material. Workflows run in the current coding agent through the
-Hiraku MCP server (`hiraku mcp`); `hiraku-agent` also runs one-assignment workers from the terminal. Those workers
-submit through their scoped MCP connection, receive only the event result, and
-stop. The parent retrieves the next instruction.
+Hiraku MCP server (`hiraku mcp`); `hiraku-agent` also runs one-assignment workers
+from the terminal. Workers write an event file and exit. After a successful
+exit, the parent validates and submits the event, then retrieves the next
+instruction.

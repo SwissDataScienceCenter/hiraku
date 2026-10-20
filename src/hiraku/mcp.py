@@ -394,7 +394,7 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     for workflow_id, workflow in sorted(workflows.items()):
         server.add_prompt(
             Prompt.from_function(
-                _start_prompt(workflow, project),
+                _start_prompt(workflow),
                 name=workflow_id,
                 description=summary(workflow.description)
                 or f"Start the {workflow_id} workflow.",
@@ -476,7 +476,7 @@ def _add_workflow_tools(
     )
     for workflow_id, workflow in sorted(workflows.items()):
         server.add_tool(
-            _start_tool(workflow, project),
+            _start_tool(workflow),
             description=_start_description(workflow),
             annotations=ToolAnnotations(read_only_hint=False),
             name=workflow_id,
@@ -542,7 +542,7 @@ def _over_mcp(response: Mapping[str, Any]) -> dict[str, Any]:
     return {**response, "instruction": {**instruction, "events": events}}
 
 
-def _start_tool(workflow: Workflow, project: Project) -> Callable[..., Any]:
+def _start_tool(workflow: Workflow) -> Callable[..., Any]:
     """Return a function whose signature is the workflow's start arguments."""
 
     def run(**arguments: Any) -> dict[str, Any]:
@@ -572,7 +572,7 @@ def _start_tool(workflow: Workflow, project: Project) -> Callable[..., Any]:
     return _with_signature(run, workflow.id, parameters)
 
 
-def _start_prompt(workflow: Workflow, project: Project) -> Callable[..., str]:
+def _start_prompt(workflow: Workflow) -> Callable[..., str]:
     """Return a function that starts a session and renders its instruction.
 
     Prompt arguments are strings; the start arguments' model converts them.
@@ -594,7 +594,7 @@ def _start_prompt(workflow: Workflow, project: Project) -> Callable[..., str]:
                 f"{response.get('message')}. Tell the user and ask for corrected "
                 "arguments."
             )
-        instruction = _over_mcp(response)["instruction"]
+        instruction = response["instruction"]
         text = Instruction.model_validate(instruction).to_text()
         if "events" not in instruction:
             return text

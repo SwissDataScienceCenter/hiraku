@@ -341,7 +341,8 @@ uv run hiraku session cancel SESSION_ID
 
 CLI start includes the first instruction. CLI send-event prints only the event
 result; use session show to retrieve the next instruction. Conversational MCP
-combines those operations; terminal workers receive only the event result.
+combines those operations. Terminal workers write event files and exit; the
+parent submits the event and retrieves the next instruction.
 
 Session advancement is guarded by a per-session lock and atomic file replacement.
 Cancellation takes precedence over retry replay. Handler, instruction, or save
