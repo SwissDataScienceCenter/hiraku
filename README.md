@@ -17,11 +17,9 @@ uv tool install ".[mlflow,wandb,dashboard]"
 uv sync --all-extras
 hiraku --help
 
-# create a hiraku project
-mkdir my-project
+# create a hiraku project (Git is optional)
+hiraku init my-project
 cd my-project
-git init
-hiraku init
 ```
 
 Check the examples for a more complete walkthrough:
@@ -43,9 +41,24 @@ Initialize an example in any of these ways:
 Without an explicit path, `--example NAME` targets `./NAME`. Use
 `hiraku init . --example NAME` to initialize the current directory, or
 `hiraku init my-project --example NAME` to choose another destination.
-The Git-root requirement still applies; add `--ignore-git` to create a new example
-directory without setting up Git first. Repeating plain `hiraku init` leaves an
-initialized project unchanged.
+Initialization does not require Git. Add `--git` to initialize the code repository
+as a convenience. Repeating plain `hiraku init` leaves an initialized project
+unchanged; repeating it with `--git` can add the code repository later.
+
+Optional Git setup is available at any time:
+
+```bash
+hiraku git setup ignore  # ignore Hiraku files in the code repository
+hiraku git setup repo    # independent local Git history inside hiraku/
+hiraku git setup submodule --url PATH_OR_URL
+hiraku git status
+```
+
+`repo` and `submodule` keep research history separate from code history. The
+metadata repository must already have a commit before submodule registration;
+`--url` records its future cloning location, including a local repository path.
+Setup preserves existing files and history and never commits or pushes. See the
+[Git setup guide](docs/guides/git.md) for examples and migration requirements.
 
 The results and generator modes are available for the Heart Disease and Digits
 examples. `--generate` cannot be combined with `--with-results`; generation can

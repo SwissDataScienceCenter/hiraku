@@ -22,7 +22,6 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
             "--example",
             "heart-disease",
             "--with-results",
-            "--ignore-git",
         ],
     )
     assert result.exit_code == 0, result.output

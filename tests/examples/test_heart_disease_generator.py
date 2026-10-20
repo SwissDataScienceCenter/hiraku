@@ -29,7 +29,7 @@ def test_generator_refuses_existing_output(generator, tmp_path):
 
 def test_init_with_generator_and_existing_project(tmp_path):
     runner = CliRunner()
-    args = ["init", str(tmp_path), "--example", "heart-disease", "--ignore-git"]
+    args = ["init", str(tmp_path), "--example", "heart-disease"]
     assert runner.invoke(main, [*args, "--with-generator"]).exit_code == 0
     assert (tmp_path / "generate_results.py").is_file()
     assert not (tmp_path / "runs.csv").exists()
@@ -56,7 +56,6 @@ def test_init_generates_once(tmp_path, monkeypatch, copy_generator):
             "--example",
             "heart-disease",
             "--generate",
-            "--ignore-git",
             *flags,
         ],
     )
@@ -76,7 +75,7 @@ def test_init_generates_once(tmp_path, monkeypatch, copy_generator):
     ],
 )
 def test_invalid_generation_options_leave_no_project(tmp_path, flags):
-    result = CliRunner().invoke(main, ["init", str(tmp_path), "--ignore-git", *flags])
+    result = CliRunner().invoke(main, ["init", str(tmp_path), *flags])
     assert result.exit_code != 0
     assert not (tmp_path / "hiraku.yml").exists()
 
@@ -97,7 +96,6 @@ def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch)
             "--example",
             "heart-disease",
             "--generate",
-            "--ignore-git",
         ],
     )
     assert result.exit_code == 1

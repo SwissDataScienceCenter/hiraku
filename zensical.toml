@@ -43,6 +43,7 @@ nav = [
   { "Guides" = [
       { "Overview" = "guides/index.md" },
       { "Start from scratch" = "examples/minimal/README.md" },
+      { "Git setup" = "guides/git.md" },
       { "Tracking Backends" = [
         { "CSV" = "guides/tracking-csv.md" },
         { "W&B" = "guides/tracking-wandb.md" },

@@ -8,11 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Breaking:** `hiraku init` no longer requires Git or a repository root; remove the obsolete `--ignore-git` flag. Add `--git` to initialize the code repository explicitly.
 - **Breaking:** `hiraku init --example NAME` now targets `./NAME`; pass `.` to initialize the current directory. Explicit paths always take precedence, and repeating plain `hiraku init` leaves an initialized project unchanged ([issue #104](https://github.com/SwissDataScienceCenter/hiraku/issues/104)).
 - **Breaking:** `hiraku runs` and `Record.runs()` now list only runs attributed to the selected record (the active record, or `--record ID`). Previously they returned every attributed run from the record's tracking source ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 
 ### Added
 
+- Add `hiraku git setup ignore|repo|submodule` and `hiraku git status [--json]` for optional metadata versioning after initialization. Submodule setup registers an existing metadata repository with a commit and records `--url` without network access; setup never clones, merges, commits, or pushes.
 - Record bodies are `hiraku.markdown.Markdown` strings that select a section by its heading line, e.g. `record.markdown.section("## Change")`, including its subsections. Headings are found with a CommonMark parser (the new `markdown-it-py` dependency), so headings in code blocks, lists, and block quotes do not start sections.
 - Add `Record.resolve_tracking_backend()` to build the tracking backend inherited by a record; `TrackingBackend.list_runs()` now lists all attributed runs when `record_id` is omitted.
 - Add `hiraku runs --all` to list all attributed runs from the tracking source resolved for a record ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
@@ -27,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Removed
 
+- **Breaking:** Remove unused `GitRepository` branch-management methods, `head`, `is_ancestor`, `parent_records`, and `child_records`, and the project-level branch-name template. Use Git directly for branch operations; record-local `branch` metadata is unchanged. Existing configuration keys remain preserved as extra metadata.
 - **Breaking:** Remove the `hiraku runs list` subcommand; use `hiraku runs` ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 - **Breaking:** Remove `TrackingBackend.list_all_recorded_runs()` and the `backend` argument of `Record.runs()`; use `record.resolve_tracking_backend().list_runs()`. Replace `select_backend` with `Record.resolve_tracking_backend()` and rename `backend_for` to `create_backend`.
 - **Breaking:** Remove the undocumented `mlflow_experiment` record field fallback; set `experiment_name` in the MLflow `tracking_backend` mapping instead.

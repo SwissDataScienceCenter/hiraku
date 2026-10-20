@@ -1,6 +1,5 @@
 hiraku_dir: hiraku
 default_dispatch: launch.sh
-branch: hiraku/records/{record_id}
 default_program: interactive
 tracking_backend:
   type: mlflow

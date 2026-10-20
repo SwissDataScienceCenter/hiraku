@@ -33,7 +33,9 @@ from .agent import (
 from .base import BaseRecord
 from .config import HirakuConfig
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
-from .git import GitRepository
+from .git import GitRepository, init_code_repository, require_git
+from .git import setup as setup_git
+from .git import status as git_setup_status
 from .io import dump_yaml
 from .launch import _dispatcher, launch, render_arguments
 from .record import Record, list_records, load_record
@@ -251,7 +253,9 @@ def main(ctx: click.Context) -> None:
     is_flag=True,
     help="Copy bundled research records and tracked runs.",
 )
-@click.option("--ignore-git", is_flag=True)
+@click.option(
+    "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
+)
 def init_command(
     path: Path | None,
     tracking_backend: str | None,
@@ -260,7 +264,7 @@ def init_command(
     results: bool,
     with_generator: bool,
     generate: bool,
-    ignore_git: bool,
+    init_git: bool,
 ) -> None:
     """Initialize PATH (default: current directory, or NAME with --example NAME)."""
     if template is not None and example is not None:
@@ -275,6 +279,8 @@ def init_command(
     if root is None:
         root = Path(example) if example is not None else Path.cwd()
     marker = root.expanduser().absolute() / "hiraku.yml"
+    if init_git:
+        require_git()
     if marker.is_file() and not any(
         (
             tracking_backend is not None,
@@ -286,6 +292,8 @@ def init_command(
         )
     ):
         config = HirakuConfig.load(marker)
+        if init_git:
+            init_code_repository(config)
         click.echo(f"Hiraku project already initialized at {config.path}")
         return
     generator = None
@@ -302,8 +310,9 @@ def init_command(
         example=example,
         results=results,
         with_generator=with_generator,
-        ignore_git=ignore_git,
     )
+    if init_git:
+        init_code_repository(config)
     click.echo(f"Initialized Hiraku project at {config.path}")
     if generator is not None:
         with as_file(generator) as source:
@@ -314,6 +323,40 @@ def init_command(
                     "Generation failed; initialized project and completed runs kept: "
                     f"{exc}"
                 ) from exc
+
+
+@main.group("git")
+def git_group() -> None:
+    """Configure optional Git versioning for Hiraku files."""
+
+
+@git_group.command("setup")
+@click.argument("mode", type=click.Choice(["ignore", "repo", "submodule"]))
+@click.option(
+    "--url",
+    help="Future metadata cloning location (submodule only; no network access).",
+)
+@click.pass_obj
+def git_setup_command(state: CLIContext, mode: str, url: str | None) -> None:
+    """Set up ignored files, independent local history, or a submodule."""
+    setup_git(state.config, mode, url=url)
+    click.echo(f"Hiraku Git setup: {mode}")
+    if mode == "repo":
+        click.echo("Metadata repository initialized; files have not been committed.")
+    elif mode == "submodule":
+        click.echo("Submodule registration staged; no commits or pushes made.")
+
+
+@git_group.command("status")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def git_status_command(state: CLIContext, json_output: bool) -> None:
+    """Show the code repository and Hiraku versioning setup."""
+    result = git_setup_status(state.config)
+    if json_output:
+        _emit_json(result)
+    else:
+        click.echo(_table(("field", "value"), list(result.items())))
 
 
 @main.command("status")

@@ -6,8 +6,7 @@ the complete walkthrough.
 
 Add `--with-results` to include prepared research records and measured tracked runs.
 
-Initialize in an empty Git repository (or add `--ignore-git` to initialize
-without Git):
+Initialize in an empty directory (Git is optional):
 
 ```bash
 uv run hiraku init . --example heart-disease --with-results
