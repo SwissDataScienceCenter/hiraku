@@ -11,7 +11,8 @@ This example installs three small workflows that do no research work:
   reaches a target.
 
 ```bash
-hiraku init --example workflows
+hiraku clone workflows
+cd workflows
 hiraku-agent count-steps --count 3 --interactive  # or start it over MCP
 hiraku-agent count-steps --interactive            # resume after pausing
 hiraku-agent greet --name Ada        # one prompt, no events

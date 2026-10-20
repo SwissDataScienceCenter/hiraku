@@ -14,11 +14,12 @@ and as starting points for your own:
 
 ## Initialize
 
-In a Git repository, install the example and restart your coding agent so it
+Clone the example, open its directory, and restart your coding agent so it
 loads the `hiraku` MCP server:
 
 ```bash
-hiraku init --example workflows
+hiraku clone workflows
+cd workflows
 ```
 
 ## Count steps

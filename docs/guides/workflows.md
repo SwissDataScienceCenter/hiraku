@@ -15,7 +15,8 @@ state. Methods registered with `@node` turn that data into an instruction.
 
 `hiraku init` installs collaborative research. Two examples add other workflows:
 
-- `hiraku init --example workflows` adds count-steps, greet, and scheduler.
+- `hiraku clone workflows` creates an example project with count-steps, greet,
+  and scheduler; run `cd workflows` to use it.
 - The autoresearch example adds a single-instruction research procedure.
 
 Over MCP, start with the tool or prompt named after the workflow. The start
