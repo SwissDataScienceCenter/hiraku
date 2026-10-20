@@ -144,6 +144,8 @@ Generated or transient paths:
   run Session -> Workflow -> Graph. Workflow must not import session, including
   under TYPE_CHECKING. Sessions are snapshots; submission reloads under the lock
   without changing the caller's snapshot.
+  Import APIs from their defining modules; workflows/__init__.py has no re-exports
+  or eager module imports.
   `Session.validate_workflow()` returns a detached concrete State after ownership
   and compatibility checks; event execution reuses it without reparsing the snapshot.
   Terminal workers write event files; the parent in `agent.py` validates and

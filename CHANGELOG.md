@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Import workflow APIs directly from their defining graph, workflow, markdown, and session modules; remove package-level re-exports and eager module loading.
 - Make State mutable so workflow events can update fields and collections in place and return the state. Keep validation before persistence and isolate saved state from failed events and instruction handlers.
 - Execute workflow definitions through `Session.run_start()` and `session.run_event()`. Session owns persistence and correlation; Workflow owns definitions and Instruction, with dependencies running Session → Workflow → Graph. `session.validate_workflow()` returns the concrete state for execution while preserving independent inspection and cancellation.
 - Separate step execution into `Workflow.run()`, returning validated state and instruction from prepared inputs without session persistence. Session records the step and handles submission outcomes.

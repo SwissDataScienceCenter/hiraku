@@ -11,8 +11,8 @@ import pytest
 from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
+import hiraku.workflows.graph as graph_module
 from hiraku.errors import WorkflowError
-from hiraku.workflows import graph as graph_module
 from hiraku.workflows.graph import (
     EventArguments,
     State,
@@ -256,9 +256,6 @@ def test_transition_requires_exact_model(definition):
 
 
 def test_state_is_a_graph_abstraction():
-    from hiraku.workflows import State as PublicState
-
-    assert PublicState is State
     assert State.__module__ == "hiraku.workflows.graph"
     assert State(node="working").model_dump() == {"node": "working"}
     assert State(node="working", extra=1).model_dump() == {

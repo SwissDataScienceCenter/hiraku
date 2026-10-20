@@ -9,7 +9,8 @@ from pydantic import Field
 from hiraku.errors import EventRejected, HirakuError, NotReady
 from hiraku.git import GitRepository
 from hiraku.record import Record, load_record
-from hiraku.workflows import Instruction, State, Workflow, event, node, start
+from hiraku.workflows.graph import State, event, node, start
+from hiraku.workflows.workflow import Instruction, Workflow
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
 Feedback = Annotated[str, "What the user wants changed."]

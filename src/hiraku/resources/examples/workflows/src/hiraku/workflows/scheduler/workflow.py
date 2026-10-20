@@ -11,7 +11,8 @@ from pydantic import Field
 from hiraku.errors import EventRejected
 from hiraku.markdown import render
 from hiraku.record import Record, load_record
-from hiraku.workflows import Instruction, State, Workflow, event, node, start
+from hiraku.workflows.graph import State, event, node, start
+from hiraku.workflows.workflow import Instruction, Workflow
 
 
 class Queue(State):

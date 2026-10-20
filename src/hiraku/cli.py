@@ -843,7 +843,7 @@ def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
     if "message" in result:
         click.echo(result["message"])
     if "instruction" in result:
-        from .workflows import Instruction
+        from .workflows.workflow import Instruction
 
         click.echo(Instruction.model_validate(result["instruction"]).to_text())
 

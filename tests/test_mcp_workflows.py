@@ -71,7 +71,8 @@ Run {{iterations}} experiments on {{task}}.
 
 LOOP_PY = r"""from typing import Annotated
 from hiraku.markdown import render
-from hiraku.workflows import State, Instruction, Workflow, event, node, start
+from hiraku.workflows.graph import State, event, node, start
+from hiraku.workflows.workflow import Instruction, Workflow
 
 
 class Inputs(State):
@@ -101,7 +102,8 @@ WORKFLOW = Loop
 
 
 ECHO_PY = r'''from hiraku.errors import EventRejected
-from hiraku.workflows import State, Instruction, Workflow, event, node, start
+from hiraku.workflows.graph import State, event, node, start
+from hiraku.workflows.workflow import Instruction, Workflow
 
 
 class Task(State):
@@ -405,7 +407,8 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     noisy = config.workflows_dir / "noisy"
     noisy.mkdir()
     (noisy / "workflow.py").write_text(
-        "from hiraku.workflows import State, Instruction, Workflow, node, start\n"
+        "from hiraku.workflows.graph import State, node, start\n"
+        "from hiraku.workflows.workflow import Instruction, Workflow\n"
         "class Noisy(Workflow):\n"
         '    @start(dest="done")\n'
         "    def start(self) -> State:\n"

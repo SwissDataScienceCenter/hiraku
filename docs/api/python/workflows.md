@@ -1,13 +1,15 @@
 # Workflows API
 
-The public API is re-exported from `hiraku.workflows`. Models, graph declarations,
-execution, and stored sessions are described in the [Workflows guide](../../guides/workflows.md).
+For authoring and execution examples, see the [Workflows guide](../../guides/workflows.md).
 
 ~~~python
-from hiraku.workflows import (
-    EventArguments, Event, EventResult, Instruction, MarkdownWorkflow, Node,
-    Session, State, Workflow, WorkflowGraph, event, node, start,
-    list_sessions, list_workflows, load_session, load_workflow,
+from hiraku.workflows.graph import (
+    Event, EventArguments, Node, State, WorkflowGraph, event, node, start,
+)
+from hiraku.workflows.markdown import MarkdownWorkflow
+from hiraku.workflows.session import EventResult, Session, list_sessions, load_session
+from hiraku.workflows.workflow import (
+    Instruction, Workflow, list_workflows, load_workflow,
 )
 ~~~
 

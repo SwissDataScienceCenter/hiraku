@@ -8,7 +8,7 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.record import Record, load_record
-from hiraku.workflows import Session, load_session
+from hiraku.workflows.session import Session, load_session
 from hiraku.workflows.workflow import list_workflows, load_workflow
 
 HEADER = "id,record_id,entrypoint,metric.val\n"

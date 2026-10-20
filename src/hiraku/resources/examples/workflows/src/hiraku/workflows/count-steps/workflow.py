@@ -9,7 +9,8 @@ from pydantic import Field
 
 from hiraku.errors import EventRejected
 from hiraku.markdown import render
-from hiraku.workflows import Instruction, State, Workflow, event, node, start
+from hiraku.workflows.graph import State, event, node, start
+from hiraku.workflows.workflow import Instruction, Workflow
 
 
 def _token() -> str:

@@ -37,7 +37,8 @@ WORKFLOW_PY = r'''from __future__ import annotations
 from typing import Annotated
 from pydantic import Field
 from hiraku.errors import EventRejected, NotReady
-from hiraku.workflows import State, Instruction, Workflow, event, node, start
+from hiraku.workflows.graph import State, event, node, start
+from hiraku.workflows.workflow import Instruction, Workflow
 
 
 class Answers(State):

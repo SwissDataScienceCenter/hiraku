@@ -14,7 +14,7 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
-from hiraku.workflows import Session, load_session
+from hiraku.workflows.session import Session, load_session
 from hiraku.workflows.workflow import list_workflows
 
 REPOSITORY = Path(__file__).parents[2]

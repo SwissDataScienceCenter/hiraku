@@ -11,26 +11,16 @@ from pydantic import ValidationError as PydanticValidationError
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.errors import SessionNotFoundError, ValidationError, WorkflowError
-from hiraku.workflows import (
-    Event,
-    EventArguments,
-    EventResult,
-    Instruction,
-    MarkdownWorkflow,
-    Node,
-    Session,
-    State,
-    WorkflowGraph,
-    list_sessions,
-    list_workflows,
-    load_session,
-    load_workflow,
-)
+from hiraku.workflows.graph import Event, EventArguments, Node, State, WorkflowGraph
+from hiraku.workflows.markdown import MarkdownWorkflow
+from hiraku.workflows.session import EventResult, Session, list_sessions, load_session
+from hiraku.workflows.workflow import Instruction, list_workflows, load_workflow
 
 TOY = '''from typing import Annotated, Literal
 from pydantic import Field
 from hiraku.errors import EventRejected, NotReady
-from hiraku.workflows import State, Instruction, Workflow, node, event, start
+from hiraku.workflows.graph import State, node, event, start
+from hiraku.workflows.workflow import Instruction, Workflow
 
 
 class Total(State):

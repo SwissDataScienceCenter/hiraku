@@ -87,9 +87,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from hiraku.workflows import (
-    Instruction, State, Workflow, event, node, start,
-)
+from hiraku.workflows.graph import State, event, node, start
+from hiraku.workflows.workflow import Instruction, Workflow
 
 
 class Counter(State):
@@ -263,7 +262,8 @@ MCP tool definitions are fixed when the server starts; reconnect after editing.
 Core execution returns an `EventResult`, containing no instruction:
 
 ~~~python
-from hiraku.workflows import Session, load_session, load_workflow
+from hiraku.workflows.session import Session, load_session
+from hiraku.workflows.workflow import load_workflow
 
 workflow = load_workflow("count", config=config)
 started = Session.run_start(workflow, {"count": 2})
