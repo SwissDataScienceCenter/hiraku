@@ -12,7 +12,7 @@ import html
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import altair as alt
 import marimo as mo
@@ -23,6 +23,31 @@ from ..errors import HirakuError
 from ..io import dump_yaml
 from ..record import Record
 from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
+
+if TYPE_CHECKING:
+    from ..workflows.graph import WorkflowGraph
+
+
+def workflow_graph(graph: WorkflowGraph | None) -> mo.Html:
+    """Render a workflow's declared graph without executing its handlers."""
+    if graph is None:
+        return mo.md("No workflow selected.")
+    # SVG text labels avoid oversized HTML label bounds in Studio.
+    config = '%%{init: {"htmlLabels": false}}%%\n'
+    return mo.mermaid(config + graph.to_mermaid())
+
+
+def record_selector(records: Sequence[BaseRecord], *, label: str) -> mo.ui.dropdown:
+    """Select a record ID independently of other dashboard selections."""
+    identifiers = [record.id for record in records]
+    return mo.ui.dropdown(
+        identifiers,
+        value=next(iter(identifiers), None),
+        label=label,
+        searchable=True,
+        full_width=True,
+        disabled=not identifiers,
+    )
 
 
 def markdown_view(

@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Add dashboard context selection with a read-only Markdown and front-matter view.
+- Add dashboard workflow selection with read-only Markdown and Mermaid graph views.
 - Workflow instructions now separate inline `data` from research `context` references (`contexts` and `records`). MCP returns native resource links for attached research material. **Breaking:** move previous arbitrary instruction `context` values to `data`; old saved instructions are not migrated.
 
 - Add the local stdio MCP server (`hiraku mcp`) with record and context CRUD, attributed launches, run queries, curated source resources, and an evidence-based proposal prompt; `hiraku init` registers it for Claude Code and Codex ([issue #80](https://github.com/SwissDataScienceCenter/hiraku/issues/80)).

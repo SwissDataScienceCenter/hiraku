@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from hiraku.config import HirakuConfig
+from hiraku.context import Context
 from hiraku.dashboard.data import tree_rows
 
 pytest.importorskip("marimo")
@@ -127,3 +128,133 @@ def test_project_copy_finds_its_project_without_the_launcher(
     _, definitions = app.run()
 
     assert definitions["config"].root == project.root
+
+
+def test_context_selection_renders_body_independently_and_refreshes(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    for identifier in ("alpha", "beta"):
+        Context(id=identifier, markdown=f"## Context {identifier}").save(
+            project.contexts_dir / identifier / "context.md"
+        )
+    from hiraku.dashboard.app import app
+
+    _, initial = app.run()
+    assert initial["selected_context"].id == "alpha"
+    initial["context_selector"]._update(["beta"])
+    outputs, selected = app.run(defs={"context_selector": initial["context_selector"]})
+    assert selected["selected_context"].id == "beta"
+    assert selected["scope"] == initial["scope"]
+    assert "Context beta" in "\n".join(getattr(o, "text", "") for o in outputs)
+
+    context = Context.load(project.contexts_dir / "beta" / "context.md")
+    context.markdown = "Updated context"
+    context.save()
+    initial["refresh"]._update(1)
+    _, refreshed = app.run(defs={"refresh": initial["refresh"]})
+    assert next(c for c in refreshed["contexts"] if c.id == "beta").markdown == (
+        "Updated context"
+    )
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_context_views_handle_missing_and_invalid_contexts(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch, invalid: bool
+) -> None:
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    if invalid:
+        path = project.contexts_dir / "broken" / "context.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("---\nid: [\n---\n")
+    from hiraku.dashboard.app import app
+
+    outputs, definitions = app.run()
+    text = "\n".join(getattr(o, "text", "") for o in outputs)
+    assert definitions["selected_context"] is None
+    assert definitions["context_selector"].value is None
+    assert ("Contexts unavailable" if invalid else "No contexts yet") in text
+    assert "No context selected." in text
+    assert len(definitions["runs_df"]) == 5
+
+
+def test_workflow_selection_renders_markdown_and_graph_without_execution(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    for identifier in ("alpha", "beta"):
+        directory = project.workflows_dir / identifier
+        directory.mkdir(parents=True)
+        (directory / "workflow.md").write_text(
+            f"---\nid: {identifier}\n---\n## Workflow {identifier}\n\n{{{{name}}}}"
+        )
+    (project.workflows_dir / "beta" / "workflow.py").write_text("""
+from hiraku.workflows.graph import State, node, start
+from hiraku.workflows.workflow import Instruction, Workflow
+
+class Preview(Workflow):
+    @start(dest="finished")
+    def start(self) -> State:
+        raise AssertionError("Viewing must not start a workflow")
+
+    @node("finished", final=True)
+    def finished(self, state: State) -> Instruction:
+        raise AssertionError("Viewing must not build instructions")
+
+WORKFLOW = Preview
+""")
+    from hiraku.dashboard.app import app
+
+    outputs, initial = app.run()
+    assert initial["selected_workflow"].id == "alpha"
+    rendered = "\n".join(getattr(o, "text", "") for o in outputs)
+    assert "Workflow alpha" in rendered
+    assert "stateDiagram-v2" in rendered
+    assert "done" in rendered
+    initial["workflow_selector"]._update(["beta"])
+    outputs, selected = app.run(
+        defs={"workflow_selector": initial["workflow_selector"]}
+    )
+    assert selected["selected_workflow"].id == "beta"
+    rendered = "\n".join(getattr(o, "text", "") for o in outputs)
+    assert "Workflow beta" in rendered
+    assert "{{name}}" in rendered
+    assert "finished" in rendered
+    assert selected["scope"] == initial["scope"]
+    assert selected["selected_context"] is None
+    assert not list(project.sessions_dir.glob("*"))
+
+    path = project.workflows_dir / "beta" / "workflow.md"
+    path.write_text("---\nid: beta\n---\nRefreshed workflow")
+    initial["refresh"]._update(1)
+    _, refreshed = app.run(defs={"refresh": initial["refresh"]})
+    assert next(w for w in refreshed["workflows"] if w.id == "beta").markdown == (
+        "Refreshed workflow"
+    )
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_workflow_views_handle_missing_and_invalid_workflows(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch, invalid: bool, caplog
+) -> None:
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    for directory in project.workflows_dir.iterdir():
+        if directory.is_dir():
+            for name in ("workflow.py", "workflow.md"):
+                (directory / name).unlink(missing_ok=True)
+    if invalid:
+        directory = project.workflows_dir / "broken"
+        directory.mkdir()
+        (directory / "workflow.py").write_text("raise ValueError('Broken workflow')")
+        (directory / "workflow.md").write_text("---\nid: broken\n---\nNotes")
+    from hiraku.dashboard.app import app
+
+    outputs, definitions = app.run()
+    assert definitions["selected_workflow"] is None
+    assert definitions["workflow_selector"].value is None
+    rendered = "\n".join(getattr(o, "text", "") for o in outputs)
+    assert "No loadable workflows" in rendered
+    assert "No workflow selected." in rendered
+    if invalid:
+        assert "Broken workflow" in caplog.text
+    assert len(definitions["runs_df"]) == 5

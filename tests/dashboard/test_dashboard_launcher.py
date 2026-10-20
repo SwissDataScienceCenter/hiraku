@@ -72,6 +72,11 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "run_table",
         "record_details",
         "record_navigation",
+        "context_list",
+        "context_details",
+        "workflow_list",
+        "workflow_details",
+        "workflow_graph",
         "run_details",
         "performance_plot",
         "tradeoff_plot",
@@ -80,7 +85,7 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "data_setup",
         "project_data",
         "selection_state",
-        "selected_context",
+        "record_selection",
     } <= named
 
 
