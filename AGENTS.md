@@ -122,8 +122,8 @@ Generated or transient paths:
   such as record, entrypoint, and commit metadata.
 - Workflow semantics live in `workflows/workflow.py`, `workflows/graph.py`,
   and `workflows/session.py` and
-  are transport independent: a `Workflow` starts and continues its `Session`s through
-  `Workflow.run_start` and `Workflow.run_event`, which return `EventResult`.
+  are transport independent: `Session.run_start(workflow)` and
+  `session.run_event(workflow, ...)` execute workflow handlers and return `EventResult`.
   Instructions are retrieved separately. Each instance builds an immutable
   `Workflow.graph` through `build_graph()`. Python workflows use decorators;
   `WorkflowGraph.from_class()` compiles decorated classes using its `State`
@@ -133,8 +133,18 @@ Generated or transient paths:
   The graph module must not import workflow implementation modules,
   including under `TYPE_CHECKING`. The default `Workflow.build_graph()` adds
   Instruction and reserved-handler-name checks after compilation.
+  `Session.state` is a `State` snapshot with extra fields allowed,
+  loadable independently of workflow code. Read its node as `session.state.node`.
+  `Workflow.run(event, arguments, state=None)` executes a step with validated
+  inputs and returns its validated state and Instruction without persistence.
+  Session owns submission outcomes, history, locking, and persistence. Dependencies
+  run Session -> Workflow -> Graph. Workflow must not import session, including
+  under TYPE_CHECKING. Sessions are snapshots; submission reloads under the lock
+  without changing the caller's snapshot.
+  `Session.validate_workflow()` returns a detached concrete State after ownership
+  and compatibility checks; event execution reuses it without reparsing the snapshot.
   Terminal workers write event files; the parent in `agent.py` validates and
-  submits them through the workflow API after successful worker exit. There is
+  submits them through the session API after successful worker exit. There is
   no worker-specific MCP server or submission journal.
   Markdown-only workflows infer arguments from YAML scalar defaults and build
   their graph directly. Python events declare annotated keyword-only inputs;

@@ -35,9 +35,8 @@ from .context import Context, list_contexts, load_context
 from .errors import HirakuError, ValidationError, WorkflowError
 from .launch import launch, render_arguments
 from .record import Record, list_records, load_record
-from .workflows.session import Session, list_sessions, load_session
+from .workflows.session import EventResult, Session, list_sessions, load_session
 from .workflows.workflow import (
-    EventResult,
     Instruction,
     Workflow,
     list_workflows,
@@ -460,7 +459,7 @@ def _add_workflow_tools(
                 ).model_dump(exclude_none=True)
             )
         return _deliver(
-            workflow, workflow.run_event(session_id, instruction_id, event, arguments)
+            workflow, session.run_event(workflow, instruction_id, event, arguments)
         )
 
     _add_tool(
@@ -494,7 +493,7 @@ def _add_session_tools(
                 "session_id": s.id,
                 "workflow": s.workflow,
                 "status": s.status,
-                "node": s.node,
+                "node": s.state.node,
                 "instruction_id": s.instruction_id,
                 "updated_at": s.updated_at.isoformat(),
             }
@@ -549,7 +548,7 @@ def _start_tool(workflow: Workflow, project: Project) -> Callable[..., Any]:
     """Return a function whose signature is the workflow's start arguments."""
 
     def run(**arguments: Any) -> dict[str, Any]:
-        return _deliver(workflow, workflow.run_start(arguments))
+        return _deliver(workflow, Session.run_start(workflow, arguments))
 
     parameters = []
     for name, field in workflow.graph.start.arguments.model_fields.items():
@@ -589,7 +588,7 @@ def _start_prompt(workflow: Workflow, project: Project) -> Callable[..., str]:
         except (ValidationError, PydanticValidationError) as exc:
             response = {"status": "rejected", "message": str(exc)}
         else:
-            response = _deliver(workflow, workflow.run_start(inputs))
+            response = _deliver(workflow, Session.run_start(workflow, inputs))
         if response["status"] != "accepted":
             # The SDK hides exception messages from prompts, so explain in text.
             return (
@@ -704,5 +703,6 @@ def _deliver(workflow: Workflow, result: EventResult) -> dict[str, Any]:
     """Conversational delivery policy: attach an assignment after submission."""
     response = result.model_dump(exclude_none=True)
     if result.session_id is not None and result.status in ("accepted", "stale"):
-        response.update(workflow.get_instruction(result.session_id))
+        session = load_session(result.session_id, config=workflow.config)
+        response.update(session.get_instruction(workflow))
     return _over_mcp(response)

@@ -1,4 +1,4 @@
-"""Workflow definitions, loading, and transport-independent execution."""
+"""Workflow definitions, instructions, and project-level loading."""
 
 from __future__ import annotations
 
@@ -8,31 +8,19 @@ import importlib.util
 import json
 import logging
 import re
-import secrets
 import sys
 import typing
-from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import Any, Self
 
-from filelock import Timeout
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    PrivateAttr,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
 from ..base import BaseRecord
 from ..config import HirakuConfig
-from ..errors import EventRejected, NotReady, ValidationError, WorkflowError
-from .graph import Event, EventArguments, WorkflowGraph
-
-if TYPE_CHECKING:
-    from .session import Session
+from ..errors import ValidationError, WorkflowError
+from .graph import Event, EventArguments, State, WorkflowGraph
 
 logger = logging.getLogger(__name__)
 
@@ -61,16 +49,6 @@ class Instruction(BaseModel):
                 rendered = json.dumps(to_jsonable_python(value), indent=1)
                 parts.append(f"{label}:\n{fence}json\n{rendered}\n{fence}")
         return "\n\n".join(parts)
-
-
-class EventResult(BaseModel):
-    """Submission outcome without an assignment; IDs name the current revision."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    status: Literal["accepted", "rejected", "not_ready", "stale", "error"]
-    session_id: str | None = None
-    instruction_id: int | None = None
-    message: str | None = None
 
 
 class Workflow(BaseRecord):
@@ -115,6 +93,56 @@ class Workflow(BaseRecord):
                 )
         return graph
 
+    def run(
+        self,
+        event: Event,
+        arguments: EventArguments,
+        state: State | None = None,
+    ) -> tuple[State, Instruction]:
+        """Execute one step using prepared inputs, without session persistence.
+
+        Arguments and incoming state must already be validated against the graph.
+        Omit state for the start event. Handler and validation errors propagate.
+        """
+        parameters = [] if state is None else [state]
+        inputs = {
+            name: getattr(arguments, name) for name in type(arguments).model_fields
+        }
+        returned = event.handler(self, *parameters, **inputs)
+        self.graph.check_transition(event, returned)
+        # Validate JSON, including updates made through model_copy(update=...).
+        raw = returned.model_dump(mode="json", warnings=False)
+        json.dumps(raw, allow_nan=False)
+        state = self.graph.state_model.model_validate(raw)
+        # Model validators can also change the selected node.
+        self.graph.check_transition(event, state)
+        node = self.graph.nodes[state.node]
+        instruction = node.handler(self, state.model_copy(deep=True))
+        if not isinstance(instruction, Instruction):
+            raise WorkflowError(f"Node handler {state.node!r} must return Instruction")
+        if instruction.events is not None:
+            raise WorkflowError("State instructions cannot override graph events")
+        events = self.graph.events_from(state.node)
+        instruction = instruction.model_copy(
+            update={
+                "context": to_jsonable_python(instruction.context),
+                "events": {
+                    "accepted": [
+                        {
+                            "event": item.name,
+                            "description": summary(item.description),
+                            "arguments": item.arguments.model_json_schema(),
+                        }
+                        for item in events
+                    ]
+                }
+                if events
+                else None,
+            }
+        )
+        json.dumps(instruction.model_dump(mode="json"), allow_nan=False)
+        return state, instruction
+
     @model_validator(mode="after")
     def check_headings(self) -> Self:
         headings = list(map(str, self.markdown.headings))
@@ -126,193 +154,6 @@ class Workflow(BaseRecord):
     def config(self) -> HirakuConfig:
         """Reload the bound project's saved configuration."""
         return HirakuConfig.load(self._config_path)
-
-    def run_start(self, arguments: Mapping[str, Any] | None = None) -> EventResult:
-        """Run the entry event and store its instruction; return an outcome."""
-        try:
-            validated = self.graph.start.arguments.model_validate(
-                {} if arguments is None else arguments
-            )
-        except PydanticValidationError as exc:
-            return EventResult(status="rejected", message=validation_message(exc))
-        return self._run(self.graph.start, validated)
-
-    def run_event(
-        self,
-        session_id: str,
-        instruction_id: int,
-        event: str,
-        arguments: Mapping[str, Any] | None = None,
-    ) -> EventResult:
-        """Submit an event to a saved instruction, with correlation and retry checks."""
-        from .session import _lock, _session_path, load_session
-
-        config = self.config
-        path = _session_path(session_id, config)
-        if type(instruction_id) is not int or instruction_id < 1:
-            raise ValidationError("instruction_id must be a positive integer")
-        session = None
-        try:
-            with _lock(path):
-                session = load_session(session_id, config=config)
-                if session.workflow != self.id:
-                    return session._result(
-                        "rejected", "Session belongs to another workflow"
-                    )
-                if session.status == "cancelled":
-                    return session._result("rejected", "Session is cancelled")
-                method = self.graph.events.get(event)
-                if method is None or method.source is None:
-                    return session._result("rejected", f"Unknown event {event!r}")
-                try:
-                    validated = method.arguments.model_validate(
-                        {} if arguments is None else arguments
-                    )
-                    values = validated.model_dump(mode="json")
-                except PydanticValidationError as exc:
-                    return session._result("rejected", validation_message(exc))
-                last = session.history[-1]
-                if last.instruction_id == instruction_id:
-                    if last.event == event and last.arguments == values:
-                        return session._result("accepted")
-                    return session._result("stale", "Instruction was already answered")
-                if session.status != "active":
-                    return session._result("rejected", f"Session is {session.status}")
-                if instruction_id != session.instruction_id:
-                    return session._result("stale", "Instruction is no longer pending")
-                if event not in session.events or session.node not in method.source:
-                    return session._result(
-                        "rejected",
-                        f"{event!r} is not an event the current instruction accepts",
-                    )
-                try:
-                    self._check_session(session)
-                except (ValueError, WorkflowError) as exc:
-                    return session._result(
-                        "rejected", f"Incompatible stored state: {exc}"
-                    )
-                return self._run(method, validated, session)
-        except Timeout:
-            return EventResult(
-                status="not_ready",
-                session_id=session_id,
-                message="Session is busy; retry after the other call finishes",
-            )
-
-    def _run(
-        self,
-        method: Event,
-        arguments: EventArguments,
-        session: Session | None = None,
-    ) -> EventResult:
-        from .session import HistoryEntry, Session, _session_path
-
-        previous = session
-        if session is not None:
-            session = session.model_copy(deep=True)
-        try:
-            values = arguments.model_dump(mode="json")
-            parameters = []
-            if session is not None:
-                parameters.append(self.graph.state_model.model_validate(session.state))
-            inputs = {
-                name: getattr(arguments, name) for name in type(arguments).model_fields
-            }
-            returned = method.handler(self, *parameters, **inputs)
-            self.graph.check_transition(method, returned)
-            # Validate JSON, including updates made through model_copy(update=...).
-            raw = returned.model_dump(mode="json", warnings=False)
-            json.dumps(raw, allow_nan=False)
-            state = self.graph.state_model.model_validate(raw)
-            raw = state.model_dump(mode="json")
-            # Model validators can also change the selected node.
-            self.graph.check_transition(method, state)
-            node = self.graph.nodes[state.node]
-            instruction = node.handler(self, state.model_copy(deep=True))
-            if not isinstance(instruction, Instruction):
-                raise WorkflowError(
-                    f"Node handler {state.node!r} must return Instruction"
-                )
-            if instruction.events is not None:
-                raise WorkflowError("State instructions cannot override graph events")
-            events = self.graph.events_from(state.node)
-            instruction = instruction.model_copy(
-                update={
-                    "context": to_jsonable_python(instruction.context),
-                    "events": {
-                        "accepted": [
-                            {
-                                "event": item.name,
-                                "description": summary(item.description),
-                                "arguments": item.arguments.model_json_schema(),
-                            }
-                            for item in events
-                        ]
-                    }
-                    if events
-                    else None,
-                }
-            )
-            json.dumps(instruction.model_dump(mode="json"), allow_nan=False)
-            if session is None:
-                session = Session(
-                    id=f"{self.id}-{secrets.token_hex(6)}",
-                    workflow=self.id,
-                    state=raw,
-                    instruction=instruction,
-                )
-                session._path = _session_path(session.id, self.config)
-            session.history.append(
-                HistoryEntry(
-                    instruction_id=session.instruction_id,
-                    event=method.name,
-                    arguments=values,
-                )
-            )
-            session.instruction_id += 1
-            session.state = raw
-            session.instruction = instruction
-            session.status = "completed" if node.final else "active"
-            session._save()
-            return session._result("accepted")
-        except (EventRejected, NotReady) as exc:
-            status = "not_ready" if isinstance(exc, NotReady) else "rejected"
-            if session is not None:
-                return session._result(status, str(exc))
-            return EventResult(status=status, message=str(exc))
-        except Exception as exc:
-            logger.exception("Workflow %s event %s failed", self.id, method.name)
-            message = f"{type(exc).__name__}: {exc}. No session progress was saved."
-            if previous is not None:
-                return previous._result("error", message)
-            return EventResult(status="error", message=message)
-
-    def _check_session(self, session: Session) -> None:
-        if session.workflow != self.id:
-            raise WorkflowError("Session belongs to another workflow")
-        state = self.graph.state_model.model_validate(session.state)
-        if state.node not in self.graph.nodes:
-            raise WorkflowError(f"Unknown node {state.node!r}")
-        if not set(session.events).issubset(
-            item.name for item in self.graph.events_from(state.node)
-        ):
-            raise WorkflowError("Pending events no longer match the graph")
-
-    def get_instruction(self, session_id: str) -> dict[str, Any]:
-        """Read the saved assignment without executing any workflow handlers."""
-        from .session import load_session
-
-        session = load_session(session_id, config=self.config)
-        if session.workflow != self.id:
-            raise ValidationError("Session belongs to another workflow")
-        response = session._instruction_response()
-        if session.status == "active":
-            try:
-                self._check_session(session)
-            except (ValueError, WorkflowError) as exc:
-                response.pop("instruction", None)
-                response["message"] = f"Incompatible stored state: {exc}"
-        return response
 
 
 def summary(text: str | None) -> str:

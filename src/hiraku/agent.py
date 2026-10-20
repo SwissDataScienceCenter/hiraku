@@ -194,8 +194,8 @@ def _event_command(
     def run(ctx: click.Context, **values: Any) -> None:
         options = _options(ctx, config)
         session = _select_for_event(workflow, name, options)
-        result = workflow.run_event(
-            session.id,
+        result = session.run_event(
+            workflow,
             session.instruction_id,
             name,
             model.from_text(
@@ -325,7 +325,7 @@ def _start_or_resume(
             raise click.ClickException(_several(workflow, active))
         click.echo(f"session {active[0].id} (resumed)")
         return active[0].id
-    response = workflow.run_start(arguments).model_dump(exclude_none=True)
+    response = Session.run_start(workflow, arguments).model_dump(exclude_none=True)
     if response["status"] != "accepted":
         raise click.ClickException(
             f"{workflow.id} did not start ({response['status']}): "
@@ -376,7 +376,8 @@ def _drive(
 ) -> int:
     """Fetch assignments and submit event files after successful worker exits."""
     while True:
-        response = workflow.get_instruction(session_id)
+        session = load_session(session_id, config=options.config)
+        response = session.get_instruction(workflow)
         if "instruction" not in response:
             raise click.ClickException(
                 response.get("message", "No instruction available")
@@ -411,11 +412,8 @@ def _drive(
             raise click.ClickException(
                 f"Invalid event file {event_file}: {exc}"
             ) from exc
-        result = workflow.run_event(
-            session_id,
-            response["instruction_id"],
-            submission.event,
-            submission.arguments,
+        result = session.run_event(
+            workflow, response["instruction_id"], submission.event, submission.arguments
         ).model_dump(exclude_none=True)
         _report(
             response["instruction_id"],

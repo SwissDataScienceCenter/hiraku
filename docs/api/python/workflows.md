@@ -16,6 +16,41 @@ definitions to the selected project's configuration file. `Workflow.config`
 reloads that file on access. `load_session` and `list_sessions` follow the same
 project lookup convention as records and contexts.
 
+`Session.state` is a `State` that validates `node`
+and preserves workflow-specific fields. Read the position as `session.state.node`.
+Loading and cancelling a session do not require its workflow code.
+To validate the remaining fields for execution,
+call `session.validate_workflow(workflow)`: it returns an instance of the concrete
+`workflow.graph.state_model`, detached from the saved data. It checks workflow
+ownership, model validation, the current node, and pending-event compatibility
+without executing handlers or changing the snapshot. Incompatible models raise
+Pydantic validation errors; ownership and graph mismatches raise `WorkflowError`.
+Validation uses the workflow definition available now, not its historical model.
+`State` allows extra fields, including in authored subclasses. Declared fields
+are still validated. A subclass can opt into rejecting unknown fields with
+`model_config = ConfigDict(extra="forbid")`.
+
+Dependencies run from `session.py` to `workflow.py` to `graph.py`.
+`workflow.py` owns the definition and `Instruction`; `session.py` owns execution,
+`EventResult`, and the stored session models. Workflow never imports Session.
+
+`workflow.run(event, arguments, state=None)` executes one step without creating
+or saving a session. Supply an `Event` from its graph, an already validated
+`EventArguments` instance, and the concrete validated state for ordinary events;
+omit state for start. It validates returned states and transitions, builds the
+instruction with accepted-event schemas, and returns `(state, instruction)`.
+Errors propagate to the caller. Session uses this method and converts failures
+into `EventResult` outcomes while handling correlation, history, and persistence.
+
+`Session.run_start(workflow, arguments=None)` returns an `EventResult`, including
+when start fails before a session exists. `session.run_event(workflow,
+instruction_id, event, arguments=None)` reloads the saved session under its lock,
+validates once, and passes that state to the event handler. The calling session
+remains a snapshot; reload it to read updated state or instructions.
+`session.get_instruction(workflow)` reads and checks the snapshot's assignment.
+Session inspection and instruction reads use the same compatibility check.
+Returned event states are still validated separately before saving.
+
 A loaded workflow owns its graph. `Workflow.build_graph()` defaults to
 `WorkflowGraph.from_class(type(self))`, followed by Workflow-specific checks.
 The compiler accepts any class with decorated instance methods. Start defines
@@ -48,7 +83,7 @@ has no dependency on the workflow implementation.
 
 `graph.check_transition(event, next_state)` checks that the result has exactly
 the graph's state model and its `node` is one of the event's destinations.
-Workflow execution uses this check before persistence; it separately validates
+Session execution uses this check before persistence; it separately validates
 serialized state data and checks instruction outputs. Stored state and session
 inspection use `node` for the current position. Session format version 2 rejects
 older files; start a new session rather than migrating the old `phase` field.
@@ -80,7 +115,7 @@ event without inputs. Manually constructed definitions must also supply a model.
 
 ::: hiraku.workflows.workflow.Instruction
 
-::: hiraku.workflows.workflow.EventResult
+::: hiraku.workflows.session.EventResult
 
 ::: hiraku.workflows.workflow.Workflow
 

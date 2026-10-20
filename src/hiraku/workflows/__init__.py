@@ -11,14 +11,13 @@ from .graph import (
     start,
 )
 from .markdown import MarkdownWorkflow
-from .session import Session, list_sessions, load_session
-from .workflow import (
+from .session import (
     EventResult,
-    Instruction,
-    Workflow,
-    list_workflows,
-    load_workflow,
+    Session,
+    list_sessions,
+    load_session,
 )
+from .workflow import Instruction, Workflow, list_workflows, load_workflow
 
 __all__ = [
     "Event",

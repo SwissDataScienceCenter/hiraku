@@ -703,13 +703,15 @@ def _arguments(arguments_file: Any) -> dict[str, Any]:
 @click.pass_obj
 def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> None:
     """Start a workflow session and print the JSON response."""
+    from .workflows.session import Session, load_session
     from .workflows.workflow import load_workflow
 
     workflow = load_workflow(workflow_id, config=state.config)
-    result = workflow.run_start(_arguments(arguments_file))
+    result = Session.run_start(workflow, _arguments(arguments_file))
     response = result.model_dump(exclude_none=True)
     if result.status == "accepted":
-        response.update(workflow.get_instruction(result.session_id))
+        session = load_session(result.session_id, config=state.config)
+        response.update(session.get_instruction(workflow))
     _emit_json(response)
 
 
@@ -738,11 +740,8 @@ def workflow_send_event(
     session = load_session(session_id, config=state.config)
     workflow = load_workflow(session.workflow, config=state.config)
     _emit_json(
-        workflow.run_event(
-            session_id,
-            instruction_id,
-            event,
-            _arguments(arguments_file),
+        session.run_event(
+            workflow, instruction_id, event, _arguments(arguments_file)
         ).model_dump(exclude_none=True)
     )
 
@@ -771,7 +770,7 @@ def workflow_graph_command(
             raise ValidationError(
                 f"Session {session_id!r} belongs to workflow {session.workflow!r}"
             )
-        current = session.node
+        current = session.state.node
     click.echo(workflow.graph.to_mermaid(current=current), nl=False)
 
 
@@ -792,7 +791,7 @@ def session_list(state: CLIContext, json_output: bool) -> None:
             "session_id": s.id,
             "workflow": s.workflow,
             "status": s.status,
-            "node": s.node,
+            "node": s.state.node,
             "updated_at": s.updated_at.isoformat(),
         }
         for s in list_sessions(config=state.config)

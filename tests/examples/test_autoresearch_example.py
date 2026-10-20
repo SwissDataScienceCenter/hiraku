@@ -14,6 +14,7 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
+from hiraku.workflows import Session, load_session
 from hiraku.workflows.workflow import list_workflows
 
 REPOSITORY = Path(__file__).parents[2]
@@ -211,10 +212,12 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
     workflows = {workflow.id: workflow for workflow in list_workflows(config=config)}
-    result = workflows["autoresearch"].run_start()
+    result = Session.run_start(workflows["autoresearch"])
     response = {
         **result.model_dump(),
-        **workflows["autoresearch"].get_instruction(result.session_id),
+        **load_session(
+            result.session_id, config=workflows["autoresearch"].config
+        ).get_instruction(workflows["autoresearch"]),
     }
     assert response["status"] == "accepted"
     assert response["session_status"] == "completed"

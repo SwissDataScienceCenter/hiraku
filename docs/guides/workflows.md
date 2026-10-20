@@ -174,7 +174,8 @@ Print the next number, then submit counted.
 - Models are defined at module scope before their workflow. Handlers are
   synchronous instance methods. `self` and the state are positional parameters
   without defaults; external inputs follow `*`. Variadic parameters are rejected.
-  Direct Python method calls bypass validation; use `run_start` and `run_event`
+  Direct Python method calls bypass validation; use `Session.run_start` and
+  `session.run_event`
   for validated execution and session persistence.
 - Graph construction checks node references and final-node rules. Unreachable
   nodes are allowed; call `workflow.graph.check_reachability()` to reject them
@@ -264,15 +265,28 @@ MCP tool definitions are fixed when the server starts; reconnect after editing.
 Core execution returns an `EventResult`, containing no instruction:
 
 ~~~python
-workflow = load_workflow("count", config=config)
-started = workflow.run_start({"count": 2})
-assignment = workflow.get_instruction(started.session_id)
+from hiraku.workflows import Session, load_session, load_workflow
 
-result = workflow.run_event(
-    started.session_id, assignment["instruction_id"], "counted",
+workflow = load_workflow("count", config=config)
+started = Session.run_start(workflow, {"count": 2})
+session = load_session(started.session_id, config=config)
+assignment = session.get_instruction(workflow)
+
+result = session.run_event(
+    workflow, assignment["instruction_id"], "counted",
 )
-next_assignment = workflow.get_instruction(started.session_id)
+session = load_session(session.id, config=config)
+next_assignment = session.get_instruction(workflow)
 ~~~
+
+Workflow defines handlers and instructions; Session executes them and owns saved
+progress. Session calls `workflow.run(event, arguments, state=None)` to invoke
+handlers, validate their outputs and transitions, and build the next instruction.
+This lower-level method expects validated inputs and returns `(state, instruction)`;
+it neither saves sessions nor catches execution errors.
+Loaded sessions are snapshots. Submission reloads current state under
+the session lock without changing the caller's snapshot; reload to inspect the
+new state. Neither object caches the other.
 
 `EventResult` contains `status`, available `session_id` and `instruction_id`,
 and optional `message`. The instruction ID is the current revision after
@@ -292,14 +306,27 @@ an explanation without an actionable instruction.
 
 Load/list sessions with module-level `load_session(id, config=...)` and
 `list_sessions(config=...)`. The latter returns `Session` objects newest first,
-logging and skipping malformed or unsupported files. A session exposes raw state,
-derived node, saved instruction, history, timestamps, and status. Session format
+logging and skipping malformed or unsupported files. A session exposes a typed state
+snapshot, saved instruction, history, timestamps, and status. Session format
 version 2 stores the current position under `state.node` and exposes it as
 `node` in inspection and listing responses. Older sessions using `phase` are
 unsupported; start a new session.
 `session.show(workflow)` inspects compatibility; `session.cancel()` does not
 require working workflow code. Session persistence retains its file location,
 not a configuration object.
+
+Session loading uses `State`, which validates the
+string `node` and preserves all other saved fields. Read the current position
+through `session.state.node`. State models allow extra fields by default;
+authored subclasses can reject them with `model_config = ConfigDict(extra="forbid")`.
+The workflow interprets that snapshot through
+`state = session.validate_workflow(workflow)`, which returns its concrete `State`
+model after checking ownership, node, and pending-event compatibility. The result
+is detached from the stored data; validation neither executes handlers nor saves
+changes. This check uses the current workflow definition. Event execution reuses
+the validated state; it validates the newly returned state separately before
+persistence. Inspection and cancellation remain available if workflow code is
+missing or incompatible.
 
 ~~~bash
 uv run hiraku workflow start count --arguments-file inputs.json

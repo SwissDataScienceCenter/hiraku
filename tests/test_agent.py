@@ -164,7 +164,7 @@ def agent(*arguments: str) -> Result:
 
 def sessions(config: HirakuConfig) -> list[dict]:
     return [
-        {"session_id": s.id, "status": s.status, "state": s.node}
+        {"session_id": s.id, "status": s.status, "state": s.state.node}
         for s in list_sessions(config=config)
     ]
 
@@ -215,13 +215,13 @@ def test_rejected_event_stops_and_can_be_retried_explicitly(
     stored = load_session(session["session_id"], config=config)
     assert stored.status == "active"
     assert stored.instruction_id == 1
-    assert stored.state["answers"] == []
+    assert stored.state.answers == []
     event_file = config.sessions_dir / stored.id / "1/1/event.json"
     assert json.loads(event_file.read_text())["arguments"] == {"value": "bad"}
     assert not (event_file.parents[1] / "pending.json").exists()
     resumed = agent("toy")
     assert resumed.exit_code == 0, resumed.output
-    assert load_session(stored.id, config=config).state["answers"] == ["one", "two"]
+    assert load_session(stored.id, config=config).state.answers == ["one", "two"]
 
 
 @pytest.mark.parametrize("command", [("toy",), ("toy", "approve")])
@@ -273,7 +273,7 @@ def test_invalid_event_file_stops_without_transition(config, monkeypatch, conten
     assert "Invalid event file" in result.output
     (session,) = list_sessions(config=config)
     assert session.instruction_id == 1
-    assert session.state["answers"] == []
+    assert session.state.answers == []
     assert (config.sessions_dir / session.id / "1/1/event.json").read_text() == content
 
 
@@ -292,7 +292,7 @@ def test_invalid_event_is_rejected_by_workflow(config, monkeypatch, payload):
     assert "Invalid event file" not in result.output
     (session,) = list_sessions(config=config)
     assert session.instruction_id == 1
-    assert session.state["answers"] == []
+    assert session.state.answers == []
 
 
 def test_rejected_pending_submission_stops_without_relaunch(config):
@@ -437,7 +437,7 @@ def test_worker_file_is_bound_to_the_dispatched_instruction(config):
     assert result.exit_code == 0, result.output
     (session,) = list_sessions(config=config)
     assert len(session.history) == 2
-    assert session.state["answers"] == ["one"]
+    assert session.state.answers == ["one"]
 
 
 def test_markdown_only_cli_inputs_and_final_assignment(config):
@@ -472,14 +472,14 @@ def test_subprocess_failure_does_not_submit_worker_output(
     (session,) = list_sessions(config=config)
     if variable == "FAKE_WORKER_EXIT":
         assert session.status == "active"
-        assert session.state["answers"] == []
+        assert session.state.answers == []
         assert (config.sessions_dir / session.id / "1/1/event.json").exists()
         monkeypatch.delenv("FAKE_WORKER_EXIT")
         answers(config, "two")
         resumed = agent("toy")
         assert resumed.exit_code == 0, resumed.output
-        assert load_session(session.id, config=config).state["answers"] == ["two"]
+        assert load_session(session.id, config=config).state.answers == ["two"]
         assert (config.sessions_dir / session.id / "1/2/event.json").exists()
     else:
         assert session.status == "completed"
-        assert session.state["answers"] == ["one"]
+        assert session.state.answers == ["one"]

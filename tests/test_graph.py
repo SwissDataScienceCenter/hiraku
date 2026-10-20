@@ -261,8 +261,10 @@ def test_state_is_a_graph_abstraction():
     assert PublicState is State
     assert State.__module__ == "hiraku.workflows.graph"
     assert State(node="working").model_dump() == {"node": "working"}
-    with pytest.raises(PydanticValidationError):
-        State(node="working", extra=1)
+    assert State(node="working", extra=1).model_dump() == {
+        "node": "working",
+        "extra": 1,
+    }
     stored = State(node="working")
     with pytest.raises(PydanticValidationError):
         stored.node = "done"

@@ -18,6 +18,7 @@ from hiraku.workflows import (
     Instruction,
     MarkdownWorkflow,
     Node,
+    Session,
     State,
     WorkflowGraph,
     list_sessions,
@@ -102,17 +103,14 @@ def write_workflow(config, source, name="toy", markdown="## Add\n\nAdd an amount
 
 def started(config, target=3):
     workflow = load_workflow("toy", config=config)
-    result = workflow.run_start({"target": target})
+    result = Session.run_start(workflow, {"target": target})
     assert result.status == "accepted", result
     return workflow, result
 
 
 def submit(workflow, result, amount=1, **arguments):
-    return workflow.run_event(
-        result.session_id,
-        result.instruction_id,
-        "add",
-        {"amount": amount, **arguments},
+    return load_session(result.session_id).run_event(
+        workflow, result.instruction_id, "add", {"amount": amount, **arguments}
     )
 
 
@@ -142,23 +140,165 @@ def test_graph_and_models_are_the_only_registry(config):
     )
 
 
+def test_workflow_run_executes_steps_without_persisting_a_session(config):
+    workflow = load_workflow("toy", config=config)
+    start = workflow.graph.start
+    state, instruction = workflow.run(
+        start, start.arguments.model_validate({"target": 2})
+    )
+    assert type(state) is workflow.graph.state_model
+    assert state.total == 0
+    assert instruction.context == {"total": 0}
+    assert [item["event"] for item in instruction.events["accepted"]] == [
+        "add",
+        "finish",
+    ]
+    event = workflow.graph.events["add"]
+    done, instruction = workflow.run(
+        event, event.arguments.model_validate({"amount": 2}), state
+    )
+    assert state.total == 0
+    assert done.node == "done"
+    assert done.total == 2
+    assert instruction.context == {"total": 2}
+    assert instruction.events is None
+    assert not list(config.sessions_dir.rglob("*.json"))
+
+
 def test_state_updates_and_reads_are_snapshots(config):
     workflow, first = started(config)
-    read = workflow.get_instruction(first.session_id)
-    assert read == workflow.get_instruction(first.session_id)
+    read = load_session(first.session_id).get_instruction(workflow)
+    assert read == load_session(first.session_id).get_instruction(workflow)
     assert read["node"] == "adding"
     assert read["instruction"]["context"] == {"total": 0}
     assert read["instruction"]["events"]["instruction_id"] == 1
     second = submit(workflow, first)
     assert second.status == "accepted"
     assert second.instruction_id == 2
-    assert workflow.get_instruction(first.session_id)["node"] == "adding"
+    assert load_session(first.session_id).get_instruction(workflow)["node"] == "adding"
     session = load_session(first.session_id, config=config)
-    assert session.state == {"node": "adding", "total": 1, "target": 3}
-    assert session.node == "adding"
+    assert session.state.model_dump() == {"node": "adding", "total": 1, "target": 3}
+    assert session.state.node == "adding"
     assert session.instruction.context == {"total": 1}
     assert len(session.history) == 2
     assert list_sessions(config=config)[0].id == first.session_id
+
+
+def test_validate_session_returns_concrete_state_without_changing_snapshot(config):
+    source = TOY.replace(
+        "    total: int = 0",
+        "    total: int = 0\n"
+        '    details: dict = Field(default_factory=lambda: {"items": []})',
+    )
+    write_workflow(config, source)
+    workflow, first = started(config)
+    session = load_session(first.session_id)
+    before = session.model_dump(mode="json")
+    state = session.validate_workflow(workflow)
+    assert type(state) is workflow.graph.state_model
+    assert state.node == "adding"
+    assert state.target == 3
+    state.details["items"].append("changed")
+    assert session.model_dump(mode="json") == before
+    assert load_session(session.id).model_dump(mode="json") == before
+
+
+def test_session_state_is_a_typed_snapshot_without_workflow_code(config):
+    _, first = started(config)
+    (config.workflows_dir / "toy" / "workflow.py").unlink()
+    session = load_session(first.session_id)
+    assert isinstance(session.state, State)
+    assert type(session.state) is State
+    assert session.state.node == "adding"
+    assert session.state.target == 3
+    assert session.state.model_dump() == {"node": "adding", "total": 0, "target": 3}
+    assert session.show()["state"] == session.state.model_dump()
+    assert session.cancel()["status"] == "cancelled"
+    assert load_session(session.id).state == session.state
+
+
+@pytest.mark.parametrize("snapshot", [{}, {"node": None}, {"node": 1}])
+def test_session_state_requires_a_string_node(snapshot):
+    with pytest.raises(PydanticValidationError, match="node"):
+        State.model_validate(snapshot)
+
+
+def test_workflow_module_does_not_import_session():
+    import ast
+    import inspect
+
+    import hiraku.workflows.workflow as module
+
+    imports = [
+        node.module
+        for node in ast.walk(ast.parse(inspect.getsource(module)))
+        if isinstance(node, ast.ImportFrom)
+    ]
+    assert "session" not in imports
+    assert "hiraku.workflows.session" not in imports
+
+
+def test_event_reuses_state_returned_by_session_validation(config, monkeypatch):
+    workflow, first = started(config)
+    original = Session.validate_workflow
+    calls = []
+
+    def validate(self, workflow):
+        state = original(self, workflow)
+        calls.append(state)
+        return state.model_copy(update={"total": 10})
+
+    monkeypatch.setattr(Session, "validate_workflow", validate)
+    result = submit(workflow, first)
+    assert result.status == "accepted", result.message
+    assert len(calls) == 1
+    assert calls[0].total == 0
+    assert load_session(first.session_id).state.total == 11
+
+
+def test_submission_reloads_current_state_without_mutating_snapshot(config):
+    workflow, first = started(config)
+    session = load_session(first.session_id)
+    before = session.model_dump()
+    accepted = session.run_event(workflow, 1, "add", {"amount": 1})
+    assert accepted.status == "accepted"
+    assert session.model_dump() == before
+    assert session.run_event(workflow, 1, "add", {"amount": 1}) == accepted
+    advanced = session.run_event(workflow, 2, "add", {"amount": 1})
+    assert advanced.status == "accepted"
+    assert advanced.instruction_id == 3
+    assert load_session(session.id).state.total == 2
+    assert session.model_dump() == before
+
+
+@pytest.mark.parametrize("problem", ["ownership", "model", "node", "events"])
+def test_validate_session_rejects_incompatible_snapshots(config, problem):
+    workflow, first = started(config)
+    session = load_session(first.session_id)
+    expected = WorkflowError
+    message = ""
+    if problem == "ownership":
+        session.workflow = "other"
+        message = "another workflow"
+    elif problem == "model":
+        session.state = session.state.model_copy(update={"total": "invalid"})
+        expected = PydanticValidationError
+        message = "total"
+    elif problem == "node":
+        source = TOY.replace('Literal["adding", "done"]', "str")
+        write_workflow(config, source)
+        workflow = load_workflow("toy")
+        session.state = session.state.model_copy(update={"node": "missing"})
+        message = "Unknown node"
+    else:
+        session.instruction = session.instruction.model_copy(
+            update={"events": {"accepted": [{"event": "missing"}]}}
+        )
+        message = "Pending events no longer match"
+    before = session.model_dump(mode="json")
+    with pytest.raises(expected, match=message):
+        session.validate_workflow(workflow)
+    assert session.model_dump(mode="json") == before
 
 
 def test_node_is_used_in_session_storage_and_inspection(config):
@@ -192,7 +332,7 @@ def test_completion_and_retry(config):
     done = submit(workflow, first)
     assert done.status == "accepted"
     assert submit(workflow, first) == done
-    read = workflow.get_instruction(done.session_id)
+    read = load_session(done.session_id).get_instruction(workflow)
     assert read["session_status"] == "completed"
     assert "events" not in read["instruction"]
     assert read["instruction"]["context"] == {"total": 1}
@@ -216,7 +356,7 @@ def test_failed_submissions_preserve_storage(config, arguments, status):
     workflow, first = started(config)
     path = config.sessions_dir / f"{first.session_id}.json"
     before = path.read_bytes()
-    result = workflow.run_event(first.session_id, 1, "add", arguments)
+    result = load_session(first.session_id).run_event(workflow, 1, "add", arguments)
     assert result.status == status
     assert result.instruction_id == 1
     assert path.read_bytes() == before
@@ -225,17 +365,31 @@ def test_failed_submissions_preserve_storage(config, arguments, status):
 
 @pytest.mark.parametrize("arguments", [{"target": 0}, {"extra": True}])
 def test_invalid_start_creates_no_session(config, arguments):
-    assert load_workflow("toy", config=config).run_start(arguments).status == "rejected"
+    assert (
+        Session.run_start(load_workflow("toy", config=config), arguments).status
+        == "rejected"
+    )
     assert list_sessions(config=config) == []
 
 
 def test_omitted_arguments_and_wrong_node(config):
     workflow, first = started(config)
-    wrong = workflow.run_event(first.session_id, 1, "finish", {"extra": True})
+    wrong = load_session(first.session_id).run_event(
+        workflow, 1, "finish", {"extra": True}
+    )
     assert wrong.status == "rejected"
-    assert workflow.run_event(first.session_id, 1, "unknown").status == "rejected"
-    assert workflow.run_event(first.session_id, 1, "start").status == "rejected"
-    assert workflow.run_event(first.session_id, 1, "finish").status == "accepted"
+    assert (
+        load_session(first.session_id).run_event(workflow, 1, "unknown").status
+        == "rejected"
+    )
+    assert (
+        load_session(first.session_id).run_event(workflow, 1, "start").status
+        == "rejected"
+    )
+    assert (
+        load_session(first.session_id).run_event(workflow, 1, "finish").status
+        == "accepted"
+    )
 
 
 def test_correlation_cancel_and_restart(config):
@@ -244,7 +398,10 @@ def test_correlation_cancel_and_restart(config):
     assert submit(workflow, first) == second
     assert submit(workflow, first, amount=2).status == "stale"
     assert (
-        workflow.run_event(first.session_id, 99, "add", {"amount": 1}).status == "stale"
+        load_session(first.session_id)
+        .run_event(workflow, 99, "add", {"amount": 1})
+        .status
+        == "stale"
     )
     restarted = load_workflow("toy", config=config)
     third = submit(restarted, second)
@@ -252,7 +409,9 @@ def test_correlation_cancel_and_restart(config):
     session = load_session(first.session_id, config=config)
     session.cancel()
     assert submit(restarted, second).status == "rejected"
-    assert "instruction" not in restarted.get_instruction(first.session_id)
+    assert "instruction" not in load_session(first.session_id).get_instruction(
+        restarted
+    )
     assert "instruction" not in load_session(first.session_id).show()
     assert session.cancel()["status"] == "cancelled"
 
@@ -262,14 +421,14 @@ def test_invalid_session_ids(config, session_id):
     with pytest.raises(ValidationError):
         load_session(session_id)
     with pytest.raises(ValidationError):
-        load_workflow("toy").run_event(session_id, 1, "finish")
+        load_session(session_id).run_event(load_workflow("toy"), 1, "finish")
 
 
 @pytest.mark.parametrize("revision", [None, True, "1", 0, -1])
 def test_invalid_revision(config, revision):
     workflow, first = started(config)
     with pytest.raises(ValidationError):
-        workflow.run_event(first.session_id, revision, "finish")
+        load_session(first.session_id).run_event(workflow, revision, "finish")
 
 
 def test_missing_session(config):
@@ -282,7 +441,7 @@ def test_concurrent_submission_applies_once(config):
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: submit(workflow, first), range(2)))
     assert results[0] == results[1]
-    assert load_session(first.session_id).state["total"] == 1
+    assert load_session(first.session_id).state.total == 1
 
 
 def test_lock_timeout_is_retryable(config, monkeypatch):
@@ -351,7 +510,7 @@ def test_bad_instruction_saves_nothing(config, expression):
     write_workflow(config, source)
     workflow, first = started(config, target=1)
     assert submit(workflow, first).status == "error"
-    assert load_session(first.session_id).state["total"] == 0
+    assert load_session(first.session_id).state.total == 0
 
 
 def test_instruction_mutation_cannot_change_saved_state(config):
@@ -362,7 +521,7 @@ def test_instruction_mutation_cannot_change_saved_state(config):
     )
     write_workflow(config, source)
     workflow, first = started(config)
-    assert load_session(first.session_id).state["total"] == 0
+    assert load_session(first.session_id).state.total == 0
 
 
 def test_config_reloads_and_is_bound_to_project(config, tmp_path, monkeypatch):
@@ -548,9 +707,9 @@ def test_generated_inputs_preserve_constraints_and_defaults(config):
     add = workflow.graph.events["add"].arguments
     assert add.model_json_schema()["required"] == ["amount"]
     assert add.model_validate({"amount": 1}).note == ""
-    assert workflow.run_start({"target": 0}).status == "rejected"
-    assert workflow.run_start({"extra": 1}).status == "rejected"
-    assert workflow.run_start().status == "accepted"
+    assert Session.run_start(workflow, {"target": 0}).status == "rejected"
+    assert Session.run_start(workflow, {"extra": 1}).status == "rejected"
+    assert Session.run_start(workflow).status == "accepted"
 
 
 def test_generated_inputs_preserve_nested_models_and_metadata(config):
@@ -576,10 +735,10 @@ def test_generated_inputs_preserve_nested_models_and_metadata(config):
     )
     parsed = inputs.from_text({"settings": '{"target": 2}'})
     assert parsed.settings.target == 2
-    result = workflow.run_start({"settings": {"target": 2}})
+    result = Session.run_start(workflow, {"settings": {"target": 2}})
     assert result.status == "accepted", result.message
-    assert load_session(result.session_id).state["target"] == 2
-    assert workflow.run_start({"settings": {}}).status == "rejected"
+    assert load_session(result.session_id).state.target == 2
+    assert Session.run_start(workflow, {"settings": {}}).status == "rejected"
 
 
 @pytest.mark.parametrize(
@@ -599,8 +758,8 @@ def test_string_descriptions_preserve_other_metadata(config, annotation):
     assert field["description"] == "Target count"
     assert field["exclusiveMinimum"] == 0
     assert field["default"] == 3
-    assert workflow.run_start({"target": 0}).status == "rejected"
-    assert workflow.run_start().status == "accepted"
+    assert Session.run_start(workflow, {"target": 0}).status == "rejected"
+    assert Session.run_start(workflow).status == "accepted"
 
 
 def test_multiple_string_descriptions_rejected(config):
@@ -620,8 +779,8 @@ def test_start_without_inputs(config):
     write_workflow(config, source)
     workflow = load_workflow("toy")
     assert workflow.graph.start.arguments.model_fields == {}
-    assert workflow.run_start().status == "accepted"
-    assert workflow.run_start({"target": 3}).status == "rejected"
+    assert Session.run_start(workflow).status == "accepted"
+    assert Session.run_start(workflow, {"target": 3}).status == "rejected"
 
 
 def test_inherited_graph_is_independent(config):
@@ -644,8 +803,8 @@ WORKFLOW = Child
         parent.graph.events["finish"].handler
         is not workflow.graph.events["finish"].handler
     )
-    workflow.run_event(first.session_id, 1, "finish")
-    assert load_session(first.session_id).state["total"] == 42
+    load_session(first.session_id).run_event(workflow, 1, "finish")
+    assert load_session(first.session_id).state.total == 42
 
 
 def test_relative_imports_and_reloading(config):
@@ -667,7 +826,7 @@ def test_incompatible_code_is_inspectable_and_cancellable(config):
     updated = load_workflow("toy")
     result = submit(updated, first)
     assert result.status == "rejected"
-    assert "instruction" not in updated.get_instruction(first.session_id)
+    assert "instruction" not in load_session(first.session_id).get_instruction(updated)
     assert "Incompatible" in load_session(first.session_id).show(updated)["message"]
     (config.workflows_dir / "toy" / "workflow.py").unlink()
     assert load_session(first.session_id).show()["state"]["total"] == 0
@@ -694,7 +853,7 @@ def test_single_final_node_and_dynamic_entry(config):
     write_workflow(config, source)
     workflow, first = started(config)
     assert load_session(first.session_id).status == "completed"
-    assert workflow.get_instruction(first.session_id)["node"] == "done"
+    assert load_session(first.session_id).get_instruction(workflow)["node"] == "done"
 
 
 def test_graph_cli_and_receipt_only_submission(config):
@@ -736,11 +895,29 @@ def test_instruction_renders_itself():
     assert Instruction("Only text").to_text() == "Only text"
 
 
-def test_base_models_reject_extras():
+def test_event_arguments_reject_extras():
     with pytest.raises(PydanticValidationError):
         EventArguments(extra=1)
-    with pytest.raises(PydanticValidationError):
-        State(node="x", extra=1)
+
+
+def test_state_preserves_extras_and_subclasses_can_reject_them():
+    from pydantic import ConfigDict
+
+    class Concrete(State):
+        count: int
+
+    state = Concrete(node="x", count=2, extra={"items": [1]})
+    snapshot = State.model_validate(state.model_dump(mode="json"))
+    assert snapshot.model_dump() == state.model_dump()
+    assert Concrete.model_validate(snapshot.model_dump()) == state
+    with pytest.raises(PydanticValidationError, match="count"):
+        Concrete(node="x", count="invalid")
+
+    class Strict(State):
+        model_config = ConfigDict(extra="forbid")
+
+    with pytest.raises(PydanticValidationError, match="extra"):
+        Strict(node="x", extra=1)
 
 
 def test_arguments_from_text_preserves_strings_and_decodes_structured_values():
@@ -869,9 +1046,9 @@ def test_markdown_defaults_types_description_and_graph(config):
         "gate": bool,
     }
     assert "required" not in model.model_json_schema()
-    result = workflow.run_start()
+    result = Session.run_start(workflow)
     assert result.status == "accepted"
-    response = workflow.get_instruction(result.session_id)
+    response = load_session(result.session_id).get_instruction(workflow)
     assert response["session_status"] == "completed"
     assert response["instruction"]["text"] == "World: 5, 0.5, true."
     assert "events" not in response["instruction"]
@@ -888,13 +1065,15 @@ def test_markdown_overrides_and_text_inputs(config):
     )
     workflow = load_workflow("markdown")
     args = workflow.graph.start.arguments.from_text({"count": "2", "enabled": "false"})
-    result = workflow.run_start(args.model_dump())
-    assert workflow.get_instruction(result.session_id)["instruction"]["context"] == {
+    result = Session.run_start(workflow, args.model_dump())
+    assert load_session(result.session_id).get_instruction(workflow)["instruction"][
+        "context"
+    ] == {
         "count": 2,
         "enabled": False,
     }
-    assert workflow.run_start({"extra": True}).status == "rejected"
-    assert workflow.run_start({"count": "invalid"}).status == "rejected"
+    assert Session.run_start(workflow, {"extra": True}).status == "rejected"
+    assert Session.run_start(workflow, {"count": "invalid"}).status == "rejected"
     assert len(list_sessions()) == 1
 
 
@@ -902,11 +1081,14 @@ def test_markdown_without_arguments_and_saved_snapshot(config):
     directory = write_markdown(config, body="Original prompt.")
     workflow = load_workflow("markdown")
     assert workflow.description is None
-    result = workflow.run_start()
-    before = workflow.get_instruction(result.session_id)
+    result = Session.run_start(workflow)
+    before = load_session(result.session_id).get_instruction(workflow)
     assert before["instruction"]["context"] == {}
     (directory / "workflow.md").write_text("---\nid: markdown\n---\nChanged prompt.")
-    assert load_workflow("markdown").get_instruction(result.session_id) == before
+    assert (
+        load_session(result.session_id).get_instruction(load_workflow("markdown"))
+        == before
+    )
 
 
 @pytest.mark.parametrize(
@@ -931,7 +1113,7 @@ def test_invalid_markdown_arguments_fail_when_loaded(config, arguments):
 
 def test_markdown_missing_placeholder_saves_nothing(config):
     write_markdown(config, body="{{missing}}")
-    result = load_workflow("markdown").run_start()
+    result = Session.run_start(load_workflow("markdown"))
     assert result.status == "error"
     assert "No value for placeholders" in result.message
     assert list_sessions() == []
