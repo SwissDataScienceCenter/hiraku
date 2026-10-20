@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 - **Breaking:** `hiraku init` no longer requires Git or a repository root; remove the obsolete `--ignore-git` flag. Add `--git` to initialize the code repository explicitly.
-- **Breaking:** `hiraku init --example NAME` now targets `./NAME`; pass `.` to initialize the current directory. Explicit paths always take precedence, and repeating plain `hiraku init` leaves an initialized project unchanged ([issue #104](https://github.com/SwissDataScienceCenter/hiraku/issues/104)).
+- **Breaking:** Replace `hiraku init --example NAME` with `hiraku clone NAME [PATH]`, which copies a bundled example into `./NAME` by default without Git history or network access. Move `--with-results`, `--with-generator`, and `--generate` to `clone`. `hiraku init [PATH]` targets the current or explicit directory, and repeating plain initialization leaves the project unchanged ([issue #104](https://github.com/SwissDataScienceCenter/hiraku/issues/104)).
 - **Breaking:** `hiraku runs` and `Record.runs()` now list only runs attributed to the selected record (the active record, or `--record ID`). Previously they returned every attributed run from the record's tracking source ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 
 ### Added

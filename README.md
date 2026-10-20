@@ -33,14 +33,17 @@ Initialize an example in any of these ways:
 
 | Command | Result |
 | --- | --- |
-| `hiraku init --example NAME` | Copy the runnable project files only |
-| `hiraku init --example NAME --with-results` | Also copy bundled records and measured runs |
-| `hiraku init --example NAME --with-generator` | Also copy `generate_results.py` for running later |
-| `hiraku init --example NAME --generate` | Generate fresh records and runs immediately |
+| `hiraku clone NAME` | Copy the runnable project files only |
+| `hiraku clone NAME --with-results` | Also copy bundled records and measured runs |
+| `hiraku clone NAME --with-generator` | Also copy `generate_results.py` for running later |
+| `hiraku clone NAME --generate` | Generate fresh records and runs immediately |
 
-Without an explicit path, `--example NAME` targets `./NAME`. Use
-`hiraku init . --example NAME` to initialize the current directory, or
-`hiraku init my-project --example NAME` to choose another destination.
+`hiraku init [PATH]` initializes the current or explicit directory, optionally
+using a local `--template`. `hiraku clone NAME [PATH]` creates a project from a
+bundled example, without Git history or network access. Its default destination
+is `./NAME`. Use
+`hiraku clone NAME .` to initialize the current directory, or
+`hiraku clone NAME my-project` to choose another destination.
 Initialization does not require Git. Add `--git` to initialize the code repository
 as a convenience. Repeating plain `hiraku init` leaves an initialized project
 unchanged; repeating it with `--git` can add the code repository later.
@@ -85,7 +88,7 @@ Try every dashboard mode without training by loading the bundled Digits runs:
 ```bash
 mkdir digits-dashboard && cd digits-dashboard
 git init
-hiraku init . --example digits-mlflow --with-results
+hiraku clone digits-mlflow . --with-results
 hiraku dashboard --record digits                 # read-only
 hiraku dashboard --include-code --record digits  # read-only, with source
 hiraku dashboard --init --edit --record digits   # copy and edit

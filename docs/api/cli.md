@@ -20,15 +20,16 @@ Initialization uses the following destinations, creating missing directories:
 | --- | --- |
 | `hiraku init` | Current directory |
 | `hiraku init my-project` | `./my-project` |
-| `hiraku init --example minimal` | `./minimal` |
-| `hiraku init my-project --example minimal` | `./my-project` |
-| `hiraku init . --example minimal` | Current directory |
+| `hiraku clone minimal` | `./minimal` |
+| `hiraku clone minimal my-project` | `./my-project` |
+| `hiraku clone minimal .` | Current directory |
 
 An explicit path always takes precedence. Plain initialization supports existing
 directories and preserves unrelated files. Repeating plain `hiraku init` reports
 that the project is already initialized and leaves every file unchanged; it does
-not reinstall missing resources. Initialization with an example, template, or
-configuration options still rejects an already initialized project.
+not reinstall missing resources. Cloning, or initialization with a template or
+configuration options, rejects an already initialized project. Both commands
+preserve unrelated files in existing destinations and refuse file collisions.
 
 `hiraku init` does not require or invoke Git, and works in nested directories as
 well as outside repositories. Add `--git` to initialize the code repository at the
@@ -60,11 +61,14 @@ Initialize from an arbitrary local project overlay with `--template`:
 hiraku init --template ./path/to/template
 ```
 
-Packaged examples use `--example NAME`. For example, start with the minimal
-local evaluation project using:
+Create a project from a bundled example with `hiraku clone EXAMPLE [PATH]`.
+The default destination is `./EXAMPLE`. This copies packaged files without
+Git history or network access; it does not accept repository URLs. Add `--git`
+to initialize the code repository. Example flags formerly on `init` now belong
+to `clone`; `init --example` has been removed. For example:
 
 ```bash
-hiraku init --example minimal
+hiraku clone minimal
 ```
 
 Each example copies only its bundled
@@ -72,7 +76,7 @@ Each example copies only its bundled
 overlay with sample records and tracked runs:
 
 ```bash
-hiraku init --example heart-disease --with-results
+hiraku clone heart-disease --with-results
 ```
 
 Results may override base files and configuration keys, but neither layer
@@ -93,7 +97,7 @@ resources/examples/<name>/
 └── results/             # optional overlay with --with-results
 ```
 
-The two options are mutually exclusive. Templates may replace files installed
+`init --template` and `clone` are separate commands. Templates may replace files installed
 by the same initialization, but initialization refuses to overwrite files that
 already existed in the target. Explicit options such as `--tracking-backend`
 take precedence over values from a template-provided `hiraku.yml`.

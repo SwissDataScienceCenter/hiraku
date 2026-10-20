@@ -30,7 +30,7 @@ def test_eurosat_rgb_example_initializes_without_downloading_data(
     git(project, "init", "-b", "main")
     runner = CliRunner()
 
-    invoke(runner, ["init", ".", "--example", "eurosat-rgb"])
+    invoke(runner, ["clone", "eurosat-rgb", "."])
 
     assert (project / "train.py").is_file()
     assert (project / "pyproject.toml").is_file()

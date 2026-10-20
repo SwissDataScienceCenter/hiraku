@@ -42,15 +42,17 @@ def source(tmp_path):
     return path
 
 
-def test_init_does_not_invoke_git(tmp_path, monkeypatch):
+@pytest.mark.parametrize("command", [["init", "minimal"], ["clone", "minimal"]])
+def test_project_creation_does_not_invoke_git(tmp_path, monkeypatch, command):
     def forbidden(*args, **kwargs):
         pytest.fail("Git must not be invoked during plain initialization")
 
     monkeypatch.setattr("hiraku.git.GitRepository._execute", forbidden)
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["init", "--example", "minimal"])
+    result = CliRunner().invoke(main, command)
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "minimal/evaluate.py").is_file()
+    assert (tmp_path / "minimal/hiraku.yml").is_file()
+    assert (tmp_path / "minimal/evaluate.py").is_file() == (command[0] == "clone")
     assert not (tmp_path / "minimal/.git").exists()
 
 

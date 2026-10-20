@@ -66,5 +66,5 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
 
 def test_results_flag_requires_example(tmp_path: Path):
     result = CliRunner().invoke(main, ["init", str(tmp_path), "--with-results"])
-    assert result.exit_code == 1
-    assert "requires a packaged example" in result.output
+    assert result.exit_code == 2
+    assert "No such option" in result.output
