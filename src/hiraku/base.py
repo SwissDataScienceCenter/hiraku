@@ -20,6 +20,7 @@ from pydantic import (
 
 from .errors import RecordExistsError, RecordNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml
+from .markdown import Markdown
 from .validation import validate_identifier
 
 _FRONT_MATTER = re.compile(
@@ -32,7 +33,8 @@ class BaseRecord(BaseModel):
 
     Attributes:
         id: Stable identifier used in the record path.
-        markdown: Free-form Markdown body.
+        markdown: Free-form Markdown body; a `Markdown` string, whose sections
+            can be selected by heading, e.g. ``record.markdown.section("## Change")``.
         path: Persistence path, populated after saving or loading.
 
     Example:
@@ -59,7 +61,7 @@ class BaseRecord(BaseModel):
     )
 
     id: str = Field(min_length=1)
-    markdown: str = ""
+    markdown: Markdown = Markdown("")
 
     # Persistence metadata (not part of the record's data)
     path: Path | None = Field(default=None, exclude=True)
