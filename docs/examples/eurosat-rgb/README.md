@@ -23,7 +23,7 @@ mkdir eurosat-rgb
 cd eurosat-rgb
 git init
 
-hiraku init --example eurosat-rgb
+hiraku init . --example eurosat-rgb
 uv sync
 
 git add .

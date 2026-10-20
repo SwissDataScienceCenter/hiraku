@@ -97,7 +97,14 @@ results or generate them, use one of these options:
 | `hiraku init --example NAME --with-generator` | Also copy `generate_results.py` for running later |
 | `hiraku init --example NAME --generate` | Generate fresh records and runs immediately |
 
-Prepared results and generators are available for the Heart Disease and Digits
+Without an explicit path, `--example NAME` targets `./NAME`. Use
+`hiraku init . --example NAME` to initialize the current directory, or
+`hiraku init my-project --example NAME` to choose another destination.
+The Git-root requirement still applies; add `--ignore-git` to create a new example
+directory without setting up Git first. Repeating plain `hiraku init` leaves an
+initialized project unchanged.
+
+The results and generator modes are available for the Heart Disease and Digits
 examples. `--generate` cannot be combined with `--with-results`; generation can
 take time and may install the example's dependencies.
 
@@ -124,7 +131,7 @@ Try every dashboard mode without training by loading the bundled Digits runs:
 ```bash
 mkdir digits-dashboard && cd digits-dashboard
 git init
-hiraku init --example digits-mlflow --with-results
+hiraku init . --example digits-mlflow --with-results
 hiraku dashboard --record digits                 # read-only
 hiraku dashboard --include-code --record digits  # read-only, with source
 hiraku dashboard --init --edit --record digits   # copy and edit

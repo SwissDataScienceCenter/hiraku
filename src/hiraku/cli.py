@@ -269,23 +269,41 @@ def init_command(
     generate: bool,
     ignore_git: bool,
 ) -> None:
-    """Initialize a project."""
+    """Initialize PATH (default: current directory, or NAME with --example NAME)."""
     if template is not None and example is not None:
         raise click.UsageError("--template and --example are mutually exclusive")
     if generate and (not example or results):
         raise click.UsageError(
             "--generate requires --example and cannot use --with-results"
         )
+    if example is not None:
+        validate_identifier(example, label="example name")
+    root = path
+    if root is None:
+        root = Path(example) if example is not None else Path.cwd()
+    marker = root.expanduser().absolute() / "hiraku.yml"
+    if marker.is_file() and not any(
+        (
+            tracking_backend is not None,
+            template is not None,
+            example is not None,
+            results,
+            with_generator,
+            generate,
+        )
+    ):
+        config = HirakuConfig.load(marker)
+        click.echo(f"Hiraku project already initialized at {config.path}")
+        return
     generator = None
     if generate:
-        validate_identifier(example, label="example name")
         generator = (
             files("hiraku.resources") / "examples" / example / "generate_results.py"
         )
         if not generator.is_file():
             raise click.UsageError(f"Example {example!r} has no generator")
     config = HirakuConfig.init(
-        path or Path.cwd(),
+        root,
         tracking_backend=tracking_backend,
         template=template,
         example=example,

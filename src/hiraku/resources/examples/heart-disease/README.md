@@ -10,7 +10,7 @@ Initialize in an empty Git repository (or add `--ignore-git` to initialize
 without Git):
 
 ```bash
-uv run hiraku init --example heart-disease --with-results
+uv run hiraku init . --example heart-disease --with-results
 ```
 
 The results overlay includes four records and nine runs in `runs.csv`.
@@ -31,7 +31,7 @@ Failed generation keeps the initialized project and any completed runs.
 For two steps, opt into copying the generator:
 
 ```bash
-hiraku init --example heart-disease --with-generator
+hiraku init . --example heart-disease --with-generator
 uv run --with hiraku python generate_results.py
 ```
 

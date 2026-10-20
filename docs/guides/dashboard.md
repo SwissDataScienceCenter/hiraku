@@ -281,7 +281,7 @@ uv tool install "hiraku[dashboard,mlflow]"
 mkdir digits-dashboard
 cd digits-dashboard
 git init
-hiraku init --example digits-mlflow --with-results
+hiraku init . --example digits-mlflow --with-results
 hiraku dashboard --record digits
 ```
 
