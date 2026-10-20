@@ -54,10 +54,22 @@ it with the project. `--init`
 refuses to overwrite an existing copy; delete `hiraku/dashboard/` to start
 over from the bundled version.
 
-The notebook imports data helpers from the installed `hiraku.dashboard`
-package. Branding and page layout live in `studio/dashboard/index.html` and
-its CSS and assets; edit those files to customize the presentation. Notebook
-cells handle data loading, selection, controls, and computed outputs.
+The notebook imports data helpers from `hiraku.dashboard.data` and reusable
+widgets and renderers from `hiraku.dashboard.components`. Components build the
+record/run table, run details, metric selectors, and metric-analysis output
+from the loaded tables; they do not query tracking backends. Notebook cells
+own data loading and shared selection, and read widget values explicitly so
+marimo can rerun dependent cells when a selection or metric changes.
+
+Imports live in `app.setup`. Named cells separate project discovery
+(`data_setup`), refresh-triggered loading (`project_data`), selection state,
+and rendering. The Studio view references the output cells by name; data and
+state cells do not need HTML hosts.
+
+Branding and page layout live in `studio/dashboard/index.html` and its CSS and
+assets; edit those files to customize the presentation. To customize a widget
+or plot, replace its component call in the notebook cell. Project copies pick
+up component fixes from the installed Hiraku package.
 
 Studio permits local CSS and JavaScript references in the HTML entry document;
 images must be inline. The bundled HTML embeds its logos as SVG data URLs.

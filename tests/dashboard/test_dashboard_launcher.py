@@ -61,10 +61,22 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         encoding="utf-8"
     )
     placed = set(re.findall(r'<marimo-cell name="([^"]+)">', view))
-    named = [cell.name for cell in app._cell_manager.cells() if cell.name != "_"]
+    named = {cell.name for cell in app._cell_manager.cells()}
 
     assert placed <= set(named)
-    assert placed == set(named)
+    assert placed == {
+        "project_name",
+        "refresh_control",
+        "run_table",
+        "run_details",
+        "metric_analysis",
+    }
+    assert {
+        "data_setup",
+        "project_data",
+        "selection_state",
+        "selected_context",
+    } <= named
 
 
 def test_init_dashboard_copies_the_notebook(project: HirakuConfig) -> None:
