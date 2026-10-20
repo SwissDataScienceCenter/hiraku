@@ -34,12 +34,12 @@ def start(runner: CliRunner, workflow: str, payload: dict[str, Any]) -> dict[str
 
 @pytest.fixture
 def runner(tmp_path: Path, monkeypatch) -> CliRunner:
-    project = tmp_path / "workflow-examples"
+    project = tmp_path / "workflows"
     project.mkdir()
     subprocess.run(["git", "init", "-b", "main"], cwd=project, check=True)
     monkeypatch.chdir(project)
     selected = CliRunner()
-    invoke(selected, ["init", "--example", "workflow-examples"])
+    invoke(selected, ["init", "--example", "workflows"])
     workflows = project / "hiraku" / "workflows"
     assert (workflows / "count-steps" / "workflow.py").is_file()
     assert (workflows / "greet" / "workflow.md").is_file()

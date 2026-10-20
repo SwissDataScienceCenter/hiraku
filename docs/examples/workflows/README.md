@@ -1,6 +1,6 @@
 # Workflow examples
 
-The `workflow-examples` example installs three small workflows next to the
+The `workflows` example installs three small workflows next to the
 bundled `collaborative` workflow. None does research work, so you can use them
 to try out a new harness, model, or MCP setup before running a real workflow,
 and as starting points for your own:
@@ -18,7 +18,7 @@ In a Git repository, install the example and restart your coding agent so it
 loads the `hiraku` MCP server:
 
 ```bash
-hiraku init --example workflow-examples
+hiraku init --example workflows
 ```
 
 ## Count steps
