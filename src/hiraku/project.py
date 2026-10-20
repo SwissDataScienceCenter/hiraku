@@ -125,16 +125,14 @@ class ProjectInitializer:
                 created_files.append(marker)
                 for directory in (
                     config.records_dir,
-                    config.programs_dir,
-                    config.actions_dir,
+                    config.workflows_dir,
                     config.contexts_dir,
                     config.dispatch_dir,
                 ):
                     cls._ensure_directory(directory, created_dirs)
                 resource_root = files("hiraku.resources")
                 copies = [
-                    (resource_root / "programs", config.programs_dir),
-                    (resource_root / "actions", config.actions_dir),
+                    (resource_root / "workflows", config.workflows_dir),
                     (resource_root / "dispatch", config.dispatch_dir),
                 ]
                 if install_skill:
@@ -265,18 +263,6 @@ class ProjectInitializer:
         codex_text += (
             f'{suffix}[mcp_servers.hiraku]\ncommand = "hiraku"\nargs = ["mcp"]\n'
         )
-        # Appending a table cannot extend every valid layout, such as an inline
-        # mcp_servers table, so check the result before replacing the file.
-        try:
-            merged = tomllib.loads(codex_text)["mcp_servers"]["hiraku"]
-        except (tomllib.TOMLDecodeError, KeyError, TypeError):
-            merged = None
-        if merged != {"command": "hiraku", "args": ["mcp"]}:
-            raise ValidationError(
-                f"Cannot add the hiraku MCP server to {codex_path}; add a "
-                '[mcp_servers.hiraku] table with command = "hiraku" and '
-                'args = ["mcp"] manually'
-            )
         atomic_write(codex_path, codex_text)
 
     @staticmethod

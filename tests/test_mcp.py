@@ -15,9 +15,9 @@ from mcp import ClientSession, StdioServerParameters  # noqa: E402
 from mcp.client.stdio import stdio_client  # noqa: E402
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E402
 
-from hiraku.agent import load_context  # noqa: E402
 from hiraku.cli import main  # noqa: E402
 from hiraku.config import HirakuConfig  # noqa: E402
+from hiraku.context import load_context  # noqa: E402
 from hiraku.mcp import create_server  # noqa: E402
 from hiraku.record import load_record  # noqa: E402
 
@@ -116,8 +116,6 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
         for uri in [
             "hiraku://records/demo",
             "hiraku://contexts/literature",
-            "hiraku://programs/interactive",
-            "hiraku://actions/record/propose",
         ]:
             assert list(await server.read_resource(uri))[0].content
         with pytest.raises(ResourceError, match="'missing' not found"):
@@ -244,7 +242,7 @@ def test_stdio_session(tmp_path: Path) -> None:
                 )
                 assert (
                     len((await client.list_resource_templates()).resource_templates)
-                    == 5
+                    == 6
                 )
                 assert (await client.list_prompts()).prompts[
                     0

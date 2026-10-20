@@ -17,19 +17,9 @@ import yaml
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-from .agent import (
-    Action,
-    Context,
-    Program,
-    list_actions,
-    list_contexts,
-    list_programs,
-    load_action,
-    load_context,
-    load_program,
-)
 from .base import BaseRecord
 from .config import HirakuConfig
+from .context import Context, list_contexts, load_context
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .git import GitRepository
 from .io import dump_yaml
@@ -615,116 +605,221 @@ def _install_generic(
         click.echo(f"Deleted {name} {identifier}")
 
 
-_install_generic("program", Program, load_program, list_programs, "programs_dir")
 _install_generic("context", Context, load_context, list_contexts, "contexts_dir")
 
 
-@main.group("action")
-def action_group() -> None:
-    """Manage agent actions."""
+@main.group("workflow")
+def workflow_group() -> None:
+    """List, start, and reply to project workflows."""
 
 
-@action_group.command("list")
-@click.option("--entity")
+@workflow_group.command("list")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def action_list(state: CLIContext, entity: str | None, json_output: bool) -> None:
-    records = list_actions(entity=entity, config=state.config)
-    _emit_json(records) if json_output else click.echo(
-        _table(("entity", "id"), [(r.entity, r.id) for r in records])
+def workflow_list(state: CLIContext, json_output: bool) -> None:
+    """List the project's workflows."""
+    from .workflows.workflow import list_workflows
+
+    workflows = list_workflows(config=state.config)
+    if json_output:
+        _emit_json(
+            [
+                {"id": workflow.id, "description": workflow.description}
+                for workflow in workflows
+            ]
+        )
+        return
+    click.echo(
+        _table(
+            ("id", "description"),
+            [
+                (workflow.id, (workflow.description or "").split("\n", 1)[0])
+                for workflow in workflows
+            ],
+        )
     )
 
 
-@action_group.command("show")
-@click.argument("reference")
+_ARGUMENTS_FILE = click.option(
+    "--arguments-file",
+    type=click.File("r", encoding="utf-8"),
+    help="JSON object with the arguments; use - for standard input.",
+)
+
+
+def _arguments(arguments_file: Any) -> dict[str, Any]:
+    if arguments_file is None:
+        return {}
+    try:
+        arguments = json.load(arguments_file)
+    except ValueError as exc:
+        raise ValidationError(f"Cannot read arguments: {exc}") from exc
+    if not isinstance(arguments, dict):
+        raise ValidationError("Arguments must be a JSON object")
+    return arguments
+
+
+@workflow_group.command("start")
+@click.argument("workflow_id")
+@_ARGUMENTS_FILE
+@click.pass_obj
+def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> None:
+    """Start a workflow session and print the JSON response."""
+    from .workflows.workflow import load_workflow
+
+    workflow = load_workflow(workflow_id, config=state.config)
+    result = workflow.run_start(_arguments(arguments_file))
+    response = result.model_dump(exclude_none=True)
+    if result.status == "accepted":
+        response.update(workflow.get_instruction(result.session_id))
+    _emit_json(response)
+
+
+@workflow_group.command("send-event")
+@click.argument("session_id")
+@click.argument("event")
+@click.option(
+    "--instruction-id",
+    type=int,
+    required=True,
+    help="ID of the current instruction the event answers.",
+)
+@_ARGUMENTS_FILE
+@click.pass_obj
+def workflow_send_event(
+    state: CLIContext,
+    session_id: str,
+    event: str,
+    instruction_id: int,
+    arguments_file: Any,
+) -> None:
+    """Send EVENT to a session's current instruction and print the response."""
+    from .workflows.session import load_session
+    from .workflows.workflow import load_workflow
+
+    session = load_session(session_id, config=state.config)
+    workflow = load_workflow(session.workflow, config=state.config)
+    _emit_json(
+        workflow.run_event(
+            session_id,
+            instruction_id,
+            event,
+            _arguments(arguments_file),
+        ).model_dump(exclude_none=True)
+    )
+
+
+@workflow_group.command("graph")
+@click.argument("workflow_id")
+@click.option(
+    "--session",
+    "session_id",
+    default=None,
+    help="Highlight the current state of this session.",
+)
+@click.pass_obj
+def workflow_graph_command(
+    state: CLIContext, workflow_id: str, session_id: str | None
+) -> None:
+    """Print a workflow's states and events as a Mermaid state diagram."""
+    from .workflows.session import load_session
+    from .workflows.workflow import load_workflow
+
+    workflow = load_workflow(workflow_id, config=state.config)
+    current = None
+    if session_id is not None:
+        session = load_session(session_id, config=state.config)
+        if session.workflow != workflow_id:
+            raise ValidationError(
+                f"Session {session_id!r} belongs to workflow {session.workflow!r}"
+            )
+        current = session.phase
+    click.echo(workflow.graph.to_mermaid(current=current), nl=False)
+
+
+@main.group("session")
+def session_group() -> None:
+    """Inspect and cancel workflow sessions."""
+
+
+@session_group.command("list")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def action_show(state: CLIContext, reference: str, json_output: bool) -> None:
-    record = _action_ref(reference, state.config)
-    _emit_json(record) if json_output else click.echo(
-        f"---\n{dump_yaml(record.to_dict())}---\n{record.markdown}", nl=False
+def session_list(state: CLIContext, json_output: bool) -> None:
+    """List workflow sessions, newest first."""
+    from .workflows.session import list_sessions
+
+    sessions = [
+        {
+            "session_id": s.id,
+            "workflow": s.workflow,
+            "status": s.status,
+            "phase": s.phase,
+            "updated_at": s.updated_at.isoformat(),
+        }
+        for s in list_sessions(config=state.config)
+    ]
+    if json_output:
+        _emit_json(sessions)
+        return
+    click.echo(
+        _table(
+            ("session", "workflow", "status", "updated"),
+            [
+                (
+                    item["session_id"],
+                    item.get("workflow"),
+                    item.get("status", f"ERROR: {item.get('error')}"),
+                    item.get("updated_at"),
+                )
+                for item in sessions
+            ],
+        )
     )
 
 
-def _action_ref(reference: str, config: HirakuConfig) -> Action:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    return load_action(identifier, entity=entity, config=config)
-
-
-@action_group.command("create")
-@click.argument("reference")
-@click.option("--set", "set_values", multiple=True)
-@click.option("--markdown-file", type=click.Path(path_type=Path))
+@session_group.command("show")
+@click.argument("session_id")
+@click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def action_create(
-    state: CLIContext,
-    reference: str,
-    set_values: tuple[str, ...],
-    markdown_file: Path | None,
-) -> None:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    validate_identifier(entity, label="action entity")
-    validate_identifier(identifier, label="action ID")
-    record = Action(
-        id=identifier,
-        entity=entity,
-        markdown=_markdown(markdown_file),
-        **_fields(set_values),
-    )
-    path = state.config.actions_dir / entity / identifier / "action.md"
-    record.save(path)
-    click.echo(f"Created action {reference} at {path}")
+def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
+    """Show a session's status, pending instruction or result, and data."""
+    from .workflows.session import load_session
+    from .workflows.workflow import load_workflow
+
+    session = load_session(session_id, config=state.config)
+    try:
+        workflow = load_workflow(session.workflow, config=state.config)
+    except HirakuError:
+        workflow = None
+    result = session.show(workflow)
+    if json_output:
+        _emit_json(result)
+        return
+    click.echo(f"Session:  {result['session_id']}")
+    click.echo(f"Workflow: {result['workflow']}")
+    click.echo(f"Status:   {result['status']}")
+    click.echo(f"State:    {result['state']}")
+    for key in ("note", "compatibility"):
+        if key in result:
+            click.echo(f"Note:     {result[key]}")
+    if "message" in result:
+        click.echo(result["message"])
+    if "instruction" in result:
+        from .workflows import Instruction
+
+        click.echo(Instruction.model_validate(result["instruction"]).to_text())
 
 
-@action_group.command("update")
-@click.argument("reference")
-@click.option("--set", "set_values", multiple=True)
-@click.option("--unset", "unset_values", multiple=True)
-@click.option("--markdown-file", type=click.Path(path_type=Path))
+@session_group.command("cancel")
+@click.argument("session_id")
 @click.pass_obj
-def action_update(
-    state: CLIContext,
-    reference: str,
-    set_values: tuple[str, ...],
-    unset_values: tuple[str, ...],
-    markdown_file: Path | None,
-) -> None:
-    _update_fields(
-        _action_ref(reference, state.config),
-        set_values,
-        unset_values,
-        markdown_file,
-        immutable={"id", "entity"},
-    )
-    click.echo(f"Updated action {reference}")
+def session_cancel(state: CLIContext, session_id: str) -> None:
+    """Cancel a session; records, code, and runs are kept."""
+    from .workflows.session import load_session
 
-
-@action_group.command("edit")
-@click.argument("reference")
-@click.pass_obj
-def action_edit(state: CLIContext, reference: str) -> None:
-    if reference.count("/") != 1:
-        raise ValidationError("ACTION must have the form entity/action-id")
-    entity, identifier = reference.split("/", 1)
-    path = state.config.actions_dir / entity / identifier / "action.md"
-    _edit_recoverable(
-        path,
-        lambda: _action_ref(reference, state.config),
-        f"Action {reference!r}",
-    )
-    click.echo(f"Validated action {reference}")
-
-
-@action_group.command("delete")
-@click.argument("reference")
-@click.pass_obj
-def action_delete(state: CLIContext, reference: str) -> None:
-    _action_ref(reference, state.config).delete()
-    click.echo(f"Deleted action {reference}")
+    result = load_session(session_id, config=state.config).cancel()
+    click.echo(f"Session {session_id} is {result['status']}. {result['note']}")
 
 
 @main.command("launch")

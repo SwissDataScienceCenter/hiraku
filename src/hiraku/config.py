@@ -21,7 +21,6 @@ class HirakuConfig(BaseModel):
         hiraku_dir_name: Relative state directory name.
         default_dispatch: Default launcher script.
         branch: Record branch template.
-        default_program: Default program identifier.
         tracking_backend: Backend configuration mapping with a required ``type``.
 
     Raises:
@@ -36,7 +35,6 @@ class HirakuConfig(BaseModel):
         "hiraku_dir": "hiraku",
         "default_dispatch": "launch.sh",
         "branch": "hiraku/records/{record_id}",
-        "default_program": "interactive",
         "tracking_backend": {"type": "csv"},
         "active_record_id": None,
     }
@@ -51,7 +49,6 @@ class HirakuConfig(BaseModel):
     )
     default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
     branch: str = Field(default=DEFAULTS["branch"], min_length=1)
-    default_program: str = Field(default=DEFAULTS["default_program"], min_length=1)
     tracking_backend: dict[str, Any] = Field(
         default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
     )
@@ -65,6 +62,13 @@ class HirakuConfig(BaseModel):
         if not isinstance(values, Mapping):
             return values
         raw = dict(values)
+        if "default_program" in raw:
+            raise ValidationError(
+                "Configuration key 'default_program' is no longer supported: "
+                "programs were replaced by workflows. Remove the key from "
+                "hiraku.yml and start a workflow explicitly through its MCP "
+                "tool or prompt, or 'hiraku workflow start'."
+            )
         backend = raw.get("tracking_backend")
         if isinstance(backend, str):
             raw["tracking_backend"] = {"type": backend}
@@ -232,14 +236,14 @@ class HirakuConfig(BaseModel):
         return self.hiraku_dir / "records"
 
     @property
-    def programs_dir(self) -> Path:
-        """Return the directory containing agent program records."""
-        return self.hiraku_dir / "programs"
+    def workflows_dir(self) -> Path:
+        """Return the directory containing project workflows."""
+        return self.hiraku_dir / "workflows"
 
     @property
-    def actions_dir(self) -> Path:
-        """Return the directory containing agent action records."""
-        return self.hiraku_dir / "actions"
+    def sessions_dir(self) -> Path:
+        """Return the directory containing persisted workflow sessions."""
+        return self.hiraku_dir / "sessions"
 
     @property
     def contexts_dir(self) -> Path:

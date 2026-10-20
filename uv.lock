@@ -1257,6 +1257,8 @@ version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
+    { name = "filelock" },
+    { name = "markdown-it-py" },
     { name = "mcp" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -1291,6 +1293,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
+    { name = "filelock", specifier = ">=3.16" },
+    { name = "markdown-it-py", specifier = ">=4.0" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "mlflow", marker = "extra == 'mlflow'", specifier = "==3.16.0" },
     { name = "pydantic", specifier = ">=2.13.5" },

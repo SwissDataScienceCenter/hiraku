@@ -8,20 +8,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Replace workflow authoring with typed `Arguments` and `State` models, `@phase` instructions, and `@event` transitions registered into an immutable `Workflow.graph`. Import the public API from `hiraku.workflows`.
+- Workflow descriptions come from the optional `description` field, which defaults to `None`; class docstrings are not used as descriptions.
+- Use `load_workflow(id, config=...)` for one workflow and `list_workflows(config=...)` for a list of loaded `Workflow` objects. Directory discovery and importing are internal; CLI and MCP format their own listings.
+- Remove `Instruction.requires_user_response` and its protocol flag. Approval is expressed in workflow text; the interactive agent driver pauses when the agent exits without an event.
+- Workflow instances bind to a project's configuration file; `Workflow.config` reloads it on access. Execution methods no longer accept configuration. Access prompt text through the inherited `markdown` field.
 - **Breaking:** `hiraku runs` and `Record.runs()` now list only runs attributed to the selected record (the active record, or `--record ID`). Previously they returned every attributed run from the record's tracking source ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
+- **Breaking:** Rename the `hiraku.agent` module to `hiraku.context`; import `Context`, `load_context`, and `list_contexts` from `hiraku.context`.
 
 ### Added
 
 - Add the local stdio MCP server (`hiraku mcp`) with record and context CRUD, attributed launches, run queries, curated source resources, and an evidence-based proposal prompt; `hiraku init` registers it for Claude Code and Codex ([issue #80](https://github.com/SwissDataScienceCenter/hiraku/issues/80)).
+- Add Python workflows: project-defined `hiraku/workflows/<id>/{workflow.py,workflow.md}` that guide a coding agent step by step, with persistent sessions under `hiraku/sessions/`, explicit events per instruction, retry-safe continuation, inspection, and cancellation. Each workflow is an MCP tool and an MCP prompt named after it; events go through the `workflow_send_event` tool, whose arguments each instruction describes. See the Workflows guide.
+- Add workflow and session tools, workflow prompts, and workflow and session resources to the MCP server, with `hiraku.mcp.add_workflow_tools()`. They are fixed when the server starts.
+- `Workflow` adds optional Markdown `description` and a class-level graph to `BaseRecord`. Start and ordinary events return the complete next state, including its phase; declared destinations validate transitions and generate diagrams. Phase methods return stored `Instruction` snapshots. `Instruction.to_text()` renders them for agents.
+- `hiraku workflow graph ID [--session ID]`, `workflow.graph.to_mermaid()`, and the MCP graph resource draw the declared phase/event graph.
+- Record bodies are `hiraku.markdown.Markdown` strings that select a section by its heading line, e.g. `record.markdown.section("## Change")`, including its subsections. Headings are found with a CommonMark parser (the new `markdown-it-py` dependency), so headings in code blocks, lists, and block quotes do not start sections. Workflows select their prompts the same way, `self.markdown.section("## Step")`.
+- Every workflow requires `workflow.py` and `workflow.md`. Explicit argument models define tool/prompt inputs. Single-instruction workflows use one final phase; Markdown placeholder rendering remains explicit.
+- Add the bundled `collaborative` workflow: draft, implement, launch, and analyze experiments step by step; the agent does each step, sends a revision event with the user's feedback to redo it, and gets the user's approval in the conversation before reporting it, and Hiraku records and checks it. The `implemented` event takes only the implementation commit. The autoresearch example ships the single-instruction `autoresearch`, which restores its previous program.
+- `Workflow.run_start()` and `run_event()` return typed `EventResult` outcomes without instructions. `get_instruction()` reads the saved assignment. Conversational MCP attaches the next instruction; CLI event submission prints only the outcome. Use module-level `load_session` and `list_sessions`. Sessions use a new versioned format without migration.
+- Add the `workflow-examples` example (`hiraku init --example workflow-examples`) with three workflows: `count-steps`, numbered steps with random tokens the agent must echo back, where the user starts each next step (`step`), to check that a coding harness follows workflow instructions and stops for the user; `greet`, a prompt-only workflow whose arguments fill placeholders; and `scheduler`, which creates experiment records with random priorities and lets the agent raise their counts, highest priority first, until each reaches a target.
+- Add `hiraku workflow list|start|send-event|graph` and `hiraku session list|show|cancel`.
+- Add `hiraku-agent`, whose workers submit over an assignment-scoped MCP connection and receive only event results. The parent retrieves the next assignment. Custom workers consume `HIRAKU_MCP_CONFIG`; event-file submission is removed. Worker failures propagate, including final-instruction failures. It runs workflow sessions from the terminal: `hiraku-agent WORKFLOW` starts or resumes a session and hands each instruction to a headless coding agent (`claude -p` by default), continuing after each accepted event until completion or a pause; `hiraku-agent WORKFLOW EVENT` sends an event as the user, and `--interactive` runs the agent in a conversation instead. The new `hiraku.agent` module implements it; contexts moved to `hiraku.context`.
 - Add `Record.resolve_tracking_backend()` to build the tracking backend inherited by a record; `TrackingBackend.list_runs()` now lists all attributed runs when `record_id` is omitted.
 - Add `hiraku runs --all` to list all attributed runs from the tracking source resolved for a record ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 
 ### Fixed
 
-- Fix `hiraku record list`, `context list`, `program list`, `action list` (and other table output) crashing when there are no rows ([issue #96](https://github.com/SwissDataScienceCenter/hiraku/issues/96)).
+- Fix `hiraku record list`, `context list` (and other table output) crashing when there are no rows ([issue #96](https://github.com/SwissDataScienceCenter/hiraku/issues/96)).
 
 ### Removed
 
+- **Breaking:** Remove Programs and Actions, including `hiraku program`, `hiraku action`, `hiraku.agent.Program`, `hiraku.agent.Action`, and their bundled resources; use workflows instead. Contexts are unchanged. Move an existing Markdown program to `hiraku/workflows/<id>/workflow.md`, keep its `id` front matter, and add a `workflow.py` sidecar declaring `start` and a final state that returns the prompt.
+- **Breaking:** Remove the `default_program` configuration key; `hiraku.yml` files that still contain it are rejected with a migration message. Start workflows explicitly through their MCP tool or prompt.
 - **Breaking:** Remove the `hiraku runs list` subcommand; use `hiraku runs` ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 - **Breaking:** Remove `TrackingBackend.list_all_recorded_runs()` and the `backend` argument of `Record.runs()`; use `record.resolve_tracking_backend().list_runs()`. Replace `select_backend` with `Record.resolve_tracking_backend()` and rename `backend_for` to `create_backend`.
 - **Breaking:** Remove the undocumented `mlflow_experiment` record field fallback; set `experiment_name` in the MLflow `tracking_backend` mapping instead.
