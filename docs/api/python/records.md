@@ -6,6 +6,11 @@
 
 `BaseRecord` provides generic Markdown/YAML persistence. Contexts extend it.
 
+Use `record.save_markdown(body)` to save a replacement body while preserving
+metadata. It returns a saved copy of the same subtype and leaves the supplied
+object unchanged. The record must already have a path; changes on disk since
+loading are rejected. This check does not lock the file against concurrent writers.
+
 ## `Record`
 
 ::: hiraku.record.Record

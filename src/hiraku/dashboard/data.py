@@ -1,10 +1,10 @@
 """Data for the dashboard: two tables and the views built from them.
 
 ``load`` reads the records and the runs of their tracking backends. ``run_rows``
-and ``record_rows`` flatten them into ``runs_df`` and ``records_df``, and every
-view on the page (run tree, run details, metric choice, plot) is computed from
-those two tables only. Nothing here imports marimo, so it can be tested without
-a notebook runtime.
+and ``record_rows`` flatten them into ``runs_df`` and ``records_df`` for the
+run tree, run details, metric choice, and plots. Markdown details use the same
+loaded records to retain their complete front matter. Nothing here imports
+marimo, so it can be tested without a notebook runtime.
 """
 
 from __future__ import annotations
@@ -280,6 +280,25 @@ def find_run(runs_df: pd.DataFrame, run_id: str) -> dict[str, Any] | None:
     return next(iter(_records(runs_df[runs_df["run"] == run_id])), None)
 
 
+def selection_scope(
+    key: str | None,
+    current_scope: str | None,
+    paths: Mapping[str, str],
+    runs_df: pd.DataFrame,
+) -> str | None:
+    """Resolve the comparison subtree after a record or run selection."""
+    kind, _, identifier = (key or "").partition(":")
+    if kind == "record" and identifier in paths:
+        return identifier
+    selected_run = find_run(runs_df, identifier) if kind == "run" else None
+    if selected_run is not None and (
+        current_scope not in paths
+        or not within(selected_run["record_path"], paths[current_scope])
+    ):
+        return selected_run["record"]
+    return current_scope
+
+
 def run_text(run: Mapping[str, Any]) -> str:
     """Render a ``runs_df`` row's provenance, parameters, and metrics as YAML."""
 
@@ -324,6 +343,50 @@ def plot_frame(runs_df: pd.DataFrame, metric: str | None) -> tuple[pd.DataFrame,
     )
     plotted = frame.dropna(subset=["value"]).reset_index(drop=True)
     return plotted, len(frame) - len(plotted)
+
+
+def tradeoff_frame(
+    runs_df: pd.DataFrame,
+    x_metric: str,
+    y_metric: str,
+    x_objective: str,
+    y_objective: str,
+) -> tuple[pd.DataFrame, int]:
+    """Return comparable runs with a trade-off highlight and excluded count."""
+    x_values = pd.to_numeric(runs_df[f"metric.{x_metric}"], errors="coerce")
+    y_values = pd.to_numeric(runs_df[f"metric.{y_metric}"], errors="coerce")
+    valid = (
+        x_values.notna()
+        & y_values.notna()
+        & x_values.map(math.isfinite)
+        & y_values.map(math.isfinite)
+    )
+    points = pd.DataFrame(
+        {
+            "run": runs_df.loc[valid, "run"].astype(str).to_numpy(),
+            "record": runs_df.loc[valid, "record"].astype(str).to_numpy(),
+            "x": x_values.loc[valid].to_numpy(),
+            "y": y_values.loc[valid].to_numpy(),
+        }
+    ).reset_index(drop=True)
+    if points.empty:
+        points["non_dominated"] = pd.Series(dtype=bool)
+        return points, len(runs_df)
+
+    x_score = points["x"] * (1 if x_objective == "minimize" else -1)
+    y_score = points["y"] * (1 if y_objective == "minimize" else -1)
+    ordered = points.assign(_x_score=x_score, _y_score=y_score)
+    non_dominated_indices: list[int] = []
+    best_y = math.inf
+    for _, group in ordered.groupby("_x_score", sort=True):
+        group_best_y = group["_y_score"].min()
+        if group_best_y <= best_y:
+            non_dominated_indices.extend(
+                group.index[group["_y_score"] == group_best_y].tolist()
+            )
+            best_y = min(best_y, group_best_y)
+    points["non_dominated"] = points.index.isin(non_dominated_indices)
+    return points, len(runs_df) - len(points)
 
 
 def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:

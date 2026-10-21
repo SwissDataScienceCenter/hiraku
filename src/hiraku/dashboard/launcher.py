@@ -14,9 +14,10 @@ from ..config import HirakuConfig
 from ..errors import ValidationError
 from ..record import load_record
 
-DEFAULT_PORT = 8765
 DEFAULT_HOST = "127.0.0.1"
 BUNDLED_NOTEBOOK = Path(__file__).with_name("app.py")
+# marimo-studio serves the notebook through the view in this folder.
+BUNDLED_VIEWS = Path(__file__).with_name("studio")
 
 
 def project_notebook(config: HirakuConfig) -> Path:
@@ -34,29 +35,41 @@ def init_dashboard(config: HirakuConfig) -> Path:
     if notebook.parent.exists():
         raise ValidationError(f"Dashboard already exists: {notebook.parent}")
     notebook.parent.mkdir(parents=True)
-    shutil.copy2(BUNDLED_NOTEBOOK, notebook)
-    # marimo keeps session caches in __marimo__/ beside the notebook.
-    (notebook.parent / ".gitignore").write_text("__marimo__/\n", encoding="utf-8")
+    _copy_bundled(notebook.parent)
+    # marimo keeps session caches in __marimo__/ beside the notebook, and
+    # marimo-studio keeps build state and locks beside its views.
+    (notebook.parent / ".gitignore").write_text(
+        "__marimo__/\nstudio/.locks/\nstudio/*/.artifacts/\n", encoding="utf-8"
+    )
     return notebook
+
+
+def _copy_bundled(directory: Path) -> Path:
+    """Copy the bundled notebook and its Studio views into ``directory``."""
+    shutil.copytree(BUNDLED_VIEWS, directory / BUNDLED_VIEWS.name)
+    return Path(shutil.copy2(BUNDLED_NOTEBOOK, directory))
 
 
 def build_command(
     python: str,
     notebook: Path,
     *,
-    port: int = DEFAULT_PORT,
+    port: int | None = None,
     no_browser: bool = False,
     edit: bool = False,
     include_code: bool = False,
 ) -> list[str]:
     """Return the marimo command serving ``notebook`` on localhost.
 
-    The read-only app runs without a token; the editor executes arbitrary code,
+    The app runs without a token; the notebook editor executes arbitrary code,
     so it keeps marimo's access token. ``include_code`` only affects the app,
-    since the editor always shows the code.
+    since the editor always shows the code. Without ``port``, marimo selects
+    a free port automatically.
     """
     command = [python, "-m", "marimo", "edit" if edit else "run"]
-    command.extend(["--host", DEFAULT_HOST, "--port", str(port)])
+    command.extend(["--host", DEFAULT_HOST])
+    if port is not None:
+        command.extend(["--port", str(port)])
     if edit:
         command.append("--watch")
     else:
@@ -73,7 +86,7 @@ def serve_dashboard(
     config: HirakuConfig,
     *,
     record_id: str | None = None,
-    port: int = DEFAULT_PORT,
+    port: int | None = None,
     no_browser: bool = False,
     edit: bool = False,
     include_code: bool = False,
@@ -97,7 +110,7 @@ def serve_dashboard(
         )
     if record_id is not None:
         load_record(record_id, config=config)
-    if any(find_spec(name) is None for name in ("marimo", "altair")):
+    if any(find_spec(name) is None for name in ("marimo", "marimo_studio", "altair")):
         raise ValidationError(
             "The dashboard requires the optional 'dashboard' dependencies. "
             'Install them with: uv sync --extra dashboard (or "hiraku[dashboard]")'
@@ -124,7 +137,7 @@ def serve_dashboard(
     # marimo writes session caches beside the notebook and in its working
     # directory, so run a copy from a scratch directory outside the project.
     with tempfile.TemporaryDirectory(prefix="hiraku-dashboard-") as directory:
-        return serve(Path(shutil.copy2(BUNDLED_NOTEBOOK, directory)))
+        return serve(_copy_bundled(Path(directory)))
 
 
 def _wait(process: subprocess.Popen[bytes]) -> int:
