@@ -81,6 +81,7 @@ The repository is a single `uv`-managed Python project.
 | --- | --- |
 | `src/hiraku/` | Installed Python package |
 | `src/hiraku/base.py` | Generic Markdown record serialization and validation |
+| `src/hiraku/markdown.py` | Markdown section parsing for record bodies |
 | `src/hiraku/record.py` | Research records, entrypoints, and metrics |
 | `src/hiraku/run.py` | Normalized tracked runs |
 | `src/hiraku/config.py` | Project discovery, configuration, and active context |
@@ -88,8 +89,13 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/launch.py` | Entrypoint argument rendering and dispatch execution |
 | `src/hiraku/tracking/` | Tracking backend adapters and run normalization |
 | `src/hiraku/git.py` | Git branches, commits, and temporary worktrees |
-| `src/hiraku/agent.py` | Programs, actions, and agent-facing resources |
-| `src/hiraku/resources/` | Bundled programs, actions, dispatchers, skills, and examples |
+| `src/hiraku/context.py` | Curated context records |
+| `src/hiraku/workflows/workflow.py` | Workflow definitions, loading, and execution |
+| `src/hiraku/workflows/session.py` | Stored workflow state, data, and event correlation |
+| `src/hiraku/workflows/graph.py` | Graph construction, validation, and Mermaid diagrams |
+| `src/hiraku/workflows/markdown.py` | Markdown-only workflow definitions and YAML argument inference |
+| `src/hiraku/mcp.py` | Stdio MCP server (`MCPServer`); `add_workflow_tools` adds the workflow and session tools, prompts, and resources |
+| `src/hiraku/resources/` | Bundled workflows, dispatchers, skills, and examples |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
 | `docs/` | Documentation sources |
 | `scripts/` | Development and release utilities |
@@ -112,6 +118,18 @@ Generated or transient paths:
   specific behavior inside `src/hiraku/tracking/`.
 - Launches go through the configured dispatcher and must preserve attribution
   such as record, entrypoint, and commit metadata.
+- Workflow code is transport independent, with dependencies running
+  Session -> Workflow -> Graph. Graph owns declarations and transition rules;
+  Workflow executes handlers and builds instructions; Session owns locking,
+  correlation, history, and persistence. Keep these dependency boundaries,
+  including imports under `TYPE_CHECKING`.
+- Session loading, inspection, and cancellation must work without workflow code.
+  Execute events with detached state and validate outputs before saving; reads
+  return stored instructions without rerunning handlers.
+- Import workflow APIs from their defining modules; keep `workflows/__init__.py`
+  free of re-exports and eager imports. Keep MCP SDK imports in `mcp.py`.
+- See [the workflow guide](docs/guides/workflows.md) for authoring and execution
+  contracts.
 - Bundled resources under `src/hiraku/resources/` are installed by
   `hiraku init`; changes to them may affect newly initialized projects and
   should include appropriate example or integration coverage.
