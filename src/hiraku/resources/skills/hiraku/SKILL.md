@@ -340,7 +340,9 @@ Ignored data and environments are not copied; configure their paths through
 the dispatcher.
 
 The CSV backend queries project-root `runs.csv`. Log `job_id` in CSV and
-`hiraku.job_id` in MLflow tags or W&B configuration alongside record and commit.
+`hiraku.job_id` in MLflow tags. For W&B jobs launched through `hiraku run`,
+Hiraku sets `WANDB_RUN_ID` to the job ID and resolves record and commit from
+the saved job receipt; no Hiraku-specific W&B config fields are needed.
 Tracking code and adapters must use the same destination. Jobs do not create
 tracking runs automatically. Curves and artifacts remain with the tracker.
 

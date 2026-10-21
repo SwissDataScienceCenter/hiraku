@@ -86,11 +86,12 @@ hiraku job wait "$job_id"
 hiraku runs --record iris --all --sort test/accuracy
 ```
 
-Each run stores Hiraku provenance, model and dataset configuration, seed,
-Python version, runtime, tags, group, notes, and summary metrics. The training
-script creates the remote W&B project on its first successful `wandb.init()`
-call. Hiraku itself queries and normalizes W&B runs; it does not create the
-W&B project or run.
+Each run stores model and dataset configuration, seed, Python version, runtime,
+tags, group, notes, and summary metrics. When started with `hiraku run`, W&B's
+native run ID is the Hiraku job ID; Hiraku reads record and commit provenance
+from the saved job receipt. The training script creates the remote W&B project
+on its first successful `wandb.init()` call. Hiraku queries and normalizes W&B
+runs; it does not create the W&B project or run.
 
 ??? info "Example run results"
     These results are from the example's W&B runs. Click a column heading to

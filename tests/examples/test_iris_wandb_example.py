@@ -25,7 +25,7 @@ STORE = Path(os.environ["FAKE_WANDB_STORE"])
 
 class _Run:
     def __init__(self, options):
-        self.id = "fake-run-1"
+        self.id = options["id"]
         self.config = options["config"]
         self.summary = {}
         self.tags = options.get("tags", [])
@@ -33,7 +33,7 @@ class _Run:
         self.url = "https://wandb.test/run/fake-run-1"
         self.state = "finished"
         self.entity = options.get("entity")
-        self.project = options["project"]
+        self.project = options.get("project") or os.environ.get("WANDB_PROJECT")
         self.notes = options.get("notes")
         self.metadata = {"python": "test"}
 
@@ -41,6 +41,9 @@ class _Run:
 class _Handle:
     def __init__(self, options):
         self.options = options
+        self.options["project"] = options.get("project") or os.environ.get(
+            "WANDB_PROJECT"
+        )
         self.summary = {}
 
     def log(self, metrics):
@@ -57,6 +60,7 @@ _active = None
 
 def init(**options):
     global _active
+    options["id"] = os.environ.get("WANDB_RUN_ID", "fake-run-1")
     _active = _Handle(options)
     return _active
 
@@ -179,7 +183,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     row = rows[0]
     assert row["record_id"] == "logistic"
     assert row["commit"] == source_commit
-    assert row["job_id"]
+    assert row["job_id"] == job_id
     assert row["params"]["model"] == "logistic"
     assert row["params"]["seed"] == 42
     assert row["params"]["test_size"] == 0.25
@@ -189,6 +193,10 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     assert row["params"]["python.version"]
     assert row["metrics"]["test/accuracy"] == pytest.approx(0.9473684210526316)
     assert row["raw"]["tags"] == ["hiraku", "iris", "logistic"]
+    stored = json.loads(store.read_text(encoding="utf-8"))[0]
+    assert stored["id"] == job_id
+    assert stored["project"] == "hiraku-iris"
+    assert not any(key.startswith("hiraku.") for key in stored["config"])
 
     filtered = json.loads(
         invoke(

@@ -14,20 +14,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, log_loss
 from sklearn.model_selection import train_test_split
 
-HIRAKU_VARIABLES = (
-    "HIRAKU_RECORD_ID",
-    "HIRAKU_COMMIT",
-    "HIRAKU_JOB_ID",
-)
-
-
-def provenance() -> dict[str, str]:
-    """Read the provenance injected by ``hiraku run``."""
-    missing = [name for name in HIRAKU_VARIABLES if name not in os.environ]
-    if missing:
-        raise RuntimeError(f"Missing Hiraku provenance variables: {', '.join(missing)}")
-    return {name: os.environ[name] for name in HIRAKU_VARIABLES}
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -41,8 +27,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    attribution = provenance()
-    project = os.environ.get("WANDB_PROJECT", "hiraku-iris")
     entity = os.environ.get("WANDB_ENTITY") or None
     group = os.environ.get("WANDB_GROUP", f"iris-{args.model}")
     tags = ["hiraku", "iris", args.model]
@@ -51,7 +35,6 @@ def main() -> None:
 
     run = wandb.init(
         entity=entity,
-        project=project,
         name=os.environ.get("WANDB_RUN_NAME"),
         group=group,
         job_type=os.environ.get("WANDB_JOB_TYPE", "train"),
@@ -60,9 +43,6 @@ def main() -> None:
             "WANDB_NOTES", "Deterministic Iris classification experiment"
         ),
         config={
-            "hiraku.record_id": attribution["HIRAKU_RECORD_ID"],
-            "hiraku.commit": attribution["HIRAKU_COMMIT"],
-            "hiraku.job_id": attribution["HIRAKU_JOB_ID"],
             "dataset.name": "scikit-learn iris",
             "dataset.samples": 150,
             "dataset.features": 4,

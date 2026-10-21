@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 import uuid
@@ -243,6 +244,28 @@ def submit_job(
     if reserved.intersection(additions):
         raise ValidationError("Environment cannot override reserved job attribution")
     job_id = uuid.uuid4().hex
+    tracking_spec = record.resolve(config=selected).values.get("tracking_backend")
+    if not tracking_spec:
+        tracking_spec = selected.tracking_backend
+    if isinstance(tracking_spec, str):
+        tracking_type = tracking_spec
+    else:
+        tracking_type = tracking_spec.get("type") if tracking_spec else None
+    if tracking_type == "wandb":
+        requested_wandb_id = additions.get("WANDB_RUN_ID")
+        if requested_wandb_id is not None and requested_wandb_id != job_id:
+            raise ValidationError("WANDB_RUN_ID is reserved for Hiraku job attribution")
+        additions["WANDB_RUN_ID"] = job_id
+        wandb_project = (
+            tracking_spec.get("project") if isinstance(tracking_spec, Mapping) else None
+        )
+        if (
+            isinstance(wandb_project, str)
+            and wandb_project
+            and "WANDB_PROJECT" not in additions
+            and "WANDB_PROJECT" not in os.environ
+        ):
+            additions["WANDB_PROJECT"] = wandb_project
     directory = (selected.jobs_dir / job_id).resolve()
     workspace = directory / "workspace"
     dispatcher = None
