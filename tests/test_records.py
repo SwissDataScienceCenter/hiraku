@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError as ModelValidationError
 
-from hiraku.agent import Context
 from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
+from hiraku.context import Context
 from hiraku.errors import RecordExistsError, ValidationError
 from hiraku.record import Record, list_records, load_record
 

@@ -6,8 +6,8 @@ import pytest
 pytest.importorskip("marimo")
 pytest.importorskip("altair")
 
-from hiraku.agent import Action, Context, Program
 from hiraku.base import BaseRecord
+from hiraku.context import Context
 from hiraku.dashboard import components as hc
 from hiraku.dashboard.data import RECORD_COLUMNS, RUN_COLUMNS, arrow_frame
 from hiraku.record import Record
@@ -52,14 +52,12 @@ def test_markdown_front_matter_is_displayed_as_text() -> None:
     assert "<script>bad()</script>" not in content
 
 
-@pytest.mark.parametrize("record_type", [BaseRecord, Context, Record, Program, Action])
+@pytest.mark.parametrize("record_type", [BaseRecord, Context, Record])
 def test_markdown_view_accepts_any_record(record_type) -> None:
-    fields = {"entity": "record"} if record_type is Action else {}
     record = record_type(
         id="notes",
         markdown="## Findings\n\n**Useful** results.",
         custom="metadata",
-        **fields,
     )
     original = record.model_dump()
 
