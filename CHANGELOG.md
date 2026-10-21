@@ -19,7 +19,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Add project-defined workflows under `hiraku/workflows/<id>/`: Python state machines with typed mutable state, annotated event inputs, node instructions, and immutable graphs, or Markdown-only prompts with arguments inferred from YAML scalar defaults. Import APIs from their defining modules under `hiraku.workflows`.
 - Add persistent workflow sessions with validated events, stored instructions, retry-safe continuation, locking, inspection, and cancellation. `Session.run_start()` and `session.run_event()` return `EventResult`; retrieve assignments separately with `session.get_instruction()`. Sessions can be inspected and cancelled without loading workflow code.
 - Add `hiraku workflow list|start|send-event|graph`, `hiraku session list|show|cancel`, and workflow/session MCP tools, prompts, and resources. Conversational MCP attaches instructions after accepted or stale submissions. Workflow tools are fixed when the server starts; bound project configuration reloads on access.
-- Add `hiraku-agent` to start or resume sessions and run one coding-agent worker per assignment, headless or interactive. Workers write event files; the parent validates and submits them after successful exit. Rejected submissions stop execution; not-ready submissions are retained for explicit resume.
 - Add the bundled `collaborative` research workflow and the `workflows` example with count-steps, greet, and scheduler. Autoresearch becomes a Markdown-only workflow. Approval requests are conversational contracts.
 - Record bodies are `hiraku.markdown.Markdown` strings that select a section by its heading line, e.g. `record.markdown.section("## Change")`, including its subsections. Headings are found with a CommonMark parser (the new `markdown-it-py` dependency), so headings in code blocks, lists, and block quotes do not start sections.
 - Add `Record.resolve_tracking_backend()` to build the tracking backend inherited by a record; `TrackingBackend.list_runs()` now lists all attributed runs when `record_id` is omitted.
@@ -30,8 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- Retain manual not-ready events for retry, reject the reserved workflow ID `runs`, validate instructions before saving, and hide instructions for incompatible or unavailable active workflows. Collaborative research now quotes launch arguments and requires matching entrypoint attribution for run evidence.
-- Retry failed final assignments with `hiraku-agent WORKFLOW --session ID`; successful final assignments are recorded and skipped on resume.
+- Reject the reserved workflow ID `runs`, validate instructions before saving, and hide instructions for incompatible or unavailable active workflows. Collaborative research now quotes launch arguments and requires matching entrypoint attribution for run evidence.
 - Fix `hiraku record list`, `context list` (and other table output) crashing when there are no rows ([issue #96](https://github.com/SwissDataScienceCenter/hiraku/issues/96)).
 - Read every page of MLflow experiments and runs; projects with more than 1,000 runs previously lost the rest.
 

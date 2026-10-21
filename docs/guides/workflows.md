@@ -32,60 +32,6 @@ not authenticate human approval.
 Resume with `session_list` and `session_show`, rather than starting another
 session. `session_cancel` stops future submissions without reverting artifacts.
 
-### Terminal driver
-
-~~~bash
-uv run hiraku-agent count-steps --count 3 --interactive
-uv run hiraku-agent count-steps step --interactive
-uv run hiraku-agent count-steps finish --interactive
-~~~
-
-`hiraku-agent WORKFLOW` starts or resumes an active session. Use `--new` to start
-another or `--session ID` to select one. Event subcommands use argument-model
-fields as options. Strings are literal text; other values are JSON.
-The CLI and MCP prompt adapters use `EventArguments.from_text(values)` to decode
-these string inputs and validate the model. Regular JSON tools and Python calls
-use normal model validation.
-
-The parent reads one saved instruction and starts a worker. The worker writes
-one event file and exits. After a successful exit, the parent validates the file,
-submits the event against the dispatched session and instruction, and retrieves
-the next instruction.
-
-The default worker is Claude Code. Override headless execution with
-`HIRAKU_AGENT_CMD` or `--agent-cmd`, and interactive execution with
-`HIRAKU_AGENT_INTERACTIVE_CMD`. Workers receive `HIRAKU_PROMPT_FILE`,
-`HIRAKU_INSTRUCTION_FILE`, `HIRAKU_SESSION_ID`, and `HIRAKU_EVENT_FILE`. The prompt
-is sent on standard input in headless mode and appended as a message in
-interactive mode. Custom commands need only write the event file:
-
-~~~json
-{"event": "answer", "arguments": {"value": "one"}}
-~~~
-
-`event` must be a string; `arguments` is an object and defaults to `{}` when
-omitted. Other fields are rejected. The parent supplies session and instruction
-IDs; the file cannot override them. Final assignments have no `HIRAKU_EVENT_FILE`.
-Prompt, instruction, event, and headless output files are stored beneath the
-session's instruction/attempt directory. Each new attempt has its own event file.
-
-Malformed files and rejected events stop execution with an error; the event file
-remains available for inspection. Resume explicitly to launch another attempt,
-or submit a corrected event through the CLI. There is no automatic correction
-loop. A not-ready submission pauses execution (exit 4); resuming retries the saved
-submission before starting another worker. Interactive workers that finish
-without an event file pause execution (exit 3); headless workers that do so fail.
-Subprocess failures propagate, including for final instructions. A failed worker's
-event file is retained but is not submitted or reused on resume.
-If a final worker fails, retry it with `hiraku-agent WORKFLOW --session ID`.
-The driver records successful final assignments and does not repeat them on resume.
-Manual event subcommands also retain not-ready submissions for retry on resume.
-
-`--interactive` asks the worker to explain its intended work and wait for your
-go-ahead. Exit without writing an event file to pause. Workers are instructed to
-leave event submission to the parent; shell access is not a sandbox against other
-project commands.
-
 ## Author a workflow
 
 ~~~python
@@ -191,7 +137,7 @@ Accepted events produce a new instruction revision, even when their node stays
 unchanged. Reads return that stored instruction without invoking any handlers.
 Generate tokens and choose assignments in events, not in instruction methods.
 
-A final node completes the session when its instruction is stored. The driver
+A final node completes the session when its instruction is stored. The agent
 still carries out that final instruction. Completion means no more events are
 accepted; its data can describe successful, partial, or stopped results.
 
@@ -374,8 +320,7 @@ uv run hiraku session cancel SESSION_ID
 
 CLI start includes the first instruction. CLI send-event prints only the event
 result; use session show to retrieve the next instruction. Conversational MCP
-combines those operations. Terminal workers write event files and exit; the
-parent submits the event and retrieves the next instruction.
+combines those operations.
 
 Session advancement is guarded by a per-session lock and atomic file replacement.
 Cancellation takes precedence over retry replay. Handler, instruction, or save
@@ -424,14 +369,14 @@ authenticated approval gate. Keep such requests explicit in the prompt.
 
 A present Python sidecar takes precedence. A broken sidecar is an error and never
 falls back to Markdown-only behavior. Both forms require `workflow.md` and use
-the same config, session, graph, CLI, MCP, and agent execution paths.
+the same config, session, graph, CLI, and MCP execution paths.
 
 ## Bundled workflows
 
 Collaborative research runs draft, implement, launch, and analyze nodes with
 revision events and early completion. It writes experiment records, verifies
 commits and run attribution, and records verdicts. Approval is conversational;
-use MCP or the interactive driver.
+use MCP.
 Launch validation and analysis use only runs attributed to the requested
 entrypoint; runs with missing entrypoint attribution are ignored. Generated
 launch commands quote their arguments for the shell.

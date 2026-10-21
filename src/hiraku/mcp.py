@@ -554,7 +554,7 @@ def _over_mcp(response: Mapping[str, Any]) -> dict[str, Any]:
     """Name the tool that sends events in an instruction's events block.
 
     The runtime does not know the transport; over MCP, events go through
-    workflow_send_event, while hiraku-agent asks for an event file instead.
+    workflow_send_event; the core instruction remains transport independent.
     """
     instruction = response.get("instruction")
     if not isinstance(instruction, Mapping) or "events" not in instruction:

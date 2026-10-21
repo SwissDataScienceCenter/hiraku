@@ -75,29 +75,6 @@ finish, so the agent cannot end the session on its own.
 To test recovery, compact or restart the conversation mid-run and ask the agent
 to continue the session; it should resume at the current step.
 
-### Run from the terminal
-
-Use `hiraku-agent count-steps --interactive` for the conversations in which
-this workflow asks you whether to continue:
-
-```bash
-hiraku-agent count-steps --count 3 --interactive
-hiraku-agent count-steps --interactive         # resume after pausing
-hiraku-agent count-steps step --interactive    # continue when step is offered
-hiraku-agent count-steps finish --interactive  # or stop early
-```
-
-Each instruction starts a new agent conversation. The agent prints the step
-line, writes its `ack` event with the token to a file, and exits; the driver
-checks the event and opens the next conversation, which asks whether to continue.
-Approval is expressed in the prompt text, not enforced by the runtime.
-
-Exit an interactive agent without writing an event to pause the session.
-Resume the pending instruction with `hiraku-agent count-steps --interactive`,
-or send one of its accepted events explicitly. The prompts and events are kept
-under `hiraku/sessions/<session-id>/<instruction-id>/` for inspection. Headless
-mode is intended for workflows that do not need a user conversation.
-
 ## Greet
 
 `hiraku/workflows/greet/workflow.md` is a Markdown-only workflow with no Python
@@ -122,11 +99,7 @@ Validated values fill the placeholders. With no overrides, it greets World twice
 Start it with
 the MCP prompt
 `/mcp__hiraku__greet name=Ada times=3`, by asking your agent to greet Ada with
-the Hiraku greet workflow, or from the terminal:
-
-```bash
-hiraku-agent greet --name Ada --formal true
-```
+the Hiraku greet workflow.
 
 Hiraku validates and converts the arguments, renders the body, and sends it as
 the session's only instruction. That instruction is final: the session
@@ -153,12 +126,8 @@ fixed sequence; it comes from the records in the project:
 5. When every count reaches `target`, a final instruction asks the agent to show
    you the records.
 
-There is no user gate, so the agent works on its own:
-
-```bash
-hiraku-agent scheduler --records 3 --target 2   # six steps, one agent each
-hiraku record tree                               # the records and their counts
-```
+There is no user gate. Ask your coding agent to start the Hiraku scheduler
+workflow with records 3 and target 2. Inspect the results with `hiraku record tree`.
 
 Assigning a record is a decision, so `start` and the `incremented` event make
 it and store it in the workflow's data; the `working` state only shows the

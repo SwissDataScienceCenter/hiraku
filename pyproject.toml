@@ -26,7 +26,6 @@ dependencies = [
 
 [project.scripts]
 hiraku = "hiraku.cli:main"
-hiraku-agent = "hiraku.agent:main"
 
 [project.optional-dependencies]
 mlflow = ["mlflow==3.16.0"]

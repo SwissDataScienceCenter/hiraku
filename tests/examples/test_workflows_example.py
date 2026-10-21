@@ -2,18 +2,15 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 from click.testing import CliRunner
 
-from hiraku.agent import main as agent_main
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
-from hiraku.workflows.session import list_sessions
 
 
 def invoke(runner: CliRunner, arguments: list[str], payload: Any = None) -> Any:
@@ -125,67 +122,6 @@ def test_count_steps_rejects_wrong_tokens_and_finishes_early(
     assert done["instruction"]["data"] == {"steps": 1, "count": 2}
 
 
-# A scripted harness: prints the step line and echoes the step's token.
-ECHO_AGENT = """
-import json, os, re
-from pathlib import Path
-
-response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
-instruction = response["instruction"]
-if response.get("session_status") == "completed":
-    print("Ran", instruction["data"]["steps"], "steps")
-    raise SystemExit
-if "token" not in instruction["data"]:
-    # Simulate ending the interactive conversation at the approval prompt.
-    raise SystemExit
-print(re.search(r"`(Step .*?)`", instruction["text"]).group(1))
-event = {"event": instruction["events"]["accepted"][0]["event"],
-         "arguments": {"token": instruction["data"]["token"]}}
-
-Path(os.environ["HIRAKU_EVENT_FILE"]).write_text(json.dumps(event))
-
-"""
-
-
-def test_count_steps_can_pause_and_resume_interactive_conversations(
-    runner: CliRunner, tmp_path: Path, monkeypatch, capfd
-) -> None:
-    script = tmp_path / "echo_agent.py"
-    script.write_text(ECHO_AGENT)
-    monkeypatch.setenv("HIRAKU_AGENT_INTERACTIVE_CMD", f"{sys.executable} {script}")
-
-    started = runner.invoke(
-        agent_main, ["count-steps", "--count", "3", "--interactive"]
-    )
-    output = capfd.readouterr().out
-    assert started.exit_code == 3, started.output
-    assert "Step 1/3: token" in output
-    assert "Step 2/3" not in output
-    assert "[1 Step] agent → ack  accepted" in started.output
-    assert "No event was submitted; instruction 2 is still pending" in started.output
-
-    second = runner.invoke(agent_main, ["count-steps", "step", "--interactive"])
-    output = capfd.readouterr().out
-    assert second.exit_code == 3, second.output
-    assert "[2 Next] you → step  accepted" in second.output
-    assert "Step 2/3: token" in output
-    assert "Step 3/3" not in output
-
-    (session,) = list_sessions(config=HirakuConfig.discover())
-    # Step 2 is done; its token cannot be sent again while the session waits.
-    old = session.history[-1].arguments["token"]
-    stale = runner.invoke(agent_main, ["count-steps", "ack", "--token", old])
-    assert stale.exit_code == 1
-    assert "No active session accepts 'ack'" in stale.output
-
-    done = runner.invoke(agent_main, ["count-steps", "step", "--interactive"])
-    output = capfd.readouterr().out
-    assert done.exit_code == 0, done.output
-    assert "Step 3/3: token" in output
-    assert "Ran 3 steps" in output
-    assert 'completed: {"steps": 3, "count": 3}' in done.output
-
-
 def test_greet_is_one_final_prompt_filled_from_its_arguments(
     runner: CliRunner,
 ) -> None:
@@ -205,32 +141,6 @@ def test_greet_is_one_final_prompt_filled_from_its_arguments(
         "times": 2,
         "formal": False,
     }
-
-
-# A scripted harness for a final instruction: there is no event to send.
-PROMPT_AGENT = """
-import json, os
-from pathlib import Path
-
-response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
-print(response["instruction"]["text"].splitlines()[2])
-print("event file:", os.environ.get("HIRAKU_EVENT_FILE"))
-"""
-
-
-def test_greet_through_hiraku_agent(
-    runner: CliRunner, tmp_path: Path, monkeypatch
-) -> None:
-    script = tmp_path / "prompt_agent.py"
-    script.write_text(PROMPT_AGENT)
-    monkeypatch.setenv("HIRAKU_AGENT_CMD", f"{sys.executable} {script}")
-
-    result = runner.invoke(agent_main, ["greet", "--name", "Ada", "--formal", "true"])
-    assert result.exit_code == 0, result.output
-    assert "[1 Greet] final" in result.output
-    assert "Print 2 greetings to Ada, one per line. Greet formally:" in result.output
-    assert "event file: None" in result.output
-    assert 'completed: {"name": "Ada", "times": 2, "formal": true}' in result.output
 
 
 def children(parent: str) -> list[Any]:
@@ -298,42 +208,6 @@ def test_scheduler_rejects_a_count_raised_too_far(runner: CliRunner) -> None:
     set_count(runner, record_id, 1)
     accepted = send(runner, response, "incremented", record_id=record_id)
     assert accepted["instruction"]["data"]["count"] == 1
-
-
-# A scripted harness: raises the assigned count with the CLI, then sends an event.
-SCHEDULER_AGENT = """
-import json, os, subprocess, sys
-from pathlib import Path
-
-response = json.loads(Path(os.environ["HIRAKU_INSTRUCTION_FILE"]).read_text())
-context = response["instruction"]["data"]
-if response.get("session_status") == "completed":
-    print("final:", [(item["record"], item["count"]) for item in context["records"]])
-    raise SystemExit
-command = ["record", "update", context["record"], "--set", f"count={context['next']}"]
-subprocess.run([sys.executable, "-m", "hiraku.cli", *command], check=True)
-event = {"event": "incremented", "arguments": {"record_id": context["record"]}}
-
-Path(os.environ["HIRAKU_EVENT_FILE"]).write_text(json.dumps(event))
-
-"""
-
-
-def test_scheduler_runs_on_its_own_through_hiraku_agent(
-    runner: CliRunner, tmp_path: Path, monkeypatch
-) -> None:
-    script = tmp_path / "scheduler_agent.py"
-    script.write_text(SCHEDULER_AGENT)
-    monkeypatch.setenv("HIRAKU_AGENT_CMD", f"{sys.executable} {script}")
-
-    result = runner.invoke(agent_main, ["scheduler", "--records", "2"])
-    assert result.exit_code == 0, result.output
-    # No user gate: four increments, then the final instruction.
-    assert result.output.count("agent → incremented  accepted") == 4
-    assert "[5 Done] final" in result.output
-    assert "waiting for you" not in result.output
-    (session,) = list_sessions(config=HirakuConfig.discover())
-    assert session.status == "completed"
 
 
 def test_example_workflows_draw_their_states(runner: CliRunner) -> None:

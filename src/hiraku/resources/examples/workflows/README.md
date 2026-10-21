@@ -12,11 +12,10 @@ This example installs three small workflows that do no research work:
 
 ```bash
 hiraku init --example workflows
-hiraku-agent count-steps --count 3 --interactive  # or start it over MCP
-hiraku-agent count-steps --interactive            # resume after pausing
-hiraku-agent greet --name Ada        # one prompt, no events
-hiraku-agent scheduler               # work through records by priority
 ```
+
+Ask your coding agent to start count-steps with count 3, greet with name Ada,
+or scheduler through the Hiraku MCP tools. Resume with `session_show`.
 
 See `docs/examples/workflows/README.md` in the Hiraku repository for
 usage.

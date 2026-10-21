@@ -192,7 +192,7 @@ hiraku status
 
 # 1. optionally, initialize context (not implement yet)
 hiraku context create literature
-hiraku-agent context update literature "Create a curated literature review for heart-disease prediction"
+# Ask your coding agent to create a curated literature review.
 
 # add literature to the active context
 hiraku context set literature
@@ -248,13 +248,9 @@ two experiments"; the agent then calls the `collaborative` MCP tool. The agent
 drafts, implements, launches, and analyzes each experiment, and you review the
 result of every step before choosing the next one.
 
-From a terminal, use `hiraku-agent collaborative --interactive` so you can review
-and approve each step in conversation:
+Inspect the session and its attributed runs from the terminal:
 
 ```bash
-hiraku-agent collaborative --task heart-disease --rounds 2 --interactive
-# Resume after stopping an agent conversation before it submits an event:
-hiraku-agent collaborative --interactive
 hiraku session list
 hiraku session show <session-id>
 hiraku runs --record heart-disease --all --json

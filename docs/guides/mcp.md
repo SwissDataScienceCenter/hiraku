@@ -115,10 +115,8 @@ workflows and inspect, resume, or cancel sessions. See the
 
 The conversational server wraps core event execution and attaches the saved next
 instruction after accepted or stale submissions. Core execution returns only a
-typed event result. Terminal workers write event files; `hiraku-agent` submits
-them through the core workflow API and dispatches the next instruction. They do
-not need an MCP connection. Workflow instances reload their bound project
-configuration on access.
+typed event result. Workflow instances reload their bound project configuration
+on access.
 
 ## Prompt template
 
