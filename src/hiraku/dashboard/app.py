@@ -2,10 +2,12 @@
 # [tool.marimo.display]
 # theme = "system"
 # ///
-"""Bundled Hiraku dashboard. Start it with ``hiraku dashboard``.
+"""Hiraku dashboard with a research tree for the ``research`` workflow.
 
-``hiraku dashboard --init`` copies this notebook into the project and
-``hiraku dashboard --edit`` opens that copy in the marimo editor.
+The bundled dashboard (Hiraku #116, commit 87cbe7a) plus a "Research tree"
+section: the experiment tree of a task, each experiment coloured by the step it
+needs, the session's current step, and a card with the selected record.
+Copy it to ``hiraku/dashboard/app.py`` and run ``hiraku dashboard``.
 """
 
 import marimo
@@ -133,6 +135,411 @@ def _(
     runs_df = arrow_frame(run_rows(project), RUN_COLUMNS)
     records_df = arrow_frame(record_rows(project.records), RECORD_COLUMNS)
     return project, records_df, runs_df
+
+
+@app.cell
+def _():
+    import pandas as pd
+
+    from hiraku.record import list_records
+    from hiraku.workflows.session import list_sessions
+    from hiraku.workflows.workflow import load_workflow
+
+    # One colour per state of an experiment, in legend order. The step comes
+    # from the research workflow; finished experiments show their verdict.
+    STATES = {
+        "task": "#5461a6",
+        "to implement": "#848484",
+        "to launch": "#3b82f6",
+        "running": "#eab308",
+        "to analyze": "#8b5cf6",
+        "to triage": "#06b6d4",
+        "to design follow-ups": "#90ca42",
+        "in review": "#f472b6",
+        "supports": "#10b981",
+        "refutes": "#ef4444",
+        "inconclusive": "#a3a3a3",
+    }
+    STEP_STATES = {
+        "implement": "to implement",
+        "launch": "to launch",
+        "waiting": "running",
+        "analyze": "to analyze",
+        "triage": "to triage",
+        "design": "to design follow-ups",
+        "review_design": "in review",
+        "review_code": "in review",
+        "review_result": "in review",
+    }
+
+    def experiment_state(item):
+        if item["step"] == "done":
+            return item["verdict"] or "inconclusive"
+        return STEP_STATES.get(item["step"], item["step"])
+
+    def tree_layout(overview):
+        """Place the task at the top and each experiment below its parent.
+
+        Leaves get consecutive x positions in tree order; a parent sits above
+        the middle of its children.
+        """
+        task = overview["task"]["record_id"]
+        children = {}
+        for item in overview["experiments"]:
+            children.setdefault(item["parent"], []).append(item["record_id"])
+        x, depth, leaves = {}, {task: 0}, [0]
+
+        def place(record_id):
+            kids = children.get(record_id, [])
+            for kid in kids:
+                depth[kid] = depth[record_id] + 1
+                place(kid)
+            if kids:
+                x[record_id] = (x[kids[0]] + x[kids[-1]]) / 2
+            else:
+                x[record_id] = leaves[0]
+                leaves[0] += 1
+
+        place(task)
+        items = {item["record_id"]: item for item in overview["experiments"]}
+        nodes = [
+            {
+                "id": task,
+                "x": x[task],
+                "y": 0,
+                "state": "task",
+                "summary": overview["task"]["summary"] or "",
+            }
+        ]
+        edges = []
+        for record_id, item in items.items():
+            nodes.append(
+                {
+                    "id": record_id,
+                    "x": x[record_id],
+                    "y": depth[record_id],
+                    "state": experiment_state(item),
+                    "summary": item["summary"] or "",
+                }
+            )
+            edges.append(
+                {
+                    "x": x[item["parent"]],
+                    "y": depth[item["parent"]],
+                    "x2": x[record_id],
+                    "y2": depth[record_id],
+                }
+            )
+        return pd.DataFrame(nodes), pd.DataFrame(edges, columns=["x", "y", "x2", "y2"])
+
+    return (
+        STATES,
+        experiment_state,
+        list_records,
+        list_sessions,
+        load_workflow,
+        pd,
+        tree_layout,
+    )
+
+
+@app.cell
+def _(config, list_records, list_sessions, load_workflow, refresh):
+    _refreshes = refresh.value  # reread records and sessions on Refresh
+    try:
+        research = load_workflow("research", config=config)
+        research_error = None
+    except Exception as exc:  # the workflow is optional in a project
+        research, research_error = None, str(exc)
+    # Active sessions first, newest first.
+    research_sessions = sorted(
+        (item for item in list_sessions(config=config) if item.workflow == "research"),
+        key=lambda item: (item.status != "active", -item.updated_at.timestamp()),
+    )
+    research_tasks = [
+        item.id for item in list_records(config=config) if item.type == "task"
+    ]
+    return research, research_error, research_sessions, research_tasks
+
+
+@app.cell
+def _(config, mo, research_sessions, research_tasks):
+    _from_sessions = [
+        getattr(item.state, "task", None)
+        for item in research_sessions
+        if getattr(item.state, "task", None) in research_tasks
+    ]
+    _default = next(
+        iter(
+            [
+                *_from_sessions,
+                *(
+                    [config.active_record_id]
+                    if config.active_record_id in research_tasks
+                    else []
+                ),
+                *research_tasks,
+            ]
+        ),
+        None,
+    )
+    task_choice = mo.ui.dropdown(research_tasks, value=_default, label="Task")
+    return (task_choice,)
+
+
+@app.cell
+def _(research, research_sessions, task_choice):
+    research_task = task_choice.value
+    # The newest session on this task tells which entrypoint its runs use and
+    # what the workflow works on now.
+    research_session = next(
+        (
+            item
+            for item in research_sessions
+            if getattr(item.state, "task", None) == research_task
+        ),
+        None,
+    )
+    _entrypoint = (
+        getattr(research_session.state, "entrypoint", "train")
+        if research_session is not None
+        else "train"
+    )
+    overview = (
+        research.overview(research_task, _entrypoint)
+        if research is not None and research_task
+        else None
+    )
+    return overview, research_session, research_task
+
+
+@app.cell
+def _(section_heading):
+    section_heading("research", "Research tree", open=True)
+    return
+
+
+@app.cell
+def _(STATES, alt, mo, overview, research_session, tree_layout):
+    research_nodes = None
+    research_chart = None
+    if overview is not None:
+        research_nodes, _edges = tree_layout(overview)
+        _current = (
+            getattr(research_session.state, "current", None)
+            if research_session is not None and research_session.status == "active"
+            else None
+        )
+        _width = max(int(research_nodes["x"].max()) + 1, 2)
+        _depth = int(research_nodes["y"].max())
+        _x = alt.X("x:Q", axis=None, scale=alt.Scale(domain=[-0.5, _width - 0.5]))
+        _y = alt.Y(
+            "y:Q",
+            axis=None,
+            scale=alt.Scale(domain=[-0.4, _depth + 0.6], reverse=True),
+        )
+        _pick = alt.selection_point(fields=["id"], on="click", name="node")
+        _links = (
+            alt.Chart(_edges)
+            .mark_rule(color="#b8bccf", strokeWidth=2)
+            .encode(x=_x, y=_y, x2="x2:Q", y2="y2:Q")
+        )
+        _dots = (
+            alt.Chart(research_nodes)
+            .mark_circle(
+                size=700, opacity=1, stroke="#ffffff", strokeWidth=2, cursor="pointer"
+            )
+            .encode(
+                x=_x,
+                y=_y,
+                color=alt.Color(
+                    "state:N",
+                    scale=alt.Scale(domain=list(STATES), range=list(STATES.values())),
+                    legend=alt.Legend(title="State", orient="right"),
+                ),
+                tooltip=[
+                    alt.Tooltip("id:N", title="Record"),
+                    alt.Tooltip("state:N", title="State"),
+                    alt.Tooltip("summary:N", title="Summary"),
+                ],
+            )
+            .add_params(_pick)
+        )
+        _ring = (
+            alt.Chart(research_nodes)
+            .transform_filter(alt.datum.id == (_current or ""))
+            .mark_circle(
+                size=1500, filled=False, stroke="#f59e0b", strokeWidth=3, opacity=1
+            )
+            .encode(x=_x, y=_y)
+        )
+        _labels = (
+            alt.Chart(research_nodes)
+            .mark_text(align="left", baseline="middle", dx=26, fontSize=12)
+            .encode(x=_x, y=_y, text="id:N", color=alt.value("#848484"))
+        )
+        research_chart = mo.ui.altair_chart(
+            alt.layer(_links, _ring, _dots, _labels)
+            .properties(width="container", height=140 + 110 * _depth)
+            .configure(background="transparent")
+            .configure_legend(labelColor="#848484", titleColor="#848484")
+            .configure_view(stroke=None),
+            legend_selection=False,
+        )
+    return research_chart, research_nodes
+
+
+@app.cell
+def _(mo, research_nodes, research_session):
+    _ids = list(research_nodes["id"]) if research_nodes is not None else []
+    # Open on the record the active session works on.
+    _current = (
+        getattr(research_session.state, "current", None)
+        if research_session is not None and research_session.status == "active"
+        else None
+    )
+    research_pick = mo.ui.dropdown(
+        _ids, value=_current if _current in _ids else None, label="Or choose a record"
+    )
+    return (research_pick,)
+
+
+@app.cell
+def _(research_chart, research_pick):
+    # A click on the tree wins over the dropdown.
+    _clicked = []
+    if research_chart is not None:
+        _selection = (research_chart.selections or {}).get("node") or {}
+        _clicked = _selection.get("id") or []
+        if isinstance(_clicked, str):
+            _clicked = [_clicked]
+    selected_node = _clicked[0] if _clicked else research_pick.value
+    return (selected_node,)
+
+
+@app.cell
+def _(
+    experiment_state,
+    html,
+    mo,
+    overview,
+    research_chart,
+    research_error,
+    research_pick,
+    research_session,
+    research_task,
+    section_body,
+    selected_node,
+    task_choice,
+):
+    def _field(label, value):
+        if value in (None, "", []):
+            return ""
+        return f"<p><strong>{label}</strong> {html.escape(str(value))}</p>"
+
+    def _status():
+        if research_session is None:
+            return mo.md(
+                f"No research session on **{research_task}** yet. Start one in "
+                f"Claude Code with `/mcp__hiraku__research task={research_task}`."
+            )
+        state = research_session.state
+        current = getattr(state, "current", None)
+        if research_session.status != "active":
+            _id, _status = research_session.id, research_session.status
+            return mo.md(f"Last session `{_id}` is **{_status}**.")
+        doing = f"**{state.node}**" + (f" on **{current}**" if current else "")
+        return mo.callout(
+            mo.md(
+                f"Session `{research_session.id}` is at {doing}. "
+                f"Limits: {getattr(state, 'max_experiments', '?')} experiments, "
+                f"depth {getattr(state, 'max_depth', '?')}. "
+                "The orange ring marks the record it works on."
+            ),
+            kind="info",
+        )
+
+    def _card(record_id):
+        if record_id is None:
+            return mo.md("Click a node in the tree to see its details.")
+        if record_id == overview["task"]["record_id"]:
+            task = overview["task"]
+            metrics = ", ".join(
+                f"{item['name']} ({item['direction']})" for item in task["metrics"]
+            )
+            return mo.Html(
+                f"<h3>{html.escape(record_id)} · task</h3>"
+                + _field("Summary", task["summary"])
+                + _field("Metrics", metrics)
+                + _field("Experiments", len(overview["experiments"]))
+            )
+        item = next(
+            entry
+            for entry in overview["experiments"]
+            if entry["record_id"] == record_id
+        )
+        runs = "".join(
+            "<li>"
+            + html.escape(run["run_id"])
+            + ": "
+            + html.escape(
+                ", ".join(f"{name} = {value}" for name, value in run["metrics"].items())
+                or "no metrics yet"
+            )
+            + "</li>"
+            for run in item["runs"]
+        )
+        triage = (
+            f"{item['triage']}: {item['triage_reason'] or ''}"
+            if item["triage"]
+            else None
+        )
+        return mo.Html(
+            f"<h3>{html.escape(record_id)} · {html.escape(experiment_state(item))}</h3>"
+            + _field("Summary", item["summary"])
+            + _field("Parent", item["parent"])
+            + _field("Hypothesis", item["hypothesis"])
+            + _field("Expected", item["expected"])
+            + _field("Commit", (item["commit"] or "")[:12])
+            + (f"<p><strong>Runs</strong></p><ul>{runs}</ul>" if runs else "")
+            + _field("Verdict", item["verdict"])
+            + _field("Conclusion", item["conclusion"])
+            + _field("Triage", triage)
+            + _field("Last failure", item["failure"])
+            + "".join(
+                _field(
+                    f"Review ({review['kind']}, {review['decision']})",
+                    review["findings"],
+                )
+                for review in item.get("reviews", [])[-3:]
+            )
+            + (
+                f"<details><summary>Planned change</summary>"
+                f"<pre>{html.escape(item['change'] or '')}</pre></details>"
+                if item["change"]
+                else ""
+            )
+        )
+
+    if research_error is not None:
+        _content = mo.md(
+            "Add the research workflow to `hiraku/workflows/research/` to see "
+            f"the experiment tree here. ({research_error})"
+        )
+    elif overview is None:
+        _content = mo.md("No task records yet.")
+    else:
+        _content = mo.vstack(
+            [
+                task_choice,
+                _status(),
+                research_chart,
+                mo.hstack([research_pick], justify="start"),
+                _card(selected_node),
+            ]
+        )
+    section_body("research", _content)
+    return
 
 
 @app.cell
