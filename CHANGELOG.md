@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Add `Run.duration`, a run's wall-clock length in seconds. The CSV backend reads an optional `duration` column, MLflow uses the run's end minus start time, and W&B its `_runtime` summary. `hiraku runs` shows it, and the dashboard adds a Duration column, run detail and plot tooltip next to the start time.
 - Add optional, collapsible dashboard record navigation sharing selection with the run table and highlighting a selected run's owning record.
+- Add a dashboard Files view showing which workflow step produces each file and which steps use it, with buttons selecting the producing record and run, and list a workflow run's steps in the run details.
 - Add a generic dashboard Markdown viewer accepting any `BaseRecord` subtype with expandable front matter, and show the selected record's Markdown or a selected run's owning record in the dashboard.
 - Add optional dashboard Markdown editing with explicit Save/Cancel, session-local drafts, and detection of external record changes before saving.
 - Add `BaseRecord.save_markdown()` for saving a replacement body with metadata preserved and checking for external changes, independent of dashboard dependencies.
@@ -37,6 +38,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Add `hiraku dashboard`, a local read-only dashboard with a record and run tree, run details with a link to the tracking backend, and a performance plot of runs in execution order. Install it with the `dashboard` extra.
 - Add `hiraku dashboard --init` to copy the dashboard notebook into the project, `--edit` to open that copy in the marimo editor, and `--include-code` to show the notebook code in the read-only dashboard. The notebook exposes runs and records, with their place in the tree, as the Arrow-backed `runs_df` and `records_df` DataFrames.
 - Add the MLflow `ui_url` option; MLflow runs now link to the MLflow web UI, also when `tracking_uri` is a credential-free HTTP(S) server.
+- Add `hiraku snakemake run` to execute a Snakemake workflow whose rules launch record entrypoints, and store each execution as a CSV run of the workflow record. Its `jobs` column lists every step with the record, entrypoint, command, files, and whether it ran, taken from `snakemake --detailed-summary`; its `outcome` column distinguishes planned, succeeded, no-op, failed, and interrupted executions. Launched steps receive `HIRAKU_WORKFLOW_RUN_ID`.
+- Add `hiraku snakemake generate` to draft one launching rule per entrypoint of a record and its children.
+- Add the `digits-snakemake` example, in which records state each step's code, the `Snakefile` states the files, and MLflow runs are linked to the workflow run.
 
 ### Fixed
 

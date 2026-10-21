@@ -11,6 +11,8 @@ working with research records.
     - [Weights &amp; Biases](tracking-wandb.md)
     - [MLflow](tracking-mlflow.md)
     - [Custom backend](tracking-custom.md)
+- [Snakemake workflows](tracking-snakemake.md): run workflows whose steps
+  launch record entrypoints.
 - [MCP server](mcp.md)
 - [Dashboard](dashboard.md)
 - Advanced usage:

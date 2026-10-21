@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
+import yaml
 
 from hiraku.config import HirakuConfig
 from hiraku.dashboard.data import (
@@ -12,6 +14,7 @@ from hiraku.dashboard.data import (
     arrow_frame,
     default_metric,
     execution_order,
+    file_rows,
     find_run,
     format_duration,
     load,
@@ -318,3 +321,71 @@ def test_plot_frame_numbers_runs_and_skips_unusable_values(
 )
 def test_safe_url(url: str | None, expected: str | None) -> None:
     assert safe_url(url) == expected
+
+
+JOB = {
+    "rule": "a__make",
+    "record": "a",
+    "entrypoint": "make",
+    "command": "hiraku launch make --record a -- --output out.csv",
+    "inputs": ["in.csv"],
+    "outputs": ["out.csv"],
+    "ran": True,
+}
+
+
+def workflow_run(run_id: str, day: int, *jobs: dict) -> Run:
+    return Run(
+        id=run_id,
+        record_id="workflow",
+        timestamp=datetime(2026, 10, day, tzinfo=UTC),
+        entrypoint="snakemake",
+        raw={"jobs": json.dumps(jobs)},
+    )
+
+
+def test_run_details_list_workflow_steps() -> None:
+    from hiraku.dashboard.data import ProjectRuns
+
+    plain = {**JOB, "rule": "copy", "record": None, "command": "cp a b", "ran": False}
+    runs = [workflow_run("w1", 15, JOB, plain), Run(id="r1", record_id="a")]
+    runs_df = arrow_frame(run_rows(ProjectRuns(records=[], runs=runs)), RUN_COLUMNS)
+
+    details = yaml.safe_load(run_text(find_run(runs_df, "w1")))
+
+    assert details["steps"] == [
+        "a · make: hiraku launch make --record a -- --output out.csv",
+        "rule copy: cp a b (did not run)",
+    ]
+    assert "steps" not in yaml.safe_load(run_text(find_run(runs_df, "r1")))
+
+
+def test_file_rows_name_the_producing_step_and_its_users() -> None:
+    from hiraku.dashboard.data import ProjectRuns
+
+    use = {
+        **JOB,
+        "rule": "b__use",
+        "record": "b",
+        "entrypoint": "use",
+        "inputs": ["out.csv"],
+        "outputs": ["final.csv"],
+    }
+    runs = [
+        workflow_run("w2", 16, {**JOB, "ran": False}),
+        workflow_run("w1", 15, JOB, use),
+        Run(id="plain", record_id="a", raw={"jobs": "not json"}),
+    ]
+
+    rows = {row["path"]: row for row in file_rows(ProjectRuns(records=[], runs=runs))}
+
+    assert sorted(rows) == ["final.csv", "in.csv", "out.csv"]
+    assert rows["out.csv"]["produced_by"] == "a · make"
+    assert rows["out.csv"]["record"] == "a"
+    assert rows["out.csv"]["command"] == JOB["command"]
+    assert rows["out.csv"]["used_by"] == ["b · use"]
+    # The later no-op run did not rebuild the file.
+    assert rows["out.csv"]["last_run"] == "w1"
+    assert rows["in.csv"]["produced_by"] is None
+    assert rows["in.csv"]["record"] is None
+    assert rows["in.csv"]["used_by"] == ["a · make"]

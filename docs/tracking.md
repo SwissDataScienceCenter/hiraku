@@ -10,6 +10,8 @@ Choose the backend that matches the stage of your project:
 - [MLflow](guides/tracking-mlflow.md) for local SQLite or a remote MLflow server.
 - [Custom](guides/tracking-custom.md) for a backend of your choice.
 
+[Snakemake workflows](guides/tracking-snakemake.md) store their executions with the CSV backend.
+
 The task-level `tracking_backend` setting overrides the project default. The
 [tracking API reference](api/python/tracking.md) documents the shared backend
 contract and normalized run model.

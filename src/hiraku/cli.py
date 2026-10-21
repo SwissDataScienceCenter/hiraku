@@ -899,6 +899,101 @@ def launch_command(
         raise click.exceptions.Exit(result.returncode)
 
 
+@main.group("snakemake")
+def snakemake_group() -> None:
+    """Run Snakemake workflows whose rules launch record entrypoints."""
+
+
+@snakemake_group.command("run")
+@click.option("--record", "record_id", required=True, help="Workflow record.")
+@click.option("--snakefile", type=click.Path(path_type=Path), default=Path("Snakefile"))
+@click.option("--cores", type=click.IntRange(min=1), default=1)
+@click.option("--dry-run", is_flag=True, help="Record the planned jobs only.")
+@click.option("--command", default="snakemake", help="Snakemake executable.")
+@click.option("--command-arg", multiple=True, help="Argument before Snakemake options.")
+@click.option(
+    "--config",
+    "snakemake_config",
+    multiple=True,
+    help="Snakemake KEY=VALUE config, such as 'train=--epochs 2'.",
+)
+@click.option("--force", is_flag=True)
+@click.option("--forceall", is_flag=True)
+@click.option("--keep-going", is_flag=True)
+@click.argument("targets", nargs=-1)
+@click.pass_obj
+def snakemake_run(
+    state: CLIContext,
+    record_id: str,
+    snakefile: Path,
+    cores: int,
+    dry_run: bool,
+    command: str,
+    command_arg: tuple[str, ...],
+    snakemake_config: tuple[str, ...],
+    force: bool,
+    forceall: bool,
+    keep_going: bool,
+    targets: tuple[str, ...],
+) -> None:
+    """Execute TARGETS and record each job as part of one workflow run."""
+    from .snakemake import run_workflow
+
+    run, exit_code = run_workflow(
+        state.config,
+        record_id=record_id,
+        snakefile=snakefile,
+        targets=targets,
+        cores=cores,
+        dry_run=dry_run,
+        command=command,
+        command_args=command_arg,
+        snakemake_config=snakemake_config,
+        options=tuple(
+            option
+            for enabled, option in (
+                (force, "--force"),
+                (forceall, "--forceall"),
+                (keep_going, "--keep-going"),
+            )
+            if enabled
+        ),
+    )
+    click.echo(f"Recorded Snakemake run {run['id']}: {run['outcome']}")
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
+
+
+@snakemake_group.command("generate")
+@click.option("--record", "record_id", required=True)
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    default=Path("Snakefile"),
+    help="Destination, relative to the project root unless absolute.",
+)
+@click.option("--force", is_flag=True, help="Overwrite an existing file.")
+@click.option("--print", "print_only", is_flag=True, help="Print instead of writing.")
+@click.pass_obj
+def snakemake_generate(
+    state: CLIContext,
+    record_id: str,
+    output: Path,
+    force: bool,
+    print_only: bool,
+) -> None:
+    """Draft one rule per entrypoint of the record and the records below it."""
+    from .snakemake import generate_workflow, write_workflow
+
+    record = load_record(record_id, config=state.config)
+    content = generate_workflow(record, config=state.config)
+    if print_only:
+        click.echo(content, nl=False)
+        return
+    path = write_workflow(content, state.config.root / output, force=force)
+    click.echo(f"Generated Snakefile at {path}")
+
+
 @main.command("runs")
 @click.option("--record", "record_id")
 @click.option(

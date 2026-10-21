@@ -113,7 +113,14 @@ location.
 **Run**
 :   The selected run's ID, record, entrypoint, commit, start time, duration,
     parameters, and metrics, plus a link to the run in its tracking backend when
-    one is available.
+    one is available. A Snakemake workflow run also lists its steps and commands.
+
+**Files**
+:   The files of Snakemake workflow runs: the record and entrypoint whose step
+    produces each file, the steps that use it, and the last run in which the
+    producing step ran. Select a row to see the producing command, with buttons
+    that select the producing record or that last run in the run table and the
+    record view. Runs from other sources add no files.
 
 **Record**
 :   Expandable YAML front matter labeled with the selected record's ID,
@@ -213,31 +220,39 @@ or closing the session discards them.
 
 ## Run and record tables
 
-The notebook reads your project once and builds two pandas DataFrames backed
-by Apache Arrow for the run table, run details, and metric analysis. Record
+The notebook reads your project once and builds three pandas DataFrames backed
+by Apache Arrow for the run table, run details, files, and metric analysis. Record
 details use the already loaded record objects to retain complete front matter.
 
 `runs_df`
 :   One row per run in execution order: `run`, `record`, `record_path`,
-    `source`, `started`, `entrypoint`, `commit`, `url`, plus a
-    `metric.<name>` and `param.<name>` column for each metric and parameter.
+    `source`, `started`, `entrypoint`, `commit`, `url`, `jobs` (the steps of a
+    Snakemake workflow run, otherwise empty), plus a `metric.<name>` and
+    `param.<name>` column for each metric and parameter.
 
 `records_df`
 :   One row per record in tree order: `record`, `parent`, `record_path`,
     `type`, `status`, `decision`, `commit`, `metrics` (a list of declared
     `name` and `direction` pairs), and `description` (the record's Markdown).
 
+`files_df`
+:   One row per file of a workflow run's jobs: `key`, `path`, `produced_by`
+    and `used_by` (as `record · entrypoint`, or `rule NAME` for a rule that
+    does not launch an entrypoint), and `last_run`.
+
 | View | Reads |
 | --- | --- |
 | Runs table | `records_df` rows, each followed by its runs from `runs_df` |
 | Run details | the selected run's row of `runs_df` |
+| Files table | `files_df` rows; the details show the producing command and select its record or run |
 | Performance plot | selected record subtree in `runs_df`; choose one metric |
 | Trade-off plot | selected record subtree in `runs_df`; choose two metrics and their objectives |
 
 `record_path` is the record's ancestry, such as `digits/weak-l2`.
 `subtree(runs_df, "digits")` selects every run of `digits` and the records
-below it. Use these tables in your own cells, or mention `@runs_df` and
-`@records_df` in marimo's AI assistant to ask questions about your runs.
+below it. Use these tables in your own cells, or mention `@runs_df`,
+`@records_df`, and `@files_df` in marimo's AI assistant to ask questions about
+your runs and their files.
 Values keep the types the tracking backend reports; some backends, such as
 MLflow, report parameters as text, so cast them before comparing numbers, for
 example `runs_df["param.alpha"].astype(float)`.

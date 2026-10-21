@@ -127,3 +127,48 @@ def test_project_copy_finds_its_project_without_the_launcher(
     _, definitions = app.run()
 
     assert definitions["config"].root == project.root
+
+
+def test_app_exposes_workflow_files_next_to_existing_runs(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import csv
+    import json
+
+    from hiraku.record import Record
+
+    Record.create(
+        "workflow",
+        parent_id="root",
+        tracking_backend={"type": "csv", "path": "workflow.csv"},
+        config=project,
+    )
+    job = {
+        "rule": "workflow__make",
+        "record": "workflow",
+        "entrypoint": "make",
+        "command": "hiraku launch make --record workflow -- --output out.txt",
+        "inputs": ["in.txt"],
+        "outputs": ["out.txt"],
+        "ran": True,
+    }
+    with (project.root / "workflow.csv").open("w", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["id", "record_id", "timestamp", "entrypoint", "jobs"])
+        writer.writerow(
+            ["snake_1", "workflow", "2026-10-15", "snakemake", json.dumps([job])]
+        )
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    from hiraku.dashboard.app import app
+
+    _, definitions = app.run()
+
+    files = definitions["file_entries"]
+    assert [(row["path"], row["produced_by"]) for row in files] == [
+        ("in.txt", None),
+        ("out.txt", "workflow · make"),
+    ]
+    assert files[1]["last_run"] == "snake_1"
+    assert "out.txt" in definitions["file_selector"].text
+    # Runs from other sources remain in the same run table.
+    assert "r0" in list(definitions["runs_df"]["run"])

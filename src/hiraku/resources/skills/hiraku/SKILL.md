@@ -54,6 +54,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set`, `entrypoints` |
 | Launch an entrypoint | `hiraku launch ENTRYPOINT [--record ID] [--commit REF] [--dispatch NAME]` |
+| Run or draft a Snakemake workflow | `hiraku snakemake run` / `generate` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
 | Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_send_event`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow send-event SESSION EVENT` |
 | Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
@@ -273,7 +274,8 @@ different source state appear to be the same attempt.
 
 A run is an execution trace owned by CSV, MLflow, W&B, or a custom tracking
 backend. Hiraku launches entrypoints and queries runs; the training or evaluation
-code writes the run to its backend.
+code writes the run to its backend. `hiraku snakemake run` also writes one CSV
+run per workflow execution.
 
 For a high-level run request:
 
@@ -383,6 +385,47 @@ The default CSV backend uses project-root `runs.csv`. MLflow and W&B require the
 training code and Hiraku adapter to use the same configured backend destination.
 Hiraku exposes normalized summaries; full curves and artifacts remain in the
 tracking backend.
+
+## Track Snakemake workflows
+
+In a Snakemake workflow, records state the code and the `Snakefile` states the
+files. Give each step an ordinary entrypoint on the record it belongs to, and
+give the workflow record a CSV tracking backend that keeps its runs with the
+records, `{type: csv, path: hiraku/runs.csv}`, so recording an execution
+does not change the code files:
+
+```yaml
+entrypoints:
+  train:
+    command: [python, scripts/train.py]
+    args: {alpha: 0.0001, epochs: 40}
+```
+
+1. Run `hiraku snakemake generate --record <workflow-record> --print` to draft
+   one rule per entrypoint of the record and its children, each running
+   `hiraku launch ENTRYPOINT --record RECORD`.
+2. Add each rule's `input:` and `output:` files and pass them after `--`, for
+   example `hiraku launch train --record weak-l2 -- --input {input[0]} --output
+   {output}`, then add a `rule all`. Never put file paths only in a rule's own
+   command: the record must describe the code a step runs.
+3. Dry-run, execute, and inspect:
+
+```bash
+hiraku snakemake run --record <workflow-record> --dry-run
+hiraku snakemake run --record <workflow-record> --cores 2
+hiraku runs --record <workflow-record> --json
+```
+
+Use `--command uv --command-arg run --command-arg snakemake` to run Snakemake in
+the project environment, and `--config 'train=--epochs 2'` to pass extra
+entrypoint arguments for a quick run.
+
+Each execution is one CSV run of the workflow record. Its `raw.jobs` lists every
+step with its rule, record, entrypoint, command, inputs, outputs, and whether it
+ran; `raw.outcome` is `planned`, `succeeded`, `no-op`, `failed`, or
+`interrupted`. To explain where a file came from, find the job whose `outputs`
+contain it and report its record, entrypoint, and command. Steps that log their
+own runs, such as MLflow training, link them through `HIRAKU_WORKFLOW_RUN_ID`.
 
 ## Finish clearly
 
