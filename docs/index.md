@@ -34,11 +34,23 @@ Launch entrypoints, compare runs, and keep the research history visible.
 
 ## Installation
 
-```bash
-uv tool install ".[mlflow,wandb]"
-hiraku --help
+From a Hiraku source checkout, install the CLI with the optional adapters you
+need:
 
-# development setup
+```bash
+uv tool install --force '.[mlflow,wandb]'
+hiraku --help
+```
+
+The MLflow and W&amp;B extras are optional. Use `uv tool install .` if you only
+need Hiraku's core CLI. `--force` replaces an existing tool installation, which
+is useful when reinstalling from a checkout after code changes that did not
+change the package version; it can be omitted for a first install.
+
+For Hiraku development, install the full environment and run the checkout
+directly:
+
+```bash
 uv sync --all-extras
 uv run hiraku --help
 ```
@@ -59,12 +71,12 @@ flowchart LR
 * Additionally, an `Entrypoint` defines an executable command associated with documented arguments. Hiraku provides launch helpers and customizable dispatch scripts.
 
 ??? tip "Branching and experiment lineage"
-    Git remains responsible for commits, branches, and source history. 
+    Git remains responsible for commits, branches, and source history.
     Branches are optional for the core workflow.
 
 ### Start here
 
-Follow the [heart disease example](examples/heart-disease/README.md) for a complete workflow. 
+Follow the [heart disease example](examples/heart-disease/README.md) for a complete workflow.
 
 For a preview of a fully agentic workflow, see the [autoresearch example](examples/autoresearch/README.md).
 

@@ -5,10 +5,10 @@
 From a local Hiraku source checkout, install the tool with the extras you want to use.
 
 ```bash
-uv tool install .
+uv tool install --force .
 
 # or with extra dependencies for MLflow and W&B
-uv tool install ".[mlflow,wandb]"
+uv tool install --force ".[mlflow,wandb]"
 ```
 
 ## Initialize
