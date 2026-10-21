@@ -268,10 +268,9 @@ def test_stdio_session(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_cli_project_error(tmp_path: Path) -> None:
-    runner = CliRunner()
-    with runner.isolated_filesystem(temp_dir=tmp_path):
-        result = runner.invoke(main, ["mcp"])
+def test_cli_project_error(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["mcp"])
     assert result.exit_code == 1
     assert "No hiraku.yml" in result.output
 
