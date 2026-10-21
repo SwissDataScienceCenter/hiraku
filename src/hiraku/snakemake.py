@@ -79,6 +79,8 @@ def generate_workflow(record: Record, *, config: HirakuConfig) -> str:
     for name, entrypoint in entrypoints.items():
         entrypoint = Entrypoint.model_validate(entrypoint)
         rule = _rule_name(name, used)
+        if rule == "all":
+            rule = _rule_name("all_entrypoint", used)
         rules.append(_render_rule(rule, name, entrypoint, record.id))
         all_outputs.extend(entrypoint.outputs)
     lines = [
@@ -117,6 +119,8 @@ def _render_rule(rule: str, name: str, entrypoint: Entrypoint, record_id: str) -
         f"HIRAKU_ENTRYPOINT={shlex.quote(name)}"
     )
     shell = " ".join([environment, *(shlex.quote(token) for token in command)])
+    # Snakemake formats shell strings with Python-style braces at execution time.
+    shell = shell.replace("{", "{{").replace("}", "}}")
     lines = [f"rule {rule}:"]
     for label, paths in (("input", entrypoint.inputs), ("output", entrypoint.outputs)):
         if paths:

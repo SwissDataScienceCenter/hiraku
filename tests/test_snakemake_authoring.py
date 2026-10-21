@@ -67,6 +67,28 @@ def test_generate_workflow_sanitizes_rule_names(tmp_path: Path) -> None:
     assert "rule train_model:" in text
 
 
+def test_generate_workflow_reserves_all_and_escapes_shell_braces(
+    tmp_path: Path,
+) -> None:
+    config = project(tmp_path)
+    record = Record.create(
+        "workflow",
+        config=config,
+        entrypoints={
+            "all": {
+                "command": ["python", "-c", "print({'result': 1})"],
+                "outputs": ["result.txt"],
+            }
+        },
+    )
+
+    text = generate_workflow(record, config=config)
+
+    assert text.count("rule all:") == 1
+    assert "rule all_entrypoint:" in text
+    assert "{{" in text and "}}" in text
+
+
 def test_generate_workflow_requires_entrypoints(tmp_path: Path) -> None:
     config = project(tmp_path)
     record = Record.create("workflow", config=config)
