@@ -195,7 +195,7 @@ class ProjectInitializer:
                 cls._install_mcp_configs(
                     project_root, created_files, created_dirs, replaced_files
                 )
-                for name in ("launch.sh", "worktree.sh"):
+                for name in ("launch.sh", "worktree.sh", "slurm.sh"):
                     dispatcher = config.dispatch_dir / name
                     if dispatcher.is_file():
                         dispatcher.chmod(dispatcher.stat().st_mode | 0o111)
