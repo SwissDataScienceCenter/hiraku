@@ -271,6 +271,59 @@ def run_details(selected_run: Mapping[str, Any] | None) -> mo.Html:
     return mo.as_html(_content)
 
 
+def file_table(files_df: pd.DataFrame) -> mo.ui.table:
+    """Table of workflow-declared files, one row per file and record."""
+    rows = [
+        {
+            "key": row["key"],
+            "record": row["record"],
+            "path": row["path"],
+            "roles": ", ".join(row["roles"]),
+            "state": row["state"],
+            "size_bytes": row["size_bytes"],
+            "runs": row["runs"],
+        }
+        for row in files_df.to_dict(orient="records")
+    ]
+    return mo.ui.table(
+        rows if rows else files_df,
+        selection="single",
+        hidden_columns=["key"],
+        page_size=25,
+        show_column_summaries=False,
+        show_data_types=False,
+        show_download=False,
+    )
+
+
+def file_details(
+    table: mo.ui.table, file_entries: Sequence[Mapping[str, Any]]
+) -> mo.Html:
+    """Render the selected file's roles and runs, or a selection prompt."""
+    value = table.value
+    if isinstance(value, list):
+        selected = value[0] if value else None
+    else:
+        selected = value.iloc[0].to_dict() if not value.empty else None
+    if selected is None:
+        return mo.as_html(
+            mo.md("Select a file to see its roles and the runs that declared it.")
+        )
+    row = next((r for r in file_entries if r["key"] == selected["key"]), selected)
+    text = dump_yaml(
+        {
+            "record": row["record"],
+            "path": row["path"],
+            "roles": list(row.get("roles") or []),
+            "state": row["state"],
+            "size_bytes": row.get("size_bytes"),
+            "runs": list(row.get("runs") or []),
+            "run_roles": dict(row.get("run_roles") or {}),
+        }
+    )
+    return mo.Html(f"<pre>{html.escape(text)}</pre>")
+
+
 def performance_controls(
     metrics: Sequence[str], default_metric: str | None
 ) -> mo.ui.dropdown:

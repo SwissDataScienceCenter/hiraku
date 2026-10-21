@@ -62,7 +62,12 @@ def project_data(config, refresh):
     project = hd.load(config)
     runs_df = hd.arrow_frame(hd.run_rows(project), hd.RUN_COLUMNS)
     records_df = hd.arrow_frame(hd.record_rows(project.records), hd.RECORD_COLUMNS)
-    return project, records_df, runs_df
+    file_entries = hd.file_rows(project)
+    files_df = hd.arrow_frame(
+        [{name: row.get(name) for name in hd.FILE_COLUMNS} for row in file_entries],
+        hd.FILE_COLUMNS,
+    )
+    return file_entries, files_df, project, records_df, runs_df
 
 
 @app.cell
@@ -149,6 +154,27 @@ def record_editor():
 def record_details(get_editor_revision, markdown_editor, selected_record):
     get_editor_revision()
     hc.markdown_view(selected_record, editor=markdown_editor)
+    return
+
+
+@app.cell
+def file_browser(files_df):
+    file_selector = hc.file_table(files_df)
+    mo.vstack(
+        [
+            mo.md(
+                f"**{len(files_df)} files declared by the workflow rules.** "
+                "One row per file and record."
+            ),
+            file_selector,
+        ]
+    )
+    return (file_selector,)
+
+
+@app.cell
+def file_details(file_entries, file_selector):
+    hc.file_details(file_selector, file_entries)
     return
 
 

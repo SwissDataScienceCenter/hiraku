@@ -5,6 +5,13 @@ attributed to them. The page is a [marimo](https://marimo.io) notebook served
 through [Marimo Studio](https://marimo-team.github.io/marimo-studio/). Its
 performance and metric trade-off plots are separate, independently placeable cells.
 
+The **Files** section lists the files declared by tracked workflow rules. Each
+Snakemake run captures the `input` and `output` paths its rules declare, and
+the dashboard aggregates them into one row per file and record: the roles the
+file plays, its last observed state and size, and the runs that used it. Only
+runs with rule declarations contribute files, so records tracked by backends
+without rules (CSV, MLflow, W&B) leave this section empty.
+
 Install the optional dependencies first:
 
 ```bash
@@ -110,6 +117,11 @@ location.
     and the value of the first metric the records declare. Select a record to
     compare its subtree, or a run to inspect it.
 
+**Files**
+:   The files the tracked workflow rules declare, one row per file and record,
+    with its input/output roles, last observed state and size, and the runs
+    that used it. Select a row to see the run-by-run roles.
+
 **Run**
 :   The selected run's ID, record, entrypoint, commit, start time, duration,
     parameters, and metrics, plus a link to the run in its tracking backend when
@@ -213,9 +225,10 @@ or closing the session discards them.
 
 ## Run and record tables
 
-The notebook reads your project once and builds two pandas DataFrames backed
-by Apache Arrow for the run table, run details, and metric analysis. Record
-details use the already loaded record objects to retain complete front matter.
+The notebook reads your project once and builds three pandas DataFrames backed
+by Apache Arrow for the run table, run details, files table, and metric
+analysis. Record details use the already loaded record objects to retain
+complete front matter.
 
 `runs_df`
 :   One row per run in execution order: `run`, `record`, `record_path`,
@@ -227,10 +240,15 @@ details use the already loaded record objects to retain complete front matter.
     `type`, `status`, `decision`, `commit`, `metrics` (a list of declared
     `name` and `direction` pairs), and `description` (the record's Markdown).
 
+`files_df`
+:   One row per file the workflow rules declare, aggregated per record and
+    path: `record`, `path`, `roles`, `state`, `size_bytes`, and `runs`.
+
 | View | Reads |
 | --- | --- |
 | Runs table | `records_df` rows, each followed by its runs from `runs_df` |
 | Run details | the selected run's row of `runs_df` |
+| Files table | the rows of `files_df` |
 | Performance plot | selected record subtree in `runs_df`; choose one metric |
 | Trade-off plot | selected record subtree in `runs_df`; choose two metrics and their objectives |
 

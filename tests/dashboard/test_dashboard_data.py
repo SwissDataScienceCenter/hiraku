@@ -12,6 +12,7 @@ from hiraku.dashboard.data import (
     arrow_frame,
     default_metric,
     execution_order,
+    file_rows,
     find_run,
     format_duration,
     load,
@@ -29,7 +30,7 @@ from hiraku.dashboard.data import (
 )
 from hiraku.errors import BackendError
 from hiraku.record import Record
-from hiraku.run import Run
+from hiraku.run import Run, RunFile
 
 
 def tables(project: HirakuConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -61,6 +62,71 @@ def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:
     assert sorted(run.id for run in loaded.runs) == ["r0", "r1", "r2", "r3", "r4"]
     assert set(loaded.sources.values()) == {"csv"}
     assert loaded.errors == []
+
+
+def test_file_rows_aggregate_declared_files_and_observations() -> None:
+    from hiraku.dashboard.data import ProjectRuns
+
+    run = Run(
+        id="run-1",
+        record_id="workflow",
+        declared_inputs=("data/used.tsv",),
+        declared_outputs=("data/produced.tsv",),
+        inputs=(RunFile(path="data/used.tsv", state="file", size=20),),
+        outputs=(RunFile(path="data/produced.tsv", state="file", size=30),),
+    )
+
+    rows = file_rows(ProjectRuns(records=[], runs=[run]))
+
+    assert [(row["path"], row["roles"], row["state"]) for row in rows] == [
+        ("data/produced.tsv", ["output"], "file"),
+        ("data/used.tsv", ["input"], "file"),
+    ]
+    assert rows[0]["size_bytes"] == 30
+    assert rows[0]["runs"] == ["run-1"]
+    assert rows[0]["run_roles"] == {"run-1": ["output"]}
+    assert rows[1]["size_bytes"] == 20
+    assert rows[1]["run_roles"] == {"run-1": ["input"]}
+
+
+def test_file_rows_merge_roles_across_runs() -> None:
+    from hiraku.dashboard.data import ProjectRuns
+
+    first = Run(
+        id="run-1",
+        record_id="workflow",
+        declared_outputs=("data/intermediate.csv",),
+        outputs=(RunFile(path="data/intermediate.csv", state="file", size=5),),
+    )
+    second = Run(
+        id="run-2",
+        record_id="workflow",
+        declared_inputs=("data/intermediate.csv",),
+        declared_outputs=("results/final.csv",),
+        inputs=(RunFile(path="data/intermediate.csv", state="file", size=6),),
+    )
+
+    rows = file_rows(ProjectRuns(records=[], runs=[first, second]))
+
+    by_path = {row["path"]: row for row in rows}
+    assert set(by_path) == {"data/intermediate.csv", "results/final.csv"}
+    assert by_path["data/intermediate.csv"]["roles"] == ["output", "input"]
+    assert by_path["data/intermediate.csv"]["runs"] == ["run-1", "run-2"]
+    # The most recent observation wins.
+    assert by_path["data/intermediate.csv"]["state"] == "file"
+    assert by_path["data/intermediate.csv"]["size_bytes"] == 6
+    assert by_path["data/intermediate.csv"]["run_roles"] == {
+        "run-1": ["output"],
+        "run-2": ["input"],
+    }
+
+
+def test_file_rows_ignore_runs_without_rule_declarations() -> None:
+    from hiraku.dashboard.data import ProjectRuns
+
+    run = Run(id="csv-run", record_id="a")
+
+    assert file_rows(ProjectRuns(records=[], runs=[run])) == []
 
 
 def test_load_reports_unavailable_source_without_failing(

@@ -1,9 +1,11 @@
-"""Data for the dashboard: two tables and the views built from them.
+"""Data for the dashboard: record, run, and workflow-file views.
 
 ``load`` reads the records and the runs of their tracking backends. ``run_rows``
 and ``record_rows`` flatten them into ``runs_df`` and ``records_df`` for the
-run tree, run details, metric choice, and plots. Markdown details use the same
-loaded records to retain their complete front matter. Nothing here imports
+run tree, run details, metric choice, and plots. ``file_rows`` aggregates the
+``input`` and ``output`` paths each run's workflow rules declare, enriched with
+the observed state and size the run reported for them. Markdown details use the
+same loaded records to retain their complete front matter. Nothing here imports
 marimo, so it can be tested without a notebook runtime.
 """
 
@@ -52,6 +54,15 @@ RECORD_COLUMNS = (
     "commit",
     "metrics",
     "description",
+)
+FILE_COLUMNS = (
+    "key",
+    "record",
+    "path",
+    "roles",
+    "state",
+    "size_bytes",
+    "runs",
 )
 
 
@@ -176,6 +187,62 @@ def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
             "description": record.markdown.strip() or None,
         }
         for record in ordered
+    ]
+
+
+def file_rows(project: ProjectRuns) -> list[dict[str, Any]]:
+    """Flatten the files each run's workflow rules declare.
+
+    Snakemake rules declare ``input`` and ``output`` paths, captured on each
+    run as ``declared_inputs`` and ``declared_outputs``. One row per
+    ``(record, path)`` pair aggregates the roles the file plays and the runs
+    that declared it, and carries the observed state and size from the most
+    recent run that reported one. Runs without rule declarations contribute
+    no rows.
+    """
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for run in execution_order(project.runs):
+        record_id = str(run.record_id) if run.record_id is not None else None
+        if record_id is None:
+            continue
+        observed = {
+            item.path: (item.state, item.size) for item in (*run.inputs, *run.outputs)
+        }
+        for role, declared in (
+            ("input", run.declared_inputs),
+            ("output", run.declared_outputs),
+        ):
+            for path in declared:
+                key = (record_id, path)
+                row = rows.get(key)
+                if row is None:
+                    row = {
+                        "record": record_id,
+                        "path": path,
+                        "roles": [],
+                        # No observation yet: "declared" marks a rule file whose
+                        # observed state is unknown; a matching observation
+                        # replaces it below.
+                        "state": "declared",
+                        "size_bytes": None,
+                        "runs": [],
+                        "run_roles": {},
+                    }
+                    rows[key] = row
+                if role not in row["roles"]:
+                    row["roles"].append(role)
+                if run.id not in row["runs"]:
+                    row["runs"].append(run.id)
+                row["run_roles"].setdefault(run.id, []).append(role)
+                state, size = observed.get(path, (None, None))
+                if state is not None:
+                    row["state"] = state
+                    row["size_bytes"] = size
+    return [
+        {"key": str(index), **row}
+        for index, row in enumerate(
+            sorted(rows.values(), key=lambda item: (item["record"], item["path"]))
+        )
     ]
 
 
