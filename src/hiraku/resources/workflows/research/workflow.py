@@ -8,6 +8,12 @@ launches first, then implementations, triage, analyses, and designs, each in
 breadth-first order. An experiment's step is derived from the evidence on its
 record (commit, attributed runs, verdict, triage decision), not stored, so
 edits made outside the session are picked up.
+
+With the `autonomous` setting, no person approves anything, so independent
+reviews take that role: a design review before experiments are implemented, a
+code review before an experiment is launched, and a result review before it is
+triaged. A review that finds a problem sends the work back to the step that
+fixes it, up to `review_rounds` times per experiment.
 """
 
 from __future__ import annotations
@@ -36,15 +42,29 @@ Decision = Literal["follow-up", "stop"]
 # compute comes first, so jobs run while the agent analyzes and designs; triage
 # precedes analysis, so an analyzed experiment is triaged right away.
 # "waiting" experiments only need time.
-STEPS = ("launch", "implement", "triage", "analyze", "design")
+# Reviews come right before the step they unblock.
+STEPS = (
+    "launch",
+    "review_code",
+    "review_design",
+    "implement",
+    "review_result",
+    "triage",
+    "analyze",
+    "design",
+)
+REVIEWS = ["review_design", "review_code", "review_result"]
 WORK = [
     "setup",
     "draft",
     "design",
+    "review_design",
     "implement",
+    "review_code",
     "launch",
     "wait",
     "analyze",
+    "review_result",
     "triage",
 ]
 NODES = [*WORK, "finished"]
@@ -57,6 +77,14 @@ AUTONOMOUS = "Decide on your own; do not wait for the user."
 # and every later instruction refers to it.
 SETUP_CONTEXT = "project-setup"
 READ_CONTEXTS = "Read the Hiraku contexts referenced below before you start."
+# Keep the end of long smoke-test output.
+SMOKE_OUTPUT_LIMIT = 4000
+Sources = Annotated[
+    list[str],
+    "Where the judgement comes from: URLs, papers, or 'model knowledge'.",
+    Field(min_length=1),
+]
+Findings = Annotated[str, "What is wrong and how to fix it, or why it holds."]
 
 
 class Plan(BaseModel):
@@ -80,6 +108,11 @@ class Study(State):
     max_repairs: int = 2
     # The experiment the agent works on, or the parent to design under.
     current: str | None = None
+    # The commit under code review; a review must not change it.
+    review_commit: str | None = None
+    # Feedback of rejected design reviews and their count, by parent record.
+    design_feedback: dict[str, str] = Field(default_factory=dict)
+    design_rounds: dict[str, int] = Field(default_factory=dict)
 
 
 class Research(Workflow):
@@ -94,6 +127,8 @@ class Research(Workflow):
     # Settings, overridable in the front matter of workflow.md.
     rules: str = ""
     autonomous: bool = False
+    # Reviews that send an experiment back before it is concluded as is.
+    review_rounds: int = 2
 
     @start(dest=NODES)
     def start(
@@ -169,6 +204,7 @@ class Research(Workflow):
             "depth": self._depth(parent, study) + 1,
             "remaining": self._remaining(study, tree),
             "tree": tree,
+            "review_feedback": study.design_feedback.get(parent.id),
         }
         return self._step("## Design", data, records=[study.task, parent.id])
 
@@ -182,6 +218,8 @@ class Research(Workflow):
             "parent_commit": parent.commit if parent.type == "experiment" else None,
             "entrypoint": study.entrypoint,
             "failure": getattr(experiment, "failure", None),
+            "review_feedback": getattr(experiment, "review_feedback", None),
+            "smoke_test_required": self.autonomous,
         }
         return self._step(
             "## Implement", data, gate=False, records=[study.task, experiment.id]
@@ -231,9 +269,75 @@ class Research(Workflow):
                 }
                 for run in runs
             ],
+            "review_feedback": getattr(experiment, "review_feedback", None),
         }
         return self._step(
             "## Analyze", data, gate=False, records=[study.task, experiment.id]
+        )
+
+    @node("review_design")
+    def reviewing_design(self, study: Study) -> Instruction:
+        batch = self._batch(study)
+        parent = self._record(batch[0].parent_id)
+        data = {
+            "task": _describe(self._record(study.task)),
+            "metrics": _metrics(self._record(study.task), config=self.config),
+            "parent": _describe(parent),
+            "experiments": [_describe(item) for item in batch],
+            "tree": self._tree(study),
+        }
+        return self._step(
+            "## Review design",
+            data,
+            gate=False,
+            records=[study.task, parent.id, *(item.id for item in batch)],
+        )
+
+    @node("review_code")
+    def reviewing_code(self, study: Study) -> Instruction:
+        experiment = self._record(study.current)
+        parent = self._record(experiment.parent_id)
+        base = parent.commit if parent.type == "experiment" else None
+        commit = str(experiment.commit)
+        data = {
+            "experiment": _describe(experiment),
+            "entrypoint": study.entrypoint,
+            "diff": f"git diff {base or commit + '^'} {commit}",
+            "smoke_test": {
+                "command": getattr(experiment, "smoke_command", None),
+                "output": getattr(experiment, "smoke_output", None),
+            },
+        }
+        return self._step(
+            "## Review code", data, gate=False, records=[study.task, experiment.id]
+        )
+
+    @node("review_result")
+    def reviewing_result(self, study: Study) -> Instruction:
+        experiment = self._record(study.current)
+        parent = self._record(experiment.parent_id)
+        task = self._record(study.task)
+        plan = _describe(experiment)
+        analysis = {
+            "verdict": plan.pop("verdict"),
+            "conclusion": plan.pop("conclusion"),
+        }
+        data = {
+            "experiment": plan,
+            "parent": _describe(parent) if parent.type == "experiment" else None,
+            "metrics": _metrics(task, config=self.config),
+            "runs": [
+                {
+                    "run_id": run.id,
+                    "metrics": dict(run.metrics),
+                    "params": dict(run.params),
+                }
+                for run in self._runs(experiment, study)
+            ],
+            "analysis": analysis,
+        }
+        return self._step(
+            "## Review result", data, gate=False, records=[study.task, experiment.id]
         )
 
     @node("triage")
@@ -330,13 +434,25 @@ class Research(Workflow):
 
     @event(source="implement", dest=NODES)
     def implemented(
-        self, study: Study, *, commit: Annotated[str, "Commit with the change."]
+        self,
+        study: Study,
+        *,
+        commit: Annotated[str, "Commit with the change."],
+        smoke_command: Annotated[str, "The smoke test you ran."] = "",
+        smoke_output: Annotated[str, "Its output, or the end of it."] = "",
     ) -> Study:
         """Submit the commit that implements the experiment."""
         with _checked():
+            if self.autonomous and not (smoke_command.strip() and smoke_output.strip()):
+                raise EventRejected(
+                    "Run a smoke test of the change and send its command and output"
+                )
             experiment = self._record(study.current)
             experiment.commit = GitRepository(self.config).resolve(commit)
             experiment.status = "implemented"
+            experiment.smoke_command = smoke_command or None
+            experiment.smoke_output = smoke_output[-SMOKE_OUTPUT_LIMIT:] or None
+            experiment.review_feedback = None
             experiment.save()
             return self._assign(study)
 
@@ -374,6 +490,7 @@ class Research(Workflow):
                 experiment.conclusion = (
                     f"Could not be run after {study.max_repairs} repairs: {reason}"
                 )
+                experiment.result_review = "not needed"
             else:
                 experiment.commit = None
                 experiment.status = "designed"
@@ -408,6 +525,105 @@ class Research(Workflow):
             experiment.verdict = verdict
             experiment.conclusion = conclusion
             experiment.status = "analyzed"
+            experiment.result_review = None
+            experiment.review_feedback = None
+            experiment.save()
+            return self._assign(study)
+
+    @event(source="review_design", dest=NODES)
+    def design_reviewed(
+        self,
+        study: Study,
+        *,
+        decision: Annotated[
+            Literal["approve", "revise"], "Approve the experiments, or redesign them."
+        ],
+        findings: Findings,
+        sources: Sources,
+    ) -> Study:
+        """Submit the independent review of the designed experiments."""
+        with _checked():
+            batch = self._batch(study)
+            parent_id = str(batch[0].parent_id)
+            review = {"kind": "design", "decision": decision, "findings": findings}
+            rounds = study.design_rounds.get(parent_id, 0) + 1
+            if decision == "revise" and rounds <= self.review_rounds:
+                # The experiments are not implemented yet: drop them and redesign.
+                study.design_rounds[parent_id] = rounds
+                study.design_feedback[parent_id] = findings
+                for experiment in batch:
+                    experiment.delete(config=self.config)
+                return self._assign(study)
+            outcome = "approved" if decision == "approve" else "unresolved"
+            for experiment in batch:
+                experiment.design_review = outcome
+                _log_review(experiment, {**review, "sources": sources})
+                experiment.save()
+            study.design_feedback.pop(parent_id, None)
+            return self._assign(study)
+
+    @event(source="review_code", dest=NODES)
+    def code_reviewed(
+        self,
+        study: Study,
+        *,
+        decision: Annotated[
+            Literal["approve", "fix"], "Launch the code, or send it back to fix."
+        ],
+        findings: Findings,
+    ) -> Study:
+        """Submit the independent review of the experiment's code."""
+        with _checked():
+            experiment = self._record(study.current)
+            if experiment.commit != study.review_commit:
+                raise EventRejected(
+                    "The experiment's commit changed during the review; a review "
+                    "must not change code"
+                )
+            _log_review(
+                experiment,
+                {"kind": "code", "decision": decision, "findings": findings},
+            )
+            if decision == "approve":
+                experiment.code_review = experiment.commit
+            else:
+                self._send_back(experiment, "code", findings, to="implement")
+            experiment.save()
+            return self._assign(study)
+
+    @event(source="review_result", dest=NODES)
+    def result_reviewed(
+        self,
+        study: Study,
+        *,
+        own_verdict: Annotated[
+            Verdict, "Your verdict from the runs, formed before reading the analysis."
+        ],
+        decision: Annotated[
+            Literal["approve", "reanalyze", "fix_code"],
+            "Accept the analysis, redo it, or fix the code and run again.",
+        ],
+        findings: Findings,
+        sources: Sources,
+    ) -> Study:
+        """Submit the independent review of the experiment's result."""
+        with _checked():
+            experiment = self._record(study.current)
+            _log_review(
+                experiment,
+                {
+                    "kind": "result",
+                    "decision": decision,
+                    "own_verdict": own_verdict,
+                    "findings": findings,
+                    "sources": sources,
+                },
+            )
+            if decision == "approve":
+                experiment.result_review = "approved"
+            else:
+                to = "analyze" if decision == "reanalyze" else "implement"
+                self._send_back(experiment, "result", findings, to=to)
             experiment.save()
             return self._assign(study)
 
@@ -465,6 +681,7 @@ class Research(Workflow):
                     "triage_reason": getattr(experiment, "triage_reason", None),
                     "failure": getattr(experiment, "failure", None),
                     "repairs": getattr(experiment, "repairs", 0) or 0,
+                    "reviews": getattr(experiment, "reviews", None) or [],
                     "runs": [
                         {"run_id": run.id, "metrics": dict(run.metrics)} for run in runs
                     ],
@@ -510,6 +727,8 @@ class Research(Workflow):
                 open_steps, key=lambda item: (STEPS.index(item[0]), item[1])
             )
             study.node, study.current = step, record_id
+            if step == "review_code":
+                study.review_commit = self._record(record_id).commit
             return study
         waiting = any(step == "waiting" for step, _index, _id in steps)
         study.node = "wait" if waiting else "finished"
@@ -518,22 +737,82 @@ class Research(Workflow):
     def _step_of(
         self, experiment: Record, study: Study, children: dict[str, list[Record]]
     ) -> str:
-        """Derive the step an experiment needs from the evidence on its record."""
+        """Derive the step an experiment needs from the evidence on its record.
+
+        Reviews apply only to autonomous studies, and only at the point an
+        experiment has reached, so switching modes mid-study does not reopen
+        finished work.
+        """
+        reviewed = not self.autonomous
         if getattr(experiment, "verdict", None):
             triage = getattr(experiment, "triage", None)
+            if (
+                not reviewed
+                and triage is None
+                and experiment.status == "analyzed"
+                and getattr(experiment, "result_review", None) is None
+            ):
+                return "review_result"
             if triage is None:
                 return "triage"
             if triage == "follow-up" and not children.get(experiment.id):
                 return "design"
             return "done"
         if experiment.commit is None:
+            if not reviewed and getattr(experiment, "design_review", None) is None:
+                return "review_design"
             return "implement"
+        if (
+            not reviewed
+            and experiment.status == "implemented"
+            and getattr(experiment, "code_review", None) != experiment.commit
+        ):
+            return "review_code"
         runs = self._runs(experiment, study)
         if any(run.metrics for run in runs):
             return "analyze"
         if runs or experiment.status == "launched":
             return "waiting"
         return "launch"
+
+    def _batch(self, study: Study) -> list[Record]:
+        """The experiments under review: the current one's unreviewed siblings."""
+        current = self._record(study.current)
+        siblings = self._children(study).get(str(current.parent_id), [])
+        return [
+            item
+            for item in siblings
+            if item.commit is None and getattr(item, "design_review", None) is None
+        ] or [current]
+
+    def _send_back(
+        self, experiment: Record, kind: str, findings: str, *, to: str
+    ) -> None:
+        """Return an experiment to `to` with the findings, or conclude it."""
+        field = f"{kind}_rounds"
+        rounds = int(getattr(experiment, field, 0) or 0) + 1
+        setattr(experiment, field, rounds)
+        if rounds > self.review_rounds:
+            experiment.status = "analyzed"
+            experiment.verdict = "inconclusive"
+            experiment.conclusion = (
+                f"Did not pass the {kind} review after {self.review_rounds} "
+                f"rounds: {findings}"
+            )
+            experiment.result_review = "not needed"
+            return
+        experiment.review_feedback = findings
+        if to == "analyze":
+            experiment.verdict = None
+            experiment.conclusion = None
+            experiment.status = "launched"
+            return
+        experiment.commit = None
+        experiment.code_review = None
+        experiment.verdict = None
+        experiment.conclusion = None
+        experiment.result_review = None
+        experiment.status = "designed"
 
     def _children(self, study: Study) -> dict[str, list[Record]]:
         children: dict[str, list[Record]] = {}
@@ -730,6 +1009,11 @@ def _metrics(record: Record, *, config: Any = None) -> list[dict[str, Any]]:
         item.model_dump() if isinstance(item, BaseModel) else dict(item)
         for item in values
     ]
+
+
+def _log_review(experiment: Record, review: dict[str, Any]) -> None:
+    reviews = list(getattr(experiment, "reviews", None) or [])
+    experiment.reviews = [*reviews, review]
 
 
 def _context_exists(context_id: str, workflow: Workflow) -> bool:

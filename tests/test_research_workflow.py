@@ -422,3 +422,204 @@ def test_instructions_refer_to_setup_and_record_contexts(
     assert harness.node == "## Launch"
     references = harness.instruction["context"]
     assert references["contexts"] == ["project-setup", "protocol", "papers"]
+
+
+def autonomous(config: HirakuConfig, rounds: int = 2) -> None:
+    path = config.workflows_dir / "research" / "workflow.md"
+    path.write_text(
+        path.read_text().replace(
+            "id: research\n",
+            f"id: research\nautonomous: true\nreview_rounds: {rounds}\n",
+            1,
+        )
+    )
+
+
+SMOKE = {"smoke_command": "python train.py --steps 2", "smoke_output": "loss 0.9"}
+
+
+def implement_reviewed(harness: Harness, config: HirakuConfig, name: str) -> str:
+    """Implement the assigned experiment and pass its code review."""
+    assert harness.node == "## Implement"
+    sha = commit(config, name)
+    assert harness.send("implemented", commit=sha, **SMOKE)["status"] == "accepted"
+    assert harness.node == "## Review code"
+    harness.send("code_reviewed", decision="approve", findings="Looks right")
+    return sha
+
+
+def test_autonomous_study_reviews_design_code_and_result(
+    config: HirakuConfig,
+) -> None:
+    autonomous(config)
+    harness = Harness(config)
+    harness.start(max_depth=1)
+    harness.send("designed", experiments=[plan("a")])
+    assert harness.node == "## Review design"
+    assert [item["record_id"] for item in harness.data["experiments"]] == ["a"]
+    assert "fresh subagent" in harness.instruction["text"]
+    harness.send(
+        "design_reviewed",
+        decision="approve",
+        findings="Fair comparison",
+        sources=["model knowledge"],
+    )
+
+    assert harness.node == "## Implement"
+    assert harness.data["smoke_test_required"] is True
+    no_smoke = harness.send("implemented", commit=commit(config, "a"))
+    assert no_smoke["status"] == "rejected"
+    assert "smoke test" in no_smoke["message"]
+    harness.send("implemented", commit="HEAD", **SMOKE)
+    assert harness.node == "## Review code"
+    sha = git(config, "rev-parse", "HEAD")
+    assert harness.data["diff"] == f"git diff {sha}^ {sha}"
+    assert harness.data["smoke_test"]["output"] == "loss 0.9"
+    harness.send("code_reviewed", decision="approve", findings="No bugs")
+
+    assert harness.node == "## Launch"
+    harness.send("launched")
+    add_run(config, "run-a", "a", sha, "0.9")
+    harness.send("checked")
+    harness.send("analyzed", verdict="supports", conclusion="run-a: 0.9")
+    assert harness.node == "## Review result"
+    assert "verdict" not in harness.data["experiment"]
+    assert harness.data["analysis"]["verdict"] == "supports"
+    harness.send(
+        "result_reviewed",
+        own_verdict="supports",
+        decision="approve",
+        findings="0.9 supports it",
+        sources=["https://example.org/paper"],
+    )
+    assert harness.node == "## Triage"
+    reviews = load_record("a", config=config).reviews
+    assert [item["kind"] for item in reviews] == ["design", "code", "result"]
+    assert reviews[2]["own_verdict"] == "supports"
+
+
+def test_rejected_design_is_redesigned_then_kept_after_the_limit(
+    config: HirakuConfig,
+) -> None:
+    autonomous(config, rounds=1)
+    harness = Harness(config)
+    harness.start(max_depth=1)
+    harness.send("designed", experiments=[plan("a"), plan("b")])
+    harness.send(
+        "design_reviewed",
+        decision="revise",
+        findings="No control",
+        sources=["model knowledge"],
+    )
+    assert harness.node == "## Design"
+    assert harness.data["review_feedback"] == "No control"
+    assert harness.data["tree"] == []  # the rejected experiments are gone
+
+    harness.send("designed", experiments=[plan("c")])
+    harness.send(
+        "design_reviewed",
+        decision="revise",
+        findings="Still no control",
+        sources=["model knowledge"],
+    )
+    # Over the limit: the design is kept, marked unresolved, and implemented.
+    assert harness.node == "## Implement"
+    assert load_record("c", config=config).design_review == "unresolved"
+
+
+def test_code_review_sends_back_then_concludes_after_the_limit(
+    config: HirakuConfig,
+) -> None:
+    autonomous(config, rounds=1)
+    harness = Harness(config)
+    harness.start(max_depth=1)
+    harness.send("designed", experiments=[plan("a")])
+    harness.send(
+        "design_reviewed",
+        decision="approve",
+        findings="ok",
+        sources=["model knowledge"],
+    )
+    harness.send("implemented", commit=commit(config, "a"), **SMOKE)
+    harness.send("code_reviewed", decision="fix", findings="Off-by-one in the loop")
+    assert harness.node == "## Implement"
+    assert harness.data["review_feedback"] == "Off-by-one in the loop"
+
+    harness.send("implemented", commit=commit(config, "a2"), **SMOKE)
+    assert harness.node == "## Review code"
+    harness.send("code_reviewed", decision="fix", findings="Still off by one")
+    assert harness.node == "## Triage"
+    record = load_record("a", config=config)
+    assert record.verdict == "inconclusive"
+    assert "Still off by one" in record.conclusion
+
+
+def test_result_review_reanalyzes_or_sends_code_back(config: HirakuConfig) -> None:
+    autonomous(config)
+    harness = Harness(config)
+    harness.start(max_depth=1)
+    harness.send("designed", experiments=[plan("a")])
+    harness.send(
+        "design_reviewed",
+        decision="approve",
+        findings="ok",
+        sources=["model knowledge"],
+    )
+    sha = implement_reviewed(harness, config, "a")
+    harness.send("launched")
+    add_run(config, "run-a", "a", sha, "0.9")
+    harness.send("checked")
+    harness.send("analyzed", verdict="supports", conclusion="Better")
+    harness.send(
+        "result_reviewed",
+        own_verdict="inconclusive",
+        decision="reanalyze",
+        findings="One run cannot support it",
+        sources=["model knowledge"],
+    )
+    assert harness.node == "## Analyze"
+    assert harness.data["review_feedback"] == "One run cannot support it"
+
+    harness.send("analyzed", verdict="inconclusive", conclusion="One run only")
+    assert harness.node == "## Review result"
+    harness.send(
+        "result_reviewed",
+        own_verdict="inconclusive",
+        decision="fix_code",
+        findings="Accuracy 0.9 on random labels means leakage",
+        sources=["model knowledge"],
+    )
+    assert harness.node == "## Implement"
+    record = load_record("a", config=config)
+    assert record.commit is None and record.verdict is None
+    assert "leakage" in harness.data["review_feedback"]
+
+
+def test_code_review_must_not_change_the_commit(config: HirakuConfig) -> None:
+    autonomous(config)
+    harness = Harness(config)
+    harness.start(max_depth=1)
+    harness.send("designed", experiments=[plan("a")])
+    harness.send(
+        "design_reviewed",
+        decision="approve",
+        findings="ok",
+        sources=["model knowledge"],
+    )
+    harness.send("implemented", commit=commit(config, "a"), **SMOKE)
+    record = load_record("a", config=config)
+    record.commit = commit(config, "reviewer edit")
+    record.save()
+    rejected = harness.send("code_reviewed", decision="approve", findings="ok")
+    assert rejected["status"] == "rejected"
+    assert "must not change code" in rejected["message"]
+
+
+def test_reviews_are_skipped_when_a_person_approves(config: HirakuConfig) -> None:
+    harness = Harness(config)
+    harness.start(max_depth=1)
+    harness.send("designed", experiments=[plan("a")])
+    assert harness.node == "## Implement"
+    assert harness.data["smoke_test_required"] is False
+    harness.send("implemented", commit=commit(config, "a"))
+    assert harness.node == "## Launch"

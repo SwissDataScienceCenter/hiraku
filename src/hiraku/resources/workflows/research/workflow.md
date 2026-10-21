@@ -51,7 +51,8 @@ proposing, and do not repeat an experiment that is already in the tree.
 Propose at most `remaining` experiments. Give each a short new record ID, a
 one-line summary, the hypothesis, the outcome that would support it in terms of
 the task metrics, and the planned code change. Send them with `designed`;
-Hiraku creates the experiment records.
+Hiraku creates the experiment records. If `review_feedback` is set, an
+independent review rejected the previous design for this parent: address it.
 
 ## Implement
 
@@ -61,8 +62,13 @@ experiment describes. The entrypoint runs as its command plus `--key value`
 options, without a shell, so it must not rely on positional arguments or
 placeholders. Each run must be recorded as the `project-setup` context
 describes, with the task's metrics. If
-`failure` is set, an earlier attempt failed to run: fix that first. Commit the
-change and send `implemented` with the commit.
+`failure` is set, an earlier attempt failed to run: fix that first. If
+`review_feedback` is set, a review found problems: fix them. Then run a smoke
+test that exercises the change quickly, as the `project-setup` context
+describes (for example a few steps on a tiny input), and fix what it shows.
+Commit the change and send `implemented` with the commit, the smoke test's
+command, and its output (`smoke_test_required` says whether they are
+mandatory).
 
 ## Launch
 
@@ -87,7 +93,64 @@ Compare the runs in the data with the experiment's hypothesis and expected
 outcome, the task's metrics and their direction, and the parent's result if
 there is one. Runs with another commit or entrypoint are left out. Send
 `analyzed` with a verdict (`supports`, `refutes`, or `inconclusive`) and a
-conclusion of a few sentences that cites run IDs and metric values.
+conclusion of a few sentences that cites run IDs and metric values. If
+`review_feedback` is set, a review disputed the previous analysis: address it.
+
+## Review design
+
+Review the experiments in the data as an independent expert, before any of
+them is implemented. Judge only what is in the data, the task, and the
+literature: whether each hypothesis is plausible and worth testing, whether the
+planned change actually tests it (a fair comparison, controls, no leakage of
+evaluation data), whether the expected outcome can be measured with the task's
+metrics, and whether the batch repeats work already in the tree. Use web search
+for related work and known results, and your own knowledge; list what you used
+in `sources`. Approve, or ask to `revise` with concrete findings.
+
+Work independently of whoever did the step: rely only on this instruction,
+the records, the repository, and your sources, not on earlier conversation. In
+a conversation that has done other steps of this study, hand this instruction
+to a fresh subagent (for example Claude Code's Agent tool) and send the event
+with its findings unchanged. Do not change code, commits, or records during a
+review.
+
+## Review code
+
+Review the experiment's code change as an independent reviewer. Read the
+change with the `diff` command and the planned change in the data, and check
+the logic: bugs, a change that does not implement the plan, evaluation or data
+handling that could bias the result, and entrypoint or run recording that
+breaks the `project-setup` context. The author ran a smoke test; read its
+command and output in `smoke_test`, and run it again only if the output is
+missing or does not show the change working. Approve, or send it back to `fix`
+with concrete findings.
+
+Work independently of whoever did the step: rely only on this instruction,
+the records, the repository, and your sources, not on earlier conversation. In
+a conversation that has done other steps of this study, hand this instruction
+to a fresh subagent (for example Claude Code's Agent tool) and send the event
+with its findings unchanged. Do not change code, commits, or records during a
+review.
+
+## Review result
+
+Review the experiment's result as an independent reviewer. First, before you
+read `analysis`, form your own verdict from the runs, the hypothesis and
+expected outcome, the task's metrics and their direction, and the parent's
+result; check the numbers against what the literature or your own knowledge
+says is plausible for this setup, and list what you used in `sources`. Then
+read `analysis` and compare. Approve if it holds; ask to `reanalyze` if the
+conclusion does not follow from the runs; ask to `fix_code` if the runs
+themselves look wrong (for example a bug, a broken evaluation, or numbers that
+cannot be right), so the code is fixed and run again. Send your own verdict in
+`own_verdict` and concrete findings.
+
+Work independently of whoever did the step: rely only on this instruction,
+the records, the repository, and your sources, not on earlier conversation. In
+a conversation that has done other steps of this study, hand this instruction
+to a fresh subagent (for example Claude Code's Agent tool) and send the event
+with its findings unchanged. Do not change code, commits, or records during a
+review.
 
 ## Triage
 
