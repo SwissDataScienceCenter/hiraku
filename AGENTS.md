@@ -58,6 +58,7 @@ Useful project commands include:
 
 ```bash
 uv run hiraku --help
+uv run hiraku-agent --help
 uv run zensical serve
 uv run python scripts/check_changelog.py
 ```
@@ -94,6 +95,7 @@ The repository is a single `uv`-managed Python project.
 | `src/hiraku/workflows/session.py` | Stored workflow state, data, and event correlation |
 | `src/hiraku/workflows/graph.py` | Graph construction, validation, and Mermaid diagrams |
 | `src/hiraku/workflows/markdown.py` | Markdown-only workflow definitions and YAML argument inference |
+| `src/hiraku/agent.py` | `hiraku-agent`: runs workflow sessions with a coding agent from the terminal |
 | `src/hiraku/mcp.py` | Stdio MCP server (`MCPServer`); `add_workflow_tools` adds the workflow and session tools, prompts, and resources |
 | `src/hiraku/resources/` | Bundled workflows, dispatchers, skills, and examples |
 | `tests/` | Unit, CLI, integration, tracking, and example tests |
@@ -128,8 +130,9 @@ Generated or transient paths:
   return stored instructions without rerunning handlers.
 - Import workflow APIs from their defining modules; keep `workflows/__init__.py`
   free of re-exports and eager imports. Keep MCP SDK imports in `mcp.py`.
-- See [the workflow guide](docs/guides/workflows.md) for authoring and execution
-  contracts.
+- Terminal workers write event files; the parent validates and submits them after
+  successful worker exit. See [the workflow guide](docs/guides/workflows.md) for
+  authoring and execution contracts.
 - Bundled resources under `src/hiraku/resources/` are installed by
   `hiraku init`; changes to them may affect newly initialized projects and
   should include appropriate example or integration coverage.

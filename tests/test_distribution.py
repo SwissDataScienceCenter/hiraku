@@ -40,8 +40,13 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         f"hiraku/workflows/{module}.py"
         for module in ("__init__", "workflow", "session", "graph", "markdown")
     )
+    expected.add("hiraku/agent.py")
     with ZipFile(wheels[0]) as wheel:
         packaged = set(wheel.namelist())
+        entrypoints = next(
+            name for name in packaged if name.endswith(".dist-info/entry_points.txt")
+        )
+        assert "hiraku.agent:main" in wheel.read(entrypoints).decode()
 
     assert expected <= packaged, f"Missing packaged resources: {expected - packaged}"
 
