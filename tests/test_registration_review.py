@@ -227,21 +227,14 @@ def test_cli_preview_and_apply(tmp_path: Path) -> None:
     _write_manifest(path, manifest)
 
     runner = CliRunner()
-    preview = runner.invoke(main, ["registry", "import", str(path), "--json"])
+    base = ["registry", "import", str(path), "--project", str(tmp_path)]
+    preview = runner.invoke(main, [*base, "--json"])
     assert preview.exit_code == 0, preview.output
     assert '"applied": false' in preview.output
 
     applied = runner.invoke(
         main,
-        [
-            "registry",
-            "import",
-            str(path),
-            "--apply",
-            "--reviewed-hash",
-            manifest.content_sha256,
-            "--json",
-        ],
+        [*base, "--apply", "--reviewed-hash", manifest.content_sha256, "--json"],
     )
     assert applied.exit_code == 0, applied.output
     assert '"applied": true' in applied.output
@@ -256,7 +249,10 @@ def test_cli_tampered_hash_blocks_apply(tmp_path: Path) -> None:
 
     result = CliRunner().invoke(
         main,
-        ["registry", "import", str(path), "--apply", "--reviewed-hash", "0" * 40],
+        [
+            *("registry", "import", str(path), "--project", str(tmp_path)),
+            *("--apply", "--reviewed-hash", "0" * 40),
+        ],
     )
 
     assert result.exit_code != 0
@@ -269,13 +265,15 @@ def test_cli_apply_requires_reviewed_hash(tmp_path: Path) -> None:
     _write_manifest(path, _manifest())
     runner = CliRunner()
 
-    result = runner.invoke(main, ["registry", "import", str(path), "--apply"])
+    base = ["registry", "import", str(path), "--project", str(tmp_path)]
+
+    result = runner.invoke(main, [*base, "--apply"])
 
     assert result.exit_code != 0
     assert "--apply requires --reviewed-hash" in result.output
     assert list_records(config=config) == []
 
-    preview = runner.invoke(main, ["registry", "import", str(path)])
+    preview = runner.invoke(main, base)
     assert f"content_sha256: {_manifest().compute_digest()}" in preview.output
 
 
@@ -310,6 +308,8 @@ def test_cli_invalid_manifest_reports_error(tmp_path: Path) -> None:
     path = tmp_path / "manifest.yml"
     path.write_text("datasets: [{namespace: n, key: k}]\n", encoding="utf-8")
 
-    result = CliRunner().invoke(main, ["registry", "import", str(path)])
+    result = CliRunner().invoke(
+        main, ["registry", "import", str(path), "--project", str(tmp_path)]
+    )
 
     assert result.exit_code != 0
