@@ -401,20 +401,21 @@ entrypoints:
     args: {alpha: 0.0001, epochs: 40}
 ```
 
-1. Launch each step once with `hiraku launch`, passing its files as
-   arguments, for example `hiraku launch train --record weak-l2 -- --input
-   data/digits.npz --output results/weak-l2.json`. Each launch records the
-   files it read and wrote under `hiraku/snakemake/observed/`, and without a
-   `Snakefile`, `hiraku snakemake run` builds the rules from them.
-2. Write a `Snakefile` only when observation is not enough, such as for
-   wildcards or non-Python steps reading files their command does not name.
-   `hiraku snakemake generate --record <workflow-record> --observed --print`
-   prints the observed rules as a starting point; without `--observed` it
-   drafts one rule per entrypoint, each running `hiraku launch ENTRYPOINT
-   --record RECORD`, with `input:` and `output:` left to fill in. Pass the
-   files after `--`, for example `-- --input {input[0]} --output {output}`, and
-   add a `rule all`. Never put file paths only in a rule's own command: the
-   record must describe the code a step runs.
+1. Write the `Snakefile` yourself: it is one reviewable file, and the rules
+   only wire files to `hiraku launch` of an entrypoint, so they cannot change
+   the code a record runs. Start from `hiraku snakemake generate --record
+   <workflow-record> --print`, which drafts one rule per entrypoint of the
+   record and its children with `input:` and `output:` left to fill in, or
+   from `--observed --print` when `hiraku/snakemake/observed/` holds the
+   user's observed launches. Read each script's arguments to find its files,
+   pass them after `--`, for example `-- --input {input[0]} --output
+   {output}`, and add a `rule all`. Never put file paths only in a rule's own
+   command: the record must describe the code a step runs.
+2. Use observation only when the user asks for a workflow without a
+   `Snakefile`, or to learn which files a step touches: `hiraku launch
+   ENTRYPOINT --record RECORD --observe` (or the MCP `launch_entrypoint` tool
+   with `observe: true`) records them, and `hiraku snakemake run` without a
+   `Snakefile` builds the rules from them. Observation is off by default.
 3. Dry-run, execute, and inspect:
 
 ```bash

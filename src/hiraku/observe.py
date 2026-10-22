@@ -1,6 +1,7 @@
 """Observe which project files a launched entrypoint reads and writes.
 
-``hiraku launch`` snapshots the project before and after the command: files
+Observation is opt-in. ``hiraku launch --observe``, or ``HIRAKU_OBSERVE=1``,
+snapshots the project before and after the command: files
 created or changed are the step's outputs. Files a Python process opens for
 reading, reported by an audit hook, and files named in the command are its
 inputs. ``hiraku snakemake run`` turns the latest observation of each step into
@@ -246,14 +247,12 @@ class Observer:
 
 
 def start(config: HirakuConfig, *, backend: Any = None) -> Observer | None:
-    """Return an observer for a launch, or ``None`` when observing is off.
+    """Return an observer for a launch, or ``None`` if it cannot be observed.
 
     Launches made by ``hiraku snakemake run`` are not observed: their files are
-    already declared. ``HIRAKU_OBSERVE=0`` turns observation off.
+    already declared.
     """
-    if os.environ.get("HIRAKU_OBSERVE") == "0" or os.environ.get(
-        "HIRAKU_WORKFLOW_RUN_ID"
-    ):
+    if os.environ.get("HIRAKU_WORKFLOW_RUN_ID"):
         return None
     try:
         observer = Observer(config, backend=backend)

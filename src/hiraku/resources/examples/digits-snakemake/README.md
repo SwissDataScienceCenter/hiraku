@@ -15,3 +15,8 @@ Each rule launches an entrypoint of a record: `digits` · `prepare`,
 arguments; the `Snakefile` states the files. The workflow record keeps its
 execution runs in `hiraku/runs.csv`, next to the records; the experiment records use MLflow and tag their
 runs with `HIRAKU_WORKFLOW_RUN_ID`.
+
+The `Snakefile` is optional: without it, `hiraku snakemake run` builds the same
+rules from steps launched once with `hiraku launch --observe`. Keeping it suits
+agentic work, since an agent can write and review the rules as a diff and
+check them with `--dry-run` before any training.

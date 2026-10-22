@@ -125,7 +125,7 @@ def observed_workflow(record: Record, *, config: HirakuConfig) -> str:
     if not steps:
         raise ValidationError(
             f"No observed launches for record {record.id!r} or its children; run "
-            "each step once with `hiraku launch`, or write a Snakefile"
+            "each step once with `hiraku launch --observe`, or write a Snakefile"
         )
     writers = Counter(path for step in steps for path in step["outputs"])
     excluded = {path for path, count in writers.items() if count > 1}

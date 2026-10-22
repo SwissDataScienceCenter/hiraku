@@ -93,16 +93,16 @@ keep the code checkout clean between executions.
 
 ## Without the Snakefile
 
-The bundled `Snakefile` is optional. Remove it and launch each step once
-instead; each launch notes the files it read and wrote:
+The bundled `Snakefile` is optional. Remove it and launch each step once with
+`--observe` instead; each observed launch notes the files it read and wrote:
 
 ```bash
 git rm -q Snakefile
 git commit -m "build the workflow from observed launches"
-hiraku launch prepare --record digits -- --output data/digits.npz
-hiraku launch train --record weak-l2 -- \
+hiraku launch prepare --record digits --observe -- --output data/digits.npz
+hiraku launch train --record weak-l2 --observe -- \
   --input data/digits.npz --output results/weak-l2.json
-hiraku launch train --record strong-l2 -- \
+hiraku launch train --record strong-l2 --observe -- \
   --input data/digits.npz --output results/strong-l2.json
 hiraku snakemake run --record digits \
   --command uv --command-arg run --command-arg snakemake
@@ -112,6 +112,15 @@ hiraku snakemake run --record digits \
 rules as the bundled file, and leaves out `mlflow.db`, which both training
 steps write. The launches already built every file, so the first execution is
 a `no-op`; delete `data/digits.npz` and run again to rebuild all three steps.
+
+Which to keep? Observation is the shortest path when you run the steps
+yourself. The bundled `Snakefile` is the form an agent can write and maintain:
+three rules that only wire files to `hiraku launch` of the records'
+entrypoints, so an edit cannot change the code a record runs; `--dry-run`
+checks them before any training, each run's `jobs` show what ran, and a
+reviewer reads the change as a diff. Restore it with `git revert HEAD`, or
+write the observed rules with `hiraku snakemake generate --record digits
+--observed`.
 
 ## Inspect the results
 

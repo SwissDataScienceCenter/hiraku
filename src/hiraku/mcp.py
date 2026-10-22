@@ -264,8 +264,13 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         commit: str | None = None,
         dispatch: str | None = None,
         dry_run: bool = False,
+        observe: bool = False,
     ) -> dict[str, Any]:
-        """Launch a configured entrypoint with attribution, or preview its command."""
+        """Launch a configured entrypoint with attribution, or preview its command.
+
+        ``observe`` records the files the step reads and writes, from which
+        ``hiraku snakemake run`` builds rules when there is no Snakefile.
+        """
         entrypoint = load_record(record_id, config=selected).entrypoint(
             entrypoint_name, config=selected
         )
@@ -285,6 +290,7 @@ def create_server(config: HirakuConfig | None = None) -> Any:
             dispatch=dispatch,
             capture_output=True,
             check=False,
+            observe=observe,
             config=selected,
         )
         return {

@@ -443,8 +443,17 @@ def test_real_snakemake_runs_observed_launches(
     )
     runner = CliRunner()
     for arguments in (
-        ["launch", "prepare", "--record", "workflow"],
-        ["launch", "train", "--record", "model", "--", "--output", "model.txt"],
+        ["launch", "prepare", "--record", "workflow", "--observe"],
+        [
+            "launch",
+            "train",
+            "--record",
+            "model",
+            "--observe",
+            "--",
+            "--output",
+            "model.txt",
+        ],
     ):
         launched = subprocess.run(["hiraku", *arguments], capture_output=True)
         assert launched.returncode == 0, launched.stderr

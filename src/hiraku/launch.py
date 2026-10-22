@@ -109,6 +109,7 @@ def launch(
     env: Mapping[str, str] | None = None,
     capture_output: bool = False,
     check: bool = True,
+    observe: bool = False,
     config: HirakuConfig | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """
@@ -124,6 +125,9 @@ def launch(
         env: Additional environment variables.
         capture_output: Capture child output in the result instead of streaming it.
         check: Raise on non-zero child exit when true.
+        observe: Record the project files the launch reads and writes, for
+            ``hiraku snakemake run``; ``HIRAKU_OBSERVE=1`` also turns it on.
+            Needs ``name``.
         config: Project configuration; discovered when omitted.
 
     Returns:
@@ -183,7 +187,8 @@ def launch(
             "HIRAKU_ENTRYPOINT": name or "",
         }
     )
-    observer = _observer(selected, record) if name else None
+    observing = observe or os.environ.get("HIRAKU_OBSERVE") == "1"
+    observer = _observer(selected, record) if name and observing else None
     if observer is not None:
         process_env.update(observer.environment(process_env))
     try:

@@ -4,12 +4,13 @@ Hiraku runs a Snakemake workflow whose steps are record entrypoints. Records
 state each step's code and arguments; the rules connect the steps through the
 files they read and write. There are two ways to get the rules:
 
-- **Observed, with no `Snakefile`.** Run each step once with `hiraku launch`,
-  as you would without Snakemake, then run `hiraku snakemake run`. Hiraku writes
-  the rules from the files each launch read and wrote. There is nothing to edit.
-- **A written `Snakefile`.** For rules Hiraku cannot observe, such as wildcards,
-  or when you or an agent maintain the workflow by hand. `hiraku snakemake
-  generate` drafts it.
+- **Observed, with no `Snakefile`.** Run each step once with
+  `hiraku launch --observe`, then run `hiraku snakemake run`. Hiraku writes the
+  rules from the files each launch read and wrote. There is nothing to edit.
+- **A written `Snakefile`.** Written by an agent, or by you, when the workflow
+  should be reviewed, shared, or needs rules Hiraku cannot observe, such as
+  wildcards. `hiraku snakemake generate` drafts it; see
+  [Why a written Snakefile suits agents](#why-a-written-snakefile-suits-agents).
 
 `hiraku snakemake run` uses `./Snakefile` when it exists and the observed
 launches otherwise. Nothing in the record or run format is specific to
@@ -20,7 +21,7 @@ project that never runs Snakemake is unaffected.
 | --- | --- | --- |
 | An entrypoint for each step | You, as without Snakemake | You, as without Snakemake |
 | A CSV tracking backend on the workflow record | Only if the project uses another backend | Only if the project uses another backend |
-| Each step's files | Hiraku, from one `hiraku launch` of the step | You or an agent, as `input:` and `output:` |
+| Each step's files | Hiraku, from one `hiraku launch --observe` of the step | You or an agent, as `input:` and `output:` |
 | The rules and `rule all` | Hiraku, on every `hiraku snakemake run` | You or an agent; `generate` drafts them, `generate --observed` fills them in |
 | Running Snakemake and storing one run with an entry per step | Hiraku | Hiraku |
 | Linking each step's own tracked run to the workflow run | Optional | Optional |
@@ -44,15 +45,18 @@ hiraku record create model --parent workflow --type experiment \
 
 ## Without a Snakefile: observe the launches
 
-Launch each step once, then run the workflow:
+Launch each step once with `--observe`, then run the workflow:
 
 ```bash
-hiraku launch prepare --record workflow -- --output data.csv
-hiraku launch train --record model -- --input data.csv --output model.pkl
+hiraku launch prepare --record workflow --observe -- --output data.csv
+hiraku launch train --record model --observe -- --input data.csv --output model.pkl
 hiraku snakemake run --record workflow
 ```
 
-Every `hiraku launch` notes its call-time arguments and the project files it
+Observation is opt-in: a plain `hiraku launch` behaves as on main. Set
+`HIRAKU_OBSERVE=1` to observe every launch of a session, and pass
+`observe=True` to `hiraku.launch.launch` or the MCP `launch_entrypoint` tool.
+An observed launch notes its call-time arguments and the project files it
 used:
 
 - **Outputs** are the files the launch created or changed.
@@ -62,8 +66,9 @@ used:
 `hiraku snakemake run` then writes `hiraku/snakemake/Snakefile` with one rule
 per observed step. Each rule repeats the step's arguments and declares its
 files, and `rule all` asks for every file no other step reads. Snakemake runs
-the steps in dependency order, and only those whose inputs or rules changed. To change a
-step's rule, launch the step again; the latest successful launch wins.
+the steps in dependency order, and only those whose inputs or rules changed.
+To change a step's rule, launch the step again with `--observe`; the latest
+successful observed launch wins.
 
 What observation leaves out:
 
@@ -74,14 +79,38 @@ What observation leaves out:
 | A step that writes no file of its own | Its printed output becomes `hiraku/snakemake/logs/<rule>.log` | Give the script an output file |
 | `.git`, virtual environments, caches, `hiraku/` | Never observed | Nothing |
 | More than 100,000 files in the project | The launch is not observed | Write a `Snakefile` |
-| A dispatcher that runs the command elsewhere, such as `worktree` | Nothing is observed | Launch with the default dispatcher once |
+| A dispatcher that runs the command elsewhere, such as `worktree` | Nothing is observed | Observe a launch with the default dispatcher |
 
 Observations stay on your machine: `hiraku/snakemake/` ignores itself in Git,
-so launching never dirties the checkout. Collaborators observe the steps by
-launching them, or you commit a `Snakefile` written with
-`hiraku snakemake generate --observed`. Set `HIRAKU_OBSERVE=0` to turn
-observation off; launches made by `hiraku snakemake run` are never observed,
-since their files are already declared.
+so an observed launch never dirties the checkout. Collaborators observe the
+steps by launching them, or you commit a `Snakefile` written with
+`hiraku snakemake generate --observed`. Launches made by `hiraku snakemake run`
+are never observed, since their files are already declared.
+
+## Why a written Snakefile suits agents
+
+Observation spares a person from writing rules. An agent working through the
+Hiraku CLI or MCP server is better served by writing the `Snakefile` itself:
+
+- **It has the facts already.** The records state each step's command and
+  arguments (`hiraku record show`), the scripts' argument parsers name their
+  files, and `generate` (or `generate --observed`) gives the rule skeletons.
+  Writing the rules is a small, declarative edit.
+- **The edit cannot change the science.** A rule only wires files to a
+  `hiraku launch` of a record's entrypoint; the code and arguments stay in the
+  record. A wrong rule misorders or misses a step, and never runs different code
+  under the record's name.
+- **It is checked before anything runs.** `hiraku snakemake run --dry-run`
+  builds the DAG and records the planned jobs, so a missing input or a cycle
+  costs no compute.
+- **The result is evidence to check against.** Each run's `jobs` lists what
+  every rule ran, read, and wrote, so the agent can compare the execution with
+  its intent from `hiraku runs --json`.
+- **It is reviewable and shared.** The `Snakefile` is one file in the
+  repository: a person reviews the agent's change as a diff, and collaborators
+  and CI run the same rules. Observations stay on one machine.
+- **It expresses what observation cannot**: wildcards over variants,
+  non-Python steps, and files a step will produce but has not yet.
 
 ## With a Snakefile: write the rules
 

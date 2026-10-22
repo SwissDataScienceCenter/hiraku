@@ -45,7 +45,7 @@ def run(config: HirakuConfig, **options) -> int:
         capture_output=True,
         check=False,
         config=config,
-        **options,
+        **{"observe": True, **options},
     ).returncode
 
 
@@ -82,14 +82,22 @@ def test_unchanged_relaunch_keeps_outputs_it_did_not_rewrite(tmp_path: Path) -> 
     assert observation["outputs"] == ["data/clean.txt", "extra.txt"]
 
 
-@pytest.mark.parametrize(
-    "variable", [("HIRAKU_OBSERVE", "0"), ("HIRAKU_WORKFLOW_RUN_ID", "snake_1")]
-)
-def test_disabled_or_workflow_launches_are_not_observed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variable: tuple[str, str]
+def test_observation_is_opt_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = project(tmp_path)
+
+    assert run(config, observe=False) == 0
+    assert load_observations(config) == []
+    assert not (config.hiraku_dir / "snakemake").exists()
+    monkeypatch.setenv("HIRAKU_OBSERVE", "1")
+    assert run(config, observe=False) == 0
+    assert len(load_observations(config)) == 1
+
+
+def test_launches_made_by_a_workflow_run_are_not_observed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = project(tmp_path)
-    monkeypatch.setenv(*variable)
+    monkeypatch.setenv("HIRAKU_WORKFLOW_RUN_ID", "snake_1")
 
     assert run(config) == 0
 

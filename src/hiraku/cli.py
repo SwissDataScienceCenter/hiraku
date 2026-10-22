@@ -864,6 +864,11 @@ def session_cancel(state: CLIContext, session_id: str) -> None:
 @click.option("--commit")
 @click.option("--dispatch")
 @click.option("--dry-run", is_flag=True)
+@click.option(
+    "--observe",
+    is_flag=True,
+    help="Record the files the step reads and writes for `hiraku snakemake run`.",
+)
 @click.pass_obj
 def launch_command(
     state: CLIContext,
@@ -873,6 +878,7 @@ def launch_command(
     commit: str | None,
     dispatch: str | None,
     dry_run: bool,
+    observe: bool,
 ) -> None:
     """Launch an effective record entrypoint."""
     record = _active(state.config, record_id)
@@ -893,6 +899,7 @@ def launch_command(
         commit=commit,
         dispatch=dispatch,
         check=False,
+        observe=observe,
         config=state.config,
     )
     if result.returncode:
