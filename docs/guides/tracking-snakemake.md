@@ -10,12 +10,35 @@ files split the work:
   files after `--`.
 
 Nothing in the record or run format is specific to Snakemake. Every step can
-still be run on its own with `hiraku launch`.
+still be run on its own with `hiraku launch`, and a project that never runs
+Snakemake is unaffected: the `Snakefile` and the workflow runs are additions
+next to the records.
+
+## What Hiraku does and what you write
+
+| Step | Who | How |
+| --- | --- | --- |
+| An entrypoint for each step | You, as without Snakemake | `command` and `args` on the record; existing entrypoints are used unchanged |
+| A CSV tracking backend on the workflow record | You, only if the project uses another backend | CSV is the default; a path under `hiraku/` is recommended, see [Stored evidence](#stored-evidence) |
+| One rule per entrypoint that runs `hiraku launch` | Hiraku | `hiraku snakemake generate` |
+| Each rule's `input:` and `output:` files | You, always | Hiraku cannot tell which files a script reads and writes |
+| Each step writing its declared output | You, always | Declare the path the script already writes, pass `{output}` to it after `--`, or capture its printed output |
+| A `rule all` naming the final files | You, or pass the targets to `hiraku snakemake run` | Otherwise Snakemake builds only the first rule |
+| Running Snakemake and storing one run with an entry per step | Hiraku | `hiraku snakemake run` |
+| Linking each step's own tracked run to the workflow run | You, optionally | Store `HIRAKU_WORKFLOW_RUN_ID`, for example as an MLflow tag |
+| Showing which step builds or uses each file | Hiraku | `hiraku dashboard` |
+
+Writing the `Snakefile` by hand works too. `generate` only drafts it, and `run`
+accepts any `Snakefile`; it fills in `record` and `entrypoint` for the rules
+whose `shell:` runs `hiraku launch ENTRYPOINT --record RECORD`.
 
 ## Write the records and the Snakefile
 
-Give the workflow record a CSV tracking backend whose file lives with the
-records, and give each record the entrypoints of its steps:
+Each step is an entrypoint of the record it belongs to, written exactly as for
+`hiraku launch`, so records that already have entrypoints need no change. The
+workflow record must use a CSV tracking backend. CSV is the project default,
+and setting its file under `hiraku/` is recommended; the step records keep
+their own backends, such as MLflow:
 
 ```bash
 hiraku record create workflow --type task \
@@ -32,8 +55,9 @@ below it:
 hiraku snakemake generate --record workflow
 ```
 
-The draft names each rule `<record>__<entrypoint>`. Add each rule's files and a
-`rule all`:
+The draft names each rule `<record>__<entrypoint>`, launches its entrypoint,
+and leaves `input:` and `output:` commented out. Fill in each rule's files and
+add a `rule all`:
 
 ```python
 rule all:
