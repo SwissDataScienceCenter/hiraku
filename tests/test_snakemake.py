@@ -16,7 +16,7 @@ from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.errors import BackendError, ValidationError
 from hiraku.record import Record, load_record
-from hiraku.snakemake import generate_workflow, run_workflow
+from hiraku.snakemake import generate_workflow, observed_workflow, run_workflow
 
 SUMMARY = (
     "output_file\tdate\trule\tlog-file(s)\tinput-file(s)\tshellcmd\tstatus\tplan\n"
@@ -322,3 +322,144 @@ def test_real_snakemake_launches_record_entrypoints(
     assert (job["record"], job["entrypoint"], job["ran"]) == ("workflow", "build", True)
     again, _ = run(config, "snakemake")
     assert again["outcome"] == "no-op"
+
+
+def observe(config: HirakuConfig, record: str, entrypoint: str, **fields) -> None:
+    directory = config.hiraku_dir / "snakemake" / "observed"
+    directory.mkdir(parents=True, exist_ok=True)
+    observation = {"record": record, "entrypoint": entrypoint, "arguments": []}
+    observation |= {"inputs": [], "outputs": [], **fields}
+    (directory / f"{record}__{entrypoint}.json").write_text(json.dumps(observation))
+
+
+def test_observed_workflow_declares_the_files_of_each_launch(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    record = Record.create(
+        "digits", config=config, tracking_backend={"type": "csv", "path": "x.csv"}
+    )
+    Record.create("weak-l2", parent_id="digits", config=config)
+    Record.create("other", config=config)
+    observe(
+        config,
+        "digits",
+        "prepare",
+        arguments=["--output", "data/{a}.npz"],
+        inputs=["prepare.py", "x.csv"],
+        outputs=["data/{a}.npz", "shared.db"],
+    )
+    observe(
+        config,
+        "weak-l2",
+        "train",
+        inputs=["data/{a}.npz", "train.py"],
+        outputs=["shared.db"],
+    )
+    observe(config, "other", "run", outputs=["other.txt"])
+
+    text = observed_workflow(record, config=config)
+
+    # Braces are escaped as literal paths, a file written by several steps is
+    # left out, and the workflow's tracking file is not a step file.
+    assert (
+        "rule digits__prepare:\n"
+        '    input:\n        "prepare.py",\n'
+        '    output:\n        "data/{{a}}.npz",\n'
+        "    shell:\n"
+        '        "hiraku launch prepare --record digits -- '
+        "--output 'data/{{a}}.npz' \""
+        " + config.get('prepare', '')\n"
+    ) in text
+    log = "hiraku/snakemake/logs/weak_l2__train.log"
+    assert f'    output:\n        "{log}",\n' in text
+    assert "config.get('train', '') + \" | tee {output}\"" in text
+    assert f'rule all:\n    input:\n        "{log}",\n' in text
+    assert "other" not in text
+    with pytest.raises(ValidationError, match="No observed launches"):
+        observed_workflow(Record.create("empty", config=config), config=config)
+
+
+def test_cli_run_without_snakefile_uses_the_observed_launches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    observe(config, "workflow", "make", inputs=["in.txt"], outputs=["out.txt"])
+    command = fake_snakemake(tmp_path)
+    runner = CliRunner()
+    arguments = ["snakemake", "run", "--record", "workflow", "--command", command]
+
+    hand_written = runner.invoke(main, arguments)
+    assert hand_written.exit_code == 0, hand_written.output
+    assert "observed" not in hand_written.output
+    observed = runner.invoke(main, [*arguments, "--observed"])
+    assert observed.exit_code == 0, observed.output
+    assert "Generated hiraku/snakemake/Snakefile" in observed.output
+    (tmp_path / "Snakefile").unlink()
+    implicit = runner.invoke(main, arguments)
+    assert implicit.exit_code == 0, implicit.output
+    rows = list(csv.DictReader((tmp_path / "runs.csv").open()))
+    assert rows[-1]["param.command"].count("hiraku/snakemake/Snakefile") == 1
+    both = runner.invoke(main, [*arguments, "--observed", "--snakefile", "S"])
+    assert both.exit_code != 0
+    assert "mutually exclusive" in both.output
+
+    generated = runner.invoke(
+        main, ["snakemake", "generate", "--record", "workflow", "--observed"]
+    )
+    assert generated.exit_code == 0, generated.output
+    assert 'output:\n        "out.txt"' in (tmp_path / "Snakefile").read_text()
+
+
+@pytest.mark.integration
+def test_real_snakemake_runs_observed_launches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("snakemake")
+    if shutil.which("snakemake") is None or shutil.which("hiraku") is None:
+        pytest.skip("snakemake and hiraku executables required")
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init", "-q", "-b", "main"], check=True)
+    assert CliRunner().invoke(main, ["init"]).exit_code == 0
+    config = HirakuConfig.discover(tmp_path)
+    (tmp_path / "raw.txt").write_text("hello\n")
+    (tmp_path / "prepare.py").write_text(
+        "import pathlib\npathlib.Path('clean.txt').write_text(open('raw.txt').read())\n"
+    )
+    (tmp_path / "train.py").write_text(
+        "import pathlib, sys\n"
+        "text = open('clean.txt').read()\n"
+        "pathlib.Path(sys.argv[-1]).write_text(text.upper())\n"
+    )
+    Record.create(
+        "workflow",
+        config=config,
+        entrypoints={"prepare": {"command": ["python", "prepare.py"]}},
+    )
+    Record.create(
+        "model",
+        parent_id="workflow",
+        config=config,
+        entrypoints={"train": {"command": ["python", "train.py"]}},
+    )
+    runner = CliRunner()
+    for arguments in (
+        ["launch", "prepare", "--record", "workflow"],
+        ["launch", "train", "--record", "model", "--", "--output", "model.txt"],
+    ):
+        launched = subprocess.run(["hiraku", *arguments], capture_output=True)
+        assert launched.returncode == 0, launched.stderr
+    run_workflow_cli = ["snakemake", "run", "--record", "workflow"]
+
+    assert "no-op" in runner.invoke(main, run_workflow_cli).output
+    (tmp_path / "raw.txt").write_text("changed\n")
+    result = runner.invoke(main, run_workflow_cli)
+
+    assert "succeeded" in result.output, result.output
+    assert (tmp_path / "model.txt").read_text() == "CHANGED\n"
+    [*_, row] = load_record("workflow", config=config).runs(config=config)
+    jobs = {job["rule"]: job for job in json.loads(row.raw["jobs"])}
+    assert (jobs["model__train"]["record"], jobs["model__train"]["ran"]) == (
+        "model",
+        True,
+    )
+    assert jobs["model__train"]["inputs"] == ["clean.txt", "train.py"]

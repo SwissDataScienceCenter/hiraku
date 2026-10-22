@@ -106,14 +106,15 @@ take time and may install the example's dependencies.
 
 ## Snakemake workflows
 
-`hiraku snakemake run` executes a [Snakemake](https://snakemake.github.io) workflow whose rules launch record entrypoints: the records state each step's code and arguments, and the `Snakefile` states only the files. Each execution is stored as one run of the workflow record, with one entry per step, and the dashboard shows which step builds or uses each file. It needs the `snakemake` extra.
+`hiraku snakemake run` executes a [Snakemake](https://snakemake.github.io) workflow whose steps are record entrypoints. Launch each step once with `hiraku launch`, as you would without Snakemake: Hiraku notes the files each launch read and wrote and builds the rules from them, so there is no `Snakefile` to write. Each execution is stored as one run of the workflow record, with one entry per step, and the dashboard shows which step builds or uses each file. It needs the `snakemake` extra.
 
 ```bash
-hiraku snakemake generate --record workflow  # draft one rule per entrypoint
-hiraku snakemake run --record workflow       # execute and record the run
+hiraku launch prepare --record workflow -- --output data.csv
+hiraku launch train --record model -- --input data.csv --output model.pkl
+hiraku snakemake run --record workflow   # rules from the observed launches
 ```
 
-The [Snakemake guide](docs/guides/tracking-snakemake.md) covers writing the rules, and the [Digits Snakemake example](docs/examples/digits-snakemake/README.md) is a complete project.
+A hand-written or agent-written `Snakefile` takes over when it exists; `hiraku snakemake generate` drafts one. The [Snakemake guide](docs/guides/tracking-snakemake.md) covers both, and the [Digits Snakemake example](docs/examples/digits-snakemake/README.md) is a complete project.
 
 ## Dashboard
 

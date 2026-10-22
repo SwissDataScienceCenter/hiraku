@@ -54,7 +54,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set`, `entrypoints` |
 | Launch an entrypoint | `hiraku launch ENTRYPOINT [--record ID] [--commit REF] [--dispatch NAME]` |
-| Run or draft a Snakemake workflow | `hiraku snakemake run` / `generate` |
+| Run a Snakemake workflow, observed or from a `Snakefile` | `hiraku snakemake run` / `generate` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
 | Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_send_event`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow send-event SESSION EVENT` |
 | Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
@@ -388,8 +388,8 @@ tracking backend.
 
 ## Track Snakemake workflows
 
-In a Snakemake workflow, records state the code and the `Snakefile` states the
-files. Give each step an ordinary entrypoint on the record it belongs to, and
+In a Snakemake workflow, records state the code and the rules connect the
+steps through their files. Give each step an ordinary entrypoint on the record it belongs to, and
 give the workflow record a CSV tracking backend that keeps its runs with the
 records, `{type: csv, path: hiraku/runs.csv}`, so recording an execution
 does not change the code files:
@@ -401,13 +401,20 @@ entrypoints:
     args: {alpha: 0.0001, epochs: 40}
 ```
 
-1. Run `hiraku snakemake generate --record <workflow-record> --print` to draft
-   one rule per entrypoint of the record and its children, each running
-   `hiraku launch ENTRYPOINT --record RECORD`.
-2. Add each rule's `input:` and `output:` files and pass them after `--`, for
-   example `hiraku launch train --record weak-l2 -- --input {input[0]} --output
-   {output}`, then add a `rule all`. Never put file paths only in a rule's own
-   command: the record must describe the code a step runs.
+1. Launch each step once with `hiraku launch`, passing its files as
+   arguments, for example `hiraku launch train --record weak-l2 -- --input
+   data/digits.npz --output results/weak-l2.json`. Each launch records the
+   files it read and wrote under `hiraku/snakemake/observed/`, and without a
+   `Snakefile`, `hiraku snakemake run` builds the rules from them.
+2. Write a `Snakefile` only when observation is not enough, such as for
+   wildcards or non-Python steps reading files their command does not name.
+   `hiraku snakemake generate --record <workflow-record> --observed --print`
+   prints the observed rules as a starting point; without `--observed` it
+   drafts one rule per entrypoint, each running `hiraku launch ENTRYPOINT
+   --record RECORD`, with `input:` and `output:` left to fill in. Pass the
+   files after `--`, for example `-- --input {input[0]} --output {output}`, and
+   add a `rule all`. Never put file paths only in a rule's own command: the
+   record must describe the code a step runs.
 3. Dry-run, execute, and inspect:
 
 ```bash

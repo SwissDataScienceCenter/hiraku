@@ -1,44 +1,38 @@
 # Track Snakemake workflows
 
-Hiraku runs a Snakemake workflow whose rules launch record entrypoints. The two
-files split the work:
+Hiraku runs a Snakemake workflow whose steps are record entrypoints. Records
+state each step's code and arguments; the rules connect the steps through the
+files they read and write. There are two ways to get the rules:
 
-- **Records state the code.** Each step is an ordinary entrypoint, a `command`
-  and its `args`, on the record it belongs to.
-- **The `Snakefile` states the files.** Each rule declares `input:` and
-  `output:` and runs `hiraku launch ENTRYPOINT --record RECORD`, passing the
-  files after `--`.
+- **Observed, with no `Snakefile`.** Run each step once with `hiraku launch`,
+  as you would without Snakemake, then run `hiraku snakemake run`. Hiraku writes
+  the rules from the files each launch read and wrote. There is nothing to edit.
+- **A written `Snakefile`.** For rules Hiraku cannot observe, such as wildcards,
+  or when you or an agent maintain the workflow by hand. `hiraku snakemake
+  generate` drafts it.
 
-Nothing in the record or run format is specific to Snakemake. Every step can
-still be run on its own with `hiraku launch`, and a project that never runs
-Snakemake is unaffected: the `Snakefile` and the workflow runs are additions
-next to the records.
+`hiraku snakemake run` uses `./Snakefile` when it exists and the observed
+launches otherwise. Nothing in the record or run format is specific to
+Snakemake, every step can still be run on its own with `hiraku launch`, and a
+project that never runs Snakemake is unaffected.
 
-## What Hiraku does and what you write
-
-| Step | Who | How |
+| Step | Observed | Written `Snakefile` |
 | --- | --- | --- |
-| An entrypoint for each step | You, as without Snakemake | `command` and `args` on the record; existing entrypoints are used unchanged |
-| A CSV tracking backend on the workflow record | You, only if the project uses another backend | CSV is the default; a path under `hiraku/` is recommended, see [Stored evidence](#stored-evidence) |
-| One rule per entrypoint that runs `hiraku launch` | Hiraku | `hiraku snakemake generate` |
-| Each rule's `input:` and `output:` files | You, always | Hiraku cannot tell which files a script reads and writes |
-| Each step writing its declared output | You, always | Declare the path the script already writes, pass `{output}` to it after `--`, or capture its printed output |
-| A `rule all` naming the final files | You, or pass the targets to `hiraku snakemake run` | Otherwise Snakemake builds only the first rule |
-| Running Snakemake and storing one run with an entry per step | Hiraku | `hiraku snakemake run` |
-| Linking each step's own tracked run to the workflow run | You, optionally | Store `HIRAKU_WORKFLOW_RUN_ID`, for example as an MLflow tag |
-| Showing which step builds or uses each file | Hiraku | `hiraku dashboard` |
+| An entrypoint for each step | You, as without Snakemake | You, as without Snakemake |
+| A CSV tracking backend on the workflow record | Only if the project uses another backend | Only if the project uses another backend |
+| Each step's files | Hiraku, from one `hiraku launch` of the step | You or an agent, as `input:` and `output:` |
+| The rules and `rule all` | Hiraku, on every `hiraku snakemake run` | You or an agent; `generate` drafts them, `generate --observed` fills them in |
+| Running Snakemake and storing one run with an entry per step | Hiraku | Hiraku |
+| Linking each step's own tracked run to the workflow run | Optional | Optional |
 
-Writing the `Snakefile` by hand works too. `generate` only drafts it, and `run`
-accepts any `Snakefile`; it fills in `record` and `entrypoint` for the rules
-whose `shell:` runs `hiraku launch ENTRYPOINT --record RECORD`.
-
-## Write the records and the Snakefile
+## Set up the records
 
 Each step is an entrypoint of the record it belongs to, written exactly as for
 `hiraku launch`, so records that already have entrypoints need no change. The
 workflow record must use a CSV tracking backend. CSV is the project default,
-and setting its file under `hiraku/` is recommended; the step records keep
-their own backends, such as MLflow:
+and setting its file under `hiraku/` is recommended (see
+[Stored evidence](#stored-evidence)); the step records keep their own backends,
+such as MLflow:
 
 ```bash
 hiraku record create workflow --type task \
@@ -48,16 +42,61 @@ hiraku record create model --parent workflow --type experiment \
   --set 'entrypoints={train: {command: [python, train.py], args: {epochs: 40}}}'
 ```
 
-Draft a `Snakefile` with one rule per entrypoint of the record and the records
-below it:
+## Without a Snakefile: observe the launches
+
+Launch each step once, then run the workflow:
 
 ```bash
-hiraku snakemake generate --record workflow
+hiraku launch prepare --record workflow -- --output data.csv
+hiraku launch train --record model -- --input data.csv --output model.pkl
+hiraku snakemake run --record workflow
+```
+
+Every `hiraku launch` notes its call-time arguments and the project files it
+used:
+
+- **Outputs** are the files the launch created or changed.
+- **Inputs** are the files that existed before and that a Python process opened
+  for reading, or that the command names, such as the script.
+
+`hiraku snakemake run` then writes `hiraku/snakemake/Snakefile` with one rule
+per observed step. Each rule repeats the step's arguments and declares its
+files, and `rule all` asks for every file no other step reads. Snakemake runs
+the steps in dependency order, and only those whose inputs or rules changed. To change a
+step's rule, launch the step again; the latest successful launch wins.
+
+What observation leaves out:
+
+| Case | What happens | If you need it |
+| --- | --- | --- |
+| A non-Python program reads a file the command does not name | Not an input | Pass the path as an argument, or write a `Snakefile` |
+| A file several steps write, the record's tracking file (its CSV file or MLflow SQLite database), `mlruns/`, or `wandb/` | Not a step file | Nothing; Snakemake does not own these |
+| A step that writes no file of its own | Its printed output becomes `hiraku/snakemake/logs/<rule>.log` | Give the script an output file |
+| `.git`, virtual environments, caches, `hiraku/` | Never observed | Nothing |
+| More than 100,000 files in the project | The launch is not observed | Write a `Snakefile` |
+| A dispatcher that runs the command elsewhere, such as `worktree` | Nothing is observed | Launch with the default dispatcher once |
+
+Observations stay on your machine: `hiraku/snakemake/` ignores itself in Git,
+so launching never dirties the checkout. Collaborators observe the steps by
+launching them, or you commit a `Snakefile` written with
+`hiraku snakemake generate --observed`. Set `HIRAKU_OBSERVE=0` to turn
+observation off; launches made by `hiraku snakemake run` are never observed,
+since their files are already declared.
+
+## With a Snakefile: write the rules
+
+Write the observed rules to `./Snakefile` as a starting point, or draft one
+rule per entrypoint of the record and the records below it:
+
+```bash
+hiraku snakemake generate --record workflow --observed  # complete rules
+hiraku snakemake generate --record workflow             # files left to fill in
 ```
 
 The draft names each rule `<record>__<entrypoint>`, launches its entrypoint,
 and leaves `input:` and `output:` commented out. Fill in each rule's files and
-add a `rule all`:
+add a `rule all`, or pass the targets to `hiraku snakemake run`; otherwise
+Snakemake builds only the first rule:
 
 ```python
 rule all:
@@ -76,8 +115,10 @@ rule model__train:
         + config.get("train", "")
 ```
 
-`--print` shows the draft without writing it, `--output` selects another path,
-and `--force` overwrites an existing file.
+`--print` shows the file without writing it, `--output` selects another path,
+and `--force` overwrites an existing file. `hiraku snakemake run` accepts any
+`Snakefile`, and fills in `record` and `entrypoint` for the rules whose
+`shell:` runs `hiraku launch ENTRYPOINT --record RECORD`.
 
 ### Steps whose code writes no file of its own
 
@@ -135,7 +176,9 @@ make a quick run:
 hiraku snakemake run --record workflow --config 'train=--epochs 2'
 ```
 
-Snakemake runs synchronously and locally from the project root. Options that
+`--snakefile` selects another file, and `--observed` uses the observed
+launches even when `./Snakefile` exists. Snakemake runs synchronously and
+locally from the project root. Options that
 change the working directory or hand execution to a scheduler, profile,
 cluster, or remote backend are rejected. `--dry-run` records the planned jobs
 without running them.

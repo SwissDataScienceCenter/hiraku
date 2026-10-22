@@ -91,6 +91,28 @@ While `hiraku/` is tracked in the code repository, the new rows make its
 `git_state` `dirty`. Ignore `hiraku/` or keep it in a separate repository to
 keep the code checkout clean between executions.
 
+## Without the Snakefile
+
+The bundled `Snakefile` is optional. Remove it and launch each step once
+instead; each launch notes the files it read and wrote:
+
+```bash
+git rm -q Snakefile
+git commit -m "build the workflow from observed launches"
+hiraku launch prepare --record digits -- --output data/digits.npz
+hiraku launch train --record weak-l2 -- \
+  --input data/digits.npz --output results/weak-l2.json
+hiraku launch train --record strong-l2 -- \
+  --input data/digits.npz --output results/strong-l2.json
+hiraku snakemake run --record digits \
+  --command uv --command-arg run --command-arg snakemake
+```
+
+`hiraku snakemake run` writes `hiraku/snakemake/Snakefile` with the same three
+rules as the bundled file, and leaves out `mlflow.db`, which both training
+steps write. The launches already built every file, so the first execution is
+a `no-op`; delete `data/digits.npz` and run again to rebuild all three steps.
+
 ## Inspect the results
 
 ```bash

@@ -21,7 +21,7 @@ import shutil
 import subprocess
 import sys
 import uuid
-from collections import deque
+from collections import Counter, deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +30,7 @@ from .config import HirakuConfig
 from .errors import BackendError, GitError, ValidationError
 from .git import GitRepository
 from .io import atomic_write
+from .observe import load_observations, observations_dir, store_files
 from .record import Record, list_records, load_record
 from .tracking import CSVBackend
 
@@ -55,24 +56,14 @@ def generate_workflow(record: Record, *, config: HirakuConfig) -> str:
         hiraku.errors.ValidationError: If no record in the subtree has
             entrypoints.
     """
-    records = {item.id: item for item in list_records(config=config)}
-
-    def in_subtree(item: Record | None) -> bool:
-        while item is not None:
-            if item.id == record.id:
-                return True
-            item = records.get(item.parent_id)
-        return False
-
     rules = [
-        f"rule {re.sub(r'[^A-Za-z0-9_]', '_', f'{item.id}__{name}')}:\n"
+        f"rule {_rule_name(item.id, name)}:\n"
         "    # input: ...,\n"
         "    # output: ...,\n"
         "    shell:\n"
         f'        "hiraku launch {name} --record {item.id} -- "'
         f" + config.get({name!r}, '')\n"
-        for item in records.values()
-        if in_subtree(item)
+        for item in _subtree(record, config)
         for name in item.entrypoints or {}
     ]
     if not rules:
@@ -86,6 +77,101 @@ def generate_workflow(record: Record, *, config: HirakuConfig) -> str:
         f"#   hiraku snakemake run --record {record.id}\n"
     )
     return "\n\n".join([header, *rules])
+
+
+def _subtree(record: Record, config: HirakuConfig) -> list[Record]:
+    """Return ``record`` and every record below it."""
+    records = {item.id: item for item in list_records(config=config)}
+
+    def inside(item: Record | None) -> bool:
+        while item is not None:
+            if item.id == record.id:
+                return True
+            item = records.get(item.parent_id)
+        return False
+
+    return [item for item in records.values() if inside(item)]
+
+
+def _rule_name(record_id: str, entrypoint: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", f"{record_id}__{entrypoint}")
+
+
+def _pattern(path: str) -> str:
+    """Quote ``path`` for ``input:``/``output:``, where braces mark wildcards."""
+    return json.dumps(path.replace("{", "{{").replace("}", "}}"))
+
+
+def _files(directive: str, paths: list[str]) -> str:
+    lines = "".join(f"        {_pattern(path)},\n" for path in paths)
+    return f"    {directive}:\n{lines}" if paths else ""
+
+
+def observed_workflow(record: Record, *, config: HirakuConfig) -> str:
+    """Write one complete rule per observed launch of ``record`` and its subtree.
+
+    ``hiraku launch`` records the files each step read and wrote; see
+    :mod:`hiraku.observe`. Each rule repeats the observed call-time arguments,
+    declares those files, and ``rule all`` asks for every file no other step
+    reads. A file written by several steps, such as a shared tracking store, is
+    left out, and a step that wrote no file of its own keeps its printed output
+    as a log under ``<hiraku_dir>/snakemake/logs``.
+
+    Raises:
+        hiraku.errors.ValidationError: If no launch in the subtree was observed.
+    """
+    members = {item.id for item in _subtree(record, config)}
+    steps = [item for item in load_observations(config) if item["record"] in members]
+    if not steps:
+        raise ValidationError(
+            f"No observed launches for record {record.id!r} or its children; run "
+            "each step once with `hiraku launch`, or write a Snakefile"
+        )
+    writers = Counter(path for step in steps for path in step["outputs"])
+    excluded = {path for path, count in writers.items() if count > 1}
+    excluded |= store_files(config, record.resolve_tracking_backend(config=config))
+    logs = (config.hiraku_dir / "snakemake" / "logs").relative_to(config.root)
+    rules = []
+    produced: list[str] = []
+    consumed: set[str] = set()
+    for step in steps:
+        name = _rule_name(step["record"], step["entrypoint"])
+        inputs = [path for path in step["inputs"] if path not in excluded]
+        outputs = [path for path in step["outputs"] if path not in excluded]
+        launch = shlex.join(
+            ["hiraku", "launch", step["entrypoint"], "--record", step["record"]]
+            + ["--", *step["arguments"]]
+        )
+        shell = (
+            f"{json.dumps(launch.replace('{', '{{').replace('}', '}}') + ' ')}"
+            f" + config.get({step['entrypoint']!r}, '')"
+        )
+        if not outputs:
+            outputs = [(logs / f"{name}.log").as_posix()]
+            shell += ' + " | tee {output}"'
+        produced.extend(outputs)
+        consumed.update(inputs)
+        rules.append(
+            f"rule {name}:\n"
+            + _files("input", inputs)
+            + _files("output", outputs)
+            + f"    shell:\n        {shell}\n"
+        )
+    targets = [path for path in produced if path not in consumed] or produced
+    header = (
+        f"# Generated by Hiraku from the observed launches of {record.id!r} and the\n"
+        "# records below it. `hiraku snakemake run` regenerates this file; to edit\n"
+        f"# the rules, write them to a Snakefile with\n"
+        f"#   hiraku snakemake generate --record {record.id} --observed\n"
+    )
+    return "\n\n".join([header, f"rule all:\n{_files('input', targets)}", *rules])
+
+
+def observed_snakefile(record: Record, *, config: HirakuConfig) -> Path:
+    """Write the observed workflow and return its path relative to the root."""
+    destination = observations_dir(config) / "Snakefile"
+    atomic_write(destination, observed_workflow(record, config=config))
+    return destination.relative_to(config.root)
 
 
 def write_workflow(content: str, destination: Path, *, force: bool = False) -> Path:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -82,6 +83,19 @@ def _dispatcher(config: HirakuConfig, dispatch: str | None) -> Path:
     if not path.is_file():
         raise LaunchError(f"Dispatcher not found: {path}")
     return path
+
+
+def _observer(config: HirakuConfig, record: Any) -> Any:
+    from . import observe
+
+    try:
+        backend = record.resolve_tracking_backend(config=config)
+    except Exception:
+        backend = None
+    try:
+        return observe.start(config, backend=backend)
+    except Exception:
+        return None
 
 
 def launch(
@@ -169,6 +183,9 @@ def launch(
             "HIRAKU_ENTRYPOINT": name or "",
         }
     )
+    observer = _observer(selected, record) if name else None
+    if observer is not None:
+        process_env.update(observer.environment(process_env))
     try:
         result = subprocess.run(
             dispatcher_arguments,
@@ -179,11 +196,23 @@ def launch(
             check=False,
         )
     except Exception as exc:
+        if observer is not None:
+            observer.discard()
         if isinstance(exc, LaunchError | ValidationError):
             raise
         raise LaunchError(
             f"Launch through dispatcher {dispatcher} failed: {exc}"
         ) from exc
+    if observer is not None:
+        # Observation describes the launch for Snakemake; it never fails it.
+        with contextlib.suppress(Exception):
+            observer.finish(
+                record_id=record.id,
+                entrypoint=name or "",
+                arguments=render_arguments(args or {}),
+                command=command,
+                returncode=result.returncode,
+            )
     if check and result.returncode != 0:
         detail = (result.stderr or "").strip() or (result.stdout or "").strip()
         error = subprocess.CalledProcessError(
