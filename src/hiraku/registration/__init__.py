@@ -1,0 +1,47 @@
+"""Generic dataset registration: observe datasets and their artifacts as records.
+
+Registration stores observations as extra front matter under one namespaced,
+versioned ``registration`` key on ordinary Hiraku records. It never executes
+workflows, fabricates runs, copies dataset contents, computes scientific
+metrics, or infers historical production provenance.
+"""
+
+from .schema import (
+    SCHEMA_VERSION,
+    Artifact,
+    Availability,
+    Coverage,
+    Dataset,
+    Documentation,
+    DocumentationRole,
+    Observation,
+    Registration,
+    RegistrationManifest,
+    Scope,
+    canonical_json,
+    content_digest,
+    dataset_record_id,
+    digest,
+    normalize_display_path,
+    redact_access,
+)
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "Artifact",
+    "Availability",
+    "Coverage",
+    "Dataset",
+    "Documentation",
+    "DocumentationRole",
+    "Observation",
+    "Registration",
+    "RegistrationManifest",
+    "Scope",
+    "canonical_json",
+    "content_digest",
+    "dataset_record_id",
+    "digest",
+    "normalize_display_path",
+    "redact_access",
+]
