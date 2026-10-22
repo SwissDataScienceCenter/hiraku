@@ -22,8 +22,11 @@ import pandas as pd
 import pyarrow as pa
 
 from ..config import HirakuConfig
+from ..errors import ValidationError
 from ..io import dump_yaml
 from ..record import Record, list_records
+from ..registration.compat import from_legacy_record
+from ..registration.schema import Registration
 from ..run import Run
 
 _LAST = datetime.max.replace(tzinfo=UTC)
@@ -52,6 +55,20 @@ RECORD_COLUMNS = (
     "description",
 )
 FILE_COLUMNS = ("key", "path", "produced_by", "used_by", "last_run")
+ARTIFACT_COLUMNS = (
+    "key",
+    "dataset",
+    "source",
+    "path",
+    "root",
+    "revision",
+    "size",
+    "availability",
+    "coverage",
+    "observed_at",
+    "documentation",
+    "used_by",
+)
 
 
 @dataclass(frozen=True)
@@ -219,6 +236,98 @@ def file_rows(project: ProjectRuns) -> list[dict[str, Any]]:
         {"key": str(index), "last_run": None, "record": None, **row}
         for index, (_, row) in enumerate(sorted(rows.items()))
     ]
+
+
+def _registration(record: Record) -> Registration | None:
+    """Return a record's validated registration block, or its legacy mapping."""
+    extra = record.to_dict()
+    registration = extra.get("registration")
+    if isinstance(registration, dict):
+        try:
+            return Registration.from_record_value(registration)
+        except ValidationError:
+            return None
+    return from_legacy_record(extra)
+
+
+def _doc_label(documentation: Any) -> str:
+    key = documentation.key
+    return key if documentation.role == "unknown" else f"{key} ({documentation.role})"
+
+
+def _used_by(project: ProjectRuns, path: str | None) -> list[dict[str, str]]:
+    """Return the workflow steps whose ``jobs`` inputs use ``path``.
+
+    Only project-relative paths match; artifacts under external roots never
+    match ``jobs`` paths.
+    """
+    if not path:
+        return []
+    steps: list[dict[str, str]] = []
+    for run in execution_order(project.runs):
+        for job in _jobs(run):
+            if path not in job["inputs"]:
+                continue
+            entry = {"run": run.id, "step": _step(job)}
+            if entry not in steps:
+                steps.append(entry)
+    return steps
+
+
+def artifact_rows(project: ProjectRuns) -> list[dict[str, Any]]:
+    """Describe each registered artifact and dataset documentation expectation.
+
+    One row per observed artifact plus one row per dataset-level documentation
+    link, keyed by document and dataset rather than filename. Rows come only
+    from records' registration fields, so the view renders without runs and
+    never merges into ``file_rows``.
+    """
+    rows: list[dict[str, Any]] = []
+    for record in sorted(project.records, key=lambda item: item.id):
+        registration = _registration(record)
+        if registration is None:
+            continue
+        source = registration.source or registration.namespace
+        for artifact in registration.artifacts:
+            rows.append(
+                {
+                    "key": f"artifact:{record.id}:{artifact.key}",
+                    "dataset": record.id,
+                    "source": source,
+                    "path": artifact.display_path,
+                    "root": artifact.root,
+                    "revision": artifact.revision,
+                    "size": artifact.size,
+                    "availability": artifact.availability,
+                    "coverage": registration.coverage,
+                    "observed_at": artifact.observed_at,
+                    "documentation": [
+                        _doc_label(doc) for doc in artifact.documentation
+                    ],
+                    "used_by": _used_by(
+                        project,
+                        artifact.display_path if artifact.root is None else None,
+                    ),
+                }
+            )
+        for doc in registration.documentation:
+            rows.append(
+                {
+                    "key": f"documentation:{record.id}:{doc.key}",
+                    "dataset": record.id,
+                    "source": source,
+                    "path": None,
+                    "root": None,
+                    "revision": None,
+                    "size": None,
+                    "availability": None,
+                    "coverage": registration.coverage,
+                    "observed_at": registration.observed_at,
+                    "documentation": [_doc_label(doc)],
+                    "used_by": [],
+                }
+            )
+    return rows
 
 
 def arrow_frame(

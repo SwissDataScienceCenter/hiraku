@@ -23,6 +23,7 @@ from ..errors import HirakuError
 from ..io import dump_yaml
 from ..record import Record
 from .data import (
+    ARTIFACT_COLUMNS,
     FILE_COLUMNS,
     arrow_frame,
     plot_frame,
@@ -328,6 +329,68 @@ def file_details(
     }
     _text = dump_yaml(
         {name: value for name, value in _row.items() if name not in ("key", "record")}
+    )
+    links = " ".join(button.text for button in buttons.values())
+    return mo.Html(f"<div>{links}</div><pre>{html.escape(_text)}</pre>"), buttons
+
+
+def artifact_table(artifact_entries: Sequence[Mapping[str, Any]]) -> mo.ui.table:
+    """Build the selectable registered-artifact table from ``artifact_rows``.
+
+    The hidden ``key`` column identifies a row for ``artifact_details``.
+    """
+    _rows = [
+        {name: row[name] for name in ARTIFACT_COLUMNS}
+        | {"documentation": ", ".join(row["documentation"])}
+        | {"used_by": ", ".join(item["step"] for item in row["used_by"])}
+        for row in artifact_entries
+    ]
+    return mo.ui.table(
+        _rows or arrow_frame([], ARTIFACT_COLUMNS),
+        selection="single",
+        hidden_columns=["key"] if _rows else None,
+        page_size=25,
+        show_column_summaries=False,
+        show_data_types=False,
+        show_download=False,
+    )
+
+
+def artifact_details(
+    artifact_entries: Sequence[Mapping[str, Any]],
+    selection: Any,
+    on_select: Callable[[str], Any],
+) -> tuple[mo.Html, dict[str, mo.ui.button]]:
+    """Render the selected registered artifact's observation and evidence.
+
+    Buttons select the owning dataset record (``record:<id>``) and any workflow
+    run whose ``jobs`` inputs use the artifact's exact path (``run:<id>``).
+    """
+    _keys = {row["key"] for row in selection} if isinstance(selection, list) else ()
+    _row = next((row for row in artifact_entries if row["key"] in _keys), None)
+    if _row is None:
+        message = mo.md(
+            "Select an artifact to see its observation, source, and documentation."
+        )
+        return mo.as_html(message), {}
+    buttons = {
+        "dataset": mo.ui.button(
+            label=f"Dataset {html.escape(_row['dataset'])}",
+            on_click=lambda _, key=f"record:{_row['dataset']}": on_select(key),
+        )
+    }
+    for item in _row["used_by"]:
+        run_id = item["run"]
+        buttons[f"run:{run_id}"] = mo.ui.button(
+            label=f"Used by {html.escape(item['step'])}",
+            on_click=lambda _, key=f"run:{run_id}": on_select(key),
+        )
+    _text = dump_yaml(
+        {
+            name: value
+            for name, value in _row.items()
+            if name not in ("key", "dataset", "used_by")
+        }
     )
     links = " ".join(button.text for button in buttons.values())
     return mo.Html(f"<div>{links}</div><pre>{html.escape(_text)}</pre>"), buttons

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -389,3 +390,122 @@ def test_file_rows_name_the_producing_step_and_its_users() -> None:
     assert rows["in.csv"]["produced_by"] is None
     assert rows["in.csv"]["record"] is None
     assert rows["in.csv"]["used_by"] == ["a · make"]
+
+
+def _registered_record(record_id: str, *artifacts: dict, **registration: Any) -> Record:
+    from hiraku.registration import Registration
+
+    registration.setdefault("namespace", "filesystem")
+    registration.setdefault("key", ["data"])
+    registration.setdefault("source", "filesystem")
+    registration.setdefault("coverage", "exhaustive")
+    registration.setdefault("artifacts", list(artifacts))
+    return Record(
+        id=record_id,
+        type="dataset",
+        registration=Registration.model_validate(registration).to_record_value(),
+    )
+
+
+def test_artifact_rows_describe_registration_only() -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+
+    record = _registered_record(
+        "dataset-abc",
+        {
+            "key": "data/a.csv",
+            "display_path": "data/a.csv",
+            "revision": "1:2",
+            "size": 3,
+            "availability": "present",
+        },
+    )
+
+    rows = artifact_rows(ProjectRuns(records=[record], runs=[]))
+
+    assert [row["dataset"] for row in rows] == ["dataset-abc"]
+    assert rows[0]["source"] == "filesystem"
+    assert rows[0]["path"] == "data/a.csv"
+    assert rows[0]["availability"] == "present"
+    assert rows[0]["coverage"] == "exhaustive"
+    assert rows[0]["revision"] == "1:2"
+
+
+def test_artifact_rows_render_without_runs() -> None:
+    from hiraku.dashboard.data import (
+        ARTIFACT_COLUMNS,
+        ProjectRuns,
+        arrow_frame,
+        artifact_rows,
+    )
+
+    rows = artifact_rows(ProjectRuns(records=[], runs=[]))
+
+    assert rows == []
+    assert list(arrow_frame(rows, ARTIFACT_COLUMNS).columns) == list(ARTIFACT_COLUMNS)
+
+
+def test_artifact_rows_keep_documentation_keyed_by_document_and_dataset() -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+
+    record = _registered_record(
+        "dataset-abc",
+        {
+            "key": "data/a.csv",
+            "display_path": "data/a.csv",
+            "availability": "present",
+            "documentation": [
+                {"key": "sop-1", "role": "output"},
+                {"key": "sop-2", "role": "unknown"},
+            ],
+        },
+        documentation=[{"key": "sop-3", "role": "unknown"}],
+    )
+
+    rows = artifact_rows(ProjectRuns(records=[record], runs=[]))
+
+    artifact = next(row for row in rows if row["key"].startswith("artifact:"))
+    assert artifact["documentation"] == ["sop-1 (output)", "sop-2"]
+    expectation = next(row for row in rows if row["key"].startswith("documentation:"))
+    assert expectation["dataset"] == "dataset-abc"
+    assert expectation["documentation"] == ["sop-3"]
+    assert expectation["path"] is None
+
+
+def test_artifact_rows_link_workflow_inputs_by_exact_path() -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+
+    record = _registered_record(
+        "dataset-abc",
+        {
+            "key": "data/in.csv",
+            "display_path": "data/in.csv",
+            "availability": "present",
+        },
+    )
+    use = {**JOB, "inputs": ["data/in.csv"]}
+    runs = [workflow_run("w1", 15, use)]
+
+    rows = artifact_rows(ProjectRuns(records=[record], runs=runs))
+
+    assert rows[0]["used_by"] == [{"run": "w1", "step": "a · make"}]
+
+
+def test_artifact_rows_external_roots_never_match_jobs() -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+
+    record = _registered_record(
+        "dataset-abc",
+        {
+            "key": "cohort/data/in.csv",
+            "display_path": "data/in.csv",
+            "root": "cohort",
+            "availability": "present",
+        },
+    )
+    use = {**JOB, "inputs": ["data/in.csv"]}
+    runs = [workflow_run("w1", 15, use)]
+
+    rows = artifact_rows(ProjectRuns(records=[record], runs=runs))
+
+    assert rows[0]["used_by"] == []
