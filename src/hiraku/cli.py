@@ -1079,6 +1079,11 @@ def _registry_config(state: CLIContext, project_path: Path | None) -> HirakuConf
     "--reviewed-hash",
     help="content_sha256 reviewed in a prior dry run; required to bind an apply.",
 )
+@click.option(
+    "--override-conflicts",
+    is_flag=True,
+    help="Overwrite importer-owned fields a human edited.",
+)
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def registry_import(
@@ -1087,6 +1092,7 @@ def registry_import(
     project_path: Path | None,
     apply: bool,
     reviewed_hash: str | None,
+    override_conflicts: bool,
     json_output: bool,
 ) -> None:
     """Review or apply a registration manifest; preview writes nothing."""
@@ -1095,9 +1101,14 @@ def registry_import(
     config = _registry_config(state, project_path)
     reviewed = load_manifest(manifest)
     if apply:
-        result = apply_import(reviewed, config, reviewed_hash=reviewed_hash)
+        result = apply_import(
+            reviewed,
+            config,
+            reviewed_hash=reviewed_hash,
+            override=override_conflicts,
+        )
     else:
-        result = plan_import(reviewed, config)
+        result = plan_import(reviewed, config, override=override_conflicts)
     if json_output:
         _emit_json(result.summary())
     else:

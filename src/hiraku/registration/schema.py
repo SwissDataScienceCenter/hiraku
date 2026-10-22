@@ -165,6 +165,7 @@ class Dataset(BaseModel):
     parent: str | list[str] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     coverage: Coverage = "unknown"
+    roots: list[str] = Field(default_factory=list)
     availability: Availability | None = None
     observed_at: datetime | None = None
     artifacts: list[Artifact] = Field(default_factory=list)
@@ -296,6 +297,7 @@ class Registration(BaseModel):
     parent: str | list[str] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     coverage: Coverage = "unknown"
+    roots: list[str] = Field(default_factory=list)
     availability: Availability | None = None
     observed_at: datetime | None = None
     artifacts: list[Artifact] = Field(default_factory=list)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,12 +21,17 @@ from ..io import load_yaml_mapping
 from ..record import Record, list_records
 from .compat import from_legacy_record
 from .schema import (
+    Artifact,
     Dataset,
+    Observation,
     Registration,
     RegistrationManifest,
     canonical_json,
+    content_digest,
     digest,
 )
+
+_HISTORY_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -169,6 +175,65 @@ def _registration_of(record: Record) -> Registration | None:
     return from_legacy_record(extra)
 
 
+# --- Refresh semantics ------------------------------------------------------
+
+
+def _scope_is_narrower(new: Dataset, existing: Registration) -> bool:
+    """Return whether ``new`` scans a strict subset of ``existing``'s roots."""
+    new_roots = set(new.roots)
+    old_roots = set(existing.roots)
+    return bool(new_roots and old_roots and new_roots < old_roots)
+
+
+def _merge_artifacts(
+    dataset: Dataset, existing: Registration
+) -> tuple[list[Artifact], bool]:
+    """Merge incoming observations with the stored ones.
+
+    An exhaustive scan over an equal or broader scope is authoritative: stored
+    artifacts that disappeared are demoted to ``stale`` and retained. A partial,
+    unknown, or narrowed scan merges evidence without claiming absence. Returns
+    the merged artifacts and whether the set changed.
+    """
+    incoming = {artifact.key: artifact for artifact in dataset.artifacts}
+    if dataset.coverage == "exhaustive" and not _scope_is_narrower(dataset, existing):
+        merged = dict(incoming)
+        for artifact in existing.artifacts:
+            if artifact.key in merged:
+                continue
+            if artifact.availability == "present":
+                merged[artifact.key] = artifact.model_copy(
+                    update={"availability": "stale"}
+                )
+            else:
+                merged[artifact.key] = artifact
+    else:
+        merged = {artifact.key: artifact for artifact in existing.artifacts}
+        merged.update(incoming)
+
+    result = [merged[key] for key in sorted(merged)]
+    return result, _artifacts_signature(result) != _artifacts_signature(
+        existing.artifacts
+    )
+
+
+def _artifacts_signature(artifacts: list[Artifact]) -> str:
+    """Return the digest of an artifact list, excluding observation times."""
+    return content_digest([artifact.model_dump(mode="json") for artifact in artifacts])
+
+
+def _observation(registration: Registration) -> Observation:
+    states = [artifact.availability for artifact in registration.artifacts]
+    return Observation(
+        observed_at=datetime.now(UTC),
+        coverage=registration.coverage,
+        artifacts=len(registration.artifacts),
+        present=states.count("present"),
+        missing=states.count("missing"),
+        stale=states.count("stale"),
+    )
+
+
 def _registration_for(
     dataset: Dataset,
     *,
@@ -177,6 +242,28 @@ def _registration_for(
     record_type: str = "dataset",
 ) -> Registration:
     """Convert a manifest dataset into the record's ``registration`` block."""
+    if existing is None:
+        registration = Registration(
+            schema=1,
+            namespace=dataset.namespace,
+            key=dataset.key,
+            source=source,
+            parent=dataset.parent,
+            metadata=dataset.metadata,
+            coverage=dataset.coverage,
+            roots=dataset.roots,
+            availability=dataset.availability,
+            observed_at=dataset.observed_at,
+            artifacts=dataset.artifacts,
+            documentation=dataset.documentation,
+            managed=_managed_fields(record_type, dataset),
+        )
+        return registration
+
+    artifacts, changed = _merge_artifacts(dataset, existing)
+    history = list(existing.history)
+    if changed:
+        history.append(_observation(existing))
     return Registration(
         schema=1,
         namespace=dataset.namespace,
@@ -185,18 +272,51 @@ def _registration_for(
         parent=dataset.parent,
         metadata=dataset.metadata,
         coverage=dataset.coverage,
+        roots=dataset.roots,
         availability=dataset.availability,
         observed_at=dataset.observed_at,
-        artifacts=dataset.artifacts,
+        artifacts=artifacts,
         documentation=dataset.documentation,
-        managed={"type": record_type},
-        history=list(existing.history) if existing else [],
+        managed=_managed_fields(record_type, dataset),
+        history=history[-_HISTORY_LIMIT:],
     )
+
+
+def _managed_fields(record_type: str, dataset: Dataset) -> dict[str, Any]:
+    """Return the baseline of the top-level record fields the importer owns."""
+    managed: dict[str, Any] = {"type": record_type}
+    if dataset.parent is not None:
+        managed["parent_id"] = collection_record_id(dataset.namespace, dataset.parent)
+    return managed
 
 
 def collection_record_id(namespace: str, parent: str | list[str]) -> str:
     """Derive the deterministic ID of a collection record for ``parent``."""
     return f"collection-{digest([namespace, parent])}"
+
+
+def _managed_conflict(
+    record: Record, registration: Registration, override: bool
+) -> str | None:
+    """Return a human-edit conflict message, or ``None`` when safe to write."""
+    managed = registration.managed
+    for key, baseline in managed.items():
+        current = record.to_dict().get(key)
+        if current != baseline and not override:
+            return (
+                f"importer-owned field {key!r} was edited: stored "
+                f"{current!r} != {baseline!r}; pass --override-conflicts to "
+                "overwrite"
+            )
+    return None
+
+
+def _owned_fields_match(record: Record, registration: Registration) -> bool:
+    """Return whether the record's importer-owned fields still hold their baseline."""
+    for key, baseline in registration.managed.items():
+        if record.to_dict().get(key) != baseline:
+            return False
+    return True
 
 
 def _plan_collections(
@@ -218,13 +338,18 @@ def _plan_collections(
     return resolved
 
 
-def plan_import(manifest: RegistrationManifest, config: HirakuConfig) -> ImportPlan:
+def plan_import(
+    manifest: RegistrationManifest,
+    config: HirakuConfig,
+    *,
+    override: bool = False,
+) -> ImportPlan:
     """Compute the import plan without writing anything.
 
     Collections are planned before their datasets. A record whose ID is already
-    taken by a different dataset identity, or whose human-edited ``type``
-    disagrees with the importer's baseline, is reported as a conflict rather
-    than overwritten.
+    taken by a different dataset identity, whose source disagrees, or whose
+    importer-owned fields were human-edited is reported as a conflict rather
+    than overwritten, unless ``override`` explicitly resolves the field edits.
     """
     manifest = validate_manifest(manifest)
     records = list_records(config=config)
@@ -302,21 +427,17 @@ def plan_import(manifest: RegistrationManifest, config: HirakuConfig) -> ImportP
                 )
             )
             continue
-        if current.type not in (None, "dataset"):
-            plan.conflicts.append(
-                Conflict(
-                    record_id,
-                    f"record type is {current.type!r}, not the importer-owned "
-                    "'dataset'",
-                )
-            )
-            continue
         incoming = _registration_for(
             dataset, source=manifest.source, existing=existing
         )
+        conflict = _managed_conflict(current, incoming, override)
+        if conflict is not None:
+            plan.conflicts.append(Conflict(record_id, conflict))
+            continue
         if (
             existing is not None
             and incoming.semantic_digest() == existing.semantic_digest()
+            and _owned_fields_match(current, incoming)
         ):
             plan.unchanged += 1
             continue
@@ -346,6 +467,7 @@ def apply_import(
     config: HirakuConfig,
     *,
     reviewed_hash: str | None = None,
+    override: bool = False,
 ) -> ImportPlan:
     """Review, verify, and apply a manifest in one step.
 
@@ -354,11 +476,20 @@ def apply_import(
     """
     manifest = validate_manifest(manifest, check_digest=True)
     verify_reviewed_hash(manifest, reviewed_hash)
-    plan = plan_import(manifest, config)
+    plan = plan_import(manifest, config, override=override)
     if plan.conflicts:
         return plan
     from .writer import apply_writes
 
-    apply_writes(config, plan._writes)
+    result = apply_writes(config, plan._writes)
     plan.applied = True
+    if result.failed:
+        plan.applied = False
+        details = "; ".join(
+            f"{record_id}: {error}" for record_id, error in result.failed
+        )
+        raise ValidationError(
+            f"registry apply failed for {len(result.failed)} record(s); retry is "
+            f"safe: {details}"
+        )
     return plan
