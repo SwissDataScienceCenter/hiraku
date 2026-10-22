@@ -66,6 +66,11 @@ def _update(write: _Write, config: HirakuConfig) -> None:
         return
     record.type = write.record_type
     record.registration = write.registration.to_record_value()
+    if write.parent_id is not None and record.parent_id != write.parent_id:
+        # Hiraku requires a record to live under its parent's root folder.
+        # ``reparent`` relocates the file and persists the fields set above.
+        record.reparent(write.parent_id, config=config)
+        return
     if write.parent_id is not None:
         record.parent_id = write.parent_id
     record.save()

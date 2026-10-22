@@ -130,6 +130,23 @@ def test_source_ownership_conflict_is_reported(project: HirakuConfig) -> None:
     assert "owned by source" in plan.conflicts[0].message
 
 
+def test_reordered_manifest_is_a_no_op(project: HirakuConfig) -> None:
+    manifest = _manifest(
+        "filesystem",
+        _dataset("data", [_artifact("data/b.csv"), _artifact("data/a.csv")]),
+    )
+    apply_import(manifest, project)
+
+    reordered = _manifest(
+        "filesystem",
+        _dataset("data", [_artifact("data/a.csv"), _artifact("data/b.csv")]),
+    )
+    plan = apply_import(reordered, project)
+
+    assert plan.unchanged == 1
+    assert plan.updates == []
+
+
 def test_exhaustive_rescan_marks_disappeared_artifacts_stale(
     project: HirakuConfig,
 ) -> None:

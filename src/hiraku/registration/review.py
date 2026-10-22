@@ -254,7 +254,10 @@ def _registration_for(
             roots=dataset.roots,
             availability=dataset.availability,
             observed_at=dataset.observed_at,
-            artifacts=dataset.artifacts,
+            # Canonical artifact order, matching the merge path, so manifest
+            # order alone can never cause an otherwise identical rescan to
+            # rewrite a record.
+            artifacts=sorted(dataset.artifacts, key=lambda artifact: artifact.key),
             documentation=dataset.documentation,
             managed=_managed_fields(record_type, dataset),
         )
@@ -296,10 +299,21 @@ def collection_record_id(namespace: str, parent: str | list[str]) -> str:
 
 
 def _managed_conflict(
-    record: Record, registration: Registration, override: bool
+    record: Record,
+    registration: Registration,
+    override: bool,
+    *,
+    baselines: dict[str, Any] | None = None,
 ) -> str | None:
-    """Return a human-edit conflict message, or ``None`` when safe to write."""
-    managed = registration.managed
+    """Return a human-edit conflict message, or ``None`` when safe to write.
+
+    ``baselines`` are the values saved by the previous import. Legacy records
+    written before the generic schema have no such baselines, so a first
+    generic reimport may adopt fields such as ``parent_id`` instead of
+    reporting a human edit. Once a generic import has run, its saved baselines
+    detect later human edits.
+    """
+    managed = registration.managed if baselines is None else baselines
     for key, baseline in managed.items():
         current = record.to_dict().get(key)
         if current != baseline and not override:
@@ -430,7 +444,12 @@ def plan_import(
         incoming = _registration_for(
             dataset, source=manifest.source, existing=existing
         )
-        conflict = _managed_conflict(current, incoming, override)
+        conflict = _managed_conflict(
+            current,
+            incoming,
+            override,
+            baselines=existing.managed if existing is not None else {},
+        )
         if conflict is not None:
             plan.conflicts.append(Conflict(record_id, conflict))
             continue
