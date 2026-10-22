@@ -115,8 +115,8 @@ arbitrary dictionaries) and maps them to `Registration` once, explicitly:
 | `files[].revision` | `artifacts[].revision` |
 | `files[].size_bytes` | `artifacts[].size` |
 | `files[].state == "file"` | `artifacts[].availability = present` |
-| `files[].matches[].sop_id` | `artifacts[].documentation[].key` (`role: output`) |
-| `missing_expected[]` | `artifacts[]` with `availability: missing`/`unknown` |
+| `files[].matches[].sop_id` | `artifacts[].documentation[].key` (`role: unknown`) |
+| `missing_expected[]` | `artifacts[]` with `availability: missing`/`unknown` and `role: unknown` |
 | `related_to` (SOP ids) | `documentation[]` (`role: unknown`) plus record links |
 | `registry.importer_fields` | `managed` (normalized baselines) |
 | `inventory_files[].path` | `artifacts[].display_path` |

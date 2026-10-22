@@ -154,7 +154,12 @@ def _missing_artifact(row: Any) -> Artifact:
         ),
         availability=observed,  # type: ignore[arg-type]
         documentation=[
-            Documentation(key=sop_id, role="output", filename=filename)
+            Documentation(
+                key=sop_id,
+                role="unknown",
+                applicability="unknown",
+                filename=filename,
+            )
         ],
     )
 
@@ -164,9 +169,12 @@ def _match(match: Any) -> Documentation:
     sop_id = item.get("sop_id")
     if not isinstance(sop_id, str) or not sop_id:
         raise ValidationError("legacy match requires a sop_id")
+    # The legacy matcher used the bounded SOP scan, which does not establish
+    # whether a reference is an input, an output, or a script.
     return Documentation(
         key=sop_id,
-        role="output",
+        role="unknown",
+        applicability="unknown",
         filename=_optional_str(item.get("expected_filename"), "expected_filename"),
     )
 
