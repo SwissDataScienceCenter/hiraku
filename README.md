@@ -104,6 +104,17 @@ take time and may install the example's dependencies.
 
 </details>
 
+## Snakemake workflows
+
+`hiraku snakemake run` executes a [Snakemake](https://snakemake.github.io) workflow whose rules launch record entrypoints: the records state each step's code and arguments, and the `Snakefile` states only the files. Each execution is stored as one run of the workflow record, with one entry per step, and the dashboard shows which step builds or uses each file. It needs the `snakemake` extra.
+
+```bash
+hiraku snakemake generate --record workflow  # draft one rule per entrypoint
+hiraku snakemake run --record workflow       # execute and record the run
+```
+
+The [Snakemake guide](docs/guides/tracking-snakemake.md) covers writing the rules, and the [Digits Snakemake example](docs/examples/digits-snakemake/README.md) is a complete project.
+
 ## Dashboard
 
 `hiraku dashboard` serves a local [marimo](https://marimo.io) notebook through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view with the record tree, the runs attributed to each record, run details with links to the tracking backend, a performance plot, and the files of Snakemake workflow runs. It needs the `dashboard` extra.
