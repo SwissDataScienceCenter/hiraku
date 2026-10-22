@@ -1125,6 +1125,104 @@ def registry_import(
         raise click.exceptions.Exit(2)
 
 
+@registry_group.command("scan")
+@click.option(
+    "--root",
+    "roots",
+    multiple=True,
+    type=click.Path(path_type=Path),
+    help="Project-relative data directory; repeat for multiple roots.",
+)
+@click.option(
+    "--external",
+    "external_names",
+    multiple=True,
+    help="Configured external root name from hiraku.yml dataset_roots.",
+)
+@click.option(
+    "--external-root",
+    "inline_external",
+    multiple=True,
+    metavar="NAME=PATH",
+    help="Configure and scan an external root NAME at PATH for this run.",
+)
+@click.option("--max-files", default=100_000, show_default=True, type=int)
+@click.option("--project", "project_path", type=click.Path(path_type=Path))
+@click.option("--output", "output", type=click.Path(path_type=Path))
+@click.option("--apply", is_flag=True, help="Write records after review.")
+@click.option(
+    "--override-conflicts",
+    is_flag=True,
+    help="Overwrite importer-owned fields a human edited.",
+)
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def registry_scan(
+    state: CLIContext,
+    roots: tuple[Path, ...],
+    external_names: tuple[str, ...],
+    inline_external: tuple[str, ...],
+    max_files: int,
+    project_path: Path | None,
+    output: Path | None,
+    apply: bool,
+    override_conflicts: bool,
+    json_output: bool,
+) -> None:
+    """Scan filesystem roots and register their files; preview writes nothing."""
+    from .io import dump_yaml
+    from .registration import (
+        apply_import,
+        external_roots,
+        plan_import,
+        scan_manifest,
+    )
+
+    config = _registry_config(state, project_path)
+    configured = external_roots(config)
+    selected: dict[str, str] = {}
+    for name in external_names:
+        if name not in configured:
+            raise ValidationError(
+                f"external root {name!r} is not configured in dataset_roots"
+            )
+        selected[name] = configured[name]
+    for expression in inline_external:
+        name, separator, path = expression.partition("=")
+        if not separator or not name or not path:
+            raise ValidationError("--external-root requires NAME=PATH")
+        selected[name] = path
+    manifest = scan_manifest(config, list(roots), selected, max_files=max_files)
+    if output is not None:
+        from .io import atomic_write
+
+        target = Path(output)
+        atomic_write(target, dump_yaml(manifest.model_dump(mode="json")))
+        click.echo(
+            f"Wrote manifest to {target} "
+            f"(content_sha256={manifest.content_sha256})"
+        )
+        return
+    if apply:
+        result = apply_import(manifest, config, override=override_conflicts)
+    else:
+        result = plan_import(manifest, config, override=override_conflicts)
+    if json_output:
+        _emit_json(result.summary())
+    else:
+        click.echo(f"Scanned {len(manifest.datasets[0].artifacts)} files.")
+        click.echo(f"Project: {result.project}")
+        click.echo(f"Create:  {len(result.creates)}")
+        click.echo(f"Update:  {len(result.updates)}")
+        click.echo(f"Unchanged: {result.unchanged}")
+        for conflict in result.conflicts:
+            click.echo(f"Conflict {conflict.record_id}: {conflict.message}", err=True)
+        if not apply:
+            click.echo("Review with --json, then apply with --apply.")
+    if result.conflicts:
+        raise click.exceptions.Exit(2)
+
+
 @main.command("runs")
 @click.option("--record", "record_id")
 @click.option(
