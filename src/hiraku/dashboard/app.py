@@ -64,7 +64,17 @@ def project_data(config, refresh):
     records_df = hd.arrow_frame(hd.record_rows(project.records), hd.RECORD_COLUMNS)
     file_entries = hd.file_rows(project)
     files_df = hd.arrow_frame(file_entries, hd.FILE_COLUMNS)
-    return file_entries, files_df, project, records_df, runs_df
+    artifact_entries = hd.artifact_rows(project, config)
+    artifacts_df = hd.arrow_frame(artifact_entries, hd.ARTIFACT_COLUMNS)
+    return (
+        artifact_entries,
+        artifacts_df,
+        file_entries,
+        files_df,
+        project,
+        records_df,
+        runs_df,
+    )
 
 
 @app.cell
@@ -174,6 +184,22 @@ def file_details(file_entries, file_selector, select_key):
     )
     mo.vstack([_details])
     return (file_buttons,)
+
+
+@app.cell
+def artifact_table(artifact_entries):
+    artifact_selector = hc.artifact_table(artifact_entries)
+    mo.vstack([artifact_selector])
+    return (artifact_selector,)
+
+
+@app.cell
+def artifact_details(artifact_entries, artifact_selector, select_key):
+    _details, artifact_buttons = hc.artifact_details(
+        artifact_entries, artifact_selector.value, on_select=select_key
+    )
+    mo.vstack([_details])
+    return (artifact_buttons,)
 
 
 @app.cell

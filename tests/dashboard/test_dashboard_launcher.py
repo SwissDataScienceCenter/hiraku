@@ -75,6 +75,8 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "run_details",
         "file_table",
         "file_details",
+        "artifact_table",
+        "artifact_details",
         "performance_plot",
         "tradeoff_plot",
     }

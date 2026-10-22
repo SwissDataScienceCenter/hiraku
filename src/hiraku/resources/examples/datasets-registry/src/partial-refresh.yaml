@@ -1,0 +1,15 @@
+schema_version: 1
+source: filesystem
+scope:
+  coverage: partial
+  filters:
+    note: one file reported by another tool; other files are not checked
+datasets:
+  - namespace: filesystem
+    key: [data]
+    coverage: partial
+    roots: [data]
+    artifacts:
+      - key: data/notes.txt
+        display_path: data/notes.txt
+        availability: present

@@ -122,6 +122,23 @@ location.
     that select the producing record or that last run in the run table and the
     record view. Runs from other sources add no files.
 
+**Datasets**
+:   Registered datasets and their artifact descriptors, read from records'
+    `registration` fields, so the view renders without any runs. Each row shows
+    the source, revision, observation time, coverage, and availability, plus
+    documentation links keyed by document and dataset. When a workflow run's
+    `jobs` name an artifact as an input or an output, `used_by` or `built_by`
+    shows the step, and buttons select that run. Both sides are compared by
+    location on this machine: a relative `jobs` path is resolved against the
+    project root, an artifact against the project root or its `dataset_roots`
+    mount, and symlinks are resolved, so an absolute path in a `Snakefile`
+    matches an artifact under a named root. A `jobs` path that is a directory,
+    such as a `directory()` output, also covers the artifacts inside it. An
+    artifact whose root is not configured in `dataset_roots` never matches.
+    `built_by` is what the workflow observed, not the artifact's historical
+    provenance. Registrations never contribute to run metrics or the runs
+    table.
+
 **Record**
 :   Expandable YAML front matter labeled with the selected record's ID,
     followed by its Markdown body.
@@ -240,11 +257,18 @@ details use the already loaded record objects to retain complete front matter.
     and `used_by` (as `record · entrypoint`, or `rule NAME` for a rule that
     does not launch an entrypoint), and `last_run`.
 
+`artifacts_df`
+:   A fourth DataFrame, for the Datasets view: one row per registered artifact
+    or dataset documentation link, with `key`, `dataset`, `source`, `path`,
+    `root`, `revision`, `size`, `availability`, `coverage`, `observed_at`,
+    `documentation`, `used_by`, and `built_by`.
+
 | View | Reads |
 | --- | --- |
 | Runs table | `records_df` rows, each followed by its runs from `runs_df` |
 | Run details | the selected run's row of `runs_df` |
 | Files table | `files_df` rows; the details show the producing command and select its record or run |
+| Datasets table | `artifacts_df` rows; the details select the dataset record and any run that uses or builds the path |
 | Performance plot | selected record subtree in `runs_df`; choose one metric |
 | Trade-off plot | selected record subtree in `runs_df`; choose two metrics and their objectives |
 

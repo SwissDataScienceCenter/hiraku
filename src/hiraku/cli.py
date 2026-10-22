@@ -1051,6 +1051,182 @@ def snakemake_generate(
     click.echo(f"Generated Snakefile at {path}")
 
 
+@main.group("registry")
+def registry_group() -> None:
+    """Register existing datasets and their artifact descriptors as records."""
+
+
+def _registry_config(state: CLIContext, project_path: Path | None) -> HirakuConfig:
+    if project_path is None:
+        return state.config
+    target = project_path.expanduser().absolute()
+    if target.is_dir():
+        target = target / "hiraku.yml"
+    return HirakuConfig.load(target)
+
+
+def _registry_report(result: Any, *, applied: bool, json_output: bool) -> None:
+    if json_output:
+        _emit_json(result.summary())
+    else:
+        click.echo(f"Project: {result.project}")
+        click.echo(f"Source:  {result.source}")
+        click.echo(f"Create:  {len(result.creates)}")
+        click.echo(f"Update:  {len(result.updates)}")
+        click.echo(f"Unchanged: {result.unchanged}")
+        click.echo(f"content_sha256: {result.content_sha256}")
+        for conflict in result.conflicts:
+            click.echo(f"Conflict {conflict.record_id}: {conflict.message}", err=True)
+        if not applied:
+            click.echo("Apply with --apply --reviewed-hash <content_sha256>.")
+    if result.conflicts:
+        raise click.exceptions.Exit(2)
+
+
+def _require_reviewed_hash(apply: bool, reviewed_hash: str | None) -> None:
+    if apply and reviewed_hash is None:
+        raise ValidationError(
+            "--apply requires --reviewed-hash; preview without --apply to see "
+            "the manifest's content_sha256"
+        )
+
+
+@registry_group.command("import")
+@click.argument("manifest", type=click.Path(path_type=Path))
+@click.option(
+    "--project",
+    "project_path",
+    type=click.Path(path_type=Path),
+    help="Target Hiraku project directory or hiraku.yml; defaults to discovery.",
+)
+@click.option("--apply", is_flag=True, help="Write records after review.")
+@click.option(
+    "--reviewed-hash",
+    help="content_sha256 shown by the preview; required with --apply.",
+)
+@click.option(
+    "--override-conflicts",
+    is_flag=True,
+    help="Overwrite importer-owned fields a human edited.",
+)
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def registry_import(
+    state: CLIContext,
+    manifest: Path,
+    project_path: Path | None,
+    apply: bool,
+    reviewed_hash: str | None,
+    override_conflicts: bool,
+    json_output: bool,
+) -> None:
+    """Review or apply a registration manifest; preview writes nothing."""
+    from .registration import apply_import, load_manifest, plan_import
+
+    _require_reviewed_hash(apply, reviewed_hash)
+    config = _registry_config(state, project_path)
+    reviewed = load_manifest(manifest)
+    if apply:
+        result = apply_import(
+            reviewed,
+            config,
+            reviewed_hash=reviewed_hash,
+            override=override_conflicts,
+        )
+    else:
+        result = plan_import(reviewed, config, override=override_conflicts)
+    _registry_report(result, applied=apply, json_output=json_output)
+
+
+@registry_group.command("scan")
+@click.option(
+    "--root",
+    "roots",
+    multiple=True,
+    type=click.Path(path_type=Path),
+    help="Project-relative data directory; repeat for multiple roots.",
+)
+@click.option(
+    "--external",
+    "external_names",
+    multiple=True,
+    help="Configured external root name from hiraku.yml dataset_roots.",
+)
+@click.option("--max-files", default=100_000, show_default=True, type=int)
+@click.option("--project", "project_path", type=click.Path(path_type=Path))
+@click.option("--output", "output", type=click.Path(path_type=Path))
+@click.option("--apply", is_flag=True, help="Write records after review.")
+@click.option(
+    "--reviewed-hash",
+    help="content_sha256 shown by the preview; required with --apply.",
+)
+@click.option(
+    "--override-conflicts",
+    is_flag=True,
+    help="Overwrite importer-owned fields a human edited.",
+)
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def registry_scan(
+    state: CLIContext,
+    roots: tuple[Path, ...],
+    external_names: tuple[str, ...],
+    max_files: int,
+    project_path: Path | None,
+    output: Path | None,
+    apply: bool,
+    reviewed_hash: str | None,
+    override_conflicts: bool,
+    json_output: bool,
+) -> None:
+    """Scan filesystem roots and register their files; preview writes nothing.
+
+    Only project-relative roots and external roots configured by name in
+    ``dataset_roots`` can be scanned. An apply must pass the hash of the
+    previewed scan, so files that changed in between are not applied unseen.
+    """
+    from .io import dump_yaml
+    from .registration import (
+        apply_import,
+        external_roots,
+        plan_import,
+        scan_manifest,
+    )
+
+    _require_reviewed_hash(apply, reviewed_hash)
+    config = _registry_config(state, project_path)
+    configured = external_roots(config)
+    selected: dict[str, str] = {}
+    for name in external_names:
+        if name not in configured:
+            raise ValidationError(
+                f"external root {name!r} is not configured in dataset_roots"
+            )
+        selected[name] = configured[name]
+    manifest = scan_manifest(config, list(roots), selected, max_files=max_files)
+    if output is not None:
+        from .io import atomic_write
+
+        target = Path(output)
+        atomic_write(target, dump_yaml(manifest.model_dump(mode="json")))
+        click.echo(
+            f"Wrote manifest to {target} (content_sha256={manifest.content_sha256})"
+        )
+        return
+    if apply:
+        result = apply_import(
+            manifest,
+            config,
+            reviewed_hash=reviewed_hash,
+            override=override_conflicts,
+        )
+    else:
+        result = plan_import(manifest, config, override=override_conflicts)
+    if not json_output:
+        click.echo(f"Scanned {len(manifest.datasets[0].artifacts)} files.")
+    _registry_report(result, applied=apply, json_output=json_output)
+
+
 @main.command("runs")
 @click.option("--record", "record_id")
 @click.option(

@@ -31,6 +31,7 @@ Check the examples for a more complete walkthrough:
 - [Iris dataset using Weights & Biases](docs/examples/iris-wandb/README.md)
 - [Digits dataset using MLFlow](docs/examples/digits-mlflow/README.md)
 - [Digits regularization variants with Snakemake and MLflow](docs/examples/digits-snakemake/README.md)
+- [Datasets registry](docs/examples/datasets-registry/README.md)
 - [EuroSAT RGB image classification](docs/examples/eurosat-rgb/README.md)
 - [Workflow examples](docs/examples/workflows/README.md)
 - [Karpathy's LLM autoresearch example](docs/examples/autoresearch/README.md)
