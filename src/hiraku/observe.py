@@ -18,9 +18,9 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .config import HirakuConfig
@@ -37,6 +37,8 @@ _SKIPPED = frozenset(
     }
 )
 _MAX_FILES = 100_000
+# More files than this under one directory are declared as the directory.
+_MANY_FILES = 50
 
 _HOOK = """\
 import atexit, os, sys
@@ -176,10 +178,16 @@ class Observer:
         arguments: Sequence[str],
         command: Sequence[str],
         returncode: int,
+        options: Sequence[str] = (),
     ) -> Path | None:
-        """Store the observation of a successful launch and return its path."""
+        """Store the observation of a successful launch and return its path.
+
+        ``options`` are the launch options to repeat, such as ``--dispatch``.
+        """
         try:
-            return self._store(record_id, entrypoint, arguments, command, returncode)
+            return self._store(
+                record_id, entrypoint, arguments, command, returncode, options
+            )
         finally:
             self.discard()
 
@@ -190,17 +198,18 @@ class Observer:
         arguments: Sequence[str],
         command: Sequence[str],
         returncode: int,
+        options: Sequence[str],
     ) -> Path | None:
         if returncode or self.before is None:
             return None
         after = _snapshot(self.config)
         if after is None:
             return None
-        outputs = sorted(
+        changed = [
             path
             for path, state in after.items()
             if self.before.get(path) != state and path not in self.excluded
-        )
+        ]
         opened = [
             line
             for log in self.scratch.glob("opened.*")
@@ -212,14 +221,15 @@ class Observer:
             for part in (token, token.partition("=")[2])
             if part and not part.startswith("-")
         ]
+        read = {
+            path
+            for value in (*opened, *named)
+            if (path := _project_path(self.config, value)) in self.before
+            and path not in self.excluded
+        }
+        outputs = _directories(changed, self.before)
         inputs = sorted(
-            {
-                path
-                for value in (*opened, *named)
-                if (path := _project_path(self.config, value)) in self.before
-                and path not in outputs
-                and path not in self.excluded
-            }
+            path for path in _directories(read, {}) if not _covered(path, outputs)
         )
         if not inputs and not outputs:
             return None
@@ -229,14 +239,21 @@ class Observer:
         # A step that skips work when its output exists still owns that output.
         if destination.exists():
             previous = json.loads(destination.read_text(encoding="utf-8"))
-            if previous.get("arguments") == list(arguments):
-                outputs = sorted(
-                    {*outputs, *(path for path in previous["outputs"] if path in after)}
-                )
-                inputs = [path for path in inputs if path not in outputs]
+            if (previous.get("arguments"), previous.get("options", [])) == (
+                list(arguments),
+                list(options),
+            ):
+                kept = [
+                    path
+                    for path in previous["outputs"]
+                    if (self.config.root / path.rstrip("/")).exists()
+                ]
+                outputs = sorted({*outputs, *kept})
+                inputs = [path for path in inputs if not _covered(path, outputs)]
         observation = {
             "record": record_id,
             "entrypoint": entrypoint,
+            "options": list(options),
             "arguments": list(arguments),
             "inputs": inputs,
             "outputs": outputs,
@@ -244,6 +261,40 @@ class Observer:
         }
         atomic_write(destination, json.dumps(observation, indent=2) + "\n")
         return destination
+
+
+def _directories(paths: Collection[str], before: Mapping[str, Any]) -> list[str]:
+    """Replace many files under one directory by that directory, as ``dir/``.
+
+    Outputs collapse only within directories the launch created, so a step
+    writing one file next to existing ones keeps its file. ``before`` is empty
+    for inputs, which collapse wherever a directory holds many of them.
+    """
+    existing = {
+        str(parent) for path in before for parent in PurePosixPath(path).parents
+    }
+    groups: dict[str, list[str]] = {}
+    for path in paths:
+        parents = [str(item) for item in reversed(PurePosixPath(path).parents)][1:]
+        top = next((item for item in parents if item not in existing), None)
+        if before and top is None:
+            groups.setdefault(path, []).append(path)
+            continue
+        key = top if before else (parents[-1] if parents else path)
+        groups.setdefault(key, []).append(path)
+    result = []
+    for members in groups.values():
+        if len(members) > _MANY_FILES:
+            result.append(f"{os.path.commonpath(members)}/")
+        else:
+            result.extend(members)
+    return sorted(result)
+
+
+def _covered(path: str, outputs: Collection[str]) -> bool:
+    return path in outputs or any(
+        item.endswith("/") and path.startswith(item) for item in outputs
+    )
 
 
 def start(config: HirakuConfig, *, backend: Any = None) -> Observer | None:

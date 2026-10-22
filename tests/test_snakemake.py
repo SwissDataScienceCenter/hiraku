@@ -378,6 +378,33 @@ def test_observed_workflow_declares_the_files_of_each_launch(tmp_path: Path) -> 
         observed_workflow(Record.create("empty", config=config), config=config)
 
 
+def test_observed_workflow_scope_options_and_directories(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create("task", config=config)
+    pipeline = Record.create("pipeline", parent_id="task", config=config)
+    Record.create("model", parent_id="task", config=config)
+    observe(
+        config,
+        "task",
+        "download",
+        options=["--dispatch", "launch.sh"],
+        inputs=["download.py"],
+        outputs=["data/images/"],
+    )
+    observe(config, "model", "train", inputs=["data/images/0/1.jpg", "train.py"])
+
+    with pytest.raises(ValidationError, match="'pipeline'"):
+        observed_workflow(pipeline, config=config)
+    text = observed_workflow(
+        pipeline, config=config, scope=load_record("task", config=config)
+    )
+
+    assert "hiraku launch download --record task --dispatch launch.sh -- " in text
+    assert '    output:\n        directory("data/images"),\n' in text
+    assert '    input:\n        "data/images",\n        "train.py",\n' in text
+    assert '    input:\n        "hiraku/snakemake/logs/model__train.log",\n' in text
+
+
 def test_cli_run_without_snakefile_uses_the_observed_launches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

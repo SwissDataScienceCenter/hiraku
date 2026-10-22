@@ -217,6 +217,10 @@ def launch(
                 arguments=render_arguments(args or {}),
                 command=command,
                 returncode=result.returncode,
+                options=[
+                    *(("--commit", commit) if commit is not None else ()),
+                    *(("--dispatch", dispatch) if dispatch else ()),
+                ],
             )
     if check and result.returncode != 0:
         detail = (result.stderr or "").strip() or (result.stdout or "").strip()

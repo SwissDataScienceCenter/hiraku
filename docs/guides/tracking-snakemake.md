@@ -64,11 +64,25 @@ used:
   for reading, or that the command names, such as the script.
 
 `hiraku snakemake run` then writes `hiraku/snakemake/Snakefile` with one rule
-per observed step. Each rule repeats the step's arguments and declares its
-files, and `rule all` asks for every file no other step reads. Snakemake runs
+per observed step of the workflow record and the records below it. Each rule
+repeats the step's `--dispatch` or `--commit` and its arguments, declares its
+files, and `rule all` asks for every file no other step reads. More than 50
+files that a step creates under one new directory, such as a downloaded
+dataset, are declared as that `directory()`, and the steps reading them depend
+on it.
+
+When the steps are not below the workflow record, for example when the
+experiments use MLflow and a separate CSV `pipeline` record holds the workflow
+runs, name the record above the steps with `--scope`:
+
+```bash
+hiraku snakemake run --record pipeline --scope my-task
+``` Snakemake runs
 the steps in dependency order, and only those whose inputs or rules changed.
 To change a step's rule, launch the step again with `--observe`; the latest
-successful observed launch wins.
+successful observed launch of each record and entrypoint wins, so one
+entrypoint launched with two argument sets, such as two seeds, becomes one
+rule. Write a `Snakefile` to keep both.
 
 What observation leaves out:
 

@@ -126,3 +126,21 @@ def test_project_sitecustomize_still_runs(tmp_path: Path) -> None:
     assert (tmp_path / "site.txt").read_text() == "ran"
     [observation] = load_observations(config)
     assert json.dumps(observation["inputs"]) == '["prepare.py", "raw.txt"]'
+
+
+def test_launch_options_and_many_new_files_are_recorded(tmp_path: Path) -> None:
+    config = project(tmp_path)
+    (tmp_path / "prepare.py").write_text(
+        "import pathlib\n"
+        "for index in range(60):\n"
+        "    path = pathlib.Path(f'data/images/{index % 3}/{index}.txt')\n"
+        "    path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    path.write_text(open('raw.txt').read())\n"
+        "pathlib.Path('summary.txt').write_text('60')\n"
+    )
+
+    assert run(config, dispatch="launch.sh") == 0
+
+    [observation] = load_observations(config)
+    assert observation["options"] == ["--dispatch", "launch.sh"]
+    assert observation["outputs"] == ["data/images/", "summary.txt"]

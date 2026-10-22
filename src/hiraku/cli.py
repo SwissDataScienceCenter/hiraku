@@ -923,6 +923,11 @@ def snakemake_group() -> None:
     is_flag=True,
     help="Build the workflow from the observed launches even if a Snakefile exists.",
 )
+@click.option(
+    "--scope",
+    "scope_id",
+    help="Take observed steps from this record and its children, not --record's.",
+)
 @click.option("--cores", type=click.IntRange(min=1), default=1)
 @click.option("--dry-run", is_flag=True, help="Record the planned jobs only.")
 @click.option("--command", default="snakemake", help="Snakemake executable.")
@@ -943,6 +948,7 @@ def snakemake_run(
     record_id: str,
     snakefile: Path | None,
     observed: bool,
+    scope_id: str | None,
     cores: int,
     dry_run: bool,
     command: str,
@@ -970,7 +976,8 @@ def snakemake_run(
         snakefile = Path("Snakefile")
     if snakefile is None:
         record = load_record(record_id, config=state.config)
-        snakefile = observed_snakefile(record, config=state.config)
+        scope = load_record(scope_id, config=state.config) if scope_id else None
+        snakefile = observed_snakefile(record, config=state.config, scope=scope)
         click.echo(f"Generated {snakefile} from the observed launches")
     run, exit_code = run_workflow(
         state.config,
@@ -1012,6 +1019,11 @@ def snakemake_run(
     is_flag=True,
     help="Write complete rules from the observed launches instead of a draft.",
 )
+@click.option(
+    "--scope",
+    "scope_id",
+    help="With --observed, take steps from this record and its children.",
+)
 @click.pass_obj
 def snakemake_generate(
     state: CLIContext,
@@ -1020,13 +1032,19 @@ def snakemake_generate(
     force: bool,
     print_only: bool,
     observed: bool,
+    scope_id: str | None,
 ) -> None:
     """Draft one rule per entrypoint of the record and the records below it."""
     from .snakemake import generate_workflow, observed_workflow, write_workflow
 
     record = load_record(record_id, config=state.config)
-    build = observed_workflow if observed else generate_workflow
-    content = build(record, config=state.config)
+    if observed:
+        scope = load_record(scope_id, config=state.config) if scope_id else None
+        content = observed_workflow(record, config=state.config, scope=scope)
+    elif scope_id:
+        raise click.UsageError("--scope requires --observed")
+    else:
+        content = generate_workflow(record, config=state.config)
     if print_only:
         click.echo(content, nl=False)
         return
