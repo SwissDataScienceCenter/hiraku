@@ -41,6 +41,16 @@ nav = [
       { "EuroSAT RGB" = "examples/eurosat-rgb/README.md" },
       { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
       { "Workflow Examples" = "examples/workflows/README.md" },
+      { "Snakemake Pipelines" = [
+        { "Overview" = "examples/snakemake-pipelines/index.md" },
+        { "Heart Disease" = "examples/snakemake-pipelines/heart-disease.md" },
+        { "Digits (MLflow)" = "examples/snakemake-pipelines/digits-mlflow.md" },
+        { "Start from scratch" = "examples/snakemake-pipelines/minimal.md" },
+        { "Iris (W&B)" = "examples/snakemake-pipelines/iris-wandb.md" },
+        { "EuroSAT RGB" = "examples/snakemake-pipelines/eurosat-rgb.md" },
+        { "Workflow Examples" = "examples/snakemake-pipelines/workflows.md" },
+        { "Autoresearch" = "examples/snakemake-pipelines/autoresearch.md" },
+      ] },
   ] },
   { "Guides" = [
       { "Overview" = "guides/index.md" },

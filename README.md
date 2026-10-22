@@ -106,15 +106,21 @@ take time and may install the example's dependencies.
 
 ## Snakemake workflows
 
-`hiraku snakemake run` executes a [Snakemake](https://snakemake.github.io) workflow whose steps are record entrypoints. Launch each step once with `hiraku launch --observe`: Hiraku notes the files each launch read and wrote and builds the rules from them, so there is no `Snakefile` to write. Observation is opt-in; a plain `hiraku launch` is unchanged. Each execution is stored as one run of the workflow record, with one entry per step, and the dashboard shows which step builds or uses each file. It needs the `snakemake` extra.
+`hiraku snakemake run` executes a [Snakemake](https://snakemake.github.io) workflow whose steps are record entrypoints, and stores each execution as one run of a workflow record, with one entry per step. The records keep each step's command and arguments; the rules only connect the steps through the files they read and write. It needs the `snakemake` extra.
 
-```bash
-hiraku launch prepare --record workflow --observe -- --output data.csv
-hiraku launch train --record model --observe -- --input data.csv --output model.pkl
-hiraku snakemake run --record workflow   # rules from the observed launches
-```
+There are two ways to get the rules:
 
-A written `Snakefile` takes over when it exists, and suits agentic workflows: an agent already knows each step's command and files from the records and scripts, the rules only wire files to `hiraku launch` of an entrypoint so they cannot change the code a record runs, `hiraku snakemake run --dry-run` checks the DAG before any compute, each run's `jobs` show what actually ran, and a person reviews the change as a diff of one shared file. `hiraku snakemake generate` drafts it, from the entrypoints or with `--observed` from observed launches. The [Snakemake guide](docs/guides/tracking-snakemake.md) covers both, and the [Digits Snakemake example](docs/examples/digits-snakemake/README.md) is a complete project.
+- **Observe the launches.** Launch each step once with `hiraku launch --observe`; Hiraku notes the files each launch read and wrote and builds the rules from them, so there is no `Snakefile` to write. Observation is opt-in: a plain `hiraku launch` is unchanged.
+
+  ```bash
+  hiraku launch prepare --record workflow --observe -- --output data.csv
+  hiraku launch train --record model --observe -- --input data.csv --output model.pkl
+  hiraku snakemake run --record workflow
+  ```
+
+- **Write a `Snakefile`.** It takes over when it exists, and suits agentic work: the rules only wire files to `hiraku launch` of an entrypoint, so an edit cannot change the code a record runs; `hiraku snakemake run --dry-run` checks them before any compute; each run's `jobs` show what actually ran; and a person reviews the change as a diff. `hiraku snakemake generate` drafts the file, with `--observed` from the observed launches.
+
+The dashboard shows each workflow run's steps, and for each file, the step that produced it and the steps that used it. The [Snakemake guide](docs/guides/tracking-snakemake.md) is the reference, the [Digits Snakemake example](docs/examples/digits-snakemake/README.md) is a complete project, and the [Snakemake pipelines](docs/examples/snakemake-pipelines/index.md) pages run every other example both ways, step by step.
 
 ## Dashboard
 

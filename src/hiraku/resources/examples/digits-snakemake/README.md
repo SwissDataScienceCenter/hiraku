@@ -13,10 +13,12 @@ writes `results/<variant>.json` atomically and logs epoch histories to a local
 Each rule launches an entrypoint of a record: `digits` · `prepare`,
 `weak-l2` · `train`, and `strong-l2` · `train`. The records state the code and
 arguments; the `Snakefile` states the files. The workflow record keeps its
-execution runs in `hiraku/runs.csv`, next to the records; the experiment records use MLflow and tag their
-runs with `HIRAKU_WORKFLOW_RUN_ID`.
+execution runs in `hiraku/runs.csv`, next to the records. The experiment
+records use MLflow and tag their runs with `HIRAKU_WORKFLOW_RUN_ID`. The
+entrypoints run `python`, so run single steps inside the project environment
+with `uv run hiraku launch ...`.
 
 The `Snakefile` is optional: without it, `hiraku snakemake run` builds the same
-rules from steps launched once with `hiraku launch --observe`. Keeping it suits
-agentic work, since an agent can write and review the rules as a diff and
-check them with `--dry-run` before any training.
+rules from steps launched once with `uv run hiraku launch ... --observe`.
+Keeping it suits agentic work, since an agent can write and review the rules as
+a diff and check them with `--dry-run` before any training.
