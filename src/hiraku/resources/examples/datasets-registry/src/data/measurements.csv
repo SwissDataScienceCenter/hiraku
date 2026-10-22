@@ -1,0 +1,4 @@
+patient,sample,technology,pass
+P1,S1,scRNA,pass_1
+P1,S2,scRNA,pass_1
+P2,S3,scRNA,pass_2

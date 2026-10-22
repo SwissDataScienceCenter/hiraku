@@ -81,6 +81,7 @@ complete walkthrough, or browse the other runnable projects below.
 - [Iris with W&B](docs/examples/iris-wandb/README.md) — log scikit-learn experiments to Weights & Biases.
 - [Digits with MLflow](docs/examples/digits-mlflow/README.md) — track model runs and metrics with MLflow.
 - [Digits with Snakemake](docs/examples/digits-snakemake/README.md) — run regularization variants as a Snakemake workflow tracked with MLflow.
+- [Datasets registry](docs/examples/datasets-registry/README.md) — register existing datasets and their artifacts as records.
 - [EuroSAT RGB](docs/examples/eurosat-rgb/README.md) — compare image-classification architectures with W&B.
 - [Workflow examples](docs/examples/workflows/README.md) — try small Python and Markdown workflows.
 - [Autoresearch](docs/examples/autoresearch/README.md) — run a research loop on Karpathy's autoresearch project.

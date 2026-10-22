@@ -122,6 +122,15 @@ location.
     that select the producing record or that last run in the run table and the
     record view. Runs from other sources add no files.
 
+**Datasets**
+:   Registered datasets and their artifact descriptors, read from records'
+    `registration` fields, so the view renders without any runs. Each row shows
+    the source, revision, observation time, coverage, and availability, plus
+    documentation links keyed by document and dataset. When a workflow run uses
+    an artifact's exact path as an input, the row shows the using step and a
+    button selects that run. Registrations never contribute to run metrics or
+    the runs table.
+
 **Record**
 :   Expandable YAML front matter labeled with the selected record's ID,
     followed by its Markdown body.

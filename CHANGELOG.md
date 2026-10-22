@@ -43,6 +43,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Add `hiraku snakemake generate` to draft one launching rule per entrypoint of a record and its children.
 - Add opt-in launch observation: `hiraku launch --observe` (or `HIRAKU_OBSERVE=1`, `launch(observe=True)`, and the MCP `launch_entrypoint` tool's `observe`) records the project files a step read and wrote under the Git-ignored `hiraku/snakemake/`, and `hiraku snakemake run` without a `Snakefile` builds the rules from them. Rules repeat each step's `--dispatch`, `--commit`, and arguments, many new files under one directory become a `directory()` output, and `--scope RECORD` takes the steps from another subtree. `hiraku snakemake generate --observed` writes those rules to a `Snakefile`.
 - Add the `digits-snakemake` example, in which records state each step's code, the `Snakefile` states the files, and MLflow runs are linked to the workflow run.
+- Add `hiraku registry import` and `hiraku registry scan` to register existing datasets and their artifact descriptors as records, with preview/apply, reviewed hashes, descriptor-only remote locations, and optional filesystem discovery.
+- Add a dashboard Datasets view showing registered artifacts by source, revision, observation time, coverage, and availability, linked to workflow runs by exact path without contributing to run metrics.
+- Add the `datasets-registry` example, which registers a local file and a descriptor-only remote dataset end to end.
 
 ### Fixed
 

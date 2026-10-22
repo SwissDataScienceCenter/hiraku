@@ -436,6 +436,24 @@ ran; `raw.outcome` is `planned`, `succeeded`, `no-op`, `failed`, or
 contain it and report its record, entrypoint, and command. Steps that log their
 own runs, such as MLflow training, link them through `HIRAKU_WORKFLOW_RUN_ID`.
 
+## Register existing datasets
+
+Register existing datasets and their artifact descriptors as ordinary records
+without executing workflows, fabricating runs, or reading dataset contents.
+Preview is always the default; nothing is written until `--apply`.
+
+1. Register files under a project-relative root with `hiraku registry scan
+   --root DIR` (preview) and then `--apply`. Revisions are `size:mtime`, and
+   paths match the form Snakemake reports.
+2. Register descriptor-only or remote data from a manifest with
+   `hiraku registry import MANIFEST` (preview) and then
+   `--apply --reviewed-hash <content_sha256>`. Descriptor-only registration
+   never opens artifact locations, and credentials never belong in manifests
+   or records.
+3. Browse registered datasets in the dashboard's Datasets view; re-importing
+   identical content makes no edits, and an exhaustive rescan demotes
+   disappeared artifacts to `stale` rather than deleting records.
+
 ## Finish clearly
 
 Verify the requested end state with `show`, `list`, or `runs --json`. Report

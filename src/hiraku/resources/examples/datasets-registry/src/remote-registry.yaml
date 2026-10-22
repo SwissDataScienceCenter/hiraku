@@ -1,0 +1,23 @@
+schema_version: 1
+source: example
+scope:
+  coverage: partial
+  filters:
+    note: descriptor-only registration; no artifact locations are opened
+datasets:
+  - namespace: example
+    key: [remote-archive]
+    coverage: unknown
+    metadata:
+      description: A descriptor-only remote dataset with no local mount.
+    artifacts:
+      - key: remote-archive/scan.tiff
+        display_path: archive/scan.tiff
+        access:
+          uri: https://example.invalid/archive/scan.tiff
+        availability: unknown
+        documentation:
+          - key: archive-catalog
+            role: unknown
+            applicability: dataset
+            filename: scan.tiff

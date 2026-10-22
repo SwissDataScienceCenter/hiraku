@@ -13,6 +13,8 @@ working with research records.
     - [Custom backend](tracking-custom.md)
 - [Snakemake workflows](tracking-snakemake.md): run workflows whose steps
   launch record entrypoints.
+- [Dataset registry](registry.md): register existing datasets and their artifact
+  descriptors as records.
 - [MCP server](mcp.md)
 - [Dashboard](dashboard.md)
 - Advanced usage:

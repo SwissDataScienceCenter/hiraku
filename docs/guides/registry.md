@@ -128,3 +128,74 @@ Deterministic legacy record IDs are preserved on migration: the writer matches
 datasets by `(namespace, key)` identity rather than recomputing an ID, so
 reimporting legacy cohort records never duplicates a dataset or loses human
 text.
+
+## Using the CLI
+
+Registration ships as the `hiraku registry` group. Preview is always the
+default; nothing is written until you pass `--apply`.
+
+### Import a manifest
+
+A manifest is a YAML or JSON document a source adapter emits; the same shape is
+validated by the Python API. Review first, then apply the exact reviewed hash:
+
+```bash
+hiraku registry import manifest.yaml            # preview: creates/updates/conflicts
+hiraku registry import manifest.yaml --json
+hiraku registry import manifest.yaml --apply \
+  --reviewed-hash <content_sha256>
+```
+
+`--reviewed-hash` binds the apply to the manifest reviewed in a prior preview.
+`--override-conflicts` overwrites an importer-owned field a person edited;
+source-ownership conflicts are always reported.
+
+### Scan a filesystem
+
+`hiraku registry scan` lists regular files under explicit roots and feeds them
+into the same registration path. Project-relative roots use paths Snakemake
+reports; external mounts use named, configured roots (`dataset_roots` in
+`hiraku.yml`) so an absolute path never becomes identity:
+
+```bash
+hiraku registry scan --root data              # preview
+hiraku registry scan --root data --apply
+hiraku registry scan --root data --output manifest.yaml   # write the manifest
+hiraku registry scan --root data --external cohort --max-files 200000
+```
+
+Scans never read file contents; revisions are `size:mtime`. A scan that would
+exceed `--max-files` aborts instead of silently truncating.
+
+## Python API
+
+The public API lives in `hiraku.registration`:
+
+```python
+from hiraku.config import HirakuConfig
+from hiraku.registration import apply_import, load_manifest, plan_import
+
+config = HirakuConfig.discover()
+manifest = load_manifest("manifest.yaml")
+plan = plan_import(manifest, config)          # no writes
+applied = apply_import(manifest, config, reviewed_hash=plan_hash)
+```
+
+`RegistrationManifest`, `Dataset`, `Artifact`, and `Documentation` are the
+versioned models; `Registration` is the record front-matter block.
+`scan_manifest(config, roots, external)` produces a manifest from filesystem
+discovery, and `hiraku.registration.compat.from_legacy_record` maps legacy
+cohort or file-inventory records to `Registration` for reimport.
+
+## Example
+
+The bundled `datasets-registry` example registers a local file and a
+descriptor-only remote dataset end to end:
+
+```bash
+hiraku init --example datasets-registry
+```
+
+See [Datasets registry](../examples/datasets-registry/README.md) for the full
+walkthrough.
+

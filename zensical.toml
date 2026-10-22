@@ -38,6 +38,7 @@ nav = [
       { "Iris (W&B)" = "examples/iris-wandb/README.md" },
       { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
       { "Digits (Snakemake)" = "examples/digits-snakemake/README.md" },
+      { "Datasets (registry)" = "examples/datasets-registry/README.md" },
       { "EuroSAT RGB" = "examples/eurosat-rgb/README.md" },
       { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
       { "Workflow Examples" = "examples/workflows/README.md" },
@@ -65,6 +66,7 @@ nav = [
       ] },
       { "MCP server" = "guides/mcp.md" },
       { "Dashboard" = "guides/dashboard.md" },
+      { "Dataset registry" = "guides/registry.md" },
   ] },
   { "CLI" = "api/cli.md" },
   { "Python API" = [
