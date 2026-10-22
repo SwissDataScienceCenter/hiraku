@@ -11,7 +11,7 @@ git clone https://github.com/SwissDataScienceCenter/hiraku.git
 cd hiraku
 
 # system install
-uv tool install ".[mlflow,wandb,dashboard]"
+uv tool install ".[mlflow,wandb,dashboard,snakemake]"
 
 # for local development
 uv sync --all-extras
@@ -26,9 +26,13 @@ hiraku init
 
 Check the examples for a more complete walkthrough:
 
+- [Start from scratch with a minimal project](docs/examples/minimal/README.md)
 - [Heart-disease prediction using CSV logging](docs/examples/heart-disease/README.md)
 - [Iris dataset using Weights & Biases](docs/examples/iris-wandb/README.md)
 - [Digits dataset using MLFlow](docs/examples/digits-mlflow/README.md)
+- [Digits regularization variants with Snakemake and MLflow](docs/examples/digits-snakemake/README.md)
+- [EuroSAT RGB image classification](docs/examples/eurosat-rgb/README.md)
+- [Workflow examples](docs/examples/workflows/README.md)
 - [Karpathy's LLM autoresearch example](docs/examples/autoresearch/README.md)
 
 Initialize an example in any of these ways:
@@ -44,9 +48,27 @@ The results and generator modes are available for the Heart Disease and Digits
 examples. `--generate` cannot be combined with `--with-results`; generation can
 take time and may install the example's dependencies.
 
+## Snakemake workflows
+
+`hiraku snakemake run` executes a [Snakemake](https://snakemake.github.io) workflow whose steps are record entrypoints, and stores each execution as one run of a workflow record, with one entry per step. The records keep each step's command and arguments; the rules only connect the steps through the files they read and write. It needs the `snakemake` extra.
+
+There are two ways to get the rules:
+
+- **Observe the launches.** Launch each step once with `hiraku launch --observe`; Hiraku notes the files each launch read and wrote and builds the rules from them, so there is no `Snakefile` to write. Observation is opt-in: a plain `hiraku launch` is unchanged.
+
+  ```bash
+  hiraku launch prepare --record workflow --observe -- --output data.csv
+  hiraku launch train --record model --observe -- --input data.csv --output model.pkl
+  hiraku snakemake run --record workflow
+  ```
+
+- **Write a `Snakefile`.** It takes over when it exists, and suits agentic work: the rules only wire files to `hiraku launch` of an entrypoint, so an edit cannot change the code a record runs; `hiraku snakemake run --dry-run` checks them before any compute; each run's `jobs` show what actually ran; and a person reviews the change as a diff. `hiraku snakemake generate` drafts the file, with `--observed` from the observed launches.
+
+The dashboard shows each workflow run's steps, and for each file, the step that produced it and the steps that used it. The [Snakemake guide](docs/guides/tracking-snakemake.md) is the reference, the [Digits Snakemake example](docs/examples/digits-snakemake/README.md) is a complete project, and the [Snakemake pipelines](docs/examples/snakemake-pipelines/index.md) pages run every other example both ways, step by step.
+
 ## Dashboard
 
-`hiraku dashboard` serves a local [marimo](https://marimo.io) notebook through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view with the record tree, the runs attributed to each record, run details with links to the tracking backend, and a performance plot. It needs the `dashboard` extra.
+`hiraku dashboard` serves a local [marimo](https://marimo.io) notebook through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view with the record tree, the runs attributed to each record, run details with links to the tracking backend, a performance plot, and the files of Snakemake workflow runs. It needs the `dashboard` extra.
 
 | Command | What it does |
 | --- | --- |
@@ -58,7 +80,7 @@ take time and may install the example's dependencies.
 
 After `--init`, `hiraku dashboard` serves your copy. In the editor, the
 `runs_df` and `records_df` tables hold every run and record with its place in
-the tree, ready for your own plots or marimo's AI assistant.
+the tree, and `files_df` the files of workflow runs, ready for your own plots or marimo's AI assistant.
 
 Try every dashboard mode without training by loading the bundled Digits runs:
 

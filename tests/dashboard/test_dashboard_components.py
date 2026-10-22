@@ -9,7 +9,11 @@ pytest.importorskip("altair")
 from hiraku.base import BaseRecord
 from hiraku.context import Context
 from hiraku.dashboard import components as hc
-from hiraku.dashboard.data import RECORD_COLUMNS, RUN_COLUMNS, arrow_frame
+from hiraku.dashboard.data import (
+    RECORD_COLUMNS,
+    RUN_COLUMNS,
+    arrow_frame,
+)
 from hiraku.record import Record
 
 
@@ -165,6 +169,7 @@ def test_run_details_escapes_content_and_only_links_safe_urls(
     assert "&lt;script&gt;bad()&lt;/script&gt;" in details
     assert "<script>bad()</script>" not in details
     assert ("Open in mlflow" in details) is linked
+    assert (f'href="{url}"' in details) is linked
     assert "javascript:alert" not in details
 
 
@@ -266,3 +271,66 @@ def test_independent_plots_render_runs_and_report_excluded_values(plot) -> None:
         assert "2 comparable runs" in content
         assert "1 strong trade-offs" in content
         assert "1 runs excluded" in content
+
+
+FILE = {
+    "key": "0",
+    "path": "results/out.csv",
+    "produced_by": "workflow · make",
+    "record": "workflow",
+    "used_by": ["report · summarize"],
+    "last_run": "run-1",
+    "command": "hiraku launch make --record workflow -- --output results/out.csv",
+}
+
+
+def test_file_table_shows_producing_and_using_steps() -> None:
+    table = hc.file_table([FILE])
+
+    assert "results/out.csv" in table.text
+    assert "workflow · make" in table.text
+    assert "report · summarize" in table.text
+    # The row key identifies a selection but is not a user-facing column.
+    assert ">key<" not in table.text
+
+
+def test_file_table_accepts_an_empty_project() -> None:
+    table = hc.file_table([])
+
+    assert table.value.empty
+
+
+def test_file_details_show_the_command_and_escape_content() -> None:
+    entries = [{**FILE, "path": "<script>bad()</script>"}]
+
+    details, _buttons = hc.file_details(entries, [{"key": "0"}], lambda _: None)
+    content = details.text
+
+    assert "&lt;script&gt;bad()&lt;/script&gt;" in content
+    assert "<script>bad()</script>" not in content
+    assert "hiraku launch make --record workflow" in content
+
+
+def test_file_details_explain_how_to_select_a_file() -> None:
+    details, buttons = hc.file_details([], None, lambda _: None)
+
+    assert "Select a file" in details.text
+    assert buttons == {}
+
+
+def test_file_details_select_the_producing_record_and_run() -> None:
+    selections: list[str] = []
+    details, buttons = hc.file_details([FILE], [{"key": "0"}], selections.append)
+
+    assert list(buttons) == ["record", "run"]
+    assert "Record workflow" in details.text
+    assert "Run run-1" in details.text
+    buttons["run"]._update(1)
+    buttons["record"]._update(1)
+    assert selections == ["run:run-1", "record:workflow"]
+
+    # A file built by a rule that does not launch a record has no record button.
+    _details, buttons = hc.file_details(
+        [{**FILE, "record": None, "last_run": None}], [{"key": "0"}], lambda _: None
+    )
+    assert buttons == {}

@@ -62,7 +62,9 @@ def project_data(config, refresh):
     project = hd.load(config)
     runs_df = hd.arrow_frame(hd.run_rows(project), hd.RUN_COLUMNS)
     records_df = hd.arrow_frame(hd.record_rows(project.records), hd.RECORD_COLUMNS)
-    return project, records_df, runs_df
+    file_entries = hd.file_rows(project)
+    files_df = hd.arrow_frame(file_entries, hd.FILE_COLUMNS)
+    return file_entries, files_df, project, records_df, runs_df
 
 
 @app.cell
@@ -156,6 +158,22 @@ def record_details(get_editor_revision, markdown_editor, selected_record):
 def run_details(selected_run):
     hc.run_details(selected_run)
     return
+
+
+@app.cell
+def file_table(file_entries):
+    file_selector = hc.file_table(file_entries)
+    mo.vstack([file_selector])
+    return (file_selector,)
+
+
+@app.cell
+def file_details(file_entries, file_selector, select_key):
+    _details, file_buttons = hc.file_details(
+        file_entries, file_selector.value, on_select=select_key
+    )
+    mo.vstack([_details])
+    return (file_buttons,)
 
 
 @app.cell

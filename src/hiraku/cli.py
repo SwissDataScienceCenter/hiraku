@@ -863,6 +863,11 @@ def session_cancel(state: CLIContext, session_id: str) -> None:
 @click.option("--commit")
 @click.option("--dispatch")
 @click.option("--dry-run", is_flag=True)
+@click.option(
+    "--observe",
+    is_flag=True,
+    help="Record the files the step reads and writes for `hiraku snakemake run`.",
+)
 @click.pass_obj
 def launch_command(
     state: CLIContext,
@@ -872,6 +877,7 @@ def launch_command(
     commit: str | None,
     dispatch: str | None,
     dry_run: bool,
+    observe: bool,
 ) -> None:
     """Launch an effective record entrypoint."""
     record = _active(state.config, record_id)
@@ -892,10 +898,157 @@ def launch_command(
         commit=commit,
         dispatch=dispatch,
         check=False,
+        observe=observe,
         config=state.config,
     )
     if result.returncode:
         raise click.exceptions.Exit(result.returncode)
+
+
+@main.group("snakemake")
+def snakemake_group() -> None:
+    """Run Snakemake workflows whose rules launch record entrypoints."""
+
+
+@snakemake_group.command("run")
+@click.option("--record", "record_id", required=True, help="Workflow record.")
+@click.option(
+    "--snakefile",
+    type=click.Path(path_type=Path),
+    help="Workflow file; defaults to ./Snakefile, else the observed launches.",
+)
+@click.option(
+    "--observed",
+    is_flag=True,
+    help="Build the workflow from the observed launches even if a Snakefile exists.",
+)
+@click.option(
+    "--scope",
+    "scope_id",
+    help="Take observed steps from this record and its children, not --record's.",
+)
+@click.option("--cores", type=click.IntRange(min=1), default=1)
+@click.option("--dry-run", is_flag=True, help="Record the planned jobs only.")
+@click.option("--command", default="snakemake", help="Snakemake executable.")
+@click.option("--command-arg", multiple=True, help="Argument before Snakemake options.")
+@click.option(
+    "--config",
+    "snakemake_config",
+    multiple=True,
+    help="Snakemake KEY=VALUE config, such as 'train=--epochs 2'.",
+)
+@click.option("--force", is_flag=True)
+@click.option("--forceall", is_flag=True)
+@click.option("--keep-going", is_flag=True)
+@click.argument("targets", nargs=-1)
+@click.pass_obj
+def snakemake_run(
+    state: CLIContext,
+    record_id: str,
+    snakefile: Path | None,
+    observed: bool,
+    scope_id: str | None,
+    cores: int,
+    dry_run: bool,
+    command: str,
+    command_arg: tuple[str, ...],
+    snakemake_config: tuple[str, ...],
+    force: bool,
+    forceall: bool,
+    keep_going: bool,
+    targets: tuple[str, ...],
+) -> None:
+    """Execute TARGETS and record each job as part of one workflow run.
+
+    Without a Snakefile, the rules come from the files each step read and wrote
+    when it was last launched with `hiraku launch`.
+    """
+    from .snakemake import observed_snakefile, run_workflow
+
+    if observed and snakefile is not None:
+        raise click.UsageError("--observed and --snakefile are mutually exclusive")
+    if (
+        snakefile is None
+        and not observed
+        and (state.config.root / "Snakefile").is_file()
+    ):
+        snakefile = Path("Snakefile")
+    if snakefile is None:
+        record = load_record(record_id, config=state.config)
+        scope = load_record(scope_id, config=state.config) if scope_id else None
+        snakefile = observed_snakefile(record, config=state.config, scope=scope)
+        click.echo(f"Generated {snakefile} from the observed launches")
+    run, exit_code = run_workflow(
+        state.config,
+        record_id=record_id,
+        snakefile=snakefile,
+        targets=targets,
+        cores=cores,
+        dry_run=dry_run,
+        command=command,
+        command_args=command_arg,
+        snakemake_config=snakemake_config,
+        options=tuple(
+            option
+            for enabled, option in (
+                (force, "--force"),
+                (forceall, "--forceall"),
+                (keep_going, "--keep-going"),
+            )
+            if enabled
+        ),
+    )
+    click.echo(f"Recorded Snakemake run {run['id']}: {run['outcome']}")
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
+
+
+@snakemake_group.command("generate")
+@click.option("--record", "record_id", required=True)
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    default=Path("Snakefile"),
+    help="Destination, relative to the project root unless absolute.",
+)
+@click.option("--force", is_flag=True, help="Overwrite an existing file.")
+@click.option("--print", "print_only", is_flag=True, help="Print instead of writing.")
+@click.option(
+    "--observed",
+    is_flag=True,
+    help="Write complete rules from the observed launches instead of a draft.",
+)
+@click.option(
+    "--scope",
+    "scope_id",
+    help="With --observed, take steps from this record and its children.",
+)
+@click.pass_obj
+def snakemake_generate(
+    state: CLIContext,
+    record_id: str,
+    output: Path,
+    force: bool,
+    print_only: bool,
+    observed: bool,
+    scope_id: str | None,
+) -> None:
+    """Draft one rule per entrypoint of the record and the records below it."""
+    from .snakemake import generate_workflow, observed_workflow, write_workflow
+
+    record = load_record(record_id, config=state.config)
+    if observed:
+        scope = load_record(scope_id, config=state.config) if scope_id else None
+        content = observed_workflow(record, config=state.config, scope=scope)
+    elif scope_id:
+        raise click.UsageError("--scope requires --observed")
+    else:
+        content = generate_workflow(record, config=state.config)
+    if print_only:
+        click.echo(content, nl=False)
+        return
+    path = write_workflow(content, state.config.root / output, force=force)
+    click.echo(f"Generated Snakefile at {path}")
 
 
 @main.command("runs")

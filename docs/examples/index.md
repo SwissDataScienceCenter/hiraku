@@ -6,9 +6,11 @@ The examples are runnable projects that show the Hiraku lifecycle with different
 - [Heart Disease](heart-disease/README.md) — the recommended first walkthrough. It ships with a small dataset and training script, and uses CSV tracking.
 - [Iris with Weights & Biases](iris-wandb/README.md) — a small classification example using the Iris dataset and W&amp;B.
 - [Digits with MLflow](digits-mlflow/README.md) — compare regularization strengths while logging learning curves to MLflow.
+- [Digits with Snakemake](digits-snakemake/README.md) — run both regularization variants as a Snakemake DAG whose steps launch record entrypoints, while keeping MLflow measurements in separate experiment records.
 - [EuroSAT RGB](eurosat-rgb/README.md) — investigate image-specific architectural inductive biases with a flattened-image MLP baseline and follow-up experiments.
 - [Workflow examples](workflows/README.md) — a Python workflow that checks that a coding harness follows Hiraku workflow instructions and stops for the user, a prompt-only workflow with arguments, and a scheduler that picks its next step from records by priority.
 - [Autoresearch](autoresearch/README.md) — add a Hiraku research loop and tracked dispatcher to the original autoresearch repository.
+- [Snakemake pipelines](snakemake-pipelines/index.md) — run the steps of every example above as one Snakemake workflow, from observed launches or a written `Snakefile`, step by step.
 
 ??? note "Optional initialization flags"
 

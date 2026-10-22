@@ -1,0 +1,12 @@
+[project]
+name = "hiraku-digits-snakemake-example"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy==2.4.6",
+  "scikit-learn==1.9.0",
+  "mlflow==3.16.0",
+  "snakemake>=8.29,<9",
+  "threadpoolctl>=3.1,<4",
+  "tqdm>=4.70.0",
+]

@@ -73,6 +73,8 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "record_details",
         "record_navigation",
         "run_details",
+        "file_table",
+        "file_details",
         "performance_plot",
         "tradeoff_plot",
     }

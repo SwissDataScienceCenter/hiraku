@@ -2,13 +2,15 @@
 
 ``load`` reads the records and the runs of their tracking backends. ``run_rows``
 and ``record_rows`` flatten them into ``runs_df`` and ``records_df`` for the
-run tree, run details, metric choice, and plots. Markdown details use the same
-loaded records to retain their complete front matter. Nothing here imports
-marimo, so it can be tested without a notebook runtime.
+run tree, run details, metric choice, and plots. ``file_rows`` turns the jobs of
+Snakemake workflow runs into ``files_df`` for the Files view. Markdown details
+use the same loaded records to retain their complete front matter. Nothing here
+imports marimo, so it can be tested without a notebook runtime.
 """
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -35,6 +37,7 @@ RUN_COLUMNS = (
     "entrypoint",
     "commit",
     "url",
+    "jobs",
 )
 RECORD_COLUMNS = (
     "record",
@@ -47,6 +50,7 @@ RECORD_COLUMNS = (
     "metrics",
     "description",
 )
+FILE_COLUMNS = ("key", "path", "produced_by", "used_by", "last_run")
 
 
 @dataclass(frozen=True)
@@ -135,6 +139,7 @@ def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
             "entrypoint": run.entrypoint,
             "commit": run.commit,
             "url": run.url,
+            "jobs": _jobs(run),
             **{f"metric.{name}": value for name, value in run.metrics.items()},
             **{f"param.{name}": value for name, value in run.params.items()},
         }
@@ -164,6 +169,53 @@ def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
             "description": record.markdown.strip() or None,
         }
         for record in ordered
+    ]
+
+
+def _jobs(run: Run) -> list[dict[str, Any]]:
+    """Return the steps ``hiraku snakemake run`` stored in a run's ``jobs`` column."""
+    try:
+        jobs = json.loads(run.raw.get("jobs") or "[]")
+    except (TypeError, ValueError):
+        return []
+    return jobs if isinstance(jobs, list) else []
+
+
+def _step(job: Mapping[str, Any]) -> str:
+    if job.get("record"):
+        return f"{job['record']} · {job['entrypoint']}"
+    return f"rule {job.get('rule')}"
+
+
+def file_rows(project: ProjectRuns) -> list[dict[str, Any]]:
+    """Describe each workflow file by the step that produces it and its users.
+
+    Steps come from the ``jobs`` of Snakemake workflow runs, in execution order,
+    so the latest run decides the producing command. ``last_run`` is the most
+    recent run in which the producing step actually ran.
+    """
+    rows: dict[str, dict[str, Any]] = {}
+    for run in execution_order(project.runs):
+        for job in _jobs(run):
+            for role, paths in (("outputs", job["outputs"]), ("inputs", job["inputs"])):
+                for path in paths:
+                    row = rows.setdefault(
+                        path,
+                        {"path": path, "produced_by": None, "used_by": []},
+                    )
+                    if role == "outputs":
+                        row.update(
+                            produced_by=_step(job),
+                            record=job.get("record"),
+                            command=job["command"],
+                        )
+                        if job.get("ran"):
+                            row["last_run"] = run.id
+                    elif _step(job) not in row["used_by"]:
+                        row["used_by"].append(_step(job))
+    return [
+        {"key": str(index), "last_run": None, "record": None, **row}
+        for index, (_, row) in enumerate(sorted(rows.items()))
     ]
 
 
@@ -319,6 +371,17 @@ def run_text(run: Mapping[str, Any]) -> str:
             "started": started.isoformat() if started else None,
             "params": prefixed("param."),
             "metrics": prefixed("metric."),
+            **(
+                {
+                    "steps": [
+                        f"{_step(job)}: {job['command']}"
+                        + ("" if job.get("ran") else " (did not run)")
+                        for job in run["jobs"]
+                    ]
+                }
+                if run.get("jobs")
+                else {}
+            ),
         }
     )
 
