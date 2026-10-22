@@ -25,7 +25,9 @@ class _Page(list):
         self.token = token
 
 
-def _native_run(run_id: str, experiment_id: str = "e1") -> SimpleNamespace:
+def _native_run(
+    run_id: str, experiment_id: str = "e1", end_time: int | None = 1700000004250
+) -> SimpleNamespace:
     return SimpleNamespace(
         info=SimpleNamespace(
             run_id=run_id,
@@ -33,6 +35,7 @@ def _native_run(run_id: str, experiment_id: str = "e1") -> SimpleNamespace:
             artifact_uri="",
             experiment_id=experiment_id,
             start_time=1700000000000,
+            end_time=end_time,
         ),
         data=SimpleNamespace(tags={"hiraku.record_id": "root"}, metrics={}, params={}),
     )
@@ -63,6 +66,27 @@ def test_mlflow_backend_paginates_experiments_and_runs(tmp_path, monkeypatch) ->
 
     assert [run.id for run in backend._read_source_runs()] == ["r1", "r2"]
     assert calls == [None, "next"]
+
+
+def test_mlflow_backend_reads_duration_from_start_and_end(
+    tmp_path, monkeypatch
+) -> None:
+    mlflow = pytest.importorskip("mlflow")
+
+    class FakeClient:
+        def __init__(self, tracking_uri: str | None = None) -> None:
+            pass
+
+        def search_experiments(self, page_token=None):
+            return _Page([SimpleNamespace(experiment_id="e1")])
+
+        def search_runs(self, experiment_ids, max_results, page_token=None):
+            return _Page([_native_run("done"), _native_run("running", end_time=None)])
+
+    monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
+    backend = MLflowBackend(HirakuConfig.init(tmp_path), database="mlflow.db")
+
+    assert [run.duration for run in backend._read_source_runs()] == [4.25, None]
 
 
 @pytest.mark.parametrize(

@@ -37,6 +37,34 @@ def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
     assert runs[0].raw == {"note": "raw"}
 
 
+def test_csv_backend_reads_duration_in_seconds(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create("iris", config=config)
+    (config.root / "runs.csv").write_text(
+        "id,record_id,timestamp,duration\n"
+        "a,iris,2026-01-01T00:00:00Z,4.25\n"
+        "b,iris,2026-01-01T00:01:00Z,\n",
+        encoding="utf-8",
+    )
+
+    runs = CSVBackend(config).list_runs(record_id="iris")
+
+    assert [run.duration for run in runs] == [4.25, None]
+    assert runs[0].raw == {}
+
+
+@pytest.mark.parametrize("value", ["-1", "nan", "soon"])
+def test_csv_backend_rejects_invalid_duration(tmp_path: Path, value: str) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create("iris", config=config)
+    (config.root / "runs.csv").write_text(
+        f"id,record_id,duration\na,iris,{value}\n", encoding="utf-8"
+    )
+
+    with pytest.raises(BackendError, match="malformed row"):
+        CSVBackend(config).list_runs(record_id="iris")
+
+
 def test_csv_source_listing_returns_all_attributed_runs(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     path = config.root / "runs.csv"

@@ -55,6 +55,7 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
             "id": "new-training-run",
             "record_id": forest.id,
             "timestamp": "2026-01-02T00:00:00Z",
+            "duration": "1.5",
             "entrypoint": "train",
             "param.model": "random_forest",
             "param.seed": "4",
@@ -65,4 +66,6 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
             "git_state": "",
         },
     )
-    assert len(forest.resolve_tracking_backend(config=config).list_runs()) == 10
+    runs = forest.resolve_tracking_backend(config=config).list_runs()
+    assert len(runs) == 10
+    assert next(run for run in runs if run.id == "new-training-run").duration == 1.5

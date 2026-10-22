@@ -13,6 +13,7 @@ from hiraku.dashboard.data import (
     default_metric,
     execution_order,
     find_run,
+    format_duration,
     load,
     metric_names,
     plot_frame,
@@ -90,9 +91,11 @@ def test_run_rows_flatten_runs_in_execution_order(project: HirakuConfig) -> None
     assert rows[0]["record_path"] == "root/a"
     assert rows[0]["source"] == "csv"
     assert rows[0]["started"] == datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
+    assert rows[0]["duration"] == 4.5
     assert float(rows[0]["metric.loss"]) == 0.9
     assert rows[2]["record_path"] == "root/a/a1"
     assert rows[-1]["started"] is None
+    assert rows[-1]["duration"] is None
 
 
 def test_execution_order_breaks_ties_by_id_and_puts_untimed_runs_last() -> None:
@@ -188,6 +191,35 @@ def test_tree_rows_nest_runs_under_records_in_execution_order(
     assert rows[2]["Type"] == "run"
     assert rows[2]["Started"] == "2026-10-14 10:00:00"
     assert rows[-1]["Started"] == ""
+    assert [row["Duration"] for row in rows] == [
+        "",
+        "",
+        "4.5 s",
+        "1 h 02 m",
+        "",
+        "250 ms",
+        "",
+        "1 m 15 s",
+        "",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (None, ""),
+        (0, "0 ms"),
+        (0.25, "250 ms"),
+        (4.25, "4.2 s"),
+        (59.94, "59.9 s"),
+        (59.96, "1 m 00 s"),
+        (187, "3 m 07 s"),
+        (3599.6, "1 h 00 m"),
+        (3725, "1 h 02 m"),
+    ],
+)
+def test_format_duration(seconds: float | None, expected: str) -> None:
+    assert format_duration(seconds) == expected
 
 
 def test_deep_trees_do_not_hit_the_recursion_limit() -> None:
@@ -228,6 +260,7 @@ def test_find_run_and_run_text(project: HirakuConfig) -> None:
         "entrypoint: train\n"
         "commit: null\n"
         "started: '2026-10-14T10:00:00+00:00'\n"
+        "duration: 4.5\n"
         "params: {}\n"
         "metrics:\n"
         "  loss: '0.9'\n"
@@ -268,6 +301,7 @@ def test_plot_frame_numbers_runs_and_skips_unusable_values(
     _, project_runs = tables(project)
     scoped, _ = plot_frame(subtree(project_runs, "root/b"), "loss")
     assert scoped[["number", "run"]].values.tolist() == [[1, "r1"], [2, "r4"]]
+    assert scoped["duration"].tolist() == ["1 m 15 s", ""]
 
 
 @pytest.mark.parametrize(

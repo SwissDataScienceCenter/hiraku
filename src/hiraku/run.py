@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -12,7 +13,11 @@ from .errors import ValidationError
 
 
 class Run(BaseModel):
-    """An immutable run returned by a tracking backend."""
+    """An immutable run returned by a tracking backend.
+
+    ``timestamp`` is when the run started and ``duration`` its wall-clock
+    length in seconds; either is ``None`` when the backend does not report it.
+    """
 
     model_config = ConfigDict(frozen=True, extra="allow")
     id: str
@@ -21,6 +26,7 @@ class Run(BaseModel):
     record_id: str | None = None
     commit: str | None = None
     timestamp: datetime | None = None
+    duration: float | None = None
     entrypoint: str | None = None
     url: str | None = None
     raw: Mapping[str, Any] = Field(default_factory=dict, repr=False)
@@ -30,6 +36,15 @@ class Run(BaseModel):
     def validate_run_id(cls, value: str) -> str:
         if not value:
             raise ValidationError("Run ID must be non-empty")
+        return value
+
+    @field_validator("duration")
+    @classmethod
+    def validate_duration(cls, value: float | None) -> float | None:
+        if value is not None and not (math.isfinite(value) and value >= 0):
+            raise ValidationError(
+                f"Run duration must be a non-negative number of seconds: {value!r}"
+            )
         return value
 
     @model_validator(mode="after")

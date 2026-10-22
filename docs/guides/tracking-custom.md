@@ -83,6 +83,7 @@ The custom service must store records that can be converted to `Run`:
     "record_id": "baseline",
     "commit": "0123456789abcdef0123456789abcdef01234567",
     "timestamp": "2026-01-01T12:00:00Z",
+    "duration": 42.5,
     "entrypoint": "evaluate",
     "params": {"seed": 42},
     "metrics": {"val/accuracy": 0.84}

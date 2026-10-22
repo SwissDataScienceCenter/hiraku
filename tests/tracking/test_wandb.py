@@ -32,6 +32,10 @@ class FakeUnattributedRun(FakeRun):
     config = {"seed": 7}
 
 
+class FakeTimedRun(FakeRun):
+    summary = {"test/accuracy": 0.95, "_runtime": 12.5}
+
+
 class FakeApi:
     def __init__(self, api_key=None):
         self.api_key = api_key
@@ -60,3 +64,8 @@ def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) 
     assert run.raw["tags"] == ["baseline", "iris"]
     assert [item.id for item in backend.list_runs()] == ["run-1"]
     assert [item.id for item in backend.list_runs()] == ["run-1"]
+
+
+def test_wandb_backend_reads_runtime_as_duration() -> None:
+    assert WandbBackend._normalize_run(FakeTimedRun()).duration == 12.5
+    assert WandbBackend._normalize_run(FakeRun()).duration is None

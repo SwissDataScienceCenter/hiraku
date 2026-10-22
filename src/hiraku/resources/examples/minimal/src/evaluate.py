@@ -11,12 +11,14 @@ FIELDS = [
     "commit",
     "git_state",
     "timestamp",
+    "duration",
     "entrypoint",
     "param.seed",
     "metric.val/accuracy",
 ]
 
 
+started = datetime.now(UTC)
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
 args = parser.parse_args()
@@ -39,7 +41,8 @@ with runs_file.open("a", encoding="utf-8", newline="") as stream:
             "record_id": os.environ["HIRAKU_RECORD_ID"],
             "commit": os.environ.get("HIRAKU_COMMIT", ""),
             "git_state": os.environ["HIRAKU_GIT_STATE"],
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": started.isoformat(),
+            "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
             "entrypoint": os.environ.get("HIRAKU_ENTRYPOINT", ""),
             "param.seed": args.seed,
             "metric.val/accuracy": accuracy,

@@ -61,4 +61,5 @@ mean measurements without statistical significance or clinical claims.
 Metrics are reproducible within the pinned environment; generated run IDs and
 timestamps vary. Git attribution is preserved as reported by Hiraku's dispatcher
 (unavailable for the isolated temporary project). The committed CSV was generated
-with this script; subsequent training can append runs using the same schema.
+with this script; subsequent training can append runs using the same schema. Its
+runs predate the `duration` column, which is left empty for them.

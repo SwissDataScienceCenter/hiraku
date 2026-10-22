@@ -79,9 +79,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+started=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+started_seconds=$(date +%s.%N)
 timeout --signal=TERM --kill-after=10s "$timeout_seconds" "$@" 2>&1 |
   tee "$capture_file"
 pipeline_status=("${PIPESTATUS[@]}")
+duration=$(awk -v start="$started_seconds" -v end="$(date +%s.%N)" \
+  'BEGIN { printf "%.3f", end - start }')
 command_status=${pipeline_status[0]}
 tee_status=${pipeline_status[1]}
 
@@ -124,9 +128,8 @@ fi
 
 read -r run_uuid </proc/sys/kernel/random/uuid
 run_id=${run_uuid//-/}
-timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 csv_path=$HIRAKU_ROOT/runs.csv
-header='id,record_id,commit,git_state,timestamp,entrypoint,status,metric.val_bpb,metric.training_seconds,metric.peak_vram_mb,metric.mfu_percent'
+header='id,record_id,commit,git_state,timestamp,duration,entrypoint,status,metric.val_bpb,metric.training_seconds,metric.peak_vram_mb,metric.mfu_percent'
 
 exec 9>>"$csv_path" || exit 1
 flock 9 || exit 1
@@ -142,9 +145,9 @@ else
     exit 1
   fi
 fi
-printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
   "$run_id" "$HIRAKU_RECORD_ID" "$commit" \
-  "$git_state" "$timestamp" "$HIRAKU_ENTRYPOINT" "$status" "$val_bpb" \
+  "$git_state" "$started" "$duration" "$HIRAKU_ENTRYPOINT" "$status" "$val_bpb" \
   "$training_seconds" "$peak_vram_mb" "$mfu_percent" >&9
 flock -u 9
 exec 9>&-

@@ -75,5 +75,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     assert len(runs) == 1
     assert runs[0].commit == commit
     assert runs[0].raw["git_state"] == "clean"
+    assert runs[0].timestamp is not None
+    assert runs[0].duration is not None and runs[0].duration >= 0
     assert (project / "runs.csv").is_file()
     assert git(project, "status", "--porcelain") == ""

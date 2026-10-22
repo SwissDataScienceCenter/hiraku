@@ -109,6 +109,20 @@ def test_record_cli_reparents_and_makes_root(tmp_path: Path, monkeypatch) -> Non
     assert load_record("child").path == config.records_dir / "child/child.md"
 
 
+def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
+    HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    assert invoke("record", "create", "root").exit_code == 0
+    (tmp_path / "runs.csv").write_text("id,record_id,duration\na,root,4.25\nb,root,\n")
+
+    rows = json.loads(invoke("runs", "--record", "root", "--json").output)
+    table = invoke("runs", "--record", "root").output.splitlines()
+
+    assert [row["duration"] for row in rows] == [4.25, None]
+    assert table[0].split() == ["id", "record", "timestamp", "duration", "commit"]
+    assert table[2].split() == ["a", "root", "4.25"]
+
+
 def test_record_cli_entrypoint_launch_and_runs(tmp_path: Path, monkeypatch) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)

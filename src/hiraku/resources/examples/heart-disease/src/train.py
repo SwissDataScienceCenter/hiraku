@@ -41,6 +41,7 @@ RUN_FIELDS = [
     "commit",
     "git_state",
     "timestamp",
+    "duration",
     "entrypoint",
     "param.model",
     "param.seed",
@@ -121,6 +122,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    started = datetime.now(UTC)
     args = parse_args()
     attribution = provenance()
     frame = pd.read_csv(
@@ -151,7 +153,8 @@ def main() -> None:
             "record_id": attribution["HIRAKU_RECORD_ID"],
             "commit": attribution["HIRAKU_COMMIT"],
             "git_state": attribution["HIRAKU_GIT_STATE"],
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": started.isoformat(),
+            "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
             "entrypoint": attribution["HIRAKU_ENTRYPOINT"],
             "param.model": args.model,
             "param.seed": str(args.seed),
