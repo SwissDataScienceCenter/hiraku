@@ -187,6 +187,29 @@ versioned models; `Registration` is the record front-matter block.
 discovery, and `hiraku.registration.compat.from_legacy_record` maps legacy
 cohort or file-inventory records to `Registration` for reimport.
 
+## Flagship cohort adapter
+
+The Flagship cohort adapter is a separate command in the `tp-agents`
+repository. It keeps the existing SOP and cohort scan:
+
+```bash
+tp-agent registry import --project /path/to/hiraku-project \
+  --technology scRNA --sample S1 --dry-run > registry-preview.json
+tp-agent registry import --project /path/to/hiraku-project \
+  --technology scRNA --all-samples --apply \
+  --reviewed-content-sha256 <hash-from-preview>
+```
+
+It emits a `source: flagship-cohort` manifest and writes through
+`hiraku.registration`; it makes no model calls and does not read artifact
+contents. `--max-samples` and `--max-files` abort rather than truncate, and
+`--all-sop-versions` includes archived declarations. The local adapter covers
+`derived/pass_*` artifacts only. An MCP descriptor import needs the SOP index
+but not the local cohort or metadata mounts. SOP evidence stays
+`role: unknown`, `applicability: unknown`, because the bounded scan does not
+establish whether a filename is an input, output, or script. See the adapter's
+`docs/registry-import.md` for operator details.
+
 ## Example
 
 The bundled `datasets-registry` example registers a local file and a
