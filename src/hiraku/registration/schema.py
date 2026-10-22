@@ -292,6 +292,7 @@ class Registration(BaseModel):
     schema: Literal[1] = SCHEMA_VERSION
     namespace: str = Field(min_length=1)
     key: str | list[str]
+    source: str | None = None
     parent: str | list[str] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     coverage: Coverage = "unknown"

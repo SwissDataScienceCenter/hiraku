@@ -1052,6 +1052,68 @@ def snakemake_generate(
     click.echo(f"Generated Snakefile at {path}")
 
 
+@main.group("registry")
+def registry_group() -> None:
+    """Register existing datasets and their artifact descriptors as records."""
+
+
+def _registry_config(state: CLIContext, project_path: Path | None) -> HirakuConfig:
+    if project_path is None:
+        return state.config
+    target = project_path.expanduser().absolute()
+    if target.is_dir():
+        target = target / "hiraku.yml"
+    return HirakuConfig.load(target)
+
+
+@registry_group.command("import")
+@click.argument("manifest", type=click.Path(path_type=Path))
+@click.option(
+    "--project",
+    "project_path",
+    type=click.Path(path_type=Path),
+    help="Target Hiraku project directory or hiraku.yml; defaults to discovery.",
+)
+@click.option("--apply", is_flag=True, help="Write records after review.")
+@click.option(
+    "--reviewed-hash",
+    help="content_sha256 reviewed in a prior dry run; required to bind an apply.",
+)
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def registry_import(
+    state: CLIContext,
+    manifest: Path,
+    project_path: Path | None,
+    apply: bool,
+    reviewed_hash: str | None,
+    json_output: bool,
+) -> None:
+    """Review or apply a registration manifest; preview writes nothing."""
+    from .registration import apply_import, load_manifest, plan_import
+
+    config = _registry_config(state, project_path)
+    reviewed = load_manifest(manifest)
+    if apply:
+        result = apply_import(reviewed, config, reviewed_hash=reviewed_hash)
+    else:
+        result = plan_import(reviewed, config)
+    if json_output:
+        _emit_json(result.summary())
+    else:
+        click.echo(f"Project: {result.project}")
+        click.echo(f"Source:  {result.source}")
+        click.echo(f"Create:  {len(result.creates)}")
+        click.echo(f"Update:  {len(result.updates)}")
+        click.echo(f"Unchanged: {result.unchanged}")
+        for conflict in result.conflicts:
+            click.echo(f"Conflict {conflict.record_id}: {conflict.message}", err=True)
+        if not apply:
+            click.echo("Review with --json, then apply with --apply --reviewed-hash.")
+    if result.conflicts:
+        raise click.exceptions.Exit(2)
+
+
 @main.command("runs")
 @click.option("--record", "record_id")
 @click.option(

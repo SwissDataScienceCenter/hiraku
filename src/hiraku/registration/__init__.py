@@ -6,6 +6,15 @@ workflows, fabricates runs, copies dataset contents, computes scientific
 metrics, or infers historical production provenance.
 """
 
+from .review import (
+    Conflict,
+    ImportPlan,
+    apply_import,
+    load_manifest,
+    plan_import,
+    validate_manifest,
+    verify_reviewed_hash,
+)
 from .schema import (
     SCHEMA_VERSION,
     Artifact,
@@ -30,18 +39,25 @@ __all__ = [
     "SCHEMA_VERSION",
     "Artifact",
     "Availability",
+    "Conflict",
     "Coverage",
     "Dataset",
     "Documentation",
     "DocumentationRole",
+    "ImportPlan",
     "Observation",
     "Registration",
     "RegistrationManifest",
     "Scope",
+    "apply_import",
     "canonical_json",
     "content_digest",
     "dataset_record_id",
     "digest",
+    "load_manifest",
     "normalize_display_path",
+    "plan_import",
     "redact_access",
+    "validate_manifest",
+    "verify_reviewed_hash",
 ]
