@@ -86,9 +86,12 @@ remove entries.
 
 ### Location, roots, and scope
 
-Project artifacts use normalized project-relative POSIX `display_path` values,
-the same form Snakemake reports in `jobs`. Artifacts under external named roots
-store `root: <name>` plus a root-relative `display_path`. The manifest `scope`
+Project artifacts use normalized project-relative POSIX `display_path` values.
+Artifacts under external named roots store `root: <name>` plus a root-relative
+`display_path`; the mount path stays in `hiraku.yml`, so records never hold a
+machine-specific absolute path. The dashboard resolves both forms to a location
+on the current machine to link artifacts to workflow steps, whether the
+`Snakefile` names them by relative or absolute path. The manifest `scope`
 records explicit `coverage`, adapter `filters`, `bounds`, and `roots`, so
 coverage is never implied by a whole filesystem.
 

@@ -127,11 +127,17 @@ location.
     `registration` fields, so the view renders without any runs. Each row shows
     the source, revision, observation time, coverage, and availability, plus
     documentation links keyed by document and dataset. When a workflow run's
-    `jobs` list an artifact's exact project-relative path as an input or an
-    output, `used_by` or `built_by` shows the step, and buttons select that run.
+    `jobs` name an artifact as an input or an output, `used_by` or `built_by`
+    shows the step, and buttons select that run. Both sides are compared by
+    location on this machine: a relative `jobs` path is resolved against the
+    project root, an artifact against the project root or its `dataset_roots`
+    mount, and symlinks are resolved, so an absolute path in a `Snakefile`
+    matches an artifact under a named root. A `jobs` path that is a directory,
+    such as a `directory()` output, also covers the artifacts inside it. An
+    artifact whose root is not configured in `dataset_roots` never matches.
     `built_by` is what the workflow observed, not the artifact's historical
-    provenance. Artifacts under external roots never match. Registrations never
-    contribute to run metrics or the runs table.
+    provenance. Registrations never contribute to run metrics or the runs
+    table.
 
 **Record**
 :   Expandable YAML front matter labeled with the selected record's ID,

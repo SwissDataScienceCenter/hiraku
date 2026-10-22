@@ -37,7 +37,7 @@ def reviewed_apply(runner: CliRunner, arguments: list[str]) -> str:
 def availability(config: HirakuConfig) -> dict[str, str]:
     return {
         row["path"]: row["availability"]
-        for row in artifact_rows(load(config))
+        for row in artifact_rows(load(config), config)
         if row["path"] is not None
     }
 

@@ -444,9 +444,10 @@ Preview is always the default; nothing is written until `--apply`.
 
 1. Register files under a project-relative root with `hiraku registry scan
    --root DIR` (preview) and then `--apply --reviewed-hash <content_sha256>`
-   with the hash the preview printed. Revisions are `size:mtime`, and paths
-   match the form Snakemake reports. Scan external mounts only by a
-   `dataset_roots` name with `--external NAME`.
+   with the hash the preview printed. Revisions are `size:mtime`. Scan
+   external mounts only by a `dataset_roots` name with `--external NAME`; the
+   dashboard links their artifacts to workflow steps by resolved location,
+   also when a `Snakefile` names them by absolute path.
 2. Register descriptor-only or remote data from a manifest with
    `hiraku registry import MANIFEST` (preview) and then
    `--apply --reviewed-hash <content_sha256>`. Descriptor-only registration

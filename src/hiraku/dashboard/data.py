@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -26,6 +28,7 @@ from ..errors import ValidationError
 from ..io import dump_yaml
 from ..record import Record, list_records
 from ..registration.compat import from_legacy_record
+from ..registration.discovery import external_roots
 from ..registration.schema import Registration
 from ..run import Run
 
@@ -256,37 +259,97 @@ def _doc_label(documentation: Any) -> str:
     return key if documentation.role == "unknown" else f"{key} ({documentation.role})"
 
 
-def _workflow_steps(
-    project: ProjectRuns, path: str | None, side: str
-) -> list[dict[str, str]]:
-    """Return the workflow steps whose ``jobs`` ``side`` lists ``path`` exactly.
+class _WorkflowFiles:
+    """Index the files of workflow runs' ``jobs`` by the location they name.
 
-    ``side`` is ``inputs`` (the step used the path) or ``outputs`` (the
-    workflow built a file at the path). Matching is by exact project-relative
-    path only; artifacts under external roots never match ``jobs`` paths, and
-    a match is an observed fact, not the artifact's historical provenance.
+    With a ``config``, every path is resolved to its canonical absolute
+    location: a relative ``jobs`` path against the project root, an artifact
+    against the project root or its ``dataset_roots`` mount, then symlinks and
+    ``..`` are collapsed. A ``jobs`` path that is a directory on disk also
+    covers the files inside it, as a Snakemake ``directory()`` does. Without a
+    ``config``, only identical project-relative paths match. A match is an
+    observed fact, not the artifact's historical provenance.
     """
-    if not path:
-        return []
-    steps: list[dict[str, str]] = []
-    for run in execution_order(project.runs):
-        for job in _jobs(run):
-            if path not in job[side]:
-                continue
-            entry = {"run": run.id, "step": _step(job)}
-            if entry not in steps:
-                steps.append(entry)
-    return steps
+
+    def __init__(self, project: ProjectRuns, config: HirakuConfig | None) -> None:
+        self.config = config
+        self.files: dict[tuple[str, str], list[dict[str, str]]] = {}
+        self.directories: set[tuple[str, str]] = set()
+        for run in execution_order(project.runs):
+            for job in _jobs(run):
+                entry = {"run": run.id, "step": _step(job)}
+                for side in ("inputs", "outputs"):
+                    for path in job.get(side) or []:
+                        location = self._job_location(path)
+                        if location is None:
+                            continue
+                        steps = self.files.setdefault((side, location), [])
+                        if entry not in steps:
+                            steps.append(entry)
+                        if config is not None and os.path.isdir(location):
+                            self.directories.add((side, location))
+
+    def _job_location(self, path: Any) -> str | None:
+        if not isinstance(path, str) or not path:
+            return None
+        if self.config is None:
+            return path
+        return _canonical(self.config.root, path)
+
+    def artifact_location(self, artifact: Any) -> str | None:
+        """Return where ``artifact`` lives on this machine, if it can be known."""
+        if self.config is None:
+            return artifact.display_path if artifact.root is None else None
+        if artifact.root is None:
+            return _canonical(self.config.root, artifact.display_path)
+        try:
+            mount = external_roots(self.config).get(artifact.root)
+        except ValidationError:
+            mount = None
+        if mount is None:
+            return None
+        base = _canonical(self.config.root, os.path.expanduser(mount))
+        return None if base is None else _canonical(base, artifact.display_path)
+
+    def steps(self, location: str | None, side: str) -> list[dict[str, str]]:
+        """Return the steps whose ``jobs`` ``side`` names or contains ``location``.
+
+        ``side`` is ``inputs`` (the step used the file) or ``outputs`` (the
+        workflow built it).
+        """
+        if location is None:
+            return []
+        found = list(self.files.get((side, location), []))
+        if self.config is not None:
+            for parent in Path(location).parents:
+                if (side, str(parent)) in self.directories:
+                    found += self.files[(side, str(parent))]
+        return list(
+            {json.dumps(entry, sort_keys=True): entry for entry in found}.values()
+        )
 
 
-def artifact_rows(project: ProjectRuns) -> list[dict[str, Any]]:
+def _canonical(base: Path | str, path: str) -> str | None:
+    """Return ``path`` resolved against ``base`` as a canonical absolute path."""
+    try:
+        return os.path.realpath(Path(base) / path)
+    except (OSError, ValueError):
+        return None
+
+
+def artifact_rows(
+    project: ProjectRuns, config: HirakuConfig | None = None
+) -> list[dict[str, Any]]:
     """Describe each registered artifact and dataset documentation expectation.
 
     One row per observed artifact plus one row per dataset-level documentation
     link, keyed by document and dataset rather than filename. Rows come only
     from records' registration fields, so the view renders without runs and
-    never merges into ``file_rows``.
+    never merges into ``file_rows``. With the project ``config``, ``used_by``
+    and ``built_by`` match workflow files by canonical location, so absolute
+    paths and artifacts under ``dataset_roots`` mounts match too.
     """
+    workflow = _WorkflowFiles(project, config)
     rows: list[dict[str, Any]] = []
     for record in sorted(project.records, key=lambda item: item.id):
         registration = _registration(record)
@@ -294,7 +357,7 @@ def artifact_rows(project: ProjectRuns) -> list[dict[str, Any]]:
             continue
         source = registration.source or registration.namespace
         for artifact in registration.artifacts:
-            project_path = artifact.display_path if artifact.root is None else None
+            location = workflow.artifact_location(artifact)
             rows.append(
                 {
                     "key": f"artifact:{record.id}:{artifact.key}",
@@ -310,8 +373,8 @@ def artifact_rows(project: ProjectRuns) -> list[dict[str, Any]]:
                     "documentation": [
                         _doc_label(doc) for doc in artifact.documentation
                     ],
-                    "used_by": _workflow_steps(project, project_path, "inputs"),
-                    "built_by": _workflow_steps(project, project_path, "outputs"),
+                    "used_by": workflow.steps(location, "inputs"),
+                    "built_by": workflow.steps(location, "outputs"),
                 }
             )
         for doc in registration.documentation:

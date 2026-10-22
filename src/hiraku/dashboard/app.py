@@ -64,7 +64,7 @@ def project_data(config, refresh):
     records_df = hd.arrow_frame(hd.record_rows(project.records), hd.RECORD_COLUMNS)
     file_entries = hd.file_rows(project)
     files_df = hd.arrow_frame(file_entries, hd.FILE_COLUMNS)
-    artifact_entries = hd.artifact_rows(project)
+    artifact_entries = hd.artifact_rows(project, config)
     artifacts_df = hd.arrow_frame(artifact_entries, hd.ARTIFACT_COLUMNS)
     return (
         artifact_entries,

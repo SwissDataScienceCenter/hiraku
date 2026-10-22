@@ -510,7 +510,7 @@ def test_artifact_rows_show_workflow_outputs_by_exact_path() -> None:
     assert rows["other/out.csv"]["built_by"] == []
 
 
-def test_artifact_rows_external_roots_never_match_jobs() -> None:
+def test_artifact_rows_without_config_never_match_external_roots() -> None:
     from hiraku.dashboard.data import ProjectRuns, artifact_rows
 
     record = _registered_record(
@@ -529,3 +529,107 @@ def test_artifact_rows_external_roots_never_match_jobs() -> None:
 
     assert rows[0]["used_by"] == []
     assert rows[0]["built_by"] == []
+
+
+def _cohort_project(tmp_path, mount_name: str = "cohort") -> tuple[HirakuConfig, Any]:
+    """Return a project whose ``dataset_roots`` names an external cohort mount."""
+    from hiraku.io import dump_yaml
+
+    config = HirakuConfig.init(tmp_path / "project", install_skill=False)
+    mount = tmp_path / "mnt" / "cohort"
+    (mount / "scans").mkdir(parents=True)
+    (mount / "scans" / "a.tiff").write_text("a", encoding="utf-8")
+    roots = {mount_name: str(mount)}
+    config.path.write_text(
+        dump_yaml({**config.to_dict(), "dataset_roots": roots}), encoding="utf-8"
+    )
+    return HirakuConfig.load(config.path), mount
+
+
+def _cohort_record(display_path: str = "scans/a.tiff", root: str = "cohort") -> Record:
+    return _registered_record(
+        "dataset-cohort",
+        {
+            "key": display_path,
+            "display_path": display_path,
+            "root": root,
+            "availability": "present",
+        },
+    )
+
+
+def test_artifact_rows_match_absolute_job_paths_to_named_roots(tmp_path) -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+
+    config, mount = _cohort_project(tmp_path)
+    use = {**JOB, "inputs": [str(mount / "scans" / "a.tiff")], "outputs": []}
+    runs = [workflow_run("w1", 15, use)]
+
+    [row] = artifact_rows(ProjectRuns([_cohort_record()], runs), config)
+
+    assert row["used_by"] == [{"run": "w1", "step": "a · make"}]
+    assert row["built_by"] == []
+
+
+def test_artifact_rows_match_equivalent_project_paths(tmp_path) -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    record = _registered_record(
+        "dataset-abc",
+        {"key": "in", "display_path": "data/in.csv", "availability": "present"},
+    )
+    spellings = ["./data/in.csv", "data/../data/in.csv", str(tmp_path / "data/in.csv")]
+    runs = [
+        workflow_run(f"w{index}", 15, {**JOB, "inputs": [path], "outputs": []})
+        for index, path in enumerate(spellings)
+    ]
+
+    [row] = artifact_rows(ProjectRuns([record], runs), config)
+
+    assert [entry["run"] for entry in row["used_by"]] == ["w0", "w1", "w2"]
+
+
+def test_artifact_rows_resolve_symlinked_mounts(tmp_path) -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+
+    config, mount = _cohort_project(tmp_path)
+    alias = tmp_path / "alias"
+    alias.symlink_to(mount, target_is_directory=True)
+    build = {**JOB, "inputs": [], "outputs": [str(alias / "scans" / "a.tiff")]}
+
+    [row] = artifact_rows(
+        ProjectRuns([_cohort_record()], [workflow_run("w1", 15, build)]), config
+    )
+
+    assert row["built_by"] == [{"run": "w1", "step": "a · make"}]
+
+
+def test_artifact_rows_match_files_inside_directory_outputs(tmp_path) -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+
+    config, mount = _cohort_project(tmp_path)
+    (mount / "scans2").mkdir()
+    build = {**JOB, "inputs": [], "outputs": [str(mount / "scans")]}
+    runs = [workflow_run("w1", 15, build)]
+    records = [_cohort_record(), _cohort_record("scans2/b.tiff")]
+
+    rows = {
+        row["path"]: row for row in artifact_rows(ProjectRuns(records, runs), config)
+    }
+
+    assert rows["scans/a.tiff"]["built_by"] == [{"run": "w1", "step": "a · make"}]
+    # A sibling directory sharing the prefix is not inside the output.
+    assert rows["scans2/b.tiff"]["built_by"] == []
+
+
+def test_artifact_rows_never_guess_unconfigured_roots(tmp_path) -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+
+    config, mount = _cohort_project(tmp_path, mount_name="other")
+    use = {**JOB, "inputs": [str(mount / "scans" / "a.tiff")], "outputs": []}
+    runs = [workflow_run("w1", 15, use)]
+
+    [row] = artifact_rows(ProjectRuns([_cohort_record()], runs), config)
+
+    assert row["used_by"] == []
