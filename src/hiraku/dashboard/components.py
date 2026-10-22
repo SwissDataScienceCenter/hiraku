@@ -343,6 +343,7 @@ def artifact_table(artifact_entries: Sequence[Mapping[str, Any]]) -> mo.ui.table
         {name: row[name] for name in ARTIFACT_COLUMNS}
         | {"documentation": ", ".join(row["documentation"])}
         | {"used_by": ", ".join(item["step"] for item in row["used_by"])}
+        | {"built_by": ", ".join(item["step"] for item in row["built_by"])}
         for row in artifact_entries
     ]
     return mo.ui.table(
@@ -364,7 +365,8 @@ def artifact_details(
     """Render the selected registered artifact's observation and evidence.
 
     Buttons select the owning dataset record (``record:<id>``) and any workflow
-    run whose ``jobs`` inputs use the artifact's exact path (``run:<id>``).
+    run whose ``jobs`` inputs or outputs list the artifact's exact path
+    (``run:<id>``).
     """
     _keys = {row["key"] for row in selection} if isinstance(selection, list) else ()
     _row = next((row for row in artifact_entries if row["key"] in _keys), None)
@@ -379,17 +381,18 @@ def artifact_details(
             on_click=lambda _, key=f"record:{_row['dataset']}": on_select(key),
         )
     }
-    for item in _row["used_by"]:
-        run_id = item["run"]
-        buttons[f"run:{run_id}"] = mo.ui.button(
-            label=f"Used by {html.escape(item['step'])}",
-            on_click=lambda _, key=f"run:{run_id}": on_select(key),
-        )
+    for side, label in (("used_by", "Used by"), ("built_by", "Built by")):
+        for item in _row[side]:
+            run_id = item["run"]
+            buttons[f"{side}:{run_id}:{item['step']}"] = mo.ui.button(
+                label=f"{label} {html.escape(item['step'])} ({html.escape(run_id)})",
+                on_click=lambda _, key=f"run:{run_id}": on_select(key),
+            )
     _text = dump_yaml(
         {
             name: value
             for name, value in _row.items()
-            if name not in ("key", "dataset", "used_by")
+            if name not in ("key", "dataset", "used_by", "built_by")
         }
     )
     links = " ".join(button.text for button in buttons.values())

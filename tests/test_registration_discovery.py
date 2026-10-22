@@ -48,7 +48,32 @@ def test_scan_does_not_read_contents(project: HirakuConfig) -> None:
 
 def test_external_root_requires_configuration(project: HirakuConfig) -> None:
     with pytest.raises(ValidationError, match="root is outside the project"):
+        scan_files(project, [Path("../outside")])
+
+
+def test_absolute_project_root_never_becomes_identity(project: HirakuConfig) -> None:
+    with pytest.raises(ValidationError, match="must be relative"):
         scan_files(project, [Path("/etc")])
+    with pytest.raises(ValidationError, match="must be relative"):
+        scan_manifest(project, [project.root / "data"])
+
+
+def test_equivalent_root_spellings_share_one_identity(project: HirakuConfig) -> None:
+    keys = {
+        tuple(scan_manifest(project, [Path(root)]).datasets[0].key)
+        for root in ("data", "./data", "data/", "data/sub/..")
+    }
+
+    assert keys == {("data",)}
+
+
+def test_scan_records_its_observation_time(project: HirakuConfig) -> None:
+    manifest = scan_manifest(project, [Path("data")])
+    dataset = manifest.datasets[0]
+
+    assert dataset.observed_at is not None
+    assert manifest.observed_at == dataset.observed_at
+    assert all(a.observed_at is not None for a in dataset.artifacts)
 
 
 def test_configured_external_roots_work(project: HirakuConfig) -> None:
@@ -137,9 +162,7 @@ def test_scan_manifest_feeds_the_same_import_path(project: HirakuConfig) -> None
     assert records[0].type == "dataset"
 
 
-def test_scan_cli_preview_and_output(
-    project: HirakuConfig, tmp_path: Path
-) -> None:
+def test_scan_cli_preview_and_output(project: HirakuConfig, tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
         main,
@@ -194,6 +217,50 @@ def test_scan_cli_rejects_unconfigured_external_root(project: HirakuConfig) -> N
 
     assert result.exit_code != 0
     assert "not configured" in result.output
+
+
+def test_scan_cli_has_no_unconfigured_external_root_option(
+    project: HirakuConfig, tmp_path: Path
+) -> None:
+    result = CliRunner().invoke(
+        main,
+        [
+            "registry",
+            "scan",
+            "--project",
+            str(project.root),
+            "--external-root",
+            f"mount={tmp_path}",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "No such option" in result.output
+
+
+def test_scan_cli_apply_requires_the_previewed_hash(project: HirakuConfig) -> None:
+    runner = CliRunner()
+    base = ["registry", "scan", "--project", str(project.root), "--root", "data"]
+
+    unbound = runner.invoke(main, [*base, "--apply"])
+    assert unbound.exit_code != 0
+    assert "--apply requires --reviewed-hash" in unbound.output
+    assert list_records(config=project) == []
+
+    preview = runner.invoke(main, base)
+    assert preview.exit_code == 0, preview.output
+    reviewed = preview.output.split("content_sha256: ", 1)[1].split()[0]
+    (project.root / "data" / "late.csv").write_text("z", encoding="utf-8")
+    changed = runner.invoke(main, [*base, "--apply", "--reviewed-hash", reviewed])
+    assert changed.exit_code != 0
+    assert "reviewed hash does not match" in changed.output
+    assert list_records(config=project) == []
+
+    preview = runner.invoke(main, base)
+    reviewed = preview.output.split("content_sha256: ", 1)[1].split()[0]
+    applied = runner.invoke(main, [*base, "--apply", "--reviewed-hash", reviewed])
+    assert applied.exit_code == 0, applied.output
+    assert len(list_records(config=project)) == 1
 
 
 def _set_dataset_roots(config: HirakuConfig, mapping: dict[str, str]) -> None:

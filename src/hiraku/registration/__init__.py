@@ -15,6 +15,7 @@ from .review import (
     plan_import,
     validate_manifest,
     verify_reviewed_hash,
+    verify_target,
 )
 from .schema import (
     SCHEMA_VERSION,
@@ -34,6 +35,7 @@ from .schema import (
     digest,
     normalize_display_path,
     redact_access,
+    redact_uri,
 )
 
 __all__ = [
@@ -60,8 +62,10 @@ __all__ = [
     "normalize_display_path",
     "plan_import",
     "redact_access",
+    "redact_uri",
     "scan_files",
     "scan_manifest",
     "validate_manifest",
     "verify_reviewed_hash",
+    "verify_target",
 ]

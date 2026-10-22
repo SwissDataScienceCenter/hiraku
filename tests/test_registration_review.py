@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -133,7 +134,9 @@ def test_descriptor_only_remote_does_not_open_locations(
                     {
                         "key": "set-a/scan.tiff",
                         "display_path": "scans/scan.tiff",
-                        "access": {"uri": "https://nonexistent.invalid/scans/scan.tiff"},
+                        "access": {
+                            "uri": "https://nonexistent.invalid/scans/scan.tiff"
+                        },
                     }
                 ],
             }
@@ -179,9 +182,7 @@ def test_conflicting_record_id_is_reported(project: HirakuConfig) -> None:
 
     manifest = _manifest()
     # Occupy the derived dataset record ID with an unrelated record.
-    Record.create(
-        manifest.datasets[0].record_id(), type="experiment", config=project
-    )
+    Record.create(manifest.datasets[0].record_id(), type="experiment", config=project)
 
     plan = plan_import(manifest, project)
 
@@ -253,10 +254,55 @@ def test_cli_tampered_hash_blocks_apply(tmp_path: Path) -> None:
     path = tmp_path / "manifest.yml"
     _write_manifest(path, manifest)
 
-    result = CliRunner().invoke(main, ["registry", "import", str(path), "--apply"])
+    result = CliRunner().invoke(
+        main,
+        ["registry", "import", str(path), "--apply", "--reviewed-hash", "0" * 40],
+    )
 
     assert result.exit_code != 0
-    assert "content_sha256" in result.output
+    assert "content_sha256 does not match" in result.output
+
+
+def test_cli_apply_requires_reviewed_hash(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    path = tmp_path / "manifest.yml"
+    _write_manifest(path, _manifest())
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["registry", "import", str(path), "--apply"])
+
+    assert result.exit_code != 0
+    assert "--apply requires --reviewed-hash" in result.output
+    assert list_records(config=config) == []
+
+    preview = runner.invoke(main, ["registry", "import", str(path)])
+    assert f"content_sha256: {_manifest().compute_digest()}" in preview.output
+
+
+def test_manifest_target_binds_the_project(project: HirakuConfig) -> None:
+    other = _manifest(target="another-project")
+    own = _manifest(target=project.root.name)
+
+    with pytest.raises(ValidationError, match="targets project"):
+        plan_import(other, project)
+    with pytest.raises(ValidationError, match="targets project"):
+        apply_import(other, project, reviewed_hash=other.compute_digest())
+    assert list_records(config=project) == []
+    assert other.compute_digest() != own.compute_digest()
+    assert apply_import(own, project).applied is True
+
+
+def test_history_keeps_the_replaced_observation_time(project: HirakuConfig) -> None:
+    first = _manifest()
+    first.datasets[0].observed_at = datetime(2026, 1, 1, tzinfo=UTC)
+    apply_import(first, project)
+    changed = _manifest()
+    changed.datasets[0].artifacts[0].size = 43
+
+    apply_import(changed, project)
+
+    registration = list_records(config=project)[0].to_dict()["registration"]
+    assert registration["history"][0]["observed_at"] == "2026-01-01T00:00:00Z"
 
 
 def test_cli_invalid_manifest_reports_error(tmp_path: Path) -> None:

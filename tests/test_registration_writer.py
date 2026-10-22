@@ -157,9 +157,7 @@ def test_exhaustive_rescan_marks_disappeared_artifacts_stale(
     record_id = manifest.datasets[0].record_id()
     apply_import(manifest, project)
 
-    narrowed = _manifest(
-        "filesystem", _dataset("data", [_artifact("data/a.csv")])
-    )
+    narrowed = _manifest("filesystem", _dataset("data", [_artifact("data/a.csv")]))
     apply_import(narrowed, project)
 
     stored = Registration.from_record_value(

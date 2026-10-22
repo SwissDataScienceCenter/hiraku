@@ -489,6 +489,25 @@ def test_artifact_rows_link_workflow_inputs_by_exact_path() -> None:
     rows = artifact_rows(ProjectRuns(records=[record], runs=runs))
 
     assert rows[0]["used_by"] == [{"run": "w1", "step": "a · make"}]
+    assert rows[0]["built_by"] == []
+
+
+def test_artifact_rows_show_workflow_outputs_by_exact_path() -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+
+    record = _registered_record(
+        "dataset-abc",
+        {"key": "out", "display_path": "data/out.csv", "availability": "present"},
+        {"key": "other", "display_path": "other/out.csv", "availability": "present"},
+    )
+    build = {**JOB, "inputs": [], "outputs": ["data/out.csv"]}
+    runs = [workflow_run("w1", 15, build)]
+
+    rows = {row["path"]: row for row in artifact_rows(ProjectRuns([record], runs))}
+
+    assert rows["data/out.csv"]["built_by"] == [{"run": "w1", "step": "a · make"}]
+    assert rows["data/out.csv"]["used_by"] == []
+    assert rows["other/out.csv"]["built_by"] == []
 
 
 def test_artifact_rows_external_roots_never_match_jobs() -> None:
@@ -509,3 +528,4 @@ def test_artifact_rows_external_roots_never_match_jobs() -> None:
     rows = artifact_rows(ProjectRuns(records=[record], runs=runs))
 
     assert rows[0]["used_by"] == []
+    assert rows[0]["built_by"] == []

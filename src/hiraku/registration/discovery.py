@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import stat
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ..config import HirakuConfig
@@ -51,8 +52,9 @@ def scan_files(
 ) -> list[Artifact]:
     """List regular files under explicit roots as artifact descriptors.
 
-    Project-relative roots are resolved against the project root; external roots
-    come from ``external``, a mapping of configured root name to mount path.
+    Project roots must be relative and are resolved against the project root;
+    external roots come from ``external``, a mapping of configured root name to
+    mount path.
     Symlinks are skipped, overlapping roots are deduplicated, and a scan that
     would exceed ``max_files`` raises instead of silently truncating.
 
@@ -68,11 +70,10 @@ def scan_files(
     allowed = external or {}
     artifacts: list[Artifact] = []
     seen: set[str] = set()
+    observed_at = datetime.now(UTC)
 
     for root in roots:
-        candidate = (project / root).resolve()
-        if not candidate.is_relative_to(project):
-            raise ValidationError(f"root is outside the project: {root}")
+        candidate = _project_root(project, root)
         if not candidate.is_dir():
             raise ValidationError(f"root is not a directory: {root}")
         _walk(candidate, project, None, artifacts, seen, max_files, config)
@@ -85,7 +86,26 @@ def scan_files(
             raise ValidationError(f"external root {name!r} is not a directory: {mount}")
         _walk(candidate, candidate, name, artifacts, seen, max_files, config)
 
+    for artifact in artifacts:
+        artifact.observed_at = observed_at
     return sorted(artifacts, key=lambda artifact: (artifact.root or "", artifact.key))
+
+
+def _project_root(project: Path, root: Path) -> Path:
+    """Resolve a project root, rejecting absolute and outside paths.
+
+    An absolute path would become part of the dataset identity, so even one
+    inside the project must be given relative to the project root.
+    """
+    if root.is_absolute():
+        raise ValidationError(
+            f"root must be relative to the project root: {root}; use a "
+            "configured dataset_roots name for external mounts"
+        )
+    candidate = (project / root).resolve()
+    if not candidate.is_relative_to(project):
+        raise ValidationError(f"root is outside the project: {root}")
+    return candidate
 
 
 def _walk(
@@ -142,9 +162,7 @@ def _walk(
                 )
 
 
-def _excluded(
-    path: Path, base: Path, hiraku_dir: Path, exclusions: set[str]
-) -> bool:
+def _excluded(path: Path, base: Path, hiraku_dir: Path, exclusions: set[str]) -> bool:
     return path.name in exclusions or path.resolve() == hiraku_dir
 
 
@@ -157,24 +175,34 @@ def scan_manifest(
 ) -> RegistrationManifest:
     """Scan roots and return the versioned manifest they describe.
 
-    The dataset key is the sorted list of root identifiers: project-relative
-    paths for project roots and ``external:<name>`` for configured mounts, so
+    The dataset key is the sorted list of root identifiers: normalized
+    project-relative paths for project roots (``data``, ``./data``, and
+    ``data/`` are one root) and ``external:<name>`` for configured mounts, so
     identity never depends on an absolute path.
     """
     allowed = external or {}
     artifacts = scan_files(config, roots, allowed, max_files=max_files)
-    identifiers = sorted([root.as_posix() for root in roots])
+    project = config.root.resolve()
+    identifiers = sorted(
+        {_project_root(project, root).relative_to(project).as_posix() for root in roots}
+    )
     identifiers.extend(sorted(f"external:{name}" for name in allowed))
+    observed_at = max(
+        (artifact.observed_at for artifact in artifacts),
+        default=datetime.now(UTC),
+    )
     dataset = Dataset(
         namespace=_NAMESPACE,
         key=identifiers,
         coverage="exhaustive",
         roots=identifiers,
+        observed_at=observed_at,
         artifacts=artifacts,
     )
     manifest = RegistrationManifest(
         source=_NAMESPACE,
         scope={"coverage": "exhaustive", "roots": identifiers},
+        observed_at=observed_at,
         datasets=[dataset],
     )
     manifest.content_sha256 = manifest.compute_digest()

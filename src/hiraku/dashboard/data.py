@@ -68,6 +68,7 @@ ARTIFACT_COLUMNS = (
     "observed_at",
     "documentation",
     "used_by",
+    "built_by",
 )
 
 
@@ -255,18 +256,22 @@ def _doc_label(documentation: Any) -> str:
     return key if documentation.role == "unknown" else f"{key} ({documentation.role})"
 
 
-def _used_by(project: ProjectRuns, path: str | None) -> list[dict[str, str]]:
-    """Return the workflow steps whose ``jobs`` inputs use ``path``.
+def _workflow_steps(
+    project: ProjectRuns, path: str | None, side: str
+) -> list[dict[str, str]]:
+    """Return the workflow steps whose ``jobs`` ``side`` lists ``path`` exactly.
 
-    Only project-relative paths match; artifacts under external roots never
-    match ``jobs`` paths.
+    ``side`` is ``inputs`` (the step used the path) or ``outputs`` (the
+    workflow built a file at the path). Matching is by exact project-relative
+    path only; artifacts under external roots never match ``jobs`` paths, and
+    a match is an observed fact, not the artifact's historical provenance.
     """
     if not path:
         return []
     steps: list[dict[str, str]] = []
     for run in execution_order(project.runs):
         for job in _jobs(run):
-            if path not in job["inputs"]:
+            if path not in job[side]:
                 continue
             entry = {"run": run.id, "step": _step(job)}
             if entry not in steps:
@@ -289,6 +294,7 @@ def artifact_rows(project: ProjectRuns) -> list[dict[str, Any]]:
             continue
         source = registration.source or registration.namespace
         for artifact in registration.artifacts:
+            project_path = artifact.display_path if artifact.root is None else None
             rows.append(
                 {
                     "key": f"artifact:{record.id}:{artifact.key}",
@@ -304,10 +310,8 @@ def artifact_rows(project: ProjectRuns) -> list[dict[str, Any]]:
                     "documentation": [
                         _doc_label(doc) for doc in artifact.documentation
                     ],
-                    "used_by": _used_by(
-                        project,
-                        artifact.display_path if artifact.root is None else None,
-                    ),
+                    "used_by": _workflow_steps(project, project_path, "inputs"),
+                    "built_by": _workflow_steps(project, project_path, "outputs"),
                 }
             )
         for doc in registration.documentation:
@@ -325,6 +329,7 @@ def artifact_rows(project: ProjectRuns) -> list[dict[str, Any]]:
                     "observed_at": registration.observed_at,
                     "documentation": [_doc_label(doc)],
                     "used_by": [],
+                    "built_by": [],
                 }
             )
     return rows

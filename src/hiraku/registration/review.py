@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +59,7 @@ class ImportPlan:
 
     project: Path
     source: str
+    content_sha256: str | None = None
     creates: list[str] = field(default_factory=list)
     updates: list[str] = field(default_factory=list)
     unchanged: int = 0
@@ -72,6 +72,7 @@ class ImportPlan:
         return {
             "project": str(self.project),
             "source": self.source,
+            "content_sha256": self.content_sha256,
             "creates": self.creates,
             "updates": self.updates,
             "unchanged": self.unchanged,
@@ -144,6 +145,18 @@ def verify_reviewed_hash(
         raise ValidationError(
             "reviewed hash does not match the manifest; review the latest "
             "manifest and pass its content_sha256"
+        )
+
+
+def verify_target(manifest: RegistrationManifest, config: HirakuConfig) -> None:
+    """Confirm that a manifest naming a ``target`` is applied to that project.
+
+    ``target`` is the target project's directory name. It is part of the
+    reviewed digest, so a reviewed manifest cannot be applied elsewhere.
+    """
+    if manifest.target is not None and manifest.target != config.root.name:
+        raise ValidationError(
+            f"manifest targets project {manifest.target!r}, not {config.root.name!r}"
         )
 
 
@@ -223,9 +236,10 @@ def _artifacts_signature(artifacts: list[Artifact]) -> str:
 
 
 def _observation(registration: Registration) -> Observation:
+    """Summarize the stored observation that a refresh is about to replace."""
     states = [artifact.availability for artifact in registration.artifacts]
     return Observation(
-        observed_at=datetime.now(UTC),
+        observed_at=registration.observed_at,
         coverage=registration.coverage,
         artifacts=len(registration.artifacts),
         present=states.count("present"),
@@ -366,6 +380,7 @@ def plan_import(
     than overwritten, unless ``override`` explicitly resolves the field edits.
     """
     manifest = validate_manifest(manifest)
+    verify_target(manifest, config)
     records = list_records(config=config)
     by_id = {record.id: record for record in records}
     by_identity: dict[tuple[str, str], Record] = {}
@@ -374,7 +389,11 @@ def plan_import(
         if identity is not None:
             by_identity[identity] = record
 
-    plan = ImportPlan(project=config.root, source=manifest.source)
+    plan = ImportPlan(
+        project=config.root,
+        source=manifest.source,
+        content_sha256=manifest.content_sha256 or manifest.compute_digest(),
+    )
     collections = _plan_collections(manifest, by_id, by_identity)
     writes: list[_Write] = []
     planned_ids: set[str] = set()
@@ -441,9 +460,7 @@ def plan_import(
                 )
             )
             continue
-        incoming = _registration_for(
-            dataset, source=manifest.source, existing=existing
-        )
+        incoming = _registration_for(dataset, source=manifest.source, existing=existing)
         conflict = _managed_conflict(
             current,
             incoming,

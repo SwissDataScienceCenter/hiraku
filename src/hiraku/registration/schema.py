@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
@@ -33,10 +34,19 @@ Availability: TypeAlias = Literal["present", "missing", "unknown", "stale"]
 DocumentationRole: TypeAlias = Literal["input", "output", "unknown"]
 
 _DIGEST_LENGTH = 20
-# Record front matter keys excluded from the semantic content digest: observed
-# timestamps are observational, and ``managed``/``history`` are importer
-# bookkeeping. Excluding them is what makes an unchanged rescan a no-op.
-_NON_SEMANTIC = {"observed_at", "managed", "history"}
+# Fields excluded from the semantic content digest, only at the levels where
+# Hiraku defines them: observed timestamps are observational, and
+# ``managed``/``history`` are importer bookkeeping. Excluding them is what makes
+# an unchanged rescan a no-op. Same-named keys inside ``metadata`` or artifact
+# extras stay semantic.
+_OBSERVATIONAL = {"observed_at"}
+_BOOKKEEPING = {"managed", "history"}
+_CREDENTIAL_KEYS = re.compile(
+    r"(^|_)(password|passwd|secret|token|credentials?|auth|authorization|"
+    r"api_?key|access_?key|secret_?key|private_?key)($|_)",
+    re.IGNORECASE,
+)
+_URI_USERINFO = re.compile(r"^([a-z][a-z0-9+.-]*://)[^/@]*@", re.IGNORECASE)
 
 
 def canonical_json(value: Any) -> str:
@@ -50,27 +60,34 @@ def digest(value: Any, *, length: int = _DIGEST_LENGTH) -> str:
 
 
 def content_digest(value: Any, *, length: int = _DIGEST_LENGTH) -> str:
-    """Return the digest of ``value`` after removing non-semantic fields.
+    """Return the digest of a registration value without non-semantic fields.
 
-    Observation timestamps and importer bookkeeping are dropped recursively so
-    that re-observing unchanged data yields the same digest.
+    ``value`` is a manifest, dataset, registration, or artifact (model or
+    dumped mapping), or a list of them. Observation timestamps and importer
+    bookkeeping are dropped where the schema defines them, so re-observing
+    unchanged data yields the same digest.
     """
     return digest(_semantic(value), length=length)
 
 
 def _semantic(value: Any) -> Any:
-    """Recursively drop non-semantic fields from a nested mapping/list."""
-    if isinstance(value, Mapping):
-        return {
-            str(key): _semantic(item)
-            for key, item in value.items()
-            if key not in _NON_SEMANTIC
-        }
+    """Drop the schema's non-semantic fields from a registration value."""
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json", by_alias=True)
     if isinstance(value, (list, tuple)):
         return [_semantic(item) for item in value]
-    if isinstance(value, BaseModel):
-        return _semantic(value.model_dump(mode="json", exclude=_NON_SEMANTIC))
-    return value
+    if not isinstance(value, Mapping):
+        return value
+    dropped = set(_OBSERVATIONAL)
+    if "schema_version" in value:  # a manifest
+        dropped.add("content_sha256")
+    elif "schema" in value:  # a stored registration
+        dropped |= _BOOKKEEPING
+    semantic = {str(key): item for key, item in value.items() if key not in dropped}
+    for nested in ("datasets", "artifacts"):
+        if isinstance(semantic.get(nested), list):
+            semantic[nested] = _semantic(semantic[nested])
+    return semantic
 
 
 def normalize_display_path(value: Any, *, label: str = "display_path") -> str:
@@ -95,6 +112,11 @@ def normalize_display_path(value: Any, *, label: str = "display_path") -> str:
             f"{label} must be a canonical relative POSIX path: {value!r}"
         )
     return value
+
+
+def redact_uri(value: str) -> str:
+    """Return ``value`` with any ``user:password@`` URI credentials removed."""
+    return _URI_USERINFO.sub(r"\1<redacted>@", value)
 
 
 def dataset_record_id(namespace: str, key: str | list[str]) -> str:
@@ -142,6 +164,11 @@ class Artifact(BaseModel):
     @classmethod
     def _validate_display_path(cls, value: str) -> str:
         return normalize_display_path(value)
+
+    @field_validator("access")
+    @classmethod
+    def _redact_access(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return redact_access(value)
 
     @field_validator("observed_at", mode="before")
     @classmethod
@@ -234,9 +261,7 @@ class RegistrationManifest(BaseModel):
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValidationError("schema_version must be an integer")
         if value != SCHEMA_VERSION:
-            raise ValidationError(
-                f"unsupported registration schema_version: {value!r}"
-            )
+            raise ValidationError(f"unsupported registration schema_version: {value!r}")
         return value
 
     @field_validator("observed_at", mode="before")
@@ -258,8 +283,7 @@ class RegistrationManifest(BaseModel):
         manifest reviewed in a dry run hashes identically at apply time even
         though a little time passed.
         """
-        payload = self.model_dump(mode="json", exclude={"content_sha256"})
-        return content_digest(payload, length=length)
+        return content_digest(self, length=length)
 
 
 class Observation(BaseModel):
@@ -288,9 +312,10 @@ class Registration(BaseModel):
     bookkeeping and excluded from the semantic content digest.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    schema: Literal[1] = SCHEMA_VERSION
+    # Stored as ``schema``; renamed in Python so it doesn't shadow BaseModel.
+    schema_: Literal[1] = Field(default=SCHEMA_VERSION, alias="schema")
     namespace: str = Field(min_length=1)
     key: str | list[str]
     source: str | None = None
@@ -315,7 +340,7 @@ class Registration(BaseModel):
     def _normalize_observed_at(cls, value: Any) -> Any:
         return _coerce_timestamp(value)
 
-    @field_validator("schema", mode="before")
+    @field_validator("schema_", mode="before")
     @classmethod
     def _reject_unknown_schema(cls, value: Any) -> int:
         if isinstance(value, bool) or not isinstance(value, int):
@@ -348,11 +373,11 @@ class Registration(BaseModel):
 
     def semantic_digest(self, *, length: int = _DIGEST_LENGTH) -> str:
         """Return the digest used to decide whether a refresh changes a record."""
-        return content_digest(self.model_dump(mode="json"), length=length)
+        return content_digest(self, length=length)
 
     def to_record_value(self) -> dict[str, Any]:
         """Return the YAML-safe value stored under the ``registration`` key."""
-        return self.model_dump(mode="json", exclude_none=False)
+        return self.model_dump(mode="json", by_alias=True)
 
     @classmethod
     def from_record_value(cls, value: Any) -> Registration:
@@ -368,12 +393,8 @@ def _validate_identity_key(value: Any) -> str | list[str]:
             raise ValidationError("identity key must be a non-empty string")
         return value
     if isinstance(value, list):
-        if not value or any(
-            not isinstance(item, str) or not item for item in value
-        ):
-            raise ValidationError(
-                "identity key list must contain non-empty strings"
-            )
+        if not value or any(not isinstance(item, str) or not item for item in value):
+            raise ValidationError("identity key list must contain non-empty strings")
         return value
     raise ValidationError("identity key must be a string or a list of strings")
 
@@ -396,18 +417,23 @@ def _coerce_timestamp(value: Any) -> datetime | None:
 
 
 def redact_access(access: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    """Return ``access`` with common credential-bearing keys redacted.
+    """Return ``access`` with credential-bearing keys and URI userinfo redacted.
 
     Credentials belong in access configuration, never in manifests or records.
-    This is a safety net; adapters should not emit them at all.
+    Artifacts apply this on validation as a safety net; adapters should not
+    emit credentials at all. Keys such as ``object_key`` are locations, not
+    secrets, and are kept.
     """
     if access is None:
         return None
-    redacted = dict(access)
-    for key, item in list(redacted.items()):
-        lowered = key.lower()
-        if any(token in lowered for token in ("password", "secret", "token", "key")):
+    redacted: dict[str, Any] = {}
+    for key, item in access.items():
+        if _CREDENTIAL_KEYS.search(str(key)):
             redacted[key] = "<redacted>"
         elif isinstance(item, Mapping):
             redacted[key] = redact_access(item)
+        elif isinstance(item, str):
+            redacted[key] = redact_uri(item)
+        else:
+            redacted[key] = item
     return redacted

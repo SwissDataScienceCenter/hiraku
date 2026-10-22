@@ -32,7 +32,7 @@ registration:
       size: 100                       # bytes; null when unknown
       availability: present
       observed_at: "2026-10-22T09:00:00+00:00"
-      access: {uri: "https://example.invalid/counts.csv"}  # never credentials
+      access: {uri: "https://example.invalid/counts.csv"}  # credentials redacted
       documentation:
         - key: sop-abc
           role: output                # input | output | unknown
@@ -53,14 +53,22 @@ their shapes; unknown technology, sample, or SOP fields are never required.
 - An artifact's identity is `(namespace, dataset key, artifact key)`. Identity
   never comes from a path, so relocating a mount does not create a new dataset
   or artifact.
-- `canonical_json` sorts keys and uses compact separators; `content_digest`
-  hashes a value after dropping `observed_at`, `managed`, and `history`.
+- `canonical_json` sorts keys and uses compact separators. `content_digest`
+  hashes a manifest, dataset, registration, or artifact after dropping the
+  fields the schema defines as non-semantic: every `observed_at`, a manifest's
+  own `content_sha256`, and a stored registration's `managed` and `history`.
+  Keys with the same names inside `metadata` or artifact extras stay part of
+  the digest.
+- A manifest's `target`, when set, names the target project's directory. It is
+  part of the digest, and importing into another project fails.
 
 ### Timestamp semantics
 
 `observed_at` is the source observation time, an ISO-8601 timestamp normalized
-to UTC. Observation timestamps are **not** part of the semantic content digest,
-so re-observing unchanged data is a no-op.
+to UTC; `hiraku registry scan` sets it to the scan time. Observation timestamps
+are **not** part of the semantic content digest, so re-observing unchanged data
+is a no-op. A stored `observed_at` is therefore the time of the observation that
+last changed the record, not of the latest scan.
 
 ### Availability
 
@@ -96,7 +104,16 @@ source does not support the distinction.
 `registration.managed` holds the importer's baselines of the top-level record
 fields it owns, so a later import can detect human edits instead of silently
 overwriting them. `registration.history` retains bounded past observations
-(`observed_at`, `coverage`, and per-availability counts).
+(`observed_at`, `coverage`, and per-availability counts). Each entry keeps the
+`observed_at` of the observation it summarizes.
+
+### Credentials
+
+Credentials belong in access configuration, never in manifests or records.
+As a safety net, every artifact's `access` mapping is redacted when it is
+validated: values of credential keys such as `password`, `token`, `api_key`,
+or `secret_key` become `<redacted>`, and so does the `user:password@` part of a
+URI. Location keys such as `object_key` are kept.
 
 ## Backward compatibility
 
@@ -140,13 +157,14 @@ A manifest is a YAML or JSON document a source adapter emits; the same shape is
 validated by the Python API. Review first, then apply the exact reviewed hash:
 
 ```bash
-hiraku registry import manifest.yaml            # preview: creates/updates/conflicts
+hiraku registry import manifest.yaml            # preview, prints content_sha256
 hiraku registry import manifest.yaml --json
 hiraku registry import manifest.yaml --apply \
   --reviewed-hash <content_sha256>
 ```
 
-`--reviewed-hash` binds the apply to the manifest reviewed in a prior preview.
+`--apply` requires `--reviewed-hash`, the `content_sha256` the preview printed,
+which binds the apply to the reviewed manifest.
 `--override-conflicts` overwrites an importer-owned field a person edited;
 source-ownership conflicts are always reported.
 
@@ -154,15 +172,28 @@ source-ownership conflicts are always reported.
 
 `hiraku registry scan` lists regular files under explicit roots and feeds them
 into the same registration path. Project-relative roots use paths Snakemake
-reports; external mounts use named, configured roots (`dataset_roots` in
-`hiraku.yml`) so an absolute path never becomes identity:
+reports, and must be given relative to the project root (`data`, `./data`,
+and `data/` are the same root). External mounts are scanned only by the name
+configured in `dataset_roots` in `hiraku.yml`, so an absolute path never becomes
+identity:
+
+```yaml
+dataset_roots:
+  cohort: /mnt/cohort
+```
 
 ```bash
-hiraku registry scan --root data              # preview
-hiraku registry scan --root data --apply
+hiraku registry scan --root data              # preview, prints content_sha256
+hiraku registry scan --root data --apply --reviewed-hash <content_sha256>
 hiraku registry scan --root data --output manifest.yaml   # write the manifest
 hiraku registry scan --root data --external cohort --max-files 200000
 ```
+
+A scan's dataset is identified by its set of roots, and it is exhaustive for
+those roots. Scanning a different set of roots registers a different dataset
+rather than narrowing an existing one. Because file revisions are part of the
+digest, a file that changes between the preview and the apply makes the apply
+fail; preview again and apply the new hash.
 
 Scans never read file contents; revisions are `size:mtime`. A scan that would
 exceed `--max-files` aborts instead of silently truncating.
@@ -178,7 +209,7 @@ from hiraku.registration import apply_import, load_manifest, plan_import
 config = HirakuConfig.discover()
 manifest = load_manifest("manifest.yaml")
 plan = plan_import(manifest, config)          # no writes
-applied = apply_import(manifest, config, reviewed_hash=plan_hash)
+applied = apply_import(manifest, config, reviewed_hash=plan.content_sha256)
 ```
 
 `RegistrationManifest`, `Dataset`, `Artifact`, and `Documentation` are the

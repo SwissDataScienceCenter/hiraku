@@ -108,9 +108,7 @@ def test_duplicate_identity_is_rejected() -> None:
 
 
 def test_no_technology_sample_or_sop_fields_are_mandatory() -> None:
-    manifest = _manifest(
-        [Dataset(namespace="plain", key="single", artifacts=[])]
-    )
+    manifest = _manifest([Dataset(namespace="plain", key="single", artifacts=[])])
 
     assert manifest.datasets[0].metadata == {}
     assert Registration.model_validate(
@@ -131,9 +129,7 @@ def test_non_exhaustive_coverage_cannot_mark_absence() -> None:
             namespace="n",
             key="k",
             coverage="partial",
-            artifacts=[
-                Artifact(key="a", display_path="a", availability="missing")
-            ],
+            artifacts=[Artifact(key="a", display_path="a", availability="missing")],
         )
     with pytest.raises(ValidationError, match="exhaustive"):
         Dataset(namespace="n", key="k", coverage="partial", availability="stale")
@@ -200,6 +196,50 @@ def test_digest_is_deterministic() -> None:
     assert digest([1, 2]) != digest([2, 1])
 
 
+def test_same_named_metadata_keys_stay_semantic() -> None:
+    def manifest(value: str) -> RegistrationManifest:
+        return RegistrationManifest(
+            source="s",
+            datasets=[
+                {
+                    "namespace": "n",
+                    "key": "k",
+                    "metadata": {"history": value, "managed": value},
+                    "artifacts": [{"key": "a", "display_path": "a", "history": value}],
+                }
+            ],
+        )
+
+    assert manifest("v1").compute_digest() != manifest("v2").compute_digest()
+
+
+def test_registration_stores_schema_without_shadowing_warning() -> None:
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        registration = Registration(schema=1, namespace="n", key="k")
+        stored = registration.to_record_value()
+
+    assert stored["schema"] == 1
+    assert "schema_" not in stored
+    assert Registration.from_record_value(stored) == registration
+
+
+def test_artifact_access_is_redacted_on_validation() -> None:
+    artifact = Artifact(
+        key="a",
+        display_path="a",
+        access={"uri": "s3://AKIA:secret@bucket/a", "object_key": "a", "token": "t"},
+    )
+
+    assert artifact.access == {
+        "uri": "s3://<redacted>@bucket/a",
+        "object_key": "a",
+        "token": "<redacted>",
+    }
+
+
 def test_redact_access_strips_credentials() -> None:
     assert redact_access({"uri": "https://host/x", "token": "secret"}) == {
         "uri": "https://host/x",
@@ -228,9 +268,7 @@ def test_manifest_allows_dataset_namespace_distinct_from_source() -> None:
 
 def test_registration_rejects_unknown_schema() -> None:
     with pytest.raises(ValidationError, match="schema"):
-        Registration.model_validate(
-            {"schema": 2, "namespace": "n", "key": "k"}
-        )
+        Registration.model_validate({"schema": 2, "namespace": "n", "key": "k"})
 
 
 def test_dataset_key_accepts_string_and_list() -> None:
@@ -411,9 +449,12 @@ def test_registered_record_is_readable_by_mains_hiraku(tmp_path, monkeypatch) ->
     stored = list_records(config=config)[0]
     assert stored.id == record.id
     assert stored.type == "dataset"
-    assert Registration.from_record_value(stored.to_dict()["registration"]).artifacts[
-        0
-    ].display_path == "data/raw.csv"
+    assert (
+        Registration.from_record_value(stored.to_dict()["registration"])
+        .artifacts[0]
+        .display_path
+        == "data/raw.csv"
+    )
 
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["record", "show", record.id, "--json"])
