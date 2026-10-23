@@ -32,6 +32,7 @@ RUN_COLUMNS = (
     "record_path",
     "source",
     "started",
+    "duration",
     "entrypoint",
     "commit",
     "url",
@@ -132,6 +133,7 @@ def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
             "record_path": paths.get(str(run.record_id)),
             "source": project.sources.get(run.id),
             "started": run.timestamp,
+            "duration": run.duration,
             "entrypoint": run.entrypoint,
             "commit": run.commit,
             "url": run.url,
@@ -272,7 +274,23 @@ def _row(key: str, depth: int, label: str, item: Mapping[str, Any]) -> dict[str,
         "Entrypoint": item.get("entrypoint") or "",
         "Commit": (item.get("commit") or "")[:7],
         "Started": started.strftime("%Y-%m-%d %H:%M:%S") if started else "",
+        "Duration": format_duration(item.get("duration")),
     }
+
+
+def format_duration(seconds: float | None) -> str:
+    """Render ``seconds`` as ``850 ms``, ``4.2 s``, ``3 m 07 s`` or ``1 h 05 m``."""
+    if seconds is None:
+        return ""
+    if seconds < 1:
+        return f"{seconds * 1000:.0f} ms"
+    if seconds < 59.95:
+        return f"{seconds:.1f} s"
+    minutes, rest = divmod(round(seconds), 60)
+    if minutes < 60:
+        return f"{minutes} m {rest:02d} s"
+    hours, minutes = divmod(round(seconds / 60), 60)
+    return f"{hours} h {minutes:02d} m"
 
 
 def find_run(runs_df: pd.DataFrame, run_id: str) -> dict[str, Any] | None:
@@ -317,6 +335,7 @@ def run_text(run: Mapping[str, Any]) -> str:
             "entrypoint": run.get("entrypoint"),
             "commit": run.get("commit"),
             "started": started.isoformat() if started else None,
+            "duration": run.get("duration"),
             "params": prefixed("param."),
             "metrics": prefixed("metric."),
         }
@@ -337,6 +356,9 @@ def plot_frame(runs_df: pd.DataFrame, metric: str | None) -> tuple[pd.DataFrame,
             "started": [
                 started.isoformat() if started else ""
                 for started in (row.get("started") for row in _records(runs_df))
+            ],
+            "duration": [
+                format_duration(row.get("duration")) for row in _records(runs_df)
             ],
             "value": metric_values(runs_df, metric),
         }

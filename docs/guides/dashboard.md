@@ -106,14 +106,14 @@ location.
 
 **Runs**
 :   Records and their runs in one indented table. Runs appear under the record
-    they are attributed to, in execution order, with the value of the first
-    metric the records declare. Select a record to compare its subtree, or a
-    run to inspect it.
+    they are attributed to, in execution order, with their start time, duration,
+    and the value of the first metric the records declare. Select a record to
+    compare its subtree, or a run to inspect it.
 
 **Run**
-:   The selected run's ID, record, entrypoint, commit, start time, parameters,
-    and metrics, plus a link to the run in its tracking backend when one is
-    available.
+:   The selected run's ID, record, entrypoint, commit, start time, duration,
+    parameters, and metrics, plus a link to the run in its tracking backend when
+    one is available.
 
 **Record**
 :   Expandable YAML front matter labeled with the selected record's ID,

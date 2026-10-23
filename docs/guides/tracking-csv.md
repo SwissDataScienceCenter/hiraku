@@ -11,11 +11,14 @@ The CSV adapter reads records; it does not write them. Your evaluation script
 can append a row using this schema:
 
 ```csv
-id,record_id,commit,git_state,timestamp,entrypoint,metric.val/accuracy,param.seed
-run-001,baseline,abc123,dirty,2026-01-01T12:00:00Z,evaluate,0.84,42
+id,record_id,commit,git_state,timestamp,duration,entrypoint,metric.val/accuracy,param.seed
+run-001,baseline,abc123,dirty,2026-01-01T12:00:00Z,42.5,evaluate,0.84,42
 ```
 
-Choose a unique run ID for each execution. Prefix metric columns with
+Choose a unique run ID for each execution. Set `timestamp` to when the run
+started, taken before any work, and `duration` to its wall-clock length in
+seconds; both are optional. The dashboard shows them as the run's start time
+and duration. Prefix metric columns with
 `metric.` and parameter columns with `param.`. Use `HIRAKU_GIT_STATE` to
 distinguish a clean commit from a dirty working tree based on that commit.
 

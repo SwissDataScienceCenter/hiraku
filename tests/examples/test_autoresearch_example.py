@@ -263,6 +263,8 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     assert row["raw"]["git_state"] == "clean"
     assert row["raw"]["status"] == "finished"
     assert float(row["metrics"]["val_bpb"]) == 0.9
+    assert row["timestamp"] is not None
+    assert row["duration"] >= 0
 
 
 @LINUX_ONLY
@@ -338,6 +340,8 @@ def test_autoresearch_dispatcher_records_timeout_and_invalid_output(tmp_path):
     with (tmp_path / "runs.csv").open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     assert [row["status"] for row in rows] == ["timeout", "crashed"]
+    # The timed-out command ran for the full one-second limit.
+    assert float(rows[0]["duration"]) >= 1
     assert rows[0]["metric.val_bpb"] == ""
     assert len({row["id"] for row in rows}) == 2
 

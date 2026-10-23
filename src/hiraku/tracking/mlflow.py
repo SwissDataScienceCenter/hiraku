@@ -167,6 +167,7 @@ class MLflowBackend(TrackingBackend):
                             backend="mlflow",
                             context=f"run {info.run_id}",
                         ),
+                        duration=_duration(info.start_time, info.end_time),
                         url=self._run_url(info.experiment_id, info.run_id),
                         metrics=dict(data.metrics),
                         params=dict(data.params),
@@ -185,6 +186,13 @@ class MLflowBackend(TrackingBackend):
         experiment = quote(str(experiment_id), safe="")
         run = quote(str(run_id), safe="")
         return f"{self.ui_url.rstrip('/')}/#/experiments/{experiment}/runs/{run}"
+
+
+def _duration(start_time: int | None, end_time: int | None) -> float | None:
+    """Return seconds between MLflow's millisecond times; ``None`` while running."""
+    if start_time is None or end_time is None:
+        return None
+    return (end_time - start_time) / 1000
 
 
 def _is_web_base(value: str) -> bool:

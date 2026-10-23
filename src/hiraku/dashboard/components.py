@@ -344,6 +344,7 @@ def performance_plot(
                 alt.Tooltip("run:N", title="Run"),
                 alt.Tooltip("record:N", title="Record"),
                 alt.Tooltip("started:N", title="Started"),
+                alt.Tooltip("duration:N", title="Duration"),
                 alt.Tooltip("value:Q", title=metric, format=".4g"),
             ],
         )

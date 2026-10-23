@@ -8,14 +8,14 @@ import pytest
 from hiraku.config import HirakuConfig
 from hiraku.record import Record
 
-# (run ID, record, minute started or None, loss)
+# (run ID, record, minute started or None, seconds taken or None, loss)
 RUNS = [
-    ("r0", "a", 0, 0.9),
-    ("r1", "b", 1, 0.8),
-    ("r2", "a1", 2, 0.5),
-    ("r3", "a", 3, 0.7),
-    ("r4", "b", None, 0.6),
-    ("r5", "unknown", 5, 0.1),
+    ("r0", "a", 0, 4.5, 0.9),
+    ("r1", "b", 1, 75, 0.8),
+    ("r2", "a1", 2, 0.25, 0.5),
+    ("r3", "a", 3, 3725, 0.7),
+    ("r4", "b", None, None, 0.6),
+    ("r5", "unknown", 5, 1, 0.1),
 ]
 
 
@@ -35,8 +35,11 @@ def project(tmp_path: Path) -> HirakuConfig:
     Record.create("a1", parent_id="a", config=config)
     with (tmp_path / "runs.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
-        writer.writerow(["id", "record_id", "timestamp", "entrypoint", "metric.loss"])
-        for run_id, record_id, minute, loss in RUNS:
+        writer.writerow(
+            ["id", "record_id", "timestamp", "duration", "entrypoint", "metric.loss"]
+        )
+        for run_id, record_id, minute, duration, loss in RUNS:
             started = "" if minute is None else f"2026-10-14T10:0{minute}:00+00:00"
-            writer.writerow([run_id, record_id, started, "train", loss])
+            duration = "" if duration is None else duration
+            writer.writerow([run_id, record_id, started, duration, "train", loss])
     return HirakuConfig.load(tmp_path / "hiraku.yml")

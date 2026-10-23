@@ -82,7 +82,7 @@ from hiraku.run import Run
 A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters; additional adapters can be registered by users. The backend needs to:
 
 - List runs from the tracking source selected by a record.
-- Return normalized runs with a required run ID, metrics, and parameters; record ID, commit, timestamp, entrypoint, and URL attribution may be absent.
+- Return normalized runs with a required run ID, metrics, and parameters; record ID, commit, start timestamp, duration in seconds, entrypoint, and URL attribution may be absent.
 
 CSV is the default project backend. A record may set `tracking_backend` to
 override the project default. Backend configuration uses one common mapping

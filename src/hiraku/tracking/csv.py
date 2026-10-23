@@ -42,6 +42,7 @@ class CSVBackend(TrackingBackend):
         "record_id",
         "commit",
         "timestamp",
+        "duration",
         "entrypoint",
         "url",
     }
@@ -123,6 +124,7 @@ class CSVBackend(TrackingBackend):
                                 backend="csv",
                                 context=f"{path} row {row_number}",
                             ),
+                            duration=normalized.get("duration"),
                             entrypoint=normalized.get("entrypoint"),
                             url=normalized.get("url"),
                             metrics=metrics,

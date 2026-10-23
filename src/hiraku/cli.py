@@ -61,6 +61,7 @@ def _json_value(value: Any) -> Any:
             "record_id": value.record_id,
             "commit": value.commit,
             "timestamp": _json_value(value.timestamp),
+            "duration": value.duration,
             "entrypoint": value.entrypoint,
             "url": value.url,
             "raw": _json_value(value.raw),
@@ -959,7 +960,7 @@ def run_list(
     if json_output:
         _emit_json(runs)
     else:
-        columns = ["id", "record", "timestamp", "commit"]
+        columns = ["id", "record", "timestamp", "duration", "commit"]
         columns.extend(f"param:{name}" for name in param_names)
         columns.extend(f"metric:{name}" for name in metric_names)
         rows = [
@@ -967,6 +968,7 @@ def run_list(
                 run.id,
                 run.record_id,
                 run.timestamp or "",
+                run.duration,
                 run.commit or "",
                 *(run.params.get(name) for name in param_names),
                 *(run.metrics.get(name) for name in metric_names),
