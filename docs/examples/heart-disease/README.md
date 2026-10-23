@@ -10,7 +10,7 @@ From a local Hiraku source checkout, install the Hiraku CLI:
 ```bash
 git clone https://github.com/SwissDataScienceCenter/hiraku.git
 cd hiraku
-uv tool install .
+uv tool install --force .
 ```
 
 Then create a project and let Hiraku install the training script, processed

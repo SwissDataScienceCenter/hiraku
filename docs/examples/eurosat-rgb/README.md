@@ -13,7 +13,7 @@ From a local Hiraku source checkout, install the Hiraku CLI:
 ```bash
 git clone https://github.com/SwissDataScienceCenter/hiraku.git
 cd hiraku
-uv tool install '.[wandb]'
+uv tool install --force '.[wandb]'
 ```
 
 Then create a project and let Hiraku install the training script, model definitions, and dependencies for this example.
