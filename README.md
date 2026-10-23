@@ -109,7 +109,7 @@ take time and may install the example's dependencies.
 
 | Command | What it does |
 | --- | --- |
-| `hiraku dashboard` | Serve the read-only dashboard at <http://127.0.0.1:8765> |
+| `hiraku dashboard` | Serve the read-only dashboard |
 | `hiraku dashboard --include-code` | Also let the page show its notebook code (marimo menu, **⋯**) |
 | `hiraku dashboard --init` | Copy the notebook to `hiraku/dashboard/app.py` so you can customize it |
 | `hiraku dashboard --edit` | Open that copy in marimo-studio |
