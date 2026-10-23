@@ -19,6 +19,30 @@ def test_mlflow_backend_config_rejects_uri_and_database() -> None:
         MLflowBackendConfig(tracking_uri="http://localhost:5000", database="mlflow.db")
 
 
+@pytest.mark.parametrize("database", [None, "custom.db"])
+@pytest.mark.parametrize("directory", [False, True])
+def test_mlflow_backend_requires_existing_database(
+    tmp_path, monkeypatch, database, directory
+) -> None:
+    mlflow = pytest.importorskip("mlflow")
+    config = HirakuConfig.init(tmp_path)
+    path = tmp_path / (database or "mlflow.db")
+    if directory:
+        path.mkdir()
+    before = set(tmp_path.rglob("*"))
+    monkeypatch.setattr(
+        mlflow.tracking,
+        "MlflowClient",
+        lambda **kwargs: pytest.fail("client must not be constructed"),
+    )
+
+    with pytest.raises(BackendError, match="not an existing file"):
+        MLflowBackend(config, database=database).list_runs()
+
+    assert set(tmp_path.rglob("*")) == before
+    assert path.is_dir() if directory else not path.exists()
+
+
 class _Page(list):
     def __init__(self, items, token=None):
         super().__init__(items)
@@ -63,6 +87,7 @@ def test_mlflow_backend_paginates_experiments_and_runs(tmp_path, monkeypatch) ->
 
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
     backend = MLflowBackend(HirakuConfig.init(tmp_path), database="mlflow.db")
+    (tmp_path / "mlflow.db").touch()
 
     assert [run.id for run in backend._read_source_runs()] == ["r1", "r2"]
     assert calls == [None, "next"]
@@ -84,7 +109,9 @@ def test_mlflow_backend_reads_duration_from_start_and_end(
             return _Page([_native_run("done"), _native_run("running", end_time=None)])
 
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
-    backend = MLflowBackend(HirakuConfig.init(tmp_path), database="mlflow.db")
+    backend = MLflowBackend(
+        HirakuConfig.init(tmp_path), tracking_uri="https://mlflow.example.com"
+    )
 
     assert [run.duration for run in backend._read_source_runs()] == [4.25, None]
 
