@@ -29,27 +29,26 @@ class Harness:
 
     def start(self, workflow: str, **arguments: Any) -> dict[str, Any]:
         self.workflow = self.workflows[workflow]
-        result = Session.run_start(self.workflow, arguments)
-        self.response = self.deliver(result)
+        session = Session.run_start(self.workflow, arguments)
+        self.response = self.deliver(session, session.history[-1].result)
         return self.response
 
     def send(self, event: str, **arguments: Any) -> dict[str, Any]:
         result = load_session(
             self.response["session_id"], config=self.workflow.config
         ).run_event(self.workflow, self.response["instruction_id"], event, arguments)
-        result = self.deliver(result)
+        result = self.deliver(
+            load_session(self.response["session_id"], config=self.workflow.config),
+            result,
+        )
         if result["status"] == "accepted":
             self.response = result
         return result
 
-    def deliver(self, result):
-        response = result.model_dump(exclude_none=True)
+    def deliver(self, session, result):
+        response = {"session_id": session.id, **result.model_dump(exclude_none=True)}
         if result.status == "accepted":
-            response.update(
-                load_session(
-                    result.session_id, config=self.workflow.config
-                ).get_instruction(self.workflow)
-            )
+            response.update(session.get_instruction(self.workflow))
         return response
 
     @property

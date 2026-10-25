@@ -423,8 +423,14 @@ def _add_workflow_tools(
             client_info=hiraku_client,
         )
         if workflow is None:
-            return render(_over_mcp(result.model_dump(exclude_none=True)))
-        return render(_deliver(workflow, result))
+            return render(
+                _over_mcp(
+                    {"session_id": session.id, **result.model_dump(exclude_none=True)}
+                )
+            )
+        if result.status in ("accepted", "stale"):
+            session = load_session(session.id, config=config)
+        return render(_deliver(workflow, session, result))
 
     server.add_tool(
         workflow_list,
@@ -570,15 +576,12 @@ def _start_prompt(workflow: Workflow) -> Callable[..., str]:
         try:
             model = workflow.graph.start.arguments
             inputs = model.from_text(values).model_dump(mode="json")
-        except (ValidationError, PydanticValidationError) as exc:
-            response = {"status": "rejected", "message": str(exc)}
-        else:
             response = _deliver(workflow, Session.run_start(workflow, inputs))
-        if response["status"] != "accepted":
+        except Exception as exc:
             # The SDK hides exception messages from prompts, so explain in text.
             return (
                 f"The Hiraku workflow `{workflow.id}` did not start: "
-                f"{response.get('message')}. Tell the user and ask for corrected "
+                f"{exc}. Tell the user and ask for corrected "
                 "arguments."
             )
         instruction = response["instruction"]
@@ -699,10 +702,13 @@ def _instruction_result(
     return CallToolResult(content=content, structured_content=dict(response))
 
 
-def _deliver(workflow: Workflow, result: EventResult) -> dict[str, Any]:
+def _deliver(
+    workflow: Workflow, session: Session, result: EventResult | None = None
+) -> dict[str, Any]:
     """Conversational delivery policy: attach an assignment after submission."""
-    response = result.model_dump(exclude_none=True)
-    if result.session_id is not None and result.status in ("accepted", "stale"):
-        session = load_session(result.session_id, config=workflow.config)
+    if result is None:
+        result = session.history[-1].result
+    response = {"session_id": session.id, **result.model_dump(exclude_none=True)}
+    if result.status in ("accepted", "stale"):
         response.update(session.get_instruction(workflow))
     return _over_mcp(response)

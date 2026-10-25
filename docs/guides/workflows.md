@@ -237,15 +237,14 @@ MCP tool definitions are fixed when the server starts; reconnect after editing.
 
 ## Execution results and sessions
 
-Core execution returns an `EventResult`, containing no instruction:
+Starting returns the saved `Session`; subsequent events return an `EventResult`:
 
 ~~~python
 from hiraku.workflows.session import Session, load_session
 from hiraku.workflows.workflow import load_workflow
 
 workflow = load_workflow("count", config=config)
-started = Session.run_start(workflow, {"count": 2})
-session = load_session(started.session_id, config=config)
+session = Session.run_start(workflow, {"count": 2})
 assignment = session.get_instruction(workflow)
 
 result = session.run_event(
@@ -268,9 +267,15 @@ new state. Neither object caches the other.
 Session execution uses a detached state; rejected, not-ready, or failed steps
 leave saved progress unchanged even if an event has mutated its working state.
 
-`EventResult` contains `status`, available `session_id` and `instruction_id`,
-and optional `message`. The instruction ID is the current revision after
-processing. Serialize with `model_dump(exclude_none=True)` at transport boundaries.
+Start failures raise: invalid arguments raise `EventRejected`, readiness failures
+raise `NotReady`, and other execution or persistence errors propagate. Failed
+starts create no session. CLI starts report errors and MCP starts return tool
+errors; prompt starts explain failures in text.
+
+`EventResult` contains `status`, available `instruction_id`, and optional `message`.
+The instruction ID is the current revision after processing. Session identity
+comes from `Session.id`; CLI and MCP responses add `session_id` at the transport
+boundary. Serialize results with `model_dump(exclude_none=True)`.
 
 | Status | Meaning |
 | --- | --- |
@@ -297,8 +302,8 @@ Inspection omits instructions for active sessions whose workflow is missing or
 incompatible, while retaining state, history, and an explanation.
 
 Session execution records one history entry per event attempt, including start,
-with its event and `outcome`, through Python, CLI, and MCP. Reads and cancellation
-do not add history entries. An `accepted` event advances `instruction_id`;
+with its event and `result`, through Python, CLI, and MCP. Reads and
+cancellation do not add history entries. An `accepted` event advances `instruction_id`;
 failed events and resubmissions do not. A submission for an
 instruction that is no longer current returns `stale`, even when it exactly
 matches an earlier accepted event. MCP includes the current instruction and
@@ -308,6 +313,8 @@ request or response bodies. Saving an event attempt updates `updated_at`.
 Revision tracking is independent of history length.
 Each entry records the `node` before the attempt; start entries use `null`.
 Stale submissions record the current stored node.
+The stored `result` retains status, message, and the returned revision;
+the entry's `instruction_id` identifies the submitted revision.
 
 Each entry has an optional `client_info` object containing `client`,
 `client_session_id`, and `client_turn_id`; these are not top-level entry fields.

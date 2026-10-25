@@ -626,16 +626,12 @@ def _arguments(arguments_file: Any) -> dict[str, Any]:
 @click.pass_obj
 def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> None:
     """Start a workflow session and print the JSON response."""
-    from .workflows.session import Session, load_session
+    from .workflows.session import Session
     from .workflows.workflow import load_workflow
 
     workflow = load_workflow(workflow_id, config=state.config)
-    result = Session.run_start(workflow, _arguments(arguments_file))
-    response = result.model_dump(exclude_none=True)
-    if result.status == "accepted":
-        session = load_session(result.session_id, config=state.config)
-        response.update(session.get_instruction(workflow))
-    _emit_json(response)
+    session = Session.run_start(workflow, _arguments(arguments_file))
+    _emit_json({"status": "accepted", **session.get_instruction(workflow)})
 
 
 @workflow_group.command("send-event")
@@ -662,11 +658,10 @@ def workflow_send_event(
 
     session = load_session(session_id, config=state.config)
     workflow = load_workflow(session.workflow, config=state.config)
-    _emit_json(
-        session.run_event(
-            workflow, instruction_id, event, _arguments(arguments_file)
-        ).model_dump(exclude_none=True)
+    result = session.run_event(
+        workflow, instruction_id, event, _arguments(arguments_file)
     )
+    _emit_json({"session_id": session.id, **result.model_dump(exclude_none=True)})
 
 
 @workflow_group.command("graph")

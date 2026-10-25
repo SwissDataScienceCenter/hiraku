@@ -14,6 +14,8 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
+from hiraku.workflows.session import Session
+from hiraku.workflows.workflow import list_workflows
 
 REPOSITORY = Path(__file__).parents[2]
 DOCS_EXAMPLE = REPOSITORY / "docs" / "examples" / "autoresearch"
@@ -205,6 +207,18 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert task.type == "task"
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
+    workflows = {workflow.id: workflow for workflow in list_workflows(config=config)}
+    session = Session.run_start(workflows["autoresearch"])
+    response = {
+        **session.history[-1].result.model_dump(),
+        **session.get_instruction(workflows["autoresearch"]),
+    }
+    assert response["status"] == "accepted"
+    assert response["session_status"] == "completed"
+    assert response["instruction"]["text"] == workflows["autoresearch"].markdown.strip()
+    assert not (project / "hiraku/workflows/autoresearch/workflow.py").exists()
+    assert "collaborative" in workflows
+    assert json.loads((project / ".mcp.json").read_text())["mcpServers"]["hiraku"]
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111
     assert git(project, "status", "--porcelain") == ""
 
