@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +13,7 @@ from hiraku.config import HirakuConfig
 from hiraku.errors import WorkflowError
 from hiraku.mcp import create_server
 from hiraku.record import Record
+from hiraku.workflows.session import ClientInfo, Session, load_session
 from hiraku.workflows.workflow import load_workflow
 
 BUILTINS = {
@@ -22,6 +23,181 @@ BUILTINS = {
     "session_show",
     "session_cancel",
 }
+
+
+def test_codex_normalized_start_name_attributes_initial_entry(tmp_path):
+    from hiraku.cli import _inject_client
+
+    config = HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
+    injected = _inject_client(
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "mcp__hiraku__count_steps",
+            "cwd": str(config.root),
+            "session_id": "codex-chat",
+            "turn_id": "first-turn",
+            "tool_input": {"count": 3},
+        },
+        "codex",
+    )["hookSpecificOutput"]["updatedInput"]
+
+    async def scenario(client, notifications):
+        return payload(await client.call_tool("count-steps", injected))
+
+    response = run(create_server(config), scenario)
+    session = load_session(response["session_id"], config=config)
+    assert len(session.history) == 1
+    entry = session.history[0]
+    assert entry.event == "start"
+    assert entry.outcome == "accepted"
+    assert entry.client_info == ClientInfo(
+        client="codex", client_session_id="codex-chat", client_turn_id="first-turn"
+    )
+    assert session.state.count == 3
+
+
+@pytest.mark.parametrize("client_name", ["codex", "claude"])
+def test_hook_metadata_reaches_session_history(config, client_name):
+    from hiraku.cli import _inject_client
+
+    write_echo(config)
+    server = create_server(config)
+
+    async def scenario(client, notifications):
+        def injected(tool, arguments, turn="turn-1"):
+            return _inject_client(
+                {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": f"mcp__hiraku__{tool}",
+                    "cwd": str(config.root),
+                    "session_id": "chat-1",
+                    "turn_id": turn,
+                    "tool_input": arguments,
+                },
+                client_name,
+            )["hookSpecificOutput"]["updatedInput"]
+
+        first = payload(await client.call_tool("echo", injected("echo", {"task": "a"})))
+        sid = first["session_id"]
+        stored = load_session(sid, config=config)
+        assert stored.history[0].client_info == ClientInfo(
+            client=client_name,
+            client_session_id="chat-1",
+            client_turn_id="turn-1" if client_name == "codex" else None,
+        )
+        await client.call_tool("session_show", {"session_id": sid})
+        assert load_session(sid, config=config) == stored
+        arguments = {
+            "session_id": sid,
+            "instruction_id": first["instruction_id"],
+            "event": "complete",
+            "arguments": {"summary": "Done"},
+        }
+        accepted = payload(
+            await client.call_tool(
+                "workflow_send_event",
+                injected("workflow_send_event", arguments, "turn-2"),
+            )
+        )
+        retry = payload(
+            await client.call_tool(
+                "workflow_send_event",
+                injected("workflow_send_event", arguments, "turn-3"),
+            )
+        )
+        assert accepted["status"] == "accepted"
+        assert retry["status"] == "stale"
+        assert retry["instruction_id"] == accepted["instruction_id"] == 2
+        assert retry["instruction"] == accepted["instruction"]
+        stored = load_session(sid, config=config)
+        await client.read_resource(f"hiraku://sessions/{sid}")
+        assert load_session(sid, config=config) == stored
+        return stored
+
+    stored = run(server, scenario)
+    assert [entry.event for entry in stored.history] == [
+        "start",
+        "complete",
+        "complete",
+    ]
+    assert [entry.outcome for entry in stored.history] == [
+        "accepted",
+        "accepted",
+        "stale",
+    ]
+    assert stored.history[1].client_info == ClientInfo(
+        client=client_name,
+        client_session_id="chat-1",
+        client_turn_id="turn-2" if client_name == "codex" else None,
+    )
+    assert stored.history[2].client_info == ClientInfo(
+        client=client_name,
+        client_session_id="chat-1",
+        client_turn_id="turn-3" if client_name == "codex" else None,
+    )
+    assert stored.history[2].instruction_id == 1
+    assert all("kind" not in entry.model_dump() for entry in stored.history)
+    assert stored.history[1].arguments == {"summary": "Done"}
+    assert stored.history[2].arguments == {}
+
+
+def test_failed_events_are_logged_but_cancellation_is_not(config):
+    write_echo(config)
+    server = create_server(config)
+    info = {"client": "claude", "client_session_id": "chat"}
+
+    async def scenario(client, notifications):
+        first = payload(await client.call_tool("echo", {"task": "a"}))
+        sid = first["session_id"]
+        event = {
+            "session_id": sid,
+            "instruction_id": 1,
+            "event": "complete",
+            "arguments": {},
+            "hiraku_client": info,
+        }
+        rejected = payload(await client.call_tool("workflow_send_event", event))
+        assert rejected["status"] == "rejected"
+        await client.call_tool("session_cancel", {"session_id": sid})
+        rejected = payload(await client.call_tool("workflow_send_event", event))
+        assert rejected["status"] == "rejected"
+        return load_session(sid, config=config)
+
+    stored = run(server, scenario)
+    assert stored.status == "cancelled"
+    assert stored.instruction_id == 1
+    assert [entry.outcome for entry in stored.history[1:]] == [
+        "rejected",
+        "rejected",
+    ]
+    assert all(entry.client_info == ClientInfo(**info) for entry in stored.history[1:])
+
+
+def test_session_read_failure_leaves_history_unchanged(config, monkeypatch):
+    write_echo(config)
+    server = create_server(config)
+
+    def fail(self, workflow=None):
+        raise RuntimeError("inspection failed")
+
+    async def scenario(client, notifications):
+        first = payload(await client.call_tool("echo", {"task": "a"}))
+        sid = first["session_id"]
+        before = load_session(sid, config=config)
+        monkeypatch.setattr(Session, "show", fail)
+        result = await client.call_tool(
+            "session_show",
+            {"session_id": sid},
+        )
+        assert result.is_error
+        stored = load_session(sid, config=config)
+        assert stored == before
+        return stored
+
+    stored = run(server, scenario)
+    assert len(stored.history) == 1
+    assert stored.history[0].event == "start"
+    assert stored.history[0].outcome == "accepted"
 
 
 @pytest.fixture
@@ -504,19 +680,35 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     (noisy / "workflow.md").write_text("---\nid: noisy\n---\n# Noisy\n")
 
     async def main() -> Any:
+        configured = tomllib.loads((config.root / ".codex/config.toml").read_text())[
+            "mcp_servers"
+        ]["hiraku"]
         parameters = StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "hiraku.cli", "mcp"],
+            command=configured["command"],
+            args=configured["args"],
             cwd=config.root,
+            env={"PATH": ""},
         )
         async with Client(parameters) as client:
             tools = await client.list_tools()
-            result = await client.call_tool("noisy", {})
+            result = await client.call_tool(
+                "noisy",
+                {
+                    "hiraku_client": {
+                        "client": "codex",
+                        "client_session_id": "chat",
+                    }
+                },
+            )
             return {tool.name for tool in tools.tools}, result
 
     names, result = anyio.run(main)
     assert "noisy" in names
     assert json.loads(result.content[0].text)["instruction"]["data"] == {"ok": True}
+    stored = load_session(payload(result)["session_id"], config=config)
+    assert stored.history[0].client_info == ClientInfo(
+        client="codex", client_session_id="chat"
+    )
 
 
 def test_runs_workflow_id_is_reserved(config, caplog):

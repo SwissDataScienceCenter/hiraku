@@ -22,7 +22,10 @@ There is no project-path flag; the process uses its working directory. Each
 initialized project gets its own host configuration, and agents connected from
 that project receive the same Hiraku tools and resources.
 
-For reference, initialization creates or merges these host configurations:
+Initialization pins MCP and hook commands to the Python environment running
+`hiraku init`. This prevents a different or older `hiraku` on the client's `PATH`
+from handling calls. For example, initializing from a virtual environment creates
+these host configurations (the Python path below is a placeholder):
 
 Claude Code's `.mcp.json`:
 
@@ -30,8 +33,8 @@ Claude Code's `.mcp.json`:
 {
   "mcpServers": {
     "hiraku": {
-      "command": "hiraku",
-      "args": ["mcp"]
+      "command": "/path/to/environment/bin/python",
+      "args": ["-m", "hiraku.cli", "mcp"]
     }
   }
 }
@@ -41,20 +44,75 @@ Codex's `.codex/config.toml`:
 
 ```toml
 [mcp_servers.hiraku]
-command = "hiraku"
-args = ["mcp"]
+command = "/path/to/environment/bin/python"
+args = ["-m", "hiraku.cli", "mcp"]
 ```
 
 An existing `hiraku` server entry is left as it is. If an existing file cannot
 be extended, for example because `mcp_servers` is an inline TOML table,
 initialization fails without changing it; add the entry manually.
 
-The host must be able to find the installed `hiraku` command. Claude Code asks
-for approval before using a project MCP server. Codex loads project config only
+Keep that Python environment available; if it moves, update the configured paths.
+Claude Code asks for approval before using a project MCP server. Codex loads project config only
 for trusted projects. The MCP tools are exposed directly by the host, so no
 extra `AGENTS.md` or Claude skill instructions are needed to register them.
 The bundled Hiraku skill tells agents to use the tools when they are available
 and fall back to the CLI when the host has not connected the server.
+
+## Client conversation attribution
+
+`hiraku init` also merges project-local `PreToolUse` hooks into
+`.codex/hooks.json` and `.claude/settings.json`, preserving existing hooks and
+settings. Hooks run the pinned Python with
+`-m hiraku.cli session hook codex` or `-m hiraku.cli session hook claude`.
+The adapter skips listing and unrelated tools, and accepts Codex's underscore
+aliases for hyphenated workflow names such as `count_steps` for `count-steps`.
+Accept the client's normal project/hook trust prompts and reconnect after setup.
+Initialization of an already initialized project is still rejected; existing
+projects can merge the following entry into their respective hook configuration,
+using `claude` instead of `codex` in Claude Code:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "^mcp__hiraku__",
+      "hooks": [{"type": "command", "command": "/path/to/environment/bin/python -m hiraku.cli session hook codex"}]
+    }]
+  }
+}
+```
+
+If an existing hook cannot find its command, use the Python command above
+and point the MCP server at the
+same environment. For a development checkout, find that interpreter with
+`uv run python -c 'import sys; print(sys.executable)'`. Reconnect the MCP server
+and reload hooks after editing the configuration.
+
+The hook injects an optional `hiraku_client` object into workflow start and
+send-event tool inputs. Its `client`, `client_session_id`, and optional `client_turn_id` fields
+are saved in each history entry's optional `client_info` object, separately from
+workflow arguments. Unattributed entries store `client_info: null`. The
+`hiraku_client` start argument name is reserved. Claude Code hooks supply the
+conversation ID; Codex hooks additionally supply the turn ID when available.
+Clients without these hooks continue to work with unattributed entries.
+No transcripts, conversation URLs, or model-generated identity guesses are stored.
+
+The adapters use the documented
+[Codex hooks](https://learn.chatgpt.com/docs/hooks) and
+[Claude Code hooks](https://code.claude.com/docs/en/hooks) payloads.
+Codex requires `permissionDecision: allow` for input rewriting; Claude's hook
+does not return a permission decision. Review this Codex behavior alongside your
+approval policy before enabling the hook. Local command hooks apply to local
+orchestration; cloud-orchestrated ChatGPT Work is outside this integration.
+Hooks assume the MCP server is registered as `hiraku`; renamed registrations
+need an adapted matcher and adapter. Malformed or unavailable hook inputs are
+skipped, and history logging failures warn on stderr without blocking operations.
+
+Only event attempts reaching a session handler can be logged: protocol/schema
+rejections before handler execution, unknown session IDs, and discovery calls do not create
+history. Reads and cancellation do not add history entries.
+See [workflow history](workflows.md) for outcomes and coverage.
 
 ## Tools
 

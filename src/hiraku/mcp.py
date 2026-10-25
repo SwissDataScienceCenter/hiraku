@@ -39,7 +39,13 @@ from .config import HirakuConfig
 from .errors import HirakuError, ValidationError, WorkflowError
 from .execution import execute_command
 from .record import Record, list_records, load_record
-from .workflows.session import EventResult, Session, list_sessions, load_session
+from .workflows.session import (
+    ClientInfo,
+    EventResult,
+    Session,
+    list_sessions,
+    load_session,
+)
 from .workflows.workflow import (
     Instruction,
     Workflow,
@@ -75,7 +81,8 @@ unless it is final, an events block that says which events it accepts:
    current: fix the input, or check again later for not_ready. Status stale
    means the event answered an instruction that is no longer current; continue
    from the current instruction in the response.
-6. Sending an identical event again is safe; it never applies the event twice.
+6. Resubmitting an answered instruction returns stale and the current instruction;
+   it never applies the event twice. Continue from that current instruction.
 7. To resume, call session_show with the session_id; it returns the current
    instruction. Do not start a new session to resume an existing one.
 Before repeating consequential work such as creating records or launching
@@ -386,6 +393,7 @@ def _add_workflow_tools(
                 "when only one session is active."
             ),
         ] = None,
+        hiraku_client: ClientInfo | None = None,
     ) -> CallToolResult:
         config = project()
         if session_id is None:
@@ -407,19 +415,16 @@ def _add_workflow_tools(
             session_id = active[0]
         session = load_session(session_id, config=config)
         workflow = workflows.get(session.workflow)
-        if workflow is None:
-            return render(
-                _over_mcp(
-                    session._result(
-                        "rejected", "Workflow unavailable; reconnect after fixing it"
-                    ).model_dump(exclude_none=True)
-                )
-            )
-        return render(
-            _deliver(
-                workflow, session.run_event(workflow, instruction_id, event, arguments)
-            )
+        result = session.run_event(
+            workflow,
+            instruction_id,
+            event,
+            arguments,
+            client_info=hiraku_client,
         )
+        if workflow is None:
+            return render(_over_mcp(result.model_dump(exclude_none=True)))
+        return render(_deliver(workflow, result))
 
     server.add_tool(
         workflow_list,
@@ -462,7 +467,8 @@ def _add_session_tools(
         ]
 
     def session_show(session_id: SessionId) -> CallToolResult:
-        return render(_show(load_session(session_id, config=project()), workflows))
+        session = load_session(session_id, config=project())
+        return render(_show(session, workflows))
 
     def session_cancel(session_id: SessionId) -> dict[str, Any]:
         return load_session(session_id, config=project()).cancel()
@@ -511,9 +517,17 @@ def _start_tool(
     """Return a function whose signature is the workflow's start arguments."""
 
     def run(**arguments: Any) -> CallToolResult:
-        return render(_deliver(workflow, Session.run_start(workflow, arguments)))
+        client_info = arguments.pop("hiraku_client", None)
+        return render(
+            _deliver(
+                workflow,
+                Session.run_start(workflow, arguments, client_info=client_info),
+            )
+        )
 
     parameters = []
+    if "hiraku_client" in workflow.graph.start.arguments.model_fields:
+        raise WorkflowError("Workflow start argument 'hiraku_client' is reserved")
     for name, field in workflow.graph.start.arguments.model_fields.items():
         default = (
             inspect.Parameter.empty
@@ -534,6 +548,14 @@ def _start_tool(
                 ],
             )
         )
+    parameters.append(
+        inspect.Parameter(
+            "hiraku_client",
+            inspect.Parameter.KEYWORD_ONLY,
+            default=None,
+            annotation=ClientInfo | None,
+        )
+    )
     return _with_signature(run, workflow.id, parameters)
 
 
