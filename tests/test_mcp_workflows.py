@@ -176,9 +176,7 @@ def test_failed_events_are_logged_but_cancellation_is_not(config):
 def test_unavailable_workflow_raises_before_event_execution(config, monkeypatch):
     write_echo(config)
     workflow = load_workflow("echo", config=config)
-    session = Session.create(workflow)
-    with session.lock():
-        assert session.run_start(workflow, {"task": "a"}).status == "accepted"
+    session = Session.start(workflow, {"task": "a"})
     before = session._path.read_bytes()
     (config.workflows_dir / "echo" / "workflow.py").write_text(
         "raise RuntimeError('broken workflow')"
@@ -621,7 +619,7 @@ def test_workflow_send_event_continues_any_session(config: HirakuConfig) -> None
     assert result["invalid"]["status"] == "rejected"
     assert "summary" in result["invalid"]["message"]
     assert result["done"]["session_status"] == "completed"
-    assert "instruction" not in result["invalid"]
+    assert result["invalid"]["instruction"]["events"]["instruction_id"] == 1
     assert result["done"]["instruction"] == {
         "text": "Report the summary.",
         "data": {"summary": "Tried three ideas"},

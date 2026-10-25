@@ -630,13 +630,8 @@ def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> 
     from .workflows.workflow import load_workflow
 
     workflow = load_workflow(workflow_id, config=state.config)
-    session = Session.create(workflow)
-    with session.lock():
-        result = session.run_start(workflow, _arguments(arguments_file))
-    response = {"session_id": session.id, **result.model_dump(exclude_none=True)}
-    if result.status == "accepted":
-        response.update(session.get_instruction(workflow))
-    _emit_json(response)
+    session = Session.start(workflow, _arguments(arguments_file))
+    _emit_json(session.get_instruction(workflow))
 
 
 @workflow_group.command("send-event")
@@ -667,7 +662,13 @@ def workflow_send_event(
         result = session.run_event(
             workflow, instruction_id, event, _arguments(arguments_file)
         )
-    _emit_json({"session_id": session.id, **result.model_dump(exclude_none=True)})
+    _emit_json(
+        {
+            "session_id": session.id,
+            "instruction_id": session.instruction_id,
+            **result.model_dump(exclude_none=True),
+        }
+    )
 
 
 @workflow_group.command("graph")

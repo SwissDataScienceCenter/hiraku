@@ -29,10 +29,8 @@ class Harness:
 
     def start(self, workflow: str, **arguments: Any) -> dict[str, Any]:
         self.workflow = self.workflows[workflow]
-        session = Session.create(self.workflow)
-        with session.lock():
-            result = session.run_start(self.workflow, arguments)
-        self.response = self.deliver(session, result)
+        session = Session.start(self.workflow, arguments)
+        self.response = session.get_instruction(self.workflow)
         return self.response
 
     def send(self, event: str, **arguments: Any) -> dict[str, Any]:
