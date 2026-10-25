@@ -45,12 +45,13 @@ class EventResult(BaseModel):
 
 
 class ClientInfo(BaseModel):
-    """Optional conversation identifiers supplied by a client hook."""
+    """Conversation identifiers and model supplied by a client hook."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     client: str
     client_session_id: str
     client_turn_id: str | None = None
+    model: str | None = None
 
 
 class EventInvocation(BaseModel):

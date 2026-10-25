@@ -750,10 +750,12 @@ def _inject_client(
     if not session_id:
         return {}
     turn_id = payload.get("turn_id") if client == "codex" else None
+    model = payload.get("model")
     info = ClientInfo(
         client=client,
         client_session_id=session_id,
         client_turn_id=turn_id if isinstance(turn_id, str) and turn_id else None,
+        model=model if isinstance(model, str) and model else None,
     )
     output: dict[str, Any] = {
         "hookEventName": "PreToolUse",

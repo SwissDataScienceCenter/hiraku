@@ -80,6 +80,25 @@ def test_hook_injects_identity_and_preserves_inputs(client):
         assert "permissionDecision" not in result
 
 
+@pytest.mark.parametrize("client", ["codex", "claude"])
+@pytest.mark.parametrize("model", ["test-model", None, "", 42, {}])
+def test_hook_captures_model_when_supplied(client, model):
+    result = _inject_client(
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "mcp__hiraku__workflow_send_event",
+            "session_id": "chat",
+            "tool_input": {},
+            "model": model,
+        },
+        client,
+    )
+    info = result["hookSpecificOutput"]["updatedInput"]["hiraku_client"]
+    assert info.get("model") == (model if model == "test-model" else None)
+    if model != "test-model":
+        assert "model" not in info
+
+
 @pytest.mark.parametrize(
     "changes",
     [

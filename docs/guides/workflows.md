@@ -336,10 +336,10 @@ The stored `result` retains status and message;
 the entry's `instruction_id` identifies the submitted revision.
 
 Each entry has an optional `client_info` object containing `client`,
-`client_session_id`, and `client_turn_id`; these are not top-level entry fields.
+`client_session_id`, `client_turn_id`, and `model`; these are not top-level entry fields.
 Project-local client hooks installed by `hiraku init` supply these identifiers
 for workflow start and send-event tools. `client` and `client_session_id` are
-required, `client_turn_id` may be `null`; an unattributed entry has
+required, `client_turn_id` and `model` may be `null`; an unattributed entry has
 `client_info: null`.
 Prompt starts retain their initial event without hook attribution.
 Failed starts have no session history to append to. Inspect the JSON session
