@@ -29,18 +29,19 @@ class Harness:
 
     def start(self, workflow: str, **arguments: Any) -> dict[str, Any]:
         self.workflow = self.workflows[workflow]
-        session = Session.run_start(self.workflow, arguments)
-        self.response = self.deliver(session, session.history[-1].result)
+        session = Session.create(self.workflow)
+        with session.lock():
+            result = session.run_start(self.workflow, arguments)
+        self.response = self.deliver(session, result)
         return self.response
 
     def send(self, event: str, **arguments: Any) -> dict[str, Any]:
-        result = load_session(
-            self.response["session_id"], config=self.workflow.config
-        ).run_event(self.workflow, self.response["instruction_id"], event, arguments)
-        result = self.deliver(
-            load_session(self.response["session_id"], config=self.workflow.config),
-            result,
-        )
+        session = load_session(self.response["session_id"], config=self.workflow.config)
+        with session.lock():
+            result = session.run_event(
+                self.workflow, self.response["instruction_id"], event, arguments
+            )
+        result = self.deliver(session, result)
         if result["status"] == "accepted":
             self.response = result
         return result

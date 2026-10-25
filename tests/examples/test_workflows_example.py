@@ -108,13 +108,9 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
 def test_count_steps_rejects_wrong_tokens_and_finishes_early(
     runner: CliRunner,
 ) -> None:
-    invalid = runner.invoke(
-        main,
-        ["workflow", "start", "count-steps", "--arguments-file", "-"],
-        input='{"count": 0}',
-    )
-    assert invalid.exit_code == 1
-    assert "count: Input should be greater than 0" in invalid.output
+    invalid = start(runner, "count-steps", {"count": 0})
+    assert invalid["status"] == "rejected"
+    assert "count: Input should be greater than 0" in invalid["message"]
     assert not list(HirakuConfig.discover().sessions_dir.glob("*.json"))
 
     response = start(runner, "count-steps", {"count": 2})

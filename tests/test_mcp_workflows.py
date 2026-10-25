@@ -175,7 +175,10 @@ def test_failed_events_are_logged_but_cancellation_is_not(config):
 
 def test_unavailable_workflow_raises_before_event_execution(config, monkeypatch):
     write_echo(config)
-    session = Session.run_start(load_workflow("echo", config=config), {"task": "a"})
+    workflow = load_workflow("echo", config=config)
+    session = Session.create(workflow)
+    with session.lock():
+        assert session.run_start(workflow, {"task": "a"}).status == "accepted"
     before = session._path.read_bytes()
     (config.workflows_dir / "echo" / "workflow.py").write_text(
         "raise RuntimeError('broken workflow')"

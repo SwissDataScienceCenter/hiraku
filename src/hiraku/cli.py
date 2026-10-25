@@ -630,8 +630,13 @@ def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> 
     from .workflows.workflow import load_workflow
 
     workflow = load_workflow(workflow_id, config=state.config)
-    session = Session.run_start(workflow, _arguments(arguments_file))
-    _emit_json({"status": "accepted", **session.get_instruction(workflow)})
+    session = Session.create(workflow)
+    with session.lock():
+        result = session.run_start(workflow, _arguments(arguments_file))
+    response = {"session_id": session.id, **result.model_dump(exclude_none=True)}
+    if result.status == "accepted":
+        response.update(session.get_instruction(workflow))
+    _emit_json(response)
 
 
 @workflow_group.command("send-event")
@@ -658,9 +663,10 @@ def workflow_send_event(
 
     session = load_session(session_id, config=state.config)
     workflow = load_workflow(session.workflow, config=state.config)
-    result = session.run_event(
-        workflow, instruction_id, event, _arguments(arguments_file)
-    )
+    with session.lock():
+        result = session.run_event(
+            workflow, instruction_id, event, _arguments(arguments_file)
+        )
     _emit_json({"session_id": session.id, **result.model_dump(exclude_none=True)})
 
 
@@ -839,7 +845,9 @@ def session_cancel(state: CLIContext, session_id: str) -> None:
     """Cancel a session; records, code, and runs are kept."""
     from .workflows.session import load_session
 
-    result = load_session(session_id, config=state.config).cancel()
+    session = load_session(session_id, config=state.config)
+    with session.lock():
+        result = session.cancel()
     click.echo(f"Session {session_id} is {result['status']}. {result['note']}")
 
 

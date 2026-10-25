@@ -417,15 +417,14 @@ def _add_workflow_tools(
         workflow = workflows.get(session.workflow)
         if workflow is None:
             raise ToolError("Workflow unavailable; reconnect after fixing it")
-        result = session.run_event(
-            workflow,
-            instruction_id,
-            event,
-            arguments,
-            client_info=hiraku_client,
-        )
-        if result.status in ("accepted", "stale"):
-            session = load_session(session.id, config=config)
+        with session.lock():
+            result = session.run_event(
+                workflow,
+                instruction_id,
+                event,
+                arguments,
+                client_info=hiraku_client,
+            )
         return render(_deliver(workflow, session, result))
 
     server.add_tool(
@@ -473,7 +472,9 @@ def _add_session_tools(
         return render(_show(session, workflows))
 
     def session_cancel(session_id: SessionId) -> dict[str, Any]:
-        return load_session(session_id, config=project()).cancel()
+        session = load_session(session_id, config=project())
+        with session.lock():
+            return session.cancel()
 
     server.add_tool(
         session_list,
@@ -520,12 +521,10 @@ def _start_tool(
 
     def run(**arguments: Any) -> CallToolResult:
         client_info = arguments.pop("hiraku_client", None)
-        return render(
-            _deliver(
-                workflow,
-                Session.run_start(workflow, arguments, client_info=client_info),
-            )
-        )
+        session = Session.create(workflow)
+        with session.lock():
+            result = session.run_start(workflow, arguments, client_info=client_info)
+        return render(_deliver(workflow, session, result))
 
     parameters = []
     if "hiraku_client" in workflow.graph.start.arguments.model_fields:
@@ -572,13 +571,21 @@ def _start_prompt(workflow: Workflow) -> Callable[..., str]:
         try:
             model = workflow.graph.start.arguments
             inputs = model.from_text(values).model_dump(mode="json")
-            response = _deliver(workflow, Session.run_start(workflow, inputs))
+            session = Session.create(workflow)
+            with session.lock():
+                result = session.run_start(workflow, inputs)
+            response = _deliver(workflow, session, result)
         except Exception as exc:
             # The SDK hides exception messages from prompts, so explain in text.
             return (
                 f"The Hiraku workflow `{workflow.id}` did not start: "
                 f"{exc}. Tell the user and ask for corrected "
                 "arguments."
+            )
+        if result.status != "accepted":
+            return (
+                f"The Hiraku workflow `{workflow.id}` did not start: "
+                f"{result.message}. Tell the user and ask for corrected arguments."
             )
         instruction = response["instruction"]
         text = Instruction.model_validate(instruction).to_text()
@@ -699,11 +706,9 @@ def _instruction_result(
 
 
 def _deliver(
-    workflow: Workflow, session: Session, result: EventResult | None = None
+    workflow: Workflow, session: Session, result: EventResult
 ) -> dict[str, Any]:
     """Conversational delivery policy: attach an assignment after submission."""
-    if result is None:
-        result = session.history[-1].result
     response = {"session_id": session.id, **result.model_dump(exclude_none=True)}
     if result.status in ("accepted", "stale"):
         response.update(session.get_instruction(workflow))
