@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - Add `hiraku example list` to list bundled examples with their descriptions.
+- Add project-local Codex and Claude Code hooks installed by `hiraku init` to attribute workflow event attempts to client conversations. Session history records one entry per event attempt with its outcome. Resubmissions for answered instructions return `stale` with the current instruction instead of acknowledging identical duplicates as accepted.
 - Add `Run.duration`, a run's wall-clock length in seconds. The CSV backend reads an optional `duration` column, MLflow uses the run's end minus start time, and W&B its `_runtime` summary. `hiraku runs` shows it, and the dashboard adds a Duration column, run detail and plot tooltip next to the start time.
 - Add optional, collapsible dashboard record navigation sharing selection with the run table and highlighting a selected run's owning record.
 - Add a generic dashboard Markdown viewer accepting any `BaseRecord` subtype with expandable front matter, and show the selected record's Markdown or a selected run's owning record in the dashboard.

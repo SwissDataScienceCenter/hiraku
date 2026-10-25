@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
+import subprocess
+import sys
 import tomllib
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
@@ -176,6 +179,9 @@ class ProjectInitializer:
                 cls._install_mcp_configs(
                     project_root, created_files, created_dirs, replaced_files
                 )
+                cls._install_client_hooks(
+                    project_root, created_files, created_dirs, replaced_files
+                )
                 for name in ("launch.sh", "worktree.sh"):
                     dispatcher = config.dispatch_dir / name
                     if dispatcher.is_file():
@@ -211,6 +217,7 @@ class ProjectInitializer:
         replaced_files: dict[Path, bytes],
     ) -> None:
         """Register the stdio server for Claude Code and Codex project configs."""
+        server = {"command": sys.executable, "args": ["-m", "hiraku.cli", "mcp"]}
         claude_path = project_root / ".mcp.json"
         claude_data: dict[str, object] = {}
         if claude_path.is_symlink():
@@ -238,7 +245,7 @@ class ProjectInitializer:
         if not isinstance(servers, dict):
             raise ValidationError(f"mcpServers must be a JSON object: {claude_path}")
         if "hiraku" not in servers:
-            servers["hiraku"] = {"command": "hiraku", "args": ["mcp"]}
+            servers["hiraku"] = server
             if claude_path.exists():
                 replaced_files[claude_path] = original
             else:
@@ -282,7 +289,9 @@ class ProjectInitializer:
         if codex_text and not codex_text.endswith("\n\n"):
             suffix += "\n"
         codex_text += (
-            f'{suffix}[mcp_servers.hiraku]\ncommand = "hiraku"\nargs = ["mcp"]\n'
+            f"{suffix}[mcp_servers.hiraku]\n"
+            f"command = {json.dumps(server['command'])}\n"
+            f"args = {json.dumps(server['args'])}\n"
         )
         # Appending a table cannot extend every valid layout, such as an inline
         # mcp_servers table, so check the result before replacing the file.
@@ -290,13 +299,63 @@ class ProjectInitializer:
             merged = tomllib.loads(codex_text)["mcp_servers"]["hiraku"]
         except (tomllib.TOMLDecodeError, KeyError, TypeError):
             merged = None
-        if merged != {"command": "hiraku", "args": ["mcp"]}:
+        if merged != server:
             raise ValidationError(
                 f"Cannot add the hiraku MCP server to {codex_path}; add a "
-                '[mcp_servers.hiraku] table with command = "hiraku" and '
-                'args = ["mcp"] manually'
+                "[mcp_servers.hiraku] table manually"
             )
         atomic_write(codex_path, codex_text)
+
+    @classmethod
+    def _install_client_hooks(
+        cls,
+        project_root: Path,
+        created_files: list[Path],
+        created_dirs: list[Path],
+        replaced_files: dict[Path, bytes],
+    ) -> None:
+        """Merge project-local PreToolUse hooks without replacing user hooks."""
+        for client, relative in (
+            ("codex", ".codex/hooks.json"),
+            ("claude", ".claude/settings.json"),
+        ):
+            path = project_root / relative
+            if path.is_symlink() or path.parent.is_symlink():
+                raise ValidationError(f"Hook configuration cannot be a symlink: {path}")
+            original = path.read_bytes() if path.exists() else None
+            try:
+                data = json.loads(original) if original is not None else {}
+                if not isinstance(data, dict):
+                    raise ValueError("Expected a JSON object")
+                hooks = data.setdefault("hooks", {})
+                if not isinstance(hooks, dict):
+                    raise ValueError("hooks must be an object")
+                entries = hooks.setdefault("PreToolUse", [])
+                if not isinstance(entries, list):
+                    raise ValueError("PreToolUse must be an array")
+            except (ValueError, UnicodeError) as exc:
+                raise ValidationError(
+                    f"Cannot merge hook configuration {path}: {exc}"
+                ) from exc
+            arguments = [sys.executable, "-m", "hiraku.cli", "session", "hook", client]
+            command = (
+                subprocess.list2cmdline(arguments)
+                if os.name == "nt"
+                else shlex.join(arguments)
+            )
+            entry = {
+                "matcher": "^mcp__hiraku__",
+                "hooks": [{"type": "command", "command": command}],
+            }
+            if entry in entries:
+                continue
+            entries.append(entry)
+            if original is not None:
+                replaced_files[path] = original
+            else:
+                cls._ensure_directory(path.parent, created_dirs)
+                created_files.append(path)
+            atomic_write(path, json.dumps(data, indent=2) + "\n")
 
     @staticmethod
     def _resolve_overlay(

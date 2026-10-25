@@ -183,11 +183,11 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert "/.claude/" in gitignore
     mcp_config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
     assert mcp_config["mcpServers"]["hiraku"] == {
-        "command": "hiraku",
-        "args": ["mcp"],
+        "command": sys.executable,
+        "args": ["-m", "hiraku.cli", "mcp"],
     }
     codex_config = (project / ".codex/config.toml").read_text(encoding="utf-8")
-    assert 'command = "hiraku"' in codex_config
+    assert f"command = {json.dumps(sys.executable)}" in codex_config
     assert "/runs.csv" in gitignore
     assert (project / "program.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "program.md"
