@@ -119,7 +119,7 @@ class Session(BaseModel):
 
     def run_event(
         self,
-        workflow: Workflow | None,
+        workflow: Workflow,
         instruction_id: int,
         event: str,
         arguments: Mapping[str, Any] | None = None,
@@ -132,11 +132,9 @@ class Session(BaseModel):
         try:
             with _lock(self._path):
                 session = _load(self._path)
-                method = workflow.graph.events.get(event) if workflow else None
+                method = workflow.graph.events.get(event)
                 status = "rejected"
-                if workflow is None:
-                    message = "Workflow unavailable; reconnect after fixing it"
-                elif session.workflow != workflow.id:
+                if session.workflow != workflow.id:
                     message = "Session belongs to another workflow"
                 elif session.status == "cancelled":
                     message = "Session is cancelled"

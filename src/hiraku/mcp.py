@@ -415,6 +415,8 @@ def _add_workflow_tools(
             session_id = active[0]
         session = load_session(session_id, config=config)
         workflow = workflows.get(session.workflow)
+        if workflow is None:
+            raise ToolError("Workflow unavailable; reconnect after fixing it")
         result = session.run_event(
             workflow,
             instruction_id,
@@ -422,12 +424,6 @@ def _add_workflow_tools(
             arguments,
             client_info=hiraku_client,
         )
-        if workflow is None:
-            return render(
-                _over_mcp(
-                    {"session_id": session.id, **result.model_dump(exclude_none=True)}
-                )
-            )
         if result.status in ("accepted", "stale"):
             session = load_session(session.id, config=config)
         return render(_deliver(workflow, session, result))

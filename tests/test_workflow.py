@@ -656,19 +656,6 @@ def test_cancel_does_not_record_events(config, completed):
         assert current.status == "cancelled"
 
 
-def test_event_without_workflow_records_rejection(config):
-    _, first = started(config)
-    session = load_session(first.id)
-    before = session.model_dump()
-    info = ClientInfo(client="codex", client_session_id="chat")
-    result = session.run_event(None, 1, "add", client_info=info)
-    assert result.status == "rejected"
-    assert "Workflow unavailable" in result.message
-    stored = load_session(first.id)
-    assert_only_call_recorded(before, stored.model_dump(), "add", "rejected")
-    assert stored.history[-1].client_info == info
-
-
 def test_lock_timeout_is_retryable(config, monkeypatch):
     workflow, first = started(config)
 

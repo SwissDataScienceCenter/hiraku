@@ -173,6 +173,31 @@ def test_failed_events_are_logged_but_cancellation_is_not(config):
     assert all(entry.client_info == ClientInfo(**info) for entry in stored.history[1:])
 
 
+def test_unavailable_workflow_raises_before_event_execution(config, monkeypatch):
+    write_echo(config)
+    session = Session.run_start(load_workflow("echo", config=config), {"task": "a"})
+    before = session._path.read_bytes()
+    (config.workflows_dir / "echo" / "workflow.py").write_text(
+        "raise RuntimeError('broken workflow')"
+    )
+
+    def fail(*args, **kwargs):
+        raise AssertionError("must reject before calling run_event")
+
+    monkeypatch.setattr(Session, "run_event", fail)
+
+    async def scenario(client, notifications):
+        result = await client.call_tool(
+            "workflow_send_event",
+            {"session_id": session.id, "instruction_id": 1, "event": "complete"},
+        )
+        assert result.is_error
+        assert "Workflow unavailable" in result.content[0].text
+
+    run(create_server(config), scenario)
+    assert session._path.read_bytes() == before
+
+
 def test_session_read_failure_leaves_history_unchanged(config, monkeypatch):
     write_echo(config)
     server = create_server(config)
