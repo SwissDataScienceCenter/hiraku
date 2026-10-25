@@ -94,9 +94,14 @@ The hook injects an optional `hiraku_client` object into workflow start and
 send-event tool inputs. Its `client`, `client_session_id`, and optional `client_turn_id` fields
 are saved in each history entry's optional `client_info` object, separately from
 workflow arguments. Unattributed entries store `client_info: null`. The
-`hiraku_client` start argument name is reserved. Claude Code hooks supply the
+`hiraku_client` start argument name is reserved; workflows using it are logged
+and omitted from MCP tools, prompts, and workflow listings. Tool schemas describe
+this metadata as hook-injected: agents should omit it and never invent identifiers.
+The metadata provides attribution, not verified identity. Claude Code hooks supply the
 conversation ID; Codex hooks additionally supply the turn ID when available.
 Clients without these hooks continue to work with unattributed entries.
+Prompt failures remain readable to the client; unexpected errors are also logged
+with a traceback on the server.
 No transcripts, conversation URLs, or model-generated identity guesses are stored.
 
 The adapters use the documented

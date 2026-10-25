@@ -493,13 +493,20 @@ def test_tools_and_prompts_are_fixed_per_workflow(config: HirakuConfig) -> None:
     assert loop["properties"]["iterations"]["default"] == 5
     assert loop["properties"]["task"]["description"] == "Task record"
     assert loop["properties"]["iterations"]["description"] == "Experiments to run"
+    for name in ("loop", "workflow_send_event"):
+        schema = tools[name].input_schema
+        assert "hiraku_client" not in schema.get("required", [])
+        description = schema["properties"]["hiraku_client"]["description"]
+        assert "Injected by the client hook" in description
+        assert "Omit this field" in description
+        assert "never invent" in description
     assert prompts["loop"].arguments[0].description == "Task record"
     arguments = {item.name: item.required for item in prompts["loop"].arguments}
     assert arguments == {"task": True, "iterations": False}
     assert tools["collaborative"].description.startswith("Start a collaborative")
 
 
-def test_prompts_start_sessions(config: HirakuConfig) -> None:
+def test_prompts_start_sessions(config: HirakuConfig, caplog) -> None:
     write_loop(config)
     server = create_server(config)
 
@@ -520,6 +527,34 @@ def test_prompts_start_sessions(config: HirakuConfig) -> None:
     assert len(listing) == 1
     assert "did not start" in invalid.messages[0].content.text
     assert "iterations" in invalid.messages[0].content.text
+    assert not caplog.records
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "hiraku.workflows.graph.EventArguments.from_text",
+        "hiraku.workflows.session.Session.get_instruction",
+        "hiraku.mcp._over_mcp",
+    ],
+)
+def test_prompt_logs_unexpected_errors(config, monkeypatch, caplog, target):
+    write_loop(config)
+    server = create_server(config)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("unexpected prompt failure")
+
+    monkeypatch.setattr(target, fail)
+
+    async def scenario(client, notifications):
+        return await client.get_prompt("loop", {"task": "a"})
+
+    response = run(server, scenario)
+    assert "unexpected prompt failure" in response.messages[0].content.text
+    record = next(item for item in caplog.records if item.name == "hiraku.mcp")
+    assert record.getMessage() == "Workflow loop prompt failed"
+    assert record.exc_info[0] is RuntimeError
 
 
 def test_prompts_render_the_events_block_and_tools_explain_it(
@@ -736,6 +771,30 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     assert stored.history[0].client_info == ClientInfo(
         client="codex", client_session_id="chat"
     )
+
+
+def test_reserved_start_argument_skips_only_its_workflow(config, caplog):
+    write_loop(config)
+    directory = config.workflows_dir / "reserved"
+    directory.mkdir()
+    (directory / "workflow.md").write_text(
+        "---\nid: reserved\narguments:\n  hiraku_client: value\n---\nRun a task."
+    )
+    server = create_server(config)
+
+    async def scenario(client, notifications):
+        tools = {item.name for item in (await client.list_tools()).tools}
+        prompts = {item.name for item in (await client.list_prompts()).prompts}
+        workflows = items(await client.call_tool("workflow_list", {}))
+        started = payload(await client.call_tool("loop", {"task": "a"}))
+        return tools, prompts, workflows, started
+
+    tools, prompts, workflows, started = run(server, scenario)
+    assert "reserved" not in tools | prompts
+    assert all(workflow["id"] != "reserved" for workflow in workflows)
+    assert "Workflow reserved is unavailable over MCP" in caplog.text
+    assert "'hiraku_client' is reserved" in caplog.text
+    assert started["instruction"]["data"]["task"] == "a"
 
 
 def test_runs_workflow_id_is_reserved(config, caplog):
