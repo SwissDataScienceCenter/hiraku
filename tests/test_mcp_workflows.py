@@ -176,7 +176,10 @@ def test_failed_events_are_logged_but_cancellation_is_not(config):
 
 def test_unavailable_workflow_raises_before_event_execution(config, monkeypatch):
     write_echo(config)
-    session = Session.run_start(load_workflow("echo", config=config), {"task": "a"})
+    workflow = load_workflow("echo", config=config)
+    session = Session.create(workflow)
+    with session.lock():
+        assert session.run_start(workflow, {"task": "a"}).status == "accepted"
     before = session._path.read_bytes()
     (config.workflows_dir / "echo" / "workflow.py").write_text(
         "raise RuntimeError('broken workflow')"
@@ -765,9 +768,9 @@ def test_workflows_read_current_project_state(config: HirakuConfig) -> None:
     Record.create("other-task", type="task", config=HirakuConfig.discover(config.root))
 
     async def scenario(client: Client, notifications: list[str]) -> Any:
-        return await client.call_tool("collaborative", {"entrypoint": "train"})
+        return payload(await client.call_tool("collaborative", {"entrypoint": "train"}))
 
     started = run(server, scenario)
-    assert started.is_error
-    assert "train" in started.content[0].text
-    assert "other-task" in started.content[0].text
+    assert started["status"] == "rejected"
+    assert "train" in started["message"]
+    assert "other-task" in started["message"]

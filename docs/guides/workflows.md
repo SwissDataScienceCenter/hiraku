@@ -123,7 +123,7 @@ Print the next number, then submit counted.
 - Models are defined at module scope before their workflow. Handlers are
   synchronous instance methods. `self` and the state are positional parameters
   without defaults; external inputs follow `*`. Variadic parameters are rejected.
-  Direct Python method calls bypass validation; use `Session.run_start` and
+  Direct Python method calls bypass validation; use `session.run_start` and
   `session.run_event`
   for validated execution and session persistence.
 - Graph construction checks node references and final-node rules. Unreachable
@@ -238,20 +238,24 @@ MCP tool definitions are fixed when the server starts; reconnect after editing.
 
 ## Execution results and sessions
 
-Starting returns the saved `Session`; subsequent events return an `EventResult`:
+Create an unstarted session in memory, then execute start and continuation events.
+Both execution methods return an `EventResult`:
 
 ~~~python
 from hiraku.workflows.session import Session, load_session
 from hiraku.workflows.workflow import load_workflow
 
 workflow = load_workflow("count", config=config)
-session = Session.run_start(workflow, {"count": 2})
+session = Session.create(workflow)
+with session.lock():
+    result = session.run_start(workflow, {"count": 2})
 assignment = session.get_instruction(workflow)
 
-result = session.run_event(
-    workflow, assignment["instruction_id"], "counted",
-)
 session = load_session(session.id, config=config)
+with session.lock():
+    result = session.run_event(
+        workflow, assignment["instruction_id"], "counted",
+    )
 next_assignment = session.get_instruction(workflow)
 ~~~
 
@@ -262,16 +266,25 @@ This lower-level method expects validated inputs and returns `(state, instructio
 it neither saves sessions nor catches execution errors. Event handlers can mutate
 the supplied state, including before raising an error. Instruction handlers
 receive a separate deep copy so they cannot change the result's state.
-Loaded sessions are snapshots. Submission reloads current state under
-the session lock without changing the caller's snapshot; reload to inspect the
-new state. Neither object caches the other.
+`create` allocates identity and a storage location without executing handlers or
+saving a file. Successful start initializes that instance and saves it. Until
+then, its state and instruction are `None` and its revision is zero. Stored
+sessions always have a state and instruction.
+`load_session` returns a read-only snapshot. Entering `with session.lock():`
+acquires the session lock and refreshes that same instance from storage. Start,
+continuation, and cancellation require this write context. Each operation saves
+immediately and updates the instance only after the atomic write succeeds;
+`accepted` means persisted when the call returns. Exiting the context only
+releases the lock: it neither saves nor rolls back accepted operations.
+Lock contention raises `ValidationError` when entering the context.
 Session execution uses a detached state; rejected, not-ready, or failed steps
 leave saved progress unchanged even if an event has mutated its working state.
 
-Start failures raise: invalid arguments raise `EventRejected`, readiness failures
-raise `NotReady`, and other execution or persistence errors propagate. Failed
-starts create no session. CLI starts report errors and MCP starts return tool
-errors; prompt starts explain failures in text.
+Start and continuation report `accepted`, `rejected`, `not_ready`, `stale`, or
+`error` through `EventResult`. Failed starts leave the instance unstarted and
+create no stored session; callers can correct the arguments and try start again.
+Repeating start after success returns `stale` without rerunning handlers.
+CLI and MCP starts return the result; prompt starts explain failures in text.
 
 `EventResult` contains `status`, available `instruction_id`, and optional `message`.
 The instruction ID is the current revision after processing. Session identity
@@ -282,7 +295,7 @@ boundary. Serialize results with `model_dump(exclude_none=True)`.
 | --- | --- |
 | accepted | Saved advancement to the next instruction. |
 | rejected | Correct the input; the current instruction remains pending. |
-| not_ready | Evidence or the session lock is unavailable; retry later. |
+| not_ready | Evidence is unavailable; retry later. |
 | stale | The submission addresses an instruction no longer pending; retrieve current work. |
 | error | Execution failed; no advancement was saved. |
 
@@ -296,8 +309,15 @@ logging and skipping malformed files. A session exposes a typed state
 snapshot, saved instruction, history, timestamps, and status. The current position
 is stored under `state.node` and exposed as `node` in inspection and listing
 responses.
-`session.show(workflow)` inspects compatibility; `session.cancel()` does not
-require working workflow code. Session persistence retains its file location,
+`session.show(workflow)` inspects compatibility; cancellation does not
+require working workflow code:
+
+~~~python
+with session.lock():
+    session.cancel()
+~~~
+
+Session persistence retains its file location,
 not a configuration object.
 Inspection omits instructions for active sessions whose workflow is missing or
 incompatible, while retaining state, history, and an explanation.
@@ -326,13 +346,15 @@ Prompt starts retain their initial event without hook attribution.
 Failed starts have no session history to append to. Inspect the JSON session
 files or use `hiraku session show SESSION_ID --json` to read the history.
 
-Python callers may pass `client_info=ClientInfo(...)` to `Session.run_start` and
-`Session.run_event`, importing `ClientInfo` from
+Python callers may pass `client_info=ClientInfo(...)` to `session.run_start` and
+`session.run_event`, importing `ClientInfo` from
 `hiraku.workflows.session`.
 This metadata is separate from workflow arguments and is not passed to handlers.
-`run_start` constructs and saves a new session; `run_event` locks, reloads, and
-advances an existing session. Both use `Workflow.run` for handler execution and
-output validation. Accepted state and history are saved together;
+Both entry points share execution and history persistence, using `Workflow.run`
+for handler execution and output validation. `Session.lock` owns locking and
+refreshing; execution uses detached workflow state and prepares file contents
+without copying the session.
+Accepted state and history are saved together;
 failed event outcomes are recorded under the same session lock without advancing.
 
 Session loading uses `State`, which validates the
