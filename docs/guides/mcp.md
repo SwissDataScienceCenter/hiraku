@@ -92,7 +92,8 @@ Drop the `uv run` prefix for projects without `uv.lock` that use Hiraku from the
 configuration.
 
 The hook injects an optional `hiraku_client` object into workflow start and
-send-event tool inputs. Its `client`, `client_session_id`, and optional `client_turn_id` fields
+send-event tool inputs. Its `client`, `client_session_id`, optional `client_turn_id`, and
+optional `model` fields
 are saved in each history entry's optional `client_info` object, separately from
 workflow arguments. Unattributed entries store `client_info: null`. The
 `hiraku_client` start argument name is reserved; workflows using it are logged
@@ -100,6 +101,9 @@ and omitted from MCP tools, prompts, and workflow listings. Tool schemas describ
 this metadata as hook-injected: agents should omit it and never invent identifiers.
 The metadata provides attribution, not verified identity. Claude Code hooks supply the
 conversation ID; Codex hooks additionally supply the turn ID when available.
+The adapter records `model` when the hook payload supplies a nonempty string.
+Codex includes this field. Claude documents it on `SessionStart`, but not on the
+`PreToolUse` event used here, so its model normally remains `null`.
 Clients without these hooks continue to work with unattributed entries.
 Prompt failures remain readable to the client; unexpected errors are also logged
 with a traceback on the server.

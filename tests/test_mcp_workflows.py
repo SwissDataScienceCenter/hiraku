@@ -74,6 +74,7 @@ def test_hook_metadata_reaches_session_history(config, client_name):
                     "cwd": str(config.root),
                     "session_id": "chat-1",
                     "turn_id": turn,
+                    "model": f"test-model-{turn}",
                     "tool_input": arguments,
                 },
                 client_name,
@@ -86,6 +87,7 @@ def test_hook_metadata_reaches_session_history(config, client_name):
             client=client_name,
             client_session_id="chat-1",
             client_turn_id="turn-1" if client_name == "codex" else None,
+            model="test-model-turn-1",
         )
         await client.call_tool("session_show", {"session_id": sid})
         assert load_session(sid, config=config) == stored
@@ -131,11 +133,13 @@ def test_hook_metadata_reaches_session_history(config, client_name):
         client=client_name,
         client_session_id="chat-1",
         client_turn_id="turn-2" if client_name == "codex" else None,
+        model="test-model-turn-2",
     )
     assert stored.history[2].client_info == ClientInfo(
         client=client_name,
         client_session_id="chat-1",
         client_turn_id="turn-3" if client_name == "codex" else None,
+        model="test-model-turn-3",
     )
     assert stored.history[2].instruction_id == 1
     assert all("kind" not in entry.model_dump() for entry in stored.history)
