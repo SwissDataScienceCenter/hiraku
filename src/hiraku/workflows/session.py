@@ -13,7 +13,6 @@ from typing import Any, Literal
 
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_json
 
 from ..config import HirakuConfig
@@ -27,7 +26,7 @@ from ..errors import (
 )
 from ..io import atomic_write
 from .graph import State
-from .workflow import Instruction, Workflow, validation_message
+from .workflow import Instruction, Workflow
 
 logger = logging.getLogger(__name__)
 LOCK_TIMEOUT_SECONDS = 30
@@ -49,8 +48,8 @@ class ClientInfo(BaseModel):
     """Optional conversation identifiers supplied by a client hook."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    client: str | None = None
-    client_session_id: str | None = None
+    client: str
+    client_session_id: str
     client_turn_id: str | None = None
 
 
@@ -91,16 +90,17 @@ class Session(BaseModel):
         client_info: ClientInfo | None = None,
     ) -> Session:
         """Execute the start event and save a new session; raise if it fails."""
-        method = workflow.graph.start
+        event = workflow.graph.start
+        validated = event.arguments.parse(arguments)
         try:
-            validated = method.arguments.model_validate(
-                {} if arguments is None else arguments
+            state, instruction = workflow.run(event, validated)
+            invocation = EventInvocation(
+                event=event.name,
+                instruction_id=0,
+                arguments=validated.model_dump(mode="json"),
+                result=EventResult(status="accepted"),
+                client_info=client_info,
             )
-        except PydanticValidationError as exc:
-            raise EventRejected(validation_message(exc)) from exc
-        try:
-            state, instruction = workflow.run(method, validated)
-            result = EventResult(status="accepted")
             session = cls(
                 id=f"{workflow.id}-{secrets.token_hex(6)}",
                 workflow=workflow.id,
@@ -110,22 +110,14 @@ class Session(BaseModel):
                 instruction_id=1,
                 state=State.model_validate(state.model_dump(mode="json")),
                 instruction=instruction,
-                history=[
-                    EventInvocation(
-                        event=method.name,
-                        instruction_id=0,
-                        arguments=validated.model_dump(mode="json"),
-                        result=result,
-                        client_info=client_info,
-                    )
-                ],
+                history=[invocation],
             )
             session._path = _session_path(session.id, workflow.config)
             session._save()
         except HirakuError:
             raise
         except Exception as exc:
-            logger.exception("Workflow %s event %s failed", workflow.id, method.name)
+            logger.exception("Workflow %s event %s failed", workflow.id, event.name)
             raise WorkflowError(
                 f"{type(exc).__name__}: {exc}. No session was saved."
             ) from exc
@@ -163,8 +155,7 @@ class Session(BaseModel):
         """Submit an event while holding the session lock."""
         if type(instruction_id) is not int or instruction_id < 1:
             raise ValidationError("instruction_id must be a positive integer")
-        if self._write_lock is None or not self._write_lock.is_locked:
-            raise ValidationError("Session writes require 'with session.lock()'")
+        self._require_lock()
         method = workflow.graph.events.get(event)
         status = "rejected"
         if self.workflow != workflow.id:
@@ -182,18 +173,12 @@ class Session(BaseModel):
             message = f"{event!r} is not an event the current instruction accepts"
         else:
             try:
-                try:
-                    validated = method.arguments.model_validate(
-                        {} if arguments is None else arguments
-                    )
-                except PydanticValidationError as exc:
-                    raise EventRejected(validation_message(exc)) from exc
+                validated = method.arguments.parse(arguments)
                 try:
                     current_state = self.validate_workflow(workflow)
                 except (ValueError, WorkflowError) as exc:
                     raise EventRejected(f"Incompatible stored state: {exc}") from exc
                 state, instruction = workflow.run(method, validated, current_state)
-                snapshot = State.model_validate(state.model_dump(mode="json"))
                 result = EventResult(status="accepted")
                 invocation = EventInvocation(
                     event=event,
@@ -204,12 +189,12 @@ class Session(BaseModel):
                     client_info=client_info,
                 )
                 self._save(
-                    instruction_id=self.instruction_id + 1,
-                    state=snapshot,
-                    instruction=instruction,
                     status="completed"
                     if workflow.graph.nodes[state.node].final
                     else "active",
+                    instruction_id=self.instruction_id + 1,
+                    state=State.model_validate(state.model_dump(mode="json")),
+                    instruction=instruction,
                     history=[*self.history, invocation],
                 )
                 return result
@@ -264,6 +249,10 @@ class Session(BaseModel):
             item["event"]
             for item in (self.instruction.events or {}).get("accepted", [])
         ]
+
+    def _require_lock(self) -> None:
+        if self._write_lock is None or not self._write_lock.is_locked:
+            raise ValidationError("Session writes require 'with session.lock()'")
 
     def _save(self, **changes: Any) -> None:
         """Persist prepared changes before applying them to this instance."""
@@ -335,8 +324,7 @@ class Session(BaseModel):
 
     def cancel(self) -> dict[str, Any]:
         """Cancel while holding the session lock, without loading workflow code."""
-        if self._write_lock is None or not self._write_lock.is_locked:
-            raise ValidationError("Session writes require 'with session.lock()'")
+        self._require_lock()
         if self.status == "completed":
             raise ValidationError(f"Session {self.id!r} is already completed")
         self._save(status="cancelled")

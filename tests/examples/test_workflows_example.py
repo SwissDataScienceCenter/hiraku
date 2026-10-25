@@ -59,13 +59,7 @@ def send(
         "--arguments-file",
         "-",
     ]
-    result = json.loads(invoke(runner, command, arguments).output)
-    assert "instruction" not in result
-    if result["status"] == "accepted":
-        shown = invoke(runner, ["session", "show", result["session_id"], "--json"])
-        result.update(json.loads(shown.output))
-        result["status"] = "accepted"
-    return result
+    return json.loads(invoke(runner, command, arguments).output)
 
 
 def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:

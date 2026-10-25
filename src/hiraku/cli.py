@@ -663,11 +663,7 @@ def workflow_send_event(
             workflow, instruction_id, event, _arguments(arguments_file)
         )
     _emit_json(
-        {
-            "session_id": session.id,
-            "instruction_id": session.instruction_id,
-            **result.model_dump(exclude_none=True),
-        }
+        {**session.get_instruction(workflow), **result.model_dump(exclude_none=True)}
     )
 
 
@@ -732,8 +728,6 @@ def _inject_client(
     if not isinstance(tool, str) or not tool.startswith(prefix):
         return {}
     name = tool.removeprefix(prefix)
-    if name in {"workflow_list", "session_list", "session_show", "session_cancel"}:
-        return {}
     if name != "workflow_send_event":
         # Codex exposes hyphenated MCP names with underscores in code mode.
         if client == "codex":
