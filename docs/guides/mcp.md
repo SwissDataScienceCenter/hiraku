@@ -111,8 +111,8 @@ need an adapted matcher and adapter. Malformed or unavailable hook inputs are
 skipped, and history logging failures warn on stderr without blocking operations.
 
 Only event attempts reaching a session handler can be logged: protocol/schema
-rejections before handler execution, unknown session IDs, and discovery calls do not create
-history. Reads and cancellation do not add history entries.
+rejections before handler execution, unknown session IDs, unavailable workflows,
+and discovery calls do not create history. Reads and cancellation do not add history entries.
 See [workflow history](workflows.md) for outcomes and coverage.
 
 ## Tools
