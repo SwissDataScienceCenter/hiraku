@@ -171,10 +171,10 @@ through `workflow_send_event`. `workflow_list` and the `session_*` tools list
 workflows and inspect, resume, or cancel sessions. See the
 [Workflows guide](workflows.md).
 
-The conversational server wraps core event execution and attaches the saved next
-instruction after accepted or stale submissions. Core execution returns only a
-typed event result. Workflow instances reload their bound project configuration
-on access.
+The conversational server wraps core event execution and attaches the current
+saved instruction to every start and event response, including rejected ones.
+Core start returns a saved session; continuation returns a typed event result.
+Workflow instances reload their bound project configuration on access.
 
 ## Prompt template
 

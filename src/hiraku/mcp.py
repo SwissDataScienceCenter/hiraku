@@ -42,7 +42,6 @@ from .launch import launch, render_arguments
 from .record import Record, list_records, load_record
 from .workflows.session import (
     ClientInfo,
-    EventResult,
     Session,
     list_sessions,
     load_session,
@@ -484,7 +483,14 @@ def _add_workflow_tools(
                 arguments,
                 client_info=hiraku_client,
             )
-        return render(_deliver(workflow, session, result))
+        return render(
+            _over_mcp(
+                {
+                    **session.get_instruction(workflow),
+                    **result.model_dump(exclude_none=True),
+                }
+            )
+        )
 
     server.add_tool(
         workflow_list,
@@ -580,10 +586,8 @@ def _start_tool(
 
     def run(**arguments: Any) -> CallToolResult:
         client_info = arguments.pop("hiraku_client", None)
-        session = Session.create(workflow)
-        with session.lock():
-            result = session.run_start(workflow, arguments, client_info=client_info)
-        return render(_deliver(workflow, session, result))
+        session = Session.start(workflow, arguments, client_info=client_info)
+        return render(_over_mcp(session.get_instruction(workflow)))
 
     parameters = []
     if "hiraku_client" in workflow.graph.start.arguments.model_fields:
@@ -630,21 +634,14 @@ def _start_prompt(workflow: Workflow) -> Callable[..., str]:
         try:
             model = workflow.graph.start.arguments
             inputs = model.from_text(values).model_dump(mode="json")
-            session = Session.create(workflow)
-            with session.lock():
-                result = session.run_start(workflow, inputs)
-            response = _deliver(workflow, session, result)
+            session = Session.start(workflow, inputs)
+            response = _over_mcp(session.get_instruction(workflow))
         except Exception as exc:
             # The SDK hides exception messages from prompts, so explain in text.
             return (
                 f"The Hiraku workflow `{workflow.id}` did not start: "
                 f"{exc}. Tell the user and ask for corrected "
                 "arguments."
-            )
-        if result.status != "accepted":
-            return (
-                f"The Hiraku workflow `{workflow.id}` did not start: "
-                f"{result.message}. Tell the user and ask for corrected arguments."
             )
         instruction = response["instruction"]
         text = Instruction.model_validate(instruction).to_text()
@@ -764,13 +761,3 @@ def _instruction_result(
                     TextContent(type="text", text=f"Resource {uri} unavailable: {exc}")
                 )
     return CallToolResult(content=content, structured_content=dict(response))
-
-
-def _deliver(
-    workflow: Workflow, session: Session, result: EventResult
-) -> dict[str, Any]:
-    """Conversational delivery policy: attach an assignment after submission."""
-    response = {"session_id": session.id, **result.model_dump(exclude_none=True)}
-    if result.status in ("accepted", "stale"):
-        response.update(session.get_instruction(workflow))
-    return _over_mcp(response)

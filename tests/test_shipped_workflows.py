@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from hiraku.config import HirakuConfig
+from hiraku.errors import EventRejected
 from hiraku.record import Record, load_record
 from hiraku.workflows.session import Session, load_session
 from hiraku.workflows.workflow import list_workflows, load_workflow
@@ -27,10 +28,8 @@ class Harness:
 
     def start(self, workflow: str, **arguments: Any) -> dict[str, Any]:
         self.workflow = self.workflows[workflow]
-        session = Session.create(self.workflow)
-        with session.lock():
-            result = session.run_start(self.workflow, arguments)
-        self.response = self.deliver(session, result)
+        session = Session.start(self.workflow, arguments)
+        self.response = session.get_instruction(self.workflow)
         return self.response
 
     def send(self, event: str, **arguments: Any) -> dict[str, Any]:
@@ -139,8 +138,7 @@ def test_collaborative_runs_each_step_and_stops_after_the_rounds(
     config: HirakuConfig,
 ) -> None:
     harness = Harness(config)
-    started = harness.start("collaborative", task="task", rounds=2)
-    assert started["status"] == "accepted"
+    harness.start("collaborative", task="task", rounds=2)
     assert harness.section() == "## Draft"
     # Until gates exist, the agent gets the user's approval in the conversation.
     text = " ".join(harness.instruction["text"].split())
@@ -223,9 +221,8 @@ def test_collaborative_can_finish_from_any_step(config: HirakuConfig) -> None:
 
 def test_collaborative_rejects_invalid_input(config: HirakuConfig) -> None:
     harness = Harness(config)
-    unknown = harness.start("collaborative", task="task", entrypoint="nope")
-    assert unknown["status"] == "rejected"
-    assert "nope" in unknown["message"]
+    with pytest.raises(EventRejected, match="nope"):
+        harness.start("collaborative", task="task", entrypoint="nope")
 
     harness.start("collaborative", task="task")
     exists = draft(harness, "base")

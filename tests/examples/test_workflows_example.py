@@ -108,9 +108,13 @@ def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
 def test_count_steps_rejects_wrong_tokens_and_finishes_early(
     runner: CliRunner,
 ) -> None:
-    invalid = start(runner, "count-steps", {"count": 0})
-    assert invalid["status"] == "rejected"
-    assert "count: Input should be greater than 0" in invalid["message"]
+    invalid = runner.invoke(
+        main,
+        ["workflow", "start", "count-steps", "--arguments-file", "-"],
+        input=json.dumps({"count": 0}),
+    )
+    assert invalid.exit_code != 0
+    assert "count: Input should be greater than 0" in invalid.output
     assert not list(HirakuConfig.discover().sessions_dir.glob("*.json"))
 
     response = start(runner, "count-steps", {"count": 2})
@@ -129,7 +133,6 @@ def test_greet_is_one_final_prompt_filled_from_its_arguments(
     runner: CliRunner,
 ) -> None:
     response = start(runner, "greet", {"name": "Ada", "times": 3})
-    assert response["status"] == "accepted"
     assert response["session_status"] == "completed"
     instruction = response["instruction"]
     assert instruction["text"].startswith("# Greet\n\nPrint 3 greetings to Ada")
@@ -138,7 +141,6 @@ def test_greet_is_one_final_prompt_filled_from_its_arguments(
     assert "events" not in instruction
 
     default = start(runner, "greet", {})
-    assert default["status"] == "accepted"
     assert default["instruction"]["data"] == {
         "name": "World",
         "times": 2,
@@ -162,7 +164,6 @@ def test_scheduler_works_by_priority_until_every_record_reaches_the_target(
     runner: CliRunner,
 ) -> None:
     response = start(runner, "scheduler", {"records": 3, "target": 2})
-    assert response["status"] == "accepted"
     parent = response["instruction"]["data"]["record"].rsplit("-", 1)[0]
     records = children(parent)
     assert len(records) == 3

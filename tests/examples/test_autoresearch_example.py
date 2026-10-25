@@ -212,14 +212,8 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
     workflows = {workflow.id: workflow for workflow in list_workflows(config=config)}
-    session = Session.create(workflows["autoresearch"])
-    with session.lock():
-        result = session.run_start(workflows["autoresearch"])
-    response = {
-        **result.model_dump(),
-        **session.get_instruction(workflows["autoresearch"]),
-    }
-    assert response["status"] == "accepted"
+    session = Session.start(workflows["autoresearch"])
+    response = session.get_instruction(workflows["autoresearch"])
     assert response["session_status"] == "completed"
     assert response["instruction"]["text"] == workflows["autoresearch"].markdown.strip()
     assert not (project / "hiraku/workflows/autoresearch/workflow.py").exists()
