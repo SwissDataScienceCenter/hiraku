@@ -339,8 +339,9 @@ the entry's `instruction_id` identifies the submitted revision.
 Each entry has an optional `client_info` object containing `client`,
 `client_session_id`, and `client_turn_id`; these are not top-level entry fields.
 Project-local client hooks installed by `hiraku init` supply these identifiers
-for workflow start and send-event tools. Missing
-identifiers remain `null`; an unattributed entry has `client_info: null`.
+for workflow start and send-event tools. `client` and `client_session_id` are
+required, `client_turn_id` may be `null`; an unattributed entry has
+`client_info: null`.
 Prompt starts retain their initial event without hook attribution.
 Failed starts have no session history to append to. Inspect the JSON session
 files or use `hiraku session show SESSION_ID --json` to read the history.
@@ -376,9 +377,8 @@ uv run hiraku session show SESSION_ID --json
 uv run hiraku session cancel SESSION_ID
 ~~~
 
-CLI start includes the first instruction. CLI send-event prints only the event
-result; use session show to retrieve the next instruction. Conversational MCP
-combines those operations.
+CLI start prints the first instruction. CLI send-event prints the event result
+together with the current instruction, as MCP does.
 
 Session advancement is guarded by a per-session lock and atomic file replacement.
 Cancellation takes precedence over stale-instruction checks. Handler, instruction,

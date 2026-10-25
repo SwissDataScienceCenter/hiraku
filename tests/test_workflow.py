@@ -1288,7 +1288,7 @@ def test_graph_cli_and_receipt_only_submission(config):
         ],
     )
     assert sent.exit_code == 0, sent.output
-    assert "instruction" not in json.loads(sent.output)
+    assert json.loads(sent.output)["instruction"]["text"] == "Report the total."
     shown = runner.invoke(main, ["session", "show", first.id, "--json"])
     assert shown.exit_code == 0, shown.output
     assert json.loads(shown.output)["session_status"] == "completed"
