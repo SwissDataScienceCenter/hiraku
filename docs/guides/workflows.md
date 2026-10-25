@@ -330,8 +330,9 @@ Python callers may pass `client_info=ClientInfo(...)` to `Session.run_start` and
 `Session.run_event`, importing `ClientInfo` from
 `hiraku.workflows.session`.
 This metadata is separate from workflow arguments and is not passed to handlers.
-Start and event execution share argument validation, handler execution, output
-validation, and persistence. Accepted state and history are saved together;
+`run_start` constructs and saves a new session; `run_event` locks, reloads, and
+advances an existing session. Both use `Workflow.run` for handler execution and
+output validation. Accepted state and history are saved together;
 failed event outcomes are recorded under the same session lock without advancing.
 
 Session loading uses `State`, which validates the
