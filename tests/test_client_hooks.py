@@ -5,7 +5,6 @@ import os
 import re
 import shlex
 import subprocess
-import sys
 
 import pytest
 from click.testing import CliRunner
@@ -18,7 +17,7 @@ from hiraku.config import HirakuConfig
     "tool",
     ["count-steps", "count_steps", "session_list", "session_show", "session_cancel"],
 )
-def test_generated_codex_hook_runs_without_hiraku_on_path(tmp_path, tool):
+def test_generated_codex_hook_runs(tmp_path, tool):
     config = HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
     hooks = json.loads((tmp_path / ".codex/hooks.json").read_text())
     entry = hooks["hooks"]["PreToolUse"][0]
@@ -28,7 +27,6 @@ def test_generated_codex_hook_runs_without_hiraku_on_path(tmp_path, tool):
     result = subprocess.run(
         arguments,
         cwd=config.root,
-        env={**os.environ, "PATH": ""},
         input=json.dumps(
             {
                 "hook_event_name": "PreToolUse",
@@ -55,20 +53,6 @@ def test_generated_codex_hook_runs_without_hiraku_on_path(tmp_path, tool):
             "client_turn_id": "turn",
         },
     }
-
-
-def test_hook_command_quotes_python_path(tmp_path, monkeypatch):
-    from hiraku.project import ProjectInitializer
-
-    executable = str(tmp_path / "environment with spaces" / "python")
-    monkeypatch.setattr(sys, "executable", executable)
-    ProjectInitializer._install_client_hooks(tmp_path, [], [], {})
-    hooks = json.loads((tmp_path / ".codex/hooks.json").read_text())
-    command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-    arguments = [executable, "-m", "hiraku.cli", "session", "hook", "codex"]
-    assert command == (
-        subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
-    )
 
 
 @pytest.mark.parametrize("client", ["codex", "claude"])

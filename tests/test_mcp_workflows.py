@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -715,7 +716,7 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
             command=configured["command"],
             args=configured["args"],
             cwd=config.root,
-            env={"PATH": ""},
+            env={"PATH": os.environ["PATH"]},
         )
         async with Client(parameters) as client:
             tools = await client.list_tools()

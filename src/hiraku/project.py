@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import shutil
-import subprocess
-import sys
 import tomllib
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
@@ -217,7 +214,8 @@ class ProjectInitializer:
         replaced_files: dict[Path, bytes],
     ) -> None:
         """Register the stdio server for Claude Code and Codex project configs."""
-        server = {"command": sys.executable, "args": ["-m", "hiraku.cli", "mcp"]}
+        command, *arguments = cls._hiraku_command(project_root)
+        server = {"command": command, "args": [*arguments, "mcp"]}
         claude_path = project_root / ".mcp.json"
         claude_data: dict[str, object] = {}
         if claude_path.is_symlink():
@@ -337,25 +335,55 @@ class ProjectInitializer:
                 raise ValidationError(
                     f"Cannot merge hook configuration {path}: {exc}"
                 ) from exc
-            arguments = [sys.executable, "-m", "hiraku.cli", "session", "hook", client]
-            command = (
-                subprocess.list2cmdline(arguments)
-                if os.name == "nt"
-                else shlex.join(arguments)
-            )
+            command = [*cls._hiraku_command(project_root), "session", "hook", client]
             entry = {
                 "matcher": "^mcp__hiraku__",
-                "hooks": [{"type": "command", "command": command}],
+                "hooks": [{"type": "command", "command": " ".join(command)}],
             }
-            if entry in entries:
+            # Replace an earlier Hiraku hook command, e.g. one written on another
+            # machine, keeping every other hook, including ones in the same entry.
+            kept = []
+            for item in entries:
+                handlers = item.get("hooks") if isinstance(item, dict) else None
+                if not isinstance(handlers, list):
+                    kept.append(item)
+                    continue
+                others = [
+                    handler
+                    for handler in handlers
+                    if not cls._is_hiraku_hook(handler, client)
+                ]
+                if len(others) == len(handlers):
+                    kept.append(item)
+                elif others:
+                    kept.append({**item, "hooks": others})
+            if [*kept, entry] == entries:
                 continue
-            entries.append(entry)
+            hooks["PreToolUse"] = [*kept, entry]
             if original is not None:
                 replaced_files[path] = original
             else:
                 cls._ensure_directory(path.parent, created_dirs)
                 created_files.append(path)
             atomic_write(path, json.dumps(data, indent=2) + "\n")
+
+    @staticmethod
+    def _is_hiraku_hook(handler: object, client: str) -> bool:
+        command = handler.get("command") if isinstance(handler, dict) else None
+        return (
+            isinstance(command, str)
+            and "hiraku" in command
+            and command.endswith(f"session hook {client}")
+        )
+
+    @staticmethod
+    def _hiraku_command(project_root: Path) -> list[str]:
+        """Use the project environment when a uv lockfile is present."""
+        return (
+            ["uv", "run", "hiraku"]
+            if (project_root / "uv.lock").is_file()
+            else ["hiraku"]
+        )
 
     @staticmethod
     def _resolve_overlay(
