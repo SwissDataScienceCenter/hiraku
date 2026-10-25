@@ -50,7 +50,7 @@ def test_codex_normalized_start_name_attributes_initial_entry(tmp_path):
     assert len(session.history) == 1
     entry = session.history[0]
     assert entry.event == "start"
-    assert entry.outcome == "accepted"
+    assert entry.result.status == "accepted"
     assert entry.client_info == ClientInfo(
         client="codex", client_session_id="codex-chat", client_turn_id="first-turn"
     )
@@ -121,7 +121,7 @@ def test_hook_metadata_reaches_session_history(config, client_name):
         "complete",
         "complete",
     ]
-    assert [entry.outcome for entry in stored.history] == [
+    assert [entry.result.status for entry in stored.history] == [
         "accepted",
         "accepted",
         "stale",
@@ -167,7 +167,7 @@ def test_failed_events_are_logged_but_cancellation_is_not(config):
     stored = run(server, scenario)
     assert stored.status == "cancelled"
     assert stored.instruction_id == 1
-    assert [entry.outcome for entry in stored.history[1:]] == [
+    assert [entry.result.status for entry in stored.history[1:]] == [
         "rejected",
         "rejected",
     ]
@@ -198,7 +198,7 @@ def test_session_read_failure_leaves_history_unchanged(config, monkeypatch):
     stored = run(server, scenario)
     assert len(stored.history) == 1
     assert stored.history[0].event == "start"
-    assert stored.history[0].outcome == "accepted"
+    assert stored.history[0].result.status == "accepted"
 
 
 @pytest.fixture
@@ -739,10 +739,10 @@ def test_workflows_read_current_project_state(config: HirakuConfig) -> None:
     server = create_server(config)
     Record.create("other-task", type="task", config=HirakuConfig.discover(config.root))
 
-    async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
-        return payload(await client.call_tool("collaborative", {"entrypoint": "train"}))
+    async def scenario(client: Client, notifications: list[str]) -> Any:
+        return await client.call_tool("collaborative", {"entrypoint": "train"})
 
     started = run(server, scenario)
-    assert started["status"] == "rejected"
-    assert "train" in started["message"]
-    assert "other-task" in started["message"]
+    assert started.is_error
+    assert "train" in started.content[0].text
+    assert "other-task" in started.content[0].text

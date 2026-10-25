@@ -11,14 +11,21 @@ from pydantic import ValidationError as PydanticValidationError
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.context import Context
-from hiraku.errors import SessionNotFoundError, ValidationError, WorkflowError
+from hiraku.errors import (
+    EventRejected,
+    HirakuError,
+    NotReady,
+    SessionNotFoundError,
+    ValidationError,
+    WorkflowError,
+)
 from hiraku.record import Record
 from hiraku.workflows.graph import Event, EventArguments, Node, State, WorkflowGraph
 from hiraku.workflows.markdown import MarkdownWorkflow
 from hiraku.workflows.session import (
     ClientInfo,
+    EventInvocation,
     EventResult,
-    HistoryEntry,
     Session,
     list_sessions,
     load_session,
@@ -100,12 +107,12 @@ def write_workflow(config, source, name="toy", markdown="## Add\n\nAdd an amount
 def started(config, target=3):
     workflow = load_workflow("toy", config=config)
     result = Session.run_start(workflow, {"target": target})
-    assert result.status == "accepted", result
+    assert isinstance(result, Session)
     return workflow, result
 
 
 def submit(workflow, result, amount=1, **arguments):
-    return load_session(result.session_id).run_event(
+    return load_session(result.id).run_event(
         workflow, result.instruction_id, "add", {"amount": amount, **arguments}
     )
 
@@ -125,15 +132,18 @@ def assert_only_call_recorded(before, after, event, outcome, instruction_id=1):
     entry = after["history"][-1]
     assert entry["event"] == event
     assert entry["node"] == before["state"]["node"]
-    assert entry["outcome"] == outcome
+    assert entry["result"]["status"] == outcome
     assert entry["instruction_id"] == instruction_id
     assert entry["arguments"] == {}
 
 
-def test_history_entry_composes_optional_client_info():
+def test_event_invocation_composes_optional_client_info():
     info = ClientInfo(client="codex", client_session_id="chat", client_turn_id="turn")
-    entry = HistoryEntry(
-        instruction_id=0, event="start", outcome="accepted", client_info=info
+    entry = EventInvocation(
+        instruction_id=0,
+        event="start",
+        result=EventResult(status="accepted", instruction_id=1),
+        client_info=info,
     )
     stored = entry.model_dump(mode="json")
     assert not isinstance(entry, ClientInfo)
@@ -142,31 +152,35 @@ def test_history_entry_composes_optional_client_info():
     assert "client" not in stored
     assert "client_session_id" not in stored
     assert "client_turn_id" not in stored
-    assert HistoryEntry.model_validate(stored) == entry
+    assert EventInvocation.model_validate(stored) == entry
     assert (
-        HistoryEntry(instruction_id=1, event="add", outcome="rejected").client_info
+        EventInvocation(
+            instruction_id=1,
+            event="add",
+            result=EventResult(status="rejected", instruction_id=1),
+        ).client_info
         is None
     )
 
 
 def test_reads_do_not_save_or_record_events(config, monkeypatch):
     workflow, first = started(config)
-    snapshot = load_session(first.session_id)
+    snapshot = load_session(first.id)
     before = snapshot._path.read_bytes()
 
     def fail(self):
         raise AssertionError("reads must not save")
 
     monkeypatch.setattr(Session, "_save", fail)
-    assert snapshot.show(workflow)["session_id"] == first.session_id
+    assert snapshot.show(workflow)["session_id"] == first.id
     assert snapshot.get_instruction(workflow)["instruction_id"] == 1
     assert snapshot._path.read_bytes() == before
-    assert snapshot == load_session(first.session_id)
+    assert snapshot == load_session(first.id)
 
 
 def test_failed_event_write_failure_preserves_result(config, monkeypatch, caplog):
     workflow, first = started(config)
-    session = load_session(first.session_id)
+    session = load_session(first.id)
     before = session._path.read_bytes()
 
     def fail(*args, **kwargs):
@@ -195,8 +209,8 @@ def test_graph_and_models_are_the_only_registry(config):
     state.total = 5
     assert state.total == 5
     assert workflow.start(target=2).target == 2
-    assert isinstance(result, EventResult)
-    assert "instruction" not in result.model_dump()
+    assert isinstance(result, Session)
+    assert result.get_instruction(workflow)["instruction"]
     assert (
         workflow.graph.events["add"].arguments.model_json_schema()[
             "additionalProperties"
@@ -233,21 +247,21 @@ def test_workflow_run_executes_steps_without_persisting_a_session(config):
 
 def test_state_updates_and_reads_are_snapshots(config):
     workflow, first = started(config)
-    read = load_session(first.session_id).get_instruction(workflow)
-    assert read == load_session(first.session_id).get_instruction(workflow)
+    read = load_session(first.id).get_instruction(workflow)
+    assert read == load_session(first.id).get_instruction(workflow)
     assert read["node"] == "adding"
     assert read["instruction"]["data"] == {"total": 0}
     assert read["instruction"]["events"]["instruction_id"] == 1
     second = submit(workflow, first)
     assert second.status == "accepted"
     assert second.instruction_id == 2
-    assert load_session(first.session_id).get_instruction(workflow)["node"] == "adding"
-    session = load_session(first.session_id, config=config)
+    assert load_session(first.id).get_instruction(workflow)["node"] == "adding"
+    session = load_session(first.id, config=config)
     assert session.state.model_dump() == {"node": "adding", "total": 1, "target": 3}
     assert session.state.node == "adding"
     assert session.instruction.data == {"total": 1}
     assert len(session.history) == 2
-    assert list_sessions(config=config)[0].id == first.session_id
+    assert list_sessions(config=config)[0].id == first.id
 
 
 def test_validate_session_returns_concrete_state_without_changing_snapshot(config):
@@ -258,7 +272,7 @@ def test_validate_session_returns_concrete_state_without_changing_snapshot(confi
     )
     write_workflow(config, source)
     workflow, first = started(config)
-    session = load_session(first.session_id)
+    session = load_session(first.id)
     before = session.model_dump(mode="json")
     state = session.validate_workflow(workflow)
     assert type(state) is workflow.graph.state_model
@@ -272,7 +286,7 @@ def test_validate_session_returns_concrete_state_without_changing_snapshot(confi
 def test_session_state_is_a_typed_snapshot_without_workflow_code(config):
     _, first = started(config)
     (config.workflows_dir / "toy" / "workflow.py").unlink()
-    session = load_session(first.session_id)
+    session = load_session(first.id)
     assert isinstance(session.state, State)
     assert type(session.state) is State
     assert session.state.node == "adding"
@@ -320,12 +334,12 @@ def test_event_reuses_state_returned_by_session_validation(config, monkeypatch):
     assert result.status == "accepted", result.message
     assert len(calls) == 1
     assert calls[0].total == 11
-    assert load_session(first.session_id).state.total == 11
+    assert load_session(first.id).state.total == 11
 
 
 def test_submission_reloads_current_state_without_mutating_snapshot(config):
     workflow, first = started(config)
-    session = load_session(first.session_id)
+    session = load_session(first.id)
     before = session.model_dump()
     accepted = session.run_event(workflow, 1, "add", {"amount": 1})
     assert accepted.status == "accepted"
@@ -341,7 +355,7 @@ def test_submission_reloads_current_state_without_mutating_snapshot(config):
 @pytest.mark.parametrize("problem", ["ownership", "model", "node", "events"])
 def test_validate_session_rejects_incompatible_snapshots(config, problem):
     workflow, first = started(config)
-    session = load_session(first.session_id)
+    session = load_session(first.id)
     expected = WorkflowError
     message = ""
     if problem == "ownership":
@@ -370,7 +384,7 @@ def test_validate_session_rejects_incompatible_snapshots(config, problem):
 
 def test_node_is_used_in_session_storage_and_inspection(config):
     workflow, result = started(config)
-    session = load_session(result.session_id)
+    session = load_session(result.id)
     stored = json.loads((config.sessions_dir / f"{session.id}.json").read_text())
     assert "format_version" not in stored
     assert stored["state"]["node"] == "adding"
@@ -385,12 +399,12 @@ def test_node_is_used_in_session_storage_and_inspection(config):
 
 def test_invalid_stored_state_is_rejected(config):
     _, result = started(config)
-    path = config.sessions_dir / f"{result.session_id}.json"
+    path = config.sessions_dir / f"{result.id}.json"
     stored = json.loads(path.read_text())
     stored["state"].pop("node")
     path.write_text(json.dumps(stored))
     with pytest.raises(ValidationError, match="node"):
-        load_session(result.session_id)
+        load_session(result.id)
 
 
 def test_completion_and_retry(config):
@@ -400,13 +414,13 @@ def test_completion_and_retry(config):
     retry = submit(workflow, first)
     assert retry.status == "stale"
     assert retry.instruction_id == done.instruction_id
-    read = load_session(done.session_id).get_instruction(workflow)
+    read = load_session(first.id).get_instruction(workflow)
     assert read["session_status"] == "completed"
     assert "events" not in read["instruction"]
     assert read["instruction"]["data"] == {"total": 1}
-    assert submit(workflow, done).status == "rejected"
+    assert submit(workflow, load_session(first.id)).status == "rejected"
     with pytest.raises(ValidationError):
-        load_session(done.session_id).cancel()
+        load_session(first.id).cancel()
 
 
 @pytest.mark.parametrize(
@@ -423,13 +437,13 @@ def test_answered_instruction_is_stale_regardless_of_resubmission(
 ):
     workflow, first = started(config)
     second = submit(workflow, first)
-    current = load_session(first.session_id)
+    current = load_session(first.id)
     before = current.model_dump()
     result = current.run_event(workflow, first.instruction_id, event, arguments)
     assert result.status == "stale"
     assert result.instruction_id == second.instruction_id
     assert_only_call_recorded(
-        before, load_session(first.session_id).model_dump(), event, "stale"
+        before, load_session(first.id).model_dump(), event, "stale"
     )
     assert (
         current.get_instruction(workflow)["instruction"]["events"]["instruction_id"]
@@ -452,47 +466,83 @@ def test_failed_submissions_record_outcome_and_preserve_progress(
     config, arguments, status
 ):
     workflow, first = started(config)
-    path = config.sessions_dir / f"{first.session_id}.json"
+    path = config.sessions_dir / f"{first.id}.json"
     before = json.loads(path.read_text())
     info = ClientInfo(client="codex", client_session_id="chat", client_turn_id="turn")
-    result = load_session(first.session_id).run_event(
+    result = load_session(first.id).run_event(
         workflow, 1, "add", arguments, client_info=info
     )
     assert result.status == status
     assert result.instruction_id == 1
     after = json.loads(path.read_text())
     assert_only_call_recorded(before, after, "add", status)
+    assert after["history"][-1]["result"] == result.model_dump(mode="json")
+    assert "session_id" not in after["history"][-1]["result"]
     assert after["history"][-1]["client_info"] == info.model_dump(mode="json")
     assert "instruction" not in result.model_dump()
 
 
 @pytest.mark.parametrize("arguments", [{"target": 0}, {"extra": True}])
 def test_invalid_start_creates_no_session(config, arguments):
-    assert (
-        Session.run_start(load_workflow("toy", config=config), arguments).status
-        == "rejected"
+    with pytest.raises(EventRejected):
+        Session.run_start(load_workflow("toy", config=config), arguments)
+    assert list_sessions(config=config) == []
+
+
+@pytest.mark.parametrize("error", [EventRejected, NotReady, RuntimeError])
+def test_start_failure_raises_without_creating_session(config, error):
+    write_workflow(
+        config,
+        TOY.replace("return Total(target=target)", f"raise {error.__name__}('failed')"),
     )
+    with pytest.raises(error, match="failed"):
+        Session.run_start(load_workflow("toy", config=config))
+    assert list_sessions(config=config) == []
+
+
+def test_start_save_failure_raises(config, monkeypatch):
+    def fail(self):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Session, "_save", fail)
+    with pytest.raises(OSError, match="disk full"):
+        Session.run_start(load_workflow("toy", config=config))
+    assert list_sessions(config=config) == []
+
+
+def test_start_returns_saved_session_without_reloading(config, monkeypatch):
+    def fail(path):
+        raise AssertionError("start must not reload")
+
+    monkeypatch.setattr("hiraku.workflows.session._load", fail)
+    workflow = load_workflow("toy", config=config)
+    session = Session.run_start(workflow)
+    assert session.status == "active"
+    assert json.loads(session._path.read_text()) == session.model_dump(mode="json")
+    assert session.get_instruction(workflow)["session_id"] == session.id
+    entry = session.history[0]
+    assert entry.instruction_id == 0
+    assert entry.result == EventResult(status="accepted", instruction_id=1)
+
+
+def test_cli_start_rejection_reports_error(config):
+    result = CliRunner().invoke(
+        main,
+        ["workflow", "start", "toy", "--arguments-file", "-"],
+        input='{"target": 0}',
+    )
+    assert result.exit_code == 1
+    assert "target" in result.output
     assert list_sessions(config=config) == []
 
 
 def test_omitted_arguments_and_wrong_node(config):
     workflow, first = started(config)
-    wrong = load_session(first.session_id).run_event(
-        workflow, 1, "finish", {"extra": True}
-    )
+    wrong = load_session(first.id).run_event(workflow, 1, "finish", {"extra": True})
     assert wrong.status == "rejected"
-    assert (
-        load_session(first.session_id).run_event(workflow, 1, "unknown").status
-        == "rejected"
-    )
-    assert (
-        load_session(first.session_id).run_event(workflow, 1, "start").status
-        == "rejected"
-    )
-    assert (
-        load_session(first.session_id).run_event(workflow, 1, "finish").status
-        == "accepted"
-    )
+    assert load_session(first.id).run_event(workflow, 1, "unknown").status == "rejected"
+    assert load_session(first.id).run_event(workflow, 1, "start").status == "rejected"
+    assert load_session(first.id).run_event(workflow, 1, "finish").status == "accepted"
 
 
 def test_correlation_cancel_and_restart(config):
@@ -501,21 +551,19 @@ def test_correlation_cancel_and_restart(config):
     assert submit(workflow, first).status == "stale"
     assert submit(workflow, first, amount=2).status == "stale"
     assert (
-        load_session(first.session_id)
-        .run_event(workflow, 99, "add", {"amount": 1})
-        .status
+        load_session(first.id).run_event(workflow, 99, "add", {"amount": 1}).status
         == "stale"
     )
     restarted = load_workflow("toy", config=config)
-    third = submit(restarted, second)
+    current = load_session(first.id)
+    assert current.instruction_id == second.instruction_id
+    third = submit(restarted, current)
     assert third.status == "accepted"
-    session = load_session(first.session_id, config=config)
+    session = load_session(first.id, config=config)
     session.cancel()
-    assert submit(restarted, second).status == "rejected"
-    assert "instruction" not in load_session(first.session_id).get_instruction(
-        restarted
-    )
-    assert "instruction" not in load_session(first.session_id).show()
+    assert submit(restarted, current).status == "rejected"
+    assert "instruction" not in load_session(first.id).get_instruction(restarted)
+    assert "instruction" not in load_session(first.id).show()
     assert session.cancel()["status"] == "cancelled"
 
 
@@ -531,7 +579,7 @@ def test_invalid_session_ids(config, session_id):
 def test_invalid_revision(config, revision):
     workflow, first = started(config)
     with pytest.raises(ValidationError):
-        load_session(first.session_id).run_event(workflow, revision, "finish")
+        load_session(first.id).run_event(workflow, revision, "finish")
 
 
 def test_missing_session(config):
@@ -544,9 +592,9 @@ def test_concurrent_submission_applies_once(config):
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: submit(workflow, first), range(2)))
     assert sorted(result.status for result in results) == ["accepted", "stale"]
-    stored = load_session(first.session_id)
+    stored = load_session(first.id)
     assert stored.state.total == 1
-    assert [entry.outcome for entry in stored.history] == [
+    assert [entry.result.status for entry in stored.history] == [
         "accepted",
         "accepted",
         "stale",
@@ -571,21 +619,20 @@ def test_event_outcome_is_recorded_in_one_save(
     saves = []
 
     def save(session):
-        saves.append(session.history[-1].outcome)
+        saves.append(session.history[-1].result.status)
         original_save(session)
 
     monkeypatch.setattr(Session, "_save", save)
-    result = load_session(first.session_id).run_event(
-        workflow, revision, "add", arguments
-    )
+    result = load_session(first.id).run_event(workflow, revision, "add", arguments)
     assert result.status == status
     assert saves == [status]
-    stored = load_session(first.session_id)
+    stored = load_session(first.id)
     assert len(stored.history) == 2
     assert stored.history[0].node is None
     assert stored.history[-1].node == "adding"
     assert stored.state.node == ("done" if status == "accepted" else "adding")
-    assert stored.history[-1].outcome == status
+    assert stored.history[-1].result.status == status
+    assert stored.history[-1].result == result
     assert stored.history[-1].instruction_id == revision
 
 
@@ -594,14 +641,14 @@ def test_cancel_does_not_record_events(config, completed):
     workflow, first = started(config, target=1)
     if completed:
         submit(workflow, first)
-    session = load_session(first.session_id)
+    session = load_session(first.id)
     before = session.model_dump()
     if completed:
         with pytest.raises(ValidationError, match="already completed"):
             session.cancel()
     else:
         session.cancel()
-    current = load_session(first.session_id)
+    current = load_session(first.id)
     assert current.history == session.history
     assert current.instruction_id == session.instruction_id
     if completed:
@@ -612,13 +659,13 @@ def test_cancel_does_not_record_events(config, completed):
 
 def test_event_without_workflow_records_rejection(config):
     _, first = started(config)
-    session = load_session(first.session_id)
+    session = load_session(first.id)
     before = session.model_dump()
     info = ClientInfo(client="codex", client_session_id="chat")
     result = session.run_event(None, 1, "add", client_info=info)
     assert result.status == "rejected"
     assert "Workflow unavailable" in result.message
-    stored = load_session(first.session_id)
+    stored = load_session(first.id)
     assert_only_call_recorded(before, stored.model_dump(), "add", "rejected")
     assert stored.history[-1].client_info == info
 
@@ -635,14 +682,14 @@ def test_lock_timeout_is_retryable(config, monkeypatch):
 
 def test_failed_save_preserves_previous_session(config, monkeypatch):
     workflow, first = started(config)
-    before = load_session(first.session_id).model_dump()
+    before = load_session(first.id).model_dump()
 
     def fail(self):
         raise OSError("disk full")
 
     monkeypatch.setattr("hiraku.workflows.session.Session._save", fail)
     assert submit(workflow, first).status == "error"
-    assert load_session(first.session_id).model_dump() == before
+    assert load_session(first.id).model_dump() == before
 
 
 @pytest.mark.parametrize("operation", ["event", "cancel"])
@@ -650,7 +697,7 @@ def test_failed_save_preserves_state_and_only_events_record_errors(
     config, monkeypatch, operation
 ):
     workflow, first = started(config)
-    session = load_session(first.session_id)
+    session = load_session(first.id)
     before = session.model_dump()
     original_save = Session._save
     calls = []
@@ -666,13 +713,13 @@ def test_failed_save_preserves_state_and_only_events_record_errors(
         assert submit(workflow, first).status == "error"
         assert len(calls) == 2
         assert_only_call_recorded(
-            before, load_session(first.session_id).model_dump(), "add", "error"
+            before, load_session(first.id).model_dump(), "add", "error"
         )
     else:
         with pytest.raises(OSError, match="temporary write failure"):
             session.cancel()
         assert len(calls) == 1
-        assert load_session(first.session_id).model_dump() == before
+        assert load_session(first.id).model_dump() == before
 
 
 @pytest.mark.parametrize(
@@ -692,10 +739,10 @@ def test_returned_state_is_validated_before_saving(config, replacement):
     assert source != TOY
     write_workflow(config, source)
     workflow, first = started(config)
-    before = load_session(first.session_id).model_dump()
+    before = load_session(first.id).model_dump()
     assert submit(workflow, first).status == "error"
     assert_only_call_recorded(
-        before, load_session(first.session_id).model_dump(), "add", "error"
+        before, load_session(first.id).model_dump(), "add", "error"
     )
 
 
@@ -718,7 +765,7 @@ def test_bad_instruction_saves_nothing(config, expression):
     write_workflow(config, source)
     workflow, first = started(config, target=1)
     assert submit(workflow, first).status == "error"
-    assert load_session(first.session_id).state.total == 0
+    assert load_session(first.id).state.total == 0
 
 
 def test_instruction_mutation_cannot_change_saved_state(config):
@@ -728,7 +775,7 @@ def test_instruction_mutation_cannot_change_saved_state(config):
     )
     write_workflow(config, source)
     workflow, first = started(config)
-    assert load_session(first.session_id).state.total == 0
+    assert load_session(first.id).state.total == 0
 
 
 @pytest.mark.parametrize(
@@ -742,7 +789,7 @@ def test_mutation_before_failure_does_not_change_saved_state(config, note, statu
     )
     write_workflow(config, source)
     workflow, first = started(config)
-    session = load_session(first.session_id)
+    session = load_session(first.id)
     before = json.loads(session._path.read_text())
     result = session.run_event(workflow, 1, "add", {"amount": 1, "note": note})
     assert result.status == status
@@ -935,9 +982,11 @@ def test_generated_inputs_preserve_constraints_and_defaults(config):
     add = workflow.graph.events["add"].arguments
     assert add.model_json_schema()["required"] == ["amount"]
     assert add.model_validate({"amount": 1}).note == ""
-    assert Session.run_start(workflow, {"target": 0}).status == "rejected"
-    assert Session.run_start(workflow, {"extra": 1}).status == "rejected"
-    assert Session.run_start(workflow).status == "accepted"
+    with pytest.raises(EventRejected):
+        Session.run_start(workflow, {"target": 0})
+    with pytest.raises(EventRejected):
+        Session.run_start(workflow, {"extra": 1})
+    assert isinstance(Session.run_start(workflow), Session)
 
 
 def test_generated_inputs_preserve_nested_models_and_metadata(config):
@@ -964,9 +1013,10 @@ def test_generated_inputs_preserve_nested_models_and_metadata(config):
     parsed = inputs.from_text({"settings": '{"target": 2}'})
     assert parsed.settings.target == 2
     result = Session.run_start(workflow, {"settings": {"target": 2}})
-    assert result.status == "accepted", result.message
-    assert load_session(result.session_id).state.target == 2
-    assert Session.run_start(workflow, {"settings": {}}).status == "rejected"
+    assert isinstance(result, Session)
+    assert load_session(result.id).state.target == 2
+    with pytest.raises(EventRejected):
+        Session.run_start(workflow, {"settings": {}})
 
 
 @pytest.mark.parametrize(
@@ -986,8 +1036,9 @@ def test_string_descriptions_preserve_other_metadata(config, annotation):
     assert field["description"] == "Target count"
     assert field["exclusiveMinimum"] == 0
     assert field["default"] == 3
-    assert Session.run_start(workflow, {"target": 0}).status == "rejected"
-    assert Session.run_start(workflow).status == "accepted"
+    with pytest.raises(EventRejected):
+        Session.run_start(workflow, {"target": 0})
+    assert isinstance(Session.run_start(workflow), Session)
 
 
 def test_multiple_string_descriptions_rejected(config):
@@ -1007,8 +1058,9 @@ def test_start_without_inputs(config):
     write_workflow(config, source)
     workflow = load_workflow("toy")
     assert workflow.graph.start.arguments.model_fields == {}
-    assert Session.run_start(workflow).status == "accepted"
-    assert Session.run_start(workflow, {"target": 3}).status == "rejected"
+    assert isinstance(Session.run_start(workflow), Session)
+    with pytest.raises(EventRejected):
+        Session.run_start(workflow, {"target": 3})
 
 
 def test_inherited_graph_is_independent(config):
@@ -1033,8 +1085,8 @@ WORKFLOW = Child
         parent.graph.events["finish"].handler
         is not workflow.graph.events["finish"].handler
     )
-    load_session(first.session_id).run_event(workflow, 1, "finish")
-    assert load_session(first.session_id).state.total == 42
+    load_session(first.id).run_event(workflow, 1, "finish")
+    assert load_session(first.id).state.total == 42
 
 
 def test_relative_imports_and_reloading(config):
@@ -1056,16 +1108,16 @@ def test_incompatible_code_is_inspectable_and_cancellable(config):
     updated = load_workflow("toy")
     result = submit(updated, first)
     assert result.status == "rejected"
-    assert "instruction" not in load_session(first.session_id).get_instruction(updated)
-    shown = load_session(first.session_id).show(updated)
+    assert "instruction" not in load_session(first.id).get_instruction(updated)
+    shown = load_session(first.id).show(updated)
     assert "Incompatible" in shown["message"]
     assert "instruction" not in shown
     assert shown["history"]
     (config.workflows_dir / "toy" / "workflow.py").unlink()
-    shown = load_session(first.session_id).show()
+    shown = load_session(first.id).show()
     assert shown["state"]["total"] == 0
     assert "instruction" not in shown
-    assert load_session(first.session_id).cancel()["status"] == "cancelled"
+    assert load_session(first.id).cancel()["status"] == "cancelled"
 
 
 @pytest.mark.parametrize(
@@ -1087,8 +1139,8 @@ def test_single_final_node_and_dynamic_entry(config):
     )
     write_workflow(config, source)
     workflow, first = started(config)
-    assert load_session(first.session_id).status == "completed"
-    assert load_session(first.session_id).get_instruction(workflow)["node"] == "done"
+    assert load_session(first.id).status == "completed"
+    assert load_session(first.id).get_instruction(workflow)["node"] == "done"
 
 
 def test_graph_cli_and_receipt_only_submission(config):
@@ -1100,9 +1152,7 @@ def test_graph_cli_and_receipt_only_submission(config):
     )
     assert workflow.graph.to_mermaid() == expected
     runner = CliRunner()
-    graph = runner.invoke(
-        main, ["workflow", "graph", "toy", "--session", first.session_id]
-    )
+    graph = runner.invoke(main, ["workflow", "graph", "toy", "--session", first.id])
     assert graph.exit_code == 0, graph.output
     assert "class adding current" in graph.output
     sent = runner.invoke(
@@ -1110,7 +1160,7 @@ def test_graph_cli_and_receipt_only_submission(config):
         [
             "workflow",
             "send-event",
-            first.session_id,
+            first.id,
             "finish",
             "--instruction-id",
             "1",
@@ -1118,7 +1168,7 @@ def test_graph_cli_and_receipt_only_submission(config):
     )
     assert sent.exit_code == 0, sent.output
     assert "instruction" not in json.loads(sent.output)
-    shown = runner.invoke(main, ["session", "show", first.session_id, "--json"])
+    shown = runner.invoke(main, ["session", "show", first.id, "--json"])
     assert shown.exit_code == 0, shown.output
     assert json.loads(shown.output)["session_status"] == "completed"
 
@@ -1163,9 +1213,8 @@ def test_missing_or_invalid_instruction_reference(config, kind, identifier):
         f'data={{"total": state.total}}, context={{{kind!r}: [{identifier!r}]}}',
     )
     write_workflow(config, source)
-    result = Session.run_start(load_workflow("toy", config=config))
-    assert result.status == "error"
-    assert result.session_id is None
+    with pytest.raises(HirakuError):
+        Session.run_start(load_workflow("toy", config=config))
     assert list_sessions(config=config) == []
 
 
@@ -1185,8 +1234,8 @@ def test_workflow_context_validation_before_persistence(config, tmp_path, monkey
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     result = Session.run_start(workflow)
-    assert result.status == "accepted"
-    session = load_session(result.session_id, config=config)
+    assert isinstance(result, Session)
+    session = load_session(result.id, config=config)
     assert session.instruction.context == {
         "contexts": ["protocol"],
         "records": ["task"],
@@ -1198,11 +1247,12 @@ def test_workflow_context_validation_before_persistence(config, tmp_path, monkey
     assert "protocol" in failed.message
     assert_only_call_recorded(
         before,
-        load_session(result.session_id, config=config).model_dump(mode="json"),
+        load_session(result.id, config=config).model_dump(mode="json"),
         "add",
         "error",
     )
-    assert Session.run_start(workflow).status == "error"
+    with pytest.raises(HirakuError, match="protocol"):
+        Session.run_start(workflow)
     assert len(list_sessions(config=config)) == 1
 
 
@@ -1284,12 +1334,12 @@ def test_arguments_from_text_preserves_strings_and_decodes_structured_values():
 @pytest.mark.parametrize("field,value", [("state", {}), ("instruction", {"text": 7})])
 def test_malformed_session_fields_are_reported(config, field, value, caplog):
     workflow, first = started(config)
-    path = config.sessions_dir / f"{first.session_id}.json"
+    path = config.sessions_dir / f"{first.id}.json"
     raw = json.loads(path.read_text())
     raw[field] = value
     path.write_text(json.dumps(raw))
     with pytest.raises(ValidationError):
-        load_session(first.session_id)
+        load_session(first.id)
     assert list_sessions() == []
     assert "unavailable" in caplog.text
 
@@ -1302,7 +1352,7 @@ def test_cancel_lock_timeout_is_a_domain_error(config, monkeypatch):
 
     monkeypatch.setattr("hiraku.workflows.session._lock", busy)
     with pytest.raises(ValidationError, match="busy"):
-        load_session(first.session_id).cancel()
+        load_session(first.id).cancel()
 
 
 def test_invalid_saved_config_is_not_silently_replaced(config):
@@ -1358,8 +1408,8 @@ def test_markdown_defaults_types_description_and_graph(config):
     }
     assert "required" not in model.model_json_schema()
     result = Session.run_start(workflow)
-    assert result.status == "accepted"
-    response = load_session(result.session_id).get_instruction(workflow)
+    assert isinstance(result, Session)
+    response = load_session(result.id).get_instruction(workflow)
     assert response["session_status"] == "completed"
     assert response["instruction"]["text"] == "World: 5, 0.5, true."
     assert "events" not in response["instruction"]
@@ -1377,14 +1427,14 @@ def test_markdown_overrides_and_text_inputs(config):
     workflow = load_workflow("markdown")
     args = workflow.graph.start.arguments.from_text({"count": "2", "enabled": "false"})
     result = Session.run_start(workflow, args.model_dump())
-    assert load_session(result.session_id).get_instruction(workflow)["instruction"][
-        "data"
-    ] == {
+    assert load_session(result.id).get_instruction(workflow)["instruction"]["data"] == {
         "count": 2,
         "enabled": False,
     }
-    assert Session.run_start(workflow, {"extra": True}).status == "rejected"
-    assert Session.run_start(workflow, {"count": "invalid"}).status == "rejected"
+    with pytest.raises(EventRejected):
+        Session.run_start(workflow, {"extra": True})
+    with pytest.raises(EventRejected):
+        Session.run_start(workflow, {"count": "invalid"})
     assert len(list_sessions()) == 1
 
 
@@ -1393,13 +1443,10 @@ def test_markdown_without_arguments_and_saved_snapshot(config):
     workflow = load_workflow("markdown")
     assert workflow.description is None
     result = Session.run_start(workflow)
-    before = load_session(result.session_id).get_instruction(workflow)
+    before = load_session(result.id).get_instruction(workflow)
     assert before["instruction"]["data"] == {}
     (directory / "workflow.md").write_text("---\nid: markdown\n---\nChanged prompt.")
-    assert (
-        load_session(result.session_id).get_instruction(load_workflow("markdown"))
-        == before
-    )
+    assert load_session(result.id).get_instruction(load_workflow("markdown")) == before
 
 
 @pytest.mark.parametrize(
@@ -1424,9 +1471,8 @@ def test_invalid_markdown_arguments_fail_when_loaded(config, arguments):
 
 def test_markdown_missing_placeholder_saves_nothing(config):
     write_markdown(config, body="{{missing}}")
-    result = Session.run_start(load_workflow("markdown"))
-    assert result.status == "error"
-    assert "No value for placeholders" in result.message
+    with pytest.raises(ValidationError, match="No value for placeholders"):
+        Session.run_start(load_workflow("markdown"))
     assert list_sessions() == []
 
 
@@ -1559,6 +1605,6 @@ def test_decorated_workflow_can_load_with_unreachable_node(config):
     )
     write_workflow(config, source)
     workflow, result = started(config)
-    assert result.status == "accepted"
+    assert isinstance(result, Session)
     with pytest.raises(WorkflowError, match="Unreachable nodes: .*unused"):
         workflow.graph.check_reachability()
