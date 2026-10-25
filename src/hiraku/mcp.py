@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import mimetypes
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any
@@ -90,6 +91,14 @@ experiments, check whether it already exists.\
 
 Project = Callable[[], HirakuConfig]
 SessionId = Annotated[str, Field(description="Session ID from session_list.")]
+ClientInfoInput = Annotated[
+    ClientInfo | None,
+    Field(
+        description="Injected by the client hook. Omit this field when calling "
+        "the tool; never invent client or session identifiers."
+    ),
+]
+logger = logging.getLogger(__name__)
 
 
 def _data(record: BaseRecord) -> dict[str, Any]:
@@ -399,7 +408,16 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     def project() -> HirakuConfig:
         return HirakuConfig.load(path)
 
-    workflows = {workflow.id: workflow for workflow in list_workflows(config=config)}
+    workflows = {}
+    for workflow in list_workflows(config=config):
+        if "hiraku_client" in workflow.graph.start.arguments.model_fields:
+            logger.warning(
+                "Workflow %s is unavailable over MCP: start argument "
+                "'hiraku_client' is reserved",
+                workflow.id,
+            )
+            continue
+        workflows[workflow.id] = workflow
 
     def render(response: Mapping[str, Any]) -> CallToolResult:
         return _instruction_result(response, project())
@@ -451,7 +469,7 @@ def _add_workflow_tools(
                 "when only one session is active."
             ),
         ] = None,
-        hiraku_client: ClientInfo | None = None,
+        hiraku_client: ClientInfoInput = None,
     ) -> CallToolResult:
         config = project()
         if session_id is None:
@@ -590,8 +608,6 @@ def _start_tool(
         return render(_over_mcp(session.get_instruction(workflow)))
 
     parameters = []
-    if "hiraku_client" in workflow.graph.start.arguments.model_fields:
-        raise WorkflowError("Workflow start argument 'hiraku_client' is reserved")
     for name, field in workflow.graph.start.arguments.model_fields.items():
         default = (
             inspect.Parameter.empty
@@ -617,7 +633,7 @@ def _start_tool(
             "hiraku_client",
             inspect.Parameter.KEYWORD_ONLY,
             default=None,
-            annotation=ClientInfo | None,
+            annotation=ClientInfoInput,
         )
     )
     return _with_signature(run, workflow.id, parameters)
@@ -637,6 +653,8 @@ def _start_prompt(workflow: Workflow) -> Callable[..., str]:
             session = Session.start(workflow, inputs)
             response = _over_mcp(session.get_instruction(workflow))
         except Exception as exc:
+            if not isinstance(exc, (HirakuError, PydanticValidationError)):
+                logger.exception("Workflow %s prompt failed", workflow.id)
             # The SDK hides exception messages from prompts, so explain in text.
             return (
                 f"The Hiraku workflow `{workflow.id}` did not start: "
