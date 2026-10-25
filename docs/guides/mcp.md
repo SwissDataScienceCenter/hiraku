@@ -22,10 +22,12 @@ There is no project-path flag; the process uses its working directory. Each
 initialized project gets its own host configuration, and agents connected from
 that project receive the same Hiraku tools and resources.
 
-Initialization pins MCP and hook commands to the Python environment running
-`hiraku init`. This prevents a different or older `hiraku` on the client's `PATH`
-from handling calls. For example, initializing from a virtual environment creates
-these host configurations (the Python path below is a placeholder):
+Initialization writes portable MCP and hook commands, so the generated files can
+be committed and shared. If the project contains `uv.lock`, commands start with
+`uv run hiraku`; add Hiraku to the project's dependencies to run its locked
+version. Otherwise they run `hiraku` from the client's `PATH`, for example after
+`uv tool install hiraku`. A project with `uv.lock` creates
+these host configurations:
 
 Claude Code's `.mcp.json`:
 
@@ -33,8 +35,8 @@ Claude Code's `.mcp.json`:
 {
   "mcpServers": {
     "hiraku": {
-      "command": "/path/to/environment/bin/python",
-      "args": ["-m", "hiraku.cli", "mcp"]
+      "command": "uv",
+      "args": ["run", "hiraku", "mcp"]
     }
   }
 }
@@ -44,15 +46,15 @@ Codex's `.codex/config.toml`:
 
 ```toml
 [mcp_servers.hiraku]
-command = "/path/to/environment/bin/python"
-args = ["-m", "hiraku.cli", "mcp"]
+command = "uv"
+args = ["run", "hiraku", "mcp"]
 ```
 
 An existing `hiraku` server entry is left as it is. If an existing file cannot
 be extended, for example because `mcp_servers` is an inline TOML table,
 initialization fails without changing it; add the entry manually.
 
-Keep that Python environment available; if it moves, update the configured paths.
+The client needs `uv` or `hiraku` on its `PATH`.
 Claude Code asks for approval before using a project MCP server. Codex loads project config only
 for trusted projects. The MCP tools are exposed directly by the host, so no
 extra `AGENTS.md` or Claude skill instructions are needed to register them.
@@ -63,8 +65,9 @@ and fall back to the CLI when the host has not connected the server.
 
 `hiraku init` also merges project-local `PreToolUse` hooks into
 `.codex/hooks.json` and `.claude/settings.json`, preserving existing hooks and
-settings. Hooks run the pinned Python with
-`-m hiraku.cli session hook codex` or `-m hiraku.cli session hook claude`.
+settings, and replacing only earlier Hiraku hook commands. Hooks run
+`hiraku session hook codex` or `hiraku session hook claude`, prefixed with
+`uv run` when the project contains `uv.lock`.
 The adapter skips listing and unrelated tools, and accepts Codex's underscore
 aliases for hyphenated workflow names such as `count_steps` for `count-steps`.
 Accept the client's normal project/hook trust prompts and reconnect after setup.
@@ -77,17 +80,15 @@ using `claude` instead of `codex` in Claude Code:
   "hooks": {
     "PreToolUse": [{
       "matcher": "^mcp__hiraku__",
-      "hooks": [{"type": "command", "command": "/path/to/environment/bin/python -m hiraku.cli session hook codex"}]
+      "hooks": [{"type": "command", "command": "uv run hiraku session hook codex"}]
     }]
   }
 }
 ```
 
-If an existing hook cannot find its command, use the Python command above
-and point the MCP server at the
-same environment. For a development checkout, find that interpreter with
-`uv run python -c 'import sys; print(sys.executable)'`. Reconnect the MCP server
-and reload hooks after editing the configuration.
+Drop the `uv run` prefix for projects without `uv.lock` that use Hiraku from the
+`PATH`. Reconnect the MCP server and reload hooks after editing the
+configuration.
 
 The hook injects an optional `hiraku_client` object into workflow start and
 send-event tool inputs. Its `client`, `client_session_id`, and optional `client_turn_id` fields

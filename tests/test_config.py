@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
-import shlex
 import subprocess
-import sys
 import tomllib
 from pathlib import Path
 
@@ -43,14 +40,71 @@ def test_init_merges_and_deduplicates_client_hooks(tmp_path):
         assert data["other"] is True
         assert data["hooks"]["PreToolUse"][0] == existing
         command = data["hooks"]["PreToolUse"][1]["hooks"][0]["command"]
-        arguments = [sys.executable, "-m", "hiraku.cli", "session", "hook", client]
-        assert command == (
-            subprocess.list2cmdline(arguments)
-            if os.name == "nt"
-            else shlex.join(arguments)
-        )
+        assert command == f"hiraku session hook {client}"
     ProjectInitializer._install_client_hooks(tmp_path, [], [], {})
     assert all(path.read_bytes() == content for path, content in before.items())
+
+
+@pytest.mark.parametrize(
+    "client,relative",
+    [("codex", ".codex/hooks.json"), ("claude", ".claude/settings.json")],
+)
+def test_init_replaces_only_the_earlier_hiraku_hook_command(tmp_path, client, relative):
+    from hiraku.project import ProjectInitializer
+
+    path = tmp_path / relative
+    path.parent.mkdir()
+    audit = {"type": "command", "command": "audit-hiraku-call"}
+    old = {
+        "matcher": "^mcp__hiraku__",
+        "custom_setting": True,
+        "hooks": [
+            {
+                "type": "command",
+                "command": f"/elsewhere/python -m hiraku.cli session hook {client}",
+            },
+            audit,
+        ],
+    }
+    policy = {
+        "matcher": "^mcp__hiraku__",
+        "hooks": [{"type": "command", "command": "policy"}],
+    }
+    other = {"matcher": "Write", "hooks": [{"type": "command", "command": "check"}]}
+    path.write_text(json.dumps({"hooks": {"PreToolUse": [old, policy, other]}}))
+    ProjectInitializer._install_client_hooks(tmp_path, [], [], {})
+    entries = json.loads(path.read_text())["hooks"]["PreToolUse"]
+    assert entries == [
+        {"matcher": "^mcp__hiraku__", "custom_setting": True, "hooks": [audit]},
+        policy,
+        other,
+        {
+            "matcher": "^mcp__hiraku__",
+            "hooks": [{"type": "command", "command": f"hiraku session hook {client}"}],
+        },
+    ]
+    before = path.read_bytes()
+    ProjectInitializer._install_client_hooks(tmp_path, [], [], {})
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("locked", [False, True])
+def test_init_uses_uv_when_the_project_has_a_lockfile(tmp_path, locked):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\ndependencies = ["hiraku"]\n'
+    )
+    if locked:
+        (tmp_path / "uv.lock").touch()
+    launcher = ["uv", "run", "hiraku"] if locked else ["hiraku"]
+    HirakuConfig.init(tmp_path, install_skill=False)
+    server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["hiraku"]
+    assert [server["command"], *server["args"]] == [*launcher, "mcp"]
+    codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
+    assert codex["mcp_servers"]["hiraku"] == server
+    hooks = json.loads((tmp_path / ".claude/settings.json").read_text())
+    assert hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == " ".join(
+        [*launcher, "session", "hook", "claude"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -329,10 +383,7 @@ def test_init_adds_hiraku_to_existing_codex_configuration(tmp_path: Path) -> Non
     parsed = tomllib.loads(codex.read_text())
     assert parsed["model"] == "x"
     assert parsed["mcp_servers"]["other"] == {"command": "other"}
-    assert parsed["mcp_servers"]["hiraku"] == {
-        "command": sys.executable,
-        "args": ["-m", "hiraku.cli", "mcp"],
-    }
+    assert parsed["mcp_servers"]["hiraku"] == {"command": "hiraku", "args": ["mcp"]}
 
 
 def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
