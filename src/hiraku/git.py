@@ -69,6 +69,10 @@ class GitRepository:
         return self.resolve("HEAD")
 
     @property
+    def dirty(self) -> bool:
+        return bool(self._git("status", "--porcelain").stdout.strip())
+
+    @property
     def current_branch(self) -> str | None:
         result = self._git("symbolic-ref", "--quiet", "--short", "HEAD", check=False)
         return result.stdout.strip() if result.returncode == 0 else None

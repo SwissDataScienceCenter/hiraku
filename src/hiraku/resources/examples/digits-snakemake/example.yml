@@ -1,0 +1,2 @@
+id: digits-snakemake
+description: Compare Digits regularization strengths in a Snakemake DAG with MLflow tracking.

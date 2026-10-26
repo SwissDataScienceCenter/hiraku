@@ -22,7 +22,15 @@ from ..base import BaseRecord
 from ..errors import HirakuError
 from ..io import dump_yaml
 from ..record import Record
-from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
+from .data import (
+    FILE_COLUMNS,
+    arrow_frame,
+    plot_frame,
+    run_text,
+    safe_url,
+    tradeoff_frame,
+    tree_rows,
+)
 
 
 def markdown_view(
@@ -269,6 +277,60 @@ def run_details(selected_run: Mapping[str, Any] | None) -> mo.Html:
             ]
         )
     return mo.as_html(_content)
+
+
+def file_table(file_entries: Sequence[Mapping[str, Any]]) -> mo.ui.table:
+    """Build the selectable workflow-file table from ``file_rows``.
+
+    The hidden ``key`` column identifies a row for ``file_details``.
+    """
+    _rows = [
+        {name: row[name] for name in FILE_COLUMNS}
+        | {"used_by": ", ".join(row["used_by"])}
+        for row in file_entries
+    ]
+    return mo.ui.table(
+        _rows or arrow_frame([], FILE_COLUMNS),
+        selection="single",
+        hidden_columns=["key"] if _rows else None,
+        page_size=25,
+        show_column_summaries=False,
+        show_data_types=False,
+        show_download=False,
+    )
+
+
+def file_details(
+    file_entries: Sequence[Mapping[str, Any]],
+    selection: Any,
+    on_select: Callable[[str], Any],
+) -> tuple[mo.Html, dict[str, mo.ui.button]]:
+    """Render the step and command that produce the selected workflow file.
+
+    Buttons for the producing record and its last run call ``on_select`` with a
+    ``record:`` or ``run:`` key; keep them in a notebook variable.
+    """
+    _keys = {row["key"] for row in selection} if isinstance(selection, list) else ()
+    _row = next((row for row in file_entries if row["key"] in _keys), None)
+    if _row is None:
+        message = mo.md("Select a file to see the step and command that produce it.")
+        return mo.as_html(message), {}
+    buttons = {
+        kind: mo.ui.button(
+            label=f"{label} {html.escape(identifier)}",
+            on_click=lambda _, key=f"{kind}:{identifier}": on_select(key),
+        )
+        for kind, label, identifier in (
+            ("record", "Record", _row["record"]),
+            ("run", "Run", _row["last_run"]),
+        )
+        if identifier
+    }
+    _text = dump_yaml(
+        {name: value for name, value in _row.items() if name not in ("key", "record")}
+    )
+    links = " ".join(button.text for button in buttons.values())
+    return mo.Html(f"<div>{links}</div><pre>{html.escape(_text)}</pre>"), buttons
 
 
 def performance_controls(

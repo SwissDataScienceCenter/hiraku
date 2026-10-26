@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -84,6 +85,19 @@ def _dispatcher(config: HirakuConfig, dispatch: str | None) -> Path:
     return path
 
 
+def _observer(config: HirakuConfig, record: Any) -> Any:
+    from . import observe
+
+    try:
+        backend = record.resolve_tracking_backend(config=config)
+    except Exception:
+        backend = None
+    try:
+        return observe.start(config, backend=backend)
+    except Exception:
+        return None
+
+
 def launch(
     entrypoint: Entrypoint | Mapping[str, Any],
     *,
@@ -95,6 +109,7 @@ def launch(
     env: Mapping[str, str] | None = None,
     capture_output: bool = False,
     check: bool = True,
+    observe: bool = False,
     config: HirakuConfig | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """
@@ -110,6 +125,9 @@ def launch(
         env: Additional environment variables.
         capture_output: Capture child output in the result instead of streaming it.
         check: Raise on non-zero child exit when true.
+        observe: Record the project files the launch reads and writes, for
+            ``hiraku snakemake run``; ``HIRAKU_OBSERVE=1`` also turns it on.
+            Needs ``name``.
         config: Project configuration; discovered when omitted.
 
     Returns:
@@ -169,6 +187,10 @@ def launch(
             "HIRAKU_ENTRYPOINT": name or "",
         }
     )
+    observing = observe or os.environ.get("HIRAKU_OBSERVE") == "1"
+    observer = _observer(selected, record) if name and observing else None
+    if observer is not None:
+        process_env.update(observer.environment(process_env))
     try:
         result = subprocess.run(
             dispatcher_arguments,
@@ -179,11 +201,27 @@ def launch(
             check=False,
         )
     except Exception as exc:
+        if observer is not None:
+            observer.discard()
         if isinstance(exc, LaunchError | ValidationError):
             raise
         raise LaunchError(
             f"Launch through dispatcher {dispatcher} failed: {exc}"
         ) from exc
+    if observer is not None:
+        # Observation describes the launch for Snakemake; it never fails it.
+        with contextlib.suppress(Exception):
+            observer.finish(
+                record_id=record.id,
+                entrypoint=name or "",
+                arguments=render_arguments(args or {}),
+                command=command,
+                returncode=result.returncode,
+                options=[
+                    *(("--commit", commit) if commit is not None else ()),
+                    *(("--dispatch", dispatch) if dispatch else ()),
+                ],
+            )
     if check and result.returncode != 0:
         detail = (result.stderr or "").strip() or (result.stdout or "").strip()
         error = subprocess.CalledProcessError(

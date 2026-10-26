@@ -44,7 +44,7 @@ Examples that use MLflow or W&amp;B need the matching optional extra in the
 tool environment:
 
 ```bash
-uv tool install --force '.[mlflow,wandb]'
+uv tool install --force '.[mlflow,wandb,dashboard,snakemake]'
 ```
 
 See the [MLflow](docs/guides/tracking-mlflow.md) and
@@ -80,6 +80,7 @@ complete walkthrough, or browse the other runnable projects below.
 - [Heart Disease](docs/examples/heart-disease/README.md) — compare models with CSV tracking.
 - [Iris with W&B](docs/examples/iris-wandb/README.md) — log scikit-learn experiments to Weights & Biases.
 - [Digits with MLflow](docs/examples/digits-mlflow/README.md) — track model runs and metrics with MLflow.
+- [Digits with Snakemake](docs/examples/digits-snakemake/README.md) — run regularization variants as a Snakemake workflow tracked with MLflow.
 - [EuroSAT RGB](docs/examples/eurosat-rgb/README.md) — compare image-classification architectures with W&B.
 - [Workflow examples](docs/examples/workflows/README.md) — try small Python and Markdown workflows.
 - [Autoresearch](docs/examples/autoresearch/README.md) — run a research loop on Karpathy's autoresearch project.
@@ -103,9 +104,43 @@ take time and may install the example's dependencies.
 
 </details>
 
+## Snakemake workflows
+
+`hiraku snakemake run` executes a [Snakemake](https://snakemake.github.io)
+workflow and records its steps and files. In the bundled examples, rules call
+`hiraku launch`: records define the base commands and arguments, while rules
+connect their files and can supply argument overrides. The workflow record
+uses a CSV backend; its experiments can keep their own MLflow or W&B backends.
+Install the `snakemake` extra to use these commands.
+
+Start with the [Snakemake quickstart](SNAKEMAKE_QUICKSTART.md). Once your
+records have entrypoints, choose how to define their workflow:
+
+- **Observe the launches.** Launch each step once with `--observe`. Hiraku
+  records Python file reads, command paths, and changed files, then builds
+  rules from those observations. Observation is best effort and opt-in.
+
+  ```bash
+  hiraku launch prepare --record workflow --observe -- --output data.csv
+  hiraku launch train --record model --observe -- --input data.csv --output model.pkl
+  hiraku snakemake run --record workflow
+  ```
+
+- **Write a `Snakefile`.** Explicit rules make dependencies and argument
+  overrides visible in Git. `hiraku snakemake generate` drafts rules from
+  entrypoints; add `--observed` to generate them from observations instead.
+  `hiraku snakemake run --dry-run` previews the jobs. A project-root
+  `Snakefile` takes precedence over observations unless `--observed` is set.
+
+The dashboard shows workflow steps and the steps that produced and used each
+file. See the [command guide](docs/guides/tracking-snakemake.md), the complete
+[Digits example](docs/examples/digits-snakemake/README.md), or the
+[pipeline walkthroughs](docs/examples/snakemake-pipelines/index.md) for the
+other examples.
+
 ## Dashboard
 
-`hiraku dashboard` serves a local [marimo](https://marimo.io) notebook through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view with the record tree, the runs attributed to each record, run details with links to the tracking backend, and a performance plot. It needs the `dashboard` extra.
+`hiraku dashboard` serves a local [marimo](https://marimo.io) notebook through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view with the record tree, the runs attributed to each record, run details with links to the tracking backend, a performance plot, and the files of Snakemake workflow runs. It needs the `dashboard` extra.
 
 | Command | What it does |
 | --- | --- |
@@ -117,7 +152,7 @@ take time and may install the example's dependencies.
 
 After `--init`, `hiraku dashboard` serves your copy. In the editor, the
 `runs_df` and `records_df` tables hold every run and record with its place in
-the tree, ready for your own plots or marimo's AI assistant.
+the tree, and `files_df` the files of workflow runs, ready for your own plots or marimo's AI assistant.
 
 Try every dashboard mode without training by loading the bundled Digits runs:
 

@@ -1,0 +1,45 @@
+# Digits Snakemake example.
+#
+# Each rule launches an entrypoint of a Hiraku record, so the record states the
+# code and arguments of the step; this file states only the files it reads and
+# writes. Run through Hiraku:
+#   hiraku snakemake run --record digits
+# Pass extra entrypoint arguments for a quick run, for example:
+#   hiraku snakemake run --record digits --config 'train=--epochs 2'
+
+
+rule all:
+    input:
+        "results/weak-l2.json",
+        "results/strong-l2.json",
+
+
+rule digits__prepare:
+    input:
+        "scripts/prepare_data.py",
+    output:
+        "data/digits.npz",
+    shell:
+        "hiraku launch prepare --record digits -- --output {output}"
+
+
+rule weak_l2__train:
+    input:
+        "data/digits.npz",
+        "scripts/train.py",
+    output:
+        "results/weak-l2.json",
+    shell:
+        "hiraku launch train --record weak-l2 -- --input {input[0]} --output {output} "
+        + config.get("train", "")
+
+
+rule strong_l2__train:
+    input:
+        "data/digits.npz",
+        "scripts/train.py",
+    output:
+        "results/strong-l2.json",
+    shell:
+        "hiraku launch train --record strong-l2 -- --input {input[0]} --output {output} "
+        + config.get("train", "")
