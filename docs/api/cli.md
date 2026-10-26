@@ -34,9 +34,7 @@ preserve unrelated files in existing destinations and refuse file collisions.
 `hiraku init` does not require or invoke Git, and works in nested directories as
 well as outside repositories. Add `--git` to initialize the code repository at the
 destination. Existing repositories and worktrees are preserved. Repeating plain
-initialization with `--git` can add Git to an existing Hiraku project. The former
-`--ignore-git` flag is no longer needed and has been removed. Python callers can
-still explicitly request Git-root validation with `ignore_git=False`.
+initialization with `--git` can add Git to an existing Hiraku project.
 
 Initialize from an arbitrary local project overlay with `--template`:
 
@@ -49,8 +47,7 @@ List available starting points with `hiraku example list`.
 Create a project from a bundled example with `hiraku example create EXAMPLE [PATH]`.
 The default destination is `./EXAMPLE`. This copies packaged files without
 Git history or network access; it does not accept repository URLs. Add `--git`
-to initialize the code repository. Example flags formerly on `init` now belong
-to `example create`; `init --example` has been removed. For example:
+to initialize the code repository. For example:
 
 ```bash
 hiraku example create minimal

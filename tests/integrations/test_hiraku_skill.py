@@ -44,7 +44,6 @@ def _new_project(tmp_path: Path) -> tuple[Path, HirakuConfig, str]:
     config = HirakuConfig.init(
         project,
         example="heart-disease",
-        ignore_git=False,
     )
     _git(project, "add", ".")
     _git(project, "commit", "-m", "initialize Heart Disease example")

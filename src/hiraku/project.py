@@ -12,7 +12,7 @@ from importlib.resources import as_file, files
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .errors import GitError, HirakuError, ProjectExistsError, ValidationError
+from .errors import HirakuError, ProjectExistsError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
 from .validation import validate_identifier
 
@@ -37,7 +37,6 @@ class ProjectInitializer:
         *,
         install_skill: bool = True,
         tracking_backend: str | None = None,
-        ignore_git: bool = True,
         template: Path | str | None = None,
         example: str | None = None,
         results: bool = False,
@@ -50,8 +49,6 @@ class ProjectInitializer:
             install_skill: Whether to install repository-local skill resources for
                 supported coding agents.
             tracking_backend: Optional default tracking backend name.
-            ignore_git: Skip validation that root is a Git repository root.
-                Defaults to true for programmatic initialization.
             template: Optional local directory copied over the initialized project.
             example: Optional packaged example name whose ``src`` tree is copied.
             results: Include the example's prepared records and tracked runs.
@@ -68,7 +65,6 @@ class ProjectInitializer:
             root,
             install_skill=install_skill,
             tracking_backend=tracking_backend,
-            ignore_git=ignore_git,
             template=template,
             example=example,
             results=results,
@@ -82,7 +78,6 @@ class ProjectInitializer:
         *,
         install_skill: bool = True,
         tracking_backend: str | None = None,
-        ignore_git: bool = True,
         template: Path | str | None = None,
         example: str | None = None,
         results: bool = False,
@@ -98,21 +93,6 @@ class ProjectInitializer:
         if with_generator and example is None:
             raise ValidationError("with_generator requires a packaged example")
         project_root = Path(root).expanduser().absolute()
-        if not ignore_git:
-            from .git import GitRepository
-
-            try:
-                repository = GitRepository(project_root)
-            except GitError as exc:
-                raise ValidationError(
-                    f"Hiraku must be initialized at a Git repository root: "
-                    f"{project_root} is not in a Git repository"
-                ) from exc
-            if repository.root != project_root.resolve():
-                raise ValidationError(
-                    f"Hiraku must be initialized at the Git repository root "
-                    f"{repository.root}, not {project_root}"
-                )
         marker = project_root / "hiraku.yml"
         if marker.exists():
             raise ProjectExistsError(f"Hiraku project already exists at {marker}")
