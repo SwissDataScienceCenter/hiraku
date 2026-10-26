@@ -75,3 +75,18 @@ hiraku runs --record my-task --all --json
 Hiraku reads native run IDs, parameters, metrics, and attribution tags.
 The MLflow experiment name is a backend grouping, distinct from a Hiraku
 record ID.
+
+??? warning "MLflow local database"
+    With `database` (or the default `mlflow.db`), queries require an existing file
+    and fail before constructing the MLflow client if it is missing. Log runs with
+    MLflow first to create the database. Explicit `tracking_uri` values use native
+    MLflow behavior without this file check.
+
+    This check does not guarantee read-only storage access: MLflow may initialize
+    tables, migrate some existing schemas, or recreate the default experiment when
+    opening an existing database. Other outdated schemas require an explicit
+    `mlflow db upgrade`. These are MLflow limitations; the standard MLflow client
+    does not provide a read-only connection mode.
+
+    For MLflow projects, install Hiraku in the project environment to avoid
+    version conflicts.

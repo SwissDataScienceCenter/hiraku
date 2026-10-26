@@ -92,6 +92,11 @@ class MLflowBackend(TrackingBackend):
         self.tracking_uri = settings.tracking_uri or _mlflow_uri(
             config, settings.database
         )
+        self._database = (
+            (config.root / (settings.database or "mlflow.db")).resolve()
+            if settings.tracking_uri is None
+            else None
+        )
         self.experiment_name = settings.experiment_name
         # Credential-bearing tracking URIs stay usable but never become links.
         self.ui_url = settings.ui_url or (
@@ -101,6 +106,10 @@ class MLflowBackend(TrackingBackend):
     def _read_source_runs(self, **options: Any) -> list[Run]:
         from ..run import Run
 
+        if self._database is not None and not self._database.is_file():
+            raise BackendError(
+                f"mlflow backend database is not an existing file: {self._database}"
+            )
         try:
             from mlflow.tracking import MlflowClient
         except ImportError as exc:
