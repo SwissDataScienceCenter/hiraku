@@ -13,11 +13,13 @@ Each step is an entrypoint of the record it belongs to:
 | `weak_l2__train` | `weak-l2` · `train` | `scripts/train.py --alpha 0.0001` | `data/digits.npz` | `results/weak-l2.json`, an MLflow run |
 | `strong_l2__train` | `strong-l2` · `train` | `scripts/train.py --alpha 1.0` | `data/digits.npz` | `results/strong-l2.json`, an MLflow run |
 
-The records state the code and its arguments. The bundled `Snakefile` states
-the files and runs each step with `hiraku launch`. The `digits` record keeps
-one CSV run per workflow execution, and the experiment records keep their
-MLflow runs. The [Snakemake pipelines](../snakemake-pipelines/index.md) pages
-apply the same approach to every other example.
+The records state the command and default arguments for each step. The bundled
+`Snakefile` declares the files and calls each step with `hiraku launch`; the
+launch may receive argument overrides, and an authored `Snakefile` can run
+other commands, so review the file as executable code. The `digits` record
+keeps one CSV run per workflow execution, and the experiment records keep
+their MLflow runs. The [Snakemake pipelines](../snakemake-pipelines/index.md)
+pages apply the same approach to every other example.
 
 ## Setup
 
@@ -36,7 +38,7 @@ mkdir digits-snakemake
 cd digits-snakemake
 git init
 hiraku init --example digits-snakemake
-uv sync
+uv sync --python 3.12
 git add .
 git commit -m "initialize Digits Snakemake example"
 ```
@@ -91,9 +93,10 @@ What happens:
 2. `uv run snakemake` reads the bundled `Snakefile` inside the project
    environment. `rule all` asks for both `results/*.json`, so Snakemake runs
    `digits__prepare` first and then both training rules.
-3. Each rule runs `hiraku launch ENTRYPOINT --record RECORD`, so the command and
-   its arguments come from the record. `--config 'train=--epochs 2'` adds
-   `--epochs 2` to both training commands, for a quick run.
+3. Each rule calls `hiraku launch ENTRYPOINT --record RECORD`, so the command
+   and default arguments come from the record. The bundled rules read the
+   `train` config value and append `--epochs 2` to both training commands,
+   overriding the records' epoch setting for a quick run.
 4. Each training step logs an MLflow run tagged with the workflow run's ID and
    writes its result JSON.
 5. Hiraku replaces the `started` run with the final one: `outcome: succeeded`,
@@ -175,11 +178,13 @@ What happens:
 
 Which to keep? Observation is the shortest path when you run the steps
 yourself. The bundled `Snakefile` is the form an agent can write and maintain:
-its rules only wire files to `hiraku launch` of the records' entrypoints, so an
-edit cannot change the code a record runs. `--dry-run` checks them before any
-training, each run's `jobs` show what ran, and a reviewer reads the change as a
-diff. Restore it with `git revert HEAD`, or write the observed rules to a new
-`Snakefile` with `hiraku snakemake generate --record digits --observed`.
+its rules wire files to `hiraku launch` of the records' entrypoints. Those
+commands still accept argument and dispatcher overrides, and a `Snakefile` can
+invoke other commands, so review it as executable code. `--dry-run` checks the
+planned jobs before training, each run's `jobs` records Snakemake's job details,
+and a reviewer can read the change as a diff. Restore it with `git revert
+HEAD`, or write the observed rules to a new `Snakefile` with
+`hiraku snakemake generate --record digits --observed`.
 
 See [Snakemake tracking](../../guides/tracking-snakemake.md) for the stored
 columns and the execution limits.

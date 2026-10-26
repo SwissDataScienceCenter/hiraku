@@ -16,7 +16,7 @@ mkdir digits-mlflow-pipeline
 cd digits-mlflow-pipeline
 git init
 hiraku init --example digits-mlflow --with-results
-uv sync
+uv sync --python 3.12
 git add .
 git commit -m "initialize Digits MLflow example with results"
 ```

@@ -401,9 +401,10 @@ entrypoints:
     args: {alpha: 0.0001, epochs: 40}
 ```
 
-1. Write the `Snakefile` yourself: it is one reviewable file, and the rules
-   only wire files to `hiraku launch` of an entrypoint, so they cannot change
-   the code a record runs. Start from `hiraku snakemake generate --record
+1. Write the `Snakefile` yourself: it is one reviewable file. Use rules that
+   call `hiraku launch` so the record defines the base command, and review
+   extra arguments and `--config` values that override its settings.
+   Start from `hiraku snakemake generate --record
    <workflow-record> --print`, which drafts one rule per entrypoint of the
    record and its children with `input:` and `output:` left to fill in, or
    from `--observed --print` when `hiraku/snakemake/observed/` holds the

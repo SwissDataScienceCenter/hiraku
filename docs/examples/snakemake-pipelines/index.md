@@ -8,10 +8,11 @@ the commands and the stored columns.
 
 ## The three pieces
 
-1. **Each step is an entrypoint.** A step runs
-   `hiraku launch ENTRYPOINT --record RECORD`, the same command you would type
-   by hand. The record keeps the step's command and arguments, so the workflow
-   never changes which code a record runs.
+1. **Each step can use a record entrypoint.** The pages use
+   `hiraku launch ENTRYPOINT --record RECORD`, the command you can also type
+   by hand. The record supplies the command and default arguments; launch
+   overrides can change arguments, and a written `Snakefile` can call other
+   commands. Review it as executable code.
 2. **A workflow record keeps the evidence.** On these pages it is a task
    record named `pipeline`, next to the experiments, with
    `tracking_backend: {type: csv, path: hiraku/runs.csv}`. Every
@@ -28,8 +29,8 @@ the commands and the stored columns.
 | --- | --- | --- |
 | What you do | Launch each step once with `hiraku launch --observe`, then `hiraku snakemake run` | Write `Snakefile`, then `hiraku snakemake run` |
 | Where the rules are | `hiraku/snakemake/Snakefile`, regenerated on every run and ignored by Git | `Snakefile`, committed with the code |
-| A step's inputs | The files its Python process opened, and the paths its command names | The files you declare |
-| Suits | Running your own steps without writing a file | Agents, review, sharing, and rules observation cannot see |
+| A step's inputs | Best-effort: files its Python process opened for reading, and existing paths named in its command | The files you declare |
+| Suits | Running your own steps without writing a file | Agents, review, sharing, and dependencies or order that observations cannot infer |
 
 Each page follows Path A and then Path B in the same project. Once
 `Snakefile` exists, `hiraku snakemake run` uses it instead of the observations.

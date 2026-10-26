@@ -18,7 +18,7 @@ mkdir heart-disease-pipeline
 cd heart-disease-pipeline
 git init
 hiraku init --example heart-disease --with-results
-uv sync
+uv sync --python 3.12
 git add .
 git commit -m "initialize Heart Disease example with results"
 ```
@@ -45,8 +45,9 @@ git commit -m "add the pipeline record"
 `hiraku/runs.csv`, not `runs.csv`: `train.py` writes `runs.csv` with a fixed
 header, and the workflow runs add columns such as `outcome` and `jobs`.
 Snakemake keeps its own state in `.snakemake/`, and Path B writes logs to
-`logs/`. Git ignores both. This example's `.gitignore` already ignores
-`hiraku/`, so the records and their runs never dirty the checkout.
+`logs/`. Git ignores both. This example's `.gitignore` also ignores `hiraku/`,
+so its records and workflow runs are hidden from Git. Files created or changed
+by a launched command still follow the project's normal Git rules.
 
 ## Path A: observe the steps
 

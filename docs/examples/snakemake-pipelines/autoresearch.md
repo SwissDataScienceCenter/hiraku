@@ -16,7 +16,7 @@ that only a written rule can state.
 ```bash
 git clone https://github.com/karpathy/autoresearch.git autoresearch-pipeline
 cd autoresearch-pipeline
-uv sync
+uv sync --python 3.12
 hiraku init --example autoresearch
 cat >> .gitignore <<'EOF'
 

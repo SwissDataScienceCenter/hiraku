@@ -21,7 +21,7 @@ mkdir eurosat-pipeline
 cd eurosat-pipeline
 git init
 hiraku init --example eurosat-rgb
-uv sync
+uv sync --python 3.12
 git add .
 git commit -m "initialize EuroSAT RGB example"
 export WANDB_MODE=offline

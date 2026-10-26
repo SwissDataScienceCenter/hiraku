@@ -10,9 +10,8 @@ through every example step by step.
 
 1. **Each step is an entrypoint.** A step runs
    `hiraku launch ENTRYPOINT --record RECORD`, the same command you would type
-   by hand. The record keeps the command and its arguments, so the workflow
-   never changes which code a record runs, and every step can still be run on
-   its own.
+   by hand. The record keeps the base command and arguments; a rule can pass
+   additional arguments to that entrypoint. Every step can still run on its own.
 2. **A workflow record keeps the evidence.** Every `hiraku snakemake run` adds
    one CSV run to it, with one entry per step.
 3. **Rules connect the steps through files.** A rule declares the files a step
@@ -127,9 +126,9 @@ both.
 | More than 100,000 files in the project | The launch is not observed | Write a `Snakefile` |
 | A dispatcher that runs the command elsewhere, such as `worktree` | Nothing is observed | Observe a launch with the default dispatcher |
 
-Observations stay on your machine: `hiraku/snakemake/` ignores itself in Git,
-so an observed launch never dirties the checkout. Collaborators observe the
-steps by launching them, or you commit a `Snakefile` written with
+Observation metadata stays on your machine: `hiraku/snakemake/` ignores itself
+in Git. The launched command can still change tracked files or create new ones.
+Collaborators observe the steps by launching them, or you commit a `Snakefile` written with
 `hiraku snakemake generate --observed`. Launches made by `hiraku snakemake run`
 are never observed, since their files are already declared.
 
@@ -218,13 +217,13 @@ Hiraku CLI or MCP server is better served by writing the `Snakefile` itself:
   arguments (`hiraku record show`), the scripts' argument parsers name their
   files, and `generate` (or `generate --observed`) gives the rule skeletons.
   Writing the rules is a small, declarative edit.
-- **The edit cannot change the science.** A rule only wires files to a
-  `hiraku launch` of a record's entrypoint; the code and arguments stay in the
-  record. A wrong rule misorders or misses a step, and never runs different code
-  under the record's name.
-- **It is checked before anything runs.** `hiraku snakemake run --dry-run`
-  builds the dependency graph and records the planned jobs, so a missing input
-  or a cycle costs no compute.
+- **The command stays discoverable.** A rule that calls `hiraku launch`
+  selects an entrypoint defined on a record. Review its extra arguments and
+  any `--config` values too: these can change how the step runs. Hiraku also
+  accepts rules that run other shell commands.
+- **You can preview the dependency graph.** `hiraku snakemake run --dry-run`
+  records the planned jobs and detects missing inputs or cycles before
+  executing the steps.
 - **The result is evidence to check against.** Each run's `jobs` lists what
   every rule ran, read, and wrote, so the agent can compare the execution with
   its intent from `hiraku runs --json`.
@@ -300,6 +299,10 @@ away from scripts that append to `runs.csv` with a fixed header.
 | `returncode`, `diagnostic` | The exit code and the end of the output on failure |
 | `jobs` | A JSON list with one entry per step |
 
+In `hiraku runs --json`, the extra CSV columns appear under `raw`. The `jobs`
+value is still a JSON-encoded string; decode it with `json.loads(run["raw"]["jobs"])`
+when inspecting it in Python.
+
 Each entry in `jobs` describes one step:
 
 ```json
@@ -318,3 +321,7 @@ files were never built, as in a planned run, or were built outside Snakemake,
 for example by an observed launch, shows `command`, `record`, and `entrypoint`
 as `null`; the dashboard then names only its rule. `--forceall` rebuilds every
 file through Snakemake.
+
+Only synchronous local execution is supported. Checkpoints and remote storage
+are outside this integration's supported scope. A Snakefile's Python code can
+execute while its dependency graph is being inspected, including in a dry run.

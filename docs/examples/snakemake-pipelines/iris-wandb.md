@@ -16,7 +16,7 @@ mkdir iris-wandb-pipeline
 cd iris-wandb-pipeline
 git init
 hiraku init --example iris-wandb
-uv sync
+uv sync --python 3.12
 git add .
 git commit -m "initialize Iris W&B example"
 export WANDB_MODE=offline
