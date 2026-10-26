@@ -17,11 +17,11 @@ Git is optional for initialization. This walkthrough uses commits for run
 attribution, so initialize the code repository with `--git`:
 
 ```bash
-hiraku clone minimal my-project --git
+hiraku example create minimal my-project --git
 cd my-project
 ```
 
-The `clone` command copies the `src/` tree of a packaged example into the
+The `example create` command copies the `src/` tree of a packaged example into the
 project. Commit the evaluation code before creating records:
 
 ```bash

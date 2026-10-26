@@ -24,8 +24,6 @@ from .config import HirakuConfig
 from .context import Context, list_contexts, load_context
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .git import GitRepository, init_code_repository, require_git
-from .git import setup as setup_git
-from .git import status as git_setup_status
 from .io import dump_yaml
 from .launch import _dispatcher, launch, render_arguments
 from .record import Record, list_records, load_record
@@ -276,7 +274,25 @@ def init_command(
     click.echo(f"{message} at {config.path}")
 
 
-@main.command("clone")
+@main.group("example")
+def example_group() -> None:
+    """List and create bundled examples."""
+
+
+@example_group.command("list")
+def example_list_command() -> None:
+    """List available bundled examples."""
+    examples = files("hiraku.resources") / "examples"
+    rows = []
+    for example in sorted(examples.iterdir(), key=lambda item: item.name):
+        manifest = example / "example.yml"
+        if example.is_dir() and manifest.is_file():
+            metadata = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+            rows.append((example.name, metadata.get("description", "")))
+    click.echo(_table(("name", "description"), rows))
+
+
+@example_group.command("create")
 @click.argument("example")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
 @click.option("--tracking-backend")
@@ -293,7 +309,7 @@ def init_command(
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
 )
-def clone_command(
+def example_create_command(
     example: str,
     path: Path | None,
     tracking_backend: str | None,
@@ -338,40 +354,6 @@ def clone_command(
                     "Generation failed; initialized project and completed runs kept: "
                     f"{exc}"
                 ) from exc
-
-
-@main.group("git")
-def git_group() -> None:
-    """Configure optional Git versioning for Hiraku files."""
-
-
-@git_group.command("setup")
-@click.argument("mode", type=click.Choice(["ignore", "repo", "submodule"]))
-@click.option(
-    "--url",
-    help="Future metadata cloning location (submodule only; no network access).",
-)
-@click.pass_obj
-def git_setup_command(state: CLIContext, mode: str, url: str | None) -> None:
-    """Set up ignored files, independent local history, or a submodule."""
-    setup_git(state.config, mode, url=url)
-    click.echo(f"Hiraku Git setup: {mode}")
-    if mode == "repo":
-        click.echo("Metadata repository initialized; files have not been committed.")
-    elif mode == "submodule":
-        click.echo("Submodule registration staged; no commits or pushes made.")
-
-
-@git_group.command("status")
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def git_status_command(state: CLIContext, json_output: bool) -> None:
-    """Show the code repository and Hiraku versioning setup."""
-    result = git_setup_status(state.config)
-    if json_output:
-        _emit_json(result)
-    else:
-        click.echo(_table(("field", "value"), list(result.items())))
 
 
 @main.command("status")

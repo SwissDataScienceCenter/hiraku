@@ -20,14 +20,14 @@ Initialization uses the following destinations, creating missing directories:
 | --- | --- |
 | `hiraku init` | Current directory |
 | `hiraku init my-project` | `./my-project` |
-| `hiraku clone minimal` | `./minimal` |
-| `hiraku clone minimal my-project` | `./my-project` |
-| `hiraku clone minimal .` | Current directory |
+| `hiraku example create minimal` | `./minimal` |
+| `hiraku example create minimal my-project` | `./my-project` |
+| `hiraku example create minimal .` | Current directory |
 
 An explicit path always takes precedence. Plain initialization supports existing
 directories and preserves unrelated files. Repeating plain `hiraku init` reports
 that the project is already initialized and leaves every file unchanged; it does
-not reinstall missing resources. Cloning, or initialization with a template or
+not reinstall missing resources. Example creation, or initialization with a template or
 configuration options, rejects an already initialized project. Both commands
 preserve unrelated files in existing destinations and refuse file collisions.
 
@@ -38,37 +38,22 @@ initialization with `--git` can add Git to an existing Hiraku project. The forme
 `--ignore-git` flag is no longer needed and has been removed. Python callers can
 still explicitly request Git-root validation with `ignore_git=False`.
 
-Manage optional metadata versioning independently, at any time:
-
-```bash
-hiraku git setup ignore
-hiraku git setup repo
-hiraku git setup submodule --url PATH_OR_URL
-hiraku git status --json
-```
-
-`ignore` writes a managed block in `.gitignore` and works without Git installed.
-`repo` also initializes independent history inside the configured Hiraku directory.
-`submodule` registers the existing metadata repository, which must already have
-a commit, inside the code repository. It records `--url` without accessing it,
-stages the submodule registration, and sets `ignore = all`. Neither
-mode creates commits or pushes. Already tracked Hiraku files require explicit
-migration. See the [Git setup guide](../guides/git.md) for details.
-
 Initialize from an arbitrary local project overlay with `--template`:
 
 ```bash
 hiraku init --template ./path/to/template
 ```
 
-Create a project from a bundled example with `hiraku clone EXAMPLE [PATH]`.
+List available starting points with `hiraku example list`.
+
+Create a project from a bundled example with `hiraku example create EXAMPLE [PATH]`.
 The default destination is `./EXAMPLE`. This copies packaged files without
 Git history or network access; it does not accept repository URLs. Add `--git`
 to initialize the code repository. Example flags formerly on `init` now belong
-to `clone`; `init --example` has been removed. For example:
+to `example create`; `init --example` has been removed. For example:
 
 ```bash
-hiraku clone minimal
+hiraku example create minimal
 ```
 
 Each example copies only its bundled
@@ -76,7 +61,7 @@ Each example copies only its bundled
 overlay with sample records and tracked runs:
 
 ```bash
-hiraku clone heart-disease --with-results
+hiraku example create heart-disease --with-results
 ```
 
 Results may override base files and configuration keys, but neither layer
@@ -97,7 +82,7 @@ resources/examples/<name>/
 └── results/             # optional overlay with --with-results
 ```
 
-`init --template` and `clone` are separate commands. Templates may replace files installed
+`init --template` and `example create` are separate commands. Templates may replace files installed
 by the same initialization, but initialization refuses to overwrite files that
 already existed in the target. Explicit options such as `--tracking-backend`
 take precedence over values from a template-provided `hiraku.yml`.

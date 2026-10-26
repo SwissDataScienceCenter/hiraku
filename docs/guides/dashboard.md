@@ -278,7 +278,7 @@ extras, then create a project with the prepared results (Git is optional):
 
 ```bash
 uv tool install "hiraku[dashboard,mlflow]"
-hiraku clone digits-mlflow digits-dashboard --with-results
+hiraku example create digits-mlflow digits-dashboard --with-results
 cd digits-dashboard
 hiraku dashboard --record digits
 ```

@@ -47,9 +47,7 @@ The CLI provides a standardized interface for managing data records, .e.g
 hiraku init  # initialize in the current directory; Git is optional
 hiraku init PATH --git  # also initialize the code Git repository
 hiraku init --template ./path/to/template  # apply a local project overlay
-hiraku clone <name> .  # apply a packaged example in the current directory
-hiraku git setup ignore  # keep Hiraku state outside code history
-hiraku git setup repo  # independent local history for Hiraku state
+hiraku example create <name> .  # apply a packaged example in the current directory
 
 hiraku record create <root-id>
 hiraku record create <child-id> --parent <root-id> --type experiment

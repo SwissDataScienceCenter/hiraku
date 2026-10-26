@@ -16,7 +16,7 @@ uv tool install --force .
 Then create a project and let Hiraku install the training script, processed
 dataset, and dependencies for this example.
 ```bash
-hiraku clone heart-disease --git
+hiraku example create heart-disease --git
 cd heart-disease
 ```
 Initialization creates `hiraku.yml`, metadata directories, and the agent

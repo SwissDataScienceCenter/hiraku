@@ -18,7 +18,7 @@ In a Git repository, install the example and restart your coding agent so it
 loads the `hiraku` MCP server:
 
 ```bash
-hiraku init --example workflows
+hiraku example create workflows .
 ```
 
 ## Count steps

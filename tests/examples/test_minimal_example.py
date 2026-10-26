@@ -36,7 +36,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     git(project, "config", "user.name", "Test")
     runner = CliRunner()
 
-    initialized = invoke(runner, ["clone", "minimal", "."])
+    initialized = invoke(runner, ["example", "create", "minimal", "."])
     assert initialized.exit_code == 0
     assert not (project / "README.md").exists()
     assert not (project / "example.yml").exists()

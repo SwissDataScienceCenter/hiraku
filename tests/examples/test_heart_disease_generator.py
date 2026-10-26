@@ -29,7 +29,7 @@ def test_generator_refuses_existing_output(generator, tmp_path):
 
 def test_init_with_generator_and_existing_project(tmp_path):
     runner = CliRunner()
-    args = ["clone", "heart-disease", str(tmp_path)]
+    args = ["example", "create", "heart-disease", str(tmp_path)]
     assert runner.invoke(main, [*args, "--with-generator"]).exit_code == 0
     assert (tmp_path / "generate_results.py").is_file()
     assert not (tmp_path / "runs.csv").exists()
@@ -51,7 +51,8 @@ def test_init_generates_once(tmp_path, monkeypatch, copy_generator):
     result = CliRunner().invoke(
         main,
         [
-            "clone",
+            "example",
+            "create",
             "heart-disease",
             str(tmp_path),
             "--generate",
@@ -68,9 +69,9 @@ def test_init_generates_once(tmp_path, monkeypatch, copy_generator):
     [
         ["init", "--generate"],
         ["init", "--with-generator"],
-        ["clone", "minimal", "--generate"],
-        ["clone", "minimal", "--with-generator"],
-        ["clone", "heart-disease", "--with-results", "--generate"],
+        ["example", "create", "minimal", "--generate"],
+        ["example", "create", "minimal", "--with-generator"],
+        ["example", "create", "heart-disease", "--with-results", "--generate"],
     ],
 )
 def test_invalid_generation_options_leave_no_project(tmp_path, arguments):
@@ -90,7 +91,8 @@ def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch)
     result = CliRunner().invoke(
         main,
         [
-            "clone",
+            "example",
+            "create",
             "heart-disease",
             str(tmp_path),
             "--generate",

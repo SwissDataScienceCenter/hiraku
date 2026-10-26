@@ -82,7 +82,7 @@ complete walkthrough, or browse the other runnable projects below.
 - [Workflow examples](docs/examples/workflows/README.md) — try small Python and Markdown workflows.
 - [Autoresearch](docs/examples/autoresearch/README.md) — run a research loop on Karpathy's autoresearch project.
 
-Initialize an example with `hiraku init --example NAME`. To include prepared
+Initialize an example with `hiraku example create NAME`. To include prepared
 results or generate them, use one of these options:
 
 <details>
@@ -90,35 +90,22 @@ results or generate them, use one of these options:
 
 | Command | Result |
 | --- | --- |
-| `hiraku clone NAME` | Copy the runnable project files only |
-| `hiraku clone NAME --with-results` | Also copy bundled records and measured runs |
-| `hiraku clone NAME --with-generator` | Also copy `generate_results.py` for running later |
-| `hiraku clone NAME --generate` | Generate fresh records and runs immediately |
+| `hiraku example create NAME` | Copy the runnable project files only |
+| `hiraku example create NAME --with-results` | Also copy bundled records and measured runs |
+| `hiraku example create NAME --with-generator` | Also copy `generate_results.py` for running later |
+| `hiraku example create NAME --generate` | Generate fresh records and runs immediately |
+
+Use `hiraku example list` to see the available starting points.
 
 `hiraku init [PATH]` initializes the current or explicit directory, optionally
-using a local `--template`. `hiraku clone NAME [PATH]` creates a project from a
+using a local `--template`. `hiraku example create NAME [PATH]` creates a project from a
 bundled example, without Git history or network access. Its default destination
 is `./NAME`. Use
-`hiraku clone NAME .` to initialize the current directory, or
-`hiraku clone NAME my-project` to choose another destination.
+`hiraku example create NAME .` to initialize the current directory, or
+`hiraku example create NAME my-project` to choose another destination.
 Initialization does not require Git. Add `--git` to initialize the code repository
 as a convenience. Repeating plain `hiraku init` leaves an initialized project
 unchanged; repeating it with `--git` can add the code repository later.
-
-Optional Git setup is available at any time:
-
-```bash
-hiraku git setup ignore  # ignore Hiraku files in the code repository
-hiraku git setup repo    # independent local Git history inside hiraku/
-hiraku git setup submodule --url PATH_OR_URL
-hiraku git status
-```
-
-`repo` and `submodule` keep research history separate from code history. The
-metadata repository must already have a commit before submodule registration;
-`--url` records its future cloning location, including a local repository path.
-Setup preserves existing files and history and never commits or pushes. See the
-[Git setup guide](docs/guides/git.md) for examples and migration requirements.
 
 The results and generator modes are available for the Heart Disease and Digits
 examples. `--generate` cannot be combined with `--with-results`; generation can
@@ -145,7 +132,7 @@ the tree, ready for your own plots or marimo's AI assistant.
 Try every dashboard mode without training by loading the bundled Digits runs:
 
 ```bash
-hiraku clone digits-mlflow digits-dashboard --with-results
+hiraku example create digits-mlflow digits-dashboard --with-results
 cd digits-dashboard
 hiraku dashboard --record digits                 # read-only
 hiraku dashboard --include-code --record digits  # read-only, with source

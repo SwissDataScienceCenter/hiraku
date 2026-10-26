@@ -45,7 +45,7 @@ From the root of the autoresearch repository, install the example. Initializatio
 autoresearch workflow at `hiraku/workflows/autoresearch/`.
 
 ```bash
-hiraku clone autoresearch .
+hiraku example create autoresearch .
 ```
 
 Keep the local Hiraku installation and run artifacts out of

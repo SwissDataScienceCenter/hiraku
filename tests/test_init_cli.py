@@ -5,14 +5,31 @@ from hiraku.cli import main
 from hiraku.config import HirakuConfig
 
 
+def test_example_list_outside_project(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["example", "list"])
+    assert result.exit_code == 0, result.output
+    for name in ("minimal", "heart-disease", "digits-mlflow", "workflows"):
+        assert name in result.output
+    assert "Start from scratch" in result.output
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("command", ["clone", "git"])
+def test_removed_commands(command):
+    result = CliRunner().invoke(main, [command])
+    assert result.exit_code == 2
+    assert "No such command" in result.output
+
+
 @pytest.mark.parametrize(
     ("arguments", "destination", "example"),
     [
         (["init"], ".", False),
         (["init", "my-project"], "my-project", False),
-        (["clone", "minimal"], "minimal", True),
-        (["clone", "minimal", "my-project"], "my-project", True),
-        (["clone", "minimal", "."], ".", True),
+        (["example", "create", "minimal"], "minimal", True),
+        (["example", "create", "minimal", "my-project"], "my-project", True),
+        (["example", "create", "minimal", "."], ".", True),
     ],
 )
 def test_project_destination(tmp_path, monkeypatch, arguments, destination, example):
@@ -67,7 +84,7 @@ def test_plain_reinitialization_leaves_project_unchanged(
 
 @pytest.mark.parametrize(
     "command",
-    [["clone", "minimal"], ["init", "--tracking-backend", "mlflow"]],
+    [["example", "create", "minimal"], ["init", "--tracking-backend", "mlflow"]],
 )
 def test_reinitialization_with_options_is_rejected(tmp_path, command):
     config = HirakuConfig.init(tmp_path)
@@ -84,7 +101,7 @@ def test_example_collision_leaves_destination_unchanged(tmp_path, monkeypatch):
     root.mkdir()
     (root / "evaluate.py").write_text("existing code\n")
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["clone", "minimal"])
+    result = CliRunner().invoke(main, ["example", "create", "minimal"])
     assert result.exit_code == 1
     assert "overwrite" in result.output
     assert list(root.iterdir()) == [root / "evaluate.py"]
@@ -94,7 +111,7 @@ def test_example_collision_leaves_destination_unchanged(tmp_path, monkeypatch):
 @pytest.mark.parametrize("example", ["missing", "../outside"])
 def test_invalid_example_creates_no_destination(tmp_path, monkeypatch, example):
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["clone", example])
+    result = CliRunner().invoke(main, ["example", "create", example])
     assert result.exit_code == 1
     assert list(tmp_path.iterdir()) == []
 
@@ -123,17 +140,18 @@ def test_init_rejects_example_options(tmp_path, monkeypatch, option):
     assert not list(tmp_path.iterdir())
 
 
-def test_clone_can_initialize_git(tmp_path, monkeypatch):
+def test_example_create_can_initialize_git(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["clone", "minimal", "--git"])
+    result = CliRunner().invoke(main, ["example", "create", "minimal", "--git"])
     assert result.exit_code == 0, result.output
     assert (tmp_path / "minimal/.git").is_dir()
     assert (tmp_path / "minimal/evaluate.py").is_file()
 
 
-def test_clone_requires_example_and_rejects_template(tmp_path, monkeypatch):
+def test_example_create_requires_example_and_rejects_template(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
-    assert runner.invoke(main, ["clone"]).exit_code == 2
-    assert runner.invoke(main, ["clone", "minimal", "--template", "."]).exit_code == 2
+    assert runner.invoke(main, ["example", "create"]).exit_code == 2
+    result = runner.invoke(main, ["example", "create", "minimal", "--template", "."])
+    assert result.exit_code == 2
     assert not list(tmp_path.iterdir())
