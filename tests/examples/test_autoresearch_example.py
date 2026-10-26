@@ -74,7 +74,7 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
     )
     monkeypatch.chdir(project)
     runner = CliRunner()
-    invoke(runner, ["init", "--example", "autoresearch"])
+    invoke(runner, ["example", "create", "autoresearch", "."])
     git(project, "add", ".gitignore", "cpu_mock.py")
     git(project, "commit", "-m", "add Hiraku autoresearch workflow")
 
@@ -124,7 +124,7 @@ def test_autoresearch_is_an_overlay() -> None:
     readme = (DOCS_EXAMPLE / "README.md").read_text(encoding="utf-8")
     assert "git clone https://github.com/karpathy/autoresearch.git" in readme
     assert "git checkout" not in readme
-    assert "hiraku init --example autoresearch" in readme
+    assert "hiraku example create autoresearch ." in readme
     assert "example_dir=" not in readme
     assert "/hiraku/*" in readme
     assert "/.agents/" in readme

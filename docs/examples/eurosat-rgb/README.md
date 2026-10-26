@@ -19,11 +19,8 @@ uv tool install --force '.[wandb]'
 Then create a project and let Hiraku install the training script, model definitions, and dependencies for this example.
 
 ```bash
-mkdir eurosat-rgb
+hiraku example create eurosat-rgb --git
 cd eurosat-rgb
-git init
-
-hiraku init --example eurosat-rgb
 uv sync
 
 git add .

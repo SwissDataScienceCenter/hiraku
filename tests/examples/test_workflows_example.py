@@ -36,7 +36,7 @@ def runner(tmp_path: Path, monkeypatch) -> CliRunner:
     subprocess.run(["git", "init", "-b", "main"], cwd=project, check=True)
     monkeypatch.chdir(project)
     selected = CliRunner()
-    invoke(selected, ["init", "--example", "workflows"])
+    invoke(selected, ["example", "create", "workflows", "."])
     workflows = project / "hiraku" / "workflows"
     assert (workflows / "count-steps" / "workflow.py").is_file()
     assert (workflows / "greet" / "workflow.md").is_file()

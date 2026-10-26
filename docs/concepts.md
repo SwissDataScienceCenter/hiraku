@@ -44,10 +44,10 @@ At any time, a single record can be set as "active". By default, creation activa
 The CLI provides a standardized interface for managing data records, .e.g
 
 ```bash
-hiraku init  # initialize at the current Git repository root
-hiraku init PATH --ignore-git  # explicitly skip Git-root validation
+hiraku init  # initialize in the current directory; Git is optional
+hiraku init PATH --git  # also initialize the code Git repository
 hiraku init --template ./path/to/template  # apply a local project overlay
-hiraku init --example <name>  # apply the src/ tree of a packaged example
+hiraku example create <name> .  # apply a packaged example in the current directory
 
 hiraku record create <root-id>
 hiraku record create <child-id> --parent <root-id> --type experiment

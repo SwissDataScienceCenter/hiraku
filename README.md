@@ -55,13 +55,11 @@ project's environment, install the tracking SDK in that project instead.
 
 ## Quickstart
 
-Create and initialize a project in a Git repository:
+Create and initialize a project (Git is optional):
 
 ```bash
-mkdir my-project
+hiraku init my-project
 cd my-project
-git init
-hiraku init
 ```
 
 Hiraku connects research questions to experiment records, launches, tracked
@@ -84,7 +82,7 @@ complete walkthrough, or browse the other runnable projects below.
 - [Workflow examples](docs/examples/workflows/README.md) — try small Python and Markdown workflows.
 - [Autoresearch](docs/examples/autoresearch/README.md) — run a research loop on Karpathy's autoresearch project.
 
-Initialize an example with `hiraku init --example NAME`. To include prepared
+Initialize an example with `hiraku example create NAME`. To include prepared
 results or generate them, use one of these options:
 
 <details>
@@ -92,12 +90,24 @@ results or generate them, use one of these options:
 
 | Command | Result |
 | --- | --- |
-| `hiraku init --example NAME` | Copy the runnable project files only |
-| `hiraku init --example NAME --with-results` | Also copy bundled records and measured runs |
-| `hiraku init --example NAME --with-generator` | Also copy `generate_results.py` for running later |
-| `hiraku init --example NAME --generate` | Generate fresh records and runs immediately |
+| `hiraku example create NAME` | Copy the runnable project files only |
+| `hiraku example create NAME --with-results` | Also copy bundled records and measured runs |
+| `hiraku example create NAME --with-generator` | Also copy `generate_results.py` for running later |
+| `hiraku example create NAME --generate` | Generate fresh records and runs immediately |
 
-Prepared results and generators are available for the Heart Disease and Digits
+Use `hiraku example list` to see the available starting points.
+
+`hiraku init [PATH]` initializes the current or explicit directory, optionally
+using a local `--template`. `hiraku example create NAME [PATH]` creates a project from a
+bundled example, without Git history or network access. Its default destination
+is `./NAME`. Use
+`hiraku example create NAME .` to initialize the current directory, or
+`hiraku example create NAME my-project` to choose another destination.
+Initialization does not require Git. Add `--git` to initialize the code repository
+as a convenience. Repeating plain `hiraku init` leaves an initialized project
+unchanged; repeating it with `--git` can add the code repository later.
+
+The results and generator modes are available for the Heart Disease and Digits
 examples. `--generate` cannot be combined with `--with-results`; generation can
 take time and may install the example's dependencies.
 
@@ -122,9 +132,8 @@ the tree, ready for your own plots or marimo's AI assistant.
 Try every dashboard mode without training by loading the bundled Digits runs:
 
 ```bash
-mkdir digits-dashboard && cd digits-dashboard
-git init
-hiraku init --example digits-mlflow --with-results
+hiraku example create digits-mlflow digits-dashboard --with-results
+cd digits-dashboard
 hiraku dashboard --record digits                 # read-only
 hiraku dashboard --include-code --record digits  # read-only, with source
 hiraku dashboard --init --edit --record digits   # copy and edit

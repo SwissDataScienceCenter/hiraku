@@ -6,7 +6,7 @@ existing checkout of [`karpathy/autoresearch`](https://github.com/karpathy/autor
 From the upstream repository root, run:
 
 ```bash
-hiraku init --example autoresearch
+hiraku example create autoresearch .
 ```
 
 See `docs/examples/autoresearch/README.md` in the Hiraku repository for the

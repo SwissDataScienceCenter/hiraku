@@ -29,7 +29,7 @@ def test_generator_refuses_existing_output(generator, tmp_path):
 
 def test_init_with_generator_and_existing_project(tmp_path):
     runner = CliRunner()
-    args = ["init", str(tmp_path), "--example", "heart-disease", "--ignore-git"]
+    args = ["example", "create", "heart-disease", str(tmp_path)]
     assert runner.invoke(main, [*args, "--with-generator"]).exit_code == 0
     assert (tmp_path / "generate_results.py").is_file()
     assert not (tmp_path / "runs.csv").exists()
@@ -51,12 +51,11 @@ def test_init_generates_once(tmp_path, monkeypatch, copy_generator):
     result = CliRunner().invoke(
         main,
         [
-            "init",
-            str(tmp_path),
-            "--example",
+            "example",
+            "create",
             "heart-disease",
+            str(tmp_path),
             "--generate",
-            "--ignore-git",
             *flags,
         ],
     )
@@ -66,17 +65,17 @@ def test_init_generates_once(tmp_path, monkeypatch, copy_generator):
 
 
 @pytest.mark.parametrize(
-    "flags",
+    "arguments",
     [
-        ["--generate"],
-        ["--with-generator"],
-        ["--example", "minimal", "--generate"],
-        ["--example", "minimal", "--with-generator"],
-        ["--example", "heart-disease", "--with-results", "--generate"],
+        ["init", "--generate"],
+        ["init", "--with-generator"],
+        ["example", "create", "minimal", "--generate"],
+        ["example", "create", "minimal", "--with-generator"],
+        ["example", "create", "heart-disease", "--with-results", "--generate"],
     ],
 )
-def test_invalid_generation_options_leave_no_project(tmp_path, flags):
-    result = CliRunner().invoke(main, ["init", str(tmp_path), "--ignore-git", *flags])
+def test_invalid_generation_options_leave_no_project(tmp_path, arguments):
+    result = CliRunner().invoke(main, [*arguments, str(tmp_path)])
     assert result.exit_code != 0
     assert not (tmp_path / "hiraku.yml").exists()
 
@@ -92,12 +91,11 @@ def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch)
     result = CliRunner().invoke(
         main,
         [
-            "init",
-            str(tmp_path),
-            "--example",
+            "example",
+            "create",
             "heart-disease",
+            str(tmp_path),
             "--generate",
-            "--ignore-git",
         ],
     )
     assert result.exit_code == 1

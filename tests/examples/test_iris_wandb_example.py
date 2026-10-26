@@ -108,7 +108,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     git(project, "config", "user.name", "Test")
     runner = CliRunner()
 
-    invoke(runner, ["init", "--example", "iris-wandb"])
+    invoke(runner, ["example", "create", "iris-wandb", "."])
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize Iris W&B example")
     source_commit = git(project, "rev-parse", "HEAD")

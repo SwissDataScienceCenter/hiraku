@@ -16,10 +16,8 @@ uv tool install --force .
 Then create a project and let Hiraku install the training script, processed
 dataset, and dependencies for this example.
 ```bash
-mkdir heart-disease
+hiraku example create heart-disease --git
 cd heart-disease
-git init
-hiraku init --example heart-disease
 ```
 Initialization creates `hiraku.yml`, metadata directories, and the agent
 skill. The `heart-disease` example also copies `train.py`, `pyproject.toml`, and

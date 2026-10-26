@@ -274,14 +274,12 @@ shown.
 
 The bundled Digits example includes three records and six measured MLflow runs,
 so you can try the dashboard without training first. Install both optional
-extras, then initialize a new Git repository with the prepared results:
+extras, then create a project with the prepared results (Git is optional):
 
 ```bash
 uv tool install "hiraku[dashboard,mlflow]"
-mkdir digits-dashboard
+hiraku example create digits-mlflow digits-dashboard --with-results
 cd digits-dashboard
-git init
-hiraku init --example digits-mlflow --with-results
 hiraku dashboard --record digits
 ```
 

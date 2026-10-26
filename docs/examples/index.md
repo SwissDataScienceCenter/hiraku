@@ -18,14 +18,14 @@ The examples are runnable projects that show the Hiraku lifecycle with different
       browse results without training.
 
       ```bash
-      hiraku init --example heart-disease --with-results
+      hiraku example create heart-disease --with-results
       ```
 
     - `--with-generator` copies `generate_results.py` into the new project so
       you can create fresh runs later.
 
       ```bash
-      hiraku init --example heart-disease --with-generator
+      hiraku example create heart-disease --with-generator
       ```
 
     - `--generate` creates fresh runs during initialization. It cannot be
@@ -33,7 +33,7 @@ The examples are runnable projects that show the Hiraku lifecycle with different
       installing the example's dependencies.
 
       ```bash
-      hiraku init --example heart-disease --generate
+      hiraku example create heart-disease --generate
       ```
 
     See each example's README for details about its prepared results and

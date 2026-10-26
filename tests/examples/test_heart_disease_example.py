@@ -40,7 +40,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
     git(project, "config", "user.email", "test@example.invalid")
     git(project, "config", "user.name", "Test")
     runner = CliRunner()
-    invoke(runner, ["init", "--example", "heart-disease"])
+    invoke(runner, ["example", "create", "heart-disease", "."])
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize")
     source_commit = git(project, "rev-parse", "HEAD")

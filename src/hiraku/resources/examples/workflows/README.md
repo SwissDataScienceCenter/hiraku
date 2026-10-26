@@ -11,7 +11,7 @@ This example installs three small workflows that do no research work:
   reaches a target.
 
 ```bash
-hiraku init --example workflows
+hiraku example create workflows .
 ```
 
 Ask your coding agent to start count-steps with count 3, greet with name Ada,

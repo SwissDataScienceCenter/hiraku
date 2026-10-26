@@ -20,7 +20,6 @@ class HirakuConfig(BaseModel):
         root: Project root directory.
         hiraku_dir_name: Relative state directory name.
         default_dispatch: Default launcher script.
-        branch: Record branch template.
         tracking_backend: Backend configuration mapping with a required ``type``.
 
     Raises:
@@ -34,7 +33,6 @@ class HirakuConfig(BaseModel):
     DEFAULTS: ClassVar[dict[str, Any]] = {
         "hiraku_dir": "hiraku",
         "default_dispatch": "launch.sh",
-        "branch": "hiraku/records/{record_id}",
         "tracking_backend": {"type": "csv"},
         "active_record_id": None,
     }
@@ -48,7 +46,6 @@ class HirakuConfig(BaseModel):
         default=DEFAULTS["hiraku_dir"], alias="hiraku_dir", min_length=1
     )
     default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
-    branch: str = Field(default=DEFAULTS["branch"], min_length=1)
     tracking_backend: dict[str, Any] = Field(
         default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
     )
@@ -154,7 +151,6 @@ class HirakuConfig(BaseModel):
         *,
         install_skill: bool = True,
         tracking_backend: str | None = None,
-        ignore_git: bool = True,
         template: Path | str | None = None,
         example: str | None = None,
         results: bool = False,
@@ -167,8 +163,6 @@ class HirakuConfig(BaseModel):
             install_skill: Whether to install the repository-local skill for
                 supported coding agents.
             tracking_backend: Optional default tracking backend name.
-            ignore_git: Skip validation that root is a Git repository root.
-                Defaults to true for programmatic initialization.
             template: Optional local directory copied over the initialized project.
             example: Optional packaged example name whose ``src`` tree is copied.
             results: Include the example's prepared records and tracked runs.
@@ -179,8 +173,6 @@ class HirakuConfig(BaseModel):
 
         Raises:
             hiraku.errors.ProjectExistsError: If the project is already initialized.
-            hiraku.errors.ValidationError: If root is not a Git repository root
-                and ignore_git is false.
         """
         from .project import ProjectInitializer
 
@@ -188,7 +180,6 @@ class HirakuConfig(BaseModel):
             root,
             install_skill=install_skill,
             tracking_backend=tracking_backend,
-            ignore_git=ignore_git,
             template=template,
             example=example,
             results=results,
