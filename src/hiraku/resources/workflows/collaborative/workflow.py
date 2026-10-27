@@ -45,7 +45,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     rules = str(fields.get("rules", "")).strip()
 
     def initialize(state: ResearchState) -> Command[Literal["draft"]]:
-        arguments = state.get("arguments", {})
+        arguments = state.arguments
         if not isinstance(arguments, dict):
             raise ValidationError("arguments must be an object")
         unknown = set(arguments) - {"task", "command", "rounds"}
@@ -89,8 +89,8 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 "arguments": "object matching the selected event's fields",
             },
         }
-        if state.get("feedback"):
-            payload["feedback"] = state["feedback"]
+        if state.feedback:
+            payload["feedback"] = state.feedback
         return payload
 
     def response_for(
@@ -147,7 +147,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         return Command(update={"step": "done"}, goto="done")
 
     def draft(state: ResearchState) -> Command[Literal["draft", "implement", "done"]]:
-        data = {"task": state["task"], "previous": state.get("results", [])}
+        data = {"task": state.task, "previous": state.results}
         response = response_for(state, "draft", data)
         event, arguments = response["event"], response["arguments"]
         if event == "finish":
@@ -175,7 +175,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         try:
             record = Record.create(
                 arguments["record_id"],
-                parent_id=state["task"],
+                parent_id=state.task,
                 type="experiment",
                 status="drafted",
                 summary=arguments["summary"],
@@ -192,7 +192,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         )
 
     def experiment(state: ResearchState) -> Record:
-        identifier = state.get("experiment")
+        identifier = state.experiment
         if not identifier:
             raise ValidationError("No experiment has been drafted")
         return load_record(identifier, config=config)
@@ -200,7 +200,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     def experiment_context(state: ResearchState) -> dict[str, Any]:
         record = experiment(state)
         return {
-            "task": state["task"],
+            "task": state.task,
             "experiment": {
                 "record_id": record.id,
                 "summary": getattr(record, "summary", None),
@@ -291,7 +291,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         data = {
             **experiment_context(state),
             "runs": [{"run_id": run.id, "metrics": dict(run.metrics)} for run in runs],
-            "previous": state.get("results", []),
+            "previous": state.results,
         }
         response = response_for(state, "analyze", data)
         event, arguments = response["event"], response["arguments"]
@@ -322,10 +322,10 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         record.conclusion = conclusion
         record.save()
         results = [
-            *state.get("results", []),
+            *state.results,
             {"record_id": record.id, "verdict": verdict},
         ]
-        next_step = "draft" if len(results) < state["rounds"] else "done"
+        next_step = "draft" if len(results) < state.rounds else "done"
         return Command(
             update={
                 "results": results,
@@ -338,9 +338,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
 
     def done(state: ResearchState) -> dict[str, str]:
         return {
-            "final": render(
-                markdown.section("## Done"), {"results": state.get("results", [])}
-            )
+            "final": render(markdown.section("## Done"), {"results": state.results})
         }
 
     builder = StateGraph(ResearchState)

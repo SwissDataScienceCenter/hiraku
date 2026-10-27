@@ -43,6 +43,14 @@ and the SQLite checkpointer owns resumable state. A run can be resumed after
 restarting Hiraku as long as its project and checkpoint database remain
 available.
 
+The bundled `collaborative` workflow also has approval gates. Call the MCP
+`workflow_approval(run_id, proposal)` tool at those gates. It opens a structured
+MCP elicitation and waits for the user's choice before returning `approve`,
+`revise`, or `stop`. If the user cancels or declines elicitation, leave the run
+paused and do not launch the experiment. Otherwise continue the graph with the
+matching response to `workflow_resume`. For the launch stage, request approval
+before running the launch command.
+
 ## Define a workflow
 
 Create `hiraku/workflows/greet/workflow.md`:

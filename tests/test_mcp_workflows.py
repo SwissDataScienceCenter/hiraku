@@ -17,6 +17,7 @@ def test_workflow_mcp_uses_generic_langgraph_controls(tmp_path) -> None:
         "workflow_start",
         "workflow_status",
         "workflow_resume",
+        "workflow_approval",
     } <= names
     assert (
         not {

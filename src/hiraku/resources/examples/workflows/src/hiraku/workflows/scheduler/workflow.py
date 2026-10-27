@@ -6,11 +6,12 @@ import json
 import random
 import secrets
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
+from pydantic import BaseModel, ConfigDict, Field
 
 from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
@@ -19,19 +20,21 @@ from hiraku.markdown import Markdown, render
 from hiraku.record import Record, load_record
 
 
-class SchedulerState(TypedDict, total=False):
-    arguments: dict[str, Any]
-    run_id: str
-    parent: str
-    target: int
-    current: str | None
-    baseline: int
-    priority: int
-    remaining: int
-    response: dict[str, Any]
-    error: str
-    final: str
-    records: list[dict[str, Any]]
+class SchedulerState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    run_id: str = ""
+    parent: str = ""
+    target: int = 0
+    current: str | None = None
+    baseline: int = 0
+    priority: int = 0
+    remaining: int = 0
+    response: dict[str, Any] = Field(default_factory=dict)
+    error: str = ""
+    final: str = ""
+    records: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
@@ -52,8 +55,8 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             )
     markdown = Markdown(body)
 
-    def initialize(state: SchedulerState) -> SchedulerState:
-        arguments = state.get("arguments", {})
+    def initialize(state: SchedulerState) -> dict[str, Any]:
+        arguments = state.arguments
         if not isinstance(arguments, dict):
             raise ValidationError("arguments must be an object")
         unknown = set(arguments) - {"records", "target"}
@@ -87,9 +90,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             )
         return {"parent": parent.id, "target": target}
 
-    def assign(state: SchedulerState) -> SchedulerState:
-        children = _children(state["parent"], config)
-        open_records = [item for item in children if _count(item) < state["target"]]
+    def assign(state: SchedulerState) -> dict[str, Any]:
+        children = _children(state.parent, config)
+        open_records = [item for item in children if _count(item) < state.target]
         selected = max(
             open_records,
             key=lambda item: (_priority(item), item.id),
@@ -114,53 +117,53 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             "baseline": _count(selected),
             "priority": _priority(selected),
             "remaining": sum(
-                state["target"] - _count(item)
+                state.target - _count(item)
                 for item in children
-                if _count(item) < state["target"]
+                if _count(item) < state.target
             ),
             "error": "",
         }
 
-    def handoff(state: SchedulerState) -> SchedulerState:
-        record_id = state["current"]
+    def handoff(state: SchedulerState) -> dict[str, Any]:
+        record_id = state.current
         values = {
             "record": record_id,
-            "count": state["baseline"],
-            "next": state["baseline"] + 1,
-            "run_id": state["run_id"],
+            "count": state.baseline,
+            "next": state.baseline + 1,
+            "run_id": state.run_id,
         }
         payload: dict[str, Any] = {
             "instruction": render(markdown.section("## Work"), values),
             "data": {
                 **values,
-                "priority": state["priority"],
-                "remaining": state["remaining"],
-                "parent": state["parent"],
+                "priority": state.priority,
+                "remaining": state.remaining,
+                "parent": state.parent,
             },
             "response_schema": {"record_id": "string: assigned record ID"},
         }
-        if state.get("error"):
-            payload["error"] = state["error"]
+        if state.error:
+            payload["error"] = state.error
         return {"response": interrupt(payload)}
 
-    def validate_update(state: SchedulerState) -> SchedulerState:
-        response = state["response"]
+    def validate_update(state: SchedulerState) -> dict[str, Any]:
+        response = state.response
         if not isinstance(response, dict):
             return {"error": "Response must be an object with record_id."}
-        if response.get("record_id") != state["current"]:
-            return {"error": f"Report the assigned record {state['current']!r}."}
-        record = load_record(str(state["current"]), config=config)
+        if response.get("record_id") != state.current:
+            return {"error": f"Report the assigned record {state.current!r}."}
+        record = load_record(str(state.current), config=config)
         count = _count(record)
-        expected = state["baseline"] + 1
+        expected = state.baseline + 1
         if count != expected:
             return {"error": f"The count is {count}; set it to {expected}."}
         return {"error": ""}
 
     def route_update(state: SchedulerState) -> str:
-        return "retry" if state.get("error") else "assign"
+        return "retry" if state.error else "assign"
 
-    def finish(state: SchedulerState) -> SchedulerState:
-        values = {"records": json.dumps(state["records"], indent=2)}
+    def finish(state: SchedulerState) -> dict[str, Any]:
+        values = {"records": json.dumps(state.records, indent=2)}
         return {"final": render(markdown.section("## Done"), values)}
 
     builder = StateGraph(SchedulerState)
@@ -173,7 +176,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     builder.add_edge("initialize", "assign")
     builder.add_conditional_edges(
         "assign",
-        lambda state: "finish" if state.get("current") is None else "work",
+        lambda state: "finish" if state.current is None else "work",
         {"finish": "finish", "work": "harness_step"},
     )
     builder.add_edge("harness_step", "validate_update")

@@ -55,7 +55,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
 | Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
-| Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
+| Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; collaborative approvals use `workflow_approval`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
 | Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
@@ -110,7 +110,8 @@ Classify the request before acting:
 - **LangGraph workflow:** Start or continue a research loop only when the user
   explicitly requests it. Read the workflow definition and follow its guidance
   and the user's constraints, permissions, budgets, checkpoints, and stopping
-  condition.
+  condition. For collaborative workflow approval gates, call
+  `workflow_approval` and wait for its structured MCP elicitation result.
 
 Infer routine identifiers, summaries, hypotheses, metrics, and command
 arguments from the user's request and the repository. Ask a question only when
@@ -324,7 +325,8 @@ User instructions override workflow defaults.
 Start workflows with their declared input object. Follow each LangGraph
 interrupt's response schema, resume the same workflow session, and inspect its
 stored state before repeating consequential work. User approval requested by
-workflow text remains a conversational contract.
+workflow text remains a conversational contract. If elicitation is cancelled
+or declined, leave the workflow paused and do not launch the experiment.
 
 Commands are not record metadata. Pass the complete invocation directly after
 `--`, for example `hiraku run --record <record-id> -- uv run --locked python

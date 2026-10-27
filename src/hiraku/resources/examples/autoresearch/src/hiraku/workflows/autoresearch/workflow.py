@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, ConfigDict
 
 from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
 from hiraku.markdown import Markdown
 
 
-class AutoresearchState(TypedDict, total=False):
-    final: str
+class AutoresearchState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    final: str = ""
 
 
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:

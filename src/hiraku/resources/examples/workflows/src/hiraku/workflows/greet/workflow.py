@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
-from pydantic import ConfigDict, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.base import BaseRecord
@@ -16,9 +16,11 @@ from hiraku.errors import ValidationError
 from hiraku.markdown import Markdown, render
 
 
-class GreetState(TypedDict, total=False):
-    arguments: dict[str, Any]
-    final: str
+class GreetState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    final: str = ""
 
 
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
@@ -38,9 +40,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     )
     markdown = Markdown(body)
 
-    def greet(state: GreetState) -> GreetState:
+    def greet(state: GreetState) -> dict[str, str]:
         try:
-            arguments = argument_model.model_validate(state.get("arguments", {}))
+            arguments = argument_model.model_validate(state.arguments)
         except PydanticValidationError as exc:
             raise ValidationError(str(exc)) from exc
         return {"final": render(markdown, arguments.model_dump())}

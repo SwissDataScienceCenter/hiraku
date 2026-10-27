@@ -5,11 +5,13 @@ from typing import Any
 import anyio
 import pytest
 from click.testing import CliRunner
+from mcp import Client, types
+from mcp.server.elicitation import render_elicitation_schema
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
-from hiraku.mcp import create_server
+from hiraku.mcp import WorkflowApproval, create_server
 from hiraku.record import Record
 from hiraku.workflows.langgraph import (
     resume_workflow,
@@ -36,12 +38,24 @@ def _interrupt(result: dict[str, Any]) -> dict[str, Any]:
     return result["interrupts"][0]["value"]
 
 
+def test_workflow_approval_schema_omits_codex_unsupported_root_title() -> None:
+    schema = render_elicitation_schema(WorkflowApproval)
+    assert set(schema) <= {"type", "properties", "required", "$schema"}
+    assert schema["properties"]["decision"]["enum"] == [
+        "approve",
+        "revise",
+        "stop",
+    ]
+    assert set(schema["properties"]) == {"decision"}
+
+
 def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     config = _project(tmp_path)
     server = create_server(config)
     assert {"workflow_start", "workflow_status", "workflow_resume"}.issubset(
         _tool_names(server)
     )
+    assert "workflow_approval" in _tool_names(server)
 
     started = start_workflow("count-steps", {"count": 2}, config=config)
     first = _interrupt(started)
@@ -121,6 +135,7 @@ def test_mcp_exposes_only_the_langgraph_workflow_interface(tmp_path) -> None:
         "workflow_start",
         "workflow_status",
         "workflow_resume",
+        "workflow_approval",
     } <= tools
     assert (
         not {
@@ -175,3 +190,84 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     completed = resume_workflow(started["run_id"], {"event": "finish"}, config=config)
     assert completed["status"] == "completed"
     assert "results" in completed["result"]
+
+
+def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    Record.create(
+        "task",
+        type="task",
+        config=config,
+        entrypoints={"train": {"command": ["python", "train.py"]}},
+    )
+    started = start_workflow("collaborative", {"rounds": 1}, config=config)
+    requested = []
+
+    async def elicit(_context, params):
+        requested.append(params)
+        return types.ElicitResult(
+            action="accept",
+            content={"decision": "approve"},
+        )
+
+    async def exercise() -> dict[str, Any]:
+        async with Client(
+            create_server(config),
+            elicitation_callback=elicit,
+        ) as client:
+            return await client.call_tool(
+                "workflow_approval",
+                {
+                    "run_id": started["run_id"],
+                    "proposal": "Try a larger learning rate.",
+                },
+            )
+
+    result = anyio.run(exercise)
+    assert len(requested) == 1
+    assert "draft" in requested[0].message
+    assert "larger learning rate" in requested[0].message
+    schema = requested[0].params.requested_schema
+    assert set(schema) <= {"type", "properties", "required", "$schema"}
+    assert schema["properties"]["decision"]["enum"] == [
+        "approve",
+        "revise",
+        "stop",
+    ]
+    assert set(schema["properties"]) == {"decision"}
+    assert result.structured_content == {"decision": "approve"}
+
+
+def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    Record.create(
+        "task",
+        type="task",
+        config=config,
+        entrypoints={"train": {"command": ["python", "train.py"]}},
+    )
+    started = start_workflow("collaborative", {"rounds": 1}, config=config)
+
+    async def elicit(_context, _params):
+        return types.ElicitResult(action="cancel")
+
+    async def exercise() -> tuple[Any, Any]:
+        async with Client(
+            create_server(config),
+            elicitation_callback=elicit,
+        ) as client:
+            approval = await client.call_tool(
+                "workflow_approval",
+                {
+                    "run_id": started["run_id"],
+                    "proposal": "Try a larger learning rate.",
+                },
+            )
+            status = await client.call_tool(
+                "workflow_status", {"run_id": started["run_id"]}
+            )
+            return approval, status
+
+    approval, status = anyio.run(exercise)
+    assert approval.structured_content == {"decision": "cancel"}
+    assert status.structured_content["status"] == "waiting"

@@ -94,6 +94,13 @@ Project workflows are LangGraph graphs. Use `workflow_list` to discover them,
 `workflow_resume` to continue an interrupted session. See the
 [Workflows guide](workflows.md).
 
+The bundled `collaborative` workflow also provides `workflow_approval(run_id,
+proposal)`. It uses MCP elicitation to show a structured approval, revision, or
+stop choice and waits for the user's answer before the tool call completes. If
+the user cancels or declines elicitation, the tool returns that outcome and the
+graph remains paused; do not resume the workflow or launch anything. Use it at
+each approval gate instead of asking through ordinary assistant text.
+
 ## Prompt template
 
 The optional `propose_implementation` prompt takes a `record_id` and a

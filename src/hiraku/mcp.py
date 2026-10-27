@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import mimetypes
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import (
     ResourceError,
     ToolError,
@@ -18,7 +18,7 @@ from mcp.server.mcpserver.exceptions import (
 from mcp.types import (
     ToolAnnotations,
 )
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
@@ -37,10 +37,22 @@ INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, runs commands with execute, and runs LangGraph
 workflows. Use workflow_start, workflow_status, and workflow_resume to operate
-a workflow.\
+a workflow. For the collaborative workflow, use workflow_approval to ask the
+user for approval; it opens a structured MCP elicitation and waits for the
+user's answer.\
 """
 
 logger = logging.getLogger(__name__)
+
+
+class WorkflowApproval(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra=lambda schema: schema.pop("title", None)
+    )
+
+    decision: Literal["approve", "revise", "stop"] = Field(
+        description="Whether to approve, request a revision, or stop."
+    )
 
 
 def _data(record: BaseRecord) -> dict[str, Any]:
@@ -310,6 +322,44 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     ) -> dict[str, Any]:
         return resume_langgraph_workflow(run_id, response, config=project())
 
+    def resolve_workflow_approval(
+        run_id: str, proposal: str
+    ) -> Elicit[WorkflowApproval]:
+        status = langgraph_workflow_status(run_id, config=project())
+        if status["workflow_id"] != "collaborative":
+            raise ValidationError("Approval elicitation is for collaborative runs")
+        if status["status"] != "waiting" or not status["interrupts"]:
+            raise ValidationError("This workflow run is not waiting for approval")
+        interrupt = status["interrupts"][0]["value"]
+        step = interrupt.get("step")
+        if step not in {"draft", "implement", "launch", "analyze"}:
+            raise ValidationError("The current collaborative step cannot be approved")
+        return Elicit(
+            message=(
+                f"Review the proposed {step} step for workflow {run_id}.\n\n"
+                f"{proposal}\n\nChoose approve, revise, or stop."
+            ),
+            schema=WorkflowApproval,
+        )
+
+    def workflow_approval(
+        run_id: Annotated[str, Field(description="Run ID returned by workflow_start.")],
+        proposal: Annotated[
+            str, Field(description="Concise proposal or result to show the user.")
+        ],
+        approval: Annotated[
+            ElicitationResult[WorkflowApproval], Resolve(resolve_workflow_approval)
+        ],
+    ) -> dict[str, str]:
+        """Ask the user to approve, revise, or stop a collaborative workflow step."""
+        if approval.action == "accept":
+            return {"decision": approval.data.decision}
+        return {"decision": approval.action}
+
+    workflow_approval.__annotations__["approval"] = Annotated[
+        ElicitationResult[WorkflowApproval], Resolve(resolve_workflow_approval)
+    ]
+
     server.add_tool(
         workflow_list,
         description="List project LangGraph workflows.",
@@ -332,6 +382,15 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     server.add_tool(
         workflow_resume,
         description="Resume a paused LangGraph run with the response to its interrupt.",
+        annotations=ToolAnnotations(read_only_hint=False),
+    )
+    server.add_tool(
+        workflow_approval,
+        description=(
+            "Open a structured MCP approval prompt for a collaborative workflow "
+            "step and wait for the user's decision. Call this before resuming the "
+            "step, and before launching work that requires approval."
+        ),
         annotations=ToolAnnotations(read_only_hint=False),
     )
 
