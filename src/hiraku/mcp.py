@@ -30,7 +30,7 @@ from .record import Record, list_records, load_record
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details
-from .workflows.langgraph import workflow_ids
+from .workflows.langgraph import workflow_ids, workflow_mermaid
 from .workflows.langgraph import workflow_status as langgraph_workflow_status
 
 INSTRUCTIONS = """\
@@ -348,6 +348,15 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         if not markdown_path.is_file():
             return ""
         return markdown_path.read_text(encoding="utf-8").strip()
+
+    @server.resource(
+        "hiraku://workflows/{workflow_id}/graph",
+        name="workflow_graph",
+        description="LangGraph workflow topology as Mermaid text",
+        mime_type="text/vnd.mermaid",
+    )
+    def workflow_graph_resource(workflow_id: str) -> str:
+        return workflow_mermaid(workflow_id, config=project())
 
 
 def _research_content(kind: str, identifier: str, config: HirakuConfig) -> str:

@@ -90,6 +90,12 @@ def workflow_status(run_id: str, *, config: HirakuConfig) -> dict[str, Any]:
         return _snapshot_result(graph, graph_workflow, run_id)
 
 
+def workflow_mermaid(workflow_id: str, *, config: HirakuConfig) -> str:
+    """Render a workflow's compiled LangGraph topology as Mermaid text."""
+    with _compiled_graph(workflow_id, config) as graph:
+        return graph.get_graph().draw_mermaid()
+
+
 def _find_run(run_id: str, config: HirakuConfig) -> str | None:
     workflow_id, separator, checkpoint_id = run_id.partition(":")
     if (

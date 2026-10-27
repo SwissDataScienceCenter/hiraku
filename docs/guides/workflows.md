@@ -11,10 +11,15 @@ List available graphs and start one:
 
 ```bash
 hiraku workflow list
+hiraku workflow graph count-steps
 hiraku workflow start count-steps --arguments-file - <<'JSON'
 {"count": 3}
 JSON
 ```
+
+`workflow graph` prints LangGraph's Mermaid view of the executable topology.
+It shows implementation nodes and edges, including loops and conditional
+routes.
 
 The response includes a `run_id`. This is the LangGraph `thread_id` used to
 identify the checkpointed run. Inspect it without advancing:

@@ -691,6 +691,16 @@ def workflow_list(state: CLIContext, json_output: bool) -> None:
     )
 
 
+@workflow_group.command("graph")
+@click.argument("workflow_id")
+@click.pass_obj
+def workflow_graph_command(state: CLIContext, workflow_id: str) -> None:
+    """Print a workflow's LangGraph topology as a Mermaid diagram."""
+    from .workflows.langgraph import workflow_mermaid
+
+    click.echo(workflow_mermaid(workflow_id, config=state.config), nl=False)
+
+
 _ARGUMENTS_FILE = click.option(
     "--arguments-file",
     type=click.File("r", encoding="utf-8"),

@@ -78,6 +78,7 @@ resources are loaded on each request, including after changes made outside MCP.
 | `hiraku://records/{record_id}` | Record fields and Markdown as JSON. |
 | `hiraku://workflows/{workflow_id}` | Prompt document of a workflow. |
 | `hiraku://sources/{record_id}/{source_path}` | File attached to a record as an MCP blob with its inferred MIME type. |
+| `hiraku://workflows/{workflow_id}/graph` | LangGraph topology as Mermaid text. |
 
 Place PDFs, literature reviews and other source files inside a record directory,
 for example `hiraku/records/literature/study.pdf`, alongside `literature.md`.

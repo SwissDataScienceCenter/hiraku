@@ -4,7 +4,9 @@ from typing import Any
 
 import anyio
 import pytest
+from click.testing import CliRunner
 
+from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.mcp import create_server
@@ -12,6 +14,7 @@ from hiraku.record import Record
 from hiraku.workflows.langgraph import (
     resume_workflow,
     start_workflow,
+    workflow_mermaid,
     workflow_status,
 )
 
@@ -131,6 +134,25 @@ def test_mcp_exposes_only_the_langgraph_workflow_interface(tmp_path) -> None:
         }
         & tools
     )
+
+
+def test_workflow_graph_is_available_from_cli_and_mcp(tmp_path, monkeypatch) -> None:
+    config = _project(tmp_path)
+    server = create_server(config)
+
+    monkeypatch.chdir(tmp_path)
+    cli_result = CliRunner().invoke(main, ["workflow", "graph", "count-steps"])
+    assert cli_result.exit_code == 0, cli_result.output
+    assert "graph TD" in cli_result.output
+    assert "harness_step" in cli_result.output
+
+    templates = anyio.run(server.list_resource_templates)
+    assert "hiraku://workflows/{workflow_id}/graph" in {
+        template.uri_template for template in templates
+    }
+    mermaid = workflow_mermaid("count-steps", config=config)
+    assert "graph TD" in mermaid
+    assert "harness_step" in mermaid
 
 
 def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
