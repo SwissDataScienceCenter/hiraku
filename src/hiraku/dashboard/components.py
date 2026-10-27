@@ -23,10 +23,10 @@ from ..errors import HirakuError
 from ..io import dump_yaml
 from ..record import Record
 from .data import (
-    ARTIFACT_COLUMNS,
     FILE_COLUMNS,
     arrow_frame,
     plot_frame,
+    record_label,
     run_text,
     safe_url,
     tradeoff_frame,
@@ -194,7 +194,8 @@ def record_tree(
             label=(
                 '<span class="hiraku-record-node">'
                 '<span class="dot" aria-hidden="true"></span>'
-                f'<span class="record-id">{html.escape(record.id)}</span> {badges}'
+                f'<span class="record-id">{html.escape(record_label(record))}</span> '
+                f'{badges}'
                 "</span>"
             ),
             full_width=True,
@@ -334,20 +335,42 @@ def file_details(
     return mo.Html(f"<div>{links}</div><pre>{html.escape(_text)}</pre>"), buttons
 
 
-def artifact_table(artifact_entries: Sequence[Mapping[str, Any]]) -> mo.ui.table:
+def artifact_table(
+    artifact_entries: Sequence[Mapping[str, Any]], *, documentation: bool = False
+) -> mo.ui.table:
     """Build the selectable registered-artifact table from ``artifact_rows``.
 
     The hidden ``key`` column identifies a row for ``artifact_details``.
     """
-    _rows = [
-        {name: row[name] for name in ARTIFACT_COLUMNS}
-        | {"documentation": ", ".join(row["documentation"])}
-        | {"used_by": ", ".join(item["step"] for item in row["used_by"])}
-        | {"built_by": ", ".join(item["step"] for item in row["built_by"])}
-        for row in artifact_entries
-    ]
+    _rows = []
+    for row in artifact_entries:
+        is_documentation = row["key"].startswith("documentation:")
+        if is_documentation != documentation:
+            continue
+        shown = {
+            "key": row["key"],
+            "Dataset": row.get("dataset_label") or row["dataset"],
+            "Description": row.get("description") or "",
+            "SOP": ", ".join(row["documentation"]),
+        }
+        if documentation:
+            shown.update({
+                "Referenced filename": row.get("filename") or "Unspecified",
+                "Observation": row.get("expectation") or "unknown",
+            })
+        else:
+            shown.update({
+                "File path": row["path"],
+                "Size (bytes)": row["size"],
+                "Availability": row["availability"],
+                "Used by": ", ".join(item["step"] for item in row["used_by"]),
+                "Built by": ", ".join(item["step"] for item in row["built_by"]),
+            })
+        _rows.append(shown)
     return mo.ui.table(
-        _rows or arrow_frame([], ARTIFACT_COLUMNS),
+        _rows or arrow_frame(
+            [], ("Dataset", "Referenced filename" if documentation else "File path")
+        ),
         selection="single",
         hidden_columns=["key"] if _rows else None,
         page_size=25,
@@ -375,9 +398,10 @@ def artifact_details(
             "Select an artifact to see its observation, source, and documentation."
         )
         return mo.as_html(message), {}
+    dataset_label = html.escape(_row.get("dataset_label") or _row["dataset"])
     buttons = {
         "dataset": mo.ui.button(
-            label=f"Dataset {html.escape(_row['dataset'])}",
+            label=f"Dataset {dataset_label}",
             on_click=lambda _, key=f"record:{_row['dataset']}": on_select(key),
         )
     }
@@ -388,11 +412,13 @@ def artifact_details(
                 label=f"{label} {html.escape(item['step'])} ({html.escape(run_id)})",
                 on_click=lambda _, key=f"run:{run_id}": on_select(key),
             )
+    # An SOP reference has no observed file, so its file fields are always empty.
     _text = dump_yaml(
         {
             name: value
             for name, value in _row.items()
             if name not in ("key", "dataset", "used_by", "built_by")
+            and value not in (None, "", [])
         }
     )
     links = " ".join(button.text for button in buttons.values())

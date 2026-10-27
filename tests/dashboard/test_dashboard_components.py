@@ -334,3 +334,41 @@ def test_file_details_select_the_producing_record_and_run() -> None:
         [{**FILE, "record": None, "last_run": None}], [{"key": "0"}], lambda _: None
     )
     assert buttons == {}
+
+
+def test_artifact_tables_separate_sop_references_and_hide_empty_file_fields() -> None:
+    from hiraku.dashboard.data import ProjectRuns, artifact_rows
+    from hiraku.registration import Registration
+
+    record = Record(
+        id="dataset-abc",
+        type="dataset",
+        registration=Registration.model_validate({
+            "namespace": "cohort",
+            "key": ["S1", "CyTOF"],
+            "metadata": {"sample_id": "S1", "technology": "CyTOF"},
+            "coverage": "exhaustive",
+            "artifacts": [{"key": "a", "display_path": "data/a.fcs",
+                           "availability": "present"}],
+            "documentation": [{"key": "sop-1", "filename": "gated.fcs",
+                               "source": "cytof/gating.md",
+                               "description": "Export gated events.",
+                               "expected_availability": "missing"}],
+        }).to_record_value(),
+    )
+    rows = artifact_rows(ProjectRuns(records=[record], runs=[]))
+
+    observed = hc.artifact_table(rows).data
+    references = hc.artifact_table(rows, documentation=True).data
+    [reference] = references.to_dict("records") if hasattr(
+        references, "to_dict") else references
+
+    assert len(observed) == 1
+    assert reference["Dataset"] == "S1 · CyTOF"
+    assert reference["Referenced filename"] == "gated.fcs"
+    assert reference["Description"] == "Export gated events."
+    assert reference["SOP"] == "cytof/gating.md"
+    selected = [row for row in rows if row["key"].startswith("documentation:")]
+    details, _ = hc.artifact_details(rows, selected, on_select=lambda key: None)
+    assert "null" not in details.text
+    assert "gated.fcs" in details.text

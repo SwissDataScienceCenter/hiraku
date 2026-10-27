@@ -66,6 +66,24 @@ def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:
     assert loaded.errors == []
 
 
+def test_load_resolves_shared_tracking_source_once(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = Record.resolve
+    calls = {"count": 0}
+
+    def counting_resolve(self: Record, **options):
+        calls["count"] += 1
+        return original(self, **options)
+
+    monkeypatch.setattr(Record, "resolve", counting_resolve)
+
+    loaded = load(project)
+
+    assert len(loaded.records) == 4
+    assert calls["count"] == 1
+
+
 def test_load_reports_unavailable_source_without_failing(
     project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -409,6 +427,26 @@ def test_artifact_rows_render_without_runs() -> None:
 
     assert rows == []
     assert list(arrow_frame(rows, ARTIFACT_COLUMNS).columns) == list(ARTIFACT_COLUMNS)
+
+
+def test_artifact_rows_skip_file_resolution_without_workflow_runs(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hiraku.dashboard.data as data
+
+    def unexpected_resolution(self, artifact):
+        raise AssertionError("no workflow files need matching")
+
+    monkeypatch.setattr(data._WorkflowFiles, "artifact_location", unexpected_resolution)
+    record = _registered_record(
+        "dataset-abc",
+        {"key": "data/a.csv", "display_path": "data/a.csv", "availability": "present"},
+    )
+
+    [row] = data.artifact_rows(data.ProjectRuns(records=[record], runs=[]), project)
+
+    assert row["used_by"] == []
+    assert row["built_by"] == []
 
 
 def test_artifact_rows_keep_documentation_keyed_by_document_and_dataset() -> None:

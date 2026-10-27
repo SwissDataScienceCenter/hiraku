@@ -50,6 +50,22 @@ def _copy_bundled(directory: Path) -> Path:
     return Path(shutil.copy2(BUNDLED_NOTEBOOK, directory))
 
 
+def _plain_notebook(source: Path, directory: Path) -> Path:
+    """Copy a dashboard without the Studio view declaration for proxy serving."""
+    view = source.parent / BUNDLED_VIEWS.name
+    if view.is_dir():
+        shutil.copytree(view, directory / view.name)
+    target = directory / source.name
+    content = source.read_text(encoding="utf-8")
+    content = content.replace(
+        '# [tool.marimo-studio]\n# default = "dashboard"\n# view_root = "studio"\n',
+        "",
+        1,
+    )
+    target.write_text(content, encoding="utf-8")
+    return target
+
+
 def build_command(
     python: str,
     notebook: Path,
@@ -90,6 +106,7 @@ def serve_dashboard(
     no_browser: bool = False,
     edit: bool = False,
     include_code: bool = False,
+    plain: bool = False,
 ) -> int:
     """Serve the dashboard until interrupted and return marimo's exit code.
 
@@ -102,6 +119,8 @@ def serve_dashboard(
         hiraku.errors.RecordNotFoundError: If ``record_id`` does not exist.
     """
     local = project_notebook(config)
+    if plain and edit:
+        raise ValidationError("--plain cannot be combined with --edit")
     if edit and not local.is_file():
         # The bundled notebook is installed package data; edits would be lost.
         raise ValidationError(
@@ -132,6 +151,10 @@ def serve_dashboard(
         )
         return _wait(subprocess.Popen(command, cwd=notebook.parent, env=environment))
 
+    if plain:
+        with tempfile.TemporaryDirectory(prefix="hiraku-dashboard-plain-") as directory:
+            return serve(_plain_notebook(local if local.is_file() else BUNDLED_NOTEBOOK,
+                                         Path(directory)))
     if local.is_file():
         return serve(local)
     # marimo writes session caches beside the notebook and in its working

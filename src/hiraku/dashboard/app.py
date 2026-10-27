@@ -189,7 +189,8 @@ def file_details(file_entries, file_selector, select_key):
 @app.cell
 def artifact_table(artifact_entries):
     artifact_selector = hc.artifact_table(artifact_entries)
-    mo.vstack([artifact_selector])
+    _count = sum(row["key"].startswith("artifact:") for row in artifact_entries)
+    mo.vstack([mo.md(f"### Observed files ({_count})"), artifact_selector])
     return (artifact_selector,)
 
 
@@ -200,6 +201,26 @@ def artifact_details(artifact_entries, artifact_selector, select_key):
     )
     mo.vstack([_details])
     return (artifact_buttons,)
+
+
+@app.cell
+def documentation_table(artifact_entries):
+    documentation_selector = hc.artifact_table(artifact_entries, documentation=True)
+    mo.vstack([
+        mo.md("### SOP references\nFilenames mentioned in SOPs without a matching "
+              "observed file. Applicability to a sample has not been established."),
+        documentation_selector,
+    ])
+    return (documentation_selector,)
+
+
+@app.cell
+def documentation_details(artifact_entries, documentation_selector, select_key):
+    _details, documentation_buttons = hc.artifact_details(
+        artifact_entries, documentation_selector.value, on_select=select_key
+    )
+    mo.vstack([_details])
+    return (documentation_buttons,)
 
 
 @app.cell

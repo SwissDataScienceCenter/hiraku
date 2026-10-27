@@ -10,6 +10,7 @@ imports marimo, so it can be tested without a notebook runtime.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -26,7 +27,7 @@ import pyarrow as pa
 from ..config import HirakuConfig
 from ..errors import ValidationError
 from ..io import dump_yaml
-from ..record import Record, list_records
+from ..record import Record, _resolve, list_records
 from ..registration.compat import from_legacy_record
 from ..registration.discovery import external_roots
 from ..registration.schema import Registration
@@ -47,6 +48,7 @@ RUN_COLUMNS = (
 )
 RECORD_COLUMNS = (
     "record",
+    "label",
     "parent",
     "record_path",
     "type",
@@ -59,7 +61,12 @@ RECORD_COLUMNS = (
 FILE_COLUMNS = ("key", "path", "produced_by", "used_by", "last_run")
 ARTIFACT_COLUMNS = (
     "key",
+    "kind",
     "dataset",
+    "dataset_label",
+    "filename",
+    "description",
+    "expectation",
     "source",
     "path",
     "root",
@@ -87,9 +94,10 @@ class ProjectRuns:
 def load(config: HirakuConfig) -> ProjectRuns:
     """Read all records and query each distinct tracking source once."""
     records = list_records(config=config)
+    index = {record.id: record for record in records}
     by_source: dict[str, Record] = {}
     for record in records:
-        specification = record.resolve(config=config).values.get("tracking_backend")
+        specification = _resolve(record, index, set()).values.get("tracking_backend")
         key = repr(specification or config.tracking_backend)
         by_source.setdefault(key, record)
 
@@ -168,6 +176,22 @@ def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
     ]
 
 
+def record_label(record: Record) -> str:
+    """Return a source-provided dataset name while keeping its ID for actions."""
+    registration = getattr(record, "registration", None)
+    if not isinstance(registration, dict):
+        return record.id
+    metadata = registration.get("metadata") or {}
+    sample = metadata.get("sample_id") or metadata.get("sample_key")
+    technology = metadata.get("technology")
+    if sample:
+        return " · ".join(str(value) for value in (sample, technology) if value)
+    key = registration.get("key")
+    if isinstance(key, list):
+        return " / ".join(map(str, key)) or record.id
+    return str(key) if key else record.id
+
+
 def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
     """Return one row per record in tree order, with its declared metrics."""
     paths = record_paths(records)
@@ -177,6 +201,7 @@ def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
     return [
         {
             "record": record.id,
+            "label": record_label(record),
             "parent": record.parent_id,
             "record_path": paths[record.id],
             "type": record.type,
@@ -253,7 +278,7 @@ def _registration(record: Record) -> Registration | None:
 
 
 def _doc_label(documentation: Any) -> str:
-    key = documentation.key
+    key = getattr(documentation, "source", None) or documentation.key
     return key if documentation.role == "unknown" else f"{key} ({documentation.role})"
 
 
@@ -271,6 +296,14 @@ class _WorkflowFiles:
 
     def __init__(self, project: ProjectRuns, config: HirakuConfig | None) -> None:
         self.config = config
+        try:
+            roots = external_roots(config) if config is not None else {}
+        except ValidationError:
+            roots = {}
+        self.mounts = {
+            name: _canonical(config.root, os.path.expanduser(path))
+            for name, path in roots.items()
+        } if config is not None else {}
         self.files: dict[tuple[str, str], list[dict[str, str]]] = {}
         self.directories: set[tuple[str, str]] = set()
         for run in execution_order(project.runs):
@@ -300,14 +333,10 @@ class _WorkflowFiles:
             return artifact.display_path if artifact.root is None else None
         if artifact.root is None:
             return _canonical(self.config.root, artifact.display_path)
-        try:
-            mount = external_roots(self.config).get(artifact.root)
-        except ValidationError:
-            mount = None
+        mount = self.mounts.get(artifact.root)
         if mount is None:
             return None
-        base = _canonical(self.config.root, os.path.expanduser(mount))
-        return None if base is None else _canonical(base, artifact.display_path)
+        return _canonical(mount, artifact.display_path)
 
     def steps(self, location: str | None, side: str) -> list[dict[str, str]]:
         """Return the steps whose ``jobs`` ``side`` names or contains ``location``.
@@ -355,11 +384,20 @@ def artifact_rows(
             continue
         source = registration.source or registration.namespace
         for artifact in registration.artifacts:
-            location = workflow.artifact_location(artifact)
+            location = workflow.artifact_location(artifact) if workflow.files else None
             rows.append(
                 {
                     "key": f"artifact:{record.id}:{artifact.key}",
+                    "kind": "Observed file",
                     "dataset": record.id,
+                    "dataset_label": record_label(record),
+                    "filename": Path(artifact.display_path).name,
+                    "description": "\n".join(dict.fromkeys(
+                        str(getattr(doc, "description", ""))
+                        for doc in artifact.documentation
+                        if getattr(doc, "description", None)
+                    )),
+                    "expectation": None,
                     "source": source,
                     "path": artifact.display_path,
                     "root": artifact.root,
@@ -376,10 +414,20 @@ def artifact_rows(
                 }
             )
         for doc in registration.documentation:
+            identity = hashlib.sha256(json.dumps(
+                [doc.key, doc.filename, doc.role, doc.applicability], sort_keys=True,
+            ).encode()).hexdigest()[:16]
             rows.append(
                 {
-                    "key": f"documentation:{record.id}:{doc.key}",
+                    "key": f"documentation:{record.id}:{doc.key}:{identity}",
+                    "kind": "SOP expectation",
                     "dataset": record.id,
+                    "dataset_label": record_label(record),
+                    "filename": doc.filename,
+                    "description": getattr(doc, "description", None),
+                    "expectation": (
+                        getattr(doc, "expected_availability", None) or "unknown"
+                    ),
                     "source": source,
                     "path": None,
                     "root": None,
@@ -477,7 +525,8 @@ def tree_rows(
     for record in _records(records_df):
         depth = record["record_path"].count("/")
         rows.append(
-            _row(f"record:{record['record']}", depth, "▾ " + record["record"], record)
+            _row(f"record:{record['record']}", depth,
+                 "▾ " + (record.get("label") or record["record"]), record)
         )
         if metric:
             rows[-1][metric] = ""

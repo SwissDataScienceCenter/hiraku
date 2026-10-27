@@ -1327,6 +1327,11 @@ def run_list(
     is_flag=True,
     help="Let the read-only dashboard show its notebook code.",
 )
+@click.option(
+    "--plain",
+    is_flag=True,
+    help="Serve the notebook directly, without the marimo-studio view.",
+)
 @click.pass_obj
 def dashboard_command(
     state: CLIContext,
@@ -1336,6 +1341,7 @@ def dashboard_command(
     initialize: bool,
     edit: bool,
     include_code: bool,
+    plain: bool,
 ) -> None:
     """Browse records and tracked runs in a local, read-only dashboard."""
     from .dashboard.launcher import init_dashboard, serve_dashboard
@@ -1351,6 +1357,7 @@ def dashboard_command(
         no_browser=no_browser,
         edit=edit,
         include_code=include_code,
+        plain=plain,
     )
     if exit_code:
         raise click.exceptions.Exit(exit_code)

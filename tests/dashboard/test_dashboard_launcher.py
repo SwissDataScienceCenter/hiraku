@@ -77,6 +77,8 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "file_details",
         "artifact_table",
         "artifact_details",
+        "documentation_table",
+        "documentation_details",
         "performance_plot",
         "tradeoff_plot",
     }
@@ -171,6 +173,21 @@ def test_serve_dashboard_runs_a_copy_outside_the_project(
     assert "run" in popen["command"]
 
 
+def test_plain_dashboard_removes_view_declaration(
+    project: HirakuConfig, popen: dict
+) -> None:
+    assert launcher.serve_dashboard(project, plain=True) == 0
+
+    assert "[tool.marimo-studio]" not in popen["copied"]
+    assert "[tool.marimo.display]" in popen["copied"]
+    assert popen["view"]
+
+
+def test_plain_dashboard_cannot_edit(project: HirakuConfig) -> None:
+    with pytest.raises(ValidationError, match="--plain cannot be combined"):
+        launcher.serve_dashboard(project, plain=True, edit=True)
+
+
 @pytest.mark.parametrize("edit", [False, True])
 def test_serve_dashboard_prefers_the_project_notebook(
     project: HirakuConfig, popen: dict, edit: bool
@@ -235,8 +252,26 @@ def test_dashboard_cli_forwards_options(
         "no_browser": True,
         "edit": False,
         "include_code": True,
+        "plain": False,
         "root": project.root,
     }
+
+
+def test_dashboard_cli_forwards_plain_option(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    received = {}
+    monkeypatch.setattr(
+        launcher,
+        "serve_dashboard",
+        lambda config, **options: received.update(options) or 0,
+    )
+    monkeypatch.chdir(project.root)
+
+    result = CliRunner().invoke(main, ["dashboard", "--plain", "--no-browser"])
+
+    assert result.exit_code == 0, result.output
+    assert received["plain"] is True
 
 
 @pytest.mark.parametrize("edit", [False, True])
