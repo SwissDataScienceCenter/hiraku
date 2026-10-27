@@ -230,11 +230,6 @@ class HirakuConfig(BaseModel):
         return self.hiraku_dir / "workflows"
 
     @property
-    def sessions_dir(self) -> Path:
-        """Return the directory containing persisted workflow sessions."""
-        return self.hiraku_dir / "sessions"
-
-    @property
     def dispatch_dir(self) -> Path:
         """Return the directory containing command dispatcher scripts."""
         return self.hiraku_dir / "dispatch"

@@ -9,25 +9,11 @@ so each client starts it in the project it is working on:
 uv run hiraku mcp
 ```
 
-Workflow start, event, and session-show tools return attached records as native
-MCP resource links alongside their JSON response. Read those resources before
-carrying out the instruction. Resources provide live contents; stored
-instructions contain only references. All records use `application/json` at
-`hiraku://records/...` URIs, regardless of their `type`.
-Source files and parent records are not attached automatically. A deleted
-attachment is returned as a link with an unavailability diagnostic; accepted
-session progress is retained. Prompts remain text-based and list the same IDs.
-
 There is no project-path flag; the process uses its working directory. Each
 initialized project gets its own host configuration, and agents connected from
 that project receive the same Hiraku tools and resources.
 
-Initialization writes portable MCP and hook commands, so the generated files can
-be committed and shared. If the project contains `uv.lock`, commands start with
-`uv run hiraku`; add Hiraku to the project's dependencies to run its locked
-version. Otherwise they run `hiraku` from the client's `PATH`, for example after
-`uv tool install hiraku`. A project with `uv.lock` creates
-these host configurations:
+For reference, initialization creates or merges these host configurations:
 
 Claude Code's `.mcp.json`:
 
@@ -35,8 +21,8 @@ Claude Code's `.mcp.json`:
 {
   "mcpServers": {
     "hiraku": {
-      "command": "uv",
-      "args": ["run", "hiraku", "mcp"]
+      "command": "hiraku",
+      "args": ["mcp"]
     }
   }
 }
@@ -46,83 +32,20 @@ Codex's `.codex/config.toml`:
 
 ```toml
 [mcp_servers.hiraku]
-command = "uv"
-args = ["run", "hiraku", "mcp"]
+command = "hiraku"
+args = ["mcp"]
 ```
 
 An existing `hiraku` server entry is left as it is. If an existing file cannot
 be extended, for example because `mcp_servers` is an inline TOML table,
 initialization fails without changing it; add the entry manually.
 
-The client needs `uv` or `hiraku` on its `PATH`.
-Claude Code asks for approval before using a project MCP server. Codex loads project config only
+The host must be able to find the installed `hiraku` command. Claude Code asks
+for approval before using a project MCP server. Codex loads project config only
 for trusted projects. The MCP tools are exposed directly by the host, so no
 extra `AGENTS.md` or Claude skill instructions are needed to register them.
 The bundled Hiraku skill tells agents to use the tools when they are available
 and fall back to the CLI when the host has not connected the server.
-
-## Client conversation attribution
-
-`hiraku init` also merges project-local `PreToolUse` hooks into
-`.codex/hooks.json` and `.claude/settings.json`, preserving existing hooks and
-settings, and replacing only earlier Hiraku hook commands. Hooks run
-`hiraku session hook codex` or `hiraku session hook claude`, prefixed with
-`uv run` when the project contains `uv.lock`.
-The adapter skips listing and unrelated tools, and accepts Codex's underscore
-aliases for hyphenated workflow names such as `count_steps` for `count-steps`.
-Accept the client's normal project/hook trust prompts and reconnect after setup.
-Initialization of an already initialized project is still rejected; existing
-projects can merge the following entry into their respective hook configuration,
-using `claude` instead of `codex` in Claude Code:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "matcher": "^mcp__hiraku__",
-      "hooks": [{"type": "command", "command": "uv run hiraku session hook codex"}]
-    }]
-  }
-}
-```
-
-Drop the `uv run` prefix for projects without `uv.lock` that use Hiraku from the
-`PATH`. Reconnect the MCP server and reload hooks after editing the
-configuration.
-
-The hook injects an optional `hiraku_client` object into workflow start and
-send-event tool inputs. Its `client`, `client_session_id`, optional `client_turn_id`, and
-optional `model` fields
-are saved in each history entry's optional `client_info` object, separately from
-workflow arguments. Unattributed entries store `client_info: null`. The
-`hiraku_client` start argument name is reserved; workflows using it are logged
-and omitted from MCP tools, prompts, and workflow listings. Tool schemas describe
-this metadata as hook-injected: agents should omit it and never invent identifiers.
-The metadata provides attribution, not verified identity. Claude Code hooks supply the
-conversation ID; Codex hooks additionally supply the turn ID when available.
-The adapter records `model` when the hook payload supplies a nonempty string.
-Codex includes this field. Claude documents it on `SessionStart`, but not on the
-`PreToolUse` event used here, so its model normally remains `null`.
-Clients without these hooks continue to work with unattributed entries.
-Prompt failures remain readable to the client; unexpected errors are also logged
-with a traceback on the server.
-No transcripts, conversation URLs, or model-generated identity guesses are stored.
-
-The adapters use the documented
-[Codex hooks](https://learn.chatgpt.com/docs/hooks) and
-[Claude Code hooks](https://code.claude.com/docs/en/hooks) payloads.
-Codex requires `permissionDecision: allow` for input rewriting; Claude's hook
-does not return a permission decision. Review this Codex behavior alongside your
-approval policy before enabling the hook. Local command hooks apply to local
-orchestration; cloud-orchestrated ChatGPT Work is outside this integration.
-Hooks assume the MCP server is registered as `hiraku`; renamed registrations
-need an adapted matcher and adapter. Malformed or unavailable hook inputs are
-skipped, and history logging failures warn on stderr without blocking operations.
-
-Only event attempts reaching a session handler can be logged: protocol/schema
-rejections before handler execution, unknown session IDs, unavailable workflows,
-and discovery calls do not create history. Reads and cancellation do not add history entries.
-See [workflow history](workflows.md) for outcomes and coverage.
 
 ## Tools
 
@@ -154,7 +77,6 @@ resources are loaded on each request, including after changes made outside MCP.
 | --- | --- |
 | `hiraku://records/{record_id}` | Record fields and Markdown as JSON. |
 | `hiraku://workflows/{workflow_id}` | Prompt document of a workflow. |
-| `hiraku://sessions/{session_id}` | Stored state of a workflow session as JSON. |
 | `hiraku://sources/{record_id}/{source_path}` | File attached to a record as an MCP blob with its inferred MIME type. |
 
 Place PDFs, literature reviews and other source files inside a record directory,
@@ -166,25 +88,10 @@ with `application/pdf`; interpretation depends on the MCP client's capabilities.
 
 ## Workflows
 
-Each project workflow is a tool and a prompt named after it, and events go
-through `workflow_send_event`. `workflow_list` and the `session_*` tools list
-workflows and inspect, resume, or cancel sessions. See the
+Project workflows are LangGraph graphs. Use `workflow_list` to discover them,
+`workflow_start` to start one, `workflow_status` to inspect it, and
+`workflow_resume` to continue an interrupted session. See the
 [Workflows guide](workflows.md).
-
-LangGraph workflows declare `engine: langgraph` in `workflow.md` and define a
-`build_graph(checkpointer, *, config)` factory in `workflow.py`. They are started
-with `workflow_start(workflow_id, arguments)`, inspected with
-`workflow_status(run_id)`, and continued with
-`workflow_resume(run_id, response)`. The harness carries out the returned
-instruction and sends its structured response. LangGraph owns the graph state
-and transitions, checkpointed in `.hiraku/langgraph-checkpoints.sqlite`; these
-runs do not create Hiraku sessions or session history entries. The bundled
-count-steps and scheduler examples demonstrate this path.
-
-The conversational server wraps core event execution and attaches the current
-saved instruction to every start and event response, including rejected ones.
-Core start returns a saved session; continuation returns a typed event result.
-Workflow instances reload their bound project configuration on access.
 
 ## Prompt template
 

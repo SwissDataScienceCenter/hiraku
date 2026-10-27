@@ -4,19 +4,15 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import runpy
 import shlex
-import shutil
 import subprocess
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from importlib.resources import as_file, files
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from typing import Any, Literal
+from typing import Any
 
 import click
 import yaml
@@ -89,13 +85,15 @@ def _emit_json(value: Any) -> None:
     click.echo(json.dumps(_json_value(value), sort_keys=True, ensure_ascii=False))
 
 
-def _print_table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+def _table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
     table = Table(box=box.ROUNDED, header_style="bold cyan", pad_edge=False)
     for column in columns:
         table.add_column(column, overflow="fold")
     for row in rows:
         table.add_row(*("" if item is None else str(item) for item in row))
-    Console().print(table)
+    console = Console(record=True, width=120)
+    console.print(table)
+    return console.export_text().rstrip()
 
 
 def _fields(values: Sequence[str]) -> dict[str, Any]:
@@ -163,6 +161,34 @@ def _edit_recoverable(
     return loader()
 
 
+def _overrides(tokens: Sequence[str]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if not token.startswith("--") or token == "--":
+            raise ValidationError(f"Invalid entrypoint argument: {token!r}")
+        key, separator, raw = token[2:].partition("=")
+        if not key:
+            raise ValidationError("Entrypoint argument name must be non-empty")
+        if not separator:
+            if index + 1 < len(tokens) and not tokens[index + 1].startswith("--"):
+                index += 1
+                raw = tokens[index]
+            else:
+                raw = True
+        key = key.replace("-", "_")
+        if key in result:
+            previous = result[key]
+            result[key] = (
+                [*previous, raw] if isinstance(previous, list) else [previous, raw]
+            )
+        else:
+            result[key] = raw
+        index += 1
+    return result
+
+
 def _update_fields(
     record: BaseRecord,
     set_values: Sequence[str],
@@ -195,7 +221,7 @@ def _update_fields(
 @click.group(name="hiraku", cls=HirakuGroup)
 @click.pass_context
 def main(ctx: click.Context) -> None:
-    """Manage research records, command execution, and tracked runs."""
+    """Manage research records, launches, and tracked runs."""
     ctx.ensure_object(CLIContext)
 
 
@@ -217,12 +243,14 @@ def mcp_command() -> None:
 
 @main.command("init")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
+@click.option("--tracking-backend")
 @click.option("--template", type=click.Path(path_type=Path))
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
 )
 def init_command(
     path: Path | None,
+    tracking_backend: str | None,
     template: Path | None,
     init_git: bool,
 ) -> None:
@@ -231,11 +259,13 @@ def init_command(
     marker = root.expanduser().absolute() / "hiraku.yml"
     if init_git:
         require_git()
-    if marker.is_file() and template is None:
+    if marker.is_file() and tracking_backend is None and template is None:
         config = HirakuConfig.load(marker)
         message = "Hiraku project already initialized"
     else:
-        config = HirakuConfig.init(root, template=template)
+        config = HirakuConfig.init(
+            root, tracking_backend=tracking_backend, template=template
+        )
         message = "Initialized Hiraku project"
     if init_git:
         init_code_repository(config)
@@ -257,12 +287,13 @@ def example_list_command() -> None:
         if example.is_dir() and manifest.is_file():
             metadata = yaml.safe_load(manifest.read_text(encoding="utf-8"))
             rows.append((example.name, metadata.get("description", "")))
-    _print_table(("name", "description"), rows)
+    click.echo(_table(("name", "description"), rows))
 
 
 @example_group.command("create")
 @click.argument("example")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
+@click.option("--tracking-backend")
 @click.option("--with-generator", is_flag=True, help="Copy the example generator.")
 @click.option(
     "--generate", is_flag=True, help="Generate example runs after initialization."
@@ -279,6 +310,7 @@ def example_list_command() -> None:
 def example_create_command(
     example: str,
     path: Path | None,
+    tracking_backend: str | None,
     results: bool,
     with_generator: bool,
     generate: bool,
@@ -303,6 +335,7 @@ def example_create_command(
             raise click.UsageError(f"Example {example!r} has no generator")
     config = HirakuConfig.init(
         root,
+        tracking_backend=tracking_backend,
         example=example,
         results=results,
         with_generator=with_generator,
@@ -313,26 +346,7 @@ def example_create_command(
     if generator is not None:
         with as_file(generator) as source:
             try:
-                namespace = runpy.run_path(str(source))
-                if "generate_results" not in namespace:
-                    namespace["generate"](config)
-                else:
-                    # Fresh projects have no source commit yet. The generator's
-                    # export mode runs commands in its temporary project.
-                    with TemporaryDirectory(prefix="hiraku-generated-") as staging:
-                        overlay = Path(staging) / "results"
-                        namespace["generate_results"](overlay)
-                        generated = HirakuConfig.load(overlay / "hiraku.yml")
-                        shutil.copytree(
-                            generated.records_dir,
-                            config.records_dir,
-                            dirs_exist_ok=True,
-                        )
-                        for result in overlay.iterdir():
-                            if result.is_file() and result.name != "hiraku.yml":
-                                shutil.copyfile(result, config.root / result.name)
-                        config.active_record_id = generated.active_record_id
-                        config.save()
+                runpy.run_path(str(source))["generate"](config)
             except Exception as exc:
                 raise click.ClickException(
                     "Generation failed; initialized project and completed runs kept: "
@@ -350,20 +364,16 @@ def status_command(state: CLIContext, json_output: bool) -> None:
         branch = GitRepository(config).current_branch
     except GitError:
         branch = None
-    tracking_backend = {"type": "csv"}
-    if config.active_record_id is not None:
-        record = load_record(config.active_record_id, config=config)
-        tracking_backend = record.tracking_backend_spec(config=config)
     result = {
         "project_root": config.root,
         "active_record_id": config.active_record_id,
-        "tracking_backend": tracking_backend,
+        "tracking_backend": config.tracking_backend,
         "git_branch": branch,
     }
     if json_output:
         _emit_json(result)
     else:
-        _print_table(("field", "value"), list(result.items()))
+        click.echo(_table(("field", "value"), list(result.items())))
 
 
 @main.group("record")
@@ -421,9 +431,11 @@ def record_list(state: CLIContext, json_output: bool) -> None:
     if json_output:
         _emit_json(records)
     else:
-        _print_table(
-            ("id", "parent", "type", "status"),
-            [(r.id, r.parent_id, r.type, r.status) for r in records],
+        click.echo(
+            _table(
+                ("id", "parent", "type", "status"),
+                [(r.id, r.parent_id, r.type, r.status) for r in records],
+            )
         )
 
 
@@ -481,8 +493,6 @@ def record_update(
     changes = _fields(set_values)
     if any(key in changes for key in ("id", "parent_id")):
         raise ValidationError("id and parent_id require dedicated operations")
-    if "markdown" in changes:
-        raise ValidationError("Use --markdown-file to update Markdown")
     if related_to:
         changes["related_to"] = list(related_to)
     if commit is not None:
@@ -571,33 +581,113 @@ def record_tree(state: CLIContext, json_output: bool) -> None:
     visit(None, 0)
 
 
+def _install_generic(
+    name: str, cls: type[BaseRecord], loader: Any, lister: Any, directory: str
+) -> None:
+    @main.group(name=name)
+    def group() -> None:
+        """Manage generic Markdown records."""
+
+    @group.command("create")
+    @click.argument("identifier")
+    @click.option("--set", "set_values", multiple=True)
+    @click.option("--markdown-file", type=click.Path(path_type=Path))
+    @click.pass_obj
+    def create(
+        state: CLIContext,
+        identifier: str,
+        set_values: tuple[str, ...],
+        markdown_file: Path | None,
+    ) -> None:
+        validate_identifier(identifier)
+        record = cls(
+            id=identifier, markdown=_markdown(markdown_file), **_fields(set_values)
+        )
+        path = getattr(state.config, directory) / identifier / f"{name}.md"
+        record.save(path)
+        click.echo(f"Created {name} {identifier} at {path}")
+
+    @group.command("list")
+    @click.option("--json", "json_output", is_flag=True)
+    @click.pass_obj
+    def listing(state: CLIContext, json_output: bool) -> None:
+        records = lister(config=state.config)
+        _emit_json(records) if json_output else click.echo(
+            _table(("id",), [(r.id,) for r in records])
+        )
+
+    @group.command("show")
+    @click.argument("identifier")
+    @click.option("--json", "json_output", is_flag=True)
+    @click.pass_obj
+    def show(state: CLIContext, identifier: str, json_output: bool) -> None:
+        record = loader(identifier, config=state.config)
+        _emit_json(record) if json_output else click.echo(
+            f"---\n{dump_yaml(record.to_dict())}---\n{record.markdown}", nl=False
+        )
+
+    @group.command("update")
+    @click.argument("identifier")
+    @click.option("--set", "set_values", multiple=True)
+    @click.option("--unset", "unset_values", multiple=True)
+    @click.option("--markdown-file", type=click.Path(path_type=Path))
+    @click.pass_obj
+    def update(
+        state: CLIContext,
+        identifier: str,
+        set_values: tuple[str, ...],
+        unset_values: tuple[str, ...],
+        markdown_file: Path | None,
+    ) -> None:
+        record = loader(identifier, config=state.config)
+        _update_fields(record, set_values, unset_values, markdown_file)
+        click.echo(f"Updated {name} {identifier}")
+
+    @group.command("edit")
+    @click.argument("identifier")
+    @click.pass_obj
+    def edit(state: CLIContext, identifier: str) -> None:
+        path = getattr(state.config, directory) / identifier / f"{name}.md"
+        _edit_recoverable(
+            path,
+            lambda: loader(identifier, config=state.config),
+            f"{name} {identifier!r}",
+        )
+        click.echo(f"Validated {name} {identifier}")
+
+    @group.command("delete")
+    @click.argument("identifier")
+    @click.pass_obj
+    def delete(state: CLIContext, identifier: str) -> None:
+        record = loader(identifier, config=state.config)
+        record.delete()
+        click.echo(f"Deleted {name} {identifier}")
+
+
 @main.group("workflow")
 def workflow_group() -> None:
-    """List, start, and reply to project workflows."""
+    """List and run project LangGraph workflows."""
 
 
 @workflow_group.command("list")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def workflow_list(state: CLIContext, json_output: bool) -> None:
-    """List the project's workflows."""
-    from .workflows.workflow import list_workflows
+    """List project LangGraph workflows."""
+    from .workflows.langgraph import workflow_details
 
-    workflows = list_workflows(config=state.config)
+    workflows = workflow_details(config=state.config)
     if json_output:
-        _emit_json(
-            [
-                {"id": workflow.id, "description": workflow.description}
-                for workflow in workflows
-            ]
-        )
+        _emit_json(workflows)
         return
-    _print_table(
-        ("id", "description"),
-        [
-            (workflow.id, (workflow.description or "").split("\n", 1)[0])
-            for workflow in workflows
-        ],
+    click.echo(
+        _table(
+            ("id", "description"),
+            [
+                (workflow["id"], (workflow["description"] or "").split("\n", 1)[0])
+                for workflow in workflows
+            ],
+        )
     )
 
 
@@ -625,236 +715,41 @@ def _arguments(arguments_file: Any) -> dict[str, Any]:
 @_ARGUMENTS_FILE
 @click.pass_obj
 def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> None:
-    """Start a workflow session and print the JSON response."""
-    from .workflows.session import Session
-    from .workflows.workflow import load_workflow
+    """Start a LangGraph workflow and print its interrupt or result."""
+    from .workflows.langgraph import start_workflow
 
-    workflow = load_workflow(workflow_id, config=state.config)
-    session = Session.start(workflow, _arguments(arguments_file))
-    _emit_json(session.get_instruction(workflow))
+    _emit_json(
+        start_workflow(workflow_id, _arguments(arguments_file), config=state.config)
+    )
 
 
-@workflow_group.command("send-event")
-@click.argument("session_id")
-@click.argument("event")
-@click.option(
-    "--instruction-id",
-    type=int,
-    required=True,
-    help="ID of the current instruction the event answers.",
-)
+@workflow_group.command("status")
+@click.argument("run_id")
+@click.pass_obj
+def workflow_status_command(state: CLIContext, run_id: str) -> None:
+    """Inspect a checkpointed LangGraph workflow run."""
+    from .workflows.langgraph import workflow_status
+
+    _emit_json(workflow_status(run_id, config=state.config))
+
+
+@workflow_group.command("resume")
+@click.argument("run_id")
 @_ARGUMENTS_FILE
 @click.pass_obj
-def workflow_send_event(
-    state: CLIContext,
-    session_id: str,
-    event: str,
-    instruction_id: int,
-    arguments_file: Any,
+def workflow_resume_command(
+    state: CLIContext, run_id: str, arguments_file: Any
 ) -> None:
-    """Send EVENT to a session's current instruction and print the response."""
-    from .workflows.session import load_session
-    from .workflows.workflow import load_workflow
+    """Resume a paused LangGraph workflow with a JSON response."""
+    from .workflows.langgraph import resume_workflow
 
-    session = load_session(session_id, config=state.config)
-    workflow = load_workflow(session.workflow, config=state.config)
-    with session.lock():
-        result = session.run_event(
-            workflow, instruction_id, event, _arguments(arguments_file)
-        )
-    _emit_json(
-        {**session.get_instruction(workflow), **result.model_dump(exclude_none=True)}
-    )
-
-
-@workflow_group.command("graph")
-@click.argument("workflow_id")
-@click.option(
-    "--session",
-    "session_id",
-    default=None,
-    help="Highlight the current state of this session.",
-)
-@click.pass_obj
-def workflow_graph_command(
-    state: CLIContext, workflow_id: str, session_id: str | None
-) -> None:
-    """Print a workflow's states and events as a Mermaid state diagram."""
-    from .workflows.session import load_session
-    from .workflows.workflow import load_workflow
-
-    workflow = load_workflow(workflow_id, config=state.config)
-    current = None
-    if session_id is not None:
-        session = load_session(session_id, config=state.config)
-        if session.workflow != workflow_id:
-            raise ValidationError(
-                f"Session {session_id!r} belongs to workflow {session.workflow!r}"
-            )
-        current = session.state.node
-    click.echo(workflow.graph.to_mermaid(current=current), nl=False)
-
-
-@main.group("session")
-def session_group() -> None:
-    """Inspect and cancel workflow sessions."""
-
-
-@session_group.command("hook", hidden=True)
-@click.argument("client", type=click.Choice(["codex", "claude"]))
-def session_hook(client: Literal["codex", "claude"]) -> None:
-    """Inject conversation identifiers from a client PreToolUse payload."""
-    try:
-        payload = json.load(sys.stdin)
-        if not isinstance(payload, dict):
-            raise ValueError("Hook input must be a JSON object")
-        response = _inject_client(payload, client)
-    except (ValueError, OSError, HirakuError) as exc:
-        click.echo(f"Hiraku client hook skipped: {exc}", err=True)
-        return
-    _emit_json(response)
-
-
-def _inject_client(
-    payload: dict[str, Any], client: Literal["codex", "claude"]
-) -> dict[str, Any]:
-    """Return a PreToolUse input rewrite for a Hiraku workflow event tool."""
-    from .workflows.session import ClientInfo
-
-    if payload.get("hook_event_name") != "PreToolUse":
-        return {}
-    prefix = "mcp__hiraku__"
-    tool = payload.get("tool_name", "")
-    if not isinstance(tool, str) or not tool.startswith(prefix):
-        return {}
-    name = tool.removeprefix(prefix)
-    if name != "workflow_send_event":
-        # Codex exposes hyphenated MCP names with underscores in code mode.
-        if client == "codex":
-            name = name.replace("_", "-")
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", name):
-            return {}
-        cwd = payload.get("cwd")
-        if not isinstance(cwd, str):
-            return {}
-        config = HirakuConfig.discover(cwd)
-        if not any(
-            (config.workflows_dir / name / filename).is_file()
-            for filename in ("workflow.md", "workflow.py")
-        ):
-            return {}
-    arguments = payload.get("tool_input")
-    session_id = payload.get("session_id")
-    if not isinstance(arguments, dict) or not isinstance(session_id, str):
-        return {}
-    if not session_id:
-        return {}
-    turn_id = payload.get("turn_id") if client == "codex" else None
-    model = payload.get("model")
-    info = ClientInfo(
-        client=client,
-        client_session_id=session_id,
-        client_turn_id=turn_id if isinstance(turn_id, str) and turn_id else None,
-        model=model if isinstance(model, str) and model else None,
-    )
-    output: dict[str, Any] = {
-        "hookEventName": "PreToolUse",
-        "updatedInput": {
-            **arguments,
-            "hiraku_client": info.model_dump(exclude_none=True),
-        },
-    }
-    # Codex requires allow for input rewrites. Claude accepts a rewrite without
-    # a permission decision, preserving its normal approval behavior.
-    if client == "codex":
-        output["permissionDecision"] = "allow"
-    return {"hookSpecificOutput": output}
-
-
-@session_group.command("list")
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def session_list(state: CLIContext, json_output: bool) -> None:
-    """List workflow sessions, newest first."""
-    from .workflows.session import list_sessions
-
-    sessions = [
-        {
-            "session_id": s.id,
-            "workflow": s.workflow,
-            "status": s.status,
-            "node": s.state.node,
-            "updated_at": s.updated_at.isoformat(),
-        }
-        for s in list_sessions(config=state.config)
-    ]
-    if json_output:
-        _emit_json(sessions)
-        return
-    _print_table(
-        ("session", "workflow", "status", "updated"),
-        [
-            (
-                item["session_id"],
-                item["workflow"],
-                item["status"],
-                item["updated_at"],
-            )
-            for item in sessions
-        ],
-    )
-
-
-@session_group.command("show")
-@click.argument("session_id")
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
-    """Show a session's status, pending instruction or result, and data."""
-    from .workflows.session import load_session
-    from .workflows.workflow import load_workflow
-
-    session = load_session(session_id, config=state.config)
-    try:
-        workflow = load_workflow(session.workflow, config=state.config)
-    except HirakuError:
-        workflow = None
-    result = session.show(workflow)
-    if json_output:
-        _emit_json(result)
-        return
-    click.echo(f"Session:  {result['session_id']}")
-    click.echo(f"Workflow: {result['workflow']}")
-    click.echo(f"Status:   {result['status']}")
-    click.echo(f"State:    {result['state']}")
-    if "message" in result:
-        click.echo(result["message"])
-    if "instruction" in result:
-        from .workflows.workflow import Instruction
-
-        click.echo(Instruction.model_validate(result["instruction"]).to_text())
-
-
-@session_group.command("cancel")
-@click.argument("session_id")
-@click.pass_obj
-def session_cancel(state: CLIContext, session_id: str) -> None:
-    """Cancel a session; records, code, and runs are kept."""
-    from .workflows.session import load_session
-
-    session = load_session(session_id, config=state.config)
-    with session.lock():
-        result = session.cancel()
-    click.echo(f"Session {session_id} is {result['status']}. {result['note']}")
+    _emit_json(resume_workflow(run_id, _arguments(arguments_file), config=state.config))
 
 
 @main.command("run")
 @click.argument("command", nargs=-1, required=True, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
-@click.option(
-    "--dispatch",
-    help="Dispatcher name from the project's dispatch directory.",
-)
+@click.option("--dispatch", help="Dispatcher name from the project's dispatch directory.")
 @click.pass_context
 def run_command(
     context: click.Context,
@@ -950,7 +845,7 @@ def run_list(
             ]
             for run in runs
         ]
-        _print_table(columns, rows)
+        click.echo(_table(columns, rows))
 
 
 @main.command("dashboard")

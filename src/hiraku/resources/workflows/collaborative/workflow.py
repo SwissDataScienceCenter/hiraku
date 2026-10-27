@@ -1,286 +1,206 @@
-"""Collaborative research: the agent does each step and the user approves it."""
+"""Collaborative research as a checkpointed LangGraph workflow."""
 
 from __future__ import annotations
 
 import shlex
-from typing import Annotated, Any, Literal
+from pathlib import Path
+from typing import Any, Literal, TypedDict
 
-from pydantic import Field
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 
-from hiraku.errors import EventRejected, HirakuError, NotReady
+from hiraku.base import BaseRecord
+from hiraku.config import HirakuConfig
+from hiraku.errors import HirakuError, ValidationError
 from hiraku.git import GitRepository
+from hiraku.markdown import Markdown, render
 from hiraku.record import Record, load_record
 from hiraku.run import Run
 from hiraku.validation import validate_command
-from hiraku.workflows.graph import State, event, node, start
-from hiraku.workflows.workflow import Instruction, Workflow
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
-Feedback = Annotated[str, "What the user wants changed."]
-STEPS = ["draft", "implement", "launch", "analyze"]
+STEPS = ("draft", "implement", "launch", "analyze")
 
 
-class Experiments(State):
-    node: str = "draft"
+class ResearchState(TypedDict, total=False):
+    arguments: dict[str, Any]
     task: str
-    command: list[str] | None = None
+    command: list[str]
     rounds: int
-    experiment: str | None = None
-    run_id: str | None = None
-    feedback: str | None = None
-    results: list[dict[str, Any]] = Field(default_factory=list)
+    step: str
+    experiment: str
+    feedback: str
+    results: list[dict[str, Any]]
+    final: str
 
 
-class Collaborative(Workflow):
-    """Draft, implement, launch, and analyze experiments with the user.
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
+    """Build the collaborative research graph from its Markdown instructions."""
+    path = Path(__file__).with_name("workflow.md")
+    fields, body = BaseRecord._parse_markdown(path)
+    if fields.get("id") != "collaborative":
+        raise ValueError("workflow.md must declare id: collaborative")
+    markdown = Markdown(body)
+    rules = str(fields.get("rules", "")).strip()
 
-    The agent works through the four steps of each experiment and gets the
-    user's approval before it reports a step with an event such as ``drafted``,
-    which Hiraku checks and records. Until then, revision events redo the step
-    with the user's feedback. Hiraku writes the experiment records, checks
-    commits and run attribution, and stops after ``rounds`` experiments.
-    """
-
-    rules: str = ""
-
-    @start(dest="draft")
-    def start(
-        self,
-        *,
-        task: Annotated[
-            str | None, "Task record; defaults to the active record."
-        ] = None,
-        command: Annotated[list[str], "Command argv to use for each experiment."],
-        rounds: Annotated[int, "Most experiments to run.", Field(gt=0)] = 3,
-    ) -> Experiments:
-        """Start collaborative research on a task record."""
+    def initialize(state: ResearchState) -> Command[Literal["draft"]]:
+        arguments = state.get("arguments", {})
+        if not isinstance(arguments, dict):
+            raise ValidationError("arguments must be an object")
+        unknown = set(arguments) - {"task", "command", "rounds"}
+        if unknown:
+            raise ValidationError(f"Unknown arguments: {', '.join(sorted(unknown))}")
+        task = arguments.get("task") or config.active_record_id
+        command = arguments.get("command")
+        rounds = arguments.get("rounds", 3)
+        if not isinstance(task, str) or not task:
+            raise ValidationError("Pass task or set an active Hiraku record")
+        if not isinstance(command, list):
+            raise ValidationError("command must be an argv list")
+        command = validate_command(command)
+        if type(rounds) is not int or rounds < 1:
+            raise ValidationError("rounds must be a positive integer")
         try:
-            task = task or self.config.active_record_id
-            if task is None:
-                raise EventRejected("No active record; pass the task record ID")
-            command = validate_command(command)
-            if command is None:
-                raise EventRejected("command must be a non-empty argv sequence")
-            return Experiments(task=task, command=command, rounds=rounds)
-        except EventRejected:
-            raise
+            load_record(task, config=config)
         except HirakuError as exc:
-            raise EventRejected(str(exc)) from exc
-
-    @node("draft")
-    def drafting(self, experiments: Experiments) -> Instruction:
-        context = {"task": experiments.task, "previous": experiments.results}
-        return self._step(experiments, "## Draft", context)
-
-    @node("implement")
-    def implementing(self, experiments: Experiments) -> Instruction:
-        return self._step(
-            experiments, "## Implement", self._experiment_context(experiments)
+            raise ValidationError(str(exc)) from exc
+        return Command(
+            update={
+                "task": task,
+                "command": command,
+                "rounds": rounds,
+                "step": "draft",
+                "results": [],
+            },
+            goto="draft",
         )
 
-    @node("launch")
-    def launching(self, experiments: Experiments) -> Instruction:
-        context = self._experiment_context(experiments)
-        record = self._experiment(experiments)
-        argv = [
-            "hiraku",
-            "run",
-            "--record",
-            record.id,
-        ]
-        argv.extend(["--", *experiments.command])
-        context["command"] = shlex.join(argv)
-        return self._step(experiments, "## Launch", context)
-
-    @node("analyze")
-    def analyzing(self, experiments: Experiments) -> Instruction:
-        record = self._experiment(experiments)
-        runs = _runs(record, self, experiments.run_id)
-        if not any(run.metrics for run in runs):
-            raise NotReady(
-                f"The runs of {record.id!r} have no metrics yet; "
-                "analyze once they finish"
-            )
-        context = {
-            **self._experiment_context(experiments),
-            "runs": [{"run_id": run.id, "metrics": dict(run.metrics)} for run in runs],
-            "previous": experiments.results,
+    def prompt(state: ResearchState, step: str, data: dict[str, Any]) -> dict[str, Any]:
+        text = markdown.section(f"## {step.title()}")
+        if rules:
+            text = f"{text}\n\n{rules}"
+        payload: dict[str, Any] = {
+            "step": step,
+            "instruction": text,
+            "data": data,
+            "response_schema": {
+                "event": "one of the listed events",
+                "arguments": "object matching the selected event's fields",
+            },
         }
-        return self._step(experiments, "## Analyze", context)
+        if state.get("feedback"):
+            payload["feedback"] = state["feedback"]
+        return payload
 
-    @node("finished", final=True)
-    def summarizing(self, experiments: Experiments) -> Instruction:
-        return Instruction(
-            self.markdown.section("## Done"),
-            data={"task": experiments.task, "results": experiments.results},
-        )
+    def response_for(
+        state: ResearchState, step: str, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        events = {
+            "draft": ("drafted", "revise_draft", "finish"),
+            "implement": ("implemented", "revise_implementation", "finish"),
+            "launch": ("launched", "revise_launch", "finish"),
+            "analyze": ("analyzed", "revise_analysis", "finish"),
+        }[step]
+        payload = prompt(state, step, data)
+        payload["response_schema"]["event"] = " | ".join(events)
+        schemas = {
+            "drafted": {
+                "record_id": "short experiment record ID",
+                "summary": "one-line summary",
+                "hypothesis": "testable hypothesis",
+                "change": "planned code change",
+            },
+            "revise_draft": {"feedback": "requested draft changes"},
+            "implemented": {"commit": "commit containing the implementation"},
+            "revise_implementation": {"feedback": "requested implementation changes"},
+            "revise_launch": {"feedback": "requested launch changes"},
+            "revise_analysis": {"feedback": "requested analysis changes"},
+            "analyzed": {
+                "verdict": "supports, refutes, or inconclusive",
+                "conclusion": "evidence-based conclusion",
+            },
+        }
+        payload["response_schema"]["arguments"] = {
+            event: schemas.get(event, {}) for event in events
+        }
+        while True:
+            response = interrupt(payload)
+            if not isinstance(response, dict) or response.get("event") not in events:
+                payload = {
+                    **prompt(state, step, data),
+                    "error": "Choose a valid event.",
+                }
+                payload["response_schema"]["event"] = " | ".join(events)
+                continue
+            arguments = response.get("arguments", {})
+            if not isinstance(arguments, dict):
+                payload = {
+                    **prompt(state, step, data),
+                    "error": "arguments must be an object.",
+                }
+                payload["response_schema"]["event"] = " | ".join(events)
+                continue
+            return {"event": response["event"], "arguments": arguments}
 
-    @event(source="draft", dest="implement")
-    def drafted(
-        self,
-        experiments: Experiments,
-        *,
-        record_id: Annotated[str, "Short ID of the experiment record."],
-        summary: Annotated[str, "The experiment in one line."],
-        hypothesis: Annotated[str, "What the experiment tests."],
-        change: Annotated[str, "The planned code change."],
-    ) -> Experiments:
-        """Submit the drafted experiment the user approved."""
+    def finish(state: ResearchState) -> Command[Literal["done"]]:
+        return Command(update={"step": "done"}, goto="done")
+
+    def draft(state: ResearchState) -> Command[Literal["draft", "implement", "done"]]:
+        data = {"task": state["task"], "previous": state.get("results", [])}
+        response = response_for(state, "draft", data)
+        event, arguments = response["event"], response["arguments"]
+        if event == "finish":
+            return finish(state)
+        if event == "revise_draft":
+            feedback = arguments.get("feedback")
+            if not isinstance(feedback, str):
+                return Command(
+                    update={"feedback": "Feedback must be a string."}, goto="draft"
+                )
+            return Command(update={"feedback": feedback}, goto="draft")
+        required = ("record_id", "summary", "hypothesis", "change")
+        if any(
+            not isinstance(arguments.get(key), str) or not arguments[key].strip()
+            for key in required
+        ):
+            return Command(
+                update={
+                    "feedback": (
+                        "Provide non-empty record_id, summary, hypothesis, and change."
+                    )
+                },
+                goto="draft",
+            )
         try:
             record = Record.create(
-                record_id,
-                parent_id=experiments.task,
+                arguments["record_id"],
+                parent_id=state["task"],
                 type="experiment",
                 status="drafted",
-                summary=summary,
-                hypothesis=hypothesis,
-                markdown=f"## Change\n\n{change.strip()}\n",
+                summary=arguments["summary"],
+                hypothesis=arguments["hypothesis"],
+                markdown=f"## Change\n\n{arguments['change'].strip()}\n",
                 activate=False,
-                config=self.config,
+                config=config,
             )
-            experiments.node = "implement"
-            experiments.experiment = record.id
-            experiments.feedback = None
-            return experiments
-        except EventRejected:
-            raise
         except HirakuError as exc:
-            raise EventRejected(str(exc)) from exc
-
-    @event(source="implement", dest="launch")
-    def implemented(
-        self,
-        experiments: Experiments,
-        *,
-        commit: Annotated[str, "Commit with the change."],
-    ) -> Experiments:
-        """Submit the commit that implements the experiment."""
-        try:
-            sha = GitRepository(self.config).resolve(commit)
-            record = self._experiment(experiments)
-            record.commit = sha
-            record.status = "implemented"
-            record.save()
-            experiments.node = "launch"
-            experiments.feedback = None
-            return experiments
-        except EventRejected:
-            raise
-        except HirakuError as exc:
-            raise EventRejected(str(exc)) from exc
-
-    @event(source="launch", dest="analyze")
-    def launched(
-        self,
-        experiments: Experiments,
-        *,
-        run_id: Annotated[str, "ID of the newly tracked run."],
-    ) -> Experiments:
-        """Report that the foreground execution produced a tracked run."""
-        try:
-            record = self._experiment(experiments)
-            runs = _runs(record, self, run_id)
-            if not runs:
-                raise NotReady(
-                    f"Run {run_id!r} is not visible in the tracking source yet"
-                )
-            run = runs[0]
-            if run.commit not in (None, record.commit):
-                raise EventRejected(
-                    f"Run {run_id!r} used another commit than {record.commit}"
-                )
-            if not run.metrics:
-                raise NotReady(f"Run {run_id!r} has no metrics yet")
-            record.status = "launched"
-            record.save()
-            experiments.node = "analyze"
-            experiments.run_id = run_id
-            experiments.feedback = None
-            return experiments
-        except EventRejected:
-            raise
-        except HirakuError as exc:
-            raise EventRejected(str(exc)) from exc
-
-    @event(source="analyze", dest=["draft", "finished"])
-    def analyzed(
-        self,
-        experiments: Experiments,
-        *,
-        verdict: Annotated[Verdict, "Whether the runs support the hypothesis."],
-        conclusion: Annotated[str, "A few sentences."],
-    ) -> Experiments:
-        """Submit the verdict and conclusion of the experiment."""
-        try:
-            record = self._experiment(experiments)
-            record.status = "analyzed"
-            record.verdict = verdict
-            record.conclusion = conclusion
-            record.save()
-            experiments.results.append({"record_id": record.id, "verdict": verdict})
-            experiments.experiment = None
-            experiments.feedback = None
-            experiments.node = (
-                "draft" if len(experiments.results) < experiments.rounds else "finished"
-            )
-            return experiments
-        except EventRejected:
-            raise
-        except HirakuError as exc:
-            raise EventRejected(str(exc)) from exc
-
-    @event(source="draft", dest="draft")
-    def revise_draft(
-        self, experiments: Experiments, *, feedback: Feedback
-    ) -> Experiments:
-        """Redraft the experiment with the user's feedback."""
-        experiments.feedback = feedback
-        return experiments
-
-    @event(source="implement", dest="implement")
-    def revise_implementation(
-        self, experiments: Experiments, *, feedback: Feedback
-    ) -> Experiments:
-        """Rework the implementation with the user's feedback."""
-        experiments.feedback = feedback
-        return experiments
-
-    @event(source="launch", dest="launch")
-    def revise_launch(
-        self, experiments: Experiments, *, feedback: Feedback
-    ) -> Experiments:
-        """Change how the experiment is launched, with the user's feedback."""
-        experiments.feedback = feedback
-        return experiments
-
-    @event(source="analyze", dest="analyze")
-    def revise_analysis(
-        self, experiments: Experiments, *, feedback: Feedback
-    ) -> Experiments:
-        """Redo the analysis with the user's feedback."""
-        experiments.feedback = feedback
-        return experiments
-
-    @event(source=STEPS, dest="finished")
-    def finish(self, experiments: Experiments) -> Experiments:
-        """End the session early and summarize the results."""
-        experiments.node = "finished"
-        return experiments
-
-    def _step(
-        self, experiments: Experiments, section: str, context: dict[str, Any]
-    ) -> Instruction:
-        text = self.markdown.section(section)
-        if experiments.feedback is not None:
-            context = {**context, "feedback": experiments.feedback}
-        return Instruction(
-            f"{text}\n\n{self.rules}" if self.rules else text, data=context
+            return Command(update={"feedback": str(exc)}, goto="draft")
+        return Command(
+            update={"experiment": record.id, "feedback": "", "step": "implement"},
+            goto="implement",
         )
 
-    def _experiment_context(self, experiments: Experiments) -> dict[str, Any]:
-        record = self._experiment(experiments)
+    def experiment(state: ResearchState) -> Record:
+        identifier = state.get("experiment")
+        if not identifier:
+            raise ValidationError("No experiment has been drafted")
+        return load_record(identifier, config=config)
+
+    def experiment_context(state: ResearchState) -> dict[str, Any]:
+        record = experiment(state)
         return {
-            "task": experiments.task,
+            "task": state["task"],
             "experiment": {
                 "record_id": record.id,
                 "summary": getattr(record, "summary", None),
@@ -290,16 +210,150 @@ class Collaborative(Workflow):
             },
         }
 
-    def _experiment(self, experiments: Experiments) -> Record:
-        if experiments.experiment is None:
-            raise EventRejected("No experiment is drafted yet")
-        return load_record(experiments.experiment, config=self.config)
+    def implement(
+        state: ResearchState,
+    ) -> Command[Literal["implement", "launch", "done"]]:
+        response = response_for(state, "implement", experiment_context(state))
+        event, arguments = response["event"], response["arguments"]
+        if event == "finish":
+            return finish(state)
+        if event == "revise_implementation":
+            feedback = arguments.get("feedback")
+            return Command(
+                update={
+                    "feedback": feedback
+                    if isinstance(feedback, str)
+                    else "Feedback must be a string."
+                },
+                goto="implement",
+            )
+        commit = arguments.get("commit")
+        if not isinstance(commit, str):
+            return Command(
+                update={"feedback": "commit must be a Git commit reference."},
+                goto="implement",
+            )
+        try:
+            sha = GitRepository(config).resolve(commit)
+            record = experiment(state)
+            record.commit = sha
+            record.status = "implemented"
+            record.save()
+        except HirakuError as exc:
+            return Command(update={"feedback": str(exc)}, goto="implement")
+        return Command(update={"feedback": "", "step": "launch"}, goto="launch")
+
+    def launch(state: ResearchState) -> Command[Literal["launch", "analyze", "done"]]:
+        record = experiment(state)
+        data = experiment_context(state)
+        data["command"] = shlex.join(
+            ["hiraku", "run", "--record", record.id, "--", *state["command"]]
+        )
+        response = response_for(state, "launch", data)
+        event, arguments = response["event"], response["arguments"]
+        if event == "finish":
+            return finish(state)
+        if event == "revise_launch":
+            feedback = arguments.get("feedback")
+            return Command(
+                update={
+                    "feedback": feedback
+                    if isinstance(feedback, str)
+                    else "Feedback must be a string."
+                },
+                goto="launch",
+            )
+        runs = _runs(record, config)
+        if not runs:
+            return Command(
+                update={"feedback": f"No run is attributed to {record.id!r} yet."},
+                goto="launch",
+            )
+        if any(run.commit not in (None, record.commit) for run in runs):
+            return Command(
+                update={
+                    "feedback": "A run used a different commit than this experiment."
+                },
+                goto="launch",
+            )
+        record.status = "launched"
+        record.save()
+        return Command(update={"feedback": "", "step": "analyze"}, goto="analyze")
+
+    def analyze(state: ResearchState) -> Command[Literal["analyze", "draft", "done"]]:
+        record = experiment(state)
+        runs = _runs(record, config)
+        if not any(run.metrics for run in runs):
+            return Command(
+                update={"feedback": "The attributed runs have no metrics yet."},
+                goto="analyze",
+            )
+        data = {
+            **experiment_context(state),
+            "runs": [{"run_id": run.id, "metrics": dict(run.metrics)} for run in runs],
+            "previous": state.get("results", []),
+        }
+        response = response_for(state, "analyze", data)
+        event, arguments = response["event"], response["arguments"]
+        if event == "finish":
+            return finish(state)
+        if event == "revise_analysis":
+            feedback = arguments.get("feedback")
+            return Command(
+                update={
+                    "feedback": feedback
+                    if isinstance(feedback, str)
+                    else "Feedback must be a string."
+                },
+                goto="analyze",
+            )
+        verdict, conclusion = arguments.get("verdict"), arguments.get("conclusion")
+        if (
+            verdict not in {"supports", "refutes", "inconclusive"}
+            or not isinstance(conclusion, str)
+            or not conclusion.strip()
+        ):
+            return Command(
+                update={"feedback": "Provide a verdict and non-empty conclusion."},
+                goto="analyze",
+            )
+        record.status = "analyzed"
+        record.verdict = verdict
+        record.conclusion = conclusion
+        record.save()
+        results = [
+            *state.get("results", []),
+            {"record_id": record.id, "verdict": verdict},
+        ]
+        next_step = "draft" if len(results) < state["rounds"] else "done"
+        return Command(
+            update={
+                "results": results,
+                "experiment": "",
+                "feedback": "",
+                "step": next_step,
+            },
+            goto=next_step,
+        )
+
+    def done(state: ResearchState) -> dict[str, str]:
+        return {
+            "final": render(
+                markdown.section("## Done"), {"results": state.get("results", [])}
+            )
+        }
+
+    builder = StateGraph(ResearchState)
+    builder.add_node("initialize", initialize)
+    builder.add_node("draft", draft)
+    builder.add_node("implement", implement)
+    builder.add_node("launch", launch)
+    builder.add_node("analyze", analyze)
+    builder.add_node("done", done)
+    builder.add_edge(START, "initialize")
+    builder.add_edge("done", END)
+    return builder.compile(checkpointer=checkpointer)
 
 
-def _runs(record: Record, workflow: Workflow, run_id: str | None) -> list[Run]:
-    if run_id is None:
-        return []
-    return [run for run in record.runs(config=workflow.config) if run.id == run_id]
-
-
-WORKFLOW = Collaborative
+def _runs(record: Record, config: HirakuConfig) -> list[Run]:
+    return record.runs(config=config)

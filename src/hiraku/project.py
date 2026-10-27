@@ -169,9 +169,6 @@ class ProjectInitializer:
                 cls._install_mcp_configs(
                     project_root, created_files, created_dirs, replaced_files
                 )
-                cls._install_client_hooks(
-                    project_root, created_files, created_dirs, replaced_files
-                )
                 for name in ("launch.sh", "worktree.sh"):
                     dispatcher = config.dispatch_dir / name
                     if dispatcher.is_file():
@@ -296,78 +293,6 @@ class ProjectInitializer:
                 "[mcp_servers.hiraku] table manually"
             )
         atomic_write(codex_path, codex_text)
-
-    @classmethod
-    def _install_client_hooks(
-        cls,
-        project_root: Path,
-        created_files: list[Path],
-        created_dirs: list[Path],
-        replaced_files: dict[Path, bytes],
-    ) -> None:
-        """Merge project-local PreToolUse hooks without replacing user hooks."""
-        for client, relative in (
-            ("codex", ".codex/hooks.json"),
-            ("claude", ".claude/settings.json"),
-        ):
-            path = project_root / relative
-            if path.is_symlink() or path.parent.is_symlink():
-                raise ValidationError(f"Hook configuration cannot be a symlink: {path}")
-            original = path.read_bytes() if path.exists() else None
-            try:
-                data = json.loads(original) if original is not None else {}
-                if not isinstance(data, dict):
-                    raise ValueError("Expected a JSON object")
-                hooks = data.setdefault("hooks", {})
-                if not isinstance(hooks, dict):
-                    raise ValueError("hooks must be an object")
-                entries = hooks.setdefault("PreToolUse", [])
-                if not isinstance(entries, list):
-                    raise ValueError("PreToolUse must be an array")
-            except (ValueError, UnicodeError) as exc:
-                raise ValidationError(
-                    f"Cannot merge hook configuration {path}: {exc}"
-                ) from exc
-            command = [*cls._hiraku_command(project_root), "session", "hook", client]
-            entry = {
-                "matcher": "^mcp__hiraku__",
-                "hooks": [{"type": "command", "command": " ".join(command)}],
-            }
-            # Replace an earlier Hiraku hook command, e.g. one written on another
-            # machine, keeping every other hook, including ones in the same entry.
-            kept = []
-            for item in entries:
-                handlers = item.get("hooks") if isinstance(item, dict) else None
-                if not isinstance(handlers, list):
-                    kept.append(item)
-                    continue
-                others = [
-                    handler
-                    for handler in handlers
-                    if not cls._is_hiraku_hook(handler, client)
-                ]
-                if len(others) == len(handlers):
-                    kept.append(item)
-                elif others:
-                    kept.append({**item, "hooks": others})
-            if [*kept, entry] == entries:
-                continue
-            hooks["PreToolUse"] = [*kept, entry]
-            if original is not None:
-                replaced_files[path] = original
-            else:
-                cls._ensure_directory(path.parent, created_dirs)
-                created_files.append(path)
-            atomic_write(path, json.dumps(data, indent=2) + "\n")
-
-    @staticmethod
-    def _is_hiraku_hook(handler: object, client: str) -> bool:
-        command = handler.get("command") if isinstance(handler, dict) else None
-        return (
-            isinstance(command, str)
-            and "hiraku" in command
-            and command.endswith(f"session hook {client}")
-        )
 
     @staticmethod
     def _hiraku_command(project_root: Path) -> list[str]:

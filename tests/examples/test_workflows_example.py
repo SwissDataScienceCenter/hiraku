@@ -46,13 +46,13 @@ def runner(tmp_path: Path, monkeypatch) -> CliRunner:
     return selected
 
 
-def test_langgraph_workflow_is_not_registered_with_legacy_cli(
+def test_all_examples_use_the_langgraph_cli(
     runner: CliRunner,
 ) -> None:
     listed = invoke(runner, ["workflow", "list"]).output
-    assert "count-steps" not in listed
-    assert "greet" not in listed
-    assert "scheduler" not in listed
+    assert "count-steps" in listed
+    assert "greet" in listed
+    assert "scheduler" in listed
 
 
 def test_greet_is_one_final_prompt_filled_from_its_arguments(
@@ -68,6 +68,30 @@ def test_greet_is_one_final_prompt_filled_from_its_arguments(
     default = start_workflow("greet", {}, config=config)
     assert default["result"].startswith("# Greet\n\nPrint 2 greetings to World")
     assert "Greet formally:\nfalse." in default["result"]
+
+
+def test_cli_uses_langgraph_run_ids_for_resume_and_status(runner: CliRunner) -> None:
+    started = json.loads(
+        invoke(
+            runner,
+            ["workflow", "start", "count-steps", "--arguments-file", "-"],
+            {"count": 1},
+        ).output
+    )
+    assert started["status"] == "waiting"
+    run_id = started["run_id"]
+    assert json.loads(invoke(runner, ["workflow", "status", run_id]).output) == started
+
+    interrupt = started["interrupts"][0]["value"]
+    completed = json.loads(
+        invoke(
+            runner,
+            ["workflow", "resume", run_id, "--arguments-file", "-"],
+            {"token": interrupt["data"]["token"], "decision": "continue"},
+        ).output
+    )
+    assert completed["status"] == "completed"
+    assert completed["workflow_id"] == "count-steps"
 
 
 def children(parent: str) -> list[Any]:

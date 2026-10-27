@@ -1,7 +1,7 @@
 # Karpathy's LLM autoresearch example with Hiraku
 
 This example adds Hiraku research records, attributed CSV runs, and
-an autonomous research program to Andrej Karpathy's original
+a LangGraph research workflow to Andrej Karpathy's original
 [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch) repository.
 It does not vendor or modify the upstream training implementation.
 
@@ -12,8 +12,8 @@ The overlay contains:
 
 - `task.md` — the Markdown body used to create the research root.
 - `cpu_mock.py` — a fast CPU-only check with the same summary format as training.
-- `hiraku/programs/autoresearch/program.md` — the upstream research loop adapted
-  to Hiraku records and runs.
+- `hiraku/workflows/autoresearch/` — the upstream research loop adapted to
+  Hiraku records and runs.
 - `hiraku/dispatch/autoresearch.sh` — timeout, output parsing, and CSV tracking.
 
 ## Setup
@@ -34,8 +34,9 @@ uv run train.py
 
 ## Initialize the Hiraku project
 
-From the root of the autoresearch repository, install the example. Initialization copies root `task.md` as a bootstrap template and installs the
-separate program at `hiraku/programs/autoresearch/program.md`.
+From the root of the autoresearch repository, install the example. Initialization
+copies root `task.md` as a bootstrap template and installs the LangGraph workflow
+at `hiraku/workflows/autoresearch/`.
 
 ```bash
 hiraku example create autoresearch .
@@ -69,7 +70,6 @@ hiraku record create sep10 --type task \
   --set 'branch=autoresearch/sep10' \
   --set "goal=Find the best architecture, optimizer, and hyperparameters to minimize `val_bpb` within the fixed 5-minute training budget." \
   --markdown-file task.md \
-  --set 'program=autoresearch' \
   --set 'metrics=[{name: val_bpb, direction: minimize}]'
 
 git switch -c autoresearch/sep10
@@ -117,16 +117,16 @@ Claude Code uses `.claude/skills/hiraku/`, which links to the canonical skill
 when directory symlinks are available. Invoke it as `$hiraku` in Codex or
 `/hiraku` in Claude Code.
 
-Currently, Hiraku records the program association but does not automatically inject its Markdown into an agent prompt. Start an agent in the repository and ask it to
-load the root record and installed program with:
+Start an agent in the repository and ask it to start the installed
+`autoresearch` workflow:
 
 
 ```bash
-Use the Hiraku skill and start the autoresearch program.
+Use the Hiraku skill and start the autoresearch workflow.
 
-To read the root record and program, run:
+To inspect the root record and available workflows, run:
 hiraku record show sep10 --json
-hiraku program show autoresearch
+hiraku workflow list
 ```
 
 Track the agent's progress with:

@@ -1,6 +1,5 @@
 ---
 id: count-steps
-engine: langgraph
 description: Count numbered steps with a LangGraph handoff to the current harness.
 arguments:
   count: 5

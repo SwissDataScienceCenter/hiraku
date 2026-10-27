@@ -48,7 +48,6 @@ reads the editable prompt and typed input defaults from
 ```markdown
 ---
 id: greet
-engine: langgraph
 description: Greet someone a few times; a prompt-only LangGraph workflow.
 arguments:
   name: World

@@ -1,6 +1,5 @@
 ---
 id: scheduler
-engine: langgraph
 description: Work through records by priority until each count reaches a target.
 arguments:
   records: 3

@@ -37,18 +37,7 @@ def workflow_ids(*, config: HirakuConfig) -> list[str]:
         and not path.name.startswith((".", "_"))
         and _WORKFLOW_ID.fullmatch(path.name)
         and (path / "workflow.py").is_file()
-        and _is_langgraph_workflow(path / "workflow.md")
     )
-
-
-def _is_langgraph_workflow(path: Path) -> bool:
-    if not path.is_file():
-        return False
-    try:
-        fields, _ = BaseRecord._parse_markdown(path)
-    except Exception:
-        return False
-    return fields.get("engine") == "langgraph"
 
 
 def workflow_details(*, config: HirakuConfig) -> list[dict[str, Any]]:

@@ -51,15 +51,3 @@ class WorkflowError(HirakuError):
 
 class SectionNotFoundError(HirakuError):
     """A Markdown body has no section with the requested heading."""
-
-
-class SessionNotFoundError(HirakuError):
-    """A workflow session does not exist."""
-
-
-class EventRejected(HirakuError):
-    """A workflow event was invalid and did not advance its session."""
-
-
-class NotReady(EventRejected):
-    """A valid workflow event whose evidence is not available yet."""

@@ -8,6 +8,7 @@ import pytest
 from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.mcp import create_server
+from hiraku.record import Record
 from hiraku.workflows.langgraph import (
     resume_workflow,
     start_workflow,
@@ -107,3 +108,48 @@ def test_count_steps_rejects_invalid_arguments(tmp_path) -> None:
     config = _project(tmp_path)
     with pytest.raises(ValidationError, match="positive integer"):
         start_workflow("count-steps", {"count": 0}, config=config)
+
+
+def test_mcp_exposes_only_the_langgraph_workflow_interface(tmp_path) -> None:
+    config = _project(tmp_path)
+    tools = _tool_names(create_server(config))
+    assert {
+        "workflow_list",
+        "workflow_start",
+        "workflow_status",
+        "workflow_resume",
+    } <= tools
+    assert (
+        not {
+            "workflow_send_event",
+            "session_list",
+            "session_show",
+            "session_cancel",
+            "count-steps",
+            "greet",
+            "scheduler",
+        }
+        & tools
+    )
+
+
+def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    Record.create(
+        "task",
+        type="task",
+        config=config,
+    )
+    started = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        config=config,
+    )
+    assert started["status"] == "waiting"
+    interrupt = _interrupt(started)
+    assert interrupt["step"] == "draft"
+    assert interrupt["data"]["task"] == "task"
+
+    completed = resume_workflow(started["run_id"], {"event": "finish"}, config=config)
+    assert completed["status"] == "completed"
+    assert "results" in completed["result"]

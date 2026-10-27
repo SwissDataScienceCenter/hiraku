@@ -115,32 +115,23 @@ shared directory. For Claude Code, initialization creates
 systems that cannot create directory symlinks). Invoke it as `$hiraku` in Codex
 or `/hiraku` in Claude Code.
 
-## Actions, Programs, Context
+## Workflows and context
 
-!!! info
-    Version 0.1.0 only implements the data model and not yet the agent integration. See github issues for the planned features.
-
-Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state.  A *program* defines complex research workflows and loops end-to-end, with defined permissions and limits. Actions and programs are executed by the `hiraku-agent`. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to provide project-relevant information to the agent.
-
-A *workflow* is a project-defined research procedure that runs inside your
-coding agent. Its Python code decides what happens next and validates what the
-agent reports; its Markdown holds the guidance the agent follows. The agent
-starts a workflow and continues it through the Hiraku MCP server, which
-`hiraku init` configures for Claude Code and Codex. Records with
-`type: context` provide project-relevant information to the agent and can be
-linked to other records.
+A *workflow* is a project-defined LangGraph procedure. Its graph controls
+execution and validates responses; its Markdown can hold editable instructions
+and defaults. The agent starts and resumes a workflow through the Hiraku MCP
+server, which `hiraku init` configures for Claude Code and Codex. Supporting
+material is stored as records with `type: context` and can be linked to other
+records.
 
 | Term | Data | Summary |
-| --- | ---  | --- |
-| **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A record with an `id`, settings, and prompts (`workflow.md`) whose class adds the operations (`workflow.py`). |
-| **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its state, history, and current instruction. Sessions are local and not committed. |
-| **Record** | `hiraku/records/{root_id}/{record_id}.md` | Research content of any kind, including tasks, experiments, literature, datasets, and context. Use `type` to describe the record. |
-
-Programs, action and context records are managed via CLI, e.g.
+| --- | --- | --- |
+| **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A LangGraph graph with optional editable instructions and input defaults. |
+| **Workflow session** | `hiraku/langgraph-checkpoints.sqlite` | A checkpointed graph execution identified by its workflow session ID. |
+| **Record** | `hiraku/records/{root_id}/{record_id}.md` | Research content of any kind, including tasks, experiments, literature, datasets, and context. |
 
 ```bash
 hiraku workflow list
-hiraku session list
 hiraku record create literature --type context
 hiraku record list
 ```
@@ -201,17 +192,15 @@ shows prompts for both a complete investigation and individual steps.
 
 ### Autoresearch workflow
 
-The packaged program describes an autonomous loop. Read its instructions and
-the research history before starting it in a coding agent; agree on the
-objective, branch, budget, and stopping condition with the user.
+LangGraph workflows can guide interactive research or run a bounded procedure.
+Inspect the workflow definition and research history before starting one.
 
 ```bash
-hiraku program show autoresearch
-hiraku program show interactive
+hiraku workflow list
+hiraku workflow start collaborative --arguments-file arguments.json
 hiraku record tree
 hiraku runs --record heart-disease --all --json
 ```
 
 The [Autoresearch example](examples/autoresearch/README.md) shows how to use
-the program with the project-local skill and a bounded dispatcher. The skill
-can be invoked with `/hiraku "run the autoresearch program for heart-disease"`.
+the LangGraph workflow with the project-local skill and a bounded dispatcher.
