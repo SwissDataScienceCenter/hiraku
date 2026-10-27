@@ -251,16 +251,16 @@ def test_mid_batch_failure_is_audited_and_retryable(
         _dataset("set-a", [_artifact("a/1.csv")]),
         _dataset("set-b", [_artifact("b/2.csv")]),
     )
-    real_create = writer_module.Record.create
+    real_save = writer_module.BaseRecord.save
     calls = {"count": 0}
 
-    def flaky_create(record_id, **kwargs):
+    def flaky_save(record, path, **kwargs):
         calls["count"] += 1
         if calls["count"] == 2:
             raise OSError("simulated disk failure")
-        return real_create(record_id, **kwargs)
+        return real_save(record, path, **kwargs)
 
-    monkeypatch.setattr(writer_module.Record, "create", staticmethod(flaky_create))
+    monkeypatch.setattr(writer_module.BaseRecord, "save", flaky_save)
 
     with pytest.raises(ValidationError, match="retry is safe"):
         apply_import(manifest, project)
@@ -375,3 +375,71 @@ def test_apply_writes_returns_audit_summary(project: HirakuConfig) -> None:
     assert isinstance(result, ApplyResult)
     assert result.applied == [dataset.record_id()]
     assert result.failed == []
+
+
+def test_batch_creates_scan_existing_records_once(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hiraku.registration.writer as writer_module
+
+    manifest = _manifest(
+        "filesystem",
+        *(
+            _dataset(f"set-{index}", [_artifact(f"data/{index}.csv")])
+            for index in range(25)
+        ),
+    )
+    plan = plan_import(manifest, project)
+    real_index = writer_module._record_index
+    calls = {"count": 0}
+
+    def counting_index(config):
+        calls["count"] += 1
+        return real_index(config)
+
+    monkeypatch.setattr(writer_module, "_record_index", counting_index)
+    result = apply_writes(project, plan._writes)
+
+    assert result.failed == []
+    assert len(result.applied) == 25
+    assert calls["count"] == 1
+    assert len(list_records(config=project)) == 25
+
+
+def test_batch_updates_scan_existing_records_once(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hiraku.registration.writer as writer_module
+
+    initial = _manifest(
+        "filesystem",
+        *(
+            _dataset(f"set-{index}", [_artifact(f"data/{index}.csv")])
+            for index in range(25)
+        ),
+    )
+    apply_import(initial, project)
+    changed = _manifest(
+        "filesystem",
+        *(
+            _dataset(
+                f"set-{index}",
+                [_artifact(f"data/{index}.csv", revision="2:2")],
+            )
+            for index in range(25)
+        ),
+    )
+    plan = plan_import(changed, project)
+    real_index = writer_module._record_index
+    calls = {"count": 0}
+
+    def counting_index(config):
+        calls["count"] += 1
+        return real_index(config)
+
+    monkeypatch.setattr(writer_module, "_record_index", counting_index)
+    result = apply_writes(project, plan._writes)
+
+    assert result.failed == []
+    assert len(result.applied) == 25
+    assert calls["count"] == 1
