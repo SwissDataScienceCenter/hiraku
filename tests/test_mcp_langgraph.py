@@ -227,21 +227,11 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
             content={"decision": "approve"},
         )
 
-    async def exercise() -> tuple[Any, Any, Any]:
+    async def exercise() -> tuple[Any, Any]:
         async with Client(
             create_server(config),
             elicitation_callback=elicit,
         ) as client:
-            bypass = await client.call_tool(
-                "workflow_resume",
-                {
-                    "run_id": started["run_id"],
-                    "response": {
-                        "approval": {"decision": "approve"},
-                        "response": {"event": "finish"},
-                    },
-                },
-            )
             approval = await client.call_tool(
                 "workflow_approval",
                 {
@@ -255,10 +245,9 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
                 "workflow_resume",
                 {"run_id": started["run_id"], "response": approval.structured_content},
             )
-            return bypass, approval, resumed
+            return approval, resumed
 
-    bypass, result, resumed = anyio.run(exercise)
-    assert bypass.is_error
+    result, resumed = anyio.run(exercise)
     assert resumed.structured_content["status"] == "completed"
     assert len(requested) == 1
     assert "draft" in requested[0].message
@@ -271,8 +260,10 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
         "stop",
     ]
     assert set(schema["properties"]) == {"decision", "feedback"}
-    assert result.structured_content["decision"] == "approve"
-    assert result.structured_content["approval"]["receipt"]
+    assert result.structured_content == {
+        "approval": {"decision": "approve"},
+        "response": {"event": "finish"},
+    }
 
 
 def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
@@ -354,10 +345,7 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
                 "workflow_resume",
                 {
                     "run_id": started["run_id"],
-                    "response": {
-                        **approval.structured_content,
-                        "response": {"value": "changed"},
-                    },
+                    "response": approval.structured_content,
                 },
             )
 
@@ -365,11 +353,7 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
     assert result.structured_content["result"] == "approved"
 
 
-def test_approval_receipt_survives_wrong_run_and_failed_resume(
-    tmp_path, monkeypatch
-) -> None:
-    from hiraku import mcp as mcp_module
-
+def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     Record.create(
         "task",
@@ -378,18 +362,6 @@ def test_approval_receipt_survives_wrong_run_and_failed_resume(
         entrypoints={"train": {"command": ["python", "train.py"]}},
     )
     first = start_workflow("collaborative", {"rounds": 1}, config=config)
-    second = start_workflow("collaborative", {"rounds": 1}, config=config)
-    original_resume = mcp_module.resume_langgraph_workflow
-    attempts = 0
-
-    def fail_once(*args, **kwargs):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise ValidationError("Temporary resume failure")
-        return original_resume(*args, **kwargs)
-
-    monkeypatch.setattr(mcp_module, "resume_langgraph_workflow", fail_once)
 
     async def elicit(_context, _params):
         return types.ElicitResult(action="accept", content={"decision": "stop"})
@@ -405,19 +377,11 @@ def test_approval_receipt_survives_wrong_run_and_failed_resume(
                     "response": {},
                 },
             )
-            response = approval.structured_content
-            wrong_run = await client.call_tool(
-                "workflow_resume", {"run_id": second["run_id"], "response": response}
+        async with Client(create_server(config)) as client:
+            return await client.call_tool(
+                "workflow_resume",
+                {"run_id": first["run_id"], "response": approval.structured_content},
             )
-            failed = await client.call_tool(
-                "workflow_resume", {"run_id": first["run_id"], "response": response}
-            )
-            retried = await client.call_tool(
-                "workflow_resume", {"run_id": first["run_id"], "response": response}
-            )
-            return wrong_run, failed, retried
 
-    wrong_run, failed, retried = anyio.run(exercise)
-    assert wrong_run.is_error
-    assert failed.is_error
-    assert retried.structured_content["status"] == "completed"
+    resumed = anyio.run(exercise)
+    assert resumed.structured_content["status"] == "completed"

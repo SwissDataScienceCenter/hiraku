@@ -97,12 +97,11 @@ Project workflows are LangGraph graphs. Use `workflow_list` to discover them,
 Any workflow interrupt can request approval by including an `approval` object
 in its interrupt payload. `workflow_approval` takes the run ID, interrupt ID,
 proposal, and proposed response, and uses MCP elicitation to collect the
-standard approve, revise, or stop decision. Pass its returned approval receipt
-to `workflow_resume`. The receipt binds the response to that interrupt and can
-be used once. Receipts are held by the MCP server; after a server restart,
-request approval again. If elicitation is cancelled, leave the graph paused.
-Python and CLI callers can supply approval decisions directly and must be
-trusted; MCP approval does not restrict other tools or local shell access.
+standard approve, revise, or stop decision. Pass its result to
+`workflow_resume`. If elicitation is cancelled, leave the graph paused.
+Approval is cooperative: Python, CLI, and MCP callers can submit decisions
+directly and must be trusted. MCP elicitation does not restrict other tools or
+local shell access.
 
 ## Prompt template
 

@@ -328,10 +328,11 @@ stored state before repeating consequential work. User approval requested by
 workflow text remains a conversational contract. If elicitation is cancelled
 or declined, leave the workflow paused and do not launch the experiment.
 For an interrupt requesting approval, call `workflow_approval` with the run ID,
-interrupt ID, proposal, and proposed response. Pass the returned receipt to
-`workflow_resume`. If elicitation is cancelled or declined, leave the workflow
+interrupt ID, proposal, and proposed response. It uses MCP elicitation to wait
+for approve, revise, or stop. Pass the returned result to `workflow_resume`.
+If elicitation is cancelled or declined, tell the user and leave the workflow
 paused; do not resume it or launch the experiment. Do not replace elicitation
-with an ordinary assistant question. A receipt expires on server restart.
+with an ordinary assistant question.
 
 Commands are not record metadata. Pass the complete invocation directly after
 `--`, for example `hiraku run --record <record-id> -- uv run --locked python

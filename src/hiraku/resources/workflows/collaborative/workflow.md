@@ -15,7 +15,7 @@ experiments first, and build on the previous results in the data. Do not
 change code yet. Present the draft to the user, then call the MCP tool
 `workflow_approval` with the run ID, current interrupt ID, concise summary,
 and the proposed response. Wait for the user's choice, then pass the returned
-approval receipt to `workflow_resume`. For an approved draft, the proposed
+result to `workflow_resume`. For an approved draft, the proposed
 response is `{"event": "drafted", "arguments":
 {"record_id": "...", "summary": "...", "hypothesis": "...", "change":
 "..."}}`.
@@ -26,14 +26,14 @@ the workflow paused; do not resume it or proceed with the experiment.
 
 Implement the drafted experiment in the data and commit the change. Show
 the user the change, then call `workflow_approval` with the proposed response.
-Pass the returned receipt to `workflow_resume`.
+Pass the returned result to `workflow_resume`.
 
 ## Launch
 
 Call `workflow_approval` with the interrupt ID and `{"event": "launched"}` as
 the proposed response. Run the explicit argv supplied when starting the
 workflow with `hiraku run --record <experiment> -- <command...>` only after
-approval, then resume with the receipt once the run is tracked; check with
+approval, then resume with the result once the run is tracked; check with
 `hiraku runs --record <experiment>`.
 
 ## Analyze
@@ -41,7 +41,7 @@ approval, then resume with the receipt once the run is tracked; check with
 Compare the runs in the data with the task's metrics, earlier results, and
 the experiment's hypothesis. Present your verdict and conclusion to the user,
 then call `workflow_approval` with the proposed analysis response and wait.
-Pass the returned receipt to `workflow_resume`.
+Pass the returned result to `workflow_resume`.
 
 ## Done
 

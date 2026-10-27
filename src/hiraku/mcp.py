@@ -5,10 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import mimetypes
-from threading import Lock
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
-from uuid import uuid4
 
 from mcp.server.mcpserver import Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import (
@@ -39,9 +37,8 @@ INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, runs commands with execute, and runs LangGraph
 workflows. Use workflow_start, workflow_status, and workflow_resume to operate
-a workflow. For the collaborative workflow, use workflow_approval to ask the
-user for approval; it opens a structured MCP elicitation and waits for the
-user's answer.\
+a workflow. When an interrupt requests approval, workflow_approval opens a
+structured MCP elicitation and waits for the user's answer.\
 """
 
 logger = logging.getLogger(__name__)
@@ -296,8 +293,6 @@ def create_server(config: HirakuConfig | None = None) -> Any:
 def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     """Add LangGraph workflow tools and definitions to a server."""
     path = config.path
-    approvals: dict[str, tuple[str, str, dict[str, str], dict[str, Any]]] = {}
-    approval_lock = Lock()
 
     def pending_approval(
         run_id: str, interrupt_id: str | None = None
@@ -342,29 +337,7 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
             Field(description="Response to the current graph interrupt."),
         ],
     ) -> dict[str, Any]:
-        with approval_lock:
-            status = langgraph_workflow_status(run_id, config=project())
-            interrupts = status["interrupts"]
-            receipt = None
-            if any(
-                isinstance(item.get("value"), dict)
-                and isinstance(item["value"].get("approval"), dict)
-                for item in interrupts
-            ):
-                pending = pending_approval(run_id)
-                approval = response.get("approval")
-                receipt = (
-                    approval.get("receipt") if isinstance(approval, dict) else None
-                )
-                grant = approvals.get(receipt) if isinstance(receipt, str) else None
-                if grant is None or grant[:2] != (run_id, pending["id"]):
-                    raise ValidationError("A current approval receipt is required")
-                _, _, decision, approved_response = grant
-                response = {"approval": decision, "response": approved_response}
-            result = resume_langgraph_workflow(run_id, response, config=project())
-            if isinstance(receipt, str):
-                approvals.pop(receipt, None)
-            return result
+        return resume_langgraph_workflow(run_id, response, config=project())
 
     def resolve_workflow_approval(
         run_id: str, interrupt_id: str, proposal: str, response: dict[str, Any]
@@ -394,25 +367,17 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     ) -> dict[str, Any]:
         """Ask the user to resolve an approval request in the current interrupt."""
         if approval.action == "accept":
-            receipt = uuid4().hex
-            with approval_lock:
-                pending_approval(run_id, interrupt_id)
-                approvals[receipt] = (
-                    run_id,
-                    interrupt_id,
-                    {
-                        "decision": approval.data.decision,
-                        **(
-                            {"feedback": approval.data.feedback}
-                            if approval.data.feedback
-                            else {}
-                        ),
-                    },
-                    response,
-                )
+            pending_approval(run_id, interrupt_id)
             return {
-                "approval": {"receipt": receipt},
-                "decision": approval.data.decision,
+                "approval": {
+                    "decision": approval.data.decision,
+                    **(
+                        {"feedback": approval.data.feedback}
+                        if approval.data.feedback
+                        else {}
+                    ),
+                },
+                "response": response,
             }
         return {"decision": approval.action}
 
@@ -449,7 +414,7 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         description=(
             "Open a structured MCP approval prompt when the current workflow "
             "interrupt declares an approval request. Supply the current interrupt "
-            "ID and proposed response; pass its approval receipt to workflow_resume."
+            "ID and proposed response; pass its result to workflow_resume."
         ),
         annotations=ToolAnnotations(read_only_hint=False),
     )
