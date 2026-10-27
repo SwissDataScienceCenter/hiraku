@@ -9,6 +9,7 @@ from typing import Any, Literal, TypedDict
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
+from pydantic import BaseModel, ConfigDict, Field
 
 from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
@@ -84,6 +85,10 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             "step": step,
             "instruction": text,
             "data": data,
+            "approval": {
+                "message": f"Approve the proposed {step} step?",
+                "schema": WorkflowApproval.model_json_schema(),
+            },
             "response_schema": {
                 "event": "one of the listed events",
                 "arguments": "object matching the selected event's fields",
@@ -126,6 +131,47 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         }
         while True:
             response = interrupt(payload)
+            approval = response.get("approval") if isinstance(response, dict) else None
+            decision = approval.get("decision") if isinstance(approval, dict) else None
+            if not isinstance(decision, str) or decision not in {
+                "approve",
+                "revise",
+                "stop",
+            }:
+                payload = {**payload, "error": "A valid approval decision is required."}
+                continue
+            if decision == "stop":
+                return {"event": "finish", "arguments": {}}
+            if decision == "revise":
+                submitted = response.get("response", {})
+                if not isinstance(submitted, dict):
+                    submitted = {}
+                arguments = submitted.get("arguments", {})
+                if not isinstance(arguments, dict):
+                    arguments = {}
+                feedback = approval.get("feedback")
+                if feedback is None and isinstance(arguments, dict):
+                    feedback = arguments.get("feedback")
+                if feedback is None:
+                    feedback = "Please revise this proposal."
+                if not isinstance(feedback, str) or not feedback.strip():
+                    payload = {
+                        **payload,
+                        "error": "Revision feedback must be non-empty.",
+                    }
+                    continue
+                revise_events = {
+                    "draft": "revise_draft",
+                    "implement": "revise_implementation",
+                    "launch": "revise_launch",
+                    "analyze": "revise_analysis",
+                }
+                response = {
+                    "event": revise_events[step],
+                    "arguments": {"feedback": feedback},
+                }
+            else:
+                response = response.get("response", response)
             if not isinstance(response, dict) or response.get("event") not in events:
                 payload = {
                     **prompt(state, step, data),
@@ -355,3 +401,18 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
 
 def _runs(record: Record, config: HirakuConfig) -> list[Run]:
     return record.runs(config=config)
+
+
+class WorkflowApproval(BaseModel):
+    """Decision required before a collaborative workflow step can proceed."""
+
+    model_config = ConfigDict(
+        json_schema_extra=lambda schema: schema.pop("title", None)
+    )
+
+    decision: Literal["approve", "revise", "stop"] = Field(
+        description="Whether to approve, request a revision, or stop."
+    )
+    feedback: str | None = Field(
+        default=None, description="Required guidance when requesting a revision."
+    )

@@ -46,7 +46,7 @@ def test_workflow_approval_schema_omits_codex_unsupported_root_title() -> None:
         "revise",
         "stop",
     ]
-    assert set(schema["properties"]) == {"decision"}
+    assert set(schema["properties"]) == {"decision", "feedback"}
 
 
 def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
@@ -187,7 +187,24 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     assert interrupt["step"] == "draft"
     assert interrupt["data"]["task"] == "task"
 
-    completed = resume_workflow(started["run_id"], {"event": "finish"}, config=config)
+    bypass = resume_workflow(started["run_id"], {"event": "finish"}, config=config)
+    assert bypass["status"] == "waiting"
+    assert "approval decision is required" in _interrupt(bypass)["error"]
+    invalid = resume_workflow(
+        started["run_id"], {"approval": {"decision": []}}, config=config
+    )
+    assert "approval decision is required" in _interrupt(invalid)["error"]
+    revised = resume_workflow(
+        started["run_id"],
+        {"approval": {"decision": "revise", "feedback": "Use a smaller model."}},
+        config=config,
+    )
+    assert _interrupt(revised)["feedback"] == "Use a smaller model."
+    completed = resume_workflow(
+        started["run_id"],
+        {"approval": {"decision": "stop"}},
+        config=config,
+    )
     assert completed["status"] == "completed"
     assert "results" in completed["result"]
 
@@ -210,32 +227,52 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
             content={"decision": "approve"},
         )
 
-    async def exercise() -> dict[str, Any]:
+    async def exercise() -> tuple[Any, Any, Any]:
         async with Client(
             create_server(config),
             elicitation_callback=elicit,
         ) as client:
-            return await client.call_tool(
+            bypass = await client.call_tool(
+                "workflow_resume",
+                {
+                    "run_id": started["run_id"],
+                    "response": {
+                        "approval": {"decision": "approve"},
+                        "response": {"event": "finish"},
+                    },
+                },
+            )
+            approval = await client.call_tool(
                 "workflow_approval",
                 {
                     "run_id": started["run_id"],
+                    "interrupt_id": started["interrupts"][0]["id"],
                     "proposal": "Try a larger learning rate.",
+                    "response": {"event": "finish"},
                 },
             )
+            resumed = await client.call_tool(
+                "workflow_resume",
+                {"run_id": started["run_id"], "response": approval.structured_content},
+            )
+            return bypass, approval, resumed
 
-    result = anyio.run(exercise)
+    bypass, result, resumed = anyio.run(exercise)
+    assert bypass.is_error
+    assert resumed.structured_content["status"] == "completed"
     assert len(requested) == 1
     assert "draft" in requested[0].message
     assert "larger learning rate" in requested[0].message
-    schema = requested[0].params.requested_schema
+    schema = requested[0].requested_schema
     assert set(schema) <= {"type", "properties", "required", "$schema"}
     assert schema["properties"]["decision"]["enum"] == [
         "approve",
         "revise",
         "stop",
     ]
-    assert set(schema["properties"]) == {"decision"}
-    assert result.structured_content == {"decision": "approve"}
+    assert set(schema["properties"]) == {"decision", "feedback"}
+    assert result.structured_content["decision"] == "approve"
+    assert result.structured_content["approval"]["receipt"]
 
 
 def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
@@ -260,7 +297,9 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
                 "workflow_approval",
                 {
                     "run_id": started["run_id"],
+                    "interrupt_id": started["interrupts"][0]["id"],
                     "proposal": "Try a larger learning rate.",
+                    "response": {"event": "finish"},
                 },
             )
             status = await client.call_tool(
@@ -271,3 +310,114 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
     approval, status = anyio.run(exercise)
     assert approval.structured_content == {"decision": "cancel"}
     assert status.structured_content["status"] == "waiting"
+
+
+def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    directory = config.workflows_dir / "review"
+    directory.mkdir()
+    (directory / "workflow.py").write_text(
+        "from langgraph.graph import START, END, StateGraph\n"
+        "from langgraph.types import interrupt\n"
+        "from typing import TypedDict\n"
+        "class State(TypedDict, total=False):\n"
+        "    run_id: str\n"
+        "    final: str\n"
+        "def build_graph(checkpointer, *, config):\n"
+        "    def review(state):\n"
+        "        answer = interrupt({'approval': {'message': 'Review this'}})\n"
+        "        return {'final': answer['response']['value']}\n"
+        "    graph = StateGraph(State)\n"
+        "    graph.add_node('review', review)\n"
+        "    graph.add_edge(START, 'review')\n"
+        "    graph.add_edge('review', END)\n"
+        "    return graph.compile(checkpointer=checkpointer)\n",
+        encoding="utf-8",
+    )
+    started = start_workflow("review", config=config)
+
+    async def elicit(_context, _params):
+        return types.ElicitResult(action="accept", content={"decision": "approve"})
+
+    async def exercise():
+        async with Client(create_server(config), elicitation_callback=elicit) as client:
+            approval = await client.call_tool(
+                "workflow_approval",
+                {
+                    "run_id": started["run_id"],
+                    "interrupt_id": started["interrupts"][0]["id"],
+                    "proposal": "Accept the value",
+                    "response": {"value": "approved"},
+                },
+            )
+            return await client.call_tool(
+                "workflow_resume",
+                {
+                    "run_id": started["run_id"],
+                    "response": {
+                        **approval.structured_content,
+                        "response": {"value": "changed"},
+                    },
+                },
+            )
+
+    result = anyio.run(exercise)
+    assert result.structured_content["result"] == "approved"
+
+
+def test_approval_receipt_survives_wrong_run_and_failed_resume(
+    tmp_path, monkeypatch
+) -> None:
+    from hiraku import mcp as mcp_module
+
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    Record.create(
+        "task",
+        type="task",
+        config=config,
+        entrypoints={"train": {"command": ["python", "train.py"]}},
+    )
+    first = start_workflow("collaborative", {"rounds": 1}, config=config)
+    second = start_workflow("collaborative", {"rounds": 1}, config=config)
+    original_resume = mcp_module.resume_langgraph_workflow
+    attempts = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise ValidationError("Temporary resume failure")
+        return original_resume(*args, **kwargs)
+
+    monkeypatch.setattr(mcp_module, "resume_langgraph_workflow", fail_once)
+
+    async def elicit(_context, _params):
+        return types.ElicitResult(action="accept", content={"decision": "stop"})
+
+    async def exercise():
+        async with Client(create_server(config), elicitation_callback=elicit) as client:
+            approval = await client.call_tool(
+                "workflow_approval",
+                {
+                    "run_id": first["run_id"],
+                    "interrupt_id": first["interrupts"][0]["id"],
+                    "proposal": "Stop the workflow",
+                    "response": {},
+                },
+            )
+            response = approval.structured_content
+            wrong_run = await client.call_tool(
+                "workflow_resume", {"run_id": second["run_id"], "response": response}
+            )
+            failed = await client.call_tool(
+                "workflow_resume", {"run_id": first["run_id"], "response": response}
+            )
+            retried = await client.call_tool(
+                "workflow_resume", {"run_id": first["run_id"], "response": response}
+            )
+            return wrong_run, failed, retried
+
+    wrong_run, failed, retried = anyio.run(exercise)
+    assert wrong_run.is_error
+    assert failed.is_error
+    assert retried.structured_content["status"] == "completed"

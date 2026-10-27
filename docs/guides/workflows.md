@@ -43,13 +43,15 @@ and the SQLite checkpointer owns resumable state. A run can be resumed after
 restarting Hiraku as long as its project and checkpoint database remain
 available.
 
-The bundled `collaborative` workflow also has approval gates. Call the MCP
-`workflow_approval(run_id, proposal)` tool at those gates. It opens a structured
-MCP elicitation and waits for the user's choice before returning `approve`,
-`revise`, or `stop`. If the user cancels or declines elicitation, leave the run
-paused and do not launch the experiment. Otherwise continue the graph with the
-matching response to `workflow_resume`. For the launch stage, request approval
-before running the launch command.
+Workflows can declare an `approval` object in an interrupt payload. The MCP
+`workflow_approval` tool presents its message and a proposed response and
+gathers the standard approve, revise, or stop decision without depending on a
+particular workflow or step name. Supply the run ID and current interrupt ID,
+then pass the returned approval receipt to `workflow_resume`. The receipt is
+valid once for the pending interrupt and expires on MCP server restart. The
+graph checks the decision before processing the workflow response. Python and
+CLI callers can submit decisions directly and must be trusted; MCP approval
+does not restrict other tools or local shell access.
 
 ## Define a workflow
 

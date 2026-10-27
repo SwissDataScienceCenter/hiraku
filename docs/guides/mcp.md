@@ -94,12 +94,15 @@ Project workflows are LangGraph graphs. Use `workflow_list` to discover them,
 `workflow_resume` to continue an interrupted session. See the
 [Workflows guide](workflows.md).
 
-The bundled `collaborative` workflow also provides `workflow_approval(run_id,
-proposal)`. It uses MCP elicitation to show a structured approval, revision, or
-stop choice and waits for the user's answer before the tool call completes. If
-the user cancels or declines elicitation, the tool returns that outcome and the
-graph remains paused; do not resume the workflow or launch anything. Use it at
-each approval gate instead of asking through ordinary assistant text.
+Any workflow interrupt can request approval by including an `approval` object
+in its interrupt payload. `workflow_approval` takes the run ID, interrupt ID,
+proposal, and proposed response, and uses MCP elicitation to collect the
+standard approve, revise, or stop decision. Pass its returned approval receipt
+to `workflow_resume`. The receipt binds the response to that interrupt and can
+be used once. Receipts are held by the MCP server; after a server restart,
+request approval again. If elicitation is cancelled, leave the graph paused.
+Python and CLI callers can supply approval decisions directly and must be
+trusted; MCP approval does not restrict other tools or local shell access.
 
 ## Prompt template
 

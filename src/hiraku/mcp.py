@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import mimetypes
+from threading import Lock
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
+from uuid import uuid4
 
 from mcp.server.mcpserver import Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import (
@@ -53,6 +55,7 @@ class WorkflowApproval(BaseModel):
     decision: Literal["approve", "revise", "stop"] = Field(
         description="Whether to approve, request a revision, or stop."
     )
+    feedback: str = Field(default="", description="Optional revision feedback.")
 
 
 def _data(record: BaseRecord) -> dict[str, Any]:
@@ -293,6 +296,25 @@ def create_server(config: HirakuConfig | None = None) -> Any:
 def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     """Add LangGraph workflow tools and definitions to a server."""
     path = config.path
+    approvals: dict[str, tuple[str, str, dict[str, str], dict[str, Any]]] = {}
+    approval_lock = Lock()
+
+    def pending_approval(
+        run_id: str, interrupt_id: str | None = None
+    ) -> dict[str, Any]:
+        status = langgraph_workflow_status(run_id, config=project())
+        interrupts = status["interrupts"]
+        if status["status"] != "waiting" or len(interrupts) != 1:
+            raise ValidationError("Workflow must have exactly one pending interrupt")
+        pending = interrupts[0]
+        if interrupt_id is not None and pending["id"] != interrupt_id:
+            raise ValidationError("Workflow interrupt has changed")
+        value = pending["value"]
+        if not isinstance(value, dict) or not isinstance(value.get("approval"), dict):
+            raise ValidationError(
+                "The current workflow interrupt does not request approval"
+            )
+        return pending
 
     def project() -> HirakuConfig:
         return HirakuConfig.load(path)
@@ -320,24 +342,41 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
             Field(description="Response to the current graph interrupt."),
         ],
     ) -> dict[str, Any]:
-        return resume_langgraph_workflow(run_id, response, config=project())
+        with approval_lock:
+            status = langgraph_workflow_status(run_id, config=project())
+            interrupts = status["interrupts"]
+            receipt = None
+            if any(
+                isinstance(item.get("value"), dict)
+                and isinstance(item["value"].get("approval"), dict)
+                for item in interrupts
+            ):
+                pending = pending_approval(run_id)
+                approval = response.get("approval")
+                receipt = (
+                    approval.get("receipt") if isinstance(approval, dict) else None
+                )
+                grant = approvals.get(receipt) if isinstance(receipt, str) else None
+                if grant is None or grant[:2] != (run_id, pending["id"]):
+                    raise ValidationError("A current approval receipt is required")
+                _, _, decision, approved_response = grant
+                response = {"approval": decision, "response": approved_response}
+            result = resume_langgraph_workflow(run_id, response, config=project())
+            if isinstance(receipt, str):
+                approvals.pop(receipt, None)
+            return result
 
     def resolve_workflow_approval(
-        run_id: str, proposal: str
+        run_id: str, interrupt_id: str, proposal: str, response: dict[str, Any]
     ) -> Elicit[WorkflowApproval]:
-        status = langgraph_workflow_status(run_id, config=project())
-        if status["workflow_id"] != "collaborative":
-            raise ValidationError("Approval elicitation is for collaborative runs")
-        if status["status"] != "waiting" or not status["interrupts"]:
-            raise ValidationError("This workflow run is not waiting for approval")
-        interrupt = status["interrupts"][0]["value"]
-        step = interrupt.get("step")
-        if step not in {"draft", "implement", "launch", "analyze"}:
-            raise ValidationError("The current collaborative step cannot be approved")
+        pending = pending_approval(run_id, interrupt_id)
+        approval = pending["value"]["approval"]
         return Elicit(
             message=(
-                f"Review the proposed {step} step for workflow {run_id}.\n\n"
-                f"{proposal}\n\nChoose approve, revise, or stop."
+                f"{approval.get('message', 'Review the proposed workflow action.')}\n\n"
+                f"{proposal}\n\nWorkflow response: "
+                f"{json.dumps(response, sort_keys=True)}"
+                "\n\nChoose approve, revise, or stop."
             ),
             schema=WorkflowApproval,
         )
@@ -347,13 +386,34 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         proposal: Annotated[
             str, Field(description="Concise proposal or result to show the user.")
         ],
+        interrupt_id: Annotated[str, Field(description="Current interrupt ID.")],
+        response: Annotated[dict[str, Any], Field(description="Response to approve.")],
         approval: Annotated[
             ElicitationResult[WorkflowApproval], Resolve(resolve_workflow_approval)
         ],
-    ) -> dict[str, str]:
-        """Ask the user to approve, revise, or stop a collaborative workflow step."""
+    ) -> dict[str, Any]:
+        """Ask the user to resolve an approval request in the current interrupt."""
         if approval.action == "accept":
-            return {"decision": approval.data.decision}
+            receipt = uuid4().hex
+            with approval_lock:
+                pending_approval(run_id, interrupt_id)
+                approvals[receipt] = (
+                    run_id,
+                    interrupt_id,
+                    {
+                        "decision": approval.data.decision,
+                        **(
+                            {"feedback": approval.data.feedback}
+                            if approval.data.feedback
+                            else {}
+                        ),
+                    },
+                    response,
+                )
+            return {
+                "approval": {"receipt": receipt},
+                "decision": approval.data.decision,
+            }
         return {"decision": approval.action}
 
     workflow_approval.__annotations__["approval"] = Annotated[
@@ -387,9 +447,9 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     server.add_tool(
         workflow_approval,
         description=(
-            "Open a structured MCP approval prompt for a collaborative workflow "
-            "step and wait for the user's decision. Call this before resuming the "
-            "step, and before launching work that requires approval."
+            "Open a structured MCP approval prompt when the current workflow "
+            "interrupt declares an approval request. Supply the current interrupt "
+            "ID and proposed response; pass its approval receipt to workflow_resume."
         ),
         annotations=ToolAnnotations(read_only_hint=False),
     )

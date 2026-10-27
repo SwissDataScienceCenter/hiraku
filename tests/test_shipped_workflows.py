@@ -33,6 +33,10 @@ def _interrupt(result: dict) -> dict:
     return result["interrupts"][0]["value"]
 
 
+def _approved(response: dict) -> dict:
+    return {"approval": {"decision": "approve"}, "response": response}
+
+
 def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     Record.create(
@@ -49,22 +53,24 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
 
     result = resume_workflow(
         result["run_id"],
-        {
-            "event": "drafted",
-            "arguments": {
-                "record_id": "dropout",
-                "summary": "Add dropout",
-                "hypothesis": "Dropout improves validation accuracy",
-                "change": "Add dropout before the head",
-            },
-        },
+        _approved(
+            {
+                "event": "drafted",
+                "arguments": {
+                    "record_id": "dropout",
+                    "summary": "Add dropout",
+                    "hypothesis": "Dropout improves validation accuracy",
+                    "change": "Add dropout before the head",
+                },
+            }
+        ),
         config=config,
     )
     assert _interrupt(result)["step"] == "implement"
 
     result = resume_workflow(
         result["run_id"],
-        {"event": "implemented", "arguments": {"commit": commit}},
+        _approved({"event": "implemented", "arguments": {"commit": commit}}),
         config=config,
     )
     launch = _interrupt(result)
@@ -73,15 +79,22 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
 
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
         stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,0.8\n")
-    result = resume_workflow(result["run_id"], {"event": "launched"}, config=config)
+    result = resume_workflow(
+        result["run_id"], _approved({"event": "launched"}), config=config
+    )
     assert _interrupt(result)["step"] == "analyze"
 
     completed = resume_workflow(
         result["run_id"],
-        {
-            "event": "analyzed",
-            "arguments": {"verdict": "supports", "conclusion": "Accuracy improved."},
-        },
+        _approved(
+            {
+                "event": "analyzed",
+                "arguments": {
+                    "verdict": "supports",
+                    "conclusion": "Accuracy improved.",
+                },
+            }
+        ),
         config=config,
     )
     assert completed["status"] == "completed"
