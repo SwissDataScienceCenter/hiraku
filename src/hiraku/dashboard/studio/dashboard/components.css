@@ -50,3 +50,30 @@ button:has(.hiraku-record-node) .paragraph {
 button:has(.hiraku-record-node):focus-visible {
   outline: 2px solid var(--primary-color, #5561a6) !important;
 }
+.record-tree summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  list-style: none;
+}
+.record-tree summary::-webkit-details-marker { display: none; }
+.record-tree summary::before {
+  content: "▸";
+  width: 1em;
+  flex: none;
+  color: var(--hiraku-record-badge-foreground, #61716d);
+}
+.record-tree details[open] > summary::before { content: "▾"; }
+.record-tree summary > .record-row { flex: 1; min-width: 0; }
+.record-tree .record-count {
+  flex: none;
+  font-size: 0.75rem;
+  color: var(--hiraku-record-badge-foreground, #61716d);
+}
+.record-tree li > .record-row { margin-left: calc(1em + 4px); }
+.hiraku-record-node .record-key {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--hiraku-record-badge-foreground, #61716d);
+}

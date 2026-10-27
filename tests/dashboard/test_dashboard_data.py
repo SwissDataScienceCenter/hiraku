@@ -20,6 +20,8 @@ from hiraku.dashboard.data import (
     load,
     metric_names,
     plot_frame,
+    record_identity,
+    record_label,
     record_rows,
     run_rows,
     run_text,
@@ -637,3 +639,97 @@ def test_artifact_rows_never_guess_unconfigured_roots(tmp_path) -> None:
     [row] = artifact_rows(ProjectRuns([_cohort_record()], runs), config)
 
     assert row["used_by"] == []
+
+
+def _cohort_tables(children: int):
+    records = [Record(id="tech")] + [
+        Record(id=f"s{index}", parent_id="tech") for index in range(children)
+    ]
+    return (
+        arrow_frame(record_rows(records), RECORD_COLUMNS),
+        arrow_frame([], RUN_COLUMNS),
+    )
+
+
+def test_large_groups_fold_until_selected() -> None:
+    from hiraku.dashboard.data import FOLD_THRESHOLD, expanded_records
+
+    records_df, runs_df = _cohort_tables(FOLD_THRESHOLD + 1)
+
+    folded = tree_rows(
+        records_df, runs_df, None, expanded_records(records_df, runs_df, None)
+    )
+    assert [row["key"] for row in folded] == ["record:tech"]
+    assert folded[0]["Record / run"] == f"▸ tech ({FOLD_THRESHOLD + 1})"
+
+    selected = tree_rows(
+        records_df, runs_df, None,
+        expanded_records(records_df, runs_df, "record:s3"),
+    )
+    assert len(selected) == FOLD_THRESHOLD + 2
+    assert selected[0]["Record / run"] == "▾ tech"
+    row = next(row for row in selected if row["key"] == "record:s3")
+    assert row["Record / run"] == "s3"
+
+
+def test_small_groups_stay_unfolded() -> None:
+    from hiraku.dashboard.data import expanded_records
+
+    records_df, runs_df = _cohort_tables(3)
+
+    rows = tree_rows(
+        records_df, runs_df, None, expanded_records(records_df, runs_df, None)
+    )
+    assert rows == tree_rows(records_df, runs_df, None)
+
+
+def test_fallback_selection_keeps_a_large_group_folded() -> None:
+    from hiraku.dashboard.data import expanded_records
+
+    records_df, runs_df = _cohort_tables(30)
+
+    assert "tech" not in expanded_records(
+        records_df, runs_df, "record:tech", include_selected=False
+    )
+    assert "tech" in expanded_records(
+        records_df, runs_df, "record:s1", include_selected=False
+    )
+
+
+def test_tree_rows_name_datasets_by_sample_and_end_with_the_record_id() -> None:
+    from hiraku.registration import Registration
+
+    dataset = Record(
+        id="dataset-abc",
+        type="dataset",
+        registration=Registration.model_validate({
+            "namespace": "cohort",
+            "key": ["S1", "CyTOF"],
+            "metadata": {"sample_id": "S1", "patient_id": "P7", "technology": "CyTOF"},
+        }).to_record_value(),
+    )
+    records_df = arrow_frame(record_rows([dataset]), RECORD_COLUMNS)
+
+    [row] = tree_rows(records_df, arrow_frame([], RUN_COLUMNS), None)
+
+    assert row["Record / run"] == "S1"
+    assert "Patient" not in row
+    assert list(row)[-1] == "ID"
+    assert row["ID"] == "dataset-abc"
+
+
+def test_dataset_without_sample_id_is_named_by_record_id_not_hashed_key() -> None:
+    from hiraku.registration import Registration
+
+    dataset = Record(
+        id="dataset-abc",
+        type="dataset",
+        registration=Registration.model_validate({
+            "namespace": "cohort",
+            "key": ["s1_788e", "CyTOF"],
+            "metadata": {"sample_key": "s1_788e", "technology": "CyTOF"},
+        }).to_record_value(),
+    )
+
+    assert record_label(dataset) == "dataset-abc"
+    assert record_identity(dataset)["sample"] is None

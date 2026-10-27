@@ -49,6 +49,8 @@ RUN_COLUMNS = (
 RECORD_COLUMNS = (
     "record",
     "label",
+    "sample",
+    "technology",
     "parent",
     "record_path",
     "type",
@@ -64,6 +66,8 @@ ARTIFACT_COLUMNS = (
     "kind",
     "dataset",
     "dataset_label",
+    "sample",
+    "technology",
     "filename",
     "description",
     "expectation",
@@ -176,17 +180,40 @@ def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
     ]
 
 
-def record_label(record: Record) -> str:
-    """Return a source-provided dataset name while keeping its ID for actions."""
+def record_identity(record: Record) -> dict[str, str | None]:
+    """Return the sample and technology a registered dataset names."""
     registration = getattr(record, "registration", None)
-    if not isinstance(registration, dict):
-        return record.id
-    metadata = registration.get("metadata") or {}
-    sample = metadata.get("sample_id") or metadata.get("sample_key")
-    technology = metadata.get("technology")
+    metadata = (
+        registration.get("metadata") or {} if isinstance(registration, dict) else {}
+    )
+
+    def text(*names: str) -> str | None:
+        value = next((metadata[name] for name in names if metadata.get(name)), None)
+        return None if value is None else str(value)
+
+    return {
+        # A sample key is an opaque hash; only the sample ID names a sample.
+        "sample": text("sample_id"),
+        "technology": text("technology"),
+    }
+
+
+def record_label(record: Record) -> str:
+    """Return the name people know a record by; its ID stays the identity.
+
+    A registered dataset is named by its sample (its technology is the parent
+    group); other registrations by their source key. A dataset registered
+    without its sample ID keeps its record ID rather than the hashed key.
+    """
+    sample = record_identity(record)["sample"]
     if sample:
-        return " · ".join(str(value) for value in (sample, technology) if value)
-    key = registration.get("key")
+        return sample
+    registration = getattr(record, "registration", None)
+    if isinstance(registration, dict) and (registration.get("metadata") or {}).get(
+        "sample_key"
+    ):
+        return record.id
+    key = registration.get("key") if isinstance(registration, dict) else None
     if isinstance(key, list):
         return " / ".join(map(str, key)) or record.id
     return str(key) if key else record.id
@@ -202,6 +229,7 @@ def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
         {
             "record": record.id,
             "label": record_label(record),
+            **record_identity(record),
             "parent": record.parent_id,
             "record_path": paths[record.id],
             "type": record.type,
@@ -383,6 +411,7 @@ def artifact_rows(
         if registration is None:
             continue
         source = registration.source or registration.namespace
+        identity = record_identity(record)
         for artifact in registration.artifacts:
             location = workflow.artifact_location(artifact) if workflow.files else None
             rows.append(
@@ -391,6 +420,7 @@ def artifact_rows(
                     "kind": "Observed file",
                     "dataset": record.id,
                     "dataset_label": record_label(record),
+                    **identity,
                     "filename": Path(artifact.display_path).name,
                     "description": "\n".join(dict.fromkeys(
                         str(getattr(doc, "description", ""))
@@ -414,15 +444,16 @@ def artifact_rows(
                 }
             )
         for doc in registration.documentation:
-            identity = hashlib.sha256(json.dumps(
+            row_digest = hashlib.sha256(json.dumps(
                 [doc.key, doc.filename, doc.role, doc.applicability], sort_keys=True,
             ).encode()).hexdigest()[:16]
             rows.append(
                 {
-                    "key": f"documentation:{record.id}:{doc.key}:{identity}",
+                    "key": f"documentation:{record.id}:{doc.key}:{row_digest}",
                     "kind": "SOP expectation",
                     "dataset": record.id,
                     "dataset_label": record_label(record),
+                    **identity,
                     "filename": doc.filename,
                     "description": getattr(doc, "description", None),
                     "expectation": (
@@ -507,30 +538,101 @@ def subtree(runs_df: pd.DataFrame, ancestor: str | None) -> pd.DataFrame:
     return runs_df[runs_df["record_path"].map(lambda path: within(path, ancestor))]
 
 
+FOLD_THRESHOLD = 25
+"""Records with more child rows than this start folded."""
+
+
+def child_counts(records_df: pd.DataFrame, runs_df: pd.DataFrame) -> dict[str, int]:
+    """Return each record's number of direct child records and runs."""
+    counts: dict[str, int] = {}
+    for parent in records_df.get("parent", ()):
+        if isinstance(parent, str):
+            counts[parent] = counts.get(parent, 0) + 1
+    for record in runs_df.get("record", ()):
+        if isinstance(record, str):
+            counts[record] = counts.get(record, 0) + 1
+    return counts
+
+
+def expanded_records(
+    records_df: pd.DataFrame,
+    runs_df: pd.DataFrame,
+    selected_key: str | None,
+    *,
+    threshold: int = FOLD_THRESHOLD,
+    include_selected: bool = True,
+) -> set[str]:
+    """Return the records whose children the tree shows.
+
+    Small records stay unfolded; a record with more than ``threshold`` child
+    rows unfolds only on the path to the selected record or run, so a large
+    registered cohort shows one row per group until one is chosen. Without
+    ``include_selected``, a selected record unfolds only its ancestors.
+    """
+    counts = child_counts(records_df, runs_df)
+    expanded = {record for record, count in counts.items() if count <= threshold}
+    parents = dict(
+        zip(records_df.get("record", ()), records_df.get("parent", ()), strict=True)
+    )
+    kind, _, identifier = (selected_key or "").partition(":")
+    if kind == "run" and "run" in runs_df:
+        matches = runs_df.loc[runs_df["run"] == identifier, "record"]
+        identifier = matches.iloc[0] if len(matches) else ""
+    elif kind != "record":
+        identifier = ""
+    elif not include_selected:
+        identifier = parents.get(identifier)
+    seen: set[str] = set()
+    while isinstance(identifier, str) and identifier and identifier not in seen:
+        seen.add(identifier)
+        expanded.add(identifier)
+        identifier = parents.get(identifier)
+    return expanded
+
+
 def tree_rows(
-    records_df: pd.DataFrame, runs_df: pd.DataFrame, metric: str | None
+    records_df: pd.DataFrame,
+    runs_df: pd.DataFrame,
+    metric: str | None,
+    expanded: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Interleave records (in tree order) with their runs as indented table rows.
 
     ``depth`` comes from ``record_path``, and ``metric`` adds one column, named
-    after the metric, with each run's value.
+    after the metric, with each run's value. With ``expanded``, only the
+    children of those records are listed; ``None`` lists every row.
     """
     values = metric_values(runs_df, metric).tolist()
     runs_by_record: dict[str, list[dict[str, Any]]] = {}
     for run, value in zip(_records(runs_df), values, strict=True):
         run["value"] = None if math.isnan(value) else value
         runs_by_record.setdefault(run["record"], []).append(run)
+    counts = child_counts(records_df, runs_df)
+    known = set(records_df["record"]) if "record" in records_df else set()
 
     rows: list[dict[str, Any]] = []
+    shown: set[str] = set()
     for record in _records(records_df):
+        identifier = record["record"]
+        parent = record.get("parent")
+        if expanded is not None and parent in known and (
+            parent not in shown or parent not in expanded
+        ):
+            continue
+        shown.add(identifier)
         depth = record["record_path"].count("/")
-        rows.append(
-            _row(f"record:{record['record']}", depth,
-                 "▾ " + (record.get("label") or record["record"]), record)
-        )
+        label = record.get("label") or identifier
+        if counts.get(identifier):
+            unfolded = expanded is None or identifier in expanded
+            label = (
+                f"▾ {label}" if unfolded else f"▸ {label} ({counts[identifier]})"
+            )
+        rows.append(_row(f"record:{identifier}", depth, label, record))
         if metric:
             rows[-1][metric] = ""
-        for run in runs_by_record.get(record["record"], ()):
+        if expanded is not None and identifier not in expanded:
+            continue
+        for run in runs_by_record.get(identifier, ()):
             rows.append(
                 _row(f"run:{run['run']}", depth + 1, "• " + run["run"][:12], run)
             )
@@ -550,6 +652,8 @@ def _row(key: str, depth: int, label: str, item: Mapping[str, Any]) -> dict[str,
         "Entrypoint": item.get("entrypoint") or "",
         "Commit": (item.get("commit") or "")[:7],
         "Started": started.strftime("%Y-%m-%d %H:%M:%S") if started else "",
+        # The identifier stays visible for commands, after the readable names.
+        "ID": key.partition(":")[2],
     }
 
 

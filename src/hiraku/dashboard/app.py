@@ -90,8 +90,11 @@ def selection_state(config, records_df, requested_record, runs_df):
         ),
         next(iter(paths), None),
     )
+    # The run table refolds on its own selection, so the cell that owns the
+    # table must rerun when it sets this state.
     get_selection, _set_selection = mo.state(
-        (f"record:{initial_record}" if initial_record else None, initial_record)
+        (f"record:{initial_record}" if initial_record else None, initial_record),
+        allow_self_loops=True,
     )
 
     def select_key(key):
@@ -106,13 +109,27 @@ def selection_state(config, records_df, requested_record, runs_df):
 
 
 @app.cell
-def run_table(get_selection, project, records_df, runs_df, select_key, tree_metric):
+def run_table(
+    config,
+    get_selection,
+    initial_record,
+    project,
+    records_df,
+    requested_record,
+    runs_df,
+    select_key,
+    tree_metric,
+):
+    _key = get_selection()[0]
+    # The first record is selected only as a fallback; it should not unfold.
+    _fallback = initial_record not in (requested_record, config.active_record_id)
     tree = hc.run_table(
         records_df,
         runs_df,
         tree_metric,
-        selected_key=get_selection()[0],
+        selected_key=_key,
         on_select=select_key,
+        unfold_selected=not (_fallback and _key == f"record:{initial_record}"),
     )
     _messages = [mo.callout(mo.md(error), kind="warn") for error in project.errors]
     if records_df.empty:

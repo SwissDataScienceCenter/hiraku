@@ -24,7 +24,9 @@ from ..io import dump_yaml
 from ..record import Record
 from .data import (
     FILE_COLUMNS,
+    FOLD_THRESHOLD,
     arrow_frame,
+    expanded_records,
     plot_frame,
     record_label,
     run_text,
@@ -177,25 +179,38 @@ def record_tree(
     children: dict[str | None, list[Record]] = {}
     for record in records:
         children.setdefault(record.parent_id, []).append(record)
+    parents = {record.id: record.parent_id for record in records}
+    # Open the selection's ancestors only: the dashboard may select a large
+    # group by default, and every group can still be opened by hand.
+    selected_path: set[str] = set()
+    identifier = parents.get(selected_id) if selected_id else None
+    while identifier is not None and identifier not in selected_path:
+        selected_path.add(identifier)
+        identifier = parents.get(identifier)
     buttons: dict[str, mo.ui.button] = {}
     fragments = ["<ul>"]
     stack = [(record, False) for record in reversed(children.get(None, []))]
     while stack:
         record, closing = stack.pop()
         if closing:
-            fragments.append("</ul></li>")
+            fragments.append("</ul></details></li>")
             continue
         badges = " ".join(
             f'<span class="badge">{html.escape(value)}</span>'
             for value in (record.type, record.status)
             if value
         )
+        label = record_label(record)
+        identifier = (
+            f' <span class="record-key">{html.escape(record.id)}</span>'
+            if label != record.id else ""
+        )
         button = mo.ui.button(
             label=(
                 '<span class="hiraku-record-node">'
                 '<span class="dot" aria-hidden="true"></span>'
-                f'<span class="record-id">{html.escape(record_label(record))}</span> '
-                f'{badges}'
+                f'<span class="record-id">{html.escape(label)}</span> '
+                f"{badges}{identifier}"
                 "</span>"
             ),
             full_width=True,
@@ -203,14 +218,20 @@ def record_tree(
         )
         buttons[record.id] = button
         selected = ' aria-current="true"' if record.id == selected_id else ""
-        fragments.append(f'<li><div class="record-row"{selected}>{button.text}</div>')
+        row = f'<div class="record-row"{selected}>{button.text}</div>'
         nested = children.get(record.id, [])
         if nested:
-            fragments.append("<ul>")
+            # Native folding: large groups open only on the selected path.
+            unfolded = len(nested) <= FOLD_THRESHOLD or record.id in selected_path
+            fragments.append(
+                f"<li><details{' open' if unfolded else ''}>"
+                f'<summary>{row}<span class="record-count">{len(nested)}</span>'
+                "</summary><ul>"
+            )
             stack.append((record, True))
             stack.extend((child, False) for child in reversed(nested))
         else:
-            fragments.append("</li>")
+            fragments.append(f"<li>{row}</li>")
     fragments.append("</ul>")
     content = "".join(fragments) if buttons else "No records yet."
     return (
@@ -227,9 +248,20 @@ def run_table(
     *,
     selected_key: str | None = None,
     on_select: Callable[[str | None], Any] | None = None,
+    unfold_selected: bool = True,
 ) -> mo.ui.table:
-    """Build the selectable record/run table, retaining its hidden row keys."""
-    _rows = tree_rows(records_df, runs_df, metric)
+    """Build the selectable record/run table, retaining its hidden row keys.
+
+    Large records stay folded until they or a descendant are selected;
+    ``unfold_selected=False`` keeps a selected large record itself folded.
+    """
+    _selected = selected_key or (f"record:{initial_record}" if initial_record else None)
+    _rows = tree_rows(
+        records_df, runs_df, metric,
+        expanded_records(
+            records_df, runs_df, _selected, include_selected=unfold_selected
+        ),
+    )
 
     def _style(row, column):
         style = {"fontWeight": "600"} if row["key"].startswith("record:") else {}
@@ -347,17 +379,19 @@ def artifact_table(
         is_documentation = row["key"].startswith("documentation:")
         if is_documentation != documentation:
             continue
+        # People identify datasets by sample and file; the record ID
+        # closes the row for commands.
         shown = {
             "key": row["key"],
-            "Dataset": row.get("dataset_label") or row["dataset"],
+            "Sample": row.get("sample") or row.get("dataset_label") or row["dataset"],
+            "Technology": row.get("technology") or "",
+            "Filename": row.get("filename")
+            or ("Unspecified" if documentation else ""),
             "Description": row.get("description") or "",
             "SOP": ", ".join(row["documentation"]),
         }
         if documentation:
-            shown.update({
-                "Referenced filename": row.get("filename") or "Unspecified",
-                "Observation": row.get("expectation") or "unknown",
-            })
+            shown["Observation"] = row.get("expectation") or "unknown"
         else:
             shown.update({
                 "File path": row["path"],
@@ -366,11 +400,10 @@ def artifact_table(
                 "Used by": ", ".join(item["step"] for item in row["used_by"]),
                 "Built by": ", ".join(item["step"] for item in row["built_by"]),
             })
+        shown["Record"] = row["dataset"]
         _rows.append(shown)
     return mo.ui.table(
-        _rows or arrow_frame(
-            [], ("Dataset", "Referenced filename" if documentation else "File path")
-        ),
+        _rows or arrow_frame([], ("Sample", "Filename", "Record")),
         selection="single",
         hidden_columns=["key"] if _rows else None,
         page_size=25,

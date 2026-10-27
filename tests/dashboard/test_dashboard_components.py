@@ -346,7 +346,7 @@ def test_artifact_tables_separate_sop_references_and_hide_empty_file_fields() ->
         registration=Registration.model_validate({
             "namespace": "cohort",
             "key": ["S1", "CyTOF"],
-            "metadata": {"sample_id": "S1", "technology": "CyTOF"},
+            "metadata": {"sample_id": "S1", "patient_id": "P7", "technology": "CyTOF"},
             "coverage": "exhaustive",
             "artifacts": [{"key": "a", "display_path": "data/a.fcs",
                            "availability": "present"}],
@@ -364,11 +364,57 @@ def test_artifact_tables_separate_sop_references_and_hide_empty_file_fields() ->
         references, "to_dict") else references
 
     assert len(observed) == 1
-    assert reference["Dataset"] == "S1 · CyTOF"
-    assert reference["Referenced filename"] == "gated.fcs"
+    assert list(reference)[1:4] == ["Sample", "Technology", "Filename"]
+    assert list(reference)[-1] == "Record"
+    assert reference["Sample"] == "S1"
+    assert "Patient" not in reference
+    assert reference["Technology"] == "CyTOF"
+    assert reference["Filename"] == "gated.fcs"
+    assert reference["Record"] == "dataset-abc"
     assert reference["Description"] == "Export gated events."
     assert reference["SOP"] == "cytof/gating.md"
     selected = [row for row in rows if row["key"].startswith("documentation:")]
     details, _ = hc.artifact_details(rows, selected, on_select=lambda key: None)
     assert "null" not in details.text
     assert "gated.fcs" in details.text
+
+
+def test_record_tree_folds_large_groups_off_the_selected_path() -> None:
+    from hiraku.dashboard.data import FOLD_THRESHOLD
+
+    records = [Record(id="a"), Record(id="b")] + [
+        Record(id=f"{group}{index}", parent_id=group)
+        for group in ("a", "b")
+        for index in range(FOLD_THRESHOLD + 1)
+    ]
+
+    tree, buttons = hc.record_tree(records, "b2", lambda _: None)
+
+    assert len(buttons) == 2 * (FOLD_THRESHOLD + 2)
+    assert tree.text.count("<details>") == 1
+    assert tree.text.count("<details open>") == 1
+    assert tree.text.index("<details>") < tree.text.index("<details open>")
+
+
+def test_record_tree_names_datasets_by_sample() -> None:
+    from hiraku.registration import Registration
+
+    dataset = Record(
+        id="dataset-abc",
+        type="dataset",
+        registration=Registration.model_validate({
+            "namespace": "cohort",
+            "key": ["S1", "CyTOF"],
+            "metadata": {"sample_id": "S1", "patient_id": "P7", "technology": "CyTOF"},
+        }).to_record_value(),
+    )
+
+    tree, _ = hc.record_tree([dataset, Record(id="notes")], None, lambda _: None)
+
+    text = tree.text
+    assert text.index("record-id") < text.index("record-key")
+    assert "S1" in text
+    assert "P7" not in text
+    assert "dataset-abc" in text
+    # A record without a sample keeps its ID as its name, shown once.
+    assert text.count("record-key") == 1
