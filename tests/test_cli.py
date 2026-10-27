@@ -28,6 +28,19 @@ def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch) -> None:
     assert invoke("--help").exit_code == 0
 
 
+def test_workflow_cli_exposes_langgraph_controls_only() -> None:
+    help_text = CliRunner().invoke(main, ["workflow", "--help"]).output
+    root_help = CliRunner().invoke(main, ["--help"]).output
+
+    assert "list" in help_text
+    assert "graph" in help_text
+    assert "start" in help_text
+    assert "status" in help_text
+    assert "resume" in help_text
+    assert "send-event" not in help_text
+    assert "session" not in root_help
+
+
 def test_record_cli_lifecycle(tmp_path: Path, monkeypatch) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
