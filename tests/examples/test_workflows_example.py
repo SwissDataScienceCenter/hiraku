@@ -40,9 +40,8 @@ def runner(tmp_path: Path, monkeypatch) -> CliRunner:
     invoke(selected, ["example", "create", "workflows", "."])
     workflows = project / "hiraku" / "workflows"
     assert (workflows / "count-steps" / "workflow.py").is_file()
-    assert (workflows / "greet" / "workflow.md").is_file()
+    assert (workflows / "greet" / "workflow.py").is_file()
     assert (workflows / "scheduler" / "workflow.py").is_file()
-    assert not (workflows / "greet" / "workflow.py").exists()
     assert not (project / "example.yml").exists()
     return selected
 
@@ -52,27 +51,23 @@ def test_langgraph_workflow_is_not_registered_with_legacy_cli(
 ) -> None:
     listed = invoke(runner, ["workflow", "list"]).output
     assert "count-steps" not in listed
-    assert "greet" in listed
+    assert "greet" not in listed
     assert "scheduler" not in listed
 
 
 def test_greet_is_one_final_prompt_filled_from_its_arguments(
     runner: CliRunner,
 ) -> None:
-    response = start(runner, "greet", {"name": "Ada", "times": 3})
-    assert response["session_status"] == "completed"
-    instruction = response["instruction"]
-    assert instruction["text"].startswith("# Greet\n\nPrint 3 greetings to Ada")
-    assert "Greet formally:\nfalse." in instruction["text"]
-    assert instruction["data"] == {"name": "Ada", "times": 3, "formal": False}
-    assert "events" not in instruction
+    config = HirakuConfig.discover()
+    response = start_workflow("greet", {"name": "Ada", "times": 3}, config=config)
+    assert response["status"] == "completed"
+    assert response["workflow_id"] == "greet"
+    assert response["result"].startswith("# Greet\n\nPrint 3 greetings to Ada")
+    assert "Greet formally:\nfalse." in response["result"]
 
-    default = start(runner, "greet", {})
-    assert default["instruction"]["data"] == {
-        "name": "World",
-        "times": 2,
-        "formal": False,
-    }
+    default = start_workflow("greet", {}, config=config)
+    assert default["result"].startswith("# Greet\n\nPrint 2 greetings to World")
+    assert "Greet formally:\nfalse." in default["result"]
 
 
 def children(parent: str) -> list[Any]:

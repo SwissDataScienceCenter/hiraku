@@ -7,8 +7,8 @@ and as starting points for your own:
 
 - [`count-steps`](#count-steps), a LangGraph workflow that hands each step to
   the current harness and pauses for the user's decision;
-- [`greet`](#greet), a prompt-only workflow whose arguments fill placeholders
-  in its `workflow.md`;
+- [`greet`](#greet), a one-node LangGraph workflow that renders a prompt from
+  `workflow.md` and its YAML defaults;
 - [`scheduler`](#scheduler), a LangGraph workflow that creates and assigns
   records by priority, then checks the harness's reported update.
 
@@ -37,18 +37,19 @@ advancing it. The token must match the current step; invalid responses pause
 again with an explanation.
 
 The checkpoint is stored in SQLite, so the run remains resumable after the MCP
-server restarts. Both count-steps and scheduler use the LangGraph driver; greet
-continues to exercise Hiraku's existing workflow/session path.
+server restarts. All three examples use the same LangGraph driver.
 
 ## Greet
 
-`hiraku/workflows/greet/workflow.md` is a Markdown-only workflow with no Python
-sidecar. Front-matter defaults define its inputs and their types:
+`hiraku/workflows/greet/workflow.py` is a single-node LangGraph workflow. It
+reads the editable prompt and typed input defaults from
+`hiraku/workflows/greet/workflow.md`:
 
 ```markdown
 ---
 id: greet
-description: Greet someone a few times; a prompt-only workflow with arguments.
+engine: langgraph
+description: Greet someone a few times; a prompt-only LangGraph workflow.
 arguments:
   name: World
   times: 2
@@ -60,16 +61,11 @@ Print {{times}} greetings to {{name}}, one per line. Greet formally:
 {{formal}}. Do not change any files.
 ```
 
-Validated values fill the placeholders. With no overrides, it greets World twice.
-Start it with
-the MCP prompt
-`/mcp__hiraku__greet name=Ada times=3`, by asking your agent to greet Ada with
-the Hiraku greet workflow.
-
-Hiraku validates and converts the arguments, renders the body, and sends it as
-the session's only instruction. That instruction is final: the session
-completes when it starts, so there is no event to send, and the agent just
-prints the greetings. Copy the directory to turn your own prompt into a
+The graph validates the arguments, fills the placeholders, and completes in
+one node. Start it through the `workflow_start` MCP tool with workflow ID
+`greet` and arguments `{"name": "Ada", "times": 3}`. The final result contains
+the rendered prompt; the default run greets World twice. There is no agent call,
+handoff, or resume step. Copy the directory to turn your own prompt into a
 workflow.
 
 ## Scheduler
