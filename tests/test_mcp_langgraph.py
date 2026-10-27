@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from typing import Any
+
+import anyio
+import pytest
+
+from hiraku.config import HirakuConfig
+from hiraku.errors import ValidationError
+from hiraku.mcp import create_server
+from hiraku.workflows.langgraph import (
+    resume_workflow,
+    start_workflow,
+    workflow_status,
+)
+
+
+def _project(tmp_path) -> HirakuConfig:
+    return HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
+
+
+def _tool_names(server: Any) -> set[str]:
+    async def list_tools() -> set[str]:
+        return {tool.name for tool in await server.list_tools()}
+
+    return anyio.run(list_tools)
+
+
+def _interrupt(result: dict[str, Any]) -> dict[str, Any]:
+    assert result["status"] == "waiting"
+    assert len(result["interrupts"]) == 1
+    return result["interrupts"][0]["value"]
+
+
+def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
+    config = _project(tmp_path)
+    server = create_server(config)
+    assert {"workflow_start", "workflow_status", "workflow_resume"}.issubset(
+        _tool_names(server)
+    )
+
+    started = start_workflow("count-steps", {"count": 2}, config=config)
+    first = _interrupt(started)
+    assert "Step 1/2: token" in first["instruction"]
+    assert first["data"]["step"] == 1
+    assert first["response_schema"]["decision"] == "continue or finish"
+
+    wrong = resume_workflow(
+        started["run_id"],
+        {"token": "wrong", "decision": "continue"},
+        config=config,
+    )
+    retry = _interrupt(wrong)
+    assert retry["data"] == first["data"]
+    assert "does not match" in retry["error"]
+
+    invalid_decision = resume_workflow(
+        started["run_id"],
+        {"token": first["data"]["token"], "decision": "skip"},
+        config=config,
+    )
+    retry = _interrupt(invalid_decision)
+    assert retry["data"] == first["data"]
+    assert "Decision must be" in retry["error"]
+
+    next_step = resume_workflow(
+        started["run_id"],
+        {"token": first["data"]["token"], "decision": "continue"},
+        config=config,
+    )
+    second = _interrupt(next_step)
+    assert "Step 2/2: token" in second["instruction"]
+    assert second["data"]["token"] != first["data"]["token"]
+
+    done = resume_workflow(
+        started["run_id"],
+        {"token": second["data"]["token"], "decision": "continue"},
+        config=config,
+    )
+    assert done["status"] == "completed"
+    assert "Finished after 2 of 2 steps." in done["result"]
+    assert workflow_status(started["run_id"], config=config) == done
+
+
+def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) -> None:
+    config = _project(tmp_path)
+    server = create_server(config)
+    assert "workflow_resume" in _tool_names(server)
+
+    started = start_workflow("count-steps", {}, config=config)
+    first = _interrupt(started)
+    assert first["data"]["count"] == 5
+
+    # Recreate the server to verify that the run lives in LangGraph's SQLite state.
+    server = create_server(config)
+    assert "workflow_status" in _tool_names(server)
+    completed = resume_workflow(
+        started["run_id"],
+        {"token": first["data"]["token"], "decision": "finish"},
+        config=config,
+    )
+    assert completed["status"] == "completed"
+    assert "Finished after 1 of 5 steps." in completed["result"]
+
+
+def test_count_steps_rejects_invalid_arguments(tmp_path) -> None:
+    config = _project(tmp_path)
+    with pytest.raises(ValidationError, match="positive integer"):
+        start_workflow("count-steps", {"count": 0}, config=config)

@@ -208,7 +208,19 @@ def _workflow_ids(config: HirakuConfig) -> list[str]:
         if path.is_dir()
         and not path.name.startswith((".", "_"))
         and any((path / name).is_file() for name in ("workflow.py", "workflow.md"))
+        and not _is_langgraph_workflow(path)
     ]
+
+
+def _is_langgraph_workflow(directory: Path) -> bool:
+    path = directory / "workflow.md"
+    if not path.is_file():
+        return False
+    try:
+        fields, _ = BaseRecord._parse_markdown(path)
+    except Exception:
+        return False
+    return fields.get("engine") == "langgraph"
 
 
 def load_workflow(workflow_id: str, *, config: HirakuConfig | None = None) -> Workflow:

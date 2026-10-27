@@ -1,5 +1,13 @@
 # Workflows
 
+This guide describes Hiraku's project-defined workflow/session API. The
+`count-steps` and `scheduler` examples also demonstrate LangGraph workflows;
+see the [workflow examples](../examples/workflows/README.md) for their MCP
+start/status/resume interaction. LangGraph workflows set `engine: langgraph`
+in `workflow.md`, define `build_graph(checkpointer, *, config)` in
+`workflow.py`, and persist execution state in the project's SQLite checkpointer.
+They do not create legacy Hiraku sessions.
+
 A workflow is a project-defined Python state machine that gives an agent one
 instruction at a time. Its directory contains
 `hiraku/workflows/<id>/workflow.md`. Add a `workflow.py` sidecar for a Python

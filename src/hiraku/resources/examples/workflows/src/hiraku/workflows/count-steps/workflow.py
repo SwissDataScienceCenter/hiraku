@@ -1,94 +1,130 @@
-"""Count steps: numbered steps with tokens, each started by the user."""
+"""Count steps as a LangGraph workflow with a harness handoff per step."""
 
 from __future__ import annotations
 
 import secrets
-from typing import Annotated
+from pathlib import Path
+from typing import Any, TypedDict
 
-from pydantic import Field
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
-from hiraku.errors import EventRejected
-from hiraku.markdown import render
-from hiraku.workflows.graph import State, event, node, start
-from hiraku.workflows.workflow import Instruction, Workflow
-
-
-def _token() -> str:
-    return secrets.token_hex(4)
+from hiraku.base import BaseRecord
+from hiraku.config import HirakuConfig
+from hiraku.errors import ValidationError
+from hiraku.markdown import Markdown, render
 
 
-class Counter(State):
-    node: str = "running"
+class CounterState(TypedDict, total=False):
+    arguments: dict[str, Any]
+    run_id: str
     count: int
-    step: int = 1
-    token: str = Field(default_factory=_token)
+    step: int
+    token: str
+    decision: str
+    response: dict[str, Any]
+    error: str
+    final: str
+    completed: int
 
 
-class CountSteps(Workflow):
-    """Check that the harness follows numbered instructions and stops for the user.
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
+    """Build the example graph using the project's workflow.md instructions."""
+    path = Path(__file__).with_name("workflow.md")
+    fields, body = BaseRecord._parse_markdown(path)
+    if fields.get("id") != "count-steps":
+        raise ValueError("workflow.md must declare id: count-steps")
+    defaults = fields.get("arguments", {})
+    if not isinstance(defaults, dict) or type(defaults.get("count")) is not int:
+        raise ValueError("workflow.md must define an integer arguments.count default")
+    if defaults["count"] < 1:
+        raise ValueError("workflow.md arguments.count must be greater than zero")
+    markdown = Markdown(body)
 
-    Each step sends a fresh random token that the harness must echo back, so a
-    skipped, repeated, or invented step is rejected. After each step the user
-    decides whether to run the next one.
-    """
+    def initialize(state: CounterState) -> CounterState:
+        arguments = state.get("arguments", {})
+        if not isinstance(arguments, dict):
+            raise ValidationError("arguments must be an object")
+        unknown = set(arguments) - set(defaults)
+        if unknown:
+            names = ", ".join(sorted(unknown))
+            raise ValidationError(f"Unknown workflow arguments: {names}")
+        count = arguments.get("count", defaults["count"])
+        if type(count) is not int or count < 1:
+            raise ValidationError("count must be a positive integer")
+        return {
+            "count": count,
+            "step": 1,
+            "token": secrets.token_hex(4),
+            "run_id": state["run_id"],
+        }
 
-    @start(dest="running")
-    def start(
-        self, *, count: Annotated[int, "Number of steps.", Field(gt=0)] = 5
-    ) -> Counter:
-        """Start counting steps to check the harness; runs the first step."""
-        return Counter(count=count)
+    def handoff(state: CounterState) -> CounterState:
+        values = {
+            "step": state["step"],
+            "count": state["count"],
+            "token": state["token"],
+            "run_id": state["run_id"],
+        }
+        payload = {
+            "instruction": "\n\n".join(
+                (
+                    render(markdown.section("## Step"), values),
+                    render(markdown.section("## Next"), values),
+                )
+            ),
+            "data": values,
+            "response_schema": {
+                "token": "string: token shown in the current step",
+                "decision": "continue or finish",
+            },
+        }
+        if state.get("error"):
+            payload["error"] = state["error"]
+        return {"response": interrupt(payload)}
 
-    @node("running")
-    def run_step(self, counter: Counter) -> Instruction:
-        values = {"step": counter.step, "count": counter.count, "token": counter.token}
-        return Instruction(
-            render(self.markdown.section("## Step"), values), data=values
-        )
+    def validate_response(state: CounterState) -> CounterState:
+        response = state["response"]
+        if not isinstance(response, dict):
+            return {"error": "Response must be an object with token and decision."}
+        if response.get("token") != state["token"]:
+            return {"error": f"Token does not match the current step {state['step']}."}
+        if response.get("decision") not in {"continue", "finish"}:
+            return {"error": "Decision must be 'continue' or 'finish'."}
+        return {"decision": response["decision"], "error": ""}
 
-    @node("waiting")
-    def ask_to_continue(self, counter: Counter) -> Instruction:
-        return Instruction(
-            self.markdown.section("## Next"),
-            data={"done": counter.step, "remaining": counter.count - counter.step},
-        )
+    def next_step(state: CounterState) -> CounterState:
+        return {"step": state["step"] + 1, "token": secrets.token_hex(4)}
 
-    @node("finished", final=True)
-    def report(self, counter: Counter) -> Instruction:
-        return Instruction(
-            self.markdown.section("## Done"),
-            data={"steps": counter.step, "count": counter.count},
-        )
+    def finish(state: CounterState) -> CounterState:
+        values = {"steps": state["step"], "count": state["count"]}
+        return {
+            "completed": state["step"],
+            "final": render(markdown.section("## Done"), values),
+        }
 
-    @event(source="running", dest=["waiting", "finished"])
-    def ack(
-        self,
-        counter: Counter,
-        *,
-        token: Annotated[str, "Token of the current step."],
-    ) -> Counter:
-        """Acknowledge the current step with its token."""
-        if token != counter.token:
-            raise EventRejected(
-                f"Token {token!r} does not match step {counter.step}; "
-                "send the token from the current instruction"
-            )
-        counter.node = "finished" if counter.step >= counter.count else "waiting"
-        return counter
+    def after_handoff(state: CounterState) -> str:
+        if state.get("error"):
+            return "retry"
+        if state["decision"] == "finish" or state["step"] >= state["count"]:
+            return "finish"
+        return "next"
 
-    @event(source="waiting", dest="running")
-    def step(self, counter: Counter) -> Counter:
-        """Run the next step."""
-        counter.step += 1
-        counter.token = _token()
-        counter.node = "running"
-        return counter
-
-    @event(source="waiting", dest="finished")
-    def finish(self, counter: Counter) -> Counter:
-        """End the session after the current step."""
-        counter.node = "finished"
-        return counter
-
-
-WORKFLOW = CountSteps
+    builder = StateGraph(CounterState)
+    builder.add_node("initialize", initialize)
+    builder.add_node("harness_step", handoff)
+    builder.add_node("validate_response", validate_response)
+    builder.add_node("next_step", next_step)
+    builder.add_node("finish", finish)
+    builder.add_edge(START, "initialize")
+    builder.add_edge("initialize", "harness_step")
+    builder.add_edge("harness_step", "validate_response")
+    builder.add_conditional_edges(
+        "validate_response",
+        after_handoff,
+        {"retry": "harness_step", "next": "next_step", "finish": "finish"},
+    )
+    builder.add_edge("next_step", "harness_step")
+    builder.add_edge("finish", END)
+    return builder.compile(checkpointer=checkpointer)

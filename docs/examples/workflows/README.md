@@ -5,12 +5,12 @@ bundled `collaborative` workflow. None does research work, so you can use them
 to try out a new harness, model, or MCP setup before running a real workflow,
 and as starting points for your own:
 
-- [`count-steps`](#count-steps), a Python workflow that checks whether a coding
-  harness follows Hiraku workflow instructions exactly;
+- [`count-steps`](#count-steps), a LangGraph workflow that hands each step to
+  the current harness and pauses for the user's decision;
 - [`greet`](#greet), a prompt-only workflow whose arguments fill placeholders
   in its `workflow.md`;
-- [`scheduler`](#scheduler), a Python workflow that picks its next step from
-  the project's records, by priority.
+- [`scheduler`](#scheduler), a LangGraph workflow that creates and assigns
+  records by priority, then checks the harness's reported update.
 
 ## Initialize
 
@@ -23,57 +23,22 @@ hiraku example create workflows .
 
 ## Count steps
 
-The workflow is `hiraku/workflows/count-steps/`. Its `## Step` section
-contains `{{step}}`, `{{count}}`, and `{{token}}` placeholders, which its
-`running` state fills with `hiraku.markdown.render`, so the agent receives the
-exact line to print.
+The workflow lives in `hiraku/workflows/count-steps/workflow.py`, with its
+instruction text and default count in `workflow.md`. LangGraph owns the loop,
+token validation, and checkpointed state. The graph pauses at each step and
+returns an instruction for the current coding harness to carry out.
 
-### Run
+Ask Codex to start count-steps with count 3. It calls `workflow_start` and
+receives a `run_id` plus a structured interrupt containing the step text. Show
+the line to the user, then wait for their choice. Resume with
+`workflow_resume(run_id, {"token": "...", "decision": "continue"})`, or use
+`"finish"` to stop. `workflow_status(run_id)` inspects progress without
+advancing it. The token must match the current step; invalid responses pause
+again with an explanation.
 
-Invoke the MCP prompt `hiraku:count-steps` (or raw: `/mcp__hiraku__count-steps`) in Claude Code. Note: Codex does not support MCP prompts.
-
-Alternatively, ask your agent (which will invoke the MCP tool) to run the workflow:
-
-> Start the Hiraku count-steps workflow with count 3.
-
-The workflow sends `count` numbered steps (default 5). Each step carries a
-fresh random token, and the agent must:
-
-1. print the step line to you, for example `Step 2/3: token 1a2b3c4d`;
-2. send the event `ack` with that step's token.
-
-After each step the agent tells you how many steps remain and asks whether to
-run the next one. It sends `step` only after you agree, or `finish` to stop.
-After the last step, or after `finish`, the session completes with a final
-instruction: the agent tells you how many steps ran.
-
-Its states and events, from `hiraku workflow graph count-steps`:
-
-```mermaid
-stateDiagram-v2
-  [*] --> running
-  running --> waiting: ack
-  running --> finished: ack
-  waiting --> running: step
-  waiting --> finished: finish
-  finished --> [*]
-```
-
-The agent acknowledges a running step; at the `waiting` gate you go on or
-finish, so the agent cannot end the session on its own.
-
-### What to look for
-
-- **Every step is printed in order.** A wrong, stale, or invented token is
-  rejected, so a skipped or repeated step shows up as a rejected event.
-- **The agent stops after every step** and waits for your answer. Hiraku cannot
-  enforce this: an agent that sends `step` without asking fails the check
-  even though the workflow accepts the event.
-- **The session completes.** Run `hiraku session list` to see its state, or
-  `hiraku session show <session-id>` for the accepted calls.
-
-To test recovery, compact or restart the conversation mid-run and ask the agent
-to continue the session; it should resume at the current step.
+The checkpoint is stored in SQLite, so the run remains resumable after the MCP
+server restarts. Both count-steps and scheduler use the LangGraph driver; greet
+continues to exercise Hiraku's existing workflow/session path.
 
 ## Greet
 
@@ -109,28 +74,22 @@ workflow.
 
 ## Scheduler
 
-The workflow is `hiraku/workflows/scheduler/`. Its next step does not follow a
-fixed sequence; it comes from the records in the project:
+The workflow is `hiraku/workflows/scheduler/workflow.py`, with its defaults and
+instructions in `workflow.md`. Its next assignment comes from project records:
 
 1. `start` creates a task record `scheduler-<id>` and `records` experiment
    records below it (default 3), each with a random `priority` from 1 to 9 and
    `count: 0`.
 2. Hiraku assigns the open record with the highest priority, ties going to the
    larger ID. A record is open while its `count` is below `target` (default 2).
-3. The agent raises the assigned record's `count` by one, with
-   `hiraku record update <record> --set count=<n>` or the `record_update`
-   tool, and sends the event `incremented` with the record ID.
-4. Hiraku checks the evidence: the event must name the assigned record, and its
-   count must be exactly one higher than when it was assigned. Then it assigns
-   the next record.
-5. When every count reaches `target`, a final instruction asks the agent to show
-   you the records.
+3. The harness raises the assigned record's `count` by one, with
+   `hiraku record update <record> --set count=<n>` or the `record_update` tool,
+   then resumes with `{"record_id": "<assigned-record>"}`.
+4. The graph verifies that the response names the assigned record and that its
+   count is exactly one higher than before. It then assigns the next record.
+5. When every count reaches `target`, the graph returns the final record summary.
 
-There is no user gate. Ask your coding agent to start the Hiraku scheduler
-workflow with records 3 and target 2. Inspect the results with `hiraku record tree`.
-
-Assigning a record is a decision, so `start` and the `incremented` event make
-it and store it in the workflow's data; the `working` state only shows the
-assignment. An
-event can then be checked against what the agent was told, and `session_show`
-returns the same assignment until the agent reports it.
+Ask your coding agent to start the scheduler with records 3 and target 2. It
+uses the same `workflow_start`, `workflow_status`, and `workflow_resume` MCP
+tools as count-steps. The graph creates and assigns records; the harness
+performs each record update.

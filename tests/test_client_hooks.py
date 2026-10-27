@@ -15,7 +15,7 @@ from hiraku.config import HirakuConfig
 
 @pytest.mark.parametrize(
     "tool",
-    ["count-steps", "count_steps", "session_list", "session_show", "session_cancel"],
+    ["session_list", "session_show", "session_cancel"],
 )
 def test_generated_codex_hook_runs(tmp_path, tool):
     config = HirakuConfig.init(tmp_path, example="workflows", install_skill=False)

@@ -171,6 +171,16 @@ through `workflow_send_event`. `workflow_list` and the `session_*` tools list
 workflows and inspect, resume, or cancel sessions. See the
 [Workflows guide](workflows.md).
 
+LangGraph workflows declare `engine: langgraph` in `workflow.md` and define a
+`build_graph(checkpointer, *, config)` factory in `workflow.py`. They are started
+with `workflow_start(workflow_id, arguments)`, inspected with
+`workflow_status(run_id)`, and continued with
+`workflow_resume(run_id, response)`. The harness carries out the returned
+instruction and sends its structured response. LangGraph owns the graph state
+and transitions, checkpointed in `.hiraku/langgraph-checkpoints.sqlite`; these
+runs do not create Hiraku sessions or session history entries. The bundled
+count-steps and scheduler examples demonstrate this path.
+
 The conversational server wraps core event execution and attaches the current
 saved instruction to every start and event response, including rejected ones.
 Core start returns a saved session; continuation returns a typed event result.

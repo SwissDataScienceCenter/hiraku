@@ -1,51 +1,79 @@
-"""Scheduler: work through records by priority until each reaches a target."""
+"""Schedule record updates through a LangGraph harness handoff."""
 
 from __future__ import annotations
 
+import json
 import random
 import secrets
-from typing import Annotated, Any
+from pathlib import Path
+from typing import Any, TypedDict
 
-from pydantic import Field
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
-from hiraku.errors import EventRejected
-from hiraku.markdown import render
+from hiraku.base import BaseRecord
+from hiraku.config import HirakuConfig
+from hiraku.errors import ValidationError
+from hiraku.markdown import Markdown, render
 from hiraku.record import Record, load_record
-from hiraku.workflows.graph import State, event, node, start
-from hiraku.workflows.workflow import Instruction, Workflow
 
 
-class Queue(State):
-    node: str = "working"
+class SchedulerState(TypedDict, total=False):
+    arguments: dict[str, Any]
+    run_id: str
     parent: str
     target: int
-    current: str | None = None
-    baseline: int = 0
+    current: str | None
+    baseline: int
+    priority: int
+    remaining: int
+    response: dict[str, Any]
+    error: str
+    final: str
+    records: list[dict[str, Any]]
 
 
-class Scheduler(Workflow):
-    """Pick the open record with the highest priority and let the agent work on it.
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
+    """Build the graph that creates and schedules experiment records."""
+    path = Path(__file__).with_name("workflow.md")
+    fields, body = BaseRecord._parse_markdown(path)
+    if fields.get("id") != "scheduler":
+        raise ValueError("workflow.md must declare id: scheduler")
+    defaults = fields.get("arguments", {})
+    if not isinstance(defaults, dict):
+        raise ValueError("workflow.md must define scheduler argument defaults")
+    for name, lower, upper in (("records", 1, 20), ("target", 1, 10)):
+        value = defaults.get(name)
+        if type(value) is not int or not lower <= value <= upper:
+            raise ValueError(
+                f"workflow.md arguments.{name} must be an integer from "
+                f"{lower} to {upper}"
+            )
+    markdown = Markdown(body)
 
-    Start creates experiment records with a random priority and a count of 0.
-    Each instruction assigns the open record with the highest priority, and the
-    agent raises its count by one, until every count reaches the target. The
-    next step comes from the records, not from a fixed sequence.
-    """
+    def initialize(state: SchedulerState) -> SchedulerState:
+        arguments = state.get("arguments", {})
+        if not isinstance(arguments, dict):
+            raise ValidationError("arguments must be an object")
+        unknown = set(arguments) - {"records", "target"}
+        if unknown:
+            raise ValidationError(
+                f"Unknown workflow arguments: {', '.join(sorted(unknown))}"
+            )
+        records = arguments.get("records", defaults["records"])
+        target = arguments.get("target", defaults["target"])
+        if type(records) is not int or not 1 <= records <= 20:
+            raise ValidationError("records must be an integer from 1 to 20")
+        if type(target) is not int or not 1 <= target <= 10:
+            raise ValidationError("target must be an integer from 1 to 10")
 
-    @start(dest="working")
-    def start(
-        self,
-        *,
-        records: Annotated[int, "Number of records to create.", Field(gt=0, le=20)] = 3,
-        target: Annotated[int, "Count each record must reach.", Field(gt=0, le=10)] = 2,
-    ) -> Queue:
-        """Create records with random priorities and start working through them."""
         parent = Record.create(
-            f"scheduler-{secrets.token_hex(3)}",
+            f"scheduler-{secrets.token_hex(4)}",
             type="task",
             summary=f"Scheduler example: raise each count to {target}",
             activate=False,
-            config=self.config,
+            config=config,
         )
         for index in range(records):
             Record.create(
@@ -55,79 +83,114 @@ class Scheduler(Workflow):
                 priority=random.randint(1, 9),
                 count=0,
                 activate=False,
-                config=self.config,
+                config=config,
             )
-        queue = Queue(parent=parent.id, target=target)
-        return self._assign(queue)
+        return {"parent": parent.id, "target": target}
 
-    @node("working")
-    def work(self, queue: Queue) -> Instruction:
-        record = load_record(str(queue.current), config=self.config)
-        values = {
-            "record": record.id,
-            "count": queue.baseline,
-            "next": queue.baseline + 1,
+    def assign(state: SchedulerState) -> SchedulerState:
+        children = _children(state["parent"], config)
+        open_records = [item for item in children if _count(item) < state["target"]]
+        selected = max(
+            open_records,
+            key=lambda item: (_priority(item), item.id),
+            default=None,
+        )
+        if selected is None:
+            return {
+                "current": None,
+                "baseline": 0,
+                "remaining": 0,
+                "records": [
+                    {
+                        "record": item.id,
+                        "priority": _priority(item),
+                        "count": _count(item),
+                    }
+                    for item in children
+                ],
+            }
+        return {
+            "current": selected.id,
+            "baseline": _count(selected),
+            "priority": _priority(selected),
+            "remaining": sum(
+                state["target"] - _count(item)
+                for item in children
+                if _count(item) < state["target"]
+            ),
+            "error": "",
         }
-        return Instruction(
-            render(self.markdown.section("## Work"), values),
-            data={
+
+    def handoff(state: SchedulerState) -> SchedulerState:
+        record_id = state["current"]
+        values = {
+            "record": record_id,
+            "count": state["baseline"],
+            "next": state["baseline"] + 1,
+            "run_id": state["run_id"],
+        }
+        payload: dict[str, Any] = {
+            "instruction": render(markdown.section("## Work"), values),
+            "data": {
                 **values,
-                "priority": _priority(record),
-                "remaining": sum(
-                    queue.target - _count(item)
-                    for item in self._children(queue)
-                    if _count(item) < queue.target
-                ),
+                "priority": state["priority"],
+                "remaining": state["remaining"],
+                "parent": state["parent"],
             },
-        )
+            "response_schema": {"record_id": "string: assigned record ID"},
+        }
+        if state.get("error"):
+            payload["error"] = state["error"]
+        return {"response": interrupt(payload)}
 
-    @node("finished", final=True)
-    def report(self, queue: Queue) -> Instruction:
-        return Instruction(
-            self.markdown.section("## Done"), data={"records": self._summary(queue)}
-        )
+    def validate_update(state: SchedulerState) -> SchedulerState:
+        response = state["response"]
+        if not isinstance(response, dict):
+            return {"error": "Response must be an object with record_id."}
+        if response.get("record_id") != state["current"]:
+            return {"error": f"Report the assigned record {state['current']!r}."}
+        record = load_record(str(state["current"]), config=config)
+        count = _count(record)
+        expected = state["baseline"] + 1
+        if count != expected:
+            return {"error": f"The count is {count}; set it to {expected}."}
+        return {"error": ""}
 
-    @event(source="working", dest=["working", "finished"])
-    def incremented(
-        self,
-        queue: Queue,
-        *,
-        record_id: Annotated[str, "ID of the assigned record."],
-    ) -> Queue:
-        """Report that the assigned record's count is one higher."""
-        if record_id != queue.current:
-            raise EventRejected(
-                f"Work on the assigned record {queue.current!r}, not {record_id!r}"
-            )
-        count = _count(load_record(record_id, config=self.config))
-        if count != queue.baseline + 1:
-            raise EventRejected(
-                f"The count of {record_id!r} is {count}; set it to {queue.baseline + 1}"
-            )
-        return self._assign(queue)
+    def route_update(state: SchedulerState) -> str:
+        return "retry" if state.get("error") else "assign"
 
-    def _assign(self, queue: Queue) -> Queue:
-        """Assign the highest-priority open record, or finish when none remain."""
-        open_records = [
-            item for item in self._children(queue) if _count(item) < queue.target
-        ]
-        pick = max(
-            open_records, key=lambda item: (_priority(item), item.id), default=None
-        )
-        queue.node = "working" if pick is not None else "finished"
-        queue.current = pick.id if pick is not None else None
-        queue.baseline = _count(pick) if pick is not None else 0
-        return queue
+    def finish(state: SchedulerState) -> SchedulerState:
+        values = {"records": json.dumps(state["records"], indent=2)}
+        return {"final": render(markdown.section("## Done"), values)}
 
-    def _children(self, queue: Queue) -> list[Record]:
-        parent = load_record(queue.parent, config=self.config)
-        return sorted(parent.children(config=self.config), key=lambda item: item.id)
+    builder = StateGraph(SchedulerState)
+    builder.add_node("initialize", initialize)
+    builder.add_node("assign", assign)
+    builder.add_node("harness_step", handoff)
+    builder.add_node("validate_update", validate_update)
+    builder.add_node("finish", finish)
+    builder.add_edge(START, "initialize")
+    builder.add_edge("initialize", "assign")
+    builder.add_conditional_edges(
+        "assign",
+        lambda state: "finish" if state.get("current") is None else "work",
+        {"finish": "finish", "work": "harness_step"},
+    )
+    builder.add_edge("harness_step", "validate_update")
+    builder.add_conditional_edges(
+        "validate_update",
+        route_update,
+        {"retry": "harness_step", "assign": "assign"},
+    )
+    builder.add_edge("finish", END)
+    return builder.compile(checkpointer=checkpointer)
 
-    def _summary(self, queue: Queue) -> list[dict[str, Any]]:
-        return [
-            {"record": item.id, "priority": _priority(item), "count": _count(item)}
-            for item in self._children(queue)
-        ]
+
+def _children(parent_id: str, config: HirakuConfig) -> list[Record]:
+    return sorted(
+        load_record(parent_id, config=config).children(config=config),
+        key=lambda item: item.id,
+    )
 
 
 def _priority(record: Record) -> int:
@@ -137,10 +200,7 @@ def _priority(record: Record) -> int:
 def _count(record: Record) -> int:
     value = getattr(record, "count", 0)
     if isinstance(value, bool) or not isinstance(value, int):
-        raise EventRejected(
+        raise ValidationError(
             f"The count of {record.id!r} must be an integer, not {value!r}"
         )
     return value
-
-
-WORKFLOW = Scheduler

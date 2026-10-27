@@ -19,42 +19,14 @@ from hiraku.workflows.workflow import load_workflow
 
 BUILTINS = {
     "workflow_list",
+    "workflow_start",
+    "workflow_status",
+    "workflow_resume",
     "workflow_send_event",
     "session_list",
     "session_show",
     "session_cancel",
 }
-
-
-def test_codex_normalized_start_name_attributes_initial_entry(tmp_path):
-    from hiraku.cli import _inject_client
-
-    config = HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
-    injected = _inject_client(
-        {
-            "hook_event_name": "PreToolUse",
-            "tool_name": "mcp__hiraku__count_steps",
-            "cwd": str(config.root),
-            "session_id": "codex-chat",
-            "turn_id": "first-turn",
-            "tool_input": {"count": 3},
-        },
-        "codex",
-    )["hookSpecificOutput"]["updatedInput"]
-
-    async def scenario(client, notifications):
-        return payload(await client.call_tool("count-steps", injected))
-
-    response = run(create_server(config), scenario)
-    session = load_session(response["session_id"], config=config)
-    assert len(session.history) == 1
-    entry = session.history[0]
-    assert entry.event == "start"
-    assert entry.result.status == "accepted"
-    assert entry.client_info == ClientInfo(
-        client="codex", client_session_id="codex-chat", client_turn_id="first-turn"
-    )
-    assert session.state.count == 3
 
 
 @pytest.mark.parametrize("client_name", ["codex", "claude"])

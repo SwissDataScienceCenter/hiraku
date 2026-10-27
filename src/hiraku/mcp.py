@@ -40,6 +40,10 @@ from .config import HirakuConfig
 from .errors import HirakuError, ValidationError, WorkflowError
 from .execution import execute_command
 from .record import Record, list_records, load_record
+from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
+from .workflows.langgraph import start_workflow as start_langgraph_workflow
+from .workflows.langgraph import workflow_details as langgraph_workflow_details
+from .workflows.langgraph import workflow_status as langgraph_workflow_status
 from .workflows.session import (
     ClientInfo,
     Session,
@@ -55,12 +59,14 @@ from .workflows.workflow import (
 
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
-attributes tracked runs to them, and runs workflows that guide you step by step.
-Run commands with execute; it waits for the command and returns its output and
-exit code. Start a workflow with the tool named after it
-(workflow_list lists them), and answer its instructions by sending events with
-workflow_send_event, as its description explains. Use session_list and
-session_show to resume earlier sessions.\
+attributes tracked runs to them, and runs workflows. Run commands with execute;
+it waits for the command and returns its output and exit code. Start legacy
+workflows with the tool named after them and continue with workflow_send_event.
+Start LangGraph workflows with workflow_start, inspect them with
+workflow_status, and
+resume their structured handoffs with workflow_resume. Legacy workflows guide
+you step by step.
+\
 """
 
 EVENT_GUIDE = """\
@@ -387,10 +393,12 @@ def _add_workflow_tools(
     render: Callable[[Mapping[str, Any]], CallToolResult],
 ) -> None:
     def workflow_list() -> list[dict[str, Any]]:
-        return [
+        workflows_list = [
             {"id": workflow.id, "description": workflow.description}
             for _, workflow in sorted(workflows.items())
         ]
+        workflows_list.extend(langgraph_workflow_details(config=project()))
+        return sorted(workflows_list, key=lambda item: item["id"])
 
     def workflow_send_event(
         event: Annotated[
@@ -454,7 +462,8 @@ def _add_workflow_tools(
     server.add_tool(
         workflow_list,
         description=(
-            "List the project's workflows. Start one with the tool named after it."
+            "List project workflows. Start legacy workflows with their named tool; "
+            "start LangGraph workflows with workflow_start."
         ),
         annotations=ToolAnnotations(read_only_hint=True),
     )
@@ -470,6 +479,58 @@ def _add_workflow_tools(
             annotations=ToolAnnotations(read_only_hint=False),
             name=workflow_id,
         )
+
+    def workflow_start(
+        workflow_id: Annotated[
+            str, Field(description="ID of a project LangGraph workflow.")
+        ],
+        arguments: Annotated[
+            dict[str, Any] | None,
+            Field(description="Workflow inputs as a JSON object."),
+        ] = None,
+    ) -> dict[str, Any]:
+        """Start a LangGraph workflow and return its first handoff or result."""
+        return start_langgraph_workflow(workflow_id, arguments, config=project())
+
+    def workflow_status_tool(
+        run_id: Annotated[str, Field(description="Run ID returned by workflow_start")],
+    ) -> dict[str, Any]:
+        """Inspect a LangGraph workflow run without advancing it."""
+        return langgraph_workflow_status(run_id, config=project())
+
+    def workflow_resume_tool(
+        run_id: Annotated[str, Field(description="Run ID returned by workflow_start")],
+        response: Annotated[
+            dict[str, Any],
+            Field(description="Structured response to the current graph interrupt."),
+        ],
+    ) -> dict[str, Any]:
+        """Resume a paused LangGraph workflow with the harness's response."""
+        return resume_langgraph_workflow(run_id, response, config=project())
+
+    server.add_tool(
+        workflow_start,
+        description=(
+            "Start a project LangGraph workflow by ID. It runs until completion "
+            "or a harness handoff, and returns a run_id plus any interrupt payload."
+        ),
+        annotations=ToolAnnotations(read_only_hint=False),
+    )
+    server.add_tool(
+        workflow_status_tool,
+        description="Inspect a checkpointed LangGraph workflow run.",
+        annotations=ToolAnnotations(read_only_hint=True),
+        name="workflow_status",
+    )
+    server.add_tool(
+        workflow_resume_tool,
+        description=(
+            "Resume a LangGraph run with the structured result of its current "
+            "harness handoff."
+        ),
+        annotations=ToolAnnotations(read_only_hint=False),
+        name="workflow_resume",
+    )
 
 
 def _add_session_tools(
