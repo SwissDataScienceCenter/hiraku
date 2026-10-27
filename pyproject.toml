@@ -23,6 +23,7 @@ dependencies = [
     "PyYAML>=6.0",
     "mcp>=2.3.0",
     "rich>=15.0.0",
+    "langgraph>=1.2.18",
 ]
 
 [project.scripts]
