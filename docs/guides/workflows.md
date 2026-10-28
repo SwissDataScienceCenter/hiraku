@@ -85,10 +85,17 @@ from typing import Any, TypedDict
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, ConfigDict
 
 from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
 from hiraku.markdown import Markdown, render
+
+
+class GreetingInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str = "World"
 
 
 class State(TypedDict, total=False):
@@ -96,12 +103,18 @@ class State(TypedDict, total=False):
     final: str
 
 
+def input_schema() -> dict[str, Any]:
+    """Declare the JSON Schema available before workflow_start."""
+    return GreetingInput.model_json_schema()
+
+
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig):
     _, body = BaseRecord._parse_markdown(Path(__file__).with_name("workflow.md"))
     prompt = Markdown(body)
 
     def greet(state: State) -> dict[str, str]:
-        return {"final": render(prompt, state.get("arguments", {}))}
+        arguments = GreetingInput.model_validate(state.get("arguments", {}))
+        return {"final": render(prompt, arguments.model_dump())}
 
     builder = StateGraph(State)
     builder.add_node("greet", greet)

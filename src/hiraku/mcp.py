@@ -379,7 +379,7 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         """Ask the user to resolve an approval request in the current interrupt."""
         if approval.action == "accept":
             pending_approval(workflow_session_id, interrupt_id)
-            return {
+            result = {
                 "approval": {
                     "decision": approval.data.decision,
                     **(
@@ -387,9 +387,11 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
                         if approval.data.feedback
                         else {}
                     ),
-                },
-                "response": response,
+                }
             }
+            if approval.data.decision == "approve":
+                result["response"] = response
+            return result
         return {"decision": approval.action}
 
     workflow_approval.__annotations__["approval"] = Annotated[

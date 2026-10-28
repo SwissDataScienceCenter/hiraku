@@ -79,6 +79,11 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         try:
             arguments = input_model.model_validate(state.arguments)
         except PydanticValidationError as exc:
+            if any(
+                error["loc"] == ("count",) and error["type"] == "greater_than_equal"
+                for error in exc.errors()
+            ):
+                raise ValidationError("count must be a positive integer") from exc
             raise ValidationError(str(exc)) from exc
         return {
             "count": arguments.count,
