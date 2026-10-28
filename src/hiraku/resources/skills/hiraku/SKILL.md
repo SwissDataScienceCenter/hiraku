@@ -42,7 +42,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | --- | --- |
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
-| Submit a job | `hiraku run [--record ID] [--backend local|slurm] [--commit REF] [--dispatch DISPATCHER] [-- COMMAND ...]` |
+| Submit a job | `hiraku run [--record ID] [--backend local] [--commit REF] [--dispatch DISPATCHER] [-- COMMAND ...]` |
 | Inspect execution | `hiraku job status ID --json`, `hiraku job wait ID`, `hiraku job logs ID`, `hiraku job cancel ID` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
 | Manage program records | `hiraku program list`, `hiraku program show PROGRAM` |

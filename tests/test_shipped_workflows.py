@@ -8,11 +8,12 @@ from typing import Any
 import pytest
 
 from hiraku.config import HirakuConfig
+from hiraku.job import submit_job, wait_job
 from hiraku.record import Record, load_record
 from hiraku.workflows.session import Session, load_session
 from hiraku.workflows.workflow import list_workflows, load_workflow
 
-HEADER = "id,record_id,entrypoint,metric.val\n"
+HEADER = "id,record_id,job_id,commit,metric.val\n"
 
 
 class Harness:
@@ -74,12 +75,24 @@ def experiment(config: HirakuConfig, record_id: str) -> None:
     )
 
 
-def add_run(config: HirakuConfig, run_id: str, record_id: str, value: str) -> None:
+def add_run(
+    config: HirakuConfig,
+    run_id: str,
+    record_id: str,
+    value: str,
+    job_id: str,
+    commit: str,
+) -> None:
     path = config.root / "runs.csv"
     if not path.exists():
         path.write_text(HEADER)
     with path.open("a", encoding="utf-8") as stream:
-        stream.write(f"{run_id},{record_id},train,{value}\n")
+        stream.write(f"{run_id},{record_id},{job_id},{commit},{value}\n")
+
+
+def successful_job(config: HirakuConfig, record_id: str):
+    job = submit_job(["python", "-c", "pass"], record_id=record_id, config=config)
+    return wait_job(job.id, config=config)
 
 
 @pytest.fixture
@@ -89,7 +102,7 @@ def config(tmp_path: Path) -> HirakuConfig:
         "task",
         type="task",
         config=selected,
-        entrypoints={"train": {"command": ["python", "train.py"]}},
+        command=["python", "train.py"],
     )
     experiment(selected, "base")
     return selected
@@ -109,8 +122,12 @@ def commit(config: HirakuConfig, message: str) -> str:
         git("init", "-b", "main")
         git("config", "user.email", "test@example.org")
         git("config", "user.name", "Test")
+    (config.root / ".gitignore").write_text(
+        "hiraku/\nhiraku.yml\n.mcp.json\n.codex/\n.agents/\n.claude/\n"
+    )
     (config.root / "train.py").write_text(f"# {message}\n")
-    git("add", "train.py")
+    git("add", "-A")
+    git("add", "-f", "hiraku/dispatch/launch.sh")
     git("commit", "-m", message)
     return git("rev-parse", "HEAD")
 
@@ -129,8 +146,9 @@ def run_experiment(harness: Harness, config: HirakuConfig, record_id: str) -> st
     """Take a drafted experiment through implement, launch, and analyze."""
     sha = commit(config, record_id)
     harness.send("implemented", commit="HEAD")
-    add_run(config, f"r-{record_id}", record_id, "0.8")
-    harness.send("launched")
+    job = successful_job(config, record_id)
+    add_run(config, f"r-{record_id}", record_id, "0.8", job.id, job.commit)
+    harness.send("launched", job_id=job.id)
     harness.send("analyzed", verdict="supports", conclusion="Better")
     return sha
 
@@ -178,16 +196,25 @@ def test_collaborative_runs_each_step_and_stops_after_the_rounds(
     harness.send("implemented", commit="HEAD")
     assert load_record("c1", config=config).commit == sha
     assert harness.section() == "## Launch"
-    assert harness.instruction["data"]["command"] == (
-        f"hiraku launch train --record c1 --commit {sha}"
-    )
+    assert shlex.split(harness.instruction["data"]["command"]) == [
+        "hiraku",
+        "run",
+        "--record",
+        "c1",
+        "--commit",
+        sha,
+        "--",
+        "python",
+        "train.py",
+    ]
     assert harness.events == ["launched", "revise_launch", "finish"]
     harness.send("revise_launch", feedback="Use the local dispatcher")
     assert harness.instruction["data"]["feedback"] == "Use the local dispatcher"
 
-    assert harness.send("launched")["status"] == "not_ready"
-    add_run(config, "r1", "c1", "0.8")
-    harness.send("launched")
+    job = successful_job(config, "c1")
+    assert harness.send("launched", job_id=job.id)["status"] == "not_ready"
+    add_run(config, "r1", "c1", "0.8", job.id, job.commit)
+    harness.send("launched", job_id=job.id)
     assert harness.section() == "## Analyze"
     assert harness.instruction["data"]["runs"] == [
         {"run_id": "r1", "metrics": {"val": "0.8"}}
@@ -223,9 +250,9 @@ def test_collaborative_can_finish_from_any_step(config: HirakuConfig) -> None:
 
 def test_collaborative_rejects_invalid_input(config: HirakuConfig) -> None:
     harness = Harness(config)
-    unknown = harness.start("collaborative", task="task", entrypoint="nope")
+    unknown = harness.start("collaborative", task="task", command=[])
     assert unknown["status"] == "rejected"
-    assert "nope" in unknown["message"]
+    assert "non-empty string" in unknown["message"]
 
     harness.start("collaborative", task="task")
     exists = draft(harness, "base")
@@ -243,16 +270,15 @@ def test_collaborative_rejects_invalid_input(config: HirakuConfig) -> None:
     assert harness.send("implemented", commit="HEAD")["status"] == "accepted"
 
     path = config.root / "runs.csv"
-    path.write_text(
-        "id,record_id,entrypoint,commit,metric.val\nr1,c1,train," + "0" * 40 + ",0.5\n"
-    )
-    wrong = harness.send("launched")
+    job = successful_job(config, "c1")
+    path.write_text(HEADER + f"r1,c1,{job.id},{'0' * 40},0.5\n")
+    wrong = harness.send("launched", job_id=job.id)
     assert wrong["status"] == "rejected"
     assert "another commit" in wrong["message"]
 
     # Entering analyze needs metrics, so the launch report waits for them.
-    path.write_text("id,record_id,entrypoint,metric.val\nr1,c1,train,\n")
-    early = harness.send("launched")
+    path.write_text(HEADER + f"r1,c1,{job.id},{job.commit},\n")
+    early = harness.send("launched", job_id=job.id)
     assert early["status"] == "not_ready"
     assert "no metrics yet" in early["message"]
     assert harness.section() == "## Launch"
@@ -267,33 +293,42 @@ def test_collaborative_quotes_launch_arguments(config, record_id):
     assert harness.send("implemented", commit=sha)["status"] == "accepted"
     assert shlex.split(harness.instruction["data"]["command"]) == [
         "hiraku",
-        "launch",
-        "train",
+        "run",
         "--record",
         record_id,
         "--commit",
         sha,
+        "--",
+        "python",
+        "train.py",
     ]
 
 
-@pytest.mark.parametrize("entrypoint", ["mock", ""])
-def test_collaborative_uses_only_requested_entrypoint_runs(config, entrypoint):
+def test_collaborative_uses_only_requested_job_runs(config):
     harness = Harness(config)
     harness.start("collaborative", task="task")
     draft(harness, "c1")
     sha = commit(config, "implementation")
     harness.send("implemented", commit=sha)
     path = config.root / "runs.csv"
-    unrelated = f"other,c1,{entrypoint},{'0' * 40},0.9\n"
-    header = "id,record_id,entrypoint,commit,metric.val\n"
-    path.write_text(header + unrelated)
-    assert harness.send("launched")["status"] == "not_ready"
-    path.write_text(header + unrelated + f"pending,c1,train,{sha},\n")
-    waiting = harness.send("launched")
+    job = successful_job(config, "c1")
+    path = config.root / "runs.csv"
+    path.write_text(HEADER + f"other,c1,another-job,{'0' * 40},0.9\n")
+    assert harness.send("launched", job_id=job.id)["status"] == "not_ready"
+    path.write_text(
+        HEADER
+        + f"other,c1,another-job,{'0' * 40},0.9\n"
+        + f"pending,c1,{job.id},{sha},\n"
+    )
+    waiting = harness.send("launched", job_id=job.id)
     assert waiting["status"] == "not_ready"
     assert "no metrics yet" in waiting["message"]
-    path.write_text(header + unrelated + f"ready,c1,train,{sha},0.8\n")
-    assert harness.send("launched")["status"] == "accepted"
+    path.write_text(
+        HEADER
+        + f"other,c1,another-job,{'0' * 40},0.9\n"
+        + f"ready,c1,{job.id},{sha},0.8\n"
+    )
+    assert harness.send("launched", job_id=job.id)["status"] == "accepted"
     assert harness.instruction["data"]["runs"] == [
         {"run_id": "ready", "metrics": {"val": "0.8"}}
     ]

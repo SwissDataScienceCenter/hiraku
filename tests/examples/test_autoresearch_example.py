@@ -65,13 +65,20 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
         gitignore.read_text(encoding="utf-8")
         + "\n# Hiraku local files and run artifacts\n"
         + "/.agents/\n/.claude/\n/hiraku/*\n!/hiraku/dispatch/\n/hiraku.yml\n/task.md\n"
-        + "/runs.csv\n/run.log\n",
+        + "/runs.csv\n/run.log\n/.mcp.json\n/.codex/\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(project)
     runner = CliRunner()
     invoke(runner, ["example", "create", "autoresearch", "."])
-    git(project, "add", ".gitignore", "cpu_mock.py")
+    git(
+        project,
+        "add",
+        ".gitignore",
+        "cpu_mock.py",
+        "hiraku/dispatch/autoresearch.sh",
+        "hiraku/dispatch/launch.sh",
+    )
     git(project, "commit", "-m", "add Hiraku autoresearch workflow")
 
     git(project, "switch", "-c", "autoresearch/sep10")
@@ -210,6 +217,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
         runner,
         ["record", "create", "cpu-test", "--parent", "sep10", "--commit", "HEAD"],
     )
+    assert git(project, "status", "--porcelain") == ""
 
     submitted = invoke(
         runner,

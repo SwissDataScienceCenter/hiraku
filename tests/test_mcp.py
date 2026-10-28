@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,15 +36,15 @@ def test_tools_and_validation(tmp_path: Path) -> None:
             record_id="root",
             fields={
                 "status": "new",
-                "entrypoints": {"train": {"command": ["echo"]}},
+                "command": ["echo"],
             },
         )
         await call("record_create", record_id="child", parent_id="root")
         await call("record_update", record_id="child", fields={"status": "done"})
         assert load_record("child", config=config).status == "done"
-        assert load_record("child", config=config).entrypoint(
-            "train", config=config
-        ).command == ["echo"]
+        assert load_record("child", config=config).resolve_command(config=config) == [
+            "echo"
+        ]
         for name, args in [
             ("record_create", {"record_id": "bad", "parent_id": "missing"}),
             ("record_create", {"record_id": "../escape"}),
@@ -132,14 +133,30 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_launch_capture_and_attribution(tmp_path: Path) -> None:
+def test_job_submission_and_lifecycle(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
+    (tmp_path / ".gitignore").write_text(
+        "hiraku/\nhiraku.yml\n.mcp.json\n.codex/\n.agents/\n.claude/\n"
+    )
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.org"],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True)
     dispatcher = config.dispatch_dir / "test.sh"
     dispatcher.write_text(
-        '#!/bin/sh\nprintf "%s\\n" "$HIRAKU_RECORD_ID:$HIRAKU_ENTRYPOINT"\n'
+        '#!/bin/sh\nprintf "%s\\n" "$HIRAKU_RECORD_ID:$HIRAKU_JOB_ID"\n'
         'printf "diagnostic\\n" >&2\nexit 7\n'
     )
     dispatcher.chmod(0o755)
+    subprocess.run(
+        ["git", "add", "-f", "hiraku/dispatch/test.sh"], cwd=tmp_path, check=True
+    )
+    subprocess.run(["git", "commit", "-m", "add dispatcher"], cwd=tmp_path, check=True)
     server = create_server(config)
 
     async def exercise() -> None:
@@ -147,41 +164,45 @@ def test_launch_capture_and_attribution(tmp_path: Path) -> None:
             "record_create",
             {
                 "record_id": "demo",
-                "fields": {
-                    "entrypoints": {"train": {"command": ["echo"], "args": {"n": 1}}},
-                },
+                "fields": {"command": ["echo", "--n", "1"]},
             },
         )
         preview = await server.call_tool(
-            "launch_entrypoint",
+            "job_submit",
             {
                 "record_id": "demo",
-                "entrypoint_name": "train",
+                "command": ["echo", "--n", "2"],
                 "dry_run": True,
-                "args": {"n": 2},
             },
         )
         assert preview.structured_content["command"] == ["echo", "--n", "2"]
         result = await server.call_tool(
-            "launch_entrypoint",
+            "job_submit",
             {
                 "record_id": "demo",
-                "entrypoint_name": "train",
+                "command": [sys.executable, "-c", "print('job output')"],
                 "dispatch": "test.sh",
             },
         )
-        assert result.structured_content == {
-            "returncode": 7,
-            "stdout": "demo:train\n",
-            "stderr": "diagnostic\n",
-        }
+        job_id = result.structured_content["id"]
+        assert result.structured_content["spec"]["record_id"] == "demo"
+        completed = await server.call_tool("job_wait", {"job_id": job_id})
+        assert completed.structured_content["status"] == "failed"
+        assert completed.structured_content["exit_code"] == 7
+        stdout = await server.call_tool("job_read_logs", {"job_id": job_id})
+        stderr = await server.call_tool(
+            "job_read_logs", {"job_id": job_id, "stream": "stderr"}
+        )
+        assert stdout.content[0].text == f"demo:{job_id}\n"
+        assert stderr.content[0].text == "diagnostic\n"
+        assert (
+            await server.call_tool("job_status", {"job_id": job_id})
+        ).structured_content["status"] == "failed"
+        jobs = await server.call_tool("job_list", {"record_id": "demo"})
+        assert jobs.structured_content["result"][0]["id"] == job_id
         with pytest.raises(ToolError):
             await server.call_tool(
-                "launch_entrypoint",
-                {
-                    "record_id": "demo",
-                    "entrypoint_name": "missing",
-                },
+                "job_submit", {"record_id": "missing", "command": ["echo"]}
             )
 
     asyncio.run(exercise())

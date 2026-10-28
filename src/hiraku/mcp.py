@@ -38,7 +38,15 @@ from .base import BaseRecord
 from .config import HirakuConfig
 from .context import Context, list_contexts, load_context
 from .errors import HirakuError, ValidationError, WorkflowError
-from .launch import launch, render_arguments
+from .job import (
+    Job,
+    cancel_job,
+    job_logs,
+    list_jobs,
+    submit_job,
+    wait_job,
+)
+from .job import job_status as get_job_status
 from .record import Record, list_records, load_record
 from .workflows.session import EventResult, Session, list_sessions, load_session
 from .workflows.workflow import (
@@ -51,10 +59,11 @@ from .workflows.workflow import (
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, and runs workflows that guide you step by step.
-Start a workflow with the tool named after it (workflow_list lists them), and
-answer its instructions by sending events with workflow_send_event, as its
-description explains. Use session_list and session_show to resume earlier
-sessions.\
+Submit commands with job_submit, then inspect them with job_status, job_wait,
+job_read_logs, and job_cancel. Start a workflow with the tool named after it
+(workflow_list lists them), and answer its instructions by sending events with
+workflow_send_event, as its description explains. Use session_list and
+session_show to resume earlier sessions.\
 """
 
 EVENT_GUIDE = """\
@@ -84,6 +93,11 @@ experiments, check whether it already exists.\
 
 Project = Callable[[], HirakuConfig]
 SessionId = Annotated[str, Field(description="Session ID from session_list.")]
+
+
+def _job_data(job: Job) -> dict[str, Any]:
+    """Return job metadata without exposing supplied environment values."""
+    return job.model_dump(mode="json", exclude={"spec": {"env"}})
 
 
 def _data(record: BaseRecord) -> dict[str, Any]:
@@ -257,41 +271,50 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         return {"deleted": context_id}
 
     @server.tool()
-    def launch_entrypoint(
+    def job_submit(
         record_id: str,
-        entrypoint_name: str,
-        args: dict[str, Any] | None = None,
+        command: list[str] | None = None,
         commit: str | None = None,
         dispatch: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Launch a configured entrypoint with attribution, or preview its command."""
-        entrypoint = load_record(record_id, config=selected).entrypoint(
-            entrypoint_name, config=selected
-        )
-        if dry_run:
-            return {
-                "command": [
-                    *entrypoint.command,
-                    *render_arguments({**entrypoint.args, **(args or {})}),
-                ]
-            }
-        result = launch(
-            entrypoint,
-            name=entrypoint_name,
-            args=args,
+        """Submit a command as a durable job, or preview it without execution."""
+        result = submit_job(
+            command,
             record_id=record_id,
             commit=commit,
             dispatch=dispatch,
-            capture_output=True,
-            check=False,
+            dry_run=dry_run,
             config=selected,
         )
-        return {
-            "returncode": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-        }
+        return _job_data(result) if isinstance(result, Job) else result
+
+    @server.tool()
+    def job_status(job_id: str) -> dict[str, Any]:
+        """Refresh and return a job's current lifecycle state."""
+        return _job_data(get_job_status(job_id, config=selected))
+
+    @server.tool()
+    def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
+        """List saved jobs, optionally filtered by record."""
+        return [
+            _job_data(job) for job in list_jobs(record_id=record_id, config=selected)
+        ]
+
+    @server.tool()
+    def job_wait(job_id: str, timeout: float | None = None) -> dict[str, Any]:
+        """Wait for a job to finish; timeout does not cancel execution."""
+        return _job_data(wait_job(job_id, timeout=timeout, config=selected))
+
+    @server.tool()
+    def job_cancel(job_id: str) -> dict[str, Any]:
+        """Request cancellation of a job."""
+        return _job_data(cancel_job(job_id, config=selected))
+
+    @server.tool()
+    def job_read_logs(job_id: str, stream: str = "stdout", follow: bool = False) -> str:
+        """Read saved stdout or stderr, optionally following it until completion."""
+        return "".join(job_logs(job_id, stream=stream, follow=follow, config=selected))
 
     @server.tool()
     def runs(

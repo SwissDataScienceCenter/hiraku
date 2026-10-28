@@ -44,7 +44,7 @@ while (($# > 0)); do
 done
 (($# > 0)) || usage
 
-for name in HIRAKU_ROOT HIRAKU_RECORD_ID HIRAKU_ENTRYPOINT; do
+for name in HIRAKU_TRACKING_ROOT HIRAKU_RECORD_ID HIRAKU_JOB_ID; do
   if [[ -z ${!name:-} ]]; then
     echo "autoresearch.sh: missing required environment variable: $name" >&2
     exit 2
@@ -128,8 +128,8 @@ fi
 
 read -r run_uuid </proc/sys/kernel/random/uuid
 run_id=${run_uuid//-/}
-csv_path=$HIRAKU_ROOT/runs.csv
-header='id,record_id,commit,git_state,timestamp,duration,entrypoint,status,metric.val_bpb,metric.training_seconds,metric.peak_vram_mb,metric.mfu_percent'
+csv_path=$HIRAKU_TRACKING_ROOT/runs.csv
+header='id,record_id,job_id,commit,git_state,timestamp,duration,status,metric.val_bpb,metric.training_seconds,metric.peak_vram_mb,metric.mfu_percent'
 
 exec 9>>"$csv_path" || exit 1
 flock 9 || exit 1
@@ -146,8 +146,8 @@ else
   fi
 fi
 printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
-  "$run_id" "$HIRAKU_RECORD_ID" "$commit" \
-  "$git_state" "$started" "$duration" "$HIRAKU_ENTRYPOINT" "$status" "$val_bpb" \
+  "$run_id" "$HIRAKU_RECORD_ID" "$HIRAKU_JOB_ID" "$commit" \
+  "$git_state" "$started" "$duration" "$status" "$val_bpb" \
   "$training_seconds" "$peak_vram_mb" "$mfu_percent" >&9
 flock -u 9
 exec 9>&-

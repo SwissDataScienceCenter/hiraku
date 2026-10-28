@@ -892,7 +892,7 @@ def job_group() -> None:
 @click.option(
     "--backend",
     "backend",
-    type=click.Choice(["local", "slurm"]),
+    type=click.Choice(["local"]),
     default="local",
     show_default=True,
     help="Execution backend.",

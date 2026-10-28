@@ -9,8 +9,10 @@ from pydantic import Field
 
 from hiraku.errors import EventRejected, HirakuError, NotReady
 from hiraku.git import GitRepository
+from hiraku.job import job_status
 from hiraku.record import Record, load_record
 from hiraku.run import Run
+from hiraku.validation import validate_command
 from hiraku.workflows.graph import State, event, node, start
 from hiraku.workflows.workflow import Instruction, Workflow
 
@@ -22,9 +24,10 @@ STEPS = ["draft", "implement", "launch", "analyze"]
 class Experiments(State):
     node: str = "draft"
     task: str
-    entrypoint: str
+    command: list[str] | None = None
     rounds: int
     experiment: str | None = None
+    job_id: str | None = None
     feedback: str | None = None
     results: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -48,7 +51,10 @@ class Collaborative(Workflow):
         task: Annotated[
             str | None, "Task record; defaults to the active record."
         ] = None,
-        entrypoint: Annotated[str, "Entrypoint of the task to launch."] = "train",
+        command: Annotated[
+            list[str] | None,
+            "Optional argv command; otherwise use the task's inherited command.",
+        ] = None,
         rounds: Annotated[int, "Most experiments to run.", Field(gt=0)] = 3,
     ) -> Experiments:
         """Start collaborative research on a task record."""
@@ -56,10 +62,9 @@ class Collaborative(Workflow):
             task = task or self.config.active_record_id
             if task is None:
                 raise EventRejected("No active record; pass the task record ID")
-            load_record(task, config=self.config).entrypoint(
-                entrypoint, config=self.config
-            )
-            return Experiments(task=task, entrypoint=entrypoint, rounds=rounds)
+            if command is not None:
+                command = validate_command(command)
+            return Experiments(task=task, command=command, rounds=rounds)
         except EventRejected:
             raise
         except HirakuError as exc:
@@ -80,23 +85,24 @@ class Collaborative(Workflow):
     def launching(self, experiments: Experiments) -> Instruction:
         context = self._experiment_context(experiments)
         record = self._experiment(experiments)
-        context["command"] = shlex.join(
-            [
-                "hiraku",
-                "launch",
-                experiments.entrypoint,
-                "--record",
-                record.id,
-                "--commit",
-                str(record.commit),
-            ]
-        )
+        argv = [
+            "hiraku",
+            "run",
+            "--record",
+            record.id,
+            "--commit",
+            str(record.commit),
+        ]
+        command = experiments.command or record.resolve_command(config=self.config)
+        if command:
+            argv.extend(["--", *command])
+        context["command"] = shlex.join(argv)
         return self._step(experiments, "## Launch", context)
 
     @node("analyze")
     def analyzing(self, experiments: Experiments) -> Instruction:
         record = self._experiment(experiments)
-        runs = _runs(record, self, experiments.entrypoint)
+        runs = _runs(record, self, experiments.job_id)
         if not any(run.metrics for run in runs):
             raise NotReady(
                 f"The runs of {record.id!r} have no metrics yet; "
@@ -171,15 +177,30 @@ class Collaborative(Workflow):
             raise EventRejected(str(exc)) from exc
 
     @event(source="launch", dest="analyze")
-    def launched(self, experiments: Experiments) -> Experiments:
+    def launched(
+        self,
+        experiments: Experiments,
+        *,
+        job_id: Annotated[str, "ID returned by hiraku run."],
+    ) -> Experiments:
         """Report that the experiment's run is tracked."""
         try:
             record = self._experiment(experiments)
-            runs = _runs(record, self, experiments.entrypoint)
+            job = job_status(job_id, config=self.config)
+            if job.record_id != record.id or job.commit != record.commit:
+                raise EventRejected(
+                    f"Job {job_id!r} is not attributed to {record.id!r} at "
+                    f"commit {record.commit}"
+                )
+            if job.status not in {"succeeded", "failed", "cancelled", "lost"}:
+                raise NotReady(f"Job {job_id!r} is still {job.status}")
+            if job.status != "succeeded":
+                raise EventRejected(f"Job {job_id!r} finished with status {job.status}")
+            runs = _runs(record, self, job_id)
             if not runs:
                 raise NotReady(
                     f"No run is attributed to {record.id!r} yet; "
-                    "send the event again once the launch is tracked"
+                    "send the event again once the job's run is tracked"
                 )
             if any(run.commit not in (None, record.commit) for run in runs):
                 raise EventRejected(
@@ -188,6 +209,7 @@ class Collaborative(Workflow):
             record.status = "launched"
             record.save()
             experiments.node = "analyze"
+            experiments.job_id = job_id
             experiments.feedback = None
             return experiments
         except EventRejected:
@@ -289,12 +311,10 @@ class Collaborative(Workflow):
         return load_record(experiments.experiment, config=self.config)
 
 
-def _runs(record: Record, workflow: Workflow, entrypoint: str) -> list[Run]:
-    return [
-        run
-        for run in record.runs(config=workflow.config)
-        if run.entrypoint == entrypoint
-    ]
+def _runs(record: Record, workflow: Workflow, job_id: str | None) -> list[Run]:
+    if job_id is None:
+        return []
+    return [run for run in record.runs(config=workflow.config) if run.job_id == job_id]
 
 
 WORKFLOW = Collaborative

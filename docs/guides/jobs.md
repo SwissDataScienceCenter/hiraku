@@ -54,20 +54,9 @@ hiraku run --record experiment-1 --backend local -- \
 ```
 
 `--record` defaults to the active record. `--backend` defaults to `local`.
-Choose `slurm` to submit through Submitit:
-
-```bash
-job_id=$(hiraku run --record experiment-1 --backend slurm -- \
-  uv run --locked python train.py --seed 7)
-hiraku job status "$job_id"
-hiraku job logs "$job_id" --follow
-```
-
-Both backends use the managed source snapshot. For Slurm, the job snapshot and
-Hiraku state directory must be visible from compute nodes, and the Python
-environment used by Submitit must be available there. To run on a VPS, install
-Hiraku and the project environment on that machine, then use the local backend
-from its project directory.
+The local backend uses a managed source snapshot. To run on another machine,
+install Hiraku and the project environment there, then submit the job from that
+project directory.
 
 `--dry-run` prints the resolved request without creating a job.
 

@@ -172,10 +172,6 @@ def _backend(name: str = "local", *, config: HirakuConfig | None = None) -> Any:
         from .compute import LocalBackend
 
         return LocalBackend(selected.jobs_dir)
-    if name == "slurm":
-        from .compute import SlurmBackend
-
-        return SlurmBackend(selected.jobs_dir)
     raise JobError(f"Unsupported compute backend: {name!r}")
 
 
@@ -205,7 +201,7 @@ def submit_job(
 ) -> Job | dict[str, Any]:
     """Resolve a request, persist its receipt, then submit it to a backend."""
     selected = config or HirakuConfig.discover()
-    if backend not in {"local", "slurm"}:
+    if backend != "local":
         raise ValidationError(f"Unsupported compute backend: {backend!r}")
     backend_name = backend
     selected_record = record_id or selected.active_record_id

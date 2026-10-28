@@ -30,7 +30,7 @@ def require_clean(repository: GitRepository) -> str:
             "Cannot submit a job from a dirty Git working tree; "
             "commit or discard changes first"
         )
-    return repository.head
+    return repository.resolve("HEAD")
 
 
 def prepare_source(
@@ -40,13 +40,15 @@ def prepare_source(
 ) -> SourceSnapshot:
     """Capture a commit after verifying the repository has no local changes."""
     initial_head = require_clean(repository)
-    base_revision = repository.resolve(revision) if revision else repository.head
+    base_revision = (
+        repository.resolve(revision) if revision else repository.resolve("HEAD")
+    )
     destination.mkdir(parents=True, exist_ok=False)
     digest = _prepare_revision(repository, base_revision, destination)
     final_state = repository._git(
         "status", "--porcelain", "--untracked-files=normal"
     ).stdout
-    if final_state or repository.head != initial_head:
+    if final_state or repository.resolve("HEAD") != initial_head:
         raise JobError("Git state changed while preparing source; retry submission")
     return SourceSnapshot(destination, base_revision, digest, False)
 

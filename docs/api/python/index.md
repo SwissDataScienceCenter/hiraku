@@ -9,7 +9,7 @@ validate their input immediately; persistence is handled through explicit paths.
     - [Record and BaseRecord](records.md)
     - [Run](run.md)
     - [Metric](metric.md)
-    - [Entrypoint](entrypoint.md)
+    - [Job](job.md)
 - [Tracking](tracking.md) — configure and query tracking backends.
-- [Launching](launch.md) — resolve and execute entrypoints.
+- [Jobs](../../guides/jobs.md) — submit and inspect project executions.
 - [Workflows](workflows.md) — author workflows and drive their sessions.

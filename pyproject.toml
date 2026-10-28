@@ -22,7 +22,6 @@ dependencies = [
     "pydantic>=2.13.5",
     "PyYAML>=6.0",
     "mcp>=2.3.0",
-    "submitit>=1.5.4",
 ]
 
 [project.scripts]

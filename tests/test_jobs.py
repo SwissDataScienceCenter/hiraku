@@ -136,6 +136,14 @@ def test_run_rejects_target_alias(project, monkeypatch):
     assert "No such option '--target'" in result.output
     assert not project.jobs_dir.exists()
 
+    result = CliRunner().invoke(
+        main,
+        ["run", "--record", "root", "--backend", "slurm"],
+    )
+    assert result.exit_code == 2
+    assert "'slurm' is not 'local'" in result.output
+    assert not project.jobs_dir.exists()
+
 
 def test_cli_detaches_and_preserves_literal_arguments(project):
     environment = {**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")}
@@ -446,39 +454,6 @@ def test_dispatcher_failure_and_uncommitted_dispatcher(project):
     done = wait_job(job.id, timeout=10, config=project)
     assert done.status == "failed" and done.exit_code == 9
     assert "setup-failed" in "".join(job_logs(job.id, stream="stderr", config=project))
-
-
-def test_cli_can_submit_to_slurm_backend(project, monkeypatch):
-    import hiraku.compute as compute
-
-    class FakeSlurmBackend:
-        def __init__(self, jobs_dir):
-            self.jobs_dir = jobs_dir
-
-        def submit(self, spec):
-            return {"job_id": "scheduler-123", "folder": str(self.jobs_dir)}
-
-    monkeypatch.setattr(compute, "SlurmBackend", FakeSlurmBackend)
-    monkeypatch.chdir(project.root)
-    result = CliRunner().invoke(
-        main,
-        [
-            "run",
-            "--record",
-            "root",
-            "--backend",
-            "slurm",
-            "--",
-            sys.executable,
-            "-c",
-            "print('slurm')",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    job = load_job(result.output.strip(), config=project)
-    assert job.backend == "slurm"
-    assert job.backend_handle["job_id"] == "scheduler-123"
-    assert job.command[-1] == "print('slurm')"
 
 
 def test_environment_passed_without_persisting_values(project):

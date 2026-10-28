@@ -7,12 +7,12 @@ import ast
 import csv
 import math
 import shutil
+import subprocess
 from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hiraku import HirakuConfig
-from hiraku.launch import launch
+from hiraku import HirakuConfig, submit_job, wait_job
 from hiraku.record import Record
 
 EXPERIMENTS = (
@@ -53,10 +53,7 @@ def validate_runs(project: Path) -> list[dict[str, str]]:
     )
     if actual != expected or len({r["id"] for r in rows}) != 9:
         raise ValueError("Expected three uniquely identified runs per experiment")
-    if any(
-        r["entrypoint"] != "train" or not r["timestamp"] or not r["duration"]
-        for r in rows
-    ):
+    if any(not r["job_id"] or not r["timestamp"] or not r["duration"] for r in rows):
         raise ValueError("Missing launch attribution")
     if not all(math.isfinite(float(r[f"metric.{m}"])) for r in rows for m in METRICS):
         raise ValueError("Non-finite training metric")
@@ -101,21 +98,26 @@ def generate(config: HirakuConfig) -> None:
                 if identifier == "forest-tuning"
                 else ""
             ),
-            entrypoints={
-                "train": {
-                    "command": ["uv", "run", "python", "train.py"],
-                    "args": {"model": model, "validation_fraction": fraction},
-                }
-            },
+            command=[
+                "uv",
+                "run",
+                "python",
+                "train.py",
+                "--model",
+                model,
+                "--validation-fraction",
+                str(fraction),
+            ],
         )
         for seed in (1, 2, 3):
-            launch(
-                record.entrypoint("train", config=config),
-                name="train",
+            job = submit_job(
+                [*record.command, "--seed", str(seed)],
                 record_id=identifier,
-                args={"seed": seed},
                 config=config,
             )
+            completed = wait_job(job.id, config=config)
+            if completed.status != "succeeded":
+                raise RuntimeError(f"Training job {job.id} failed: {completed.error}")
     rows = validate_runs(config.root)
     for identifier, _, _, _ in EXPERIMENTS:
         values = [r for r in rows if r["record_id"] == identifier]
@@ -143,6 +145,22 @@ def generate_results(output: Path) -> None:
         config = HirakuConfig.init(
             project, example="heart-disease", install_skill=False
         )
+        for arguments in (
+            ["init", "-q"],
+            ["add", "."],
+            [
+                "-c",
+                "user.name=Hiraku example",
+                "-c",
+                "user.email=example@hiraku.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "Initialize isolated example source",
+            ],
+        ):
+            subprocess.run(["git", *arguments], cwd=config.root, check=True)
         generate(config)
         output.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
