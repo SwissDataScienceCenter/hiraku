@@ -23,6 +23,8 @@ from .io import atomic_write, dump_yaml
 from .markdown import Markdown
 from .validation import validate_identifier
 
+# libyaml parses large registered projects several times faster; same safe schema.
+_SAFE_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 _FRONT_MATTER = re.compile(
     r"\A---\r?\n(.*?)^---[ \t]*(?:\r?\n|\Z)", re.MULTILINE | re.DOTALL
 )
@@ -134,7 +136,7 @@ class BaseRecord(BaseModel):
         if match is None:
             raise ValidationError(f"Unterminated YAML front matter in {path}")
         try:
-            value = yaml.safe_load(match.group(1))
+            value = yaml.load(match.group(1), Loader=_SAFE_LOADER)
         except yaml.YAMLError as exc:
             raise ValidationError(
                 f"Malformed YAML front matter in {path}: {exc}"

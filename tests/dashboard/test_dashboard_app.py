@@ -173,6 +173,33 @@ def test_file_link_selects_its_dataset_and_the_file(
     ]
 
 
+def test_link_sent_to_a_running_dashboard_selects_without_a_new_session(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "a")
+    from hiraku.dashboard.app import app
+
+    _, initial = app.run()
+    assert initial["selected_record"].id == "a"
+    receiver = initial["link_receiver"]
+    receiver.widget.link = {"record": "b", "artifact": None, "sequence": 1}
+
+    _, definitions = app.run(defs={"link_receiver": receiver})
+
+    assert definitions["selected_record"].id == "b"
+    assert definitions["linked_record"] == "b"
+    assert definitions["link_sequence"] == 1
+    assert definitions["get_show_all"]() is False
+
+
+def test_link_receiver_accepts_links_only_from_the_embedding_page() -> None:
+    from hiraku.dashboard.components import _LINK_RECEIVER_ESM
+
+    assert "event.source !== window.parent" in _LINK_RECEIVER_ESM
+    assert "window.parent === window" in _LINK_RECEIVER_ESM
+
+
 def _rows(data: object) -> list[dict]:
     return data.to_dict("records") if hasattr(data, "to_dict") else list(data)
 

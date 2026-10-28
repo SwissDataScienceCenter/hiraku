@@ -85,10 +85,22 @@ def project_data(config, refresh):
 
 
 @app.cell
-def link_target(artifact_entries, link):
+def link_listener():
+    # Studio sends later chat links here rather than reloading the dashboard,
+    # which would start a new session and load the project again.
+    link_receiver = hc.link_receiver()
+    mo.vstack([link_receiver])
+    return (link_receiver,)
+
+
+@app.cell
+def link_target(artifact_entries, link, link_receiver):
     # A linked file selects the dataset that registered it; a link wins over
     # the record the dashboard was started on.
-    linked_artifact = link["artifact"]
+    _sent = link_receiver.value.get("link") or {}
+    link_sequence = _sent.get("sequence", 0)
+    _link = _sent if link_sequence else link
+    linked_artifact = _link.get("artifact")
     linked_file = next(
         (
             row
@@ -98,11 +110,17 @@ def link_target(artifact_entries, link):
         ),
         None,
     )
-    linked_record = link["record"] or (linked_file or {}).get("dataset")
+    linked_record = _link.get("record") or (linked_file or {}).get("dataset")
     requested_record = (
         linked_record or os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
     )
-    return linked_artifact, linked_file, linked_record, requested_record
+    return (
+        link_sequence,
+        linked_artifact,
+        linked_file,
+        linked_record,
+        requested_record,
+    )
 
 
 @app.cell
@@ -137,8 +155,10 @@ def selection_state(config, records_df, requested_record, runs_df):
 
 
 @app.cell
-def linked_scope():
-    # A linked record is shown on its own branch until the reader widens it.
+def linked_scope(link_sequence):
+    # A linked record is shown on its own branch until the reader widens it;
+    # every new link narrows again.
+    _ = link_sequence
     get_show_all, _set_show_all = mo.state(False)
     show_all = mo.ui.button(
         label="Show all", on_click=lambda _: _set_show_all(True)

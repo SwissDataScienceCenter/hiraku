@@ -32,6 +32,7 @@ mlflow = ["mlflow==3.16.0"]
 wandb = ["wandb>=0.29.0"]
 dashboard = [
     "altair>=6.3.0",
+    "anywidget>=0.9",
     "marimo>=0.25.1,<0.26",
     "marimo-studio==0.3.0",
     "pandas>=2.3.3",

@@ -32,6 +32,7 @@ from ..registration.compat import from_legacy_record
 from ..registration.discovery import external_roots
 from ..registration.schema import Registration
 from ..run import Run
+from ..tracking import create_backend
 
 _LAST = datetime.max.replace(tzinfo=UTC)
 
@@ -99,19 +100,20 @@ def load(config: HirakuConfig) -> ProjectRuns:
     """Read all records and query each distinct tracking source once."""
     records = list_records(config=config)
     index = {record.id: record for record in records}
-    by_source: dict[str, Record] = {}
+    by_source: dict[str, tuple[Record, Any]] = {}
     for record in records:
         specification = _resolve(record, index, set()).values.get("tracking_backend")
         key = repr(specification or config.tracking_backend)
-        by_source.setdefault(key, record)
+        by_source.setdefault(key, (record, specification or config.tracking_backend))
 
     known = {record.id for record in records}
     runs: dict[tuple[str, str], Run] = {}
     sources: dict[str, str] = {}
     errors: list[str] = []
-    for record in by_source.values():
+    for record, specification in by_source.values():
         try:
-            backend = record.resolve_tracking_backend(config=config)
+            # Resolved from the index above; re-resolving would re-read every record.
+            backend = create_backend(specification, config)
             # Without a record ID, the source lists every attributed run.
             found = backend.list_runs()
         except Exception as exc:

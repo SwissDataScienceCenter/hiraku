@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Any
 
 import altair as alt
+import anywidget
 import marimo as mo
 import pandas as pd
+import traitlets
 
 from ..base import BaseRecord
 from ..errors import HirakuError
@@ -34,6 +36,45 @@ from .data import (
     tradeoff_frame,
     tree_rows,
 )
+
+_LINK_RECEIVER_ESM = """
+const LINKS = {"hiraku-open-record": "record", "hiraku-open-artifact": "artifact"};
+const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+function render({ model }) {
+  // Only an embedding page (the agent Studio) sends links.
+  if (window.parent === window) return;
+  const receive = (event) => {
+    if (event.source !== window.parent) return;
+    const data = event.data || {};
+    const name = LINKS[data.type];
+    const value = name ? data[name] : undefined;
+    if (typeof value !== "string" || !ID.test(value)) return;
+    const sequence = (model.get("link").sequence || 0) + 1;
+    model.set("link", { record: null, artifact: null, [name]: value, sequence });
+    model.save_changes();
+  };
+  window.addEventListener("message", receive);
+  window.parent.postMessage({ type: "hiraku-dashboard-ready" }, "*");
+  return () => window.removeEventListener("message", receive);
+}
+
+export default { render };
+"""
+
+
+class _LinkReceiver(anywidget.AnyWidget):
+    _esm = _LINK_RECEIVER_ESM
+    link = traitlets.Dict({}).tag(sync=True)
+
+
+def link_receiver() -> mo.ui.anywidget:
+    """Receive record and file links from an embedding page without a reload.
+
+    The value's ``link`` holds ``record`` or ``artifact`` and a ``sequence``
+    that grows with every link, so a repeated link is still a new selection.
+    """
+    return mo.ui.anywidget(_LinkReceiver())
 
 
 def markdown_view(

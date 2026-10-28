@@ -69,22 +69,33 @@ def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:
     assert loaded.errors == []
 
 
-def test_load_resolves_shared_tracking_source_once(
+def test_load_reads_records_and_creates_shared_tracking_source_once(
     project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original = Record.resolve
-    calls = {"count": 0}
+    import hiraku.dashboard.data as data
 
-    def counting_resolve(self: Record, **options):
-        calls["count"] += 1
-        return original(self, **options)
+    reads = {"records": 0, "backends": 0}
+    list_records, create_backend = data.list_records, data.create_backend
 
-    monkeypatch.setattr(Record, "resolve", counting_resolve)
+    def counting_list(**options):
+        reads["records"] += 1
+        return list_records(**options)
+
+    def counting_create(*args):
+        reads["backends"] += 1
+        return create_backend(*args)
+
+    monkeypatch.setattr(data, "list_records", counting_list)
+    monkeypatch.setattr(data, "create_backend", counting_create)
+    # Resolving a backend through a record would read every record again.
+    monkeypatch.setattr(
+        Record, "resolve", lambda *_, **__: pytest.fail("records re-read")
+    )
 
     loaded = load(project)
 
     assert len(loaded.records) == 4
-    assert calls["count"] == 1
+    assert reads == {"records": 1, "backends": 1}
 
 
 def test_load_reports_unavailable_source_without_failing(
@@ -93,14 +104,16 @@ def test_load_reports_unavailable_source_without_failing(
     Record.create(
         "broken", tracking_backend={"type": "csv", "path": "other.csv"}, config=project
     )
-    original = Record.resolve_tracking_backend
+    import hiraku.dashboard.data as data
 
-    def resolve(self: Record, **options):
-        if self.id == "broken":
+    original = data.create_backend
+
+    def create(specification, config):
+        if specification == {"type": "csv", "path": "other.csv"}:
             raise BackendError("source offline")
-        return original(self, **options)
+        return original(specification, config)
 
-    monkeypatch.setattr(Record, "resolve_tracking_backend", resolve)
+    monkeypatch.setattr(data, "create_backend", create)
 
     loaded = load(project)
 
