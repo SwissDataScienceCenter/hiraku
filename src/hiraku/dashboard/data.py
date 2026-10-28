@@ -538,6 +538,20 @@ def subtree(runs_df: pd.DataFrame, ancestor: str | None) -> pd.DataFrame:
     return runs_df[runs_df["record_path"].map(lambda path: within(path, ancestor))]
 
 
+def linked_view(
+    records_df: pd.DataFrame, runs_df: pd.DataFrame, path: str
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return the records on ``path``'s branch and the runs in its subtree.
+
+    The branch is the record's ancestors and its own subtree, so a record opened
+    from a link shows in context without paging through its siblings.
+    """
+    on_branch = records_df["record_path"].map(
+        lambda record_path: within(path, record_path) or within(record_path, path)
+    )
+    return records_df[on_branch], subtree(runs_df, path)
+
+
 FOLD_THRESHOLD = 25
 """Records with more child rows than this start folded."""
 

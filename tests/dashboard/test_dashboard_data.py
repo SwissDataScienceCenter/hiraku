@@ -17,6 +17,7 @@ from hiraku.dashboard.data import (
     execution_order,
     file_rows,
     find_run,
+    linked_view,
     load,
     metric_names,
     plot_frame,
@@ -733,3 +734,17 @@ def test_dataset_without_sample_id_is_named_by_record_id_not_hashed_key() -> Non
 
     assert record_label(dataset) == "dataset-abc"
     assert record_identity(dataset)["sample"] is None
+
+
+def test_linked_view_keeps_the_branch_and_its_runs() -> None:
+    records_df = pd.DataFrame({
+        "record": ["root", "a", "a1", "b"],
+        "record_path": ["root", "root/a", "root/a/a1", "root/b"],
+    })
+    runs_df = pd.DataFrame({"run": ["r0", "r1", "r2"],
+                            "record_path": ["root/a", "root/a/a1", "root/b"]})
+
+    records, runs = linked_view(records_df, runs_df, "root/a")
+
+    assert list(records["record"]) == ["root", "a", "a1"]
+    assert list(runs["run"]) == ["r0", "r1"]

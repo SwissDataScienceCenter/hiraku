@@ -368,11 +368,15 @@ def file_details(
 
 
 def artifact_table(
-    artifact_entries: Sequence[Mapping[str, Any]], *, documentation: bool = False
+    artifact_entries: Sequence[Mapping[str, Any]],
+    *,
+    documentation: bool = False,
+    selected_key: str | None = None,
 ) -> mo.ui.table:
     """Build the selectable registered-artifact table from ``artifact_rows``.
 
-    The hidden ``key`` column identifies a row for ``artifact_details``.
+    The hidden ``key`` column identifies a row for ``artifact_details``; the
+    row keyed ``selected_key``, when shown, starts selected.
     """
     _rows = []
     for row in artifact_entries:
@@ -402,9 +406,13 @@ def artifact_table(
             })
         shown["Record"] = row["dataset"]
         _rows.append(shown)
+    # The selected row leads so it is on the first page.
+    _rows.sort(key=lambda shown: shown["key"] != selected_key)
+    _selected = [0] if _rows and _rows[0]["key"] == selected_key else None
     return mo.ui.table(
         _rows or arrow_frame([], ("Sample", "Filename", "Record")),
         selection="single",
+        initial_selection=_selected,
         hidden_columns=["key"] if _rows else None,
         page_size=25,
         show_column_summaries=False,

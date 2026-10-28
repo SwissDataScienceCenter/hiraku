@@ -39,8 +39,15 @@ def data_setup():
         if _root
         else HirakuConfig.discover(mo.notebook_dir())
     )
-    requested_record = os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
-    return config, requested_record
+    # Studio opens records and files from the agent chat with ?record= and
+    # ?artifact= links.
+    _params = mo.query_params()
+    link = {
+        name: (value[0] if isinstance(value, list) else value) or None
+        for name in ("record", "artifact")
+        for value in [_params.get(name)]
+    }
+    return config, link
 
 
 @app.cell
@@ -78,6 +85,27 @@ def project_data(config, refresh):
 
 
 @app.cell
+def link_target(artifact_entries, link):
+    # A linked file selects the dataset that registered it; a link wins over
+    # the record the dashboard was started on.
+    linked_artifact = link["artifact"]
+    linked_file = next(
+        (
+            row
+            for row in artifact_entries
+            if linked_artifact
+            and row["key"] == f"artifact:{row['dataset']}:{linked_artifact}"
+        ),
+        None,
+    )
+    linked_record = link["record"] or (linked_file or {}).get("dataset")
+    requested_record = (
+        linked_record or os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
+    )
+    return linked_artifact, linked_file, linked_record, requested_record
+
+
+@app.cell
 def selection_state(config, records_df, requested_record, runs_df):
     paths = dict(zip(records_df["record"], records_df["record_path"], strict=True))
     metrics = hd.metric_names(runs_df)
@@ -109,29 +137,66 @@ def selection_state(config, records_df, requested_record, runs_df):
 
 
 @app.cell
+def linked_scope():
+    # A linked record is shown on its own branch until the reader widens it.
+    get_show_all, _set_show_all = mo.state(False)
+    show_all = mo.ui.button(
+        label="Show all", on_click=lambda _: _set_show_all(True)
+    )
+    return get_show_all, show_all
+
+
+@app.cell
 def run_table(
     config,
     get_selection,
+    get_show_all,
     initial_record,
+    linked_file,
+    linked_record,
+    paths,
     project,
     records_df,
     requested_record,
     runs_df,
     select_key,
+    show_all,
     tree_metric,
 ):
     _key = get_selection()[0]
     # The first record is selected only as a fallback; it should not unfold.
     _fallback = initial_record not in (requested_record, config.active_record_id)
+    _linked_path = paths.get(linked_record) if linked_record else None
+    _narrow = _linked_path is not None and not get_show_all()
+    _records, _runs = (
+        hd.linked_view(records_df, runs_df, _linked_path)
+        if _narrow
+        else (records_df, runs_df)
+    )
     tree = hc.run_table(
-        records_df,
-        runs_df,
+        _records,
+        _runs,
         tree_metric,
         selected_key=_key,
         on_select=select_key,
         unfold_selected=not (_fallback and _key == f"record:{initial_record}"),
     )
     _messages = [mo.callout(mo.md(error), kind="warn") for error in project.errors]
+    if _narrow:
+        _label = _records.loc[_records["record"] == linked_record, "label"].iloc[0]
+        _file = (
+            f" Its file `{linked_file['path']}` is selected under Observed files."
+            if linked_file
+            else ""
+        )
+        _messages.append(
+            mo.hstack(
+                [mo.md(f"Showing **{_label}** (`{linked_record}`), opened from a "
+                       f"link, with its parent records and runs.{_file}"), show_all],
+                justify="space-between",
+                align="center",
+            )
+        )
     if records_df.empty:
         _messages.append(
             mo.md("No records yet. Create one with `hiraku record create`.")
@@ -204,9 +269,21 @@ def file_details(file_entries, file_selector, select_key):
 
 
 @app.cell
-def artifact_table(artifact_entries):
-    artifact_selector = hc.artifact_table(artifact_entries)
-    _count = sum(row["key"].startswith("artifact:") for row in artifact_entries)
+def artifact_table(artifact_entries, get_show_all, linked_artifact, linked_record):
+    # A linked file is shown among its dataset's files, already selected.
+    _narrow = bool(linked_artifact and linked_record) and not get_show_all()
+    _entries = (
+        [row for row in artifact_entries if row["dataset"] == linked_record]
+        if _narrow
+        else artifact_entries
+    )
+    artifact_selector = hc.artifact_table(
+        _entries,
+        selected_key=(
+            f"artifact:{linked_record}:{linked_artifact}" if linked_artifact else None
+        ),
+    )
+    _count = sum(row["key"].startswith("artifact:") for row in _entries)
     mo.vstack([mo.md(f"### Observed files ({_count})"), artifact_selector])
     return (artifact_selector,)
 

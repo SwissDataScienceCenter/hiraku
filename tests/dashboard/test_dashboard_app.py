@@ -110,6 +110,73 @@ def test_navigation_selection_updates_table_and_clears_run(
     assert definitions["selected_run"] is None
 
 
+@pytest.mark.parametrize("linked", ["b", ["b"]])
+def test_record_link_selects_that_record_over_the_start_record(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch, linked: object
+) -> None:
+    import marimo
+
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "a")
+    monkeypatch.setattr(marimo, "query_params", lambda: {"record": linked})
+    from hiraku.dashboard.app import app
+
+    _, definitions = app.run()
+
+    assert definitions["selected_record"].id == "b"
+    assert definitions["tree"].value[0]["key"] == "record:b"
+    # The linked record is shown on its own branch: no sibling records.
+    shown = {row["key"] for row in _rows(definitions["tree"].data)}
+    assert {"record:root", "record:b"} <= shown
+    assert not shown & {"record:a", "record:a1"}
+
+
+def test_file_link_selects_its_dataset_and_the_file(
+    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import marimo
+
+    from hiraku.record import Record
+    from hiraku.registration import Registration
+
+    def dataset(record_id: str, *files: str) -> None:
+        Record.create(
+            record_id,
+            parent_id="b",
+            type="dataset",
+            registration=Registration.model_validate({
+                "namespace": "cohort", "key": [record_id], "source": "cohort",
+                "coverage": "exhaustive",
+                "artifacts": [{"key": key, "display_path": f"data/{key}.csv",
+                               "availability": "present"} for key in files],
+            }).to_record_value(),
+            config=project,
+        )
+
+    dataset("ds1", "a1_one", "a1_two")
+    dataset("ds2", "a1_three")
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "a")
+    monkeypatch.setattr(marimo, "query_params", lambda: {"artifact": "a1_two"})
+    from hiraku.dashboard.app import app
+
+    _, definitions = app.run()
+
+    assert definitions["selected_record"].id == "ds1"
+    files = _rows(definitions["artifact_selector"].data)
+    assert [row["key"] for row in files] == [
+        "artifact:ds1:a1_two",
+        "artifact:ds1:a1_one",
+    ]
+    assert [row["key"] for row in definitions["artifact_selector"].value] == [
+        "artifact:ds1:a1_two"
+    ]
+
+
+def _rows(data: object) -> list[dict]:
+    return data.to_dict("records") if hasattr(data, "to_dict") else list(data)
+
+
 def test_project_copy_finds_its_project_without_the_launcher(
     project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
