@@ -35,23 +35,17 @@ consistent with the existing public API.
 Use focused commands while iterating:
 
 ```bash
-uv run pytest tests/test_records.py
-uv run pytest tests/test_cli.py::test_name
+uv run pytest -n auto tests/test_records.py
+uv run pytest -n auto tests/test_cli.py::test_name
 uv run ruff check src tests
 ```
 
 Before finishing a code change, run the relevant full checks:
 
 ```bash
-uv run pytest
+uv run pytest -n auto
 uv run ruff check .
-uv run zensical build --clean
-```
-
-For packaging changes, also run:
-
-```bash
-uv build
+uv run zensical build --clean --strict
 ```
 
 Useful project commands include:
@@ -104,8 +98,8 @@ The repository is a single `uv`-managed Python project.
 Generated or transient paths:
 
 - `site/` — generated documentation; do not edit or commit it.
-- `dist/` — generated package artifacts; do not commit it.
 - `__pycache__/`, `.pytest_cache/`, and virtual environments — do not commit.
+- Remove Python cache debris with `uvx pyclean . --debris`.
 
 ### Architecture boundaries
 
@@ -159,7 +153,7 @@ configuration or record formats, bundled resources, or files under `docs/`.
 
 - Add or update regression tests for behavior changes and bug fixes.
 - Do not weaken or delete existing tests to make a change pass.
-- Prefer `pytest` tests over `unittest.TestCase`.
+- Write tests as pytest functions; do not use `unittest.TestCase`.
 - Keep tests deterministic and independent of network access or external
   credentials. Mark tests that require optional integrations appropriately.
 - Place unit tests in the corresponding `tests/test_*.py` module and tracking

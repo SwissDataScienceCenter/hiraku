@@ -44,14 +44,16 @@ uv sync --all-extras
 Run these checks before opening a pull request:
 
 ```bash
-uv run pytest
+uv run pytest -n auto
 uv run ruff check src tests
-uv run zensical build --clean
+uv run zensical build --clean --strict
 ```
 
 Pytest uses parallel workers, capped at four to limit memory use.
+Write tests as pytest functions; do not use `unittest.TestCase`. Tests should
+not require network access or W&B/MLflow credentials.
 
-Tests should not require network access or W&B/MLflow credentials.
+Remove Python cache debris with `uvx pyclean . --debris`.
 
 Keep public models and CLI behavior explicit. Add tests for new behavior and
 update the relevant documentation when a public interface changes.
