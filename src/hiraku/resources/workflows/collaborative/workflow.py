@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import shlex
+from functools import reduce
+from operator import or_
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+<<<<<<< HEAD
+from typing import Annotated, Any, Literal, TypedDict
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
+from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
@@ -36,6 +40,53 @@ class ResearchState(TypedDict, total=False):
     final: str
 
 
+class CollaborativeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    task: str | None = Field(
+        default=None, description="Task record ID; defaults to active context."
+    )
+    command: list[str] = Field(min_length=1)
+    rounds: int = Field(default=3, ge=1)
+
+
+class DraftedArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    record_id: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    hypothesis: str = Field(min_length=1)
+    change: str = Field(min_length=1)
+
+
+class FeedbackArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    feedback: str = Field(min_length=1)
+
+
+class ImplementedArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    commit: str = Field(min_length=1)
+
+
+class AnalyzedArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    verdict: Verdict
+    conclusion: str = Field(min_length=1)
+
+
+class EmptyArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+def input_schema() -> dict[str, Any]:
+    """Return the JSON Schema for starting collaborative research."""
+    return CollaborativeInput.model_json_schema()
+
+
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
     """Build the collaborative research graph from its Markdown instructions."""
     path = Path(__file__).with_name("workflow.md")
@@ -46,15 +97,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     rules = str(fields.get("rules", "")).strip()
 
     def initialize(state: ResearchState) -> Command[Literal["draft"]]:
-        arguments = state.arguments
-        if not isinstance(arguments, dict):
-            raise ValidationError("arguments must be an object")
-        unknown = set(arguments) - {"task", "command", "rounds"}
-        if unknown:
-            raise ValidationError(f"Unknown arguments: {', '.join(sorted(unknown))}")
-        task = arguments.get("task") or config.active_record_id
-        command = arguments.get("command")
-        rounds = arguments.get("rounds", 3)
+        try:
+            arguments = CollaborativeInput.model_validate(state.arguments)
+        except PydanticValidationError as exc:
+            raise ValidationError(str(exc)) from exc
+        task = arguments.task or config.active_record_id
+        command = arguments.command
+        rounds = arguments.rounds
         if not isinstance(task, str) or not task:
             raise ValidationError("Pass task or set an active Hiraku record")
         if not isinstance(command, list):
@@ -89,10 +138,22 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 "message": f"Approve the proposed {step} step?",
                 "schema": WorkflowApproval.model_json_schema(),
             },
-            "response_schema": {
-                "event": "one of the listed events",
-                "arguments": "object matching the selected event's fields",
-            },
+            "required_capabilities": {
+                "draft": ["record.read", "workflow.user_input"],
+                "implement": [
+                    "filesystem.read",
+                    "filesystem.write",
+                    "shell.execute",
+                    "git.commit",
+                    "workflow.user_input",
+                ],
+                "launch": [
+                    "experiment.launch",
+                    "tracking.run.read",
+                    "workflow.user_input",
+                ],
+                "analyze": ["tracking.run.read", "workflow.user_input"],
+            }[step],
         }
         if state.feedback:
             payload["feedback"] = state.feedback
@@ -101,93 +162,67 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     def response_for(
         state: ResearchState, step: str, data: dict[str, Any]
     ) -> dict[str, Any]:
-        events = {
-            "draft": ("drafted", "revise_draft", "finish"),
-            "implement": ("implemented", "revise_implementation", "finish"),
-            "launch": ("launched", "revise_launch", "finish"),
-            "analyze": ("analyzed", "revise_analysis", "finish"),
-        }[step]
         payload = prompt(state, step, data)
-        payload["response_schema"]["event"] = " | ".join(events)
-        schemas = {
-            "drafted": {
-                "record_id": "short experiment record ID",
-                "summary": "one-line summary",
-                "hypothesis": "testable hypothesis",
-                "change": "planned code change",
-            },
-            "revise_draft": {"feedback": "requested draft changes"},
-            "implemented": {"commit": "commit containing the implementation"},
-            "revise_implementation": {"feedback": "requested implementation changes"},
-            "revise_launch": {"feedback": "requested launch changes"},
-            "revise_analysis": {"feedback": "requested analysis changes"},
-            "analyzed": {
-                "verdict": "supports, refutes, or inconclusive",
-                "conclusion": "evidence-based conclusion",
-            },
-        }
-        payload["response_schema"]["arguments"] = {
-            event: schemas.get(event, {}) for event in events
-        }
+        direct_adapter, approval_adapter, response_schema = _step_response_contract(
+            step
+        )
+        payload["response_schema"] = response_schema
         while True:
             response = interrupt(payload)
-            approval = response.get("approval") if isinstance(response, dict) else None
-            decision = approval.get("decision") if isinstance(approval, dict) else None
-            if not isinstance(decision, str) or decision not in {
-                "approve",
-                "revise",
-                "stop",
-            }:
-                payload = {**payload, "error": "A valid approval decision is required."}
+            if not isinstance(response, dict) or "approval" not in response:
+                payload = {
+                    **payload,
+                    "error": "A valid approval decision is required.",
+                }
                 continue
+            try:
+                approved = approval_adapter.validate_python(response)
+            except PydanticValidationError as exc:
+                approval_error = any(
+                    error["loc"][:2] == ("approval", "decision")
+                    for error in exc.errors()
+                )
+                message = (
+                    "A valid approval decision is required."
+                    if approval_error
+                    else str(exc)
+                )
+                payload = {**payload, "error": message}
+                continue
+            decision = approved.approval.decision
             if decision == "stop":
                 return {"event": "finish", "arguments": {}}
+            if approved.response is None and decision != "revise":
+                payload = {
+                    **payload,
+                    "error": "An approved workflow response is required.",
+                }
+                continue
+            submitted = (
+                approved.response.model_dump() if approved.response is not None else {}
+            )
             if decision == "revise":
-                submitted = response.get("response", {})
-                if not isinstance(submitted, dict):
-                    submitted = {}
-                arguments = submitted.get("arguments", {})
-                if not isinstance(arguments, dict):
-                    arguments = {}
-                feedback = approval.get("feedback")
-                if feedback is None and isinstance(arguments, dict):
-                    feedback = arguments.get("feedback")
-                if feedback is None:
+                feedback = approved.approval.feedback or submitted.get(
+                    "arguments", {}
+                ).get("feedback")
+                if not feedback:
                     feedback = "Please revise this proposal."
-                if not isinstance(feedback, str) or not feedback.strip():
-                    payload = {
-                        **payload,
-                        "error": "Revision feedback must be non-empty.",
-                    }
-                    continue
-                revise_events = {
+                revise_event = {
                     "draft": "revise_draft",
                     "implement": "revise_implementation",
                     "launch": "revise_launch",
                     "analyze": "revise_analysis",
-                }
-                response = {
-                    "event": revise_events[step],
+                }[step]
+                submitted = {
+                    "event": revise_event,
                     "arguments": {"feedback": feedback},
                 }
-            else:
-                response = response.get("response", response)
-            if not isinstance(response, dict) or response.get("event") not in events:
-                payload = {
-                    **prompt(state, step, data),
-                    "error": "Choose a valid event.",
-                }
-                payload["response_schema"]["event"] = " | ".join(events)
+            try:
+                action = direct_adapter.validate_python(submitted)
+            except PydanticValidationError as exc:
+                payload = {**payload, "error": str(exc)}
                 continue
-            arguments = response.get("arguments", {})
-            if not isinstance(arguments, dict):
-                payload = {
-                    **prompt(state, step, data),
-                    "error": "arguments must be an object.",
-                }
-                payload["response_schema"]["event"] = " | ".join(events)
-                continue
-            return {"event": response["event"], "arguments": arguments}
+            return action.model_dump()
 
     def finish(state: ResearchState) -> Command[Literal["done"]]:
         return Command(update={"step": "done"}, goto="done")
@@ -416,3 +451,53 @@ class WorkflowApproval(BaseModel):
     feedback: str | None = Field(
         default=None, description="Required guidance when requesting a revision."
     )
+def _step_response_contract(
+    step: str,
+) -> tuple[TypeAdapter[Any], TypeAdapter[Any], dict[str, Any]]:
+    arguments_by_event: dict[str, type[BaseModel]] = {
+        "drafted": DraftedArguments,
+        "implemented": ImplementedArguments,
+        "analyzed": AnalyzedArguments,
+        "revise_draft": FeedbackArguments,
+        "revise_implementation": FeedbackArguments,
+        "revise_launch": FeedbackArguments,
+        "revise_analysis": FeedbackArguments,
+        "launched": EmptyArguments,
+        "finish": EmptyArguments,
+    }
+    events_by_step = {
+        "draft": ("drafted", "revise_draft", "finish"),
+        "implement": ("implemented", "revise_implementation", "finish"),
+        "launch": ("launched", "revise_launch", "finish"),
+        "analyze": ("analyzed", "revise_analysis", "finish"),
+    }
+    events = events_by_step[step]
+    event_models = []
+    for event in events:
+        arguments_model = arguments_by_event[event]
+        fields: dict[str, Any] = {"event": (Literal[event], ...)}
+        if arguments_model is EmptyArguments:
+            fields["arguments"] = (
+                arguments_model,
+                Field(default_factory=arguments_model),
+            )
+        else:
+            fields["arguments"] = (arguments_model, ...)
+        event_models.append(
+            create_model(
+                f"{step.title()}{event.title().replace('_', '')}Response",
+                __config__=ConfigDict(extra="forbid", strict=True),
+                **fields,
+            )
+        )
+    action_type = Annotated[reduce(or_, event_models), Field(discriminator="event")]
+    action_adapter = TypeAdapter(action_type)
+    approval_model = create_model(
+        f"{step.title()}ApprovalResponse",
+        __config__=ConfigDict(extra="forbid", strict=True),
+        approval=(WorkflowApproval, ...),
+        response=(action_type | None, None),
+    )
+    approval_adapter = TypeAdapter(approval_model)
+    schema = approval_adapter.json_schema()
+    return action_adapter, approval_adapter, schema

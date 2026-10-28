@@ -43,12 +43,21 @@ and the SQLite checkpointer owns resumable state. A run can be resumed after
 restarting Hiraku as long as its project and checkpoint database remain
 available.
 
+Each workflow must expose an `input_schema()` function from `workflow.py`;
+`workflow_list` includes its JSON Schema as `input_schema`. Interrupts include a
+JSON Schema in `response_schema`, and may include `required_capabilities` to
+describe what the agent needs for that step. The graph remains responsible for
+validating inputs and interrupt responses. Capability names describe needs, not
+specific tools; an executor maps them to its own tools. The bundled workflows
+demonstrate these contracts with Pydantic models.
+
 Workflows can declare an `approval` object in an interrupt payload. The MCP
 `workflow_approval` tool presents its message and a proposed response and
 gathers the standard approve, revise, or stop decision without depending on a
-particular workflow or step name. Supply the workflow session ID and current interrupt ID,
-then pass the result to `workflow_resume`. The graph checks the decision before
-processing the workflow response. This is a cooperative workflow convention:
+particular workflow or step name. Supply the workflow session ID and current
+interrupt ID, then pass the result to `workflow_resume`. The graph checks the
+decision before processing the workflow response. This is a cooperative
+workflow convention:
 callers can submit decisions directly and must be trusted. MCP elicitation does
 not restrict other tools or local shell access.
 
@@ -115,7 +124,8 @@ records, launches, tracked runs, and provenance from their nodes.
 ## State and persistence
 
 The workflow session ID maps to LangGraph's `thread_id`; checkpoints are stored in
-`.hiraku/langgraph-checkpoints.sqlite`. Use the same workflow session ID for status and resume.
+`.hiraku/langgraph-checkpoints.sqlite`. Use the same workflow session ID for
+status and resume.
 Checkpoint state is execution state, while Hiraku research records and tracked
 runs remain the durable research history.
 

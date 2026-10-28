@@ -46,7 +46,18 @@ def workflow_details(*, config: HirakuConfig) -> list[dict[str, Any]]:
     for workflow_id in workflow_ids(config=config):
         path = config.workflows_dir / workflow_id / "workflow.md"
         fields, _ = BaseRecord._parse_markdown(path)
-        details.append({"id": workflow_id, "description": fields.get("description")})
+        detail: dict[str, Any] = {
+            "id": workflow_id,
+            "description": fields.get("description"),
+        }
+        capabilities = fields.get("required_capabilities")
+        if isinstance(capabilities, list) and all(
+            isinstance(item, str) for item in capabilities
+        ):
+            detail["required_capabilities"] = capabilities
+        module = _import_graph(config.workflows_dir / workflow_id / "workflow.py")
+        detail["input_schema"] = _workflow_input_schema(module, workflow_id)
+        details.append(detail)
     return details
 
 
@@ -156,6 +167,7 @@ def _compiled_graph(workflow_id: str, config: HirakuConfig) -> Iterator[Any]:
         )
     directory = config.workflows_dir / workflow_id
     module = _import_graph(directory / "workflow.py")
+    _workflow_input_schema(module, workflow_id)
     factory = getattr(module, "build_graph", None)
     if not callable(factory):
         raise WorkflowError(f"{directory / 'workflow.py'} must export build_graph")
@@ -175,6 +187,27 @@ def _compiled_graph(workflow_id: str, config: HirakuConfig) -> Iterator[Any]:
                 f"{directory / 'workflow.py'} build_graph must return a compiled graph"
             )
         yield graph
+
+
+def _workflow_input_schema(module: ModuleType, workflow_id: str) -> dict[str, Any]:
+    factory = getattr(module, "input_schema", None)
+    if not callable(factory):
+        raise WorkflowError(
+            f"Workflow {workflow_id!r} must export input_schema() to declare its "
+            "start-input JSON Schema"
+        )
+    try:
+        schema = factory()
+    except Exception as exc:
+        raise WorkflowError(
+            f"Cannot load input schema for workflow {workflow_id!r}: {exc}"
+        ) from exc
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        raise WorkflowError(
+            f"Workflow {workflow_id!r} input_schema() must return a JSON Schema "
+            "object with type 'object'"
+        )
+    return schema
 
 
 def _import_graph(path: Path) -> ModuleType:

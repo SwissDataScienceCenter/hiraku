@@ -11,7 +11,8 @@ from typing import Any
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
@@ -37,6 +38,37 @@ class SchedulerState(BaseModel):
     records: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class RecordUpdateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    record_id: str = Field(min_length=1, description="The assigned record ID.")
+
+
+def _input_model(defaults: dict[str, Any]) -> type[BaseModel]:
+    return create_model(
+        "SchedulerInput",
+        __config__=ConfigDict(extra="forbid", strict=True),
+        records=(int, Field(default=defaults["records"], ge=1, le=20)),
+        target=(int, Field(default=defaults["target"], ge=1, le=10)),
+    )
+
+
+def input_schema() -> dict[str, Any]:
+    """Return the JSON Schema for starting scheduler."""
+    fields, _ = BaseRecord._parse_markdown(Path(__file__).with_name("workflow.md"))
+    defaults = fields.get("arguments", {})
+    if not isinstance(defaults, dict):
+        raise ValueError("workflow.md must define scheduler argument defaults")
+    for name, lower, upper in (("records", 1, 20), ("target", 1, 10)):
+        value = defaults.get(name)
+        if type(value) is not int or not lower <= value <= upper:
+            raise ValueError(
+                f"workflow.md arguments.{name} must be an integer from "
+                f"{lower} to {upper}"
+            )
+    return _input_model(defaults).model_json_schema()
+
+
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
     """Build the graph that creates and schedules experiment records."""
     path = Path(__file__).with_name("workflow.md")
@@ -53,23 +85,15 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 f"workflow.md arguments.{name} must be an integer from "
                 f"{lower} to {upper}"
             )
+    input_model = _input_model(defaults)
     markdown = Markdown(body)
 
     def initialize(state: SchedulerState) -> dict[str, Any]:
-        arguments = state.arguments
-        if not isinstance(arguments, dict):
-            raise ValidationError("arguments must be an object")
-        unknown = set(arguments) - {"records", "target"}
-        if unknown:
-            raise ValidationError(
-                f"Unknown workflow arguments: {', '.join(sorted(unknown))}"
-            )
-        records = arguments.get("records", defaults["records"])
-        target = arguments.get("target", defaults["target"])
-        if type(records) is not int or not 1 <= records <= 20:
-            raise ValidationError("records must be an integer from 1 to 20")
-        if type(target) is not int or not 1 <= target <= 10:
-            raise ValidationError("target must be an integer from 1 to 10")
+        try:
+            arguments = input_model.model_validate(state.arguments)
+        except PydanticValidationError as exc:
+            raise ValidationError(str(exc)) from exc
+        records, target = arguments.records, arguments.target
 
         parent = Record.create(
             f"scheduler-{secrets.token_hex(4)}",
@@ -140,17 +164,19 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 "remaining": state.remaining,
                 "parent": state.parent,
             },
-            "response_schema": {"record_id": "string: assigned record ID"},
+            "response_schema": RecordUpdateResponse.model_json_schema(),
+            "required_capabilities": ["record.update"],
         }
         if state.error:
             payload["error"] = state.error
         return {"response": interrupt(payload)}
 
     def validate_update(state: SchedulerState) -> dict[str, Any]:
-        response = state.response
-        if not isinstance(response, dict):
-            return {"error": "Response must be an object with record_id."}
-        if response.get("record_id") != state.current:
+        try:
+            response = RecordUpdateResponse.model_validate(state.response)
+        except PydanticValidationError as exc:
+            return {"error": f"Response does not match the expected schema: {exc}"}
+        if response.record_id != state.current:
             return {"error": f"Report the assigned record {state.current!r}."}
         record = load_record(str(state.current), config=config)
         count = _count(record)

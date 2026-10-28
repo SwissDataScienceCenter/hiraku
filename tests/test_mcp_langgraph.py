@@ -61,7 +61,12 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     first = _interrupt(started)
     assert "Step 1/2: token" in first["instruction"]
     assert first["data"]["step"] == 1
-    assert first["response_schema"]["decision"] == "continue or finish"
+    assert first["response_schema"]["type"] == "object"
+    assert first["response_schema"]["additionalProperties"] is False
+    assert first["response_schema"]["properties"]["decision"]["enum"] == [
+        "continue",
+        "finish",
+    ]
 
     wrong = resume_workflow(
         started["workflow_session_id"],
@@ -79,7 +84,7 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     )
     retry = _interrupt(invalid_decision)
     assert retry["data"] == first["data"]
-    assert "Decision must be" in retry["error"]
+    assert "continue" in retry["error"] and "finish" in retry["error"]
 
     next_step = resume_workflow(
         started["workflow_session_id"],
@@ -320,6 +325,12 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
         "class State(TypedDict, total=False):\n"
         "    run_id: str\n"
         "    final: str\n"
+        "def input_schema():\n"
+        "    return {\n"
+        "        'type': 'object',\n"
+        "        'properties': {},\n"
+        "        'additionalProperties': False,\n"
+        "    }\n"
         "def build_graph(checkpointer, *, config):\n"
         "    def review(state):\n"
         "        answer = interrupt({'approval': {'message': 'Review this'}})\n"

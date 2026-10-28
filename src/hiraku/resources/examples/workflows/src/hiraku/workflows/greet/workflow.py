@@ -33,11 +33,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     if not isinstance(defaults, dict) or not defaults:
         raise ValueError("workflow.md must define arguments")
 
-    argument_model = create_model(
-        "GreetArguments",
-        __config__=ConfigDict(extra="forbid"),
-        **{name: (type(value), value) for name, value in defaults.items()},
-    )
+    argument_model = _argument_model(defaults)
     markdown = Markdown(body)
 
     def greet(state: GreetState) -> dict[str, str]:
@@ -52,3 +48,20 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     builder.add_edge(START, "greet")
     builder.add_edge("greet", END)
     return builder.compile(checkpointer=checkpointer)
+
+
+def _argument_model(defaults: dict[str, Any]) -> type[BaseModel]:
+    return create_model(
+        "GreetArguments",
+        __config__=ConfigDict(extra="forbid", strict=True),
+        **{name: (type(value), value) for name, value in defaults.items()},
+    )
+
+
+def input_schema() -> dict[str, Any]:
+    """Return the JSON Schema for starting greet."""
+    fields, _ = BaseRecord._parse_markdown(Path(__file__).with_name("workflow.md"))
+    defaults = fields.get("arguments", {})
+    if not isinstance(defaults, dict) or not defaults:
+        raise ValueError("workflow.md must define arguments")
+    return _argument_model(defaults).model_json_schema()

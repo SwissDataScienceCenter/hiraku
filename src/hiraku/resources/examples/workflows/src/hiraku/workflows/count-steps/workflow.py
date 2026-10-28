@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
@@ -32,6 +33,34 @@ class CounterState(BaseModel):
     completed: int = 0
 
 
+class CountStepsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    token: str = Field(min_length=1, description="Token shown in the current step.")
+    decision: Literal["continue", "finish"] = Field(
+        description="Continue to the next step or finish the workflow."
+    )
+
+
+def _input_model(default_count: int) -> type[BaseModel]:
+    return create_model(
+        "CountStepsInput",
+        __config__=ConfigDict(extra="forbid", strict=True),
+        count=(int, Field(default=default_count, ge=1)),
+    )
+
+
+def input_schema() -> dict[str, Any]:
+    """Return the JSON Schema for starting count-steps."""
+    fields, _ = BaseRecord._parse_markdown(Path(__file__).with_name("workflow.md"))
+    defaults = fields.get("arguments", {})
+    if not isinstance(defaults, dict) or type(defaults.get("count")) is not int:
+        raise ValueError("workflow.md must define an integer arguments.count default")
+    if defaults["count"] < 1:
+        raise ValueError("workflow.md arguments.count must be greater than zero")
+    return _input_model(defaults["count"]).model_json_schema()
+
+
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
     """Build the example graph using the project's workflow.md instructions."""
     path = Path(__file__).with_name("workflow.md")
@@ -44,23 +73,17 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     if defaults["count"] < 1:
         raise ValueError("workflow.md arguments.count must be greater than zero")
     markdown = Markdown(body)
+    input_model = _input_model(defaults["count"])
 
     def initialize(state: CounterState) -> dict[str, Any]:
-        arguments = state.arguments
-        if not isinstance(arguments, dict):
-            raise ValidationError("arguments must be an object")
-        unknown = set(arguments) - set(defaults)
-        if unknown:
-            names = ", ".join(sorted(unknown))
-            raise ValidationError(f"Unknown workflow arguments: {names}")
-        count = arguments.get("count", defaults["count"])
-        if type(count) is not int or count < 1:
-            raise ValidationError("count must be a positive integer")
+        try:
+            arguments = input_model.model_validate(state.arguments)
+        except PydanticValidationError as exc:
+            raise ValidationError(str(exc)) from exc
         return {
-            "count": count,
+            "count": arguments.count,
             "step": 1,
             "token": secrets.token_hex(4),
-            "workflow_session_id": state.run_id,
         }
 
     def handoff(state: CounterState) -> dict[str, Any]:
@@ -78,24 +101,21 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 )
             ),
             "data": values,
-            "response_schema": {
-                "token": "string: token shown in the current step",
-                "decision": "continue or finish",
-            },
+            "response_schema": CountStepsResponse.model_json_schema(),
+            "required_capabilities": ["workflow.user_input"],
         }
         if state.error:
             payload["error"] = state.error
         return {"response": interrupt(payload)}
 
     def validate_response(state: CounterState) -> dict[str, Any]:
-        response = state.response
-        if not isinstance(response, dict):
-            return {"error": "Response must be an object with token and decision."}
-        if response.get("token") != state.token:
+        try:
+            response = CountStepsResponse.model_validate(state.response)
+        except PydanticValidationError as exc:
+            return {"error": f"Response does not match the expected schema: {exc}"}
+        if response.token != state.token:
             return {"error": f"Token does not match the current step {state.step}."}
-        if response.get("decision") not in {"continue", "finish"}:
-            return {"error": "Decision must be 'continue' or 'finish'."}
-        return {"decision": response["decision"], "error": ""}
+        return {"decision": response.decision, "error": ""}
 
     def next_step(state: CounterState) -> dict[str, Any]:
         return {"step": state.step + 1, "token": secrets.token_hex(4)}
