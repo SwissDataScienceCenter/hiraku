@@ -127,8 +127,12 @@ records.
 | Term | Data | Summary |
 | --- | --- | --- |
 | **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A LangGraph graph with optional editable instructions and input defaults. |
-| **Workflow session** | `hiraku/langgraph-checkpoints.sqlite` | A checkpointed graph execution identified by its workflow session ID. |
 | **Record** | `hiraku/records/{root_id}/{record_id}.md` | Research content of any kind, including tasks, experiments, literature, datasets, and context. |
+| **Workflow session** | `.hiraku/langgraph-checkpoints.sqlite` | One graph execution, identified by a workflow session ID that is also its LangGraph thread ID. |
+
+Hiraku ships the `collaborative` workflow as an editable copy in your
+project. See the [Workflows guide](guides/workflows.md) for how to write and
+run a graph.
 
 ```bash
 hiraku workflow list
@@ -199,6 +203,7 @@ Inspect the workflow definition and research history before starting one.
 hiraku workflow list
 hiraku workflow start collaborative --arguments-file arguments.json
 hiraku record tree
+hiraku workflow status <workflow-session-id>
 hiraku runs --record heart-disease --all --json
 ```
 

@@ -130,7 +130,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             "record": record_id,
             "count": state.baseline,
             "next": state.baseline + 1,
-            "run_id": state.run_id,
+            "workflow_session_id": state.run_id,
         }
         payload: dict[str, Any] = {
             "instruction": render(markdown.section("## Work"), values),

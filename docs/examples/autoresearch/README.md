@@ -128,6 +128,10 @@ To inspect the root record and available workflows, run:
 hiraku record show sep10 --json
 hiraku workflow list
 ```
+If it pauses, inspect it with `hiraku workflow status <workflow-session-id>` or MCP
+`workflow_status`, then continue with `hiraku workflow resume <workflow-session-id>
+--arguments-file response.json` or MCP
+`workflow_resume` (or the corresponding `hiraku workflow` CLI commands).
 
 Track the agent's progress with:
 

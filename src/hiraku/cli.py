@@ -734,26 +734,30 @@ def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> 
 
 
 @workflow_group.command("status")
-@click.argument("run_id")
+@click.argument("workflow_session_id")
 @click.pass_obj
-def workflow_status_command(state: CLIContext, run_id: str) -> None:
+def workflow_status_command(state: CLIContext, workflow_session_id: str) -> None:
     """Inspect a checkpointed LangGraph workflow run."""
     from .workflows.langgraph import workflow_status
 
-    _emit_json(workflow_status(run_id, config=state.config))
+    _emit_json(workflow_status(workflow_session_id, config=state.config))
 
 
 @workflow_group.command("resume")
-@click.argument("run_id")
+@click.argument("workflow_session_id")
 @_ARGUMENTS_FILE
 @click.pass_obj
 def workflow_resume_command(
-    state: CLIContext, run_id: str, arguments_file: Any
+    state: CLIContext, workflow_session_id: str, arguments_file: Any
 ) -> None:
     """Resume a paused LangGraph workflow with a JSON response."""
     from .workflows.langgraph import resume_workflow
 
-    _emit_json(resume_workflow(run_id, _arguments(arguments_file), config=state.config))
+    _emit_json(
+        resume_workflow(
+            workflow_session_id, _arguments(arguments_file), config=state.config
+        )
+    )
 
 
 @main.command("run")

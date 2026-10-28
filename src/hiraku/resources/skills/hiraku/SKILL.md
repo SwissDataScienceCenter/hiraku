@@ -320,14 +320,19 @@ runs, Git state, and required files before starting it. Resume incomplete work
 with the same workflow session and follow its checkpoints and stopping rules.
 User instructions override workflow defaults.
 
-## Commands and tracking details
+Workflows are project-defined LangGraph procedures under `hiraku/workflows/`.
+Start one with `workflow_start(workflow_id, arguments)`. Follow the current
+interrupt payload and its response schema. Resume the same run with
+`workflow_resume(workflow_session_id, response)`; inspect it without advancing with
+`workflow_status(workflow_session_id)`. The workflow session ID is the LangGraph thread ID, so do not
+start a new run to continue an interrupted workflow. Before repeating
+consequential work such as creating records or launching experiments, check
+whether it already exists. User instructions override workflow defaults; if
+they conflict with a workflow, explain the conflict and do not bypass its
+validation. If a workflow is missing, check `workflow_list` or reconnect MCP
+after adding it to the project.
 
-Start workflows with their declared input object. Follow each LangGraph
-interrupt's response schema, resume the same workflow session, and inspect its
-stored state before repeating consequential work. User approval requested by
-workflow text remains a conversational contract. If elicitation is cancelled
-or declined, leave the workflow paused and do not launch the experiment.
-For an interrupt requesting approval, call `workflow_approval` with the run ID,
+For an interrupt requesting approval, call `workflow_approval` with the workflow session ID,
 interrupt ID, proposal, and proposed response. It uses MCP elicitation to wait
 for approve, revise, or stop. Pass the returned result to `workflow_resume`.
 If elicitation is cancelled or declined, tell the user and leave the workflow

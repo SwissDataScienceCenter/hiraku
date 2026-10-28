@@ -10,7 +10,7 @@ arguments:
 
 Print this line to the user exactly: `Step {{step}}/{{count}}: token {{token}}`.
 Then ask whether to continue. Wait for the user's answer before calling
-`workflow_resume` with run ID `{{run_id}}` and response
+`workflow_resume` with workflow session ID `{{workflow_session_id}}` and response
 `{"token": "{{token}}", "decision": "continue"}` if they agree, or
 `{"token": "{{token}}", "decision": "finish"}` if they want to stop.
 

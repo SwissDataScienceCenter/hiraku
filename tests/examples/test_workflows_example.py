@@ -70,7 +70,7 @@ def test_greet_is_one_final_prompt_filled_from_its_arguments(
     assert "Greet formally:\nfalse." in default["result"]
 
 
-def test_cli_uses_langgraph_run_ids_for_resume_and_status(runner: CliRunner) -> None:
+def test_cli_uses_workflow_session_ids_for_resume_and_status(runner: CliRunner) -> None:
     started = json.loads(
         invoke(
             runner,
@@ -79,14 +79,17 @@ def test_cli_uses_langgraph_run_ids_for_resume_and_status(runner: CliRunner) -> 
         ).output
     )
     assert started["status"] == "waiting"
-    run_id = started["run_id"]
-    assert json.loads(invoke(runner, ["workflow", "status", run_id]).output) == started
+    workflow_session_id = started["workflow_session_id"]
+    assert (
+        json.loads(invoke(runner, ["workflow", "status", workflow_session_id]).output)
+        == started
+    )
 
     interrupt = started["interrupts"][0]["value"]
     completed = json.loads(
         invoke(
             runner,
-            ["workflow", "resume", run_id, "--arguments-file", "-"],
+            ["workflow", "resume", workflow_session_id, "--arguments-file", "-"],
             {"token": interrupt["data"]["token"], "decision": "continue"},
         ).output
     )
@@ -128,25 +131,27 @@ def test_scheduler_langgraph_works_by_priority_until_every_record_reaches_target
         count = context["count"]
         assert f"--set count={count + 1}" in interruption["instruction"]
         other = next(item.id for item in records if item.id != record_id)
-        wrong = resume_workflow(response["run_id"], {"record_id": other}, config=config)
+        wrong = resume_workflow(
+            response["workflow_session_id"], {"record_id": other}, config=config
+        )
         retry = wrong["interrupts"][0]["value"]
         assert retry["data"] == context
         assert "assigned record" in retry["error"]
 
         unchanged = resume_workflow(
-            response["run_id"], {"record_id": record_id}, config=config
+            response["workflow_session_id"], {"record_id": record_id}, config=config
         )
         retry = unchanged["interrupts"][0]["value"]
         assert f"set it to {count + 1}" in retry["error"]
 
         set_count(runner, record_id, count + 1)
         response = resume_workflow(
-            response["run_id"], {"record_id": record_id}, config=config
+            response["workflow_session_id"], {"record_id": record_id}, config=config
         )
 
     assert response["status"] == "completed"
     assert response["workflow_id"] == "scheduler"
-    assert workflow_status(response["run_id"], config=config) == response
+    assert workflow_status(response["workflow_session_id"], config=config) == response
     assert all(item.id in response["result"] for item in records)
 
 
@@ -155,9 +160,13 @@ def test_langgraph_runs_are_routed_to_their_own_workflow(runner: CliRunner) -> N
     count_run = start_workflow("count-steps", {"count": 1}, config=config)
     scheduler_run = start_workflow("scheduler", {"records": 1}, config=config)
 
-    assert workflow_status(count_run["run_id"], config=config)["workflow_id"] == (
-        "count-steps"
+    assert (
+        workflow_status(count_run["workflow_session_id"], config=config)["workflow_id"]
+        == "count-steps"
     )
-    assert workflow_status(scheduler_run["run_id"], config=config)["workflow_id"] == (
-        "scheduler"
+    assert (
+        workflow_status(scheduler_run["workflow_session_id"], config=config)[
+            "workflow_id"
+        ]
+        == "scheduler"
     )

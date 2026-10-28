@@ -52,7 +52,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     assert _interrupt(result)["step"] == "draft"
 
     result = resume_workflow(
-        result["run_id"],
+        result["workflow_session_id"],
         _approved(
             {
                 "event": "drafted",
@@ -69,7 +69,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     assert _interrupt(result)["step"] == "implement"
 
     result = resume_workflow(
-        result["run_id"],
+        result["workflow_session_id"],
         _approved({"event": "implemented", "arguments": {"commit": commit}}),
         config=config,
     )
@@ -80,12 +80,12 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
         stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,0.8\n")
     result = resume_workflow(
-        result["run_id"], _approved({"event": "launched"}), config=config
+        result["workflow_session_id"], _approved({"event": "launched"}), config=config
     )
     assert _interrupt(result)["step"] == "analyze"
 
     completed = resume_workflow(
-        result["run_id"],
+        result["workflow_session_id"],
         _approved(
             {
                 "event": "analyzed",

@@ -21,17 +21,17 @@ JSON
 It shows implementation nodes and edges, including loops and conditional
 routes.
 
-The response includes a `run_id`. This is the LangGraph `thread_id` used to
+The response includes a `workflow_session_id`. This is the LangGraph `thread_id` used to
 identify the checkpointed run. Inspect it without advancing:
 
 ```bash
-hiraku workflow status <run-id>
+hiraku workflow status <workflow-session-id>
 ```
 
 If the graph pauses with an interrupt, send its structured response to resume:
 
 ```bash
-hiraku workflow resume <run-id> --arguments-file - <<'JSON'
+hiraku workflow resume <workflow-session-id> --arguments-file - <<'JSON'
 {"token": "...", "decision": "continue"}
 JSON
 ```
@@ -46,7 +46,7 @@ available.
 Workflows can declare an `approval` object in an interrupt payload. The MCP
 `workflow_approval` tool presents its message and a proposed response and
 gathers the standard approve, revise, or stop decision without depending on a
-particular workflow or step name. Supply the run ID and current interrupt ID,
+particular workflow or step name. Supply the workflow session ID and current interrupt ID,
 then pass the result to `workflow_resume`. The graph checks the decision before
 processing the workflow response. This is a cooperative workflow convention:
 callers can submit decisions directly and must be trusted. MCP elicitation does
@@ -114,8 +114,8 @@ records, launches, tracked runs, and provenance from their nodes.
 
 ## State and persistence
 
-The run ID maps to LangGraph's `thread_id`; checkpoints are stored in
-`.hiraku/langgraph-checkpoints.sqlite`. Use the same run ID for status and resume.
+The workflow session ID maps to LangGraph's `thread_id`; checkpoints are stored in
+`.hiraku/langgraph-checkpoints.sqlite`. Use the same workflow session ID for status and resume.
 Checkpoint state is execution state, while Hiraku research records and tracked
 runs remain the durable research history.
 

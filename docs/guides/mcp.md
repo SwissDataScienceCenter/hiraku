@@ -95,7 +95,7 @@ Project workflows are LangGraph graphs. Use `workflow_list` to discover them,
 [Workflows guide](workflows.md).
 
 Any workflow interrupt can request approval by including an `approval` object
-in its interrupt payload. `workflow_approval` takes the run ID, interrupt ID,
+in its interrupt payload. `workflow_approval` takes the workflow session ID, interrupt ID,
 proposal, and proposed response, and uses MCP elicitation to collect the
 standard approve, revise, or stop decision. Pass its result to
 `workflow_resume`. If elicitation is cancelled, leave the graph paused.

@@ -57,37 +57,53 @@ def start_workflow(
     config: HirakuConfig,
 ) -> dict[str, Any]:
     """Start a LangGraph workflow and run until it completes or interrupts."""
-    run_id = f"{workflow_id}:{uuid4().hex}"
+    workflow_session_id = f"{workflow_id}:{uuid4().hex}"
     with _compiled_graph(workflow_id, config) as graph:
         graph.invoke(
-            {"arguments": dict(arguments or {}), "run_id": run_id},
-            _thread_config(run_id),
+            {
+                "arguments": dict(arguments or {}),
+                "run_id": workflow_session_id,
+            },
+            _thread_config(workflow_session_id),
         )
-        return _snapshot_result(graph, workflow_id, run_id)
+        return _snapshot_result(graph, workflow_id, workflow_session_id)
 
 
 def resume_workflow(
-    run_id: str, response: Mapping[str, Any], *, config: HirakuConfig
+    workflow_session_id: str,
+    response: Mapping[str, Any],
+    *,
+    config: HirakuConfig,
 ) -> dict[str, Any]:
     """Resume a paused graph with the harness's structured response."""
-    graph_workflow = _find_run(run_id, config)
+    graph_workflow = _find_run(workflow_session_id, config)
     if graph_workflow is None:
-        raise ValidationError(f"LangGraph workflow run {run_id!r} was not found")
+        raise ValidationError(
+            f"LangGraph workflow session {workflow_session_id!r} was not found"
+        )
     with _compiled_graph(graph_workflow, config) as graph:
-        snapshot = graph.get_state(_thread_config(run_id))
+        snapshot = graph.get_state(_thread_config(workflow_session_id))
         if not snapshot.values or not snapshot.next:
-            raise ValidationError(f"Workflow run {run_id!r} is not waiting for input")
-        graph.invoke(Command(resume=dict(response)), _thread_config(run_id))
-        return _snapshot_result(graph, graph_workflow, run_id)
+            raise ValidationError(
+                f"Workflow session {workflow_session_id!r} is not waiting for input"
+            )
+        graph.invoke(
+            Command(resume=dict(response)), _thread_config(workflow_session_id)
+        )
+        return _snapshot_result(graph, graph_workflow, workflow_session_id)
 
 
-def workflow_status(run_id: str, *, config: HirakuConfig) -> dict[str, Any]:
+def workflow_status(
+    workflow_session_id: str, *, config: HirakuConfig
+) -> dict[str, Any]:
     """Inspect a checkpointed graph run without advancing it."""
-    graph_workflow = _find_run(run_id, config)
+    graph_workflow = _find_run(workflow_session_id, config)
     if graph_workflow is None:
-        raise ValidationError(f"LangGraph workflow run {run_id!r} was not found")
+        raise ValidationError(
+            f"LangGraph workflow session {workflow_session_id!r} was not found"
+        )
     with _compiled_graph(graph_workflow, config) as graph:
-        return _snapshot_result(graph, graph_workflow, run_id)
+        return _snapshot_result(graph, graph_workflow, workflow_session_id)
 
 
 def workflow_mermaid(workflow_id: str, *, config: HirakuConfig) -> str:
@@ -96,8 +112,8 @@ def workflow_mermaid(workflow_id: str, *, config: HirakuConfig) -> str:
         return graph.get_graph().draw_mermaid()
 
 
-def _find_run(run_id: str, config: HirakuConfig) -> str | None:
-    workflow_id, separator, checkpoint_id = run_id.partition(":")
+def _find_run(workflow_session_id: str, config: HirakuConfig) -> str | None:
+    workflow_id, separator, checkpoint_id = workflow_session_id.partition(":")
     if (
         separator
         and _WORKFLOW_ID.fullmatch(workflow_id)
@@ -106,7 +122,7 @@ def _find_run(run_id: str, config: HirakuConfig) -> str | None:
     ):
         try:
             with _compiled_graph(workflow_id, config) as graph:
-                snapshot = graph.get_state(_thread_config(run_id))
+                snapshot = graph.get_state(_thread_config(workflow_session_id))
             return workflow_id if snapshot.values else None
         except Exception as exc:
             logger.warning("LangGraph workflow %s is unavailable: %s", workflow_id, exc)
@@ -118,14 +134,15 @@ def _find_run(run_id: str, config: HirakuConfig) -> str | None:
     for candidate in workflow_ids(config=config):
         try:
             with _compiled_graph(candidate, config) as graph:
-                snapshot = graph.get_state(_thread_config(run_id))
+                snapshot = graph.get_state(_thread_config(workflow_session_id))
             if snapshot.values:
                 matches.append(candidate)
         except Exception as exc:
             logger.warning("LangGraph workflow %s is unavailable: %s", candidate, exc)
     if len(matches) > 1:
         raise ValidationError(
-            f"Workflow run {run_id!r} matches multiple graphs: {', '.join(matches)}"
+            f"Workflow session {workflow_session_id!r} matches multiple graphs: "
+            f"{', '.join(matches)}"
         )
     return matches[0] if matches else None
 
@@ -179,12 +196,14 @@ def _import_graph(path: Path) -> ModuleType:
     return module
 
 
-def _thread_config(run_id: str) -> dict[str, dict[str, str]]:
-    return {"configurable": {"thread_id": run_id}}
+def _thread_config(workflow_session_id: str) -> dict[str, dict[str, str]]:
+    return {"configurable": {"thread_id": workflow_session_id}}
 
 
-def _snapshot_result(graph: Any, workflow_id: str, run_id: str) -> dict[str, Any]:
-    snapshot = graph.get_state(_thread_config(run_id))
+def _snapshot_result(
+    graph: Any, workflow_id: str, workflow_session_id: str
+) -> dict[str, Any]:
+    snapshot = graph.get_state(_thread_config(workflow_session_id))
     interrupts = [
         {"id": item.id, "value": item.value}
         for task in snapshot.tasks
@@ -192,7 +211,7 @@ def _snapshot_result(graph: Any, workflow_id: str, run_id: str) -> dict[str, Any
     ]
     completed = not snapshot.next and not interrupts
     result = {
-        "run_id": run_id,
+        "workflow_session_id": workflow_session_id,
         "workflow_id": workflow_id,
         "status": "completed" if completed else "waiting",
         "interrupts": interrupts,

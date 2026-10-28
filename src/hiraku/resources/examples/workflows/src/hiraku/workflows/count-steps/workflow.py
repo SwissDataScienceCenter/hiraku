@@ -60,7 +60,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             "count": count,
             "step": 1,
             "token": secrets.token_hex(4),
-            "run_id": state.run_id,
+            "workflow_session_id": state.run_id,
         }
 
     def handoff(state: CounterState) -> dict[str, Any]:
@@ -68,7 +68,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             "step": state.step,
             "count": state.count,
             "token": state.token,
-            "run_id": state.run_id,
+            "workflow_session_id": state.run_id,
         }
         payload = {
             "instruction": "\n\n".join(

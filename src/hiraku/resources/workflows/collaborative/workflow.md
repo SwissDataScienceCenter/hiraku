@@ -13,7 +13,7 @@ rules: >-
 Draft one experiment for the task. Read the task record and its earlier
 experiments first, and build on the previous results in the data. Do not
 change code yet. Present the draft to the user, then call the MCP tool
-`workflow_approval` with the run ID, current interrupt ID, concise summary,
+`workflow_approval` with the workflow session ID, current interrupt ID, concise summary,
 and the proposed response. Wait for the user's choice, then pass the returned
 result to `workflow_resume`. For an approved draft, the proposed
 response is `{"event": "drafted", "arguments":

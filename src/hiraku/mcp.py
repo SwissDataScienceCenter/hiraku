@@ -295,9 +295,9 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     path = config.path
 
     def pending_approval(
-        run_id: str, interrupt_id: str | None = None
+        workflow_session_id: str, interrupt_id: str | None = None
     ) -> dict[str, Any]:
-        status = langgraph_workflow_status(run_id, config=project())
+        status = langgraph_workflow_status(workflow_session_id, config=project())
         interrupts = status["interrupts"]
         if status["status"] != "waiting" or len(interrupts) != 1:
             raise ValidationError("Workflow must have exactly one pending interrupt")
@@ -326,23 +326,32 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         return start_langgraph_workflow(workflow_id, arguments, config=project())
 
     def workflow_status(
-        run_id: Annotated[str, Field(description="Run ID returned by workflow_start.")],
+        workflow_session_id: Annotated[
+            str, Field(description="Workflow session ID returned by workflow_start.")
+        ],
     ) -> dict[str, Any]:
-        return langgraph_workflow_status(run_id, config=project())
+        return langgraph_workflow_status(workflow_session_id, config=project())
 
     def workflow_resume(
-        run_id: Annotated[str, Field(description="Run ID returned by workflow_start.")],
+        workflow_session_id: Annotated[
+            str, Field(description="Workflow session ID returned by workflow_start.")
+        ],
         response: Annotated[
             dict[str, Any],
             Field(description="Response to the current graph interrupt."),
         ],
     ) -> dict[str, Any]:
-        return resume_langgraph_workflow(run_id, response, config=project())
+        return resume_langgraph_workflow(
+            workflow_session_id, response, config=project()
+        )
 
     def resolve_workflow_approval(
-        run_id: str, interrupt_id: str, proposal: str, response: dict[str, Any]
+        workflow_session_id: str,
+        interrupt_id: str,
+        proposal: str,
+        response: dict[str, Any],
     ) -> Elicit[WorkflowApproval]:
-        pending = pending_approval(run_id, interrupt_id)
+        pending = pending_approval(workflow_session_id, interrupt_id)
         approval = pending["value"]["approval"]
         return Elicit(
             message=(
@@ -355,7 +364,9 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         )
 
     def workflow_approval(
-        run_id: Annotated[str, Field(description="Run ID returned by workflow_start.")],
+        workflow_session_id: Annotated[
+            str, Field(description="Workflow session ID returned by workflow_start.")
+        ],
         proposal: Annotated[
             str, Field(description="Concise proposal or result to show the user.")
         ],
@@ -367,7 +378,7 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     ) -> dict[str, Any]:
         """Ask the user to resolve an approval request in the current interrupt."""
         if approval.action == "accept":
-            pending_approval(run_id, interrupt_id)
+            pending_approval(workflow_session_id, interrupt_id)
             return {
                 "approval": {
                     "decision": approval.data.decision,

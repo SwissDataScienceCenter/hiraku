@@ -64,7 +64,7 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     assert first["response_schema"]["decision"] == "continue or finish"
 
     wrong = resume_workflow(
-        started["run_id"],
+        started["workflow_session_id"],
         {"token": "wrong", "decision": "continue"},
         config=config,
     )
@@ -73,7 +73,7 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     assert "does not match" in retry["error"]
 
     invalid_decision = resume_workflow(
-        started["run_id"],
+        started["workflow_session_id"],
         {"token": first["data"]["token"], "decision": "skip"},
         config=config,
     )
@@ -82,7 +82,7 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     assert "Decision must be" in retry["error"]
 
     next_step = resume_workflow(
-        started["run_id"],
+        started["workflow_session_id"],
         {"token": first["data"]["token"], "decision": "continue"},
         config=config,
     )
@@ -91,13 +91,13 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     assert second["data"]["token"] != first["data"]["token"]
 
     done = resume_workflow(
-        started["run_id"],
+        started["workflow_session_id"],
         {"token": second["data"]["token"], "decision": "continue"},
         config=config,
     )
     assert done["status"] == "completed"
     assert "Finished after 2 of 2 steps." in done["result"]
-    assert workflow_status(started["run_id"], config=config) == done
+    assert workflow_status(started["workflow_session_id"], config=config) == done
 
 
 def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) -> None:
@@ -113,7 +113,7 @@ def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) 
     server = create_server(config)
     assert "workflow_status" in _tool_names(server)
     completed = resume_workflow(
-        started["run_id"],
+        started["workflow_session_id"],
         {"token": first["data"]["token"], "decision": "finish"},
         config=config,
     )
@@ -187,21 +187,23 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     assert interrupt["step"] == "draft"
     assert interrupt["data"]["task"] == "task"
 
-    bypass = resume_workflow(started["run_id"], {"event": "finish"}, config=config)
+    bypass = resume_workflow(
+        started["workflow_session_id"], {"event": "finish"}, config=config
+    )
     assert bypass["status"] == "waiting"
     assert "approval decision is required" in _interrupt(bypass)["error"]
     invalid = resume_workflow(
-        started["run_id"], {"approval": {"decision": []}}, config=config
+        started["workflow_session_id"], {"approval": {"decision": []}}, config=config
     )
     assert "approval decision is required" in _interrupt(invalid)["error"]
     revised = resume_workflow(
-        started["run_id"],
+        started["workflow_session_id"],
         {"approval": {"decision": "revise", "feedback": "Use a smaller model."}},
         config=config,
     )
     assert _interrupt(revised)["feedback"] == "Use a smaller model."
     completed = resume_workflow(
-        started["run_id"],
+        started["workflow_session_id"],
         {"approval": {"decision": "stop"}},
         config=config,
     )
@@ -235,7 +237,7 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
             approval = await client.call_tool(
                 "workflow_approval",
                 {
-                    "run_id": started["run_id"],
+                    "workflow_session_id": started["workflow_session_id"],
                     "interrupt_id": started["interrupts"][0]["id"],
                     "proposal": "Try a larger learning rate.",
                     "response": {"event": "finish"},
@@ -243,7 +245,10 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
             )
             resumed = await client.call_tool(
                 "workflow_resume",
-                {"run_id": started["run_id"], "response": approval.structured_content},
+                {
+                    "workflow_session_id": started["workflow_session_id"],
+                    "response": approval.structured_content,
+                },
             )
             return approval, resumed
 
@@ -287,14 +292,15 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
             approval = await client.call_tool(
                 "workflow_approval",
                 {
-                    "run_id": started["run_id"],
+                    "workflow_session_id": started["workflow_session_id"],
                     "interrupt_id": started["interrupts"][0]["id"],
                     "proposal": "Try a larger learning rate.",
                     "response": {"event": "finish"},
                 },
             )
             status = await client.call_tool(
-                "workflow_status", {"run_id": started["run_id"]}
+                "workflow_status",
+                {"workflow_session_id": started["workflow_session_id"]},
             )
             return approval, status
 
@@ -335,7 +341,7 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
             approval = await client.call_tool(
                 "workflow_approval",
                 {
-                    "run_id": started["run_id"],
+                    "workflow_session_id": started["workflow_session_id"],
                     "interrupt_id": started["interrupts"][0]["id"],
                     "proposal": "Accept the value",
                     "response": {"value": "approved"},
@@ -344,7 +350,7 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
             return await client.call_tool(
                 "workflow_resume",
                 {
-                    "run_id": started["run_id"],
+                    "workflow_session_id": started["workflow_session_id"],
                     "response": approval.structured_content,
                 },
             )
@@ -371,7 +377,7 @@ def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
             approval = await client.call_tool(
                 "workflow_approval",
                 {
-                    "run_id": first["run_id"],
+                    "workflow_session_id": first["workflow_session_id"],
                     "interrupt_id": first["interrupts"][0]["id"],
                     "proposal": "Stop the workflow",
                     "response": {},
@@ -380,7 +386,10 @@ def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
         async with Client(create_server(config)) as client:
             return await client.call_tool(
                 "workflow_resume",
-                {"run_id": first["run_id"], "response": approval.structured_content},
+                {
+                    "workflow_session_id": first["workflow_session_id"],
+                    "response": approval.structured_content,
+                },
             )
 
     resumed = anyio.run(exercise)
