@@ -20,9 +20,9 @@ from langgraph.types import Command
 from ..base import BaseRecord
 from ..config import HirakuConfig
 from ..errors import ValidationError, WorkflowError
+from .session_history import CHECKPOINTS, record_event, validate_context
 
 logger = logging.getLogger(__name__)
-_CHECKPOINTS = "langgraph-checkpoints.sqlite"
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 
@@ -66,18 +66,40 @@ def start_workflow(
     arguments: Mapping[str, Any] | None = None,
     *,
     config: HirakuConfig,
+    context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Start a LangGraph workflow and run until it completes or interrupts."""
+    validate_context(context)
     workflow_session_id = f"{workflow_id}:{uuid4().hex}"
     with _compiled_graph(workflow_id, config) as graph:
-        graph.invoke(
-            {
-                "arguments": dict(arguments or {}),
-                "run_id": workflow_session_id,
-            },
-            _thread_config(workflow_session_id),
+        record_event(
+            workflow_session_id,
+            workflow_id,
+            "started",
+            "running",
+            config=config,
+            context=context,
         )
-        return _snapshot_result(graph, workflow_id, workflow_session_id)
+        try:
+            graph.invoke(
+                {
+                    "arguments": dict(arguments or {}),
+                    "run_id": workflow_session_id,
+                },
+                _thread_config(workflow_session_id),
+            )
+        except Exception as exc:
+            record_event(
+                workflow_session_id,
+                workflow_id,
+                "failed",
+                "failed",
+                config=config,
+                context=context,
+                error_type=type(exc).__name__,
+            )
+            raise
+        return _record_snapshot(graph, workflow_id, workflow_session_id, config)
 
 
 def resume_workflow(
@@ -85,8 +107,10 @@ def resume_workflow(
     response: Mapping[str, Any],
     *,
     config: HirakuConfig,
+    context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resume a paused graph with the harness's structured response."""
+    validate_context(context)
     graph_workflow = _find_run(workflow_session_id, config)
     if graph_workflow is None:
         raise ValidationError(
@@ -98,10 +122,31 @@ def resume_workflow(
             raise ValidationError(
                 f"Workflow session {workflow_session_id!r} is not waiting for input"
             )
-        graph.invoke(
-            Command(resume=dict(response)), _thread_config(workflow_session_id)
+        record_event(
+            workflow_session_id,
+            graph_workflow,
+            "resume_requested",
+            "running",
+            config=config,
+            context=context,
+            checkpoint_id=snapshot.config.get("configurable", {}).get("checkpoint_id"),
         )
-        return _snapshot_result(graph, graph_workflow, workflow_session_id)
+        try:
+            graph.invoke(
+                Command(resume=dict(response)), _thread_config(workflow_session_id)
+            )
+        except Exception as exc:
+            record_event(
+                workflow_session_id,
+                graph_workflow,
+                "failed",
+                "failed",
+                config=config,
+                context=context,
+                error_type=type(exc).__name__,
+            )
+            raise
+        return _record_snapshot(graph, graph_workflow, workflow_session_id, config)
 
 
 def workflow_status(
@@ -171,7 +216,7 @@ def _compiled_graph(workflow_id: str, config: HirakuConfig) -> Iterator[Any]:
     factory = getattr(module, "build_graph", None)
     if not callable(factory):
         raise WorkflowError(f"{directory / 'workflow.py'} must export build_graph")
-    database = config.hiraku_dir / _CHECKPOINTS
+    database = config.hiraku_dir / CHECKPOINTS
     database.parent.mkdir(parents=True, exist_ok=True)
     with SqliteSaver.from_conn_string(str(database)) as checkpointer:
         try:
@@ -233,10 +278,30 @@ def _thread_config(workflow_session_id: str) -> dict[str, dict[str, str]]:
     return {"configurable": {"thread_id": workflow_session_id}}
 
 
-def _snapshot_result(
-    graph: Any, workflow_id: str, workflow_session_id: str
+def _record_snapshot(
+    graph: Any, workflow_id: str, workflow_session_id: str, config: HirakuConfig
 ) -> dict[str, Any]:
     snapshot = graph.get_state(_thread_config(workflow_session_id))
+    result = _snapshot_result(
+        graph, workflow_id, workflow_session_id, snapshot=snapshot
+    )
+    checkpoint_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
+    record_event(
+        workflow_session_id,
+        workflow_id,
+        result["status"],
+        result["status"],
+        config=config,
+        checkpoint_id=checkpoint_id,
+    )
+    return result
+
+
+def _snapshot_result(
+    graph: Any, workflow_id: str, workflow_session_id: str, *, snapshot: Any = None
+) -> dict[str, Any]:
+    if snapshot is None:
+        snapshot = graph.get_state(_thread_config(workflow_session_id))
     interrupts = [
         {"id": item.id, "value": item.value}
         for task in snapshot.tasks

@@ -13,3 +13,9 @@ For authoring and execution examples, see the [Workflows guide](../../guides/wor
 ::: hiraku.workflows.langgraph.workflow_status
 
 ::: hiraku.workflows.langgraph.resume_workflow
+
+## Workflow session history
+
+::: hiraku.workflows.session_history.list_sessions
+
+::: hiraku.workflows.session_history.session_history

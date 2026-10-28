@@ -32,6 +32,7 @@ from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details
 from .workflows.langgraph import workflow_ids, workflow_mermaid
 from .workflows.langgraph import workflow_status as langgraph_workflow_status
+from .workflows.session_history import list_sessions, session_history
 
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
@@ -39,6 +40,8 @@ attributes tracked runs to them, runs commands with execute, and runs LangGraph
 workflows. Use workflow_start, workflow_status, and workflow_resume to operate
 a workflow. When an interrupt requests approval, workflow_approval opens a
 structured MCP elicitation and waits for the user's answer.\
+Use workflow_sessions and workflow_session_history to inspect recorded
+sessions and their history.\
 """
 
 logger = logging.getLogger(__name__)
@@ -322,8 +325,24 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         arguments: Annotated[
             dict[str, Any] | None, Field(description="Workflow input object.")
         ] = None,
+        context: Annotated[
+            dict[str, Any] | None,
+            Field(description="Optional caller-provided session context."),
+        ] = None,
     ) -> dict[str, Any]:
-        return start_langgraph_workflow(workflow_id, arguments, config=project())
+        return start_langgraph_workflow(
+            workflow_id, arguments, config=project(), context=context
+        )
+
+    def workflow_sessions() -> list[dict[str, Any]]:
+        return list_sessions(config=project())
+
+    def workflow_session_history(
+        workflow_session_id: Annotated[
+            str, Field(description="Workflow session ID returned by workflow_start.")
+        ],
+    ) -> dict[str, Any]:
+        return session_history(workflow_session_id, config=project())
 
     def workflow_status(
         workflow_session_id: Annotated[
@@ -340,9 +359,13 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
             dict[str, Any],
             Field(description="Response to the current graph interrupt."),
         ],
+        context: Annotated[
+            dict[str, Any] | None,
+            Field(description="Optional caller-provided transition context."),
+        ] = None,
     ) -> dict[str, Any]:
         return resume_langgraph_workflow(
-            workflow_session_id, response, config=project()
+            workflow_session_id, response, config=project(), context=context
         )
 
     def resolve_workflow_approval(
@@ -409,6 +432,16 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
             "Start a LangGraph workflow and return its interrupt or final result."
         ),
         annotations=ToolAnnotations(read_only_hint=False),
+    )
+    server.add_tool(
+        workflow_sessions,
+        description="List recorded workflow sessions and their metadata.",
+        annotations=ToolAnnotations(read_only_hint=True),
+    )
+    server.add_tool(
+        workflow_session_history,
+        description="Read a workflow session's recorded metadata and history.",
+        annotations=ToolAnnotations(read_only_hint=True),
     )
     server.add_tool(
         workflow_status,

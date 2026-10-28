@@ -706,31 +706,63 @@ _ARGUMENTS_FILE = click.option(
     type=click.File("r", encoding="utf-8"),
     help="JSON object with the arguments; use - for standard input.",
 )
+_CONTEXT_FILE = click.option(
+    "--context-file",
+    type=click.File("r", encoding="utf-8"),
+    help="JSON object with session or transition context; use - for standard input.",
+)
 
 
-def _arguments(arguments_file: Any) -> dict[str, Any]:
+def _arguments(arguments_file: Any, *, name: str = "arguments") -> dict[str, Any]:
     if arguments_file is None:
         return {}
     try:
         arguments = json.load(arguments_file)
     except ValueError as exc:
-        raise ValidationError(f"Cannot read arguments: {exc}") from exc
+        raise ValidationError(f"Cannot read {name}: {exc}") from exc
     if not isinstance(arguments, dict):
-        raise ValidationError("Arguments must be a JSON object")
+        raise ValidationError(f"{name.capitalize()} must be a JSON object")
     return arguments
 
 
 @workflow_group.command("start")
 @click.argument("workflow_id")
 @_ARGUMENTS_FILE
+@_CONTEXT_FILE
 @click.pass_obj
-def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> None:
+def workflow_start(
+    state: CLIContext, workflow_id: str, arguments_file: Any, context_file: Any
+) -> None:
     """Start a LangGraph workflow and print its interrupt or result."""
     from .workflows.langgraph import start_workflow
 
     _emit_json(
-        start_workflow(workflow_id, _arguments(arguments_file), config=state.config)
+        start_workflow(
+            workflow_id,
+            _arguments(arguments_file),
+            config=state.config,
+            context=_arguments(context_file, name="context"),
+        )
     )
+
+
+@workflow_group.command("sessions")
+@click.pass_obj
+def workflow_sessions(state: CLIContext) -> None:
+    """List recorded workflow sessions as JSON."""
+    from .workflows.session_history import list_sessions
+
+    _emit_json(list_sessions(config=state.config))
+
+
+@workflow_group.command("history")
+@click.argument("workflow_session_id")
+@click.pass_obj
+def workflow_history(state: CLIContext, workflow_session_id: str) -> None:
+    """Show a workflow session's recorded metadata and history."""
+    from .workflows.session_history import session_history
+
+    _emit_json(session_history(workflow_session_id, config=state.config))
 
 
 @workflow_group.command("status")
@@ -746,16 +778,20 @@ def workflow_status_command(state: CLIContext, workflow_session_id: str) -> None
 @workflow_group.command("resume")
 @click.argument("workflow_session_id")
 @_ARGUMENTS_FILE
+@_CONTEXT_FILE
 @click.pass_obj
 def workflow_resume_command(
-    state: CLIContext, workflow_session_id: str, arguments_file: Any
+    state: CLIContext, workflow_session_id: str, arguments_file: Any, context_file: Any
 ) -> None:
     """Resume a paused LangGraph workflow with a JSON response."""
     from .workflows.langgraph import resume_workflow
 
     _emit_json(
         resume_workflow(
-            workflow_session_id, _arguments(arguments_file), config=state.config
+            workflow_session_id,
+            _arguments(arguments_file),
+            config=state.config,
+            context=_arguments(context_file, name="context"),
         )
     )
 
