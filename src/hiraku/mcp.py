@@ -359,13 +359,20 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
             dict[str, Any],
             Field(description="Response to the current graph interrupt."),
         ],
+        checkpoint_id: Annotated[
+            str, Field(description="Checkpoint ID from workflow status.")
+        ],
         context: Annotated[
             dict[str, Any] | None,
             Field(description="Optional caller-provided transition context."),
         ] = None,
     ) -> dict[str, Any]:
         return resume_langgraph_workflow(
-            workflow_session_id, response, config=project(), context=context
+            workflow_session_id,
+            response,
+            config=project(),
+            checkpoint_id=checkpoint_id,
+            context=context,
         )
 
     def resolve_workflow_approval(

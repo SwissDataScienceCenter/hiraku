@@ -323,7 +323,8 @@ User instructions override workflow defaults.
 Workflows are project-defined LangGraph procedures under `hiraku/workflows/`.
 Start one with `workflow_start(workflow_id, arguments)`. Follow the current
 interrupt payload and its response schema. Resume the same run with
-`workflow_resume(workflow_session_id, response)`; inspect it without advancing with
+`workflow_resume(workflow_session_id, response, checkpoint_id)` using the checkpoint ID
+returned by start or status; inspect it without advancing with
 `workflow_status(workflow_session_id)`. The workflow session ID is the LangGraph thread ID, so do not
 start a new run to continue an interrupted workflow. Before repeating
 consequential work such as creating records or launching experiments, check

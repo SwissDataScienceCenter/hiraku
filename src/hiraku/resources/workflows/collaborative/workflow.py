@@ -363,20 +363,23 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     def analyze(state: ResearchState) -> Command[Literal["analyze", "draft", "done"]]:
         record = experiment(state)
         runs = _runs(record, config)
-        if not any(run.metrics for run in runs):
-            return Command(
-                update={"feedback": "The attributed runs have no metrics yet."},
-                goto="analyze",
-            )
         data = {
             **experiment_context(state),
             "runs": [{"run_id": run.id, "metrics": dict(run.metrics)} for run in runs],
             "previous": state.results,
         }
+        if not any(run.metrics for run in runs):
+            data["metrics_pending"] = True
+            state = {**state, "feedback": "The attributed runs have no metrics yet."}
         response = response_for(state, "analyze", data)
         event, arguments = response["event"], response["arguments"]
         if event == "finish":
             return finish(state)
+        if not any(run.metrics for run in runs) and event == "analyzed":
+            return Command(
+                update={"feedback": "The attributed runs have no metrics yet."},
+                goto="analyze",
+            )
         if event == "revise_analysis":
             feedback = arguments.get("feedback")
             return Command(

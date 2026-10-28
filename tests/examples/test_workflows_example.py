@@ -11,7 +11,15 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
-from hiraku.workflows.langgraph import resume_workflow, start_workflow, workflow_status
+from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
+from hiraku.workflows.langgraph import start_workflow, workflow_status
+
+
+def resume_workflow(session_id, response, *, config):
+    status = workflow_status(session_id, config=config)
+    return _resume_workflow(
+        session_id, response, config=config, checkpoint_id=status["checkpoint_id"]
+    )
 
 
 def invoke(runner: CliRunner, arguments: list[str], payload: Any = None) -> Any:
@@ -89,7 +97,15 @@ def test_cli_uses_workflow_session_ids_for_resume_and_status(runner: CliRunner) 
     completed = json.loads(
         invoke(
             runner,
-            ["workflow", "resume", workflow_session_id, "--arguments-file", "-"],
+            [
+                "workflow",
+                "resume",
+                workflow_session_id,
+                "--checkpoint-id",
+                started["checkpoint_id"],
+                "--arguments-file",
+                "-",
+            ],
             {"token": interrupt["data"]["token"], "decision": "continue"},
         ).output
     )

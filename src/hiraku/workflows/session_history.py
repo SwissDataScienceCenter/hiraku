@@ -7,12 +7,25 @@ import sqlite3
 from collections.abc import Mapping
 from contextlib import closing
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from ..config import HirakuConfig
 from ..errors import ValidationError
 
 CHECKPOINTS = "langgraph-checkpoints.sqlite"
+
+
+def checkpoint_database(config: HirakuConfig) -> Path:
+    """Prepare a local-only home for checkpoints and session locks."""
+    directory = config.hiraku_dir / ".hiraku"
+    directory.mkdir(parents=True, exist_ok=True)
+    ignore = directory / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("*\n", encoding="utf-8")
+    # Preserve access to databases created by earlier versions.
+    legacy = config.hiraku_dir / CHECKPOINTS
+    return legacy if legacy.exists() else directory / CHECKPOINTS
 
 
 def _context_json(context: Mapping[str, Any] | None) -> str:
@@ -74,7 +87,7 @@ def record_event(
     """Atomically append an event and update Hiraku's session index."""
     encoded = _context_json(context)
     timestamp = datetime.now(UTC).isoformat()
-    database = config.hiraku_dir / CHECKPOINTS
+    database = checkpoint_database(config)
     database.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(database, timeout=30)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -121,7 +134,7 @@ def _decode(row: sqlite3.Row) -> dict[str, Any]:
 
 def list_sessions(*, config: HirakuConfig) -> list[dict[str, Any]]:
     """List indexed sessions without loading workflow code."""
-    database = config.hiraku_dir / CHECKPOINTS
+    database = checkpoint_database(config)
     if not database.is_file():
         return []
     with closing(sqlite3.connect(database)) as connection:
@@ -141,7 +154,7 @@ def session_history(
     workflow_session_id: str, *, config: HirakuConfig
 ) -> dict[str, Any]:
     """Read stored session metadata and events without executing the graph."""
-    database = config.hiraku_dir / CHECKPOINTS
+    database = checkpoint_database(config)
     if database.is_file():
         with closing(sqlite3.connect(database)) as connection:
             connection.row_factory = sqlite3.Row

@@ -12,7 +12,8 @@ arguments:
 Increase the `count` of record {{record}} from {{count}} to {{next}}, with
 `hiraku record update {{record}} --set count={{next}}` or the `record_update`
 tool. Change nothing else. Then call `workflow_resume` with workflow session ID
-`{{workflow_session_id}}` and response `{"record_id": "{{record}}"}`. If the update did not
+`{{workflow_session_id}}`, the checkpoint ID returned by start or status, and
+response `{"record_id": "{{record}}"}`. If the update did not
 work, report that and do not claim success.
 
 ## Done

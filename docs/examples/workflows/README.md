@@ -31,7 +31,7 @@ returns an instruction for the current coding harness to carry out.
 Ask Codex to start count-steps with count 3. It calls `workflow_start` and
 receives a `workflow_session_id` plus a structured interrupt containing the step text. Show
 the line to the user, then wait for their choice. Resume with
-`workflow_resume(workflow_session_id, {"token": "...", "decision": "continue"})`, or use
+`workflow_resume(workflow_session_id, {"token": "...", "decision": "continue"}, checkpoint_id)`, or use
 `"finish"` to stop. `workflow_status(workflow_session_id)` inspects progress without
 advancing it. The token must match the current step; invalid responses pause
 again with an explanation.

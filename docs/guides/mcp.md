@@ -89,10 +89,14 @@ with `application/pdf`; interpretation depends on the MCP client's capabilities.
 
 ## Workflows
 
-Project workflows are LangGraph graphs. Use `workflow_list` to discover them,
-`workflow_start` to start one, `workflow_status` to inspect it, and
-`workflow_resume` to continue an interrupted session. See the
-[Workflows guide](workflows.md).
+Project workflows are listed with `workflow_list`, started with
+`workflow_start(workflow_id, arguments)`, inspected with
+`workflow_status(workflow_session_id)`, and resumed with
+`workflow_resume(workflow_session_id, response, checkpoint_id)`. Every workflow is a LangGraph graph defined
+by `build_graph(checkpointer, *, config)` in `workflow.py`; there is no
+Hiraku-specific event protocol or per-workflow MCP tool. The workflow session ID is the
+LangGraph thread ID, and resumable graph state is checkpointed in
+`.hiraku/langgraph-checkpoints.sqlite` by default. See the [Workflows guide](workflows.md).
 
 Any workflow interrupt can request approval by including an `approval` object
 in its interrupt payload. `workflow_approval` takes the workflow session ID, interrupt ID,

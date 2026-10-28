@@ -5,7 +5,15 @@ from pathlib import Path
 
 from hiraku.config import HirakuConfig
 from hiraku.record import Record, load_record
-from hiraku.workflows.langgraph import resume_workflow, start_workflow
+from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
+from hiraku.workflows.langgraph import start_workflow, workflow_status
+
+
+def resume_workflow(session_id, response, *, config):
+    status = workflow_status(session_id, config=config)
+    return _resume_workflow(
+        session_id, response, config=config, checkpoint_id=status["checkpoint_id"]
+    )
 
 
 def _commit(path: Path) -> str:
@@ -78,9 +86,19 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     assert "hiraku run --record dropout -- python train.py" in launch["data"]["command"]
 
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
-        stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,0.8\n")
+        stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,\n")
     result = resume_workflow(
         result["workflow_session_id"], _approved({"event": "launched"}), config=config
+    )
+    pending = _interrupt(result)
+    assert pending["step"] == "analyze"
+    assert pending["data"]["metrics_pending"] is True
+    with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
+        stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,0.8\n")
+    result = resume_workflow(
+        result["workflow_session_id"],
+        _approved({"event": "revise_analysis", "arguments": {"feedback": "Retry"}}),
+        config=config,
     )
     assert _interrupt(result)["step"] == "analyze"
 

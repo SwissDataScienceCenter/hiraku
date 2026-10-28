@@ -777,11 +777,16 @@ def workflow_status_command(state: CLIContext, workflow_session_id: str) -> None
 
 @workflow_group.command("resume")
 @click.argument("workflow_session_id")
+@click.option("--checkpoint-id", required=True, help="Checkpoint ID from status.")
 @_ARGUMENTS_FILE
 @_CONTEXT_FILE
 @click.pass_obj
 def workflow_resume_command(
-    state: CLIContext, workflow_session_id: str, arguments_file: Any, context_file: Any
+    state: CLIContext,
+    workflow_session_id: str,
+    checkpoint_id: str,
+    arguments_file: Any,
+    context_file: Any,
 ) -> None:
     """Resume a paused LangGraph workflow with a JSON response."""
     from .workflows.langgraph import resume_workflow
@@ -791,6 +796,7 @@ def workflow_resume_command(
             workflow_session_id,
             _arguments(arguments_file),
             config=state.config,
+            checkpoint_id=checkpoint_id,
             context=_arguments(context_file, name="context"),
         )
     )

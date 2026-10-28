@@ -13,12 +13,19 @@ from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.mcp import WorkflowApproval, create_server
 from hiraku.record import Record
+from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import (
-    resume_workflow,
     start_workflow,
     workflow_mermaid,
     workflow_status,
 )
+
+
+def resume_workflow(session_id, response, *, config):
+    status = workflow_status(session_id, config=config)
+    return _resume_workflow(
+        session_id, response, config=config, checkpoint_id=status["checkpoint_id"]
+    )
 
 
 def _project(tmp_path) -> HirakuConfig:
@@ -253,6 +260,7 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
                 {
                     "workflow_session_id": started["workflow_session_id"],
                     "response": approval.structured_content,
+                    "checkpoint_id": started["checkpoint_id"],
                 },
             )
             return approval, resumed
@@ -363,6 +371,7 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
                 {
                     "workflow_session_id": started["workflow_session_id"],
                     "response": approval.structured_content,
+                    "checkpoint_id": started["checkpoint_id"],
                 },
             )
 
@@ -400,6 +409,7 @@ def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
                 {
                     "workflow_session_id": first["workflow_session_id"],
                     "response": approval.structured_content,
+                    "checkpoint_id": first["checkpoint_id"],
                 },
             )
 

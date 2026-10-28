@@ -14,13 +14,14 @@ from types import ModuleType
 from typing import Any
 from uuid import uuid4
 
+from filelock import FileLock
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
 from ..base import BaseRecord
 from ..config import HirakuConfig
 from ..errors import ValidationError, WorkflowError
-from .session_history import CHECKPOINTS, record_event, validate_context
+from .session_history import checkpoint_database, record_event, validate_context
 
 logger = logging.getLogger(__name__)
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
@@ -107,10 +108,28 @@ def resume_workflow(
     response: Mapping[str, Any],
     *,
     config: HirakuConfig,
+    checkpoint_id: str,
     context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resume a paused graph with the harness's structured response."""
     validate_context(context)
+    lock_dir = config.hiraku_dir / ".hiraku" / "locks"
+    checkpoint_database(config)
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_name = hashlib.sha256(workflow_session_id.encode()).hexdigest()
+    with FileLock(str(lock_dir / f"{lock_name}.lock")):
+        return _resume_locked(
+            workflow_session_id, response, config, checkpoint_id, context
+        )
+
+
+def _resume_locked(
+    workflow_session_id: str,
+    response: Mapping[str, Any],
+    config: HirakuConfig,
+    checkpoint_id: str,
+    context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
     graph_workflow = _find_run(workflow_session_id, config)
     if graph_workflow is None:
         raise ValidationError(
@@ -122,6 +141,9 @@ def resume_workflow(
             raise ValidationError(
                 f"Workflow session {workflow_session_id!r} is not waiting for input"
             )
+        current_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
+        if not checkpoint_id or checkpoint_id != current_id:
+            raise ValidationError("Workflow checkpoint has changed; inspect its status")
         record_event(
             workflow_session_id,
             graph_workflow,
@@ -216,7 +238,7 @@ def _compiled_graph(workflow_id: str, config: HirakuConfig) -> Iterator[Any]:
     factory = getattr(module, "build_graph", None)
     if not callable(factory):
         raise WorkflowError(f"{directory / 'workflow.py'} must export build_graph")
-    database = config.hiraku_dir / CHECKPOINTS
+    database = checkpoint_database(config)
     database.parent.mkdir(parents=True, exist_ok=True)
     with SqliteSaver.from_conn_string(str(database)) as checkpointer:
         try:
@@ -313,6 +335,7 @@ def _snapshot_result(
         "workflow_id": workflow_id,
         "status": "completed" if completed else "waiting",
         "interrupts": interrupts,
+        "checkpoint_id": snapshot.config.get("configurable", {}).get("checkpoint_id"),
     }
     if completed:
         result["result"] = snapshot.values.get("final")

@@ -58,10 +58,14 @@ resumed; earlier history and creation time cannot be reconstructed by the journa
 If the graph pauses with an interrupt, send its structured response to resume:
 
 ```bash
-hiraku workflow resume <workflow-session-id> --arguments-file - <<'JSON'
+hiraku workflow resume <workflow-session-id> --checkpoint-id <checkpoint-id> --arguments-file - <<'JSON'
 {"token": "...", "decision": "continue"}
 JSON
 ```
+
+Use the `checkpoint_id` returned by start or status. A stale checkpoint is
+rejected, so retrying an earlier response cannot answer a later interrupt.
+Resumes of the same session are serialized across local processes.
 
 The same operations are available through MCP as `workflow_list`,
 `workflow_start`, `workflow_status`, and `workflow_resume`. The MCP tools pass
@@ -164,7 +168,9 @@ records, launches, tracked runs, and provenance from their nodes.
 ## State and persistence
 
 The workflow session ID maps to LangGraph's `thread_id`; checkpoints are stored in
-`.hiraku/langgraph-checkpoints.sqlite`. Use the same workflow session ID for
+`hiraku/.hiraku/langgraph-checkpoints.sqlite` (under the configured Hiraku data
+directory). The local directory ignores its own contents. Existing databases in
+the data directory remain in use. Use the same workflow session ID for
 status and resume.
 Checkpoint state is execution state, while Hiraku research records and tracked
 runs remain the durable research history.

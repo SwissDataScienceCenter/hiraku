@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import anyio
@@ -13,11 +14,56 @@ from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.mcp import create_server
 from hiraku.workflows.langgraph import resume_workflow, start_workflow
-from hiraku.workflows.session_history import CHECKPOINTS, list_sessions, session_history
+from hiraku.workflows.session_history import (
+    checkpoint_database,
+    list_sessions,
+    session_history,
+)
 
 
 def _project(tmp_path: Path) -> HirakuConfig:
     return HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
+
+
+def test_concurrent_resumes_reject_stale_checkpoint(tmp_path: Path) -> None:
+    config = _project(tmp_path)
+    started = start_workflow("count-steps", {"count": 2}, config=config)
+    session_id = started["workflow_session_id"]
+    token = started["interrupts"][0]["value"]["data"]["token"]
+
+    def resume():
+        try:
+            return resume_workflow(
+                session_id,
+                {"token": token, "decision": "continue"},
+                checkpoint_id=started["checkpoint_id"],
+                config=config,
+            )
+        except ValidationError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: resume(), range(2)))
+    assert sum(isinstance(result, ValidationError) for result in results) == 1
+    assert sum(isinstance(result, dict) for result in results) == 1
+    error = next(r for r in results if isinstance(r, Exception))
+    assert "checkpoint has changed" in str(error)
+
+
+def test_checkpoint_storage_is_ignored(tmp_path: Path) -> None:
+    import subprocess
+
+    config = _project(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    start_workflow("count-steps", config=config)
+    database = checkpoint_database(config)
+    assert database.is_file()
+    assert (
+        subprocess.run(
+            ["git", "check-ignore", str(database)], cwd=tmp_path, check=False
+        ).returncode
+        == 0
+    )
 
 
 def test_session_history_survives_restart_and_missing_workflow(tmp_path: Path) -> None:
@@ -35,6 +81,7 @@ def test_session_history_survives_restart_and_missing_workflow(tmp_path: Path) -
         session_id,
         {"token": token, "decision": "continue"},
         config=HirakuConfig.load(config.path),
+        checkpoint_id=started["checkpoint_id"],
         context={"client": "claude"},
     )
     assert completed["status"] == "completed"
@@ -54,7 +101,7 @@ def test_session_history_survives_restart_and_missing_workflow(tmp_path: Path) -
     assert all("response" not in event for event in history["events"])
     assert list_sessions(config=config) == [history["session"]]
 
-    with sqlite3.connect(config.hiraku_dir / CHECKPOINTS) as connection:
+    with sqlite3.connect(checkpoint_database(config)) as connection:
         checkpoint = connection.execute(
             "SELECT 1 FROM checkpoints WHERE thread_id = ? AND checkpoint_id = ?",
             (session_id, history["session"]["checkpoint_id"]),
@@ -86,7 +133,7 @@ def test_legacy_checkpoint_is_indexed_when_resumed(tmp_path: Path) -> None:
     started = start_workflow("count-steps", {"count": 1}, config=config)
     session_id = started["workflow_session_id"]
     token = started["interrupts"][0]["value"]["data"]["token"]
-    with sqlite3.connect(config.hiraku_dir / CHECKPOINTS) as connection:
+    with sqlite3.connect(checkpoint_database(config)) as connection:
         connection.execute("DROP TABLE hiraku_workflow_session_events")
         connection.execute("DROP TABLE hiraku_workflow_sessions")
     assert list_sessions(config=config) == []
@@ -94,6 +141,7 @@ def test_legacy_checkpoint_is_indexed_when_resumed(tmp_path: Path) -> None:
         session_id,
         {"token": token, "decision": "continue"},
         config=config,
+        checkpoint_id=started["checkpoint_id"],
         context={"client": "resuming-client"},
     )
     history = session_history(session_id, config=config)
@@ -144,6 +192,7 @@ def test_mcp_exposes_sessions_and_transition_context(tmp_path: Path) -> None:
         {
             "workflow_session_id": session_id,
             "response": {"token": token, "decision": "continue"},
+            "checkpoint_id": started["checkpoint_id"],
             "context": {"trace": "xyz"},
         },
     )
