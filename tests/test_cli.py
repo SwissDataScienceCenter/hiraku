@@ -190,27 +190,35 @@ def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> Non
 
 
 @pytest.mark.parametrize("value", ["null", "42"])
-def test_context_update_rejects_invalid_markdown(
+def test_record_update_rejects_invalid_markdown(
     value: str, tmp_path: Path, monkeypatch
 ) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    assert invoke("context", "create", "test").exit_code == 0
-    result = invoke("context", "update", "test", "--set", f"markdown={value}")
+    assert invoke("record", "create", "test", "--type", "context").exit_code == 0
+    result = invoke("record", "update", "test", "--set", f"markdown={value}")
     assert result.exit_code != 0
-    assert "Input should be a valid string" in result.output
-    assert invoke("context", "show", "test").exit_code == 0
+    assert "Use --markdown-file" in result.output
+    assert invoke("record", "show", "test").exit_code == 0
 
 
-def test_generic_agent_commands_still_work(tmp_path: Path, monkeypatch) -> None:
+def test_contexts_use_record_commands(tmp_path: Path, monkeypatch) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    assert invoke("context", "create", "literature", "--set", "x=1").exit_code == 0
     assert (
-        json.loads(invoke("context", "show", "literature", "--json").output)["x"] == 1
+        invoke(
+            "record", "create", "literature", "--type", "context", "--set", "x=1"
+        ).exit_code
+        == 0
     )
-    assert invoke("context", "update", "literature", "--set", "x=2").exit_code == 0
-    for removed in ("program", "action"):
+    assert (
+        json.loads(invoke("record", "show", "literature", "--raw", "--json").output)[
+            "values"
+        ]["x"]
+        == 1
+    )
+    assert invoke("record", "update", "literature", "--set", "x=2").exit_code == 0
+    for removed in ("context", "program", "action"):
         result = invoke(removed, "list")
         assert result.exit_code != 0
         assert "No such command" in result.output
@@ -219,18 +227,14 @@ def test_generic_agent_commands_still_work(tmp_path: Path, monkeypatch) -> None:
 @pytest.mark.parametrize(
     ("command", "header"),
     [
-        ("context", ["id"]),
+        ("record", ["id", "parent", "type", "status"]),
     ],
 )
 def test_generic_list_with_no_entries(
     command: str, header: list[str], tmp_path: Path, monkeypatch
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    directory = {"context": config.contexts_dir}[command]
-    for path in directory.rglob("*.md"):
-        path.unlink()
-
     result = invoke(command, "list")
     assert result.exit_code == 0
     lines = result.output.splitlines()

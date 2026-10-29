@@ -10,7 +10,6 @@ import pytest
 from mcp import Client, StdioServerParameters
 
 from hiraku.config import HirakuConfig
-from hiraku.context import Context
 from hiraku.errors import WorkflowError
 from hiraku.mcp import create_server
 from hiraku.record import Record
@@ -150,19 +149,20 @@ def write_loop(config: HirakuConfig) -> None:
 
 
 def test_instruction_research_resources(config):
-    context_path = config.contexts_dir / "protocol" / "context.md"
-    Context(id="protocol", markdown="Original protocol").save(context_path)
+    protocol_path = config.records_dir / "protocol" / "protocol.md"
+    Record.create(
+        "protocol", type="context", markdown="Original protocol", config=config
+    )
     directory = config.workflows_dir / "echo"
     directory.mkdir()
     (directory / "workflow.md").write_text("---\nid: echo\n---\nEcho")
     source = ECHO_PY.replace(
         'return Instruction(f"Work on {task.task}.")',
         'return Instruction(f"Work on {task.task}.", '
-        'context={"contexts": ["protocol"], "records": ["task"]})',
+        'context={"records": ["protocol", "task"]})',
     ).replace(
         'data={"summary": task.summary}',
-        'data={"summary": task.summary}, '
-        'context={"contexts": ["protocol"], "records": ["task"]}',
+        'data={"summary": task.summary}, context={"records": ["protocol", "task"]}',
     )
     (directory / "workflow.py").write_text(source)
 
@@ -171,8 +171,7 @@ def test_instruction_research_resources(config):
         response = payload(started)
         assert started.structured_content == response
         assert response["instruction"]["context"] == {
-            "contexts": ["protocol"],
-            "records": ["task"],
+            "records": ["protocol", "task"],
         }
 
         async def check_resources(result, protocol):
@@ -183,22 +182,22 @@ def test_instruction_research_resources(config):
             ]
             for block, uri, mime in zip(
                 result.content[1:],
-                ["hiraku://contexts/protocol", "hiraku://records/task"],
-                ["text/markdown", "application/json"],
+                ["hiraku://records/protocol", "hiraku://records/task"],
+                ["application/json", "application/json"],
                 strict=True,
             ):
                 assert str(block.uri) == uri
                 assert block.mime_type == mime
                 read = await client.read_resource(uri)
-                if mime == "text/markdown":
-                    assert read.contents[0].text == protocol
-                else:
-                    assert json.loads(read.contents[0].text)["id"] == "task"
+                resource = json.loads(read.contents[0].text)
+                assert resource["id"] in {"protocol", "task"}
+                if resource["id"] == "protocol":
+                    assert resource["markdown"] == protocol
 
         await check_resources(started, "Original protocol")
-        Context(id="protocol", markdown="Updated protocol").save(
-            context_path, overwrite=True
-        )
+        updated = Record.load(protocol_path)
+        updated.markdown = "Updated protocol"
+        updated.save(overwrite=True)
         shown = await client.call_tool(
             "session_show", {"session_id": response["session_id"]}
         )
@@ -218,7 +217,7 @@ def test_instruction_research_resources(config):
         )
         assert payload(stale)["status"] == "stale"
         await check_resources(stale, "Updated protocol")
-        context_path.unlink()
+        protocol_path.unlink()
         missing = await client.call_tool(
             "session_show", {"session_id": response["session_id"]}
         )

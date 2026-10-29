@@ -40,12 +40,12 @@ an entrypoint; instrumented code independently writes the resulting run to the t
 ## Main CLI entry points
 
 When the connected agent environment provides Hiraku MCP tools, use them for
-record and context CRUD, project resources, and attributed entrypoint launches.
+record CRUD, project resources, and attributed entrypoint launches.
 The MCP server uses the project directory selected by the host and applies the
 same Hiraku validation and persistence rules as the Python API. Use the CLI
 commands below when the relevant MCP tool is unavailable or the user asks for
 CLI commands. MCP tools may be listed under names such as `record_create`,
-`record_show`, or `context_list`.
+`record_show`, or `record_list`.
 
 Prefer `--json` for state that will be inspected or verified programmatically.
 
@@ -57,7 +57,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
 | Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_send_event`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow send-event SESSION EVENT` |
 | Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
-| Manage context records | `hiraku context ...` |
+| Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
 Use `record show` and `record entrypoints`
@@ -334,7 +334,7 @@ the tool named after it. Start and accepted-event responses contain one instruct
 inline `data`, optional research `context`, and, unless it is final, an `events`
 block that says which events it accepts:
 
-1. Read attached research contexts and records, then carry out the instruction
+1. Read attached research records, then carry out the instruction
    text using its `data`. MCP returns native resource links by default; fetch
    them before use to retrieve their current contents.
 2. Follow any requests for user approval in the instruction text before sending
@@ -394,6 +394,6 @@ attribution explicitly. Stop when the user's requested scope is complete.
 The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
 `Entrypoint`, `Metric`, loaders, and listing functions in `hiraku.record`;
 `BaseRecord` in `hiraku.base`; `Run` in `hiraku.run`;
-and `hiraku.launch.launch` for scripted use. `hiraku context` manages
+and `hiraku.launch.launch` for scripted use. Records with `type: context` store
 supporting material. Workflows run in the current coding agent through the
 Hiraku MCP server (`hiraku mcp`).

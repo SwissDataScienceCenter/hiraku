@@ -162,13 +162,12 @@ Instruction(
     "Evaluate the experiment.",
     data={"metric": "accuracy"},
     context={
-        "contexts": ["evaluation-protocol"],
-        "records": ["experiment-42"],
+        "records": ["evaluation-protocol", "experiment-42"],
     },
 )
 ```
 
-Both context lists are optional. Unknown keys and non-string IDs are rejected.
+The record list is optional. Unknown keys and non-string IDs are rejected.
 References are resolved against the workflow's project before session progress is
 saved; missing references fail the step. Duplicate IDs are removed in order.
 Sessions store IDs rather than content snapshots. Reading a reference later sees

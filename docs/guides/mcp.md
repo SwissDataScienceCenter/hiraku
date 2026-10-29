@@ -9,12 +9,11 @@ so each client starts it in the project it is working on:
 uv run hiraku mcp
 ```
 
-Workflow start, event, and session-show tools return attached research contexts
-and records as native MCP resource links alongside their JSON response. Read
-those resources before carrying out the instruction. Resources provide live
-contents; stored instructions contain only references.
-Attached contexts use `text/markdown`; records use `application/json`. Their
-canonical `hiraku://contexts/...` and `hiraku://records/...` URIs remain readable.
+Workflow start, event, and session-show tools return attached records as native
+MCP resource links alongside their JSON response. Read those resources before
+carrying out the instruction. Resources provide live contents; stored
+instructions contain only references. All records use `application/json` at
+`hiraku://records/...` URIs, regardless of their `type`.
 Source files and parent records are not attached automatically. A deleted
 attachment is returned as a link with an unavailability diagnostic; accepted
 session progress is retained. Prompts remain text-based and list the same IDs.
@@ -64,14 +63,12 @@ and fall back to the CLI when the host has not connected the server.
 | `record_list`, `record_show` | Read records; show includes inherited values and their sources. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
 | `record_reparent` | Move a record subtree under a parent, or make it a root. |
-| `context_list`, `context_show` | Read curated context metadata and Markdown. |
-| `context_create`, `context_update`, `context_delete` | Persist or remove context metadata. Deletion leaves attached files in place. |
 | `launch_entrypoint` | Execute a configured record entrypoint through the dispatcher, preserving attribution. |
 | `runs` | List tracked runs attributed to a record, like `hiraku runs`; `all_records` lists every attributed run in its tracking source. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
 Record creation activates the record by default; pass `activate: false` to leave
-the active context unchanged. Update tools merge `fields` and optionally replace
+the active record unchanged. Update tools merge `fields` and optionally replace
 the Markdown body. Set a field to `null` to clear its value. IDs and persistence
 paths cannot be changed; use `record_reparent` to change the organizational parent.
 Expected failures are returned as MCP tool errors.
@@ -94,16 +91,15 @@ resources are loaded on each request, including after changes made outside MCP.
 | URI | Content |
 | --- | --- |
 | `hiraku://records/{record_id}` | Record fields and Markdown as JSON. |
-| `hiraku://contexts/{context_id}` | Curated context Markdown. |
 | `hiraku://workflows/{workflow_id}` | Prompt document of a workflow. |
 | `hiraku://sessions/{session_id}` | Stored state of a workflow session as JSON. |
-| `hiraku://sources/{context_id}/{source_path}` | Attached file as an MCP blob with its inferred MIME type. |
+| `hiraku://sources/{record_id}/{source_path}` | File attached to a record as an MCP blob with its inferred MIME type. |
 
-Place PDFs, literature reviews and other source files inside a context directory,
-for example `hiraku/contexts/literature/papers/study.pdf`, alongside its
-`context.md`. The catalog returns percent-encoded source paths, including encoded
+Place PDFs, literature reviews and other source files inside a record directory,
+for example `hiraku/records/literature/study.pdf`, alongside `literature.md`.
+The catalog returns percent-encoded source paths, including encoded
 slashes for nested directories. Use those URIs directly. File access rejects
-paths and symlinks escaping the selected context directory. PDF bytes are served
+paths and symlinks escaping the selected record directory. PDF bytes are served
 with `application/pdf`; interpretation depends on the MCP client's capabilities.
 
 ## Workflows
@@ -121,8 +117,8 @@ on access.
 ## Prompt template
 
 The optional `propose_implementation` prompt takes a `record_id` and a
-comma-separated `context_ids` string. It includes current record and context
-content and asks the agent to cite evidence, distinguish assumptions, inspect
+comma-separated `related_record_ids` string. It includes the selected and
+related records and asks the agent to cite evidence, distinguish assumptions, inspect
 attached sources and describe validation before making changes. It returns
 instructions only; it does not run an agent or modify the project.
 

@@ -25,7 +25,6 @@ from pydantic_core import to_jsonable_python
 
 from ..base import BaseRecord
 from ..config import HirakuConfig
-from ..context import load_context
 from ..errors import ValidationError, WorkflowError
 from ..record import load_record
 from .graph import Event, EventArguments, State, WorkflowGraph
@@ -39,7 +38,7 @@ class Instruction(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     text: str = Field(min_length=1)
     data: Any = None
-    context: dict[Literal["contexts", "records"], list[str]] | None = None
+    context: dict[Literal["records"], list[str]] | None = None
     events: dict[str, Any] | None = None
 
     def __init__(
@@ -47,7 +46,7 @@ class Instruction(BaseModel):
         text: str,
         *,
         data: Any = None,
-        context: dict[Literal["contexts", "records"], list[str]] | None = None,
+        context: dict[Literal["records"], list[str]] | None = None,
         **values: Any,
     ) -> None:
         super().__init__(
@@ -167,11 +166,10 @@ class Workflow(BaseRecord):
         instruction = Instruction.model_validate(raw)
         if instruction.context:
             config = self.config
-            for key, loader in (("contexts", load_context), ("records", load_record)):
-                identifiers = instruction.context.get(key, [])
-                identifiers[:] = dict.fromkeys(identifiers)
-                for identifier in identifiers:
-                    loader(identifier, config=config)
+            identifiers = instruction.context.get("records", [])
+            identifiers[:] = dict.fromkeys(identifiers)
+            for identifier in identifiers:
+                load_record(identifier, config=config)
         return state, instruction
 
     @model_validator(mode="after")

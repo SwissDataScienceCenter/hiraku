@@ -241,11 +241,6 @@ class HirakuConfig(BaseModel):
         return self.hiraku_dir / "sessions"
 
     @property
-    def contexts_dir(self) -> Path:
-        """Return the directory containing curated context records."""
-        return self.hiraku_dir / "contexts"
-
-    @property
     def dispatch_dir(self) -> Path:
         """Return the directory containing launcher dispatch scripts."""
         return self.hiraku_dir / "dispatch"

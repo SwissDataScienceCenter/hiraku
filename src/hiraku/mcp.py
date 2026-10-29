@@ -36,7 +36,6 @@ from pydantic_core import to_jsonable_python
 
 from .base import BaseRecord
 from .config import HirakuConfig
-from .context import Context, list_contexts, load_context
 from .errors import HirakuError, ValidationError, WorkflowError
 from .launch import launch, render_arguments
 from .record import Record, list_records, load_record
@@ -220,43 +219,6 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         return {"deleted": record_id}
 
     @server.tool()
-    def context_list() -> list[dict[str, Any]]:
-        """List curated contexts."""
-        return [_data(item) for item in list_contexts(config=selected)]
-
-    @server.tool()
-    def context_show(context_id: str) -> dict[str, Any]:
-        """Read a curated context."""
-        return _data(load_context(context_id, config=selected))
-
-    @server.tool()
-    def context_create(
-        context_id: str, markdown: str = "", fields: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """Create a context with Markdown and optional metadata."""
-        extras = fields or {}
-        if {"id", "path", "markdown"}.intersection(extras):
-            raise ValidationError("Use named arguments for identity and Markdown")
-        context = Context(id=context_id, markdown=markdown, **extras)
-        context.save(selected.contexts_dir / context.id / "context.md")
-        return _data(context)
-
-    @server.tool()
-    def context_update(
-        context_id: str, fields: dict[str, Any], markdown: str | None = None
-    ) -> dict[str, Any]:
-        """Merge context metadata and optionally replace its Markdown."""
-        return _data(
-            _update(load_context(context_id, config=selected), fields, markdown)
-        )
-
-    @server.tool()
-    def context_delete(context_id: str) -> dict[str, str]:
-        """Delete context metadata; attached source files remain on disk."""
-        load_context(context_id, config=selected).delete()
-        return {"deleted": context_id}
-
-    @server.tool()
     def launch_entrypoint(
         record_id: str,
         entrypoint_name: str,
@@ -328,16 +290,15 @@ def create_server(config: HirakuConfig | None = None) -> Any:
 
     @server.resource("hiraku://catalog", mime_type="application/json")
     def catalog() -> str:
-        """Discover current records, contexts and source files."""
+        """Discover records and attached source files."""
         uris = [f"hiraku://records/{item.id}" for item in list_records(config=selected)]
-        for context in list_contexts(config=selected):
-            uris.append(f"hiraku://contexts/{context.id}")
-            root = (selected.contexts_dir / context.id).resolve()
+        for record in list_records(config=selected):
+            root = (selected.records_dir / record.path.parent.name).resolve()
             for path in sorted(root.rglob("*")):
                 if path.is_file() and path.resolve().is_relative_to(root):
                     relative = path.relative_to(root).as_posix()
                     uris.append(
-                        f"hiraku://sources/{context.id}/{quote(relative, safe='')}"
+                        f"hiraku://sources/{record.id}/{quote(relative, safe='')}"
                     )
         return json.dumps(uris)
 
@@ -345,35 +306,31 @@ def create_server(config: HirakuConfig | None = None) -> Any:
     def record_resource(record_id: str) -> str:
         return _research_content("records", record_id, selected)
 
-    @server.resource("hiraku://contexts/{context_id}", mime_type="text/markdown")
-    def context_resource(context_id: str) -> str:
-        return _research_content("contexts", context_id, selected)
-
-    @server.resource("hiraku://sources/{context_id}/{source_path}")
-    def source_resource(context_id: str, source_path: str) -> bytes:
-        load_context(context_id, config=selected)
-        root = (selected.contexts_dir / context_id).resolve()
+    @server.resource("hiraku://sources/{record_id}/{source_path}")
+    def source_resource(record_id: str, source_path: str) -> bytes:
+        record = load_record(record_id, config=selected)
+        root = (selected.records_dir / record.path.parent.name).resolve()
         path = (root / unquote(source_path)).resolve()
         if not path.is_relative_to(root) or not path.is_file():
-            raise ResourceError("Source must be a file inside its context directory")
+            raise ResourceError("Source must be a file inside its record directory")
         return path.read_bytes()
 
     @server.prompt()
-    def propose_implementation(record_id: str, context_ids: str = "") -> str:
-        """Ground a proposal in a record and comma-separated contexts."""
+    def propose_implementation(record_id: str, related_record_ids: str = "") -> str:
+        """Ground a proposal in a record and comma-separated related records."""
         record = load_record(record_id, config=selected)
-        contexts = [
-            load_context(identifier.strip(), config=selected)
-            for identifier in context_ids.split(",")
+        related = [
+            load_record(identifier.strip(), config=selected)
+            for identifier in related_record_ids.split(",")
             if identifier.strip()
         ]
-        evidence = "\n\n".join(f"## {item.id}\n{item.markdown}" for item in contexts)
+        evidence = "\n\n".join(f"## {item.id}\n{item.markdown}" for item in related)
         return (
             "Propose the next implementation for this research record. Cite the "
             "curated evidence, distinguish observations from assumptions, and "
             "describe validation before making changes. Inspect attached sources "
             "through hiraku://catalog when needed.\n\n"
-            f"Record: {json.dumps(_data(record))}\n\nContexts:\n{evidence}"
+            f"Record: {json.dumps(_data(record))}\n\nRelated records:\n{evidence}"
         )
 
     add_workflow_tools(server, selected)
@@ -707,8 +664,6 @@ def _register_resources(
 
 def _research_content(kind: str, identifier: str, config: HirakuConfig) -> str:
     """Read the same live representation for resources and tool attachments."""
-    if kind == "contexts":
-        return str(load_context(identifier, config=config).markdown)
     return json.dumps(_data(load_record(identifier, config=config)))
 
 
@@ -722,7 +677,7 @@ def _instruction_result(
     instruction = response.get("instruction")
     context = instruction.get("context") if isinstance(instruction, Mapping) else None
     for kind, identifiers in (context or {}).items():
-        mime = "text/markdown" if kind == "contexts" else "application/json"
+        mime = "application/json"
         for identifier in identifiers:
             uri = f"hiraku://{kind}/{quote(identifier, safe='')}"
             link = ResourceLink(

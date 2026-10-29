@@ -187,13 +187,13 @@ hierarchy and selection styling remain in the Studio view's `style.css`.
 ### Reusing Markdown rendering
 
 `hiraku.dashboard.components.markdown_view(record)` accepts any `BaseRecord`
-subtype, including research records, contexts, programs, and actions. It reads
+subtype, including research records and generic Markdown records. It reads
 the ID, front matter, and Markdown body directly from the object, displaying
 collapsed metadata labeled with the ID above the body. For example:
 
 ```python
 hc.markdown_view(record)
-hc.markdown_view(context)
+hc.markdown_view(record)
 ```
 
 Loading and persistence remain with the caller. The component does not load,

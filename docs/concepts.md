@@ -157,14 +157,15 @@ A *workflow* is a project-defined research procedure that runs inside your
 coding agent. Its Python code decides what happens next and validates what the
 agent reports; its Markdown holds the guidance the agent follows. The agent
 starts a workflow and continues it through the Hiraku MCP server, which
-`hiraku init` configures for Claude Code and Codex. *Context* files provide
-project-relevant information to the agent.
+`hiraku init` configures for Claude Code and Codex. Records with
+`type: context` provide project-relevant information to the agent and can be
+linked to other records.
 
 | Term | Data | Summary |
 | --- | ---  | --- |
 | **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A record with an `id`, settings, and prompts (`workflow.md`) whose class adds the operations (`workflow.py`). |
 | **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its state, history, and current instruction. Sessions are local and not committed. |
-| **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
+| **Record** | `hiraku/records/{root_id}/{record_id}.md` | Research content of any kind, including tasks, experiments, literature, datasets, and context. Use `type` to describe the record. |
 
 Hiraku ships the `collaborative` workflow as an editable copy in your
 project. See the [Workflows guide](guides/workflows.md) for how
@@ -173,9 +174,14 @@ sessions work and how to write your own.
 ```bash
 hiraku workflow list
 hiraku session list
-hiraku context create <context-id>
-hiraku context list
+hiraku record create literature --type context
+hiraku record list
 ```
+
+Existing projects must move each `hiraku/contexts/{id}/context.md` file to
+`hiraku/records/{id}/{id}.md`, add `type: context` to its frontmatter, and move
+its supporting files into the same record directory. Context-specific CLI and
+MCP operations are replaced by record operations.
 
 
 
@@ -190,14 +196,9 @@ The following sequence illustrates the intended workflow.
 hiraku init
 hiraku status
 
-# 1. optionally, initialize context (not implement yet)
-hiraku context create literature
+# 1. optionally, create a context record
+hiraku record create literature --type context
 # Ask your coding agent to create a curated literature review.
-
-# add literature to the active context
-hiraku context set literature
-# print files that would be added to the context
-hiraku context
 
 # 2. create the research root; creation makes it active
 hiraku record create heart-disease --type task \
