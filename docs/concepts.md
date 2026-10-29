@@ -178,13 +178,6 @@ hiraku record create literature --type context
 hiraku record list
 ```
 
-Existing projects must move each `hiraku/contexts/{id}/context.md` file to
-`hiraku/records/{id}/{id}.md`, add `type: context` to its frontmatter, and move
-its supporting files into the same record directory. Context-specific CLI and
-MCP operations are replaced by record operations.
-
-
-
 ## Example workflows
 
 The following sequence illustrates the intended workflow.

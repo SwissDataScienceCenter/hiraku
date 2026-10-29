@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Breaking:** `hiraku init` initializes a project independently of Git. Add `--git` to initialize the code repository explicitly.
 - **Breaking:** `hiraku example create NAME [PATH]` copies a bundled example into `./NAME` by default without Git history or network access. Use `--with-results`, `--with-generator`, and `--generate` with `example create`. `hiraku init [PATH]` targets the current or explicit directory, and repeating plain initialization leaves the project unchanged ([issue #104](https://github.com/SwissDataScienceCenter/hiraku/issues/104)).
 - **Breaking:** `hiraku runs` and `Record.runs()` now list only runs attributed to the selected record (the active record, or `--record ID`). Previously they returned every attributed run from the record's tracking source ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
-- **Breaking:** Store all research material as `Record` objects under `hiraku/records/`; use `type: context` for supporting context. Remove `hiraku.context`, `Context`, the `hiraku context` CLI group, context-specific MCP tools and resources, and the separate `hiraku/contexts/` directory. Existing context files must be moved into the records tree and marked with `type: context` ([issue #133](https://github.com/SwissDataScienceCenter/hiraku/issues/133)).
+- **Breaking:** Store all research material as `Record` objects under `hiraku/records/`; use `type: context` for supporting context. Remove `hiraku.context`, `Context`, the `hiraku context` CLI group, context-specific MCP tools and resources, and the separate `hiraku/contexts/` directory ([issue #133](https://github.com/SwissDataScienceCenter/hiraku/issues/133)).
 
 ### Added
 
