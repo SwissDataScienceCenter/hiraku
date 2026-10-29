@@ -84,7 +84,7 @@ started_seconds=$(date +%s.%N)
 timeout --signal=TERM --kill-after=10s "$timeout_seconds" "$@" 2>&1 |
   tee "$capture_file"
 pipeline_status=("${PIPESTATUS[@]}")
-duration=$(awk -v start="$started_seconds" -v end="$(date +%s.%N)" \
+duration=$(LC_ALL=C awk -v start="$started_seconds" -v end="$(date +%s.%N)" \
   'BEGIN { printf "%.3f", end - start }')
 command_status=${pipeline_status[0]}
 tee_status=${pipeline_status[1]}

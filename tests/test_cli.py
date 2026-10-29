@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -74,6 +75,40 @@ def test_record_cli_active_and_validation(tmp_path: Path, monkeypatch) -> None:
     assert invoke("record", "update", "second", "--related-to", "first").exit_code == 0
 
 
+def test_status_reports_active_record_tracking_backend(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    result = invoke(
+        "record",
+        "create",
+        "eurosat",
+        "--type",
+        "task",
+        "--set",
+        "tracking_backend={type: wandb, project: eurosat-rgb}",
+    )
+    assert result.exit_code == 0
+    child = invoke(
+        "record", "create", "mlp", "--parent", "eurosat", "--type", "experiment"
+    )
+    assert child.exit_code == 0
+
+    status = json.loads(invoke("status", "--json").output)
+    assert status["tracking_backend"] == {
+        "type": "wandb",
+        "project": "eurosat-rgb",
+    }
+    assert "project_tracking_backend" not in status
+    assert (
+        load_record("mlp", config=config)
+        .resolve(config=config)
+        .values["tracking_backend"]
+        == status["tracking_backend"]
+    )
+
+
 def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
@@ -123,25 +158,34 @@ def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
     assert table[2].split() == ["a", "root", "4.25"]
 
 
-def test_record_cli_entrypoint_launch_and_runs(tmp_path: Path, monkeypatch) -> None:
+def test_record_cli_command_and_runs(tmp_path: Path, monkeypatch) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=tmp_path,
+        check=True,
+    )
     assert (
         invoke(
             "record",
             "create",
             "root",
             "--set",
-            'entrypoints={train: {command: [python, -c, "print(7)"]}}',
+            'command=[python, -c, "print(7)"]',
         ).exit_code
         == 0
     )
     assert invoke("record", "create", "child", "--parent", "root").exit_code == 0
-    entries = json.loads(invoke("record", "entrypoints", "child", "--json").output)
-    assert entries["sources"] == {"train": "root"}
-    result = invoke("launch", "train", "--record", "child", "--dry-run")
-    assert result.exit_code == 0
-    assert "python -c" in result.output
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "records"], cwd=tmp_path, check=True)
+    result = invoke(
+        "run", "--record", "child", "--dry-run", "--", "python", "-c", "print(7)"
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["command"] == ["python", "-c", "print(7)"]
     (tmp_path / "runs.csv").write_text(
         "id,record_id,metric.loss\na,root,0.5\nb,child,0.2\nc,,0.1\n"
     )

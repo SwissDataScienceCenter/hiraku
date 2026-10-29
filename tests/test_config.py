@@ -51,8 +51,8 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert (config.workflows_dir / "collaborative" / "workflow.md").is_file()
     assert not (config.hiraku_dir / "programs").exists()
     assert not (config.hiraku_dir / "actions").exists()
-    for name in ("launch.sh", "worktree.sh"):
-        assert (config.dispatch_dir / name).stat().st_mode & 0o111
+    assert (config.dispatch_dir / "launch.sh").stat().st_mode & 0o111
+    assert not (config.dispatch_dir / "worktree.sh").exists()
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
     assert codex_skill.is_file()
@@ -130,7 +130,7 @@ def test_init_from_template_applies_arbitrary_overlay(tmp_path: Path) -> None:
     assert config.to_dict()["extension"] == {"enabled": True}
     assert launcher.read_text() == (root / "custom/dispatch/launch.sh").read_text()
     assert (root / "custom/dispatch/launch.sh").stat().st_mode & 0o111
-    assert (root / "custom/dispatch/worktree.sh").is_file()
+    assert not (root / "custom/dispatch/worktree.sh").exists()
     assert (root / ".example-dotfile").read_text() == "included\n"
     assert (root / "payload.bin").read_bytes() == b"\x00\xfftemplate"
     assert (root / "empty").is_dir()

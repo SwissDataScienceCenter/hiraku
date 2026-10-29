@@ -36,7 +36,7 @@ The nearest record command replaces the inherited command. Otherwise Hiraku
 uses an ancestor command and then the project default.
 
 ```bash
-job_id=$(hiraku run --record experiment-1 --backend local)
+job_id=$(hiraku run --record experiment-1)
 hiraku job status "$job_id" --json
 hiraku job wait "$job_id"
 hiraku job logs "$job_id"
@@ -49,11 +49,11 @@ The nearest record command replaces the complete inherited argv. An explicit
 command after `--` always takes precedence and replaces that default:
 
 ```bash
-hiraku run --record experiment-1 --backend local -- \
+hiraku run --record experiment-1 -- \
   uv run --locked python analyze.py --seed 7
 ```
 
-`--record` defaults to the active record. `--backend` defaults to `local`.
+`--record` defaults to the active record. Jobs currently execute locally.
 The local backend uses a managed source snapshot. To run on another machine,
 install Hiraku and the project environment there, then submit the job from that
 project directory.

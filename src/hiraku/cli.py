@@ -368,10 +368,17 @@ def status_command(state: CLIContext, json_output: bool) -> None:
         branch = GitRepository(config).current_branch
     except GitError:
         branch = None
+    tracking_backend = config.tracking_backend
+    if config.active_record_id is not None:
+        record = load_record(config.active_record_id, config=config)
+        tracking_backend = (
+            record.resolve(config=config).values.get("tracking_backend")
+            or tracking_backend
+        )
     result = {
         "project_root": config.root,
         "active_record_id": config.active_record_id,
-        "tracking_backend": config.tracking_backend,
+        "tracking_backend": tracking_backend,
         "git_branch": branch,
     }
     if json_output:
@@ -889,14 +896,6 @@ def job_group() -> None:
 @main.command("run")
 @click.argument("command", nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
-@click.option(
-    "--backend",
-    "backend",
-    type=click.Choice(["local"]),
-    default="local",
-    show_default=True,
-    help="Execution backend.",
-)
 @click.option("--commit")
 @click.option(
     "--dispatch",
@@ -909,7 +908,6 @@ def run_command(
     context: click.Context,
     command: tuple[str, ...],
     record_id: str | None,
-    backend: str,
     commit: str | None,
     dispatch: str | None,
     dry_run: bool,
@@ -921,7 +919,6 @@ def run_command(
         context.get_parameter_source(name) == click.core.ParameterSource.DEFAULT
         for name in (
             "record_id",
-            "backend",
             "commit",
             "dispatch",
             "dry_run",
@@ -933,7 +930,6 @@ def run_command(
     result = submit_job(
         command or None,
         record_id=record_id,
-        backend=backend,
         commit=commit,
         dispatch=dispatch,
         dry_run=dry_run,

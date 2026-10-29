@@ -63,9 +63,9 @@ hiraku record create logistic --parent iris --type experiment \
 hiraku record show logistic
 hiraku record show logistic
 
-hiraku run --record logistic --backend local --dry-run -- \
+hiraku run --record logistic --dry-run -- \
   uv run python train.py --model logistic --seed 42 --test-size 0.25
-job_id=$(hiraku run --record logistic --backend local -- \
+job_id=$(hiraku run --record logistic -- \
   uv run python train.py --model logistic --seed 42 --test-size 0.25)
 hiraku job wait "$job_id"
 hiraku runs --record iris --all
@@ -80,7 +80,7 @@ hiraku record create random-forest --parent iris --type experiment \
   --set "hypothesis=A random forest improves Iris classification accuracy." \
   --commit HEAD
 
-job_id=$(hiraku run --record random-forest --backend local -- \
+job_id=$(hiraku run --record random-forest -- \
   uv run python train.py --model random_forest --seed 42 --test-size 0.25)
 hiraku job wait "$job_id"
 hiraku runs --record iris --all --sort test/accuracy

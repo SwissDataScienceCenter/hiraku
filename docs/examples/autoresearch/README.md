@@ -83,7 +83,7 @@ hiraku record create cpu-test --parent sep10 --type experiment \
   --set "hypothesis=The Hiraku dispatcher records an attributed mock result" \
   --commit HEAD
 
-job_id=$(hiraku run --record cpu-test --backend local -- uv run python cpu_mock.py --val-bpb 1.0)
+job_id=$(hiraku run --record cpu-test -- uv run python cpu_mock.py --val-bpb 1.0)
 hiraku job wait "$job_id"
 hiraku runs --record cpu-test
 
@@ -102,7 +102,7 @@ hiraku record create baseline --parent sep10 --type experiment \
   --set "hypothesis=Provide a reasonable starting point for comparison" \
   --commit HEAD
 
-job_id=$(hiraku run --record baseline --backend local -- uv run python train.py)
+job_id=$(hiraku run --record baseline -- uv run python train.py)
 hiraku job wait "$job_id"
 hiraku runs --record baseline
 

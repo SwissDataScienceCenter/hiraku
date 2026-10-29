@@ -66,7 +66,6 @@ def test_plain_reinitialization_leaves_project_unchanged(
     root = tmp_path / "project" if destination == "project" else tmp_path
     config = HirakuConfig.init(root, tracking_backend="mlflow")
     (config.dispatch_dir / "launch.sh").write_text("custom launcher\n")
-    (config.dispatch_dir / "worktree.sh").unlink()
     before = {
         p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()
     }

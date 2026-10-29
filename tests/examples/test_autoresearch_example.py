@@ -19,7 +19,7 @@ REPOSITORY = Path(__file__).parents[2]
 DOCS_EXAMPLE = REPOSITORY / "docs" / "examples" / "autoresearch"
 EXAMPLE = REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "autoresearch"
 OVERLAY = EXAMPLE / "src"
-PROGRAM = OVERLAY / "hiraku" / "programs" / "autoresearch" / "program.md"
+WORKFLOW = OVERLAY / "hiraku" / "workflows" / "autoresearch" / "workflow.md"
 DISPATCHER = OVERLAY / "hiraku" / "dispatch" / "autoresearch.sh"
 LINUX_ONLY = pytest.mark.skipif(
     sys.platform != "linux",
@@ -98,8 +98,6 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
             "--markdown-file",
             "task.md",
             "--set",
-            "program=autoresearch",
-            "--set",
             "metrics=[{name: val_bpb, direction: minimize}]",
             "--set",
             "command=[uv, run, python, train.py]",
@@ -116,7 +114,7 @@ def test_autoresearch_is_an_overlay() -> None:
         "src/task.md",
         "src/cpu_mock.py",
         "src/hiraku/dispatch/autoresearch.sh",
-        "src/hiraku/programs/autoresearch/program.md",
+        "src/hiraku/workflows/autoresearch/workflow.md",
     }
     actual = {
         str(path.relative_to(EXAMPLE))
@@ -149,17 +147,17 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "run.log" not in task_template
     assert "Changelog" not in task_template
 
-    program = PROGRAM.read_text(encoding="utf-8")
-    assert "hiraku status --json" in program
-    assert "hiraku record tree" in program
-    assert "hiraku runs --record <id> --json" in program
-    assert "--commit HEAD" in program
-    assert "Never rebind a completed attempt" in program
-    assert "results.tsv" not in program
-    assert "grep " not in program
-    assert "Choose the history mode" not in program
-    assert "hiraku experiment" not in program
-    assert "Changelog" not in program
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "hiraku status --json" in workflow
+    assert "hiraku record tree" in workflow
+    assert "hiraku runs --record <root-id> --all --json" in workflow
+    assert "--commit HEAD" in workflow
+    assert "Never rebind a completed attempt" in workflow
+    assert "results.tsv" not in workflow
+    assert "grep " not in workflow
+    assert "Choose the history mode" not in workflow
+    assert "hiraku experiment" not in workflow
+    assert "Changelog" not in workflow
 
 
 def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
@@ -184,27 +182,25 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert (project / "program.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "program.md"
     ]
-    installed_program = (project / "hiraku/programs/autoresearch/program.md").read_text(
-        encoding="utf-8"
-    )
+    installed_workflow = (
+        project / "hiraku/workflows/autoresearch/workflow.md"
+    ).read_text(encoding="utf-8")
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
-    assert installed_program == PROGRAM.read_text(encoding="utf-8")
+    assert installed_workflow == WORKFLOW.read_text(encoding="utf-8")
     assert (project / "task.md").read_text(encoding="utf-8") == task_template
     assert task.markdown == task_template
     assert task.path == project / "hiraku/records/sep10/sep10.md"
-    assert task.markdown not in installed_program
-    assert installed_program not in task.markdown
+    assert task.markdown not in installed_workflow
+    assert installed_workflow not in task.markdown
     assert task.branch == "autoresearch/sep10"
     assert task.goal == (
         "Find the best architecture, optimizer, and hyperparameters to minimize "
         "`val_bpb` within the fixed 5-minute training budget."
     )
     assert task.type == "task"
-    assert task.program == "autoresearch"
     assert task.command == ["uv", "run", "python", "train.py"]
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
-    assert config.default_program == "autoresearch"
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111
     assert git(project, "status", "--porcelain") == ""
 
@@ -223,8 +219,6 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
         runner,
         [
             "run",
-            "--backend",
-            "local",
             "--record",
             "cpu-test",
             "--",
@@ -272,8 +266,6 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
         runner,
         [
             "run",
-            "--backend",
-            "local",
             "--record",
             "failure",
             "--",
@@ -388,6 +380,30 @@ def test_autoresearch_dispatcher_accepts_non_gnu_timeout_version(tmp_path):
         rows = list(csv.DictReader(stream))
     assert rows[0]["status"] == "finished"
     assert rows[0]["metric.val_bpb"] == "0.8"
+
+
+@LINUX_ONLY
+def test_autoresearch_dispatcher_writes_locale_independent_csv(tmp_path):
+    environment = dispatcher_environment(tmp_path)
+    environment.pop("LC_ALL", None)
+    environment["LC_NUMERIC"] = "it_IT.UTF-8"
+    result = subprocess.run(
+        [DISPATCHER, "--", sys.executable, "-c", "print('val_bpb: 0.8')"],
+        cwd=tmp_path,
+        env=environment,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    with (tmp_path / "runs.csv").open(newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        rows = list(reader)
+    assert len(rows) == 1
+    assert len(rows[0]) == len(reader.fieldnames)
+    assert rows[0]["status"] == "finished"
+    assert rows[0]["metric.val_bpb"] == "0.8"
+    assert "," not in rows[0]["duration"]
 
 
 @LINUX_ONLY

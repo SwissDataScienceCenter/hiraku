@@ -136,12 +136,9 @@ def test_run_rejects_target_alias(project, monkeypatch):
     assert "No such option '--target'" in result.output
     assert not project.jobs_dir.exists()
 
-    result = CliRunner().invoke(
-        main,
-        ["run", "--record", "root", "--backend", "slurm"],
-    )
+    result = CliRunner().invoke(main, ["run", "--record", "root", "--backend", "local"])
     assert result.exit_code == 2
-    assert "'slurm' is not 'local'" in result.output
+    assert "No such option '--backend'" in result.output
     assert not project.jobs_dir.exists()
 
 
@@ -155,8 +152,6 @@ def test_cli_detaches_and_preserves_literal_arguments(project):
             "run",
             "--record",
             "root",
-            "--backend",
-            "local",
             "--",
             sys.executable,
             "-c",
@@ -378,7 +373,9 @@ def test_cancel_reaches_child_group_after_supervisor_dies(project):
     while not (job.working_directory / "ready").exists():
         assert time.monotonic() < deadline
         time.sleep(0.02)
-    os.kill(job.backend_handle["supervisor_pid"], signal.SIGKILL)
+    supervisor_pid = job.backend_handle["supervisor_pid"]
+    os.kill(supervisor_pid, signal.SIGKILL)
+    os.waitpid(supervisor_pid, 0)
     time.sleep(0.1)
     cancel_job(job.id, config=project)
     time.sleep(3)

@@ -34,7 +34,7 @@ Records are stored as Markdown with YAML front matter. This allows users and age
 
 Fields inherit through `parent_id` by default: the nearest definition wins, an explicit `null` clears an inherited field, and commands replace inherited argv lists. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
-At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. The current status can be queried with `hiraku status`.
+At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. The current status can be queried with `hiraku status`; its `tracking_backend` field shows the active record's effective backend.
 
 !!! note
     Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
@@ -85,9 +85,9 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 - List runs from the tracking source selected by a record.
 - Return normalized runs with a required run ID, metrics, and parameters; record ID, job ID, commit, timestamp, historical entrypoint, and URL attribution may be absent.
 
-CSV is the default project backend. A record may set `tracking_backend` to
-override the project default. Backend configuration uses one common mapping
-shape, with `type` identifying the adapter:
+Set `tracking_backend` on a root record to select the tracking source for that
+record tree; child records inherit it unless they define their own value. Backend
+configuration uses one common mapping shape, with `type` identifying the adapter:
 
 ```yaml
 tracking_backend:
@@ -109,7 +109,7 @@ An explicit null clears the inherited command and uses the project default.
 Arguments after `--` replace the complete invocation.
 
 ```bash
-job_id=$(hiraku run --record baseline --backend local)
+job_id=$(hiraku run --record baseline)
 hiraku job wait "$job_id"
 hiraku job logs "$job_id"
 hiraku runs --record baseline --json
@@ -198,7 +198,7 @@ git commit -m "implement logistic baseline"
 hiraku record update logistic-baseline --commit HEAD
 
 # 4. run an arbitrary command and list attributed runs
-job_id=$(hiraku run --record logistic-baseline --backend local -- \
+job_id=$(hiraku run --record logistic-baseline -- \
   uv run python train.py)
 hiraku job wait "$job_id"
 hiraku runs --record logistic-baseline --sort val/log_loss --ascending

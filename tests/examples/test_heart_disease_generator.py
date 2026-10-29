@@ -120,12 +120,11 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     result = CliRunner().invoke(
         main,
         [
-            "init",
-            str(tmp_path),
-            "--example",
+            "example",
+            "create",
             "heart-disease",
+            str(tmp_path),
             "--generate",
-            "--ignore-git",
         ],
     )
     assert result.exit_code == 0, result.output

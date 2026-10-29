@@ -49,6 +49,8 @@ uv run ruff check src tests
 uv run zensical build --clean
 ```
 
+Pytest uses parallel workers, capped at four to limit memory use.
+
 Tests should not require network access or W&B/MLflow credentials.
 
 Keep public models and CLI behavior explicit. Add tests for new behavior and

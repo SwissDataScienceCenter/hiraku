@@ -8,7 +8,7 @@ Typical workflow:
 hiraku init
 hiraku record create <root-id>
 hiraku record create <child-id> --parent <root-id>
-job_id=$(hiraku run --record <child-id> --backend local -- python train.py)
+job_id=$(hiraku run --record <child-id> -- python train.py)
 hiraku job wait "$job_id"
 hiraku runs --record <record-id>
 ```
