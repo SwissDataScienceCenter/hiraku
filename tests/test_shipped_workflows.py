@@ -308,19 +308,13 @@ def test_collaborative_uses_only_requested_tracking_run(config):
     sha = commit(config, "implementation")
     harness.send("implemented", commit=sha)
     path = config.root / "runs.csv"
-    tracked_run = successful_run(config, "c1")
-    path = config.root / "runs.csv"
     path.write_text(HEADER + f"other,c1,{'0' * 40},0.9\n")
     assert harness.send("launched", run_id="ready")["status"] == "not_ready"
-    path.write_text(
-        HEADER + f"other,c1,{'0' * 40},0.9\n" + f"pending,c1,{tracked_run.id},{sha},\n"
-    )
+    path.write_text(HEADER + f"other,c1,{'0' * 40},0.9\n" + f"pending,c1,{sha},\n")
     waiting = harness.send("launched", run_id="pending")
     assert waiting["status"] == "not_ready"
     assert "no metrics yet" in waiting["message"]
-    path.write_text(
-        HEADER + f"other,c1,{'0' * 40},0.9\n" + f"ready,c1,{tracked_run.id},{sha},0.8\n"
-    )
+    path.write_text(HEADER + f"other,c1,{'0' * 40},0.9\n" + f"ready,c1,{sha},0.8\n")
     assert harness.send("launched", run_id="ready")["status"] == "accepted"
     assert harness.instruction["data"]["runs"] == [
         {"run_id": "ready", "metrics": {"val": "0.8"}}
