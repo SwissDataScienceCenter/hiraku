@@ -194,7 +194,9 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     stored = json.loads(store.read_text(encoding="utf-8"))[0]
     assert stored["id"] == job_id
     assert stored["project"] == "hiraku-iris"
-    assert not any(key.startswith("hiraku.") for key in stored["config"])
+    assert stored["config"]["hiraku.record_id"] == "logistic"
+    assert stored["config"]["hiraku.commit"] == source_commit
+    assert stored["config"]["hiraku.job_id"] == job_id
 
     filtered = json.loads(
         invoke(
