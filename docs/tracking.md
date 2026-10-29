@@ -12,5 +12,7 @@ Choose the backend that matches the stage of your project:
 
 Set `tracking_backend` on a root record to select one tracking source for its
 record tree; child records inherit that setting unless they override it. The
+project config does not define tracking sources; move any former project-level
+setting to the root record. Records without an explicit setting use CSV. The
 [tracking API reference](api/python/tracking.md) documents the shared backend
 contract and normalized run model.

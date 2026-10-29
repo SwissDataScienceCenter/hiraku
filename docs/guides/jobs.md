@@ -26,14 +26,14 @@ job_id=$(hiraku run --record experiment-1 -- uv run --locked python train.py)
 ```
 
 An optional inherited default command can make repeated runs shorter. Configure
-it in `hiraku.yml` or record front matter:
+it on a root record or override it on a child record:
 
 ```yaml
 command: [uv, run, --locked, python, train.py, --seed, "42"]
 ```
 
 The nearest record command replaces the inherited command. Otherwise Hiraku
-uses an ancestor command and then the project default.
+uses the root record's command. There is no project-level command setting.
 
 ```bash
 job_id=$(hiraku run --record experiment-1)
@@ -45,8 +45,8 @@ hiraku job list --record experiment-1 --json
 hiraku job cancel "$job_id"
 ```
 
-The nearest record command replaces the complete inherited argv. An explicit
-command after `--` always takes precedence and replaces that default:
+An explicit command after `--` always takes precedence and replaces the
+complete inherited argv:
 
 ```bash
 hiraku run --record experiment-1 -- \
@@ -116,6 +116,11 @@ former default arguments directly into that list and provide alternative
 commands to `hiraku run`. `Entrypoint`, `Record.entrypoint`,
 `hiraku record entrypoints`, `hiraku launch`, and `hiraku job submit` are
 removed.
+
+Move any project-level `command` in `hiraku.yml` to the root record's front
+matter. Child records inherit the root command unless they define their own;
+pass explicit argv after `--` to override it for one submission. Hiraku rejects
+`command` and `tracking_backend` in `hiraku.yml` so defaults have one source.
 
 Hiraku keeps execution receipts separate from tracking, following the durable
 job and per-job staging ideas in [Claude Science](https://claude.com/docs/claude-science/remote-compute-clusters)

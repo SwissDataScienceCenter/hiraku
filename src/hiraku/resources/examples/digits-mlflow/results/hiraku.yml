@@ -1,7 +1,3 @@
 hiraku_dir: hiraku
 default_dispatch: launch.sh
-tracking_backend:
-  type: mlflow
-  database: mlflow.db
-  experiment_name: hiraku-digits
 active_record_id: weak-l2

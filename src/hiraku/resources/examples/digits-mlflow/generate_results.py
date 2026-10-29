@@ -75,16 +75,15 @@ def generate(config: HirakuConfig) -> None:
     database = config.root / "mlflow.db"
     if database.exists() or list(config.records_dir.rglob("*.md")):
         raise FileExistsError("Generation requires an example without records or runs")
-    config.tracking_backend = {
-        "type": "mlflow",
-        "database": "mlflow.db",
-        "experiment_name": "hiraku-digits",
-    }
-    config.save()
     Record.create(
         "digits",
         type="task",
         status="concluded",
+        tracking_backend={
+            "type": "mlflow",
+            "database": "mlflow.db",
+            "experiment_name": "hiraku-digits",
+        },
         activate=False,
         config=config,
         metrics=[

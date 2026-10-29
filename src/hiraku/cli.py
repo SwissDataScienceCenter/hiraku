@@ -227,14 +227,12 @@ def mcp_command() -> None:
 
 @main.command("init")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
-@click.option("--tracking-backend")
 @click.option("--template", type=click.Path(path_type=Path))
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
 )
 def init_command(
     path: Path | None,
-    tracking_backend: str | None,
     template: Path | None,
     init_git: bool,
 ) -> None:
@@ -243,13 +241,11 @@ def init_command(
     marker = root.expanduser().absolute() / "hiraku.yml"
     if init_git:
         require_git()
-    if marker.is_file() and tracking_backend is None and template is None:
+    if marker.is_file() and template is None:
         config = HirakuConfig.load(marker)
         message = "Hiraku project already initialized"
     else:
-        config = HirakuConfig.init(
-            root, tracking_backend=tracking_backend, template=template
-        )
+        config = HirakuConfig.init(root, template=template)
         message = "Initialized Hiraku project"
     if init_git:
         init_code_repository(config)
@@ -277,7 +273,6 @@ def example_list_command() -> None:
 @example_group.command("create")
 @click.argument("example")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
-@click.option("--tracking-backend")
 @click.option("--with-generator", is_flag=True, help="Copy the example generator.")
 @click.option(
     "--generate", is_flag=True, help="Generate example runs after initialization."
@@ -294,7 +289,6 @@ def example_list_command() -> None:
 def example_create_command(
     example: str,
     path: Path | None,
-    tracking_backend: str | None,
     results: bool,
     with_generator: bool,
     generate: bool,
@@ -319,7 +313,6 @@ def example_create_command(
             raise click.UsageError(f"Example {example!r} has no generator")
     config = HirakuConfig.init(
         root,
-        tracking_backend=tracking_backend,
         example=example,
         results=results,
         with_generator=with_generator,
@@ -349,7 +342,6 @@ def example_create_command(
                             if result.is_file() and result.name != "hiraku.yml":
                                 shutil.copyfile(result, config.root / result.name)
                         config.active_record_id = generated.active_record_id
-                        config.tracking_backend = generated.tracking_backend
                         config.save()
             except Exception as exc:
                 raise click.ClickException(
@@ -368,13 +360,10 @@ def status_command(state: CLIContext, json_output: bool) -> None:
         branch = GitRepository(config).current_branch
     except GitError:
         branch = None
-    tracking_backend = config.tracking_backend
+    tracking_backend = {"type": "csv"}
     if config.active_record_id is not None:
         record = load_record(config.active_record_id, config=config)
-        tracking_backend = (
-            record.resolve(config=config).values.get("tracking_backend")
-            or tracking_backend
-        )
+        tracking_backend = record.tracking_backend_spec(config=config)
     result = {
         "project_root": config.root,
         "active_record_id": config.active_record_id,

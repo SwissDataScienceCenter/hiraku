@@ -66,8 +66,7 @@ def load(config: HirakuConfig) -> ProjectRuns:
     records = list_records(config=config)
     by_source: dict[str, Record] = {}
     for record in records:
-        specification = record.resolve(config=config).values.get("tracking_backend")
-        key = repr(specification or config.tracking_backend)
+        key = repr(record.tracking_backend_spec(config=config))
         by_source.setdefault(key, record)
 
     known = {record.id for record in records}

@@ -24,7 +24,11 @@ class SourceSnapshot:
 
 def require_clean(repository: GitRepository) -> str:
     """Require a clean Git tree and return its current HEAD."""
-    state = repository._git("status", "--porcelain", "--untracked-files=normal").stdout
+    arguments = ["status", "--porcelain", "--untracked-files=normal"]
+    job_store = repository.job_store_pathspec()
+    if job_store is not None:
+        arguments.extend(["--", ".", job_store])
+    state = repository._git(*arguments).stdout
     if state:
         raise JobError(
             "Cannot submit a job from a dirty Git working tree; "

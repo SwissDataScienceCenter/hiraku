@@ -95,13 +95,20 @@ def test_init_falls_back_to_copy_when_skill_symlinks_are_unavailable(
     assert claude_skill.read_text() == canonical_skill.read_text()
 
 
-def test_init_sets_tracking_backend(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, tracking_backend="mlflow")
+@pytest.mark.parametrize("key", ["command", "tracking_backend"])
+def test_project_config_rejects_record_defaults(tmp_path: Path, key: str) -> None:
+    marker = tmp_path / "hiraku.yml"
+    marker.write_text(f"{key}: value\n")
+    with pytest.raises(ValidationError, match="root record"):
+        HirakuConfig.load(marker)
 
-    assert config.tracking_backend == {"type": "mlflow"}
-    assert yaml.safe_load(config.path.read_text())["tracking_backend"] == {
-        "type": "mlflow"
-    }
+
+def test_project_config_cannot_be_assigned_record_defaults(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    with pytest.raises(ValidationError, match="root record"):
+        config.tracking_backend = {"type": "wandb"}
+    with pytest.raises(ValidationError, match="root record"):
+        config.command = ["python", "train.py"]
 
 
 def test_init_from_template_applies_arbitrary_overlay(tmp_path: Path) -> None:
@@ -109,7 +116,7 @@ def test_init_from_template_applies_arbitrary_overlay(tmp_path: Path) -> None:
     (template / "custom/dispatch").mkdir(parents=True)
     (template / "empty").mkdir()
     (template / "hiraku.yml").write_text(
-        "hiraku_dir: custom\ntracking_backend: wandb\nextension:\n  enabled: true\n"
+        "hiraku_dir: custom\nextension:\n  enabled: true\n"
     )
     launcher = template / "custom/dispatch/launch.sh"
     launcher.write_text("#!/bin/sh\necho template\n")
@@ -121,12 +128,10 @@ def test_init_from_template_applies_arbitrary_overlay(tmp_path: Path) -> None:
     config = HirakuConfig.init(
         root,
         template=template,
-        tracking_backend="mlflow",
         install_skill=False,
     )
 
     assert config.hiraku_dir == root / "custom"
-    assert config.tracking_backend == {"type": "mlflow"}
     assert config.to_dict()["extension"] == {"enabled": True}
     assert launcher.read_text() == (root / "custom/dispatch/launch.sh").read_text()
     assert (root / "custom/dispatch/launch.sh").stat().st_mode & 0o111

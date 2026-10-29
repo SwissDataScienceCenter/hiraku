@@ -13,7 +13,14 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 from pydantic import ValidationError as ModelValidationError
 
 from .config import HirakuConfig
@@ -42,7 +49,7 @@ TERMINAL = frozenset({"succeeded", "failed", "cancelled", "lost"})
 
 
 class JobSpec(BaseModel):
-    """Immutable, resolved request passed to an execution backend."""
+    """Immutable, resolved request passed to local execution."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     job_id: str
@@ -55,10 +62,6 @@ class JobSpec(BaseModel):
     source_dirty: bool | None
     source_mode: Literal["snapshot", "existing"] = "snapshot"
     source_location: str | None = None
-    compute_config: Mapping[str, Any] = Field(
-        default_factory=lambda: MappingProxyType({})
-    )
-    target: str = "local"
     env: Mapping[str, str] = Field(default_factory=lambda: MappingProxyType({}))
     dispatcher: str | None = None
 
@@ -67,7 +70,7 @@ class JobSpec(BaseModel):
     def _tuple_command(cls, value: Any) -> Any:
         return tuple(value) if isinstance(value, (tuple, list)) else value
 
-    @field_validator("env", "compute_config", mode="before")
+    @field_validator("env", mode="before")
     @classmethod
     def _copy_env(cls, value: Any) -> Any:
         return _freeze(value) if isinstance(value, Mapping) else value
@@ -76,6 +79,17 @@ class JobSpec(BaseModel):
     @classmethod
     def _freeze_snapshot(cls, value: Any) -> Any:
         return _freeze(value)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _discard_legacy_target_metadata(cls, value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {
+                key: item
+                for key, item in value.items()
+                if key not in {"target", "compute_config"}
+            }
+        return value
 
     @field_serializer("env", "record_snapshot")
     def _serialize_frozen_mapping(self, value: Any) -> dict[str, Any]:
@@ -92,14 +106,24 @@ class Job(BaseModel):
     directory: Path
     source_path: Path | None = None
     project_root: Path
-    backend: str = "local"
-    backend_handle: dict[str, Any] = Field(default_factory=dict)
+    execution_handle: dict[str, Any] = Field(default_factory=dict)
     status: JobStatus = "submitted"
     submitted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
     finished_at: datetime | None = None
     exit_code: int | None = None
     error: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _discard_legacy_backend_metadata(cls, value: Any) -> Any:
+        if isinstance(value, Mapping):
+            legacy = dict(value)
+            legacy.pop("backend", None)
+            if "backend_handle" in legacy:
+                legacy["execution_handle"] = legacy.pop("backend_handle")
+            return legacy
+        return value
 
     @property
     def record_id(self) -> str:
@@ -166,13 +190,11 @@ def load_job(job_id: str, *, config: HirakuConfig | None = None) -> Job:
     return _read(_directory(job_id, selected).resolve())
 
 
-def _backend(name: str = "local", *, config: HirakuConfig | None = None) -> Any:
+def _executor(*, config: HirakuConfig | None = None) -> Any:
     selected = config or HirakuConfig.discover()
-    if name == "local":
-        from .compute import LocalBackend
+    from .compute import LocalBackend
 
-        return LocalBackend(selected.jobs_dir)
-    raise JobError(f"Unsupported compute backend: {name!r}")
+    return LocalBackend(selected.jobs_dir)
 
 
 def _save_fields(directory: Path, **values: Any) -> Job:
@@ -192,18 +214,14 @@ def submit_job(
     command: Sequence[str] | None = None,
     *,
     record_id: str | None = None,
-    backend: str = "local",
     commit: str | None = None,
     dispatch: str | None = None,
     env: Mapping[str, str] | None = None,
     dry_run: bool = False,
     config: HirakuConfig | None = None,
 ) -> Job | dict[str, Any]:
-    """Resolve a request, persist its receipt, then submit it to a backend."""
+    """Resolve a request, persist its receipt, then submit it for local execution."""
     selected = config or HirakuConfig.discover()
-    if backend != "local":
-        raise ValidationError(f"Unsupported compute backend: {backend!r}")
-    backend_name = backend
     selected_record = record_id or selected.active_record_id
     if selected_record is None:
         raise NoActiveRecordError("Select a record with --record or hiraku record set")
@@ -240,9 +258,7 @@ def submit_job(
     if reserved.intersection(additions):
         raise ValidationError("Environment cannot override reserved job attribution")
     job_id = uuid.uuid4().hex
-    tracking_spec = record.resolve(config=selected).values.get("tracking_backend")
-    if not tracking_spec:
-        tracking_spec = selected.tracking_backend
+    tracking_spec = record.tracking_backend_spec(config=selected)
     if isinstance(tracking_spec, str):
         tracking_type = tracking_spec
     else:
@@ -271,7 +287,6 @@ def submit_job(
     source_mode: Literal["snapshot", "existing"] = "snapshot"
     source_location: str | None = None
     project_path = ""
-    compute_config: dict[str, Any] = {}
     repository: GitRepository | None = None
     pinned_revision = commit or record.commit
 
@@ -303,7 +318,6 @@ def submit_job(
             "job_id": job_id,
             "record_id": record.id,
             "command": argv,
-            "backend": backend_name,
             "revision": revision,
             "source_mode": source_mode,
             "source_location": source_location,
@@ -340,8 +354,6 @@ def submit_job(
             source_dirty=source_dirty,
             source_mode=source_mode,
             source_location=source_location,
-            compute_config=compute_config,
-            target=backend_name,
             env=additions,
             dispatcher=dispatcher,
         )
@@ -351,7 +363,6 @@ def submit_job(
             directory=directory,
             source_path=workspace if source is not None else None,
             project_root=selected.root.resolve(),
-            backend=backend_name,
         )
         _write(job)
         job.record_file.write_text(
@@ -360,10 +371,10 @@ def submit_job(
         for stream in ("stdout", "stderr"):
             (directory / f"{stream}.log").touch(mode=0o600)
         handle = {"directory": str(directory)}
-        _save_fields(directory, backend_handle=handle)
+        _save_fields(directory, execution_handle=handle)
         dispatch_started = True
-        handle = _backend(backend_name, config=selected).submit(spec)
-        return _save_fields(directory, backend_handle=handle)
+        handle = _executor(config=selected).submit(spec)
+        return _save_fields(directory, execution_handle=handle)
     except Exception as exc:
         if directory.exists() and not (directory / "job.json").exists():
             shutil.rmtree(directory, ignore_errors=True)
@@ -390,7 +401,7 @@ def job_status(job_id: str, *, config: HirakuConfig | None = None) -> Job:
     if job.status in TERMINAL:
         return job
     selected = config or HirakuConfig.discover()
-    observed = _backend(job.backend, config=selected).status(job.backend_handle)
+    observed = _executor(config=selected).status(job.execution_handle)
     status = observed.get("status", "unknown")
     if status == "unknown":
         return job.model_copy(update={"status": "unknown"})
@@ -464,7 +475,7 @@ def cancel_job(job_id: str, *, config: HirakuConfig | None = None) -> Job:
     if job.status in TERMINAL:
         return job
     selected = config or HirakuConfig.discover()
-    _backend(job.backend, config=selected).cancel(job.backend_handle)
+    _executor(config=selected).cancel(job.execution_handle)
     return job_status(job_id, config=config)
 
 
@@ -479,11 +490,9 @@ def job_logs(
     if stream not in {"stdout", "stderr"}:
         raise ValidationError("stream must be stdout or stderr")
     job = load_job(job_id, config=config)
-    handle = {"directory": str(job.directory), **job.backend_handle}
+    handle = {"directory": str(job.directory), **job.execution_handle}
     selected = config or HirakuConfig.discover()
-    yield from _backend(job.backend, config=selected).logs(
-        handle, stream=stream, follow=follow
-    )
+    yield from _executor(config=selected).logs(handle, stream=stream, follow=follow)
 
 
 def _write(job: Job) -> None:

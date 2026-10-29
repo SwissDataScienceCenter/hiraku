@@ -98,15 +98,16 @@ tracking_backend:
 
 ## Commands and jobs
 
-Records and projects define one optional command argv list:
+Root records define an optional command argv list; children inherit it and may
+override it:
 
 ```yaml
 command: [uv, run, --locked, python, train.py, --seed, "42"]
 ```
 
-The nearest record command wins, followed by ancestors and the project default.
-An explicit null clears the inherited command and uses the project default.
-Arguments after `--` replace the complete invocation.
+The nearest record command wins. An explicit null clears an inherited command;
+there is no project-level command fallback. Arguments after `--` replace the
+complete invocation.
 
 ```bash
 job_id=$(hiraku run --record baseline)

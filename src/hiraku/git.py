@@ -18,8 +18,10 @@ class GitRepository:
         require_git()
         if isinstance(config, HirakuConfig):
             start = config.root
+            self.state_dir: Path | None = config.hiraku_dir
         else:
             start = Path.cwd() if config is None else Path(config)
+            self.state_dir = None
         result = self._execute(
             ["git", "-C", str(start), "rev-parse", "--show-toplevel"], cwd=None
         )
@@ -58,6 +60,13 @@ class GitRepository:
         if not isinstance(ref, str) or not ref:
             raise GitError(f"Invalid Git ref: {ref!r}")
         return self._git("rev-parse", "--verify", f"{ref}^{{commit}}").stdout.strip()
+
+    def job_store_pathspec(self) -> str | None:
+        """Return a literal repository pathspec excluding Hiraku job state."""
+        if self.state_dir is None:
+            return None
+        path = (self.state_dir / ".jobs").relative_to(self.root).as_posix()
+        return f":(exclude,top,literal){path}"
 
     @property
     def current_branch(self) -> str | None:

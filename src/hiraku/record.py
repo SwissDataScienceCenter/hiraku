@@ -295,21 +295,24 @@ class Record(BaseRecord):
         return [item for item in index.values() if _is_descendant(item, self.id, index)]
 
     def resolve_command(self, *, config: Any = None) -> list[str] | None:
-        """Return the nearest command, falling back to the project default.
-
-        An explicit null clears the inherited command and uses the project default.
-        """
+        """Return the nearest command, including an explicit null override."""
         selected = _config(config)
         command = self.resolve(config=selected).values.get("command")
-        return (
-            list(command or selected.command) if command or selected.command else None
-        )
+        return list(command) if command is not None else None
+
+    def tracking_backend_spec(self, *, config: Any = None) -> dict[str, Any]:
+        """Return the nearest tracking backend, defaulting to CSV."""
+        specification = self.resolve(config=config).values.get("tracking_backend")
+        if specification is None:
+            return {"type": "csv"}
+        if isinstance(specification, str):
+            return {"type": specification}
+        return dict(specification)
 
     def resolve_tracking_backend(self, *, config: Any = None) -> TrackingBackend:
         """Create the tracking backend inherited by this record."""
         selected = _config(config)
-        specification = self.resolve(config=selected).values.get("tracking_backend")
-        return create_backend(specification or selected.tracking_backend, selected)
+        return create_backend(self.tracking_backend_spec(config=selected), selected)
 
     def runs(self, *, config: Any = None, **query: Any) -> list[Run]:
         """Return runs attributed to this record."""

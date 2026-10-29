@@ -84,8 +84,8 @@ resources/examples/<name>/
 
 `init --template` and `example create` are separate commands. Templates may replace files installed
 by the same initialization, but initialization refuses to overwrite files that
-already existed in the target. Explicit options such as `--tracking-backend`
-take precedence over values from a template-provided `hiraku.yml`.
+already existed in the target. Tracking and command defaults belong on the
+root record, not in project configuration.
 After successful initialization, the command prints the project configuration
 location.
 

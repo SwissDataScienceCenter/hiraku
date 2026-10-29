@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from hiraku import HirakuConfig
+from hiraku import HirakuConfig, Record
 from hiraku.cli import main
 from hiraku.errors import ValidationError
 
@@ -30,16 +30,21 @@ def test_results_preserve_existing_files(tmp_path: Path):
     assert not (tmp_path / "train.py").exists()
 
 
-def test_results_configuration_and_explicit_override(tmp_path: Path):
+def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
     config = HirakuConfig.init(
         tmp_path,
-        example="heart-disease",
+        example="digits-mlflow",
         results=True,
-        tracking_backend="mlflow",
         install_skill=False,
     )
-    assert config.active_record_id == "random-forest"
-    assert config.tracking_backend["type"] == "mlflow"
+    assert config.active_record_id == "weak-l2"
+    root = Record.load(config.records_dir / "digits" / "digits.md")
+    assert root.tracking_backend == {
+        "type": "mlflow",
+        "database": "mlflow.db",
+        "experiment_name": "hiraku-digits",
+    }
+    assert root.resolve_tracking_backend(config=config).backend_name == "mlflow"
 
 
 def test_results_override_base_files(tmp_path: Path, monkeypatch):

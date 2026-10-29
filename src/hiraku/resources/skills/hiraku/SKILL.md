@@ -25,8 +25,8 @@ through an existing record lifecycle.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and job attribution together with
   parameters, metrics, timestamps, and an external URL.
-- **Command:** One optional argv list inherited from the nearest record or
-  project default. Explicit commands need no registration.
+- **Command:** One optional argv list inherited from the nearest record,
+  starting at the root record. Explicit commands need no registration.
 - **Job:** A durable execution receipt with lifecycle, source provenance, and
   retained logs and outputs. Jobs require a clean Git working tree and snapshot
   the selected commit.
@@ -324,8 +324,8 @@ instructions override program defaults.
 
 Records do not need a default command. Pass the invocation directly after `--`,
 for example `hiraku run --record <record-id> -- uv run --locked python train.py
---seed 42`. An optional inherited `command:` can shorten repeated runs;
-explicit argv replaces the entire default command.
+--seed 42`. An optional `command:` on a root record can shorten repeated runs;
+children inherit it, and explicit argv replaces the entire default command.
 
 Revision selection is explicit `--commit`, record-local commit, then HEAD.
 Hiraku captures tracked changes and non-ignored untracked source before running.

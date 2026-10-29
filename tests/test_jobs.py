@@ -108,6 +108,14 @@ def test_default_command_and_literal_argv_in_source_snapshot(project):
     assert job.record_snapshot["id"] == "root"
     assert job.spec.source_digest
     assert job.spec.source_dirty is False
+    receipt = json.loads((job.directory / "job.json").read_text())
+    assert "backend" not in receipt
+    assert "backend_handle" not in receipt
+    assert "execution_handle" in receipt
+    assert "target" not in receipt["spec"]
+    assert "compute_config" not in receipt["spec"]
+    preview = submit_job(record_id="root", dry_run=True, config=project)
+    assert "backend" not in preview
     assert git(project.root, "status", "--porcelain") == ""
     default = submit_job(record_id="root", config=project)
     assert wait_job(default.id, timeout=10, config=project).status == "succeeded"
@@ -193,7 +201,6 @@ def test_explicit_command_does_not_require_a_default_and_run_json(project, monke
     record = Record.load(project.records_dir / "root/root.md")
     record.command = None
     record.save(overwrite=True)
-    project.command = None
     git(project.root, "add", ".")
     git(project.root, "commit", "-qm", "remove default command")
     monkeypatch.chdir(project.root)
@@ -230,7 +237,6 @@ def test_missing_explicit_and_default_command_has_actionable_error(project):
     record = Record.load(project.records_dir / "root/root.md")
     record.command = None
     record.save(overwrite=True)
-    project.command = None
     with pytest.raises(ValidationError, match="supply a command after --"):
         submit_job(record_id="root", config=project)
 
@@ -373,7 +379,7 @@ def test_cancel_reaches_child_group_after_supervisor_dies(project):
     while not (job.working_directory / "ready").exists():
         assert time.monotonic() < deadline
         time.sleep(0.02)
-    supervisor_pid = job.backend_handle["supervisor_pid"]
+    supervisor_pid = job.execution_handle["supervisor_pid"]
     os.kill(supervisor_pid, signal.SIGKILL)
     os.waitpid(supervisor_pid, 0)
     time.sleep(0.1)
@@ -383,6 +389,8 @@ def test_cancel_reaches_child_group_after_supervisor_dies(project):
 
 
 def test_concurrent_submissions_and_terminal_cancel_race(project):
+    project.jobs_dir.mkdir(parents=True, exist_ok=True)
+    (project.jobs_dir / "in-progress").write_text("job store initialization")
     with ThreadPoolExecutor() as pool:
         jobs = list(pool.map(lambda _: submit(project, "print('done')"), range(3)))
     assert len({job.id for job in jobs}) == 3
@@ -425,8 +433,8 @@ def test_dry_run_and_invalid_inputs(project):
         submit(project, "pass", env={"HIRAKU_JOB_ID": "fake"})
     with pytest.raises(ValidationError, match="reserved"):
         submit(project, "pass", env={"HIRAKU_TRACKING_ROOT": "/elsewhere"})
-    with pytest.raises(ValidationError, match="Unsupported compute backend"):
-        submit_job(record_id="root", backend="hpc", config=project)
+    with pytest.raises(TypeError, match="backend"):
+        submit_job(record_id="root", backend="local", config=project)
     with pytest.raises(ValidationError, match="Invalid job ID"):
         load_job("../bad", config=project)
     with pytest.raises(ValidationError, match="dispatcher"):
@@ -509,7 +517,7 @@ def test_ambiguous_supervisor_start_retains_reconcilable_job(project, monkeypatc
         submit(project, "pass")
     jobs = list_jobs(config=project)
     assert len(jobs) == 1 and jobs[0].status == "unknown"
-    assert jobs[0].backend_handle == {"directory": str(jobs[0].directory)}
+    assert jobs[0].execution_handle == {"directory": str(jobs[0].directory)}
 
 
 def test_slow_source_preparation_is_not_listed_before_receipt(project, monkeypatch):
@@ -570,15 +578,8 @@ def test_records_reject_invalid_commands(value):
         Record(id="root", command=value)
 
 
-def test_project_config_has_no_custom_command_validator(tmp_path):
-    config = HirakuConfig(path=tmp_path / "hiraku.yml", root=tmp_path, command=[])
-    assert config.command == []
-
-
-def test_command_inheritance_roundtrip_and_project_fallback(tmp_path):
+def test_command_inheritance_roundtrip_and_explicit_clear(tmp_path):
     config = HirakuConfig.init(tmp_path, install_skill=False)
-    config.command = ["project-command"]
-    config.save()
     root = Record.create("root", command=["root-command"], config=config)
     child = Record.create("child", parent_id=root.id, config=config)
     assert child.resolve_command(config=config) == ["root-command"]
@@ -590,8 +591,7 @@ def test_command_inheritance_roundtrip_and_project_fallback(tmp_path):
     ]
     child.command = None
     child.save(overwrite=True)
-    assert child.resolve_command(config=config) == ["project-command"]
-    assert HirakuConfig.load(config.path).command == ["project-command"]
+    assert child.resolve_command(config=config) is None
     with pytest.raises(ValidationError, match="no longer supported"):
         Record(id="old", entrypoints={})
     old_config = HirakuConfig(path=config.path, root=tmp_path, entrypoints={})

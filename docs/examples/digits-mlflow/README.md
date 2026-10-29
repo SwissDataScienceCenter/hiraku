@@ -38,7 +38,7 @@ The dashboard reads the prepared `mlflow.db` directly, so an MLflow server is
 not required. Use `hiraku dashboard --init --edit --record digits` to copy the
 notebook into the project and edit it. Run details only show an MLflow link
 after you start the MLflow UI and set
-`ui_url: http://127.0.0.1:5000` in the `tracking_backend` configuration.
+`ui_url: http://127.0.0.1:5000` in the root record's `tracking_backend`.
 
 MLflow creates `mlflow.db` in the project root on the first launch. The training
 script uses the Hiraku project root to keep that location stable for local and
