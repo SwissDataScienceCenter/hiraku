@@ -108,7 +108,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     client = MlflowClient(tracking_uri=uri)
     for row in rows:
         assert row["commit"] == source_commit
-        assert row["job_id"]
+        assert row["id"]
         assert row["raw"]["status"] == "FINISHED"
         assert row["params"]["epochs"] == "8"
         assert row["params"]["seed"] == "42"
@@ -175,7 +175,6 @@ def test_digits_requires_root_for_default_tracking(tmp_path):
         {
             "HIRAKU_RECORD_ID": "baseline",
             "HIRAKU_COMMIT": "a" * 40,
-            "HIRAKU_JOB_ID": "test-job",
         }
     )
     result = subprocess.run(

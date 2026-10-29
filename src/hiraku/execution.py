@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -49,8 +48,6 @@ def execute_command(
     ):
         raise ValidationError("Environment additions must map strings to strings")
     reserved = {
-        "HIRAKU_JOB_ID",
-        "HIRAKU_JOB_DIR",
         "HIRAKU_RECORD_ID",
         "HIRAKU_RECORD_FILE",
         "HIRAKU_ROOT",
@@ -63,13 +60,8 @@ def execute_command(
     if reserved.intersection(additions):
         raise ValidationError("Environment cannot override reserved run attribution")
 
-    execution_id = uuid.uuid4().hex
     tracking_spec = record.tracking_backend_spec(config=selected)
     if tracking_spec.get("type") == "wandb":
-        requested_wandb_id = additions.get("WANDB_RUN_ID")
-        if requested_wandb_id is not None and requested_wandb_id != execution_id:
-            raise ValidationError("WANDB_RUN_ID is reserved for Hiraku run attribution")
-        additions["WANDB_RUN_ID"] = execution_id
         wandb_project = tracking_spec.get("project")
         if (
             isinstance(wandb_project, str)
@@ -100,7 +92,6 @@ def execute_command(
     environment.update(additions)
     environment.update(
         {
-            "HIRAKU_JOB_ID": execution_id,
             "HIRAKU_RECORD_ID": record.id,
             "HIRAKU_RECORD_FILE": str(record.path),
             "HIRAKU_ROOT": str(selected.root),

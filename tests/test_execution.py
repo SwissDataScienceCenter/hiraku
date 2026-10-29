@@ -31,7 +31,7 @@ def test_run_executes_in_project_and_returns_output_and_exit_code(
     assert not (tmp_path / ".jobs").exists()
 
 
-def test_run_allows_dirty_tree_and_supplies_ephemeral_attribution(
+def test_run_allows_dirty_tree_and_supplies_provenance(
     tmp_path: Path,
 ) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
@@ -42,14 +42,13 @@ def test_run_allows_dirty_tree_and_supplies_ephemeral_attribution(
         sys.executable,
         "-c",
         "import os; print('|'.join(os.environ[k] for k in "
-        "('HIRAKU_RECORD_ID','HIRAKU_JOB_ID','HIRAKU_COMMIT','HIRAKU_GIT_STATE'))) ",
+        "('HIRAKU_RECORD_ID','HIRAKU_COMMIT','HIRAKU_GIT_STATE'))) ",
     ]
     result = execute_command(
         command, record_id="root", config=config, capture_output=True
     )
-    record_id, execution_id, commit, git_state = result.stdout.strip().split("|")
+    record_id, commit, git_state = result.stdout.strip().split("|")
     assert record_id == "root"
-    assert len(execution_id) == 32
     assert commit == ""
     assert git_state == "unavailable"
 

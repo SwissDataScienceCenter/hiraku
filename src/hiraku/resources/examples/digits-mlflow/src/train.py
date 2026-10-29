@@ -39,7 +39,6 @@ def main() -> None:
     required = (
         "HIRAKU_RECORD_ID",
         "HIRAKU_COMMIT",
-        "HIRAKU_JOB_ID",
         "HIRAKU_ROOT",
         "HIRAKU_TRACKING_ROOT",
     )
@@ -50,7 +49,7 @@ def main() -> None:
         )
     tags = {
         f"hiraku.{key}": os.environ[f"HIRAKU_{key.upper()}"]
-        for key in ("record_id", "commit", "job_id")
+        for key in ("record_id", "commit")
     }
     database = Path(os.environ["HIRAKU_TRACKING_ROOT"]) / "mlflow.db"
     default_tracking_uri = f"sqlite:///{database}"

@@ -83,14 +83,14 @@ The custom service must store records that can be converted to `Run`:
     "record_id": "baseline",
     "commit": "0123456789abcdef0123456789abcdef01234567",
     "timestamp": "2026-01-01T12:00:00Z",
-    "job_id": "job-001",
     "params": {"seed": 42},
     "metrics": {"val/accuracy": 0.84}
   }
 ]
 ```
 
-Use `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` when writing attribution. Interpret
+`id` is the tracking backend's run ID. Use `HIRAKU_RECORD_ID` when writing
+attribution. Interpret
 `HIRAKU_COMMIT` and `HIRAKU_GIT_STATE` as the current Git revision and whether
 the working tree had changes. Keep credentials outside `hiraku.yml`.
 

@@ -45,7 +45,6 @@ def main() -> None:
         config={
             "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
             "hiraku.commit": os.environ["HIRAKU_COMMIT"],
-            "hiraku.job_id": os.environ["HIRAKU_JOB_ID"],
             "dataset.name": "scikit-learn iris",
             "dataset.samples": 150,
             "dataset.features": 4,

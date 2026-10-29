@@ -42,7 +42,6 @@ RUN_FIELDS = [
     "git_state",
     "timestamp",
     "duration",
-    "job_id",
     "param.model",
     "param.seed",
     "param.validation_fraction",
@@ -53,7 +52,6 @@ PROVENANCE_VARIABLES = [
     "HIRAKU_RECORD_ID",
     "HIRAKU_COMMIT",
     "HIRAKU_GIT_STATE",
-    "HIRAKU_JOB_ID",
     "HIRAKU_ROOT",
     "HIRAKU_TRACKING_ROOT",
 ]
@@ -156,7 +154,6 @@ def main() -> None:
             "git_state": attribution["HIRAKU_GIT_STATE"],
             "timestamp": started.isoformat(),
             "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
-            "job_id": attribution["HIRAKU_JOB_ID"],
             "param.model": args.model,
             "param.seed": str(args.seed),
             "param.validation_fraction": str(args.validation_fraction),

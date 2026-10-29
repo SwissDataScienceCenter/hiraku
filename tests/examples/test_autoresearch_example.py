@@ -243,7 +243,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     row = rows[0]
     assert row["record_id"] == "cpu-test"
     assert row["commit"] == commit
-    assert row["job_id"]
+    assert row["id"]
     assert row["raw"]["git_state"] == "clean"
     assert row["raw"]["status"] == "finished"
     assert float(row["metrics"]["val_bpb"]) == 0.9
@@ -291,7 +291,6 @@ def dispatcher_environment(root: Path) -> dict[str, str]:
         "HIRAKU_ROOT": str(root),
         "HIRAKU_TRACKING_ROOT": str(root),
         "HIRAKU_RECORD_ID": "cpu-test",
-        "HIRAKU_JOB_ID": "test-job",
     }
 
 

@@ -53,7 +53,7 @@ def validate_runs(project: Path) -> list[dict[str, str]]:
     )
     if actual != expected or len({r["id"] for r in rows}) != 9:
         raise ValueError("Expected three uniquely identified runs per experiment")
-    if any(not r["job_id"] or not r["timestamp"] or not r["duration"] for r in rows):
+    if any(not r["timestamp"] or not r["duration"] for r in rows):
         raise ValueError("Missing launch attribution")
     if not all(math.isfinite(float(r[f"metric.{m}"])) for r in rows for m in METRICS):
         raise ValueError("Non-finite training metric")

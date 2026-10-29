@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Use the tracking backend's run ID as the only run identifier; remove
+  Hiraku-generated command IDs and their attribution metadata.
 - Separate dashboard performance and trade-off plots into independently placeable components and named cells with their own controls, removing the analysis mode selector.
 - Exclude generated Marimo and Studio session/build caches from distribution archives.
 - Extract reusable dashboard widgets and rendering into `hiraku.dashboard.components`, keeping notebook cells focused on data and reactive selection wiring.

@@ -251,7 +251,7 @@ report its tracked validation metrics. Do not create or update other records."""
     run = runs[0]
     assert run.record_id == experiment.id
     assert run.commit == commit
-    assert run.job_id
+    assert run.id
     assert run.params == {
         "model": "logistic",
         "seed": "42",

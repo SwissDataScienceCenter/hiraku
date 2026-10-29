@@ -23,9 +23,9 @@ needed.
 
 Execution happens in the existing project working tree. Dirty and uncommitted
 changes are available to the command. Hiraku sets `HIRAKU_RECORD_ID`,
-`HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE`, along with a per-invocation
-`HIRAKU_JOB_ID` used only to correlate tracking data. The invocation ID is not
-a durable job and cannot be used to query status or logs later.
+`HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE` for provenance. The tracking backend
+creates and owns its run IDs; Hiraku does not create a second identifier for
+the command invocation.
 
 An optional dispatcher can prepare an environment around the command:
 

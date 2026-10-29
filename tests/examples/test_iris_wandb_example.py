@@ -180,8 +180,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     row = rows[0]
     assert row["record_id"] == "logistic"
     assert row["commit"] == source_commit
-    job_id = row["job_id"]
-    assert job_id
+    run_id = row["id"]
     assert row["params"]["model"] == "logistic"
     assert row["params"]["seed"] == 42
     assert row["params"]["test_size"] == 0.25
@@ -192,11 +191,10 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     assert row["metrics"]["test/accuracy"] == pytest.approx(0.9473684210526316)
     assert row["raw"]["tags"] == ["hiraku", "iris", "logistic"]
     stored = json.loads(store.read_text(encoding="utf-8"))[0]
-    assert stored["id"] == job_id
+    assert stored["id"] == run_id
     assert stored["project"] == "hiraku-iris"
     assert stored["config"]["hiraku.record_id"] == "logistic"
     assert stored["config"]["hiraku.commit"] == source_commit
-    assert stored["config"]["hiraku.job_id"] == job_id
 
     filtered = json.loads(
         invoke(

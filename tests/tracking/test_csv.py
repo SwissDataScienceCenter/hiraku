@@ -16,15 +16,13 @@ def test_csv_backend_config_is_validated() -> None:
     assert config.path == Path("runs.csv")
 
 
-def test_csv_job_and_historical_entrypoint_attribution(tmp_path: Path) -> None:
+def test_csv_tracking_run_and_historical_entrypoint_attribution(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     (tmp_path / "runs.csv").write_text(
-        "id,record_id,job_id,entrypoint\nnew,record,job-csv,\nold,record,,train\n"
+        "id,record_id,entrypoint\nnew,record,\nold,record,train\n"
     )
     runs = {run.id: run for run in CSVBackend(config).list_runs()}
-    assert runs["new"].job_id == "job-csv"
-    assert "job_id" not in runs["new"].raw
-    assert runs["old"].job_id is None
+    assert runs["new"].id == "new"
     assert runs["old"].entrypoint == "train"
 
 

@@ -83,9 +83,8 @@ hiraku runs --record iris --all --sort test/accuracy
 ```
 
 Each run stores model and dataset configuration, seed, Python version, runtime,
-tags, group, notes, and summary metrics. When started with `hiraku run`, W&B's
-native run ID is the Hiraku invocation ID; Hiraku reads record and commit provenance
-from run metadata. The training script creates the remote W&B project
+tags, group, notes, and summary metrics. W&B assigns the native run ID. Hiraku
+reads record and commit provenance from run metadata. The training script creates the remote W&B project
 on its first successful `wandb.init()` call. Hiraku queries and normalizes W&B
 runs; it does not create the W&B project or run.
 

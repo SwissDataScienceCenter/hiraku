@@ -12,7 +12,6 @@ FIELDS = [
     "git_state",
     "timestamp",
     "duration",
-    "job_id",
     "param.seed",
     "metric.val/accuracy",
 ]
@@ -43,7 +42,6 @@ with runs_file.open("a", encoding="utf-8", newline="") as stream:
             "git_state": os.environ["HIRAKU_GIT_STATE"],
             "timestamp": started.isoformat(),
             "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
-            "job_id": os.environ["HIRAKU_JOB_ID"],
             "param.seed": args.seed,
             "metric.val/accuracy": accuracy,
         }

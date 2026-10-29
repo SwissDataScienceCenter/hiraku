@@ -112,7 +112,7 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     def export(output):
         generated = HirakuConfig.init(output, install_skill=False)
         Record.create("generated", command=["python", "train.py"], config=generated)
-        (output / "runs.csv").write_text("id,record_id,job_id\nrun,generated,job\n")
+        (output / "runs.csv").write_text("id,record_id\nrun,generated\n")
 
     monkeypatch.setattr(
         cli.runpy, "run_path", lambda path: {"generate_results": export}
@@ -130,9 +130,7 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     config = HirakuConfig.discover(tmp_path)
     assert config.active_record_id == "generated"
-    assert (
-        load_record("generated", config=config).runs(config=config)[0].job_id == "job"
-    )
+    assert load_record("generated", config=config).runs(config=config)[0].id == "run"
     assert not (tmp_path / ".git").exists()
 
 
@@ -180,7 +178,7 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
         "random-forest": 3,
         "forest-tuning": 3,
     }
-    assert all(r.job_id and r.timestamp for r in runs)
+    assert all(r.id and r.timestamp for r in runs)
     assert all(r.decision is None for r in list_records(config=config))
 
 

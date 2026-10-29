@@ -15,6 +15,8 @@ from .errors import ValidationError
 class Run(BaseModel):
     """An immutable run returned by a tracking backend.
 
+    ``id`` is the tracking backend's run ID.
+
     ``timestamp`` is when the run started and ``duration`` its wall-clock
     length in seconds; either is ``None`` when the backend does not report it.
     """
@@ -24,7 +26,6 @@ class Run(BaseModel):
     metrics: Mapping[str, Any] = Field(default_factory=dict)
     params: Mapping[str, Any] = Field(default_factory=dict)
     record_id: str | None = None
-    job_id: str | None = None
     commit: str | None = None
     timestamp: datetime | None = None
     duration: float | None = None

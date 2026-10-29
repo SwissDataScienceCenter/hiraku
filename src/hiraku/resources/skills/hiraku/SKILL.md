@@ -324,17 +324,16 @@ children inherit it, and explicit argv replaces the entire default command.
 Commands execute in the current project working tree, including uncommitted
 changes. `hiraku run` waits until the command exits.
 
-Hiraku injects `HIRAKU_JOB_ID`, `HIRAKU_RECORD_ID`,
+Hiraku injects `HIRAKU_RECORD_ID`,
 `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, `HIRAKU_COMMIT`,
 `HIRAKU_GIT_STATE`. `HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, and cwd point to the
 project directory. Use the dispatcher to prepare the runtime when needed.
 
-The CSV backend queries project-root `runs.csv`. Log the invocation ID in the
-legacy `job_id` CSV column and `hiraku.job_id` MLflow tag. For W&B runs through `hiraku run`,
-Hiraku sets `WANDB_RUN_ID` to the invocation ID and tracking adapters read
-record and commit attribution from run metadata. Tracking code and adapters
-must use the same destination. Hiraku does not create tracking runs
-automatically; curves and artifacts remain with the tracker.
+The CSV backend queries project-root `runs.csv`. Tracking backends generate
+and own run IDs. Tracking adapters read record and commit attribution from run
+metadata. Tracking code and adapters must use the same destination. Hiraku does
+not create tracking runs automatically; curves and artifacts remain with the
+tracker.
 
 ## Finish clearly
 

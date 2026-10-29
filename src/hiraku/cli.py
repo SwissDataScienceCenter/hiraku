@@ -61,7 +61,6 @@ def _json_value(value: Any) -> Any:
             "metrics": _json_value(value.metrics),
             "params": _json_value(value.params),
             "record_id": value.record_id,
-            "job_id": value.job_id,
             "commit": value.commit,
             "timestamp": _json_value(value.timestamp),
             "duration": value.duration,

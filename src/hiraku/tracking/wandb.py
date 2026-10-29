@@ -187,7 +187,6 @@ class WandbBackend(TrackingBackend):
         from ..run import Run
 
         config = self._run_config(run)
-        job_id = config.get("hiraku.job_id")
         record_id = config.get("hiraku.record_id")
         commit = config.get("hiraku.commit")
         return Run(
@@ -200,7 +199,6 @@ class WandbBackend(TrackingBackend):
             # W&B keeps a run's wall-clock seconds in the ``_runtime`` summary key.
             duration=(run.summary or {}).get("_runtime"),
             entrypoint=config.get("hiraku.entrypoint"),
-            job_id=job_id,
             url=run.url,
             raw=self._run_raw(run),
         )

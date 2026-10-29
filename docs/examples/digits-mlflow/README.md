@@ -94,7 +94,7 @@ Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs
 in the native MLflow interface.
 
 One MLflow experiment contains both Hiraku child records. Native MLflow tags
-`hiraku.record_id`, `hiraku.commit`, and `hiraku.job_id`
+`hiraku.record_id` and `hiraku.commit`
 link each run back to Hiraku. The script owns logging; Hiraku queries the latest
 value of each metric. Full epoch histories remain in MLflow and its UI.
 

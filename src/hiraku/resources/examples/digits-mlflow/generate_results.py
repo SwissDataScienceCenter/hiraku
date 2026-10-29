@@ -43,9 +43,7 @@ def validate_database(database: Path) -> None:
                     "SELECT key,value FROM tags WHERE run_uuid=?", (run,)
                 )
             )
-            if status != "FINISHED" or not (
-                tags.get("hiraku.job_id") or tags.get("hiraku.entrypoint")
-            ):
+            if status != "FINISHED" or not (tags.get("hiraku.entrypoint")):
                 raise ValueError("Incomplete or unattributed training run")
             if (
                 float(params["alpha"]) != dict(EXPERIMENTS)[record]
