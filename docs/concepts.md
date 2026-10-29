@@ -17,9 +17,9 @@ This fragmentation creates an inherent barrier for effective Human-AI collaborat
 
 ## Records and runs
 
-Hiraku uses records, jobs, and tracked runs to document the model-development lifecycle.
+Hiraku uses records, foreground command execution, and tracked runs to document the model-development lifecycle.
 
-Records and jobs are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
+Records and command execution are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
 A root *record* defines a working scope and goal, and documents the research progress. Child records are focused, reproducible units within that scope that can link code, execution commands, and runs. Records carry no required semantic type; users may create them for baselines, hypotheses, diagnostics, model runs, ablations, hyperparameter optimization, etc. *Runs* record execution traces attributed to one record and, when available, a code commit.
 
@@ -27,7 +27,7 @@ A root *record* defines a working scope and goal, and documents the research pro
 | --- | ---  | --- |
 | **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared fields and commands. |
 | **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit and commands. A proposed investigation may have no commit. |
-| **Job** | ignored local receipt store plus executor state | Execution identity, lifecycle, logs, and either a managed snapshot or existing workspace reference. |
+| **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
 Records are stored as Markdown with YAML front matter. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent, and all descendants are stored flat in their root's folder. IDs are unique across the project.
@@ -96,7 +96,7 @@ tracking_backend:
 
 `hiraku runs` lists runs attributed to the active record, or to the record given with `--record ID`. Add `--all` to list every attributed run from the tracking source resolved for that record, for example to compare sibling records under a root. In Python, `record.runs(config=config)` returns the record's own runs, and `record.resolve_tracking_backend(config=config).list_runs()` lists the whole source. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
 
-## Commands and jobs
+## Command execution
 
 Root records define an optional command argv list; children inherit it and may
 override it:
@@ -110,15 +110,13 @@ there is no project-level command fallback. Arguments after `--` replace the
 complete invocation.
 
 ```bash
-job_id=$(hiraku run --record baseline)
-hiraku job wait "$job_id"
-hiraku job logs "$job_id"
+hiraku run --record baseline
 hiraku runs --record baseline --json
 ```
 
-Jobs own execution and provenance; tracked runs own measurements. One job may
-produce zero, one, or multiple tracking runs. See [Jobs](guides/jobs.md) for
-execution, cancellation, provenance, and migration from named entrypoints.
+Command execution runs synchronously in the project working tree; tracked runs
+own measurements and can be inspected after the command exits. See
+[Command execution](guides/execution.md) for details.
 
 ## Agent Skill
 
@@ -199,9 +197,7 @@ git commit -m "implement logistic baseline"
 hiraku record update logistic-baseline --commit HEAD
 
 # 4. run an arbitrary command and list attributed runs
-job_id=$(hiraku run --record logistic-baseline -- \
-  uv run python train.py)
-hiraku job wait "$job_id"
+hiraku run --record logistic-baseline -- uv run python train.py
 hiraku runs --record logistic-baseline --sort val/log_loss --ascending
 
 # 5. review the runs and document the conclusion on the child record

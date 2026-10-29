@@ -48,11 +48,8 @@ hiraku record create baseline --parent my-task --type experiment \
   --set "hypothesis=The existing representation establishes a reference." \
   --commit HEAD
 
-job_id=$(hiraku run --record baseline -- \
-  uv run python evaluate.py --seed 0)
-hiraku job wait "$job_id"
-job_id=$(hiraku run --record baseline -- uv run python evaluate.py --seed 1)
-hiraku job wait "$job_id"
+hiraku run --record baseline -- uv run python evaluate.py --seed 0
+hiraku run --record baseline -- uv run python evaluate.py --seed 1
 hiraku record list
 hiraku runs --record baseline
 ```
@@ -67,6 +64,6 @@ For other tracking backends, see [W&B](../../guides/tracking-wandb.md) or
 For the next experiment, implement and commit the source changes, then create a
 new experiment bound to that commit.
 
-### Job execution
+### Command execution
 
-Jobs require a clean Git working tree and capture the selected commit in an isolated snapshot. Ignored datasets and environments are not copied; configure access through an optional dispatcher. Submission returns a job ID; wait before querying runs. Use `hiraku job logs JOB_ID` for output. Arguments after `--` replace the complete default command.
+Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.

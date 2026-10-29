@@ -25,7 +25,7 @@ class HirakuConfig(BaseModel):
         path: Path to the project configuration file.
         root: Project root directory.
         hiraku_dir_name: Relative state directory name.
-        default_dispatch: Default launcher script.
+        default_dispatch: Default command dispatcher.
 
     Raises:
         pydantic.ValidationError: If configuration values are invalid or inconsistent.
@@ -241,13 +241,8 @@ class HirakuConfig(BaseModel):
 
     @property
     def dispatch_dir(self) -> Path:
-        """Return the directory containing launcher dispatch scripts."""
+        """Return the directory containing command dispatcher scripts."""
         return self.hiraku_dir / "dispatch"
-
-    @property
-    def jobs_dir(self) -> Path:
-        """Return the ignored directory of durable local job state."""
-        return self.hiraku_dir / ".jobs"
 
     def set_active_record(self, record: str | Any) -> None:
         """Persist the active research record."""

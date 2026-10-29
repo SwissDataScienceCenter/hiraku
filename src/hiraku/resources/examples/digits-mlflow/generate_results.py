@@ -11,7 +11,7 @@ from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hiraku import HirakuConfig, submit_job, wait_job
+from hiraku import HirakuConfig, execute_command
 from hiraku.record import Record
 
 EXPERIMENTS = (("weak-l2", 0.0001), ("strong-l2", 1.0))
@@ -120,7 +120,7 @@ def generate(config: HirakuConfig) -> None:
             ],
         )
         for seed in (1, 2, 3):
-            job = submit_job(
+            result = execute_command(
                 [*record.command, "--seed", str(seed)],
                 record_id=identifier,
                 config=config,
@@ -129,9 +129,11 @@ def generate(config: HirakuConfig) -> None:
                     "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
                 },
             )
-            completed = wait_job(job.id, config=config)
-            if completed.status != "succeeded":
-                raise RuntimeError(f"Training job {job.id} failed: {completed.error}")
+            if result.returncode:
+                raise RuntimeError(
+                    f"Training command for {identifier} failed with "
+                    f"exit code {result.returncode}"
+                )
     validate_database(database)
     config.active_record_id = "weak-l2"
     config.save()

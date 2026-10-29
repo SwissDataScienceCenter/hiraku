@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..config import HirakuConfig
-from ..errors import BackendError, HirakuError
+from ..errors import BackendError
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
@@ -184,22 +184,12 @@ class WandbBackend(TrackingBackend):
 
     def _normalize_run(self, run: Any) -> Run:
         """Convert one W&B public run object into Hiraku's normalized model."""
-        from ..job import load_job
         from ..run import Run
 
         config = self._run_config(run)
         job_id = config.get("hiraku.job_id")
         record_id = config.get("hiraku.record_id")
         commit = config.get("hiraku.commit")
-        if not job_id:
-            try:
-                job = load_job(run.id, config=self.config)
-            except HirakuError:
-                pass
-            else:
-                job_id = job.id
-                record_id = record_id or job.record_id
-                commit = commit or job.commit
         return Run(
             id=run.id,
             metrics=dict(run.summary or {}),

@@ -37,16 +37,8 @@ class GitError(HirakuError):
     """A Git operation failed."""
 
 
-class JobError(HirakuError):
-    """A job could not be submitted, inspected, or controlled."""
-
-
-class BackendSubmissionError(JobError):
-    """A backend submission failed, with whether acceptance is uncertain."""
-
-    def __init__(self, message: str, *, uncertain: bool = False) -> None:
-        super().__init__(message)
-        self.uncertain = uncertain
+class ExecutionError(HirakuError):
+    """A foreground command could not be started or configured."""
 
 
 class BackendError(HirakuError):

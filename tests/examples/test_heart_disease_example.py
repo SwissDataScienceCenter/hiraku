@@ -91,8 +91,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
             ],
         )
         assert load_record(record_id).commit == source_commit
-        job_id = invoke(runner, ["run", "--record", record_id]).output.strip()
-        invoke(runner, ["job", "wait", job_id])
+        invoke(runner, ["run", "--record", record_id])
 
     config = HirakuConfig.discover(project)
     root = load_record("heart-disease", config=config)

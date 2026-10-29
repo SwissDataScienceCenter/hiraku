@@ -140,7 +140,9 @@ def test_generator_does_not_publish_failed_batch(generator, tmp_path, monkeypatc
     def fail(*args, **kwargs):
         raise RuntimeError("training failed")
 
-    monkeypatch.setitem(generator["generate_results"].__globals__, "submit_job", fail)
+    monkeypatch.setitem(
+        generator["generate_results"].__globals__, "execute_command", fail
+    )
     output = tmp_path / "results"
     with pytest.raises(RuntimeError, match="training failed"):
         generator["generate_results"](output)

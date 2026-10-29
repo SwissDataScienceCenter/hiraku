@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from hiraku import HirakuConfig, submit_job, wait_job
+from hiraku import HirakuConfig, execute_command
 from hiraku.record import load_record
 
 
@@ -30,7 +30,7 @@ def test_digits_refuses_existing_output_and_partial_export(
     def fail(*args, **kwargs):
         raise RuntimeError("failed training")
 
-    monkeypatch.setitem(generator["generate"].__globals__, "submit_job", fail)
+    monkeypatch.setitem(generator["generate"].__globals__, "execute_command", fail)
     output = tmp_path / "results"
     with pytest.raises(RuntimeError, match="failed training"):
         generator["generate_results"](output)
@@ -113,7 +113,7 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
     ):
         subprocess.run(["git", *arguments], cwd=config.root, check=True)
     command = [*weak.command, "--seed", "4", "--epochs", "1"]
-    job = submit_job(
+    result = execute_command(
         command,
         record_id=weak.id,
         config=config,
@@ -122,5 +122,5 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
             "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
         },
     )
-    assert wait_job(job.id, timeout=60, config=config).status == "succeeded"
+    assert result.returncode == 0
     assert len(backend.list_runs()) == 7

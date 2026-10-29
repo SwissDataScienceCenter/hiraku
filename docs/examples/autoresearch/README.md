@@ -83,8 +83,7 @@ hiraku record create cpu-test --parent sep10 --type experiment \
   --set "hypothesis=The Hiraku dispatcher records an attributed mock result" \
   --commit HEAD
 
-job_id=$(hiraku run --record cpu-test -- uv run python cpu_mock.py --val-bpb 1.0)
-hiraku job wait "$job_id"
+hiraku run --record cpu-test -- uv run python cpu_mock.py --val-bpb 1.0
 hiraku runs --record cpu-test
 
 hiraku record update cpu-test \
@@ -102,8 +101,7 @@ hiraku record create baseline --parent sep10 --type experiment \
   --set "hypothesis=Provide a reasonable starting point for comparison" \
   --commit HEAD
 
-job_id=$(hiraku run --record baseline -- uv run python train.py)
-hiraku job wait "$job_id"
+hiraku run --record baseline -- uv run python train.py
 hiraku runs --record baseline
 
 hiraku record update baseline \
@@ -138,6 +136,6 @@ hiraku record list --json
 hiraku runs --record sep10 --all --sort val_bpb --ascending
 ```
 
-### Job execution
+### Command execution
 
-Jobs require a clean Git working tree and capture the selected commit in an isolated snapshot. Ignored datasets and environments are not copied; configure access through an optional dispatcher. Submission returns a job ID; wait before querying runs. Use `hiraku job logs JOB_ID` for output. Arguments after `--` replace the complete default command.
+Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.

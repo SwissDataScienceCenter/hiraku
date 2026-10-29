@@ -23,16 +23,16 @@ through an existing record lifecycle.
   Fields inherit from the nearest parent definition by default; `id`,
   `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local.
 - **Run:** An execution trace returned by the configured tracking backend. A run
-  may include record, commit, and job attribution together with
+  may include record, commit, and invocation attribution together with
   parameters, metrics, timestamps, and an external URL.
 - **Command:** One optional argv list inherited from the nearest record,
   starting at the root record. Explicit commands need no registration.
-- **Job:** A durable execution receipt with lifecycle, source provenance, and
-  retained logs and outputs. Jobs require a clean Git working tree and snapshot
-  the selected commit.
+- **Execution:** A foreground command in the current project working tree.
+  Hiraku streams output, returns the command's exit code, and supplies tracking
+  attribution for that invocation.
 - **Dispatch script:** An optional project script under `hiraku/dispatch/`
-  that sets up the runtime and runs argv inside the source snapshot. Compute
-  targets own lifecycle; tracking backends own experimental measurements.
+  that prepares the runtime before running argv. Tracking backends own
+  experimental measurements.
 
 ## Main CLI entry points
 
@@ -42,8 +42,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | --- | --- |
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
-| Submit a job | `hiraku run [--record ID] [--commit REF] [--dispatch DISPATCHER] [-- COMMAND ...]` |
-| Inspect execution | `hiraku job status ID --json`, `hiraku job wait ID`, `hiraku job logs ID`, `hiraku job cancel ID` |
+| Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
 | Manage program records | `hiraku program list`, `hiraku program show PROGRAM` |
 | Manage action records | `hiraku action ...` |
@@ -52,8 +51,8 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 
 Use `record show`
 to resolve canonical records and effective commands before making changes or
-launching work. Use `hiraku run --dry-run` when execution resolution
-needs verification without starting the command.
+launching work. Inspect the resolved command with `hiraku record show` before
+running it when needed.
 
 ## Operating scope
 
@@ -266,26 +265,21 @@ code writes the run to its backend.
 For a high-level run request:
 
 1. Inspect the record, revision, command, dependencies, and tracking destination.
-2. Inspect source changes and confirm ignored data and environments are
-   available to the job through their configured paths.
-3. Submit with explicit record attribution and save the job ID.
-4. Wait, inspect status and logs, then query tracked runs. A successful job
-   without measurements is not experimental evidence.
+2. Inspect source changes and confirm data and environments are available at
+   their configured paths.
+3. Run with explicit record attribution and inspect output and the exit code.
+   Then query tracked runs; a successful command without measurements is not
+   experimental evidence.
 
 ```bash
-job_id=$(hiraku run --record <record-id> -- \
-  uv run --locked python train.py --seed 42)
-hiraku job wait "$job_id"
-hiraku job status "$job_id" --json
-hiraku job logs "$job_id"
+hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
 hiraku runs --record <record-id> --json
 ```
 
 Tokens after `--` replace the complete invocation:
 
 ```bash
-job_id=$(hiraku run --record <record-id> -- \
-  uv run --locked python train.py --seed 7)
+hiraku run --record <record-id> -- uv run --locked python train.py --seed 7
 ```
 
 Do not repeat an existing successful run unless the user or workflow requires a
@@ -320,31 +314,27 @@ runs, Git state, and required files before entering its loop. Resume incomplete
 work safely and follow the program's own checkpoints and stopping rules. User
 instructions override program defaults.
 
-## Commands, jobs, and tracking details
+## Commands and tracking details
 
 Records do not need a default command. Pass the invocation directly after `--`,
 for example `hiraku run --record <record-id> -- uv run --locked python train.py
 --seed 42`. An optional `command:` on a root record can shorten repeated runs;
 children inherit it, and explicit argv replaces the entire default command.
 
-Revision selection is explicit `--commit`, record-local commit, then HEAD.
-Hiraku captures tracked changes and non-ignored untracked source before running.
-The supervisor survives CLI exit; inspect and cancel it through job commands.
+Commands execute in the current project working tree, including uncommitted
+changes. `hiraku run` waits until the command exits.
 
-Hiraku injects `HIRAKU_JOB_ID`, `HIRAKU_JOB_DIR`, `HIRAKU_RECORD_ID`,
+Hiraku injects `HIRAKU_JOB_ID`, `HIRAKU_RECORD_ID`,
 `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, `HIRAKU_COMMIT`,
-`HIRAKU_GIT_STATE`, and `HIRAKU_SOURCE_DIGEST`. `HIRAKU_ROOT` and cwd point to
-the captured source; `HIRAKU_RECORD_FILE` is the submitted record snapshot.
-Use `HIRAKU_TRACKING_ROOT` for persistent local tracking output.
-Ignored data and environments are not copied; configure their paths through
-the dispatcher.
+`HIRAKU_GIT_STATE`. `HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, and cwd point to the
+project directory. Use the dispatcher to prepare the runtime when needed.
 
-The CSV backend queries project-root `runs.csv`. Log `job_id` in CSV and
-`hiraku.job_id` in MLflow tags. For W&B jobs launched through `hiraku run`,
-Hiraku sets `WANDB_RUN_ID` to the job ID and resolves record and commit from
-the saved job receipt; no Hiraku-specific W&B config fields are needed.
-Tracking code and adapters must use the same destination. Jobs do not create
-tracking runs automatically. Curves and artifacts remain with the tracker.
+The CSV backend queries project-root `runs.csv`. Log the invocation ID in the
+legacy `job_id` CSV column and `hiraku.job_id` MLflow tag. For W&B runs through `hiraku run`,
+Hiraku sets `WANDB_RUN_ID` to the invocation ID and tracking adapters read
+record and commit attribution from run metadata. Tracking code and adapters
+must use the same destination. Hiraku does not create tracking runs
+automatically; curves and artifacts remain with the tracker.
 
 ## Finish clearly
 
@@ -356,7 +346,7 @@ attribution explicitly. Stop when the user's requested scope is complete.
 The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
 `Metric`, loaders, and listing functions in `hiraku.record`;
 `BaseRecord` in `hiraku.base`; `Run` in `hiraku.run`;
-and `Job`, `JobSpec`, `submit_job`, `wait_job`, `job_status`, `job_logs`, and
-`cancel_job` in `hiraku.job` for scripted execution. `hiraku context`, `hiraku action`,
+and `execute_command` in `hiraku.execution` for scripted execution.
+`hiraku context`, `hiraku action`,
 and `hiraku program` manage supporting material and instructions. V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.

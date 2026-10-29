@@ -3,12 +3,13 @@ from __future__ import annotations
 import shlex
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from hiraku.config import HirakuConfig
-from hiraku.job import submit_job, wait_job
+from hiraku.git import GitRepository
 from hiraku.record import Record, load_record
 from hiraku.workflows.session import Session, load_session
 from hiraku.workflows.workflow import list_workflows, load_workflow
@@ -91,8 +92,9 @@ def add_run(
 
 
 def successful_job(config: HirakuConfig, record_id: str):
-    job = submit_job(["python", "-c", "pass"], record_id=record_id, config=config)
-    return wait_job(job.id, config=config)
+    return SimpleNamespace(
+        id=f"r-{record_id}", commit=GitRepository(config).resolve("HEAD")
+    )
 
 
 @pytest.fixture
@@ -148,7 +150,7 @@ def run_experiment(harness: Harness, config: HirakuConfig, record_id: str) -> st
     harness.send("implemented", commit="HEAD")
     job = successful_job(config, record_id)
     add_run(config, f"r-{record_id}", record_id, "0.8", job.id, job.commit)
-    harness.send("launched", job_id=job.id)
+    harness.send("launched", run_id=job.id)
     harness.send("analyzed", verdict="supports", conclusion="Better")
     return sha
 
@@ -201,8 +203,6 @@ def test_collaborative_runs_each_step_and_stops_after_the_rounds(
         "run",
         "--record",
         "c1",
-        "--commit",
-        sha,
         "--",
         "python",
         "train.py",
@@ -212,9 +212,9 @@ def test_collaborative_runs_each_step_and_stops_after_the_rounds(
     assert harness.instruction["data"]["feedback"] == "Use the local dispatcher"
 
     job = successful_job(config, "c1")
-    assert harness.send("launched", job_id=job.id)["status"] == "not_ready"
+    assert harness.send("launched", run_id="r1")["status"] == "not_ready"
     add_run(config, "r1", "c1", "0.8", job.id, job.commit)
-    harness.send("launched", job_id=job.id)
+    harness.send("launched", run_id="r1")
     assert harness.section() == "## Analyze"
     assert harness.instruction["data"]["runs"] == [
         {"run_id": "r1", "metrics": {"val": "0.8"}}
@@ -272,13 +272,13 @@ def test_collaborative_rejects_invalid_input(config: HirakuConfig) -> None:
     path = config.root / "runs.csv"
     job = successful_job(config, "c1")
     path.write_text(HEADER + f"r1,c1,{job.id},{'0' * 40},0.5\n")
-    wrong = harness.send("launched", job_id=job.id)
+    wrong = harness.send("launched", run_id="r1")
     assert wrong["status"] == "rejected"
     assert "another commit" in wrong["message"]
 
     # Entering analyze needs metrics, so the launch report waits for them.
     path.write_text(HEADER + f"r1,c1,{job.id},{job.commit},\n")
-    early = harness.send("launched", job_id=job.id)
+    early = harness.send("launched", run_id="r1")
     assert early["status"] == "not_ready"
     assert "no metrics yet" in early["message"]
     assert harness.section() == "## Launch"
@@ -296,8 +296,6 @@ def test_collaborative_quotes_launch_arguments(config, record_id):
         "run",
         "--record",
         record_id,
-        "--commit",
-        sha,
         "--",
         "python",
         "train.py",
@@ -314,13 +312,13 @@ def test_collaborative_uses_only_requested_job_runs(config):
     job = successful_job(config, "c1")
     path = config.root / "runs.csv"
     path.write_text(HEADER + f"other,c1,another-job,{'0' * 40},0.9\n")
-    assert harness.send("launched", job_id=job.id)["status"] == "not_ready"
+    assert harness.send("launched", run_id="ready")["status"] == "not_ready"
     path.write_text(
         HEADER
         + f"other,c1,another-job,{'0' * 40},0.9\n"
         + f"pending,c1,{job.id},{sha},\n"
     )
-    waiting = harness.send("launched", job_id=job.id)
+    waiting = harness.send("launched", run_id="pending")
     assert waiting["status"] == "not_ready"
     assert "no metrics yet" in waiting["message"]
     path.write_text(
@@ -328,7 +326,7 @@ def test_collaborative_uses_only_requested_job_runs(config):
         + f"other,c1,another-job,{'0' * 40},0.9\n"
         + f"ready,c1,{job.id},{sha},0.8\n"
     )
-    assert harness.send("launched", job_id=job.id)["status"] == "accepted"
+    assert harness.send("launched", run_id="ready")["status"] == "accepted"
     assert harness.instruction["data"]["runs"] == [
         {"run_id": "ready", "metrics": {"val": "0.8"}}
     ]

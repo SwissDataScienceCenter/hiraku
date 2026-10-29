@@ -182,10 +182,16 @@ def test_record_cli_command_and_runs(tmp_path: Path, monkeypatch) -> None:
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-qm", "records"], cwd=tmp_path, check=True)
     result = invoke(
-        "run", "--record", "child", "--dry-run", "--", "python", "-c", "print(7)"
+        "run",
+        "--record",
+        "child",
+        "--",
+        sys.executable,
+        "-c",
+        "from pathlib import Path; Path('ran.txt').write_text('7')",
     )
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["command"] == ["python", "-c", "print(7)"]
+    assert (tmp_path / "ran.txt").read_text() == "7"
     (tmp_path / "runs.csv").write_text(
         "id,record_id,metric.loss\na,root,0.5\nb,child,0.2\nc,,0.1\n"
     )

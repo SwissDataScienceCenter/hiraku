@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -29,6 +28,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
 
     async def exercise() -> None:
         async def call(name: str, **args):
+            print(f"calling {name}", flush=True)
             return await server.call_tool(name, args)
 
         await call(
@@ -133,77 +133,31 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_job_submission_and_lifecycle(tmp_path: Path) -> None:
+def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
-    (tmp_path / ".gitignore").write_text(
-        "hiraku/\nhiraku.yml\n.mcp.json\n.codex/\n.agents/\n.claude/\n"
-    )
-    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.org"],
-        cwd=tmp_path,
-        check=True,
-    )
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
-    subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True)
-    dispatcher = config.dispatch_dir / "test.sh"
-    dispatcher.write_text(
-        '#!/bin/sh\nprintf "%s\\n" "$HIRAKU_RECORD_ID:$HIRAKU_JOB_ID"\n'
-        'printf "diagnostic\\n" >&2\nexit 7\n'
-    )
-    dispatcher.chmod(0o755)
-    subprocess.run(
-        ["git", "add", "-f", "hiraku/dispatch/test.sh"], cwd=tmp_path, check=True
-    )
-    subprocess.run(["git", "commit", "-m", "add dispatcher"], cwd=tmp_path, check=True)
     server = create_server(config)
 
     async def exercise() -> None:
         await server.call_tool(
-            "record_create",
-            {
-                "record_id": "demo",
-                "fields": {"command": ["echo", "--n", "1"]},
-            },
+            "record_create", {"record_id": "demo", "fields": {"command": ["echo"]}}
         )
-        preview = await server.call_tool(
-            "job_submit",
-            {
-                "record_id": "demo",
-                "command": ["echo", "--n", "2"],
-                "dry_run": True,
-            },
-        )
-        assert preview.structured_content["command"] == ["echo", "--n", "2"]
         result = await server.call_tool(
-            "job_submit",
+            "execute",
             {
                 "record_id": "demo",
-                "command": [sys.executable, "-c", "print('job output')"],
-                "dispatch": "test.sh",
+                "command": [
+                    sys.executable,
+                    "-c",
+                    "import sys; print('out'); print('err', file=sys.stderr); "
+                    "raise SystemExit(7)",
+                ],
             },
         )
-        job_id = result.structured_content["id"]
-        assert result.structured_content["spec"]["record_id"] == "demo"
-        completed = await server.call_tool("job_wait", {"job_id": job_id})
-        assert completed.structured_content["status"] == "failed"
-        assert completed.structured_content["exit_code"] == 7
-        stdout = await server.call_tool("job_read_logs", {"job_id": job_id})
-        stderr = await server.call_tool(
-            "job_read_logs", {"job_id": job_id, "stream": "stderr"}
-        )
-        assert stdout.content[0].text == f"demo:{job_id}\n"
-        assert stderr.content[0].text == "diagnostic\n"
-        assert (
-            await server.call_tool("job_status", {"job_id": job_id})
-        ).structured_content["status"] == "failed"
-        jobs = await server.call_tool("job_list", {"record_id": "demo"})
-        assert jobs.structured_content["result"][0]["id"] == job_id
-        with pytest.raises(ToolError):
-            await server.call_tool(
-                "job_submit", {"record_id": "missing", "command": ["echo"]}
-            )
+        assert result.structured_content == {
+            "returncode": 7,
+            "stdout": "out\n",
+            "stderr": "err\n",
+        }
 
     asyncio.run(exercise())
 

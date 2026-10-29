@@ -1,6 +1,6 @@
 # CLI Reference
 
-The CLI manages research records, durable jobs, and tracked runs.
+The CLI manages research records, foreground command execution, and tracked runs.
 
 Typical workflow:
 
@@ -8,8 +8,7 @@ Typical workflow:
 hiraku init
 hiraku record create <root-id>
 hiraku record create <child-id> --parent <root-id>
-job_id=$(hiraku run --record <child-id> -- python train.py)
-hiraku job wait "$job_id"
+hiraku run --record <child-id> -- python train.py
 hiraku runs --record <record-id>
 ```
 

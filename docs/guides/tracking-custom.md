@@ -90,12 +90,9 @@ The custom service must store records that can be converted to `Run`:
 ]
 ```
 
-Use `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` when
-writing attribution. Interpret `HIRAKU_COMMIT`, `HIRAKU_GIT_STATE`, and
-`HIRAKU_SOURCE_DIGEST` together: the commit is the base revision and the digest
-identifies the captured source revision. Job submission requires a clean Git
-working tree. Keep credentials
-outside `hiraku.yml`.
+Use `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` when writing attribution. Interpret
+`HIRAKU_COMMIT` and `HIRAKU_GIT_STATE` as the current Git revision and whether
+the working tree had changes. Keep credentials outside `hiraku.yml`.
 
 ## Inspect
 

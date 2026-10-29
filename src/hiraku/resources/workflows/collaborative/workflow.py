@@ -9,7 +9,6 @@ from pydantic import Field
 
 from hiraku.errors import EventRejected, HirakuError, NotReady
 from hiraku.git import GitRepository
-from hiraku.job import job_status
 from hiraku.record import Record, load_record
 from hiraku.run import Run
 from hiraku.validation import validate_command
@@ -27,7 +26,7 @@ class Experiments(State):
     command: list[str] | None = None
     rounds: int
     experiment: str | None = None
-    job_id: str | None = None
+    run_id: str | None = None
     feedback: str | None = None
     results: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -90,8 +89,6 @@ class Collaborative(Workflow):
             "run",
             "--record",
             record.id,
-            "--commit",
-            str(record.commit),
         ]
         command = experiments.command or record.resolve_command(config=self.config)
         if command:
@@ -102,7 +99,7 @@ class Collaborative(Workflow):
     @node("analyze")
     def analyzing(self, experiments: Experiments) -> Instruction:
         record = self._experiment(experiments)
-        runs = _runs(record, self, experiments.job_id)
+        runs = _runs(record, self, experiments.run_id)
         if not any(run.metrics for run in runs):
             raise NotReady(
                 f"The runs of {record.id!r} have no metrics yet; "
@@ -181,35 +178,27 @@ class Collaborative(Workflow):
         self,
         experiments: Experiments,
         *,
-        job_id: Annotated[str, "ID returned by hiraku run."],
+        run_id: Annotated[str, "ID of the newly tracked run."],
     ) -> Experiments:
-        """Report that the experiment's run is tracked."""
+        """Report that the foreground execution produced a tracked run."""
         try:
             record = self._experiment(experiments)
-            job = job_status(job_id, config=self.config)
-            if job.record_id != record.id or job.commit != record.commit:
-                raise EventRejected(
-                    f"Job {job_id!r} is not attributed to {record.id!r} at "
-                    f"commit {record.commit}"
-                )
-            if job.status not in {"succeeded", "failed", "cancelled", "lost"}:
-                raise NotReady(f"Job {job_id!r} is still {job.status}")
-            if job.status != "succeeded":
-                raise EventRejected(f"Job {job_id!r} finished with status {job.status}")
-            runs = _runs(record, self, job_id)
+            runs = _runs(record, self, run_id)
             if not runs:
                 raise NotReady(
-                    f"No run is attributed to {record.id!r} yet; "
-                    "send the event again once the job's run is tracked"
+                    f"Run {run_id!r} is not visible in the tracking source yet"
                 )
-            if any(run.commit not in (None, record.commit) for run in runs):
+            run = runs[0]
+            if run.commit not in (None, record.commit):
                 raise EventRejected(
-                    f"A run of {record.id!r} used another commit than {record.commit}"
+                    f"Run {run_id!r} used another commit than {record.commit}"
                 )
+            if not run.metrics:
+                raise NotReady(f"Run {run_id!r} has no metrics yet")
             record.status = "launched"
             record.save()
             experiments.node = "analyze"
-            experiments.job_id = job_id
+            experiments.run_id = run_id
             experiments.feedback = None
             return experiments
         except EventRejected:
@@ -311,10 +300,10 @@ class Collaborative(Workflow):
         return load_record(experiments.experiment, config=self.config)
 
 
-def _runs(record: Record, workflow: Workflow, job_id: str | None) -> list[Run]:
-    if job_id is None:
+def _runs(record: Record, workflow: Workflow, run_id: str | None) -> list[Run]:
+    if run_id is None:
         return []
-    return [run for run in record.runs(config=workflow.config) if run.job_id == job_id]
+    return [run for run in record.runs(config=workflow.config) if run.id == run_id]
 
 
 WORKFLOW = Collaborative

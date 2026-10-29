@@ -39,10 +39,9 @@ with wandb.init(
     run.log({"test/accuracy": accuracy})  # calculated by your evaluation code
 ```
 
-Use the same entity/project in logging and Hiraku configuration. When launched
-with `hiraku run`, Hiraku sets `WANDB_RUN_ID` to the job ID. W&B uses this as
-the native run ID, and Hiraku joins it to the saved job receipt to recover the
-record and commit. Hiraku also supplies the W&B project from the selected
+Use the same entity/project in logging and Hiraku configuration. When started
+with `hiraku run`, Hiraku sets `WANDB_RUN_ID` to the invocation ID. Hiraku also
+supplies the W&B project from the selected
 record's `tracking_backend` configuration unless `WANDB_PROJECT` is already
 set. Your script only needs its ordinary `wandb.init()` call; there is no
 Hiraku-specific W&B config to add. Record settings select the query backend

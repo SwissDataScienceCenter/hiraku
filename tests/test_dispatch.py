@@ -109,25 +109,23 @@ def test_launch_dispatcher_preserves_context_and_reports_unavailable_git(
     assert result.stdout == "stale-record||unavailable"
 
 
-def test_jobs_isolate_revision_and_retain_outputs(tmp_path: Path) -> None:
-    from hiraku import Record, job_logs, submit_job, wait_job
+def test_run_uses_dispatcher_in_current_working_tree(tmp_path: Path) -> None:
+    from hiraku.execution import execute_command
+    from hiraku.record import Record
 
     config = _repository(tmp_path)
     Record.create("test", config=config)
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "-qm", "record")
-    commit = _git(tmp_path, "rev-parse", "HEAD")
-    (tmp_path / "marker.txt").write_text("newer")
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "-qm", "newer source")
-    job = submit_job(
+    (config.dispatch_dir / "test.sh").write_text(
+        '#!/bin/sh\n[ "$1" = "--" ] && shift\nexec "$@"\n', encoding="utf-8"
+    )
+    (config.dispatch_dir / "test.sh").chmod(0o755)
+    result = execute_command(
         ["/bin/sh", "-c", "cat marker.txt; printf output > result.txt"],
         record_id="test",
-        commit=commit,
+        dispatch="test",
         config=config,
+        capture_output=True,
     )
-    assert wait_job(job.id, timeout=10, config=config).status == "succeeded"
-    assert "".join(job_logs(job.id, config=config)) == "committed"
-    assert (job.working_directory / "result.txt").read_text() == "output"
-    assert (tmp_path / "marker.txt").read_text() == "newer"
-    assert not (tmp_path / "result.txt").exists()
+    assert result.returncode == 0
+    assert result.stdout == "committed"
+    assert (tmp_path / "result.txt").read_text() == "output"

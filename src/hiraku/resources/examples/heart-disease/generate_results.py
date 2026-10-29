@@ -12,7 +12,7 @@ from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hiraku import HirakuConfig, submit_job, wait_job
+from hiraku import HirakuConfig, execute_command
 from hiraku.record import Record
 
 EXPERIMENTS = (
@@ -110,14 +110,16 @@ def generate(config: HirakuConfig) -> None:
             ],
         )
         for seed in (1, 2, 3):
-            job = submit_job(
+            result = execute_command(
                 [*record.command, "--seed", str(seed)],
                 record_id=identifier,
                 config=config,
             )
-            completed = wait_job(job.id, config=config)
-            if completed.status != "succeeded":
-                raise RuntimeError(f"Training job {job.id} failed: {completed.error}")
+            if result.returncode:
+                raise RuntimeError(
+                    f"Training command for {identifier} failed with "
+                    f"exit code {result.returncode}"
+                )
     rows = validate_runs(config.root)
     for identifier, _, _, _ in EXPERIMENTS:
         values = [r for r in rows if r["record_id"] == identifier]

@@ -172,8 +172,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         "0.25",
     ]
 
-    job_id = invoke(runner, ["run", "--record", "logistic"]).output.strip()
-    invoke(runner, ["job", "wait", job_id])
+    invoke(runner, ["run", "--record", "logistic"])
     rows = json.loads(
         invoke(runner, ["runs", "--record", "iris", "--all", "--json"]).output
     )
@@ -181,7 +180,8 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     row = rows[0]
     assert row["record_id"] == "logistic"
     assert row["commit"] == source_commit
-    assert row["job_id"] == job_id
+    job_id = row["job_id"]
+    assert job_id
     assert row["params"]["model"] == "logistic"
     assert row["params"]["seed"] == 42
     assert row["params"]["test_size"] == 0.25

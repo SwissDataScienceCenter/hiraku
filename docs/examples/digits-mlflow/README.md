@@ -41,8 +41,8 @@ after you start the MLflow UI and set
 `ui_url: http://127.0.0.1:5000` in the root record's `tracking_backend`.
 
 MLflow creates `mlflow.db` in the project root on the first launch. The training
-script uses the Hiraku project root to keep that location stable for local and
-isolated jobs. Set `MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
+script uses the Hiraku project root to keep that location stable. Set
+`MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
 when you want to override the local defaults. These variables affect the
 training process only, so update the root record's `tracking_backend` with the matching
 `tracking_uri` and `experiment_name` before using `hiraku runs`.
@@ -68,14 +68,10 @@ hiraku record create strong-l2 --parent digits --type experiment \
 
 hiraku record list
 
-job_id=$(hiraku run --record weak-l2 -- \
-  uv run python train.py --alpha 0.0001 --epochs 40 --hidden-units 64 \
-  --seed 42 --validation-fraction 0.25)
-hiraku job wait "$job_id"
-job_id=$(hiraku run --record strong-l2 -- \
-  uv run python train.py --alpha 1.0 --epochs 40 --hidden-units 64 \
-  --seed 42 --validation-fraction 0.25)
-hiraku job wait "$job_id"
+hiraku run --record weak-l2 -- uv run python train.py --alpha 0.0001 \
+  --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
+hiraku run --record strong-l2 -- uv run python train.py --alpha 1.0 \
+  --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
 ```
 
 ## Compare final metrics and inspect curves
@@ -125,6 +121,6 @@ hiraku dashboard --record digits
     | `15895756` | `weak-l2` | `2026-09-10 06:35:05Z` | `17f59bac` | 0.12493475669652965 | 0.9688888888888889 |
     | `f6f6de2f` | `strong-l2` | `2026-09-10 06:35:10Z` | `17f59bac` | 0.4801207515207299 | 0.9266666666666666 |
 
-### Job execution
+### Command execution
 
-Jobs require a clean Git working tree and capture the selected commit in an isolated snapshot. Ignored datasets and environments are not copied; configure access through an optional dispatcher. Submission returns a job ID; wait before querying runs. Use `hiraku job logs JOB_ID` for output. Arguments after `--` replace the complete default command.
+Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.

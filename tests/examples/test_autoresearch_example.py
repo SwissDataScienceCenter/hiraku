@@ -215,7 +215,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     )
     assert git(project, "status", "--porcelain") == ""
 
-    submitted = invoke(
+    invoke(
         runner,
         [
             "run",
@@ -227,12 +227,6 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
             "--val-bpb",
             "0.9",
         ],
-    )
-    invoke(runner, ["job", "wait", submitted.output.strip()])
-
-    assert (
-        "val_bpb: 0.900000"
-        in invoke(runner, ["job", "logs", submitted.output.strip()]).output
     )
     rows = json.loads(
         invoke(
@@ -249,7 +243,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     row = rows[0]
     assert row["record_id"] == "cpu-test"
     assert row["commit"] == commit
-    assert row["job_id"] == submitted.output.strip()
+    assert row["job_id"]
     assert row["raw"]["git_state"] == "clean"
     assert row["raw"]["status"] == "finished"
     assert float(row["metrics"]["val_bpb"]) == 0.9
@@ -262,8 +256,8 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
         runner, ["record", "create", "failure", "--parent", "sep10", "--commit", "HEAD"]
     )
 
-    submitted = invoke(
-        runner,
+    failed = runner.invoke(
+        main,
         [
             "run",
             "--record",
@@ -274,13 +268,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
             "--fail",
         ],
     )
-    failed = runner.invoke(main, ["job", "wait", submitted.output.strip()])
-
     assert failed.exit_code != 0
-    assert (
-        "val_bpb: 0.000000"
-        in invoke(runner, ["job", "logs", submitted.output.strip()]).output
-    )
     rows = json.loads(
         invoke(
             runner,

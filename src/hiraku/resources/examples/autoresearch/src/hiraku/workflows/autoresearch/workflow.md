@@ -63,9 +63,7 @@ hiraku record create baseline --parent <root-id> --type experiment \
   --set 'summary=Unmodified upstream baseline' \
   --set 'hypothesis=The upstream implementation establishes the reference val_bpb' \
   --commit HEAD
-job_id=$(hiraku run --record baseline -- uv run python train.py)
-hiraku job wait "$job_id"
-hiraku job logs "$job_id"
+hiraku run --record baseline -- uv run python train.py
 hiraku runs --record baseline --json
 ```
 
@@ -106,13 +104,13 @@ LOOP FOREVER:
    --set 'summary=<summary>' --set 'hypothesis=<hypothesis>' --commit HEAD`.
    Never rebind a completed attempt to another commit.
 5. Run the experiment:
-   save the ID returned by `hiraku run --record <experiment-id> -- uv run python train.py`,
-   then run `hiraku job wait JOB_ID` before inspecting measurements.
+   run `hiraku run --record <experiment-id> -- uv run python train.py` and wait
+   for the command to finish before inspecting measurements.
 6. Inspect the result with
    `hiraku runs --record <experiment-id> --json`.
-7. If the recorded execution crashed or timed out, use `hiraku job logs JOB_ID --stream stderr` to
-   read the Python stack trace or final diagnostics. If the dispatcher did not
-   record a row, inspect the log and treat the missing result as a failure.
+7. If execution fails or times out, inspect the terminal output for the Python
+   stack trace or final diagnostics. If the dispatcher did not record a row,
+   treat the missing result as a failure.
 8. Update the experiment record with its decision and evidence-backed
    conclusion. Do this before changing Git history.
 9. If val_bpb improved (lower), you "advance" the branch, keeping the git

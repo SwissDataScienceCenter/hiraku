@@ -16,13 +16,11 @@ run-001,baseline,abc123,clean,2026-01-01T12:00:00Z,job-001,0.84,42
 ```
 
 Choose a unique run ID for each execution. Prefix metric columns with
-`metric.` and parameter columns with `param.`. Use `HIRAKU_GIT_STATE` and
-`HIRAKU_SOURCE_DIGEST` to identify the selected source snapshot. Job submission
-requires a clean Git working tree.
+`metric.` and parameter columns with `param.`. Use `HIRAKU_GIT_STATE` to record
+whether the current working tree had changes.
 
-During a job, `HIRAKU_ROOT` points to the captured source tree and
-`HIRAKU_TRACKING_ROOT` points to the persistent project directory. Write the
-tracking table there so it remains queryable after the isolated job completes:
+During execution, `HIRAKU_ROOT` and `HIRAKU_TRACKING_ROOT` point to the project
+directory. Write the tracking table there:
 
 ```python
 import os
@@ -31,8 +29,8 @@ from pathlib import Path
 runs_path = Path(os.environ["HIRAKU_TRACKING_ROOT"]) / "runs.csv"
 ```
 
-Use `HIRAKU_RECORD_ID`, `HIRAKU_JOB_ID`, `HIRAKU_COMMIT`,
-`HIRAKU_GIT_STATE`, and `HIRAKU_SOURCE_DIGEST` to populate attribution. See
+Use `HIRAKU_RECORD_ID`, `HIRAKU_JOB_ID`, `HIRAKU_COMMIT`, and
+`HIRAKU_GIT_STATE` to populate attribution. See
 Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 `hiraku example create heart-disease` to get a complete writer in `train.py`.
 

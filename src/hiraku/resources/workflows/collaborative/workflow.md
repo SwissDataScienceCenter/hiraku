@@ -29,8 +29,8 @@ the user the change. If they want changes, send the event
 
 Ask the user before submitting; if they want it run differently, send the event
 `revise_launch` with their feedback. Once they agree, submit the command from
-the context with `hiraku run`, wait with `hiraku job wait`, and send the event
-`launched` with the returned job ID once its tracking run is available. Check
+the context with `hiraku run`, then send the event `launched` with the tracked
+run ID once it is available. Check
 the run with `hiraku runs --record <experiment>`.
 
 ## Analyze

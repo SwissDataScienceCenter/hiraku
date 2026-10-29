@@ -66,7 +66,7 @@ and fall back to the CLI when the host has not connected the server.
 | `record_reparent` | Move a record subtree under a parent, or make it a root. |
 | `context_list`, `context_show` | Read curated context metadata and Markdown. |
 | `context_create`, `context_update`, `context_delete` | Persist or remove context metadata. Deletion leaves attached files in place. |
-| `job_submit`, `job_status`, `job_list`, `job_wait`, `job_cancel`, `job_read_logs` | Submit and manage durable command jobs, including separate stdout and stderr logs. |
+| `execute` | Run a command in the foreground and return its exit code, stdout, and stderr. |
 | `runs` | List tracked runs attributed to a record, like `hiraku runs`; `all_records` lists every attributed run in its tracking source. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
@@ -76,10 +76,10 @@ the Markdown body. Set a field to `null` to clear its value. IDs and persistence
 paths cannot be changed; use `record_reparent` to change the organizational parent.
 Expected failures are returned as MCP tool errors.
 
-`job_submit` accepts explicit command arguments or resolves the selected
-record's inherited command. It returns a durable job ID; use `job_wait` and
-`job_read_logs` to observe execution. A client connected to this server can
-modify project metadata and submit commands with the user's local permissions.
+`execute` accepts explicit command arguments or resolves the selected record's
+inherited command. It waits for completion and returns the exit code, stdout,
+and stderr. A connected client can run commands with the user's local
+permissions.
 
 ## Resources and evidence
 

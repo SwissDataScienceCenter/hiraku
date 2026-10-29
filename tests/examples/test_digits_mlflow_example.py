@@ -84,8 +84,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             ],
         )
     for record_id in ("weak-l2", "strong-l2"):
-        job_id = invoke(runner, ["run", "--record", record_id]).output.strip()
-        invoke(runner, ["job", "wait", job_id])
+        invoke(runner, ["run", "--record", record_id])
     rows = json.loads(
         invoke(
             runner,
