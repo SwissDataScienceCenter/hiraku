@@ -28,6 +28,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
 
     async def exercise() -> None:
         async def call(name: str, **args):
+            print(f"calling {name}", flush=True)
             return await server.call_tool(name, args)
 
         await call(
@@ -35,15 +36,11 @@ def test_tools_and_validation(tmp_path: Path) -> None:
             record_id="root",
             fields={
                 "status": "new",
-                "entrypoints": {"train": {"command": ["echo"]}},
             },
         )
         await call("record_create", record_id="child", parent_id="root")
         await call("record_update", record_id="child", fields={"status": "done"})
         assert load_record("child", config=config).status == "done"
-        assert load_record("child", config=config).entrypoint(
-            "train", config=config
-        ).command == ["echo"]
         for name, args in [
             ("record_create", {"record_id": "bad", "parent_id": "missing"}),
             ("record_create", {"record_id": "../escape"}),
@@ -132,57 +129,29 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_launch_capture_and_attribution(tmp_path: Path) -> None:
+def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
-    dispatcher = config.dispatch_dir / "test.sh"
-    dispatcher.write_text(
-        '#!/bin/sh\nprintf "%s\\n" "$HIRAKU_RECORD_ID:$HIRAKU_ENTRYPOINT"\n'
-        'printf "diagnostic\\n" >&2\nexit 7\n'
-    )
-    dispatcher.chmod(0o755)
     server = create_server(config)
 
     async def exercise() -> None:
-        await server.call_tool(
-            "record_create",
-            {
-                "record_id": "demo",
-                "fields": {
-                    "entrypoints": {"train": {"command": ["echo"], "args": {"n": 1}}},
-                },
-            },
-        )
-        preview = await server.call_tool(
-            "launch_entrypoint",
-            {
-                "record_id": "demo",
-                "entrypoint_name": "train",
-                "dry_run": True,
-                "args": {"n": 2},
-            },
-        )
-        assert preview.structured_content["command"] == ["echo", "--n", "2"]
+        await server.call_tool("record_create", {"record_id": "demo"})
         result = await server.call_tool(
-            "launch_entrypoint",
+            "execute",
             {
                 "record_id": "demo",
-                "entrypoint_name": "train",
-                "dispatch": "test.sh",
+                "command": [
+                    sys.executable,
+                    "-c",
+                    "import sys; print('out'); print('err', file=sys.stderr); "
+                    "raise SystemExit(7)",
+                ],
             },
         )
         assert result.structured_content == {
             "returncode": 7,
-            "stdout": "demo:train\n",
-            "stderr": "diagnostic\n",
+            "stdout": "out\n",
+            "stderr": "err\n",
         }
-        with pytest.raises(ToolError):
-            await server.call_tool(
-                "launch_entrypoint",
-                {
-                    "record_id": "demo",
-                    "entrypoint_name": "missing",
-                },
-            )
 
     asyncio.run(exercise())
 

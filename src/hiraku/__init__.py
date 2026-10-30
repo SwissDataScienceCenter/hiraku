@@ -2,7 +2,15 @@
 
 from .base import BaseRecord
 from .config import HirakuConfig
-from .record import Entrypoint, Metric, Record
+from .execution import execute_command
+from .record import Metric, Record
 from .run import Run
 
-__all__ = ["BaseRecord", "Entrypoint", "HirakuConfig", "Metric", "Record", "Run"]
+__all__ = [
+    "BaseRecord",
+    "HirakuConfig",
+    "Metric",
+    "Record",
+    "Run",
+    "execute_command",
+]

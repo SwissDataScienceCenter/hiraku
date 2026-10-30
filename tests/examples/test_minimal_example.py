@@ -41,6 +41,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     assert not (project / "README.md").exists()
     assert not (project / "example.yml").exists()
     git(project, "add", ".")
+    git(project, "add", "-f", "hiraku/dispatch")
     git(project, "commit", "-m", "initialize minimal example")
     commit = git(project, "rev-parse", "HEAD")
     invoke(
@@ -63,12 +64,13 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
             "my-task",
             "--commit",
             "HEAD",
-            "--set",
-            f"entrypoints={{evaluate: {{command: [{sys.executable}, evaluate.py]}}}}",
         ],
     )
 
-    invoke(runner, ["launch", "evaluate", "--record", "baseline"])
+    invoke(
+        runner,
+        ["run", "--record", "baseline", "--", sys.executable, "evaluate.py"],
+    )
 
     config = HirakuConfig.discover(project)
     runs = load_record("baseline", config=config).runs(config=config)

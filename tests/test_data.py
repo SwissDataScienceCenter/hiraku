@@ -6,44 +6,38 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.config import HirakuConfig
-from hiraku.errors import EntrypointNotFoundError, ValidationError
+from hiraku.errors import ValidationError
 from hiraku.record import Record, load_record
 from hiraku.run import Run
 
 
-def test_inheritance_entrypoints_and_guarded_delete(tmp_path: Path) -> None:
+def test_inheritance_and_guarded_delete(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     parent = Record.create(
         "task",
         config=config,
         metrics=[{"name": "loss", "direction": "minimize"}],
-        entrypoints={
-            "train": {"command": ["python", "train.py"]},
-            "evaluate": {"command": ["python", "evaluate.py"]},
-        },
     )
     child = Record.create(
         "exp",
         parent_id=parent.id,
         config=config,
-        entrypoints={"train": {"command": ["python", "special.py"]}},
     )
     effective = child.resolve(config=config)
     assert (
         effective.values["metrics"] == parent.resolve(config=config).values["metrics"]
     )
-    assert child.entrypoint("train", config=config).command == ["python", "special.py"]
-    assert child.entrypoint("evaluate", config=config).command == [
-        "python",
-        "evaluate.py",
-    ]
-    assert effective.sources["entrypoints"] == {"train": "exp", "evaluate": "task"}
-    with pytest.raises(EntrypointNotFoundError):
-        child.entrypoint("missing", config=config)
+    assert "command" not in effective.values
     with pytest.raises(ValidationError):
         parent.delete(config=config)
     with pytest.raises(PydanticValidationError):
         Record(id="invalid", metrics=[{"name": "loss", "direction": "sideways"}])
+
+
+def test_record_rejects_command_metadata(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    with pytest.raises(ValidationError, match="command is not a record field"):
+        Record.create("root", config=config, command=["python", "train.py"])
 
 
 def test_commit_local_and_validated(tmp_path: Path) -> None:

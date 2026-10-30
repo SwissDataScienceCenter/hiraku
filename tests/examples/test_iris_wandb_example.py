@@ -25,7 +25,7 @@ STORE = Path(os.environ["FAKE_WANDB_STORE"])
 
 class _Run:
     def __init__(self, options):
-        self.id = "fake-run-1"
+        self.id = options["id"]
         self.config = options["config"]
         self.summary = {}
         self.tags = options.get("tags", [])
@@ -33,7 +33,7 @@ class _Run:
         self.url = "https://wandb.test/run/fake-run-1"
         self.state = "finished"
         self.entity = options.get("entity")
-        self.project = options["project"]
+        self.project = options.get("project") or os.environ.get("WANDB_PROJECT")
         self.notes = options.get("notes")
         self.metadata = {"python": "test"}
 
@@ -41,6 +41,9 @@ class _Run:
 class _Handle:
     def __init__(self, options):
         self.options = options
+        self.options["project"] = options.get("project") or os.environ.get(
+            "WANDB_PROJECT"
+        )
         self.summary = {}
 
     def log(self, metrics):
@@ -57,6 +60,7 @@ _active = None
 
 def init(**options):
     global _active
+    options["id"] = os.environ.get("WANDB_RUN_ID", "fake-run-1")
     _active = _Handle(options)
     return _active
 
@@ -110,6 +114,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
 
     invoke(runner, ["example", "create", "iris-wandb", "."])
     git(project, "add", ".")
+    git(project, "add", "-f", "hiraku/dispatch")
     git(project, "commit", "-m", "initialize Iris W&B example")
     source_commit = git(project, "rev-parse", "HEAD")
 
@@ -149,20 +154,27 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "hypothesis=A linear classifier provides a strong Iris baseline.",
             "--commit",
             "HEAD",
-            "--set",
-            f"entrypoints={{train: {{command: [{sys.executable}, train.py], args: "
-            "{model: logistic, seed: 42, test-size: 0.25}}}",
         ],
     )
     record = load_record("logistic", config=config)
     assert record.commit == source_commit
-    assert record.entrypoint("train", config=config).args == {
-        "model": "logistic",
-        "seed": 42,
-        "test-size": 0.25,
-    }
-
-    invoke(runner, ["launch", "train", "--record", "logistic"])
+    invoke(
+        runner,
+        [
+            "run",
+            "--record",
+            "logistic",
+            "--",
+            sys.executable,
+            "train.py",
+            "--model",
+            "logistic",
+            "--seed",
+            "42",
+            "--test-size",
+            "0.25",
+        ],
+    )
     rows = json.loads(
         invoke(runner, ["runs", "--record", "iris", "--all", "--json"]).output
     )
@@ -170,7 +182,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     row = rows[0]
     assert row["record_id"] == "logistic"
     assert row["commit"] == source_commit
-    assert row["entrypoint"] == "train"
+    run_id = row["id"]
     assert row["params"]["model"] == "logistic"
     assert row["params"]["seed"] == 42
     assert row["params"]["test_size"] == 0.25
@@ -180,6 +192,11 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     assert row["params"]["python.version"]
     assert row["metrics"]["test/accuracy"] == pytest.approx(0.9473684210526316)
     assert row["raw"]["tags"] == ["hiraku", "iris", "logistic"]
+    stored = json.loads(store.read_text(encoding="utf-8"))[0]
+    assert stored["id"] == run_id
+    assert stored["project"] == "hiraku-iris"
+    assert stored["config"]["hiraku.record_id"] == "logistic"
+    assert stored["config"]["hiraku.commit"] == source_commit
 
     filtered = json.loads(
         invoke(

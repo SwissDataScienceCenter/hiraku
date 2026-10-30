@@ -110,6 +110,9 @@ unchanged; repeating it with `--git` can add the code repository later.
 The results and generator modes are available for the Heart Disease and Digits
 examples. `--generate` cannot be combined with `--with-results`; generation can
 take time and may install the example's dependencies.
+Immediate generation runs in a temporary source project and imports the
+completed results. Normal commands run in the current working tree, including
+local changes.
 
 </details>
 

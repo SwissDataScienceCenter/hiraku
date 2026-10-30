@@ -32,6 +32,7 @@ Install the example's training dependencies and commit the code.
 ```bash
 uv sync
 git add .
+git add hiraku/dispatch
 git commit -m "initialize Heart Disease example"
 ```
 
@@ -43,7 +44,7 @@ training code and dataset that the initial baseline experiments will evaluate.
 ??? note "Tracking Hiraku metadata in Git"
     In this example, `.gitignore` excludes hiraku metadata (`hiraku.yml`, `hiraku/*`) and the `runs.csv` file.
 
-    Hiraku is (mostly) agnostic to Git state: You can commit metadata, and Hiraku shows what is currently visible in the working tree.
+    Hiraku runs commands directly in the working tree, including local changes.
     Merging research records is a user (or agent) responsibility.
 
 
@@ -77,18 +78,13 @@ backend set to CSV.
 hiraku record create logistic-baseline --parent heart-disease --type experiment \
   --set "summary=Logistic regression baseline" \
   --set "hypothesis=Regularized logistic regression provides a calibrated baseline" \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: logistic, seed: 42, validation-fraction: 0.25}}}'
+  --commit HEAD
 
 hiraku record show logistic-baseline
 
-# show entrypoint definitions
-hiraku record entrypoints logistic-baseline
-
-# preview the command
-hiraku launch train --record logistic-baseline --dry-run
-
-hiraku launch train --record logistic-baseline
+# run the command and stream its output
+hiraku run --record logistic-baseline -- uv run python train.py \
+  --model logistic --seed 42 --validation-fraction 0.25
 
 # query all runs under the root's tracking source
 hiraku runs --record heart-disease --all
@@ -97,7 +93,7 @@ hiraku runs --record logistic-baseline
 ```
 
 Expect one run with `val/log_loss` and `val/accuracy`. The default dispatcher
-runs the current working state and reports its commit and clean/dirty state. The
+executes a snapshot of the Git-visible source. The
 training program writes the CSV row to project-root `runs.csv`.
 
 ??? tip "Tracking backends: CSV, Weights & Biases, MLflow and custom backends"
@@ -109,15 +105,11 @@ training program writes the CSV row to project-root `runs.csv`.
     Hiraku only **queries the tracking backend for existing runs and metrics**. This means the same training and logging setup can be used with or without Hiraku.
 
 
-??? note "Launch dispatchers and isolated execution"
-    By default `hiraku launch train --record logistic-baseline` passes the entrypoint command to a bash script in `hiraku/dispatch/launch.sh`, which executes the command. Launch scripts are project data that can be modified to support custom launch dispatch behaviour, e.g. submitting a job to a compute platform.
-
-    Hiraku ships a second default `worktree` dispatcher, which runs the entrypoint in a separate worktree at the commit specified by the record. Try the following:
-    ```bash
-    hiraku launch train --record logistic-baseline --dispatch worktree
-    hiraku launch train --record logistic-baseline --dispatch worktree --commit <sha>
-    ```
-
+??? note "Dispatchers and execution"
+    Hiraku runs in the current project working tree and invokes
+    the optional `hiraku/dispatch/launch.sh` runtime setup hook.
+    Runs use the current project working tree. `HIRAKU_GIT_STATE` records
+    whether the tree had uncommitted changes.
 
 ## 4. Run a second experiment
 
@@ -125,10 +117,10 @@ training program writes the CSV row to project-root `runs.csv`.
 hiraku record create random-forest --parent heart-disease --type experiment \
   --set "summary=Random forest comparison" \
   --set "hypothesis=Nonlinear feature interactions improve validation log loss" \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: random_forest, seed: 42, validation-fraction: 0.25}}}'
+  --commit HEAD
 
-hiraku launch train --record random-forest
+hiraku run --record random-forest -- uv run python train.py \
+  --model random_forest --seed 42 --validation-fraction 0.25
 hiraku runs --record heart-disease --all --sort val/log_loss
 ```
 
@@ -280,3 +272,7 @@ the new implementation commit and use the same evaluation settings.
 
     These tests invoke `codex exec` with GPT-5.6 Luna and require local Codex
     authentication. They are skipped during the normal test suite and CI.
+
+### Command execution
+
+Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.

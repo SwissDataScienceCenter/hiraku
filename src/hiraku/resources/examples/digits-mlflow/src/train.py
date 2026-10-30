@@ -39,8 +39,8 @@ def main() -> None:
     required = (
         "HIRAKU_RECORD_ID",
         "HIRAKU_COMMIT",
-        "HIRAKU_ENTRYPOINT",
         "HIRAKU_ROOT",
+        "HIRAKU_TRACKING_ROOT",
     )
     missing = [name for name in required if name not in os.environ]
     if missing:
@@ -49,9 +49,9 @@ def main() -> None:
         )
     tags = {
         f"hiraku.{key}": os.environ[f"HIRAKU_{key.upper()}"]
-        for key in ("record_id", "commit", "entrypoint")
+        for key in ("record_id", "commit")
     }
-    database = Path(os.environ["HIRAKU_ROOT"]) / "mlflow.db"
+    database = Path(os.environ["HIRAKU_TRACKING_ROOT"]) / "mlflow.db"
     default_tracking_uri = f"sqlite:///{database}"
     mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", default_tracking_uri))
     mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT_NAME", "hiraku-digits"))

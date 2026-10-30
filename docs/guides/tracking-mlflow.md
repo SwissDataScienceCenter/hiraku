@@ -55,7 +55,6 @@ mlflow.set_experiment("my-task")
 with mlflow.start_run():
     mlflow.set_tags({
         "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
-        "hiraku.entrypoint": os.environ["HIRAKU_ENTRYPOINT"],
     })
     if os.environ.get("HIRAKU_COMMIT"):
         mlflow.set_tag("hiraku.commit", os.environ["HIRAKU_COMMIT"])
@@ -64,7 +63,7 @@ with mlflow.start_run():
 
 The launcher inherits the environment; it does not derive the training
 process's MLflow URI from the record's backend settings. An absolute URI keeps
-worktree dispatches writing to the original database.
+snapshot dispatches writing to the original database.
 
 ## Inspect
 

@@ -291,9 +291,9 @@ hiraku dashboard --include-code --record digits
 hiraku dashboard --init --edit --record digits
 ```
 
-The bundled configuration has no `ui_url`, so run details initially have no
-**Open in mlflow** link. To enable it, add this property under
-`tracking_backend` in `hiraku.yml`:
+The bundled root record has no `ui_url`, so run details initially have no
+**Open in mlflow** link. To enable it, add `ui_url` to that record's
+`tracking_backend` mapping:
 
 ```yaml
 ui_url: http://127.0.0.1:5000

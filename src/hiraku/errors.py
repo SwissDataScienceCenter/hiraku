@@ -33,16 +33,12 @@ class NoActiveRecordError(HirakuError):
     """An operation requires an active research record."""
 
 
-class EntrypointNotFoundError(HirakuError):
-    """A named entrypoint is absent from a record."""
-
-
 class GitError(HirakuError):
     """A Git operation failed."""
 
 
-class LaunchError(HirakuError):
-    """A launch could not be completed successfully."""
+class ExecutionError(HirakuError):
+    """A foreground command could not be started or configured."""
 
 
 class BackendError(HirakuError):

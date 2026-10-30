@@ -87,7 +87,6 @@ def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
         status="accepted",
         decision="keep",
         type="task",
-        entrypoints={"train": {"command": ["echo", "root"]}},
     )
     child = Record.create("child", parent_id=root.id, config=config, goal=None)
     resolved = child.resolve(config=config)
@@ -98,7 +97,7 @@ def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
     assert "status" not in resolved.values
     assert "decision" not in resolved.values
     assert "type" not in resolved.values
-    assert resolved.sources["entrypoints"] == {"train": "root"}
+    assert "command" not in resolved.values
 
 
 def test_runs_list_attributed_runs_from_current_backend(tmp_path: Path) -> None:
@@ -467,6 +466,10 @@ def test_resolve_tracking_backend_inherits_closest_setting(tmp_path: Path) -> No
     inherited = child.resolve_tracking_backend(config=config)
     assert isinstance(inherited, CSVBackend)
     assert inherited.path == (tmp_path / "results" / "root.csv").resolve()
+    child.tracking_backend = {"type": "csv", "path": "results/child.csv"}
+    child.save(overwrite=True)
+    overridden = Record.load(child.path).resolve_tracking_backend(config=config)
+    assert overridden.path == (tmp_path / "results" / "child.csv").resolve()
     default = other.resolve_tracking_backend(config=config)
     assert isinstance(default, CSVBackend)
     assert default.path is None

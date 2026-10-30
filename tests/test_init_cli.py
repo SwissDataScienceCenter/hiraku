@@ -64,9 +64,8 @@ def test_plain_reinitialization_leaves_project_unchanged(
     tmp_path, monkeypatch, destination
 ):
     root = tmp_path / "project" if destination == "project" else tmp_path
-    config = HirakuConfig.init(root, tracking_backend="mlflow")
+    config = HirakuConfig.init(root)
     (config.dispatch_dir / "launch.sh").write_text("custom launcher\n")
-    (config.dispatch_dir / "worktree.sh").unlink()
     before = {
         p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()
     }
@@ -82,14 +81,10 @@ def test_plain_reinitialization_leaves_project_unchanged(
     } == before
 
 
-@pytest.mark.parametrize(
-    "command",
-    [["example", "create", "minimal"], ["init", "--tracking-backend", "mlflow"]],
-)
-def test_reinitialization_with_options_is_rejected(tmp_path, command):
+def test_reinitialization_with_example_option_is_rejected(tmp_path):
     config = HirakuConfig.init(tmp_path)
     before = config.path.read_bytes()
-    result = CliRunner().invoke(main, [*command, str(tmp_path)])
+    result = CliRunner().invoke(main, ["example", "create", "minimal", str(tmp_path)])
     assert result.exit_code == 1
     assert "already exists" in result.output
     assert config.path.read_bytes() == before

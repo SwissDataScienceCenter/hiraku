@@ -42,7 +42,6 @@ RUN_FIELDS = [
     "git_state",
     "timestamp",
     "duration",
-    "entrypoint",
     "param.model",
     "param.seed",
     "param.validation_fraction",
@@ -53,8 +52,8 @@ PROVENANCE_VARIABLES = [
     "HIRAKU_RECORD_ID",
     "HIRAKU_COMMIT",
     "HIRAKU_GIT_STATE",
-    "HIRAKU_ENTRYPOINT",
     "HIRAKU_ROOT",
+    "HIRAKU_TRACKING_ROOT",
 ]
 
 
@@ -145,7 +144,7 @@ def main() -> None:
         "log_loss": log_loss(validation_y, probabilities),
         "accuracy": accuracy_score(validation_y, predictions),
     }
-    runs_path = Path(attribution["HIRAKU_ROOT"]) / "runs.csv"
+    runs_path = Path(attribution["HIRAKU_TRACKING_ROOT"]) / "runs.csv"
     append_run(
         runs_path,
         {
@@ -155,7 +154,6 @@ def main() -> None:
             "git_state": attribution["HIRAKU_GIT_STATE"],
             "timestamp": started.isoformat(),
             "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
-            "entrypoint": attribution["HIRAKU_ENTRYPOINT"],
             "param.model": args.model,
             "param.seed": str(args.seed),
             "param.validation_fraction": str(args.validation_fraction),

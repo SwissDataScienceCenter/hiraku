@@ -1,3 +1,4 @@
 /hiraku.yml
-/hiraku/
+/hiraku/*
+!/hiraku/dispatch/
 /runs.csv

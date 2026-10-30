@@ -6,12 +6,12 @@ import argparse
 import math
 import shutil
 import sqlite3
+import subprocess
 from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hiraku import HirakuConfig
-from hiraku.launch import launch
+from hiraku import HirakuConfig, execute_command
 from hiraku.record import Record
 
 EXPERIMENTS = (("weak-l2", 0.0001), ("strong-l2", 1.0))
@@ -43,7 +43,7 @@ def validate_database(database: Path) -> None:
                     "SELECT key,value FROM tags WHERE run_uuid=?", (run,)
                 )
             )
-            if status != "FINISHED" or tags.get("hiraku.entrypoint") != "train":
+            if status != "FINISHED" or tags.get("hiraku.record_id") != record:
                 raise ValueError("Incomplete or unattributed training run")
             if (
                 float(params["alpha"]) != dict(EXPERIMENTS)[record]
@@ -73,16 +73,15 @@ def generate(config: HirakuConfig) -> None:
     database = config.root / "mlflow.db"
     if database.exists() or list(config.records_dir.rglob("*.md")):
         raise FileExistsError("Generation requires an example without records or runs")
-    config.tracking_backend = {
-        "type": "mlflow",
-        "database": "mlflow.db",
-        "experiment_name": "hiraku-digits",
-    }
-    config.save()
     Record.create(
         "digits",
         type="task",
         status="concluded",
+        tracking_backend={
+            "type": "mlflow",
+            "database": "mlflow.db",
+            "experiment_name": "hiraku-digits",
+        },
         activate=False,
         config=config,
         metrics=[
@@ -94,7 +93,7 @@ def generate(config: HirakuConfig) -> None:
         "Measured CPU training results; no statistical significance is claimed.\n",
     )
     for identifier, alpha in EXPERIMENTS:
-        record = Record.create(
+        Record.create(
             identifier,
             parent_id="digits",
             type="hypothesis",
@@ -103,30 +102,36 @@ def generate(config: HirakuConfig) -> None:
             config=config,
             markdown=f"## {identifier}\n\nL2 alpha: {alpha}; seeds: 1, 2, 3; "
             f"epochs: {EPOCHS}; hidden units: 64; validation fraction: 0.25.\n",
-            entrypoints={
-                "train": {
-                    "command": ["uv", "run", "python", "train.py"],
-                    "args": {
-                        "alpha": alpha,
-                        "epochs": EPOCHS,
-                        "hidden_units": 64,
-                        "validation_fraction": 0.25,
-                    },
-                }
-            },
         )
+        command = [
+            "uv",
+            "run",
+            "python",
+            "train.py",
+            "--alpha",
+            str(alpha),
+            "--epochs",
+            str(EPOCHS),
+            "--hidden-units",
+            str(64),
+            "--validation-fraction",
+            str(0.25),
+        ]
         for seed in (1, 2, 3):
-            launch(
-                record.entrypoint("train", config=config),
-                name="train",
+            result = execute_command(
+                [*command, "--seed", str(seed)],
                 record_id=identifier,
-                args={"seed": seed},
                 config=config,
                 env={
                     "MLFLOW_TRACKING_URI": f"sqlite:///{database}",
                     "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
                 },
             )
+            if result.returncode:
+                raise RuntimeError(
+                    f"Training command for {identifier} failed with "
+                    f"exit code {result.returncode}"
+                )
     validate_database(database)
     config.active_record_id = "weak-l2"
     config.save()
@@ -143,6 +148,23 @@ def generate_results(output: Path) -> None:
             example="digits-mlflow",
             install_skill=False,
         )
+        for arguments in (
+            ["init", "-q"],
+            ["add", "."],
+            ["add", "-f", "hiraku/dispatch/launch.sh"],
+            [
+                "-c",
+                "user.name=Hiraku example",
+                "-c",
+                "user.email=example@hiraku.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "Initialize isolated example source",
+            ],
+        ):
+            subprocess.run(["git", *arguments], cwd=config.root, check=True)
         generate(config)
         output.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:

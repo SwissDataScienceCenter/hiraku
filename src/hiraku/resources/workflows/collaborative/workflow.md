@@ -27,10 +27,11 @@ the user the change. If they want changes, send the event
 
 ## Launch
 
-Ask the user before launching; if they want it launched differently, send the
-event `revise_launch` with their feedback. Run the launch command from the
-context once they agree, and send the event `launched` once the run is tracked;
-check with `hiraku runs --record <experiment>`.
+Ask the user before submitting; if they want it run differently, send the event
+`revise_launch` with their feedback. Once they agree, submit the command from
+the context with `hiraku run`, then send the event `launched` with the tracked
+run ID once it is available. Check
+the run with `hiraku runs --record <experiment>`.
 
 ## Analyze
 

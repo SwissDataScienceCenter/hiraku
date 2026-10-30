@@ -12,7 +12,6 @@ FIELDS = [
     "git_state",
     "timestamp",
     "duration",
-    "entrypoint",
     "param.seed",
     "metric.val/accuracy",
 ]
@@ -28,7 +27,7 @@ expected = [0, 1, 1, 0]
 predicted = [int(value >= 0.5) for value in [0.1, 0.8, 0.7, 0.2]]
 accuracy = sum(a == b for a, b in zip(expected, predicted, strict=True)) / len(expected)
 
-runs_file = Path(os.environ["HIRAKU_ROOT"]) / "runs.csv"
+runs_file = Path(os.environ["HIRAKU_TRACKING_ROOT"]) / "runs.csv"
 write_header = not runs_file.exists() or runs_file.stat().st_size == 0
 
 with runs_file.open("a", encoding="utf-8", newline="") as stream:
@@ -43,7 +42,6 @@ with runs_file.open("a", encoding="utf-8", newline="") as stream:
             "git_state": os.environ["HIRAKU_GIT_STATE"],
             "timestamp": started.isoformat(),
             "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
-            "entrypoint": os.environ.get("HIRAKU_ENTRYPOINT", ""),
             "param.seed": args.seed,
             "metric.val/accuracy": accuracy,
         }

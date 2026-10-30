@@ -2,5 +2,6 @@
 __pycache__/
 *.py[cod]
 /hiraku.yml
-/hiraku/
+/hiraku/*
+!/hiraku/dispatch/
 /runs.csv

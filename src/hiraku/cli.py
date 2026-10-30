@@ -6,26 +6,31 @@ import json
 import os
 import runpy
 import shlex
+import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from importlib.resources import as_file, files
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import click
 import yaml
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
+from rich import box
+from rich.console import Console
+from rich.table import Table
 
 from .base import BaseRecord
 from .config import HirakuConfig
 from .context import Context, list_contexts, load_context
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
+from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .launch import _dispatcher, launch, render_arguments
 from .record import Record, list_records, load_record
 from .run import Run
 from .validation import validate_identifier
@@ -83,19 +88,13 @@ def _emit_json(value: Any) -> None:
     click.echo(json.dumps(_json_value(value), sort_keys=True, ensure_ascii=False))
 
 
-def _table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
-    rendered = [["" if item is None else str(item) for item in row] for row in rows]
-    widths = [
-        max([len(name), *(len(row[index]) for row in rendered)])
-        for index, name in enumerate(columns)
-    ]
-    lines = ["  ".join(name.ljust(widths[i]) for i, name in enumerate(columns))]
-    lines.append("  ".join("-" * width for width in widths))
-    lines.extend(
-        "  ".join(item.ljust(widths[i]) for i, item in enumerate(row)).rstrip()
-        for row in rendered
-    )
-    return "\n".join(lines)
+def _print_table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+    table = Table(box=box.ROUNDED, header_style="bold cyan", pad_edge=False)
+    for column in columns:
+        table.add_column(column, overflow="fold")
+    for row in rows:
+        table.add_row(*("" if item is None else str(item) for item in row))
+    Console().print(table)
 
 
 def _fields(values: Sequence[str]) -> dict[str, Any]:
@@ -163,34 +162,6 @@ def _edit_recoverable(
     return loader()
 
 
-def _overrides(tokens: Sequence[str]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if not token.startswith("--") or token == "--":
-            raise ValidationError(f"Invalid entrypoint argument: {token!r}")
-        key, separator, raw = token[2:].partition("=")
-        if not key:
-            raise ValidationError("Entrypoint argument name must be non-empty")
-        if not separator:
-            if index + 1 < len(tokens) and not tokens[index + 1].startswith("--"):
-                index += 1
-                raw = tokens[index]
-            else:
-                raw = True
-        key = key.replace("-", "_")
-        if key in result:
-            previous = result[key]
-            result[key] = (
-                [*previous, raw] if isinstance(previous, list) else [previous, raw]
-            )
-        else:
-            result[key] = raw
-        index += 1
-    return result
-
-
 def _update_fields(
     record: BaseRecord,
     set_values: Sequence[str],
@@ -223,7 +194,7 @@ def _update_fields(
 @click.group(name="hiraku", cls=HirakuGroup)
 @click.pass_context
 def main(ctx: click.Context) -> None:
-    """Manage research records, launches, and tracked runs."""
+    """Manage research records, command execution, and tracked runs."""
     ctx.ensure_object(CLIContext)
 
 
@@ -245,14 +216,12 @@ def mcp_command() -> None:
 
 @main.command("init")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
-@click.option("--tracking-backend")
 @click.option("--template", type=click.Path(path_type=Path))
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
 )
 def init_command(
     path: Path | None,
-    tracking_backend: str | None,
     template: Path | None,
     init_git: bool,
 ) -> None:
@@ -261,13 +230,11 @@ def init_command(
     marker = root.expanduser().absolute() / "hiraku.yml"
     if init_git:
         require_git()
-    if marker.is_file() and tracking_backend is None and template is None:
+    if marker.is_file() and template is None:
         config = HirakuConfig.load(marker)
         message = "Hiraku project already initialized"
     else:
-        config = HirakuConfig.init(
-            root, tracking_backend=tracking_backend, template=template
-        )
+        config = HirakuConfig.init(root, template=template)
         message = "Initialized Hiraku project"
     if init_git:
         init_code_repository(config)
@@ -289,13 +256,12 @@ def example_list_command() -> None:
         if example.is_dir() and manifest.is_file():
             metadata = yaml.safe_load(manifest.read_text(encoding="utf-8"))
             rows.append((example.name, metadata.get("description", "")))
-    click.echo(_table(("name", "description"), rows))
+    _print_table(("name", "description"), rows)
 
 
 @example_group.command("create")
 @click.argument("example")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
-@click.option("--tracking-backend")
 @click.option("--with-generator", is_flag=True, help="Copy the example generator.")
 @click.option(
     "--generate", is_flag=True, help="Generate example runs after initialization."
@@ -312,7 +278,6 @@ def example_list_command() -> None:
 def example_create_command(
     example: str,
     path: Path | None,
-    tracking_backend: str | None,
     results: bool,
     with_generator: bool,
     generate: bool,
@@ -337,7 +302,6 @@ def example_create_command(
             raise click.UsageError(f"Example {example!r} has no generator")
     config = HirakuConfig.init(
         root,
-        tracking_backend=tracking_backend,
         example=example,
         results=results,
         with_generator=with_generator,
@@ -348,7 +312,26 @@ def example_create_command(
     if generator is not None:
         with as_file(generator) as source:
             try:
-                runpy.run_path(str(source))["generate"](config)
+                namespace = runpy.run_path(str(source))
+                if "generate_results" not in namespace:
+                    namespace["generate"](config)
+                else:
+                    # Fresh projects have no source commit yet. The generator's
+                    # export mode runs commands in its temporary project.
+                    with TemporaryDirectory(prefix="hiraku-generated-") as staging:
+                        overlay = Path(staging) / "results"
+                        namespace["generate_results"](overlay)
+                        generated = HirakuConfig.load(overlay / "hiraku.yml")
+                        shutil.copytree(
+                            generated.records_dir,
+                            config.records_dir,
+                            dirs_exist_ok=True,
+                        )
+                        for result in overlay.iterdir():
+                            if result.is_file() and result.name != "hiraku.yml":
+                                shutil.copyfile(result, config.root / result.name)
+                        config.active_record_id = generated.active_record_id
+                        config.save()
             except Exception as exc:
                 raise click.ClickException(
                     "Generation failed; initialized project and completed runs kept: "
@@ -366,16 +349,20 @@ def status_command(state: CLIContext, json_output: bool) -> None:
         branch = GitRepository(config).current_branch
     except GitError:
         branch = None
+    tracking_backend = {"type": "csv"}
+    if config.active_record_id is not None:
+        record = load_record(config.active_record_id, config=config)
+        tracking_backend = record.tracking_backend_spec(config=config)
     result = {
         "project_root": config.root,
         "active_record_id": config.active_record_id,
-        "tracking_backend": config.tracking_backend,
+        "tracking_backend": tracking_backend,
         "git_branch": branch,
     }
     if json_output:
         _emit_json(result)
     else:
-        click.echo(_table(("field", "value"), list(result.items())))
+        _print_table(("field", "value"), list(result.items()))
 
 
 @main.group("record")
@@ -433,11 +420,9 @@ def record_list(state: CLIContext, json_output: bool) -> None:
     if json_output:
         _emit_json(records)
     else:
-        click.echo(
-            _table(
-                ("id", "parent", "type", "status"),
-                [(r.id, r.parent_id, r.type, r.status) for r in records],
-            )
+        _print_table(
+            ("id", "parent", "type", "status"),
+            [(r.id, r.parent_id, r.type, r.status) for r in records],
         )
 
 
@@ -583,35 +568,6 @@ def record_tree(state: CLIContext, json_output: bool) -> None:
     visit(None, 0)
 
 
-@record_group.command("entrypoints")
-@click.argument("record_id", required=False)
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def record_entrypoints(
-    state: CLIContext, record_id: str | None, json_output: bool
-) -> None:
-    """List effective entrypoints and their defining records."""
-    resolved = _active(state.config, record_id).resolve(config=state.config)
-    entries = resolved.values.get("entrypoints") or {}
-    sources = resolved.sources.get("entrypoints") or {}
-    if json_output:
-        _emit_json({"entrypoints": entries, "sources": sources})
-    else:
-        click.echo(
-            _table(
-                ("name", "command", "source"),
-                [
-                    (
-                        name,
-                        shlex.join([*entry.command, *render_arguments(entry.args)]),
-                        sources.get(name),
-                    )
-                    for name, entry in entries.items()
-                ],
-            )
-        )
-
-
 def _install_generic(
     name: str, cls: type[BaseRecord], loader: Any, lister: Any, directory: str
 ) -> None:
@@ -643,8 +599,8 @@ def _install_generic(
     @click.pass_obj
     def listing(state: CLIContext, json_output: bool) -> None:
         records = lister(config=state.config)
-        _emit_json(records) if json_output else click.echo(
-            _table(("id",), [(r.id,) for r in records])
+        _emit_json(records) if json_output else _print_table(
+            ("id",), [(r.id,) for r in records]
         )
 
     @group.command("show")
@@ -719,14 +675,12 @@ def workflow_list(state: CLIContext, json_output: bool) -> None:
             ]
         )
         return
-    click.echo(
-        _table(
-            ("id", "description"),
-            [
-                (workflow.id, (workflow.description or "").split("\n", 1)[0])
-                for workflow in workflows
-            ],
-        )
+    _print_table(
+        ("id", "description"),
+        [
+            (workflow.id, (workflow.description or "").split("\n", 1)[0])
+            for workflow in workflows
+        ],
     )
 
 
@@ -851,19 +805,17 @@ def session_list(state: CLIContext, json_output: bool) -> None:
     if json_output:
         _emit_json(sessions)
         return
-    click.echo(
-        _table(
-            ("session", "workflow", "status", "updated"),
-            [
-                (
-                    item["session_id"],
-                    item["workflow"],
-                    item["status"],
-                    item["updated_at"],
-                )
-                for item in sessions
-            ],
-        )
+    _print_table(
+        ("session", "workflow", "status", "updated"),
+        [
+            (
+                item["session_id"],
+                item["workflow"],
+                item["status"],
+                item["updated_at"],
+            )
+            for item in sessions
+        ],
     )
 
 
@@ -908,46 +860,30 @@ def session_cancel(state: CLIContext, session_id: str) -> None:
     click.echo(f"Session {session_id} is {result['status']}. {result['note']}")
 
 
-@main.command("launch")
-@click.argument("entrypoint_name")
-@click.argument("entrypoint_overrides", nargs=-1, type=click.UNPROCESSED)
+@main.command("run")
+@click.argument("command", nargs=-1, required=True, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
-@click.option("--commit")
-@click.option("--dispatch")
-@click.option("--dry-run", is_flag=True)
-@click.pass_obj
-def launch_command(
-    state: CLIContext,
-    entrypoint_name: str,
-    entrypoint_overrides: tuple[str, ...],
+@click.option(
+    "--dispatch",
+    help="Dispatcher name from the project's dispatch directory.",
+)
+@click.pass_context
+def run_command(
+    context: click.Context,
+    command: tuple[str, ...],
     record_id: str | None,
-    commit: str | None,
     dispatch: str | None,
-    dry_run: bool,
 ) -> None:
-    """Launch an effective record entrypoint."""
-    record = _active(state.config, record_id)
-    entrypoint = record.entrypoint(entrypoint_name, config=state.config)
-    overrides = _overrides(entrypoint_overrides)
-    if dry_run:
-        click.echo(f"Dispatcher: {_dispatcher(state.config, dispatch)}")
-        arguments = dict(entrypoint.args)
-        arguments.update(overrides)
-        command = [*entrypoint.command, *render_arguments(arguments)]
-        click.echo(f"Command: {shlex.join(command)}")
-        return
-    result = launch(
-        entrypoint,
-        name=entrypoint_name,
-        args=overrides,
-        record_id=record.id,
-        commit=commit,
+    """Run a project command in the foreground."""
+    state: CLIContext = context.obj
+    result = execute_command(
+        command,
+        record_id=record_id,
         dispatch=dispatch,
-        check=False,
         config=state.config,
     )
-    if result.returncode:
-        raise click.exceptions.Exit(result.returncode)
+    code = result.returncode
+    raise click.exceptions.Exit(128 - code if code < 0 else code)
 
 
 @main.command("runs")
@@ -1026,7 +962,7 @@ def run_list(
             ]
             for run in runs
         ]
-        click.echo(_table(columns, rows))
+        _print_table(columns, rows)
 
 
 @main.command("dashboard")

@@ -1,6 +1,6 @@
 # CLI Reference
 
-The CLI manages research records, launches, and tracked runs.
+The CLI manages research records, foreground command execution, and tracked runs.
 
 Typical workflow:
 
@@ -8,7 +8,7 @@ Typical workflow:
 hiraku init
 hiraku record create <root-id>
 hiraku record create <child-id> --parent <root-id>
-hiraku launch <entrypoint> --record <child-id>
+hiraku run --record <child-id> -- python train.py
 hiraku runs --record <record-id>
 ```
 
@@ -66,6 +66,8 @@ overwrites pre-existing project files. Explicit CLI options take precedence.
 The flag requires a packaged example with a `results/` directory.
 Use `--with-generator` to copy an example's optional `generate_results.py` for
 running later, or `--generate` to execute it immediately after initialization.
+Immediate generation uses an isolated temporary Git project and publishes the
+completed batch, so the new project does not need an initial commit yet.
 Both flags require an example with a generator; `--generate` cannot accompany
 `--with-results`. Already initialized projects are rejected. Generation failures retain the new
 project and completed runs. `--generate` alone does not copy the script.
@@ -81,8 +83,8 @@ resources/examples/<name>/
 
 `init --template` and `example create` are separate commands. Templates may replace files installed
 by the same initialization, but initialization refuses to overwrite files that
-already existed in the target. Explicit options such as `--tracking-backend`
-take precedence over values from a template-provided `hiraku.yml`.
+already existed in the target. Tracking and command defaults belong on the
+root record, not in project configuration.
 After successful initialization, the command prints the project configuration
 location.
 

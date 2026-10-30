@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -74,6 +75,96 @@ def test_record_cli_active_and_validation(tmp_path: Path, monkeypatch) -> None:
     assert invoke("record", "update", "second", "--related-to", "first").exit_code == 0
 
 
+def test_status_reports_active_record_tracking_backend(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    result = invoke(
+        "record",
+        "create",
+        "eurosat",
+        "--type",
+        "task",
+        "--set",
+        "metrics=[{name: val/accuracy, direction: maximize}]",
+        "--set",
+        "tracking_backend={type: wandb, project: eurosat-rgb}",
+    )
+    assert result.exit_code == 0
+    child = invoke(
+        "record", "create", "mlp", "--parent", "eurosat", "--type", "experiment"
+    )
+    assert child.exit_code == 0
+
+    shown = json.loads(invoke("record", "show", "mlp", "--json").output)
+    assert shown["values"]["metrics"] == [
+        {"name": "val/accuracy", "direction": "maximize"}
+    ]
+    assert shown["values"]["tracking_backend"] == {
+        "type": "wandb",
+        "project": "eurosat-rgb",
+    }
+    assert shown["sources"]["metrics"] == "mlp"
+    assert shown["sources"]["tracking_backend"] == "mlp"
+
+    raw = json.loads(invoke("record", "show", "mlp", "--raw", "--json").output)
+    assert raw["values"]["metrics"] == [
+        {"name": "val/accuracy", "direction": "maximize"}
+    ]
+    assert raw["values"]["tracking_backend"] == {
+        "type": "wandb",
+        "project": "eurosat-rgb",
+    }
+
+    override = invoke(
+        "record",
+        "create",
+        "cnn",
+        "--parent",
+        "eurosat",
+        "--type",
+        "experiment",
+        "--set",
+        "metrics=[{name: val/loss, direction: minimize}]",
+        "--set",
+        "tracking_backend={type: csv}",
+    )
+    assert override.exit_code == 0
+    cnn = json.loads(invoke("record", "show", "cnn", "--raw", "--json").output)
+    assert cnn["values"]["metrics"] == [{"name": "val/loss", "direction": "minimize"}]
+    assert cnn["values"]["tracking_backend"] == {"type": "csv"}
+
+    assert invoke("record", "set", "mlp").exit_code == 0
+    status = json.loads(invoke("status", "--json").output)
+    assert status["tracking_backend"] == {
+        "type": "wandb",
+        "project": "eurosat-rgb",
+    }
+    assert "project_tracking_backend" not in status
+    assert (
+        load_record("mlp", config=config)
+        .resolve(config=config)
+        .values["tracking_backend"]
+        == status["tracking_backend"]
+    )
+    assert (
+        invoke(
+            "record",
+            "update",
+            "eurosat",
+            "--set",
+            "tracking_backend={type: csv}",
+        ).exit_code
+        == 0
+    )
+    stored_child = json.loads(invoke("record", "show", "mlp", "--raw", "--json").output)
+    assert stored_child["values"]["tracking_backend"] == {
+        "type": "wandb",
+        "project": "eurosat-rgb",
+    }
+
+
 def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
@@ -81,9 +172,12 @@ def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
     invoke("record", "create", "child", "--parent", "root")
 
     lines = invoke("record", "list").output.splitlines()
-    assert lines[0].split() == ["id", "parent", "type", "status"]
-    assert lines[2].split() == ["child", "root"]
-    assert lines[3].split() == ["root", "task", "active"]
+    assert "id" in lines[1]
+    assert "parent" in lines[1]
+    assert "type" in lines[1]
+    assert "status" in lines[1]
+    assert any("child" in line and "root" in line for line in lines)
+    assert any("root" in line and "task" in line and "active" in line for line in lines)
 
 
 def test_record_list_with_no_records(tmp_path: Path, monkeypatch) -> None:
@@ -92,9 +186,9 @@ def test_record_list_with_no_records(tmp_path: Path, monkeypatch) -> None:
 
     result = invoke("record", "list")
     assert result.exit_code == 0
-    lines = result.output.splitlines()
-    assert lines[0].split() == ["id", "parent", "type", "status"]
-    assert len(lines) == 2
+    assert "id" in result.output
+    assert "parent" in result.output
+    assert "status" in result.output
 
 
 def test_record_cli_reparents_and_makes_root(tmp_path: Path, monkeypatch) -> None:
@@ -116,32 +210,43 @@ def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "runs.csv").write_text("id,record_id,duration\na,root,4.25\nb,root,\n")
 
     rows = json.loads(invoke("runs", "--record", "root", "--json").output)
-    table = invoke("runs", "--record", "root").output.splitlines()
+    table = invoke("runs", "--record", "root").output
 
     assert [row["duration"] for row in rows] == [4.25, None]
-    assert table[0].split() == ["id", "record", "timestamp", "duration", "commit"]
-    assert table[2].split() == ["a", "root", "4.25"]
+    assert all(
+        column in table
+        for column in ("id", "record", "timestamp", "duration", "commit")
+    )
+    assert "a" in table
+    assert "root" in table
+    assert "4.25" in table
 
 
-def test_record_cli_entrypoint_launch_and_runs(tmp_path: Path, monkeypatch) -> None:
+def test_record_cli_explicit_run_and_runs(tmp_path: Path, monkeypatch) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    assert (
-        invoke(
-            "record",
-            "create",
-            "root",
-            "--set",
-            'entrypoints={train: {command: [python, -c, "print(7)"]}}',
-        ).exit_code
-        == 0
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=tmp_path,
+        check=True,
     )
+    assert invoke("record", "create", "root").exit_code == 0
     assert invoke("record", "create", "child", "--parent", "root").exit_code == 0
-    entries = json.loads(invoke("record", "entrypoints", "child", "--json").output)
-    assert entries["sources"] == {"train": "root"}
-    result = invoke("launch", "train", "--record", "child", "--dry-run")
-    assert result.exit_code == 0
-    assert "python -c" in result.output
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "records"], cwd=tmp_path, check=True)
+    result = invoke(
+        "run",
+        "--record",
+        "child",
+        "--",
+        sys.executable,
+        "-c",
+        "from pathlib import Path; Path('ran.txt').write_text('7')",
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "ran.txt").read_text() == "7"
     (tmp_path / "runs.csv").write_text(
         "id,record_id,metric.loss\na,root,0.5\nb,child,0.2\nc,,0.1\n"
     )
@@ -161,10 +266,12 @@ def test_record_cli_entrypoint_launch_and_runs(tmp_path: Path, monkeypatch) -> N
         "--ascending",
     )
     assert sorted_table.exit_code == 0
-    assert [line.split()[0] for line in sorted_table.output.splitlines()[2:]] == [
-        "b",
-        "a",
-    ]
+    data_rows = [
+        [cell.strip() for cell in line.split("│")[1:-1]]
+        for line in sorted_table.output.splitlines()
+        if line.startswith("│")
+    ][1:]
+    assert [row[0] for row in data_rows] == ["b", "a"]
     assert invoke("runs", "list", "--record", "root").exit_code != 0
 
 
@@ -233,9 +340,7 @@ def test_generic_list_with_no_entries(
 
     result = invoke(command, "list")
     assert result.exit_code == 0
-    lines = result.output.splitlines()
-    assert lines[0].split() == header
-    assert len(lines) == 2
+    assert all(column in result.output for column in header)
 
 
 def test_edit_uses_stored_file(tmp_path: Path, monkeypatch) -> None:

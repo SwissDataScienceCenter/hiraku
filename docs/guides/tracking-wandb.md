@@ -31,20 +31,20 @@ import wandb
 
 with wandb.init(
     entity="your-team",
-    project="hiraku-iris",
     group=os.environ["HIRAKU_RECORD_ID"],
     config={
-        "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
-        "hiraku.commit": os.environ.get("HIRAKU_COMMIT"),
-        "hiraku.entrypoint": os.environ["HIRAKU_ENTRYPOINT"],
+        "seed": 42,
     },
 ) as run:
     run.log({"test/accuracy": accuracy})  # calculated by your evaluation code
 ```
 
-Use the same entity/project in logging and Hiraku configuration. Record settings
-select the query backend; they do not initialize a W&B run or automatically
-configure your training script.
+Use the same entity/project in logging and Hiraku configuration. W&B assigns
+the run ID. Hiraku supplies the W&B project from the selected record's
+`tracking_backend` configuration unless `WANDB_PROJECT` is already set. Your
+script only needs its ordinary `wandb.init()` call; there is no Hiraku-specific
+W&B config to add. Record settings select the query backend and do not
+initialize a W&B run.
 
 ## Inspect
 

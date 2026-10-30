@@ -21,9 +21,9 @@ Then create a project and let Hiraku install the training script, model definiti
 ```bash
 hiraku example create eurosat-rgb --git
 cd eurosat-rgb
-uv sync
 
 git add .
+git add hiraku/dispatch
 git commit -m "initialize EuroSAT RGB example"
 ```
 
@@ -64,14 +64,12 @@ Create an experiment using a MLP with fully connected layers.
 hiraku record create mlp --parent eurosat --type experiment \
   --set "summary=MLP baseline for EuroSAT RGB classification" \
   --set "hypothesis=A fully connected neural network can learn a useful baseline from flattened RGB image pixels." \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: mlp, seed: 42, epochs: 10, batch-size: 64, learning-rate: 0.001, validation-fraction: 0.2}}}'
+  --commit HEAD
 
 hiraku record show mlp
-hiraku record entrypoints mlp
 
-hiraku launch train --record mlp --dry-run
-hiraku launch train --record mlp
+hiraku run --record mlp -- uv run python train.py --model mlp --seed 42 \
+  --epochs 10 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
 
 hiraku runs --record eurosat --all
 hiraku runs --record mlp
@@ -89,13 +87,13 @@ Create a second experiment using a CNN.
 hiraku record create cnn --parent eurosat --type experiment \
   --set "summary=CNN baseline for EuroSAT RGB classification" \
   --set "hypothesis=A convolutional neural network improves classification accuracy over the MLP by learning spatial features from satellite imagery." \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: cnn, seed: 42, epochs: 10, batch-size: 64, learning-rate: 0.001, validation-fraction: 0.2}}}'
+  --commit HEAD
 
 hiraku record show cnn
-hiraku record entrypoints cnn
+hiraku record show cnn
 
-hiraku launch train --record cnn
+hiraku run --record cnn -- uv run python train.py --model cnn --seed 42 \
+  --epochs 10 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
 hiraku runs --record eurosat --all --sort val/accuracy
 ```
 

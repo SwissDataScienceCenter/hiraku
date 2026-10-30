@@ -21,6 +21,7 @@ hiraku example create digits-mlflow --git
 cd digits-mlflow
 uv sync
 git add .
+git add hiraku/dispatch
 git commit -m "initialize Digits MLflow example"
 ```
 
@@ -37,11 +38,11 @@ The dashboard reads the prepared `mlflow.db` directly, so an MLflow server is
 not required. Use `hiraku dashboard --init --edit --record digits` to copy the
 notebook into the project and edit it. Run details only show an MLflow link
 after you start the MLflow UI and set
-`ui_url: http://127.0.0.1:5000` in the `tracking_backend` configuration.
+`ui_url: http://127.0.0.1:5000` in the root record's `tracking_backend`.
 
 MLflow creates `mlflow.db` in the project root on the first launch. The training
-script uses the Hiraku project root to keep that location stable for local and
-worktree dispatchers. Set `MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
+script uses the Hiraku project root to keep that location stable. Set
+`MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
 when you want to override the local defaults. These variables affect the
 training process only, so update the root record's `tracking_backend` with the matching
 `tracking_uri` and `experiment_name` before using `hiraku runs`.
@@ -58,19 +59,19 @@ hiraku record create digits --type task \
 hiraku record create weak-l2 --parent digits --type experiment \
   --set "summary=Weak L2 baseline" \
   --set "hypothesis=Weak regularization fits training data well but may overfit" \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {alpha: 0.0001, epochs: 40, hidden-units: 64, seed: 42, validation-fraction: 0.25}}}'
+  --commit HEAD
 
 hiraku record create strong-l2 --parent digits --type experiment \
   --set "summary=Stronger L2 comparison" \
   --set "hypothesis=Stronger regularization reduces the training-validation gap" \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {alpha: 1.0, epochs: 40, hidden-units: 64, seed: 42, validation-fraction: 0.25}}}'
+  --commit HEAD
 
 hiraku record list
 
-hiraku launch train --record weak-l2
-hiraku launch train --record strong-l2
+hiraku run --record weak-l2 -- uv run python train.py --alpha 0.0001 \
+  --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
+hiraku run --record strong-l2 -- uv run python train.py --alpha 1.0 \
+  --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
 ```
 
 ## Compare final metrics and inspect curves
@@ -93,7 +94,7 @@ Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs
 in the native MLflow interface.
 
 One MLflow experiment contains both Hiraku child records. Native MLflow tags
-`hiraku.record_id`, `hiraku.commit`, and `hiraku.entrypoint`
+`hiraku.record_id` and `hiraku.commit`
 link each run back to Hiraku. The script owns logging; Hiraku queries the latest
 value of each metric. Full epoch histories remain in MLflow and its UI.
 
@@ -119,3 +120,7 @@ hiraku dashboard --record digits
     | --- | --- | --- | --- | ---: | ---: |
     | `15895756` | `weak-l2` | `2026-09-10 06:35:05Z` | `17f59bac` | 0.12493475669652965 | 0.9688888888888889 |
     | `f6f6de2f` | `strong-l2` | `2026-09-10 06:35:10Z` | `17f59bac` | 0.4801207515207299 | 0.9266666666666666 |
+
+### Command execution
+
+Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.

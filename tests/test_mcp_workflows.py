@@ -31,7 +31,6 @@ def config(tmp_path: Path) -> HirakuConfig:
     Record.create(
         "task",
         type="task",
-        entrypoints={"train": {"command": ["python", "train.py"]}},
         config=selected,
     )
     return selected
@@ -548,9 +547,10 @@ def test_workflows_read_current_project_state(config: HirakuConfig) -> None:
     Record.create("other-task", type="task", config=HirakuConfig.discover(config.root))
 
     async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
-        return payload(await client.call_tool("collaborative", {"entrypoint": "train"}))
+        return payload(
+            await client.call_tool("collaborative", {"command": ["python", "train.py"]})
+        )
 
     started = run(server, scenario)
-    assert started["status"] == "rejected"
-    assert "train" in started["message"]
-    assert "other-task" in started["message"]
+    assert started["status"] == "accepted"
+    assert started["instruction"]["data"]["task"] == "other-task"

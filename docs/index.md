@@ -26,7 +26,7 @@ Small, reproducible units track the research progress.
 
 <h3>Learn</h3>
 
-Launch entrypoints, compare runs, and keep the research history visible.
+Launch commands, compare runs, and keep the research history visible.
 </div>
 </div>
 
@@ -58,17 +58,17 @@ uv run hiraku --help
 
 ## The Hiraku workflow
 
-Hiraku connects the research loop with records and tracked runs:
+Hiraku connects research records, command executions, and tracked measurements:
 
 ```mermaid
 flowchart LR
-    T[Root record<br/>research goal] --> E[Child record<br/>focused attempt] --> R[Run<br/>metric trace]
+    T[Root record<br/>research goal] --> E[Child record<br/>focused attempt] --> C[Foreground command<br/>execution and provenance] --> R[Run<br/>metric trace]
 ```
 
-* A root `Record` may define a research goal, metrics, shared entrypoints, and a tracking backend. It lives at `hiraku/records/{root-id}/{root-id}.md`.
+* A root `Record` may define a research goal, metrics, shared commands, and a tracking backend. It lives at `hiraku/records/{root-id}/{root-id}.md`.
 * A child `Record` may focus on an experiment, diagnosis, or review. It inherits through `parent_id` and may bind its own code commit.
 * A `Run` records one execution attributed to a `record_id`. Runs are managed by CSV, MLflow, W&B, or another backend and queried by Hiraku.
-* Additionally, an `Entrypoint` defines an executable command associated with documented arguments. Hiraku provides launch helpers and customizable dispatch scripts.
+* `hiraku run` executes in the current working tree, streams output, and returns the command's exit code. Optional dispatch scripts can prepare its runtime.
 
 ??? tip "Branching and experiment lineage"
     Git remains responsible for commits, branches, and source history.
