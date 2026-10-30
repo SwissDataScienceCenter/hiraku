@@ -23,7 +23,6 @@ hiraku example create eurosat-rgb --git
 cd eurosat-rgb
 
 git add .
-git add hiraku/dispatch
 git commit -m "initialize EuroSAT RGB example"
 ```
 

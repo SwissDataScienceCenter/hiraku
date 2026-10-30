@@ -26,7 +26,6 @@ project. Commit the evaluation code before creating records:
 
 ```bash
 git add .
-git add hiraku/dispatch
 git commit -m "initial commit"
 ```
 

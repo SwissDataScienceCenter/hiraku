@@ -32,7 +32,6 @@ Install the example's training dependencies and commit the code.
 ```bash
 uv sync
 git add .
-git add hiraku/dispatch
 git commit -m "initialize Heart Disease example"
 ```
 
@@ -94,9 +93,8 @@ hiraku runs --record heart-disease --all
 hiraku runs --record logistic-baseline
 ```
 
-Expect one run with `val/log_loss` and `val/accuracy`. The default dispatcher
-executes a snapshot of the Git-visible source. The
-training program writes the CSV row to project-root `runs.csv`.
+Expect one run with `val/log_loss` and `val/accuracy`. The training program
+writes the CSV row to project-root `runs.csv`.
 
 ??? tip "Tracking backends: CSV, Weights & Biases, and MLflow"
     Hiraku does **not** handle, control or own metric logging. Training scripts log metrics directly to a user-managed tracking backend, independently of Hiraku.
@@ -107,11 +105,9 @@ training program writes the CSV row to project-root `runs.csv`.
     Hiraku only **queries the tracking backend for existing runs and metrics**. This means the same training and logging setup can be used with or without Hiraku.
 
 
-??? note "Dispatchers and execution"
-    Hiraku runs in the current project working tree and invokes
-    the optional `hiraku/dispatch/launch.sh` runtime setup hook.
-    Runs use the current project working tree. `HIRAKU_GIT_STATE` records
-    whether the tree had uncommitted changes.
+??? note "Execution"
+    Hiraku runs commands in the current project working tree.
+    `HIRAKU_GIT_STATE` records whether the tree had uncommitted changes.
 
 ## 4. Run a second experiment
 

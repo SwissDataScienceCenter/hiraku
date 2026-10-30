@@ -41,7 +41,7 @@ class HirakuConfig(BaseModel):
 
     DEFAULTS: ClassVar[dict[str, Any]] = {
         "hiraku_dir": "hiraku",
-        "default_dispatch": "launch.sh",
+        "default_dispatch": None,
         "active_record_id": None,
         "tracking_backend": "csv",
     }
@@ -54,7 +54,9 @@ class HirakuConfig(BaseModel):
     hiraku_dir_name: str = Field(
         default=DEFAULTS["hiraku_dir"], alias="hiraku_dir", min_length=1
     )
-    default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
+    default_dispatch: str | None = Field(
+        default=DEFAULTS["default_dispatch"], min_length=1
+    )
     active_record_id: str | None = DEFAULTS["active_record_id"]
     tracking_backend: str | dict[str, Any] = DEFAULTS["tracking_backend"]
     _hiraku_dir: Path = PrivateAttr()

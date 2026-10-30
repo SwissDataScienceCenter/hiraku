@@ -700,7 +700,7 @@ def workflow_resume_command(
 
 
 @main.command("run")
-@click.argument("command", nargs=-1, required=True, type=click.UNPROCESSED)
+@click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
 @click.option(
     "--dispatch", help="Dispatcher name from the project's dispatch directory."

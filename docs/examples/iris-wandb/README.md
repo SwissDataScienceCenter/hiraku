@@ -22,7 +22,6 @@ hiraku example create iris-wandb --git
 cd iris-wandb
 uv sync
 git add .
-git add hiraku/dispatch
 git commit -m "initialize Iris W&B example"
 ```
 

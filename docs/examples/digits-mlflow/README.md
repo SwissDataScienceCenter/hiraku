@@ -21,7 +21,6 @@ hiraku example create digits-mlflow --git
 cd digits-mlflow
 uv sync
 git add .
-git add hiraku/dispatch
 git commit -m "initialize Digits MLflow example"
 ```
 

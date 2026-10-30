@@ -98,7 +98,8 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert (config.workflows_dir / "collaborative" / "workflow.md").is_file()
     assert not (config.hiraku_dir / "programs").exists()
     assert not (config.hiraku_dir / "actions").exists()
-    assert (config.dispatch_dir / "launch.sh").stat().st_mode & 0o111
+    assert config.default_dispatch is None
+    assert list(config.dispatch_dir.iterdir()) == []
     assert not (config.dispatch_dir / "worktree.sh").exists()
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"

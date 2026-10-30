@@ -145,10 +145,7 @@ class _ProjectProvisioner:
                 ):
                     cls._ensure_directory(directory, created_dirs)
                 resource_root = files("hiraku.resources")
-                copies = [
-                    (resource_root / "workflows", config.workflows_dir),
-                    (resource_root / "dispatch", config.dispatch_dir),
-                ]
+                copies = [(resource_root / "workflows", config.workflows_dir)]
                 if install_skill:
                     skill_source = resource_root / "skills/hiraku"
                     canonical_skill = project_root / ".agents/skills/hiraku"
@@ -169,10 +166,6 @@ class _ProjectProvisioner:
                 cls._install_mcp_configs(
                     project_root, created_files, created_dirs, replaced_files
                 )
-                for name in ("launch.sh", "worktree.sh"):
-                    dispatcher = config.dispatch_dir / name
-                    if dispatcher.is_file():
-                        dispatcher.chmod(dispatcher.stat().st_mode | 0o111)
                 return _InitializationResult(
                     config=config,
                     created_files=tuple(dict.fromkeys(created_files)),

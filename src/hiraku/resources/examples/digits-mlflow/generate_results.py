@@ -153,7 +153,6 @@ def generate_results(output: Path) -> None:
         for arguments in (
             ["init", "-q"],
             ["add", "."],
-            ["add", "-f", "hiraku/dispatch/launch.sh"],
             [
                 "-c",
                 "user.name=Hiraku example",
