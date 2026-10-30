@@ -313,7 +313,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 goto="implement",
             )
         try:
-            sha = GitRepository(config).resolve(commit)
+            sha = GitRepository(config.root).resolve(commit)
             record = experiment(state)
             record.commit = sha
             record.status = "implemented"

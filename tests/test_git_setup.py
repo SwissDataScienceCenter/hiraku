@@ -42,7 +42,7 @@ def test_project_creation_does_not_invoke_git(tmp_path, monkeypatch, command):
     def forbidden(*args, **kwargs):
         pytest.fail("Git must not be invoked during plain initialization")
 
-    monkeypatch.setattr("hiraku.git.GitRepository._execute", forbidden)
+    monkeypatch.setattr("hiraku.git.GitRepository._run", forbidden)
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, command)
     assert result.exit_code == 0, result.output

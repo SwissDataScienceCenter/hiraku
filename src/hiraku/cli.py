@@ -340,7 +340,7 @@ def status_command(state: CLIContext, json_output: bool) -> None:
     """Show project and active record."""
     config = state.config
     try:
-        branch = GitRepository(config).current_branch
+        branch = GitRepository(config.root).current_branch
     except GitError:
         branch = None
     tracking_backend = {"type": "csv"}
@@ -392,7 +392,7 @@ def record_create(
     if type is not None:
         fields["type"] = type
     if commit is not None:
-        fields["commit"] = GitRepository(state.config).resolve(commit)
+        fields["commit"] = GitRepository(state.config.root).resolve(commit)
     record = Record.create(
         record_id,
         parent_id=parent_id,
@@ -479,7 +479,7 @@ def record_update(
     if related_to:
         changes["related_to"] = list(related_to)
     if commit is not None:
-        changes["commit"] = GitRepository(state.config).resolve(commit)
+        changes["commit"] = GitRepository(state.config.root).resolve(commit)
     fields = record.to_dict()
     fields.update(changes)
     for key in unset_values:

@@ -75,15 +75,9 @@ def execute_command(
     commit = ""
     git_state = "unavailable"
     try:
-        repository = GitRepository(selected)
+        repository = GitRepository(selected.root)
         commit = repository.resolve("HEAD")
-        git_state = (
-            "dirty"
-            if repository._git(
-                "status", "--porcelain", "--untracked-files=normal"
-            ).stdout
-            else "clean"
-        )
+        git_state = "dirty" if repository.is_dirty else "clean"
     except GitError:
         pass
 

@@ -19,9 +19,11 @@ class Run(BaseModel):
 
     ``timestamp`` is when the run started and ``duration`` its wall-clock
     length in seconds; either is ``None`` when the backend does not report it.
+    Backend-specific metadata belongs in ``raw``. The ``metrics``, ``params``,
+    and ``raw`` mappings are shallowly immutable snapshots.
     """
 
-    model_config = ConfigDict(frozen=True, extra="allow")
+    model_config = ConfigDict(frozen=True, extra="forbid")
     id: str = Field(min_length=1)
     metrics: Mapping[str, Any] = Field(default_factory=dict)
     params: Mapping[str, Any] = Field(default_factory=dict)
@@ -44,8 +46,11 @@ class Run(BaseModel):
 
     @model_validator(mode="after")
     def normalize(self) -> Run:
+        """Snapshot mappings and normalize timestamps to UTC."""
         from types import MappingProxyType
 
+        # Copy before wrapping so later changes to the source mapping do not
+        # alter the normalized run. Nested values remain backend-owned values.
         for name in ("metrics", "params", "raw"):
             value = getattr(self, name)
             object.__setattr__(self, name, MappingProxyType(dict(value)))

@@ -18,3 +18,9 @@ move any former project-level setting to the root record. Records without an
 explicit setting use CSV. The
 [tracking API reference](api/python/tracking.md) documents the shared backend
 contract and normalized run model.
+
+Normalized runs accept only the documented fields: `id`, `metrics`, `params`,
+`record_id`, `commit`, `timestamp`, `duration`, `entrypoint`, `url`, and `raw`.
+Put backend-specific metadata in `raw`. Its mapping, along with `metrics` and
+`params`, is copied and made shallowly immutable; nested values retain their
+original types and mutability.

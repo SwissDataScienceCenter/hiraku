@@ -25,7 +25,7 @@ def _repository(tmp_path: Path) -> tuple[HirakuConfig, GitRepository]:
     _git(tmp_path, "add", "tracked.txt")
     _git(tmp_path, "commit", "-qm", "initial")
     config = HirakuConfig.init(tmp_path)
-    return config, GitRepository(config)
+    return config, GitRepository(config.root)
 
 
 def test_git_resolution_and_current_branch(tmp_path: Path) -> None:
@@ -57,4 +57,4 @@ def test_invalid_commit_reference(tmp_path: Path, ref: str) -> None:
 def test_git_errors_outside_repository(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     with pytest.raises(GitError):
-        GitRepository(config)
+        GitRepository(config.root)

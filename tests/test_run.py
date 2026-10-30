@@ -18,6 +18,27 @@ def test_run_id_must_not_be_empty() -> None:
         Run(id="")
 
 
+def test_run_keeps_backend_metadata_in_raw() -> None:
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        Run(id="a", backend_state="finished")
+    assert Run(id="a", raw={"backend_state": "finished"}).raw == {
+        "backend_state": "finished"
+    }
+
+
+def test_run_mapping_fields_are_shallow_immutable_snapshots() -> None:
+    nested = {"details": ["original"]}
+    metrics = {"result": nested}
+    run = Run(id="a", metrics=metrics)
+
+    metrics["later"] = 1
+    assert "later" not in run.metrics
+    with pytest.raises(TypeError):
+        run.metrics["later"] = 1  # type: ignore[index]
+    nested["details"].append("nested mutation")
+    assert run.metrics["result"]["details"] == ["original", "nested mutation"]
+
+
 @pytest.mark.parametrize("value", [-0.1, math.nan, math.inf])
 def test_run_rejects_invalid_duration(value: float) -> None:
     with pytest.raises(ValidationError, match="duration"):
