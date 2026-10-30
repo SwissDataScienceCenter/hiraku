@@ -32,7 +32,7 @@ A root *record* defines a working scope and goal, and documents the research pro
 
 Records are stored as Markdown with YAML front matter. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent, and all descendants are stored flat in their root's folder. IDs are unique across the project.
 
-Fields inherit through `parent_id` by default: the nearest definition wins and an explicit `null` clears an inherited field. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
+Fields inherit through `parent_id` by default: the nearest definition wins and an explicit `null` clears an inherited field. When a child is created, its effective `metrics` and `tracking_backend` are copied into its YAML front matter unless explicitly set on the child. These values are snapshots: later parent edits do not rewrite existing children. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
 At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. The current status can be queried with `hiraku status`; its `tracking_backend` field shows the active record's effective backend.
 
@@ -85,8 +85,9 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 - List runs from the tracking source selected by a record.
 - Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, historical entrypoint, and URL attribution may be absent.
 
-Set `tracking_backend` on a root record to select the tracking source for that
-record tree; child records inherit it unless they define their own value. Backend
+Set `tracking_backend` on a root record to select the default tracking source
+for new records in that tree. When a child is created, the effective backend is
+stored in its front matter; an explicit child value overrides it. Backend
 configuration uses one common mapping shape, with `type` identifying the adapter:
 
 ```yaml

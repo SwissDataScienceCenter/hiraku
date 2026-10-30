@@ -29,6 +29,7 @@ class Metric(BaseModel):
 _LOCAL_FIELDS = frozenset(
     {"id", "parent_id", "related_to", "type", "commit", "status", "decision"}
 )
+_MATERIALIZED_INHERITED_FIELDS = ("metrics", "tracking_backend")
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,7 @@ class Record(BaseRecord):
         config: Any = None,
         **fields: Any,
     ) -> Record:
+        """Create a record, materializing inherited metrics and tracking defaults."""
         selected = _config(config)
         index = _record_index(selected)
         if record_id in index:
@@ -136,12 +138,18 @@ class Record(BaseRecord):
         for link in links:
             if link not in index:
                 raise RecordNotFoundError(f"Related record {link!r} not found")
+        values = dict(fields)
+        if parent_id is not None:
+            inherited = index[parent_id].resolve(config=selected).values
+            for name in _MATERIALIZED_INHERITED_FIELDS:
+                if name not in values and name in inherited:
+                    values[name] = inherited[name]
         record = cls(
             id=record_id,
             parent_id=parent_id,
             related_to=links,
             markdown=markdown,
-            **fields,
+            **values,
         )
         root_id = _root_id(parent_id, index) if parent_id else record_id
         record.save(selected.records_dir / root_id / f"{record_id}.md")

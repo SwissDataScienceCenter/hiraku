@@ -20,7 +20,10 @@ through an existing record lifecycle.
   the source commit being evaluated. Its
   optional `type` describes its role, such as experiment, diagnostic, or
   ablation. `related_to` links records without inheritance.
-  Fields inherit from the nearest parent definition by default; `id`,
+  Fields inherit from the nearest parent definition by default. On child
+  creation, inherited `metrics` and `tracking_backend` values are copied into
+  the child record unless explicitly set there; later parent edits do not
+  update those snapshots. `id`,
   `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and invocation attribution together with

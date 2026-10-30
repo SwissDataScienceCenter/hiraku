@@ -87,6 +87,8 @@ def test_status_reports_active_record_tracking_backend(
         "--type",
         "task",
         "--set",
+        "metrics=[{name: val/accuracy, direction: maximize}]",
+        "--set",
         "tracking_backend={type: wandb, project: eurosat-rgb}",
     )
     assert result.exit_code == 0
@@ -95,6 +97,45 @@ def test_status_reports_active_record_tracking_backend(
     )
     assert child.exit_code == 0
 
+    shown = json.loads(invoke("record", "show", "mlp", "--json").output)
+    assert shown["values"]["metrics"] == [
+        {"name": "val/accuracy", "direction": "maximize"}
+    ]
+    assert shown["values"]["tracking_backend"] == {
+        "type": "wandb",
+        "project": "eurosat-rgb",
+    }
+    assert shown["sources"]["metrics"] == "mlp"
+    assert shown["sources"]["tracking_backend"] == "mlp"
+
+    raw = json.loads(invoke("record", "show", "mlp", "--raw", "--json").output)
+    assert raw["values"]["metrics"] == [
+        {"name": "val/accuracy", "direction": "maximize"}
+    ]
+    assert raw["values"]["tracking_backend"] == {
+        "type": "wandb",
+        "project": "eurosat-rgb",
+    }
+
+    override = invoke(
+        "record",
+        "create",
+        "cnn",
+        "--parent",
+        "eurosat",
+        "--type",
+        "experiment",
+        "--set",
+        "metrics=[{name: val/loss, direction: minimize}]",
+        "--set",
+        "tracking_backend={type: csv}",
+    )
+    assert override.exit_code == 0
+    cnn = json.loads(invoke("record", "show", "cnn", "--raw", "--json").output)
+    assert cnn["values"]["metrics"] == [{"name": "val/loss", "direction": "minimize"}]
+    assert cnn["values"]["tracking_backend"] == {"type": "csv"}
+
+    assert invoke("record", "set", "mlp").exit_code == 0
     status = json.loads(invoke("status", "--json").output)
     assert status["tracking_backend"] == {
         "type": "wandb",
@@ -107,6 +148,21 @@ def test_status_reports_active_record_tracking_backend(
         .values["tracking_backend"]
         == status["tracking_backend"]
     )
+    assert (
+        invoke(
+            "record",
+            "update",
+            "eurosat",
+            "--set",
+            "tracking_backend={type: csv}",
+        ).exit_code
+        == 0
+    )
+    stored_child = json.loads(invoke("record", "show", "mlp", "--raw", "--json").output)
+    assert stored_child["values"]["tracking_backend"] == {
+        "type": "wandb",
+        "project": "eurosat-rgb",
+    }
 
 
 def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
