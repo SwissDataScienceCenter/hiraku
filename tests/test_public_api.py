@@ -1,4 +1,4 @@
-from hiraku import HirakuConfig, Metric, Record, Run
+from hiraku import HirakuConfig, Metric, Record, Run, initialize_project
 from hiraku.errors import GitError, HirakuError
 from hiraku.execution import execute_command
 from hiraku.io import atomic_write, dump_yaml, load_yaml_mapping
@@ -16,6 +16,7 @@ def test_documented_imports() -> None:
             Metric,
             Run,
             Record,
+            initialize_project,
             TrackingBackend,
             execute_command,
             list_records,

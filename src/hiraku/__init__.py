@@ -3,7 +3,7 @@
 from .config import HirakuConfig
 from .git import GitRepository
 from .markdown import Markdown
-from .project import ProjectInitializer
+from .project import initialize_project
 from .record import Metric, Record
 from .run import Run
 
@@ -14,5 +14,5 @@ __all__ = [
     "Run",
     "GitRepository",
     "Markdown",
-    "ProjectInitializer",
+    "initialize_project",
 ]

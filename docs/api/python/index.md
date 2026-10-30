@@ -4,6 +4,7 @@ Hiraku exposes validated Pydantic models and small service APIs. Constructors
 validate their input immediately; persistence is handled through explicit paths.
 
 - [Configuration](config.md) — discover and persist project configuration.
+- [Project initialization](project.md) — create a project and install its resources.
 - [Records](records.md) — work with validated Markdown-backed records.
 - Data models:
     - [Record](records.md)

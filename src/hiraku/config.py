@@ -167,9 +167,9 @@ class HirakuConfig(BaseModel):
         Raises:
             hiraku.errors.ProjectExistsError: If the project is already initialized.
         """
-        from .project import ProjectInitializer
+        from .project import initialize_project
 
-        return ProjectInitializer.create(
+        return initialize_project(
             root,
             install_skill=install_skill,
             template=template,

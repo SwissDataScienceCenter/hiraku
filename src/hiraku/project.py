@@ -27,8 +27,8 @@ class _InitializationResult:
     created_dirs: tuple[Path, ...]
 
 
-class ProjectInitializer:
-    """Create a new Hiraku project and install its bundled resources."""
+class _ProjectProvisioner:
+    """Implement transactional filesystem provisioning for one operation."""
 
     @classmethod
     def create(
@@ -476,3 +476,23 @@ class ProjectInitializer:
             cls._copy_resource_tree(source, target, created_files, created_dirs)
         else:
             created_files.append(target)
+
+
+def initialize_project(
+    root: Path | str = ".",
+    *,
+    install_skill: bool = True,
+    template: Path | str | None = None,
+    example: str | None = None,
+    results: bool = False,
+    with_generator: bool = False,
+) -> HirakuConfig:
+    """Create a Hiraku project and install its bundled resources."""
+    return _ProjectProvisioner.create(
+        root,
+        install_skill=install_skill,
+        template=template,
+        example=example,
+        results=results,
+        with_generator=with_generator,
+    )
