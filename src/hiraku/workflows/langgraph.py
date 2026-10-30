@@ -123,14 +123,14 @@ def _resume_locked(
     checkpoint_id: str,
     context: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    graph_workflow = _find_run(workflow_session_id, config)
-    if graph_workflow is None:
-        raise ValidationError(
-            f"LangGraph workflow session {workflow_session_id!r} was not found"
-        )
+    graph_workflow = _session_workflow_id(workflow_session_id, config)
     with _compiled_graph(graph_workflow, config) as graph:
         snapshot = graph.get_state(_thread_config(workflow_session_id))
-        if not snapshot.values or not snapshot.next:
+        if not snapshot.values:
+            raise ValidationError(
+                f"LangGraph workflow session {workflow_session_id!r} was not found"
+            )
+        if not snapshot.next:
             raise ValidationError(
                 f"Workflow session {workflow_session_id!r} is not waiting for input"
             )
@@ -160,13 +160,14 @@ def workflow_status(
     workflow_session_id: str, *, config: HirakuConfig
 ) -> dict[str, Any]:
     """Inspect a checkpointed graph run without advancing it."""
-    graph_workflow = _find_run(workflow_session_id, config)
-    if graph_workflow is None:
-        raise ValidationError(
-            f"LangGraph workflow session {workflow_session_id!r} was not found"
-        )
+    graph_workflow = _session_workflow_id(workflow_session_id, config)
     with _compiled_graph(graph_workflow, config) as graph:
-        return _snapshot_result(graph, graph_workflow, workflow_session_id)
+        snapshot = graph.get_state(_thread_config(workflow_session_id))
+        if not snapshot.values:
+            raise ValidationError(
+                f"LangGraph workflow session {workflow_session_id!r} was not found"
+            )
+        return _snapshot_result(graph_workflow, workflow_session_id, snapshot)
 
 
 def workflow_mermaid(workflow_id: str, *, config: HirakuConfig) -> str:
@@ -175,7 +176,8 @@ def workflow_mermaid(workflow_id: str, *, config: HirakuConfig) -> str:
         return graph.get_graph().draw_mermaid()
 
 
-def _find_run(workflow_session_id: str, config: HirakuConfig) -> str | None:
+def _session_workflow_id(workflow_session_id: str, config: HirakuConfig) -> str:
+    """Resolve the workflow encoded in a current-format session ID."""
     workflow_id, separator, checkpoint_id = workflow_session_id.partition(":")
     if (
         not separator
@@ -183,10 +185,10 @@ def _find_run(workflow_session_id: str, config: HirakuConfig) -> str | None:
         or not re.fullmatch(r"[0-9a-f]{32}", checkpoint_id)
         or workflow_id not in workflow_ids(config=config)
     ):
-        return None
-    with _compiled_graph(workflow_id, config) as graph:
-        snapshot = graph.get_state(_thread_config(workflow_session_id))
-    return workflow_id if snapshot.values else None
+        raise ValidationError(
+            f"LangGraph workflow session {workflow_session_id!r} was not found"
+        )
+    return workflow_id
 
 
 @contextmanager
@@ -293,9 +295,7 @@ def _record_snapshot(
     graph: Any, workflow_id: str, workflow_session_id: str, config: HirakuConfig
 ) -> dict[str, Any]:
     snapshot = graph.get_state(_thread_config(workflow_session_id))
-    result = _snapshot_result(
-        graph, workflow_id, workflow_session_id, snapshot=snapshot
-    )
+    result = _snapshot_result(workflow_id, workflow_session_id, snapshot)
     checkpoint_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
     record_event(
         workflow_session_id,
@@ -309,10 +309,8 @@ def _record_snapshot(
 
 
 def _snapshot_result(
-    graph: Any, workflow_id: str, workflow_session_id: str, *, snapshot: Any = None
+    workflow_id: str, workflow_session_id: str, snapshot: Any
 ) -> dict[str, Any]:
-    if snapshot is None:
-        snapshot = graph.get_state(_thread_config(workflow_session_id))
     interrupts = [
         {"id": item.id, "value": item.value}
         for task in snapshot.tasks
