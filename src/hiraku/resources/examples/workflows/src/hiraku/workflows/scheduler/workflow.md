@@ -1,6 +1,9 @@
 ---
 id: scheduler
 description: Work through records by priority until each count reaches a target.
+arguments:
+  records: 3
+  target: 2
 ---
 # Scheduler
 
@@ -8,9 +11,15 @@ description: Work through records by priority until each count reaches a target.
 
 Increase the `count` of record {{record}} from {{count}} to {{next}}, with
 `hiraku record update {{record}} --set count={{next}}` or the `record_update`
-tool. Change nothing else. Then send the event `incremented` with the record
-ID {{record}}.
+tool. Change nothing else. Then call `workflow_resume` with workflow session ID
+`{{workflow_session_id}}`, the checkpoint ID returned by start or status, and
+response `{"record_id": "{{record}}"}`. If the update did not
+work, report that and do not claim success.
 
 ## Done
 
-Show the user the records in the data with their priority and count.
+Show the user this final record summary:
+
+```json
+{{records}}
+```

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
+export LC_NUMERIC=C
 
 if [[ $(uname -s) != Linux ]]; then
   echo "autoresearch.sh: this dispatcher requires Linux" >&2

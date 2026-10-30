@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import tomllib
 from pathlib import Path
@@ -15,6 +16,52 @@ from hiraku.errors import (
     ValidationError,
 )
 from hiraku.record import Record
+
+
+def test_init_leaves_client_hooks_out_of_the_project(tmp_path):
+    existing = {"matcher": "Write", "hooks": [{"type": "command", "command": "check"}]}
+    for relative in (".codex/hooks.json", ".claude/settings.json"):
+        path = tmp_path / relative
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(
+            json.dumps({"other": True, "hooks": {"PreToolUse": [existing]}})
+        )
+    HirakuConfig.init(tmp_path, install_skill=False)
+    for relative in (".codex/hooks.json", ".claude/settings.json"):
+        path = tmp_path / relative
+        assert json.loads(path.read_text()) == {
+            "other": True,
+            "hooks": {"PreToolUse": [existing]},
+        }
+
+
+@pytest.mark.parametrize("locked", [False, True])
+def test_init_uses_uv_when_the_project_has_a_lockfile(tmp_path, locked):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\ndependencies = ["hiraku"]\n'
+    )
+    if locked:
+        (tmp_path / "uv.lock").touch()
+    launcher = ["uv", "run", "hiraku"] if locked else ["hiraku"]
+    HirakuConfig.init(tmp_path, install_skill=False)
+    server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["hiraku"]
+    assert [server["command"], *server["args"]] == [*launcher, "mcp"]
+    codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
+    assert codex["mcp_servers"]["hiraku"] == server
+    assert not (tmp_path / ".claude/settings.json").exists()
+
+
+@pytest.mark.parametrize(
+    "content", ["not json", "[]", '{"hooks": []}', '{"hooks":{"PreToolUse":{}}}']
+)
+def test_init_preserves_hook_configuration_without_inspecting_it(tmp_path, content):
+    path = tmp_path / ".claude/settings.json"
+    path.parent.mkdir()
+    path.write_text(content)
+    HirakuConfig.init(tmp_path, install_skill=False)
+    assert path.read_text() == content
+    assert (tmp_path / "hiraku.yml").is_file()
+    assert (tmp_path / ".mcp.json").is_file()
 
 
 def _git(path: Path, *arguments: str) -> None:
@@ -70,7 +117,8 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     without_skill = tmp_path / "without-skill"
     HirakuConfig.init(without_skill, install_skill=False)
     assert not (without_skill / ".agents").exists()
-    assert not (without_skill / ".claude").exists()
+    assert not (without_skill / ".claude/skills").exists()
+    assert not (without_skill / ".claude/settings.json").exists()
 
     with pytest.raises(ProjectExistsError):
         HirakuConfig.init(root)

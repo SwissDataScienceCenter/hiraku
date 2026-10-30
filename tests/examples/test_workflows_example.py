@@ -11,6 +11,15 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
+from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
+from hiraku.workflows.langgraph import start_workflow, workflow_status
+
+
+def resume_workflow(session_id, response, *, config):
+    status = workflow_status(session_id, config=config)
+    return _resume_workflow(
+        session_id, response, config=config, checkpoint_id=status["checkpoint_id"]
+    )
 
 
 def invoke(runner: CliRunner, arguments: list[str], payload: Any = None) -> Any:
@@ -39,108 +48,69 @@ def runner(tmp_path: Path, monkeypatch) -> CliRunner:
     invoke(selected, ["example", "create", "workflows", "."])
     workflows = project / "hiraku" / "workflows"
     assert (workflows / "count-steps" / "workflow.py").is_file()
-    assert (workflows / "greet" / "workflow.md").is_file()
+    assert (workflows / "greet" / "workflow.py").is_file()
     assert (workflows / "scheduler" / "workflow.py").is_file()
-    assert not (workflows / "greet" / "workflow.py").exists()
     assert not (project / "example.yml").exists()
     return selected
 
 
-def send(
-    runner: CliRunner, response: dict[str, Any], name: str, **arguments: Any
-) -> dict[str, Any]:
-    command = [
-        "workflow",
-        "send-event",
-        response["session_id"],
-        name,
-        "--instruction-id",
-        str(response["instruction_id"]),
-        "--arguments-file",
-        "-",
-    ]
-    result = json.loads(invoke(runner, command, arguments).output)
-    assert "instruction" not in result
-    if result["status"] == "accepted":
-        shown = invoke(runner, ["session", "show", result["session_id"], "--json"])
-        result.update(json.loads(shown.output))
-        result["status"] = "accepted"
-    return result
-
-
-def test_count_steps_tokens_and_user_steps(runner: CliRunner) -> None:
+def test_all_examples_use_the_langgraph_cli(
+    runner: CliRunner,
+) -> None:
     listed = invoke(runner, ["workflow", "list"]).output
     assert "count-steps" in listed
     assert "greet" in listed
-
-    response = start(runner, "count-steps", {"count": 3})
-    tokens = []
-    for step in range(1, 4):
-        instruction = response["instruction"]
-        context = instruction["data"]
-        assert instruction["text"].startswith("## Step")
-        assert f"`Step {step}/3: token {context['token']}`" in instruction["text"]
-        assert "{{" not in instruction["text"]
-        options = instruction["events"]["accepted"]
-        assert [item["event"] for item in options] == ["ack"]
-        if tokens:
-            stale = send(runner, response, "ack", token=tokens[-1])
-            assert stale["status"] == "rejected"
-            assert f"does not match step {step}" in stale["message"]
-        tokens.append(context["token"])
-        response = send(runner, response, "ack", token=context["token"])
-        if step == 3:
-            break
-        gate = response["instruction"]
-        assert gate["text"].startswith("## Next")
-        assert "Send `step` only if the user agrees" in gate["text"]
-        assert gate["data"] == {"done": step, "remaining": 3 - step}
-        gate_options = gate["events"]["accepted"]
-        assert [item["event"] for item in gate_options] == ["step", "finish"]
-        response = send(runner, response, "step")
-
-    assert response["session_status"] == "completed"
-    assert response["instruction"]["text"].startswith("## Done")
-    assert response["instruction"]["data"] == {"steps": 3, "count": 3}
-    assert len(set(tokens)) == 3
-
-
-def test_count_steps_rejects_wrong_tokens_and_finishes_early(
-    runner: CliRunner,
-) -> None:
-    assert start(runner, "count-steps", {"count": 0})["status"] == "rejected"
-
-    response = start(runner, "count-steps", {"count": 2})
-    wrong = send(runner, response, "ack", token="00000000")
-    assert wrong["status"] == "rejected"
-    early = send(runner, response, "finish")
-    assert early["status"] == "rejected"
-    assert "not an event the current instruction accepts" in early["message"]
-    gate = send(runner, response, "ack", token=response["instruction"]["data"]["token"])
-    done = send(runner, gate, "finish")
-    assert done["session_status"] == "completed"
-    assert done["instruction"]["data"] == {"steps": 1, "count": 2}
+    assert "scheduler" in listed
 
 
 def test_greet_is_one_final_prompt_filled_from_its_arguments(
     runner: CliRunner,
 ) -> None:
-    response = start(runner, "greet", {"name": "Ada", "times": 3})
-    assert response["status"] == "accepted"
-    assert response["session_status"] == "completed"
-    instruction = response["instruction"]
-    assert instruction["text"].startswith("# Greet\n\nPrint 3 greetings to Ada")
-    assert "Greet formally:\nfalse." in instruction["text"]
-    assert instruction["data"] == {"name": "Ada", "times": 3, "formal": False}
-    assert "events" not in instruction
+    config = HirakuConfig.discover()
+    response = start_workflow("greet", {"name": "Ada", "times": 3}, config=config)
+    assert response["status"] == "completed"
+    assert response["workflow_id"] == "greet"
+    assert response["result"].startswith("# Greet\n\nPrint 3 greetings to Ada")
+    assert "Greet formally:\nfalse." in response["result"]
 
-    default = start(runner, "greet", {})
-    assert default["status"] == "accepted"
-    assert default["instruction"]["data"] == {
-        "name": "World",
-        "times": 2,
-        "formal": False,
-    }
+    default = start_workflow("greet", {}, config=config)
+    assert default["result"].startswith("# Greet\n\nPrint 2 greetings to World")
+    assert "Greet formally:\nfalse." in default["result"]
+
+
+def test_cli_uses_workflow_session_ids_for_resume_and_status(runner: CliRunner) -> None:
+    started = json.loads(
+        invoke(
+            runner,
+            ["workflow", "start", "count-steps", "--arguments-file", "-"],
+            {"count": 1},
+        ).output
+    )
+    assert started["status"] == "waiting"
+    workflow_session_id = started["workflow_session_id"]
+    assert (
+        json.loads(invoke(runner, ["workflow", "status", workflow_session_id]).output)
+        == started
+    )
+
+    interrupt = started["interrupts"][0]["value"]
+    completed = json.loads(
+        invoke(
+            runner,
+            [
+                "workflow",
+                "resume",
+                workflow_session_id,
+                "--checkpoint-id",
+                started["checkpoint_id"],
+                "--arguments-file",
+                "-",
+            ],
+            {"token": interrupt["data"]["token"], "decision": "continue"},
+        ).output
+    )
+    assert completed["status"] == "completed"
+    assert completed["workflow_id"] == "count-steps"
 
 
 def children(parent: str) -> list[Any]:
@@ -155,12 +125,13 @@ def set_count(runner: CliRunner, record_id: str, count: int) -> None:
     invoke(runner, ["record", "update", record_id, "--set", f"count={count}"])
 
 
-def test_scheduler_works_by_priority_until_every_record_reaches_the_target(
+def test_scheduler_langgraph_works_by_priority_until_every_record_reaches_target(
     runner: CliRunner,
 ) -> None:
-    response = start(runner, "scheduler", {"records": 3, "target": 2})
-    assert response["status"] == "accepted"
-    parent = response["instruction"]["data"]["record"].rsplit("-", 1)[0]
+    config = HirakuConfig.discover()
+    response = start_workflow("scheduler", {"records": 3, "target": 2}, config=config)
+    interruption = response["interrupts"][0]["value"]
+    parent = interruption["data"]["parent"]
     records = children(parent)
     assert len(records) == 3
     assert all(1 <= item.priority <= 9 and item.count == 0 for item in records)
@@ -169,58 +140,49 @@ def test_scheduler_works_by_priority_until_every_record_reaches_the_target(
     expected = [item.id for item in order for _ in range(2)]
 
     for done, record_id in enumerate(expected):
-        instruction = response["instruction"]
-        context = instruction["data"]
+        interruption = response["interrupts"][0]["value"]
+        context = interruption["data"]
         assert context["record"] == record_id
         assert context["remaining"] == 6 - done
         count = context["count"]
-        assert f"--set count={count + 1}" in instruction["text"]
-        assert [item["event"] for item in instruction["events"]["accepted"]] == [
-            "incremented"
-        ]
-
-        unchanged = send(runner, response, "incremented", record_id=record_id)
-        assert unchanged["status"] == "rejected"
-        assert f"set it to {count + 1}" in unchanged["message"]
+        assert f"--set count={count + 1}" in interruption["instruction"]
         other = next(item.id for item in records if item.id != record_id)
-        wrong = send(runner, response, "incremented", record_id=other)
-        assert wrong["status"] == "rejected"
-        assert "assigned record" in wrong["message"]
+        wrong = resume_workflow(
+            response["workflow_session_id"], {"record_id": other}, config=config
+        )
+        retry = wrong["interrupts"][0]["value"]
+        assert retry["data"] == context
+        assert "assigned record" in retry["error"]
+
+        unchanged = resume_workflow(
+            response["workflow_session_id"], {"record_id": record_id}, config=config
+        )
+        retry = unchanged["interrupts"][0]["value"]
+        assert f"set it to {count + 1}" in retry["error"]
 
         set_count(runner, record_id, count + 1)
-        response = send(runner, response, "incremented", record_id=record_id)
-        assert response["status"] == "accepted"
+        response = resume_workflow(
+            response["workflow_session_id"], {"record_id": record_id}, config=config
+        )
 
-    assert response["session_status"] == "completed"
-    assert response["instruction"]["text"].startswith("## Done")
-    summary = response["instruction"]["data"]["records"]
-    assert [item["record"] for item in summary] == [item.id for item in records]
-    assert {item["count"] for item in summary} == {2}
-
-
-def test_scheduler_rejects_a_count_raised_too_far(runner: CliRunner) -> None:
-    response = start(runner, "scheduler", {"records": 1, "target": 3})
-    record_id = response["instruction"]["data"]["record"]
-    set_count(runner, record_id, 2)
-    skipped = send(runner, response, "incremented", record_id=record_id)
-    assert skipped["status"] == "rejected"
-    assert "is 2; set it to 1" in skipped["message"]
-    set_count(runner, record_id, 1)
-    accepted = send(runner, response, "incremented", record_id=record_id)
-    assert accepted["instruction"]["data"]["count"] == 1
+    assert response["status"] == "completed"
+    assert response["workflow_id"] == "scheduler"
+    assert workflow_status(response["workflow_session_id"], config=config) == response
+    assert all(item.id in response["result"] for item in records)
 
 
-def test_example_workflows_draw_their_states(runner: CliRunner) -> None:
-    count_steps = invoke(runner, ["workflow", "graph", "count-steps"]).output
-    assert count_steps == (
-        "stateDiagram-v2\n"
-        "  [*] --> running\n"
-        "  running --> waiting: ack\n"
-        "  running --> finished: ack\n"
-        "  waiting --> running: step\n"
-        "  waiting --> finished: finish\n"
-        "  finished --> [*]\n"
+def test_langgraph_runs_are_routed_to_their_own_workflow(runner: CliRunner) -> None:
+    config = HirakuConfig.discover()
+    count_run = start_workflow("count-steps", {"count": 1}, config=config)
+    scheduler_run = start_workflow("scheduler", {"records": 1}, config=config)
+
+    assert (
+        workflow_status(count_run["workflow_session_id"], config=config)["workflow_id"]
+        == "count-steps"
     )
-    scheduler = invoke(runner, ["workflow", "graph", "scheduler"]).output
-    assert "  working --> working: incremented\n" in scheduler
-    assert "  working --> finished: incremented\n" in scheduler
+    assert (
+        workflow_status(scheduler_run["workflow_session_id"], config=config)[
+            "workflow_id"
+        ]
+        == "scheduler"
+    )

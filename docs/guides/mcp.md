@@ -9,15 +9,6 @@ so each client starts it in the project it is working on:
 uv run hiraku mcp
 ```
 
-Workflow start, event, and session-show tools return attached records as native
-MCP resource links alongside their JSON response. Read those resources before
-carrying out the instruction. Resources provide live contents; stored
-instructions contain only references. All records use `application/json` at
-`hiraku://records/...` URIs, regardless of their `type`.
-Source files and parent records are not attached automatically. A deleted
-attachment is returned as a link with an unavailability diagnostic; accepted
-session progress is retained. Prompts remain text-based and list the same IDs.
-
 There is no project-path flag; the process uses its working directory. Each
 initialized project gets its own host configuration, and agents connected from
 that project receive the same Hiraku tools and resources.
@@ -86,8 +77,8 @@ resources are loaded on each request, including after changes made outside MCP.
 | --- | --- |
 | `hiraku://records/{record_id}` | Record fields and Markdown as JSON. |
 | `hiraku://workflows/{workflow_id}` | Prompt document of a workflow. |
-| `hiraku://sessions/{session_id}` | Stored state of a workflow session as JSON. |
 | `hiraku://sources/{record_id}/{source_path}` | File attached to a record as an MCP blob with its inferred MIME type. |
+| `hiraku://workflows/{workflow_id}/graph` | LangGraph topology as Mermaid text. |
 
 Place PDFs, literature reviews and other source files inside a record directory,
 for example `hiraku/records/literature/study.pdf`, alongside `literature.md`.
@@ -98,15 +89,23 @@ with `application/pdf`; interpretation depends on the MCP client's capabilities.
 
 ## Workflows
 
-Each project workflow is a tool and a prompt named after it, and events go
-through `workflow_send_event`. `workflow_list` and the `session_*` tools list
-workflows and inspect, resume, or cancel sessions. See the
-[Workflows guide](workflows.md).
+Project workflows are listed with `workflow_list`, started with
+`workflow_start(workflow_id, arguments)`, inspected with
+`workflow_status(workflow_session_id)`, and resumed with
+`workflow_resume(workflow_session_id, response, checkpoint_id)`. Every workflow is a LangGraph graph defined
+by `build_graph(checkpointer, *, config)` in `workflow.py`; there is no
+Hiraku-specific event protocol or per-workflow MCP tool. The workflow session ID is the
+LangGraph thread ID, and resumable graph state is checkpointed in
+`.hiraku/langgraph-checkpoints.sqlite` by default. See the [Workflows guide](workflows.md).
 
-The conversational server wraps core event execution and attaches the saved next
-instruction after accepted or stale submissions. Core execution returns only a
-typed event result. Workflow instances reload their bound project configuration
-on access.
+Any workflow interrupt can request approval by including an `approval` object
+in its interrupt payload. `workflow_approval` takes the workflow session ID, interrupt ID,
+proposal, and proposed response, and uses MCP elicitation to collect the
+standard approve, revise, or stop decision. Pass its result to
+`workflow_resume`. If elicitation is cancelled, leave the graph paused.
+Approval is cooperative: Python, CLI, and MCP callers can submit decisions
+directly and must be trusted. MCP elicitation does not restrict other tools or
+local shell access.
 
 ## Prompt template
 

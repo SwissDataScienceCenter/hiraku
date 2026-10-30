@@ -2,20 +2,22 @@
 
 This example installs three small workflows that do no research work:
 
-- `count-steps`, a Python workflow that checks that a coding harness follows
-  Hiraku workflow instructions and stops for the user after each step;
-- `greet`, a Markdown-only workflow whose YAML defaults define typed inputs
-  and fill `{{name}}` placeholders in `workflow.md`;
-- `scheduler`, which creates experiment records with random priorities and
-  lets the agent raise their counts, highest priority first, until each
-  reaches a target.
+- `count-steps`, a LangGraph workflow that hands each step to the current
+  harness and pauses for the user's decision;
+- `greet`, a one-node LangGraph workflow that renders a prompt from `workflow.md`
+  and its YAML defaults;
+- `scheduler`, a LangGraph workflow that creates experiment records, assigns
+  them by priority, and checks each update before assigning the next one.
 
 ```bash
 hiraku example create workflows .
 ```
 
-Ask your coding agent to start count-steps with count 3, greet with name Ada,
-or scheduler through the Hiraku MCP tools. Resume with `session_show`.
+Start count-steps with count 3, greet with `{"name": "Ada", "times": 3}`, or
+scheduler through the Hiraku MCP tools. All three examples use the same
+LangGraph driver and `workflow_start`, `workflow_status`, and
+`workflow_resume` tools. Greet completes immediately after rendering its
+prompt.
 
 See `docs/examples/workflows/README.md` in the Hiraku repository for
 usage.

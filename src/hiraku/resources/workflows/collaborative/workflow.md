@@ -12,36 +12,38 @@ rules: >-
 
 Draft one experiment for the task. Read the task record and its earlier
 experiments first, and build on the previous results in the data. Do not
-change code yet. Present the draft to the user. If they want changes, send the
-event `revise_draft` with their feedback; the draft instruction comes back
-with it.
-Once they approve, send the event `drafted` with a short record ID, a one-line
-summary, the hypothesis, and the change you plan to make.
+change code yet. Present the draft to the user, then call the MCP tool
+`workflow_approval` with the workflow session ID, current interrupt ID, concise summary,
+and the proposed response. Wait for the user's choice, then pass the returned
+result to `workflow_resume`. For an approved draft, the proposed
+response is `{"event": "drafted", "arguments":
+{"record_id": "...", "summary": "...", "hypothesis": "...", "change":
+"..."}}`.
+If the elicitation is cancelled, explain that approval was not given and leave
+the workflow paused; do not resume it or proceed with the experiment.
 
 ## Implement
 
 Implement the drafted experiment in the data and commit the change. Show
-the user the change. If they want changes, send the event
-`revise_implementation` with their feedback. Once they approve, send the event
-`implemented` with the commit.
+the user the change, then call `workflow_approval` with the proposed response.
+Pass the returned result to `workflow_resume`.
 
 ## Launch
 
-Ask the user before submitting; if they want it run differently, send the event
-`revise_launch` with their feedback. Once they agree, submit the command from
-the context with `hiraku run`, then send the event `launched` with the tracked
-run ID once it is available. Check
-the run with `hiraku runs --record <experiment>`.
+Call `workflow_approval` with the interrupt ID and `{"event": "launched"}` as
+the proposed response. Run the explicit argv supplied when starting the
+workflow with `hiraku run --record <experiment> -- <command...>` only after
+approval, then resume with the result once the run is tracked; check with
+`hiraku runs --record <experiment>`.
 
 ## Analyze
 
 Compare the runs in the data with the task's metrics, earlier results, and
-the experiment's hypothesis. Present your verdict and conclusion to the user.
-If they want changes, send the event `revise_analysis` with their feedback.
-Once they approve, send the event `analyzed` with the verdict and a conclusion
-of a few sentences.
+the experiment's hypothesis. Present your verdict and conclusion to the user,
+then call `workflow_approval` with the proposed analysis response and wait.
+Pass the returned result to `workflow_resume`.
 
 ## Done
 
-Summarize the session for the user: each experiment in the data's
+Summarize the run for the user: each experiment in the data's
 `results` with its verdict, and what you would try next.

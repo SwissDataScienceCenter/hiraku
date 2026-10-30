@@ -3,6 +3,18 @@ id: autoresearch
 description: >-
   The upstream autoresearch loop as one prompt: experiment autonomously until
   the user stops you.
+required_capabilities:
+  - filesystem.read
+  - filesystem.write
+  - shell.execute
+  - record.read
+  - record.create
+  - record.update
+  - git.branch
+  - git.checkout
+  - git.reset
+  - experiment.launch
+  - tracking.run.read
 ---
 # autoresearch loop
 

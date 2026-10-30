@@ -1,19 +1,25 @@
 ---
 id: count-steps
-description: Check that the harness follows numbered instructions and stops for the user.
+description: Count numbered steps with a LangGraph handoff to the current harness.
+arguments:
+  count: 5
 ---
 # Count steps
 
 ## Step
 
 Print this line to the user exactly: `Step {{step}}/{{count}}: token {{token}}`.
-Then send the event `ack` with the token {{token}}.
+Then ask whether to continue. Wait for the user's answer before calling
+`workflow_resume` with workflow session ID `{{workflow_session_id}}`, the checkpoint
+ID returned by start or status, and response
+`{"token": "{{token}}", "decision": "continue"}` if they agree, or
+`{"token": "{{token}}", "decision": "finish"}` if they want to stop.
 
 ## Next
 
-Tell the user which step is done and how many remain, and ask whether to run
-the next step. Send `step` only if the user agrees, or `finish` to stop.
+Tell the user which step is done and how many remain. Do not call
+`workflow_resume` until the user answers.
 
 ## Done
 
-Tell the user how many of the steps in the data ran.
+Tell the user: `Finished after {{steps}} of {{count}} steps.`

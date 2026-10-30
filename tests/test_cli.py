@@ -28,6 +28,19 @@ def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch) -> None:
     assert invoke("--help").exit_code == 0
 
 
+def test_workflow_cli_exposes_langgraph_controls_only() -> None:
+    help_text = CliRunner().invoke(main, ["workflow", "--help"]).output
+    root_help = CliRunner().invoke(main, ["--help"]).output
+
+    assert "list" in help_text
+    assert "graph" in help_text
+    assert "start" in help_text
+    assert "status" in help_text
+    assert "resume" in help_text
+    assert "send-event" not in help_text
+    assert "session" not in root_help
+
+
 def test_record_cli_lifecycle(tmp_path: Path, monkeypatch) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
@@ -267,10 +280,12 @@ def test_record_cli_explicit_run_and_runs(tmp_path: Path, monkeypatch) -> None:
     )
     assert sorted_table.exit_code == 0
     data_rows = [
-        [cell.strip() for cell in line.split("│")[1:-1]]
+        cells
         for line in sorted_table.output.splitlines()
         if line.startswith("│")
-    ][1:]
+        if (cells := [cell.strip() for cell in line.split("│")[1:-1]])
+        and cells[0] != "id"
+    ]
     assert [row[0] for row in data_rows] == ["b", "a"]
     assert invoke("runs", "list", "--record", "root").exit_code != 0
 

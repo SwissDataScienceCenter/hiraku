@@ -55,8 +55,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
 | Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
-| Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_send_event`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow send-event SESSION EVENT` |
-| Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
+| Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; collaborative approvals use `workflow_approval`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
 | Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
@@ -108,10 +107,11 @@ Classify the request before acting:
 - **Bounded workflow:** Complete every requested stage in order, such as creating
   a research root, defining child records, running them, and comparing results.
   Do not add stages the user did not request.
-- **Autonomous or program workflow:** Start or continue a research loop only when
-  the user explicitly requests it. Read the selected program with
-  `hiraku program show <program-id>` and follow both that program and the user's
-  constraints, permissions, budgets, checkpoints, and stopping condition.
+- **LangGraph workflow:** Start or continue a research loop only when the user
+  explicitly requests it. Read the workflow definition and follow its guidance
+  and the user's constraints, permissions, budgets, checkpoints, and stopping
+  condition. For collaborative workflow approval gates, call
+  `workflow_approval` and wait for its structured MCP elicitation result.
 
 Infer routine identifiers, summaries, hypotheses, metrics, and command
 arguments from the user's request and the repository. Ask a question only when
@@ -254,7 +254,7 @@ hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
 Creating a record activates it by default. Several children may share a
 commit and use different explicit command arguments. Follow the effective record branch
 recorded for implementation; create or change that branch assignment only when
-the user or selected program asks for it. Ordinary Git operations remain
+the user or selected workflow asks for it. Ordinary Git operations remain
 responsible for commits and merges.
 
 Use repeatable `--set 'key=<YAML value>'` for custom metadata and `--unset key`
@@ -315,26 +315,30 @@ commit when appropriate, launch it, inspect its attributed run, and record an
 evidence-backed result. Respect any requested maximum experiments, runs, time,
 cost, or hardware budget.
 
-For a named autonomous program, inspect the root, program, child history,
-runs, Git state, and required files before entering its loop. Resume incomplete
-work safely and follow the program's own checkpoints and stopping rules. User
-instructions override program defaults.
+For a named workflow, inspect the root, workflow definition, child history,
+runs, Git state, and required files before starting it. Resume incomplete work
+with the same workflow session and follow its checkpoints and stopping rules.
+User instructions override workflow defaults.
 
-## Commands and tracking details
+Workflows are project-defined LangGraph procedures under `hiraku/workflows/`.
+Start one with `workflow_start(workflow_id, arguments)`. Follow the current
+interrupt payload and its response schema. Resume the same run with
+`workflow_resume(workflow_session_id, response, checkpoint_id)` using the checkpoint ID
+returned by start or status; inspect it without advancing with
+`workflow_status(workflow_session_id)`. The workflow session ID is the LangGraph thread ID, so do not
+start a new run to continue an interrupted workflow. Before repeating
+consequential work such as creating records or launching experiments, check
+whether it already exists. User instructions override workflow defaults; if
+they conflict with a workflow, explain the conflict and do not bypass its
+validation. If a workflow is missing, check `workflow_list` or reconnect MCP
+after adding it to the project.
 
-1. Read attached research records, then carry out the instruction
-   text using its `data`. MCP returns native resource links by default; fetch
-   them before use to retrieve their current contents.
-2. Follow any requests for user approval in the instruction text before sending
-   an event. Approval is a conversational contract.
-3. Send one of `events.accepted` with the `workflow_send_event` tool, never in
-   the chat: its arguments as the event's schema describes, and the events
-   block's `session_id` and `instruction_id` unchanged. Sending an identical
-   event again is safe; a `stale` status means the instruction moved on, so
-   continue from the one returned.
-4. A `rejected` or `not_ready` response keeps the same instruction current; fix
-   the input or check again later. An instruction without an `events` block is
-   final: carry it out, then stop.
+For an interrupt requesting approval, call `workflow_approval` with the workflow session ID,
+interrupt ID, proposal, and proposed response. It uses MCP elicitation to wait
+for approve, revise, or stop. Pass the returned result to `workflow_resume`.
+If elicitation is cancelled or declined, tell the user and leave the workflow
+paused; do not resume it or launch the experiment. Do not replace elicitation
+with an ordinary assistant question.
 
 Commands are not record metadata. Pass the complete invocation directly after
 `--`, for example `hiraku run --record <record-id> -- uv run --locked python

@@ -204,6 +204,8 @@ class ProjectInitializer:
         replaced_files: dict[Path, bytes],
     ) -> None:
         """Register the stdio server for Claude Code and Codex project configs."""
+        command, *arguments = cls._hiraku_command(project_root)
+        server = {"command": command, "args": [*arguments, "mcp"]}
         claude_path = project_root / ".mcp.json"
         claude_data: dict[str, object] = {}
         if claude_path.is_symlink():
@@ -231,7 +233,7 @@ class ProjectInitializer:
         if not isinstance(servers, dict):
             raise ValidationError(f"mcpServers must be a JSON object: {claude_path}")
         if "hiraku" not in servers:
-            servers["hiraku"] = {"command": "hiraku", "args": ["mcp"]}
+            servers["hiraku"] = server
             if claude_path.exists():
                 replaced_files[claude_path] = original
             else:
@@ -275,7 +277,9 @@ class ProjectInitializer:
         if codex_text and not codex_text.endswith("\n\n"):
             suffix += "\n"
         codex_text += (
-            f'{suffix}[mcp_servers.hiraku]\ncommand = "hiraku"\nargs = ["mcp"]\n'
+            f"{suffix}[mcp_servers.hiraku]\n"
+            f"command = {json.dumps(server['command'])}\n"
+            f"args = {json.dumps(server['args'])}\n"
         )
         # Appending a table cannot extend every valid layout, such as an inline
         # mcp_servers table, so check the result before replacing the file.
@@ -283,13 +287,21 @@ class ProjectInitializer:
             merged = tomllib.loads(codex_text)["mcp_servers"]["hiraku"]
         except (tomllib.TOMLDecodeError, KeyError, TypeError):
             merged = None
-        if merged != {"command": "hiraku", "args": ["mcp"]}:
+        if merged != server:
             raise ValidationError(
                 f"Cannot add the hiraku MCP server to {codex_path}; add a "
-                '[mcp_servers.hiraku] table with command = "hiraku" and '
-                'args = ["mcp"] manually'
+                "[mcp_servers.hiraku] table manually"
             )
         atomic_write(codex_path, codex_text)
+
+    @staticmethod
+    def _hiraku_command(project_root: Path) -> list[str]:
+        """Use the project environment when a uv lockfile is present."""
+        return (
+            ["uv", "run", "hiraku"]
+            if (project_root / "uv.lock").is_file()
+            else ["hiraku"]
+        )
 
     @staticmethod
     def _resolve_overlay(

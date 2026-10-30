@@ -214,7 +214,7 @@ def test_stdio_session(tmp_path: Path) -> None:
                 )
                 assert (
                     len((await client.list_resource_templates()).resource_templates)
-                    == 5
+                    == 4
                 )
                 assert (await client.list_prompts()).prompts[
                     0

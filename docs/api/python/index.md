@@ -11,4 +11,4 @@ validate their input immediately; persistence is handled through explicit paths.
     - [Metric](metric.md)
 - [Tracking](tracking.md) — configure and query tracking backends.
 - [Command execution](../../guides/execution.md) — run commands in the foreground.
-- [Workflows](workflows.md) — author workflows and drive their sessions.
+- [Workflows](workflows.md) — define LangGraph workflows and manage their sessions.

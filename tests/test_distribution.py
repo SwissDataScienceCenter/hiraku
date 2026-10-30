@@ -36,10 +36,9 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         if path.is_file() and "__pycache__" not in path.parts
     }
     assert any(path.endswith("collaborative/workflow.md") for path in expected)
-    expected.update(
-        f"hiraku/workflows/{module}.py"
-        for module in ("__init__", "workflow", "session", "graph", "markdown")
-    )
+    expected.add("hiraku/workflows/__init__.py")
+    expected.add("hiraku/workflows/langgraph.py")
+    expected.add("hiraku/workflows/session_history.py")
     with ZipFile(wheels[0]) as wheel:
         packaged = set(wheel.namelist())
 
@@ -62,5 +61,13 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         )
     }
     assert dashboard <= packaged, f"Missing dashboard files: {dashboard - packaged}"
-    assert not {"hiraku/workflow.py", "hiraku/session.py"} & packaged
+    assert (
+        not {
+            "hiraku/workflows/workflow.py",
+            "hiraku/workflows/session.py",
+            "hiraku/workflows/graph.py",
+            "hiraku/workflows/markdown.py",
+        }
+        & packaged
+    )
     assert not any(name.startswith("hiraku/workflow/") for name in packaged)

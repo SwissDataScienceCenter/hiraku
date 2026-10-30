@@ -1,6 +1,6 @@
 ---
 id: greet
-description: Greet someone a few times; a prompt-only workflow with arguments.
+description: Greet someone a few times; a prompt-only LangGraph workflow.
 arguments:
   name: World
   times: 2
