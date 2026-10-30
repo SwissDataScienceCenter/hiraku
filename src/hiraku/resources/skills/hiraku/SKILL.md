@@ -34,7 +34,8 @@ through an existing record lifecycle.
   Hiraku streams output, returns the command's exit code, and supplies tracking
   attribution for that invocation.
 - **Dispatch script:** An optional project script under `hiraku/dispatch/`
-  that prepares the runtime before running argv. Tracking backends own
+  that prepares the runtime before running argv. Commands run directly by
+  default; Hiraku does not install a generic dispatcher. Tracking backends own
   experimental measurements.
 
 ## Main CLI entry points
@@ -59,8 +60,8 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
-Use `record show` to inspect canonical records and effective research and
-  project tracking backend before making changes or running commands.
+Use `record show` to inspect canonical records and effective research fields.
+Use `hiraku status --json` to inspect the project tracking backend.
 
 ## Operating scope
 
@@ -348,10 +349,10 @@ runtime behavior around that invocation.
 Commands execute in the current project working tree, including uncommitted
 changes. `hiraku run` waits until the command exits.
 
-Hiraku injects `HIRAKU_RECORD_ID`,
-`HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, `HIRAKU_COMMIT`,
-`HIRAKU_GIT_STATE`. `HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, and cwd point to the
-project directory. Use the dispatcher to prepare the runtime when needed.
+Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`,
+`HIRAKU_TRACKING_ROOT`, `HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE`.
+`HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, and cwd point to the project directory.
+Use a project dispatcher to prepare the runtime when needed.
 
 The CSV backend queries project-root `runs.csv`. Tracking backends generate
 and own run IDs. Tracking adapters read record and commit attribution from run

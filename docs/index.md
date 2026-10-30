@@ -65,7 +65,9 @@ flowchart LR
     T[Root record<br/>research goal] --> E[Child record<br/>focused attempt] --> C[Foreground command<br/>execution and provenance] --> R[Run<br/>metric trace]
 ```
 
-* A root `Record` may define a research goal, metrics, shared commands, and a tracking backend. It lives at `hiraku/records/{root-id}/{root-id}.md`.
+* A root `Record` may define a research goal and metrics. Project-wide
+  settings, including the tracking backend, live in `hiraku.yml`. The record
+  lives at `hiraku/records/{root-id}/{root-id}.md`.
 * A child `Record` may focus on an experiment, diagnosis, or review. It inherits through `parent_id` and may bind its own code commit.
 * A `Run` records one execution attributed to a `record_id`. Runs are managed by CSV, MLflow, W&B, or another backend and queried by Hiraku.
 * `hiraku run` executes in the current working tree, streams output, and returns the command's exit code. Optional dispatch scripts can prepare its runtime.
