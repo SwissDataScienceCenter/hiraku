@@ -280,10 +280,12 @@ def test_record_cli_explicit_run_and_runs(tmp_path: Path, monkeypatch) -> None:
     )
     assert sorted_table.exit_code == 0
     data_rows = [
-        [cell.strip() for cell in line.split("│")[1:-1]]
+        cells
         for line in sorted_table.output.splitlines()
         if line.startswith("│")
-    ][1:]
+        if (cells := [cell.strip() for cell in line.split("│")[1:-1]])
+        and cells[0] != "id"
+    ]
     assert [row[0] for row in data_rows] == ["b", "a"]
     assert invoke("runs", "list", "--record", "root").exit_code != 0
 

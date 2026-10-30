@@ -97,7 +97,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
 
     def initialize(state: ResearchState) -> Command[Literal["draft"]]:
         try:
-            arguments = CollaborativeInput.model_validate(state.arguments)
+            arguments = CollaborativeInput.model_validate(state.get("arguments", {}))
         except PydanticValidationError as exc:
             raise ValidationError(str(exc)) from exc
         task = arguments.task or config.active_record_id
@@ -154,8 +154,8 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 "analyze": ["tracking.run.read", "workflow.user_input"],
             }[step],
         }
-        if state.feedback:
-            payload["feedback"] = state.feedback
+        if state.get("feedback"):
+            payload["feedback"] = state["feedback"]
         return payload
 
     def response_for(
@@ -227,7 +227,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         return Command(update={"step": "done"}, goto="done")
 
     def draft(state: ResearchState) -> Command[Literal["draft", "implement", "done"]]:
-        data = {"task": state.task, "previous": state.results}
+        data = {"task": state["task"], "previous": state.get("results", [])}
         response = response_for(state, "draft", data)
         event, arguments = response["event"], response["arguments"]
         if event == "finish":
@@ -255,7 +255,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         try:
             record = Record.create(
                 arguments["record_id"],
-                parent_id=state.task,
+                parent_id=state["task"],
                 type="experiment",
                 status="drafted",
                 summary=arguments["summary"],
@@ -272,7 +272,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         )
 
     def experiment(state: ResearchState) -> Record:
-        identifier = state.experiment
+        identifier = state.get("experiment")
         if not identifier:
             raise ValidationError("No experiment has been drafted")
         return load_record(identifier, config=config)
@@ -280,7 +280,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     def experiment_context(state: ResearchState) -> dict[str, Any]:
         record = experiment(state)
         return {
-            "task": state.task,
+            "task": state["task"],
             "experiment": {
                 "record_id": record.id,
                 "summary": getattr(record, "summary", None),
@@ -366,7 +366,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         data = {
             **experiment_context(state),
             "runs": [{"run_id": run.id, "metrics": dict(run.metrics)} for run in runs],
-            "previous": state.results,
+            "previous": state.get("results", []),
         }
         if not any(run.metrics for run in runs):
             data["metrics_pending"] = True
@@ -405,10 +405,10 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         record.conclusion = conclusion
         record.save()
         results = [
-            *state.results,
+            *state.get("results", []),
             {"record_id": record.id, "verdict": verdict},
         ]
-        next_step = "draft" if len(results) < state.rounds else "done"
+        next_step = "draft" if len(results) < state["rounds"] else "done"
         return Command(
             update={
                 "results": results,
@@ -421,7 +421,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
 
     def done(state: ResearchState) -> dict[str, str]:
         return {
-            "final": render(markdown.section("## Done"), {"results": state.results})
+            "final": render(
+                markdown.section("## Done"), {"results": state.get("results", [])}
+            )
         }
 
     builder = StateGraph(ResearchState)
@@ -453,6 +455,8 @@ class WorkflowApproval(BaseModel):
     feedback: str | None = Field(
         default=None, description="Required guidance when requesting a revision."
     )
+
+
 def _step_response_contract(
     step: str,
 ) -> tuple[TypeAdapter[Any], TypeAdapter[Any], dict[str, Any]]:

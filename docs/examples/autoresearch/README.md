@@ -50,6 +50,8 @@ cat >> .gitignore <<'EOF'
 # Hiraku local files and run artifacts
 /.agents/
 /.claude/
+/.codex/
+/.mcp.json
 /hiraku/*
 !/hiraku/dispatch/
 /hiraku.yml
@@ -120,6 +122,9 @@ when directory symlinks are available. Invoke it as `$hiraku` in Codex or
 Start an agent in the repository and ask it to start the installed
 `autoresearch` workflow:
 
+The agent can start and resume the graph with the MCP tools `workflow_start`,
+`workflow_status`, and `workflow_resume`. If it pauses, use the workflow session
+ID returned by `workflow_start` to inspect or resume the same session.
 
 ```bash
 Use the Hiraku skill and start the autoresearch workflow.

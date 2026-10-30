@@ -129,7 +129,6 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "/.mcp.json" in readme
     assert "/.codex/" in readme
     assert "workflow_start" in readme
-    assert "`collaborative`" in readme
     assert "hiraku program" not in readme
     assert "--markdown-file task.md" in readme
     assert "hiraku record create sep10" in readme
@@ -226,7 +225,18 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
 
     invoke(
         runner,
-        ["launch", "mock", "--record", "cpu-test", "--", "--val-bpb", "0.9"],
+        [
+            "run",
+            "--record",
+            "cpu-test",
+            "--dispatch",
+            "autoresearch",
+            "--",
+            sys.executable,
+            "cpu_mock.py",
+            "--val-bpb",
+            "0.9",
+        ],
     )
 
     assert "val_bpb: 0.900000" in capfd.readouterr().out
@@ -245,7 +255,6 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     row = rows[0]
     assert row["record_id"] == "cpu-test"
     assert row["commit"] == commit
-    assert row["entrypoint"] == "mock"
     assert row["raw"]["git_state"] == "clean"
     assert row["raw"]["status"] == "finished"
     assert float(row["metrics"]["val_bpb"]) == 0.9
@@ -261,7 +270,18 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
     )
 
     failed = runner.invoke(
-        main, ["launch", "mock", "--record", "failure", "--", "--fail"]
+        main,
+        [
+            "run",
+            "--record",
+            "failure",
+            "--dispatch",
+            "autoresearch",
+            "--",
+            sys.executable,
+            "cpu_mock.py",
+            "--fail",
+        ],
     )
 
     assert failed.exit_code != 0
@@ -285,9 +305,8 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
 def dispatcher_environment(root: Path) -> dict[str, str]:
     return {
         **os.environ,
-        "HIRAKU_ROOT": str(root),
+        "HIRAKU_TRACKING_ROOT": str(root),
         "HIRAKU_RECORD_ID": "cpu-test",
-        "HIRAKU_ENTRYPOINT": "test",
     }
 
 

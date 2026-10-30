@@ -6,12 +6,15 @@ import json
 import os
 import runpy
 import shlex
+import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from importlib.resources import as_file, files
+from io import StringIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import click
@@ -91,7 +94,7 @@ def _table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
         table.add_column(column, overflow="fold")
     for row in rows:
         table.add_row(*("" if item is None else str(item) for item in row))
-    console = Console(record=True, width=120)
+    console = Console(record=True, width=120, file=StringIO())
     console.print(table)
     return console.export_text().rstrip()
 
@@ -243,14 +246,12 @@ def mcp_command() -> None:
 
 @main.command("init")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
-@click.option("--tracking-backend")
 @click.option("--template", type=click.Path(path_type=Path))
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
 )
 def init_command(
     path: Path | None,
-    tracking_backend: str | None,
     template: Path | None,
     init_git: bool,
 ) -> None:
@@ -259,13 +260,11 @@ def init_command(
     marker = root.expanduser().absolute() / "hiraku.yml"
     if init_git:
         require_git()
-    if marker.is_file() and tracking_backend is None and template is None:
+    if marker.is_file() and template is None:
         config = HirakuConfig.load(marker)
         message = "Hiraku project already initialized"
     else:
-        config = HirakuConfig.init(
-            root, tracking_backend=tracking_backend, template=template
-        )
+        config = HirakuConfig.init(root, template=template)
         message = "Initialized Hiraku project"
     if init_git:
         init_code_repository(config)
@@ -293,7 +292,6 @@ def example_list_command() -> None:
 @example_group.command("create")
 @click.argument("example")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
-@click.option("--tracking-backend")
 @click.option("--with-generator", is_flag=True, help="Copy the example generator.")
 @click.option(
     "--generate", is_flag=True, help="Generate example runs after initialization."
@@ -310,7 +308,6 @@ def example_list_command() -> None:
 def example_create_command(
     example: str,
     path: Path | None,
-    tracking_backend: str | None,
     results: bool,
     with_generator: bool,
     generate: bool,
@@ -335,7 +332,6 @@ def example_create_command(
             raise click.UsageError(f"Example {example!r} has no generator")
     config = HirakuConfig.init(
         root,
-        tracking_backend=tracking_backend,
         example=example,
         results=results,
         with_generator=with_generator,
@@ -346,7 +342,24 @@ def example_create_command(
     if generator is not None:
         with as_file(generator) as source:
             try:
-                runpy.run_path(str(source))["generate"](config)
+                namespace = runpy.run_path(str(source))
+                if "generate_results" not in namespace:
+                    namespace["generate"](config)
+                else:
+                    with TemporaryDirectory(prefix="hiraku-generated-") as staging:
+                        overlay = Path(staging) / "results"
+                        namespace["generate_results"](overlay)
+                        generated = HirakuConfig.load(overlay / "hiraku.yml")
+                        shutil.copytree(
+                            generated.records_dir,
+                            config.records_dir,
+                            dirs_exist_ok=True,
+                        )
+                        for result in overlay.iterdir():
+                            if result.is_file() and result.name != "hiraku.yml":
+                                shutil.copyfile(result, config.root / result.name)
+                        config.active_record_id = generated.active_record_id
+                        config.save()
             except Exception as exc:
                 raise click.ClickException(
                     "Generation failed; initialized project and completed runs kept: "
@@ -364,10 +377,14 @@ def status_command(state: CLIContext, json_output: bool) -> None:
         branch = GitRepository(config).current_branch
     except GitError:
         branch = None
+    tracking_backend = {"type": "csv"}
+    if config.active_record_id is not None:
+        active_record = load_record(config.active_record_id, config=config)
+        tracking_backend = active_record.tracking_backend_spec(config=config)
     result = {
         "project_root": config.root,
         "active_record_id": config.active_record_id,
-        "tracking_backend": config.tracking_backend,
+        "tracking_backend": tracking_backend,
         "git_branch": branch,
     }
     if json_output:
@@ -491,6 +508,8 @@ def record_update(
     if parent_id is not None and make_root:
         raise ValidationError("--parent and --root are mutually exclusive")
     changes = _fields(set_values)
+    if "markdown" in changes:
+        raise ValidationError("Use --markdown-file to update record Markdown")
     if any(key in changes for key in ("id", "parent_id")):
         raise ValidationError("id and parent_id require dedicated operations")
     if related_to:
@@ -805,7 +824,9 @@ def workflow_resume_command(
 @main.command("run")
 @click.argument("command", nargs=-1, required=True, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
-@click.option("--dispatch", help="Dispatcher name from the project's dispatch directory.")
+@click.option(
+    "--dispatch", help="Dispatcher name from the project's dispatch directory."
+)
 @click.pass_context
 def run_command(
     context: click.Context,

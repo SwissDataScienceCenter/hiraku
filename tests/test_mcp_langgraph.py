@@ -229,9 +229,12 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
         "task",
         type="task",
         config=config,
-        entrypoints={"train": {"command": ["python", "train.py"]}},
     )
-    started = start_workflow("collaborative", {"rounds": 1}, config=config)
+    started = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        config=config,
+    )
     requested = []
 
     async def elicit(_context, params):
@@ -290,9 +293,12 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
         "task",
         type="task",
         config=config,
-        entrypoints={"train": {"command": ["python", "train.py"]}},
     )
-    started = start_workflow("collaborative", {"rounds": 1}, config=config)
+    started = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        config=config,
+    )
 
     async def elicit(_context, _params):
         return types.ElicitResult(action="cancel")
@@ -385,9 +391,12 @@ def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
         "task",
         type="task",
         config=config,
-        entrypoints={"train": {"command": ["python", "train.py"]}},
     )
-    first = start_workflow("collaborative", {"rounds": 1}, config=config)
+    first = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        config=config,
+    )
 
     async def elicit(_context, _params):
         return types.ElicitResult(action="accept", content={"decision": "stop"})
