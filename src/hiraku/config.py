@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import (
     BaseModel,
@@ -16,6 +16,9 @@ from pydantic import (
 
 from .errors import ProjectNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
+
+if TYPE_CHECKING:
+    from .record import Record
 
 
 class HirakuConfig(BaseModel):
@@ -232,7 +235,7 @@ class HirakuConfig(BaseModel):
         """Return the directory containing command dispatcher scripts."""
         return self.hiraku_dir / "dispatch"
 
-    def set_active_record(self, record: str | Any) -> None:
+    def set_active_record(self, record: str | Record) -> None:
         """Persist the active research record."""
         from .record import Record, load_record
 
