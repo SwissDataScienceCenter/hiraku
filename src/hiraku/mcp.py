@@ -22,11 +22,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .base import BaseRecord
 from .config import HirakuConfig
 from .errors import HirakuError, ValidationError
 from .execution import execute_command
-from .record import Record, list_records, load_record
+from .record import BaseRecord, Record, list_records, load_record
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details

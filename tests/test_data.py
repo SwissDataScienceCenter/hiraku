@@ -40,6 +40,11 @@ def test_record_rejects_command_metadata(tmp_path: Path) -> None:
         Record.create("root", config=config, command=["python", "train.py"])
 
 
+def test_record_rejects_entrypoint_metadata() -> None:
+    with pytest.raises(ValidationError, match="entrypoints configuration"):
+        Record(id="root", entrypoints={"train": {"command": ["python"]}})
+
+
 def test_commit_local_and_validated(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
     parent = Record.create("parent", commit="a" * 40, config=config)

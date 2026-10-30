@@ -24,13 +24,12 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .base import BaseRecord
 from .config import HirakuConfig
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .record import Record, list_records, load_record
+from .record import BaseRecord, Record, list_records, load_record
 from .run import Run
 from .validation import validate_identifier
 
