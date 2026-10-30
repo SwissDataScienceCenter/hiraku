@@ -20,6 +20,9 @@ import click
 import yaml
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
+from rich import box
+from rich.console import Console
+from rich.table import Table
 
 from .base import BaseRecord
 from .config import HirakuConfig
@@ -85,19 +88,13 @@ def _emit_json(value: Any) -> None:
     click.echo(json.dumps(_json_value(value), sort_keys=True, ensure_ascii=False))
 
 
-def _table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
-    rendered = [["" if item is None else str(item) for item in row] for row in rows]
-    widths = [
-        max([len(name), *(len(row[index]) for row in rendered)])
-        for index, name in enumerate(columns)
-    ]
-    lines = ["  ".join(name.ljust(widths[i]) for i, name in enumerate(columns))]
-    lines.append("  ".join("-" * width for width in widths))
-    lines.extend(
-        "  ".join(item.ljust(widths[i]) for i, item in enumerate(row)).rstrip()
-        for row in rendered
-    )
-    return "\n".join(lines)
+def _print_table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+    table = Table(box=box.ROUNDED, header_style="bold cyan", pad_edge=False)
+    for column in columns:
+        table.add_column(column, overflow="fold")
+    for row in rows:
+        table.add_row(*("" if item is None else str(item) for item in row))
+    Console().print(table)
 
 
 def _fields(values: Sequence[str]) -> dict[str, Any]:
@@ -259,7 +256,7 @@ def example_list_command() -> None:
         if example.is_dir() and manifest.is_file():
             metadata = yaml.safe_load(manifest.read_text(encoding="utf-8"))
             rows.append((example.name, metadata.get("description", "")))
-    click.echo(_table(("name", "description"), rows))
+    _print_table(("name", "description"), rows)
 
 
 @example_group.command("create")
@@ -365,7 +362,7 @@ def status_command(state: CLIContext, json_output: bool) -> None:
     if json_output:
         _emit_json(result)
     else:
-        click.echo(_table(("field", "value"), list(result.items())))
+        _print_table(("field", "value"), list(result.items()))
 
 
 @main.group("record")
@@ -423,11 +420,9 @@ def record_list(state: CLIContext, json_output: bool) -> None:
     if json_output:
         _emit_json(records)
     else:
-        click.echo(
-            _table(
-                ("id", "parent", "type", "status"),
-                [(r.id, r.parent_id, r.type, r.status) for r in records],
-            )
+        _print_table(
+            ("id", "parent", "type", "status"),
+            [(r.id, r.parent_id, r.type, r.status) for r in records],
         )
 
 
@@ -604,8 +599,8 @@ def _install_generic(
     @click.pass_obj
     def listing(state: CLIContext, json_output: bool) -> None:
         records = lister(config=state.config)
-        _emit_json(records) if json_output else click.echo(
-            _table(("id",), [(r.id,) for r in records])
+        _emit_json(records) if json_output else _print_table(
+            ("id",), [(r.id,) for r in records]
         )
 
     @group.command("show")
@@ -680,14 +675,12 @@ def workflow_list(state: CLIContext, json_output: bool) -> None:
             ]
         )
         return
-    click.echo(
-        _table(
-            ("id", "description"),
-            [
-                (workflow.id, (workflow.description or "").split("\n", 1)[0])
-                for workflow in workflows
-            ],
-        )
+    _print_table(
+        ("id", "description"),
+        [
+            (workflow.id, (workflow.description or "").split("\n", 1)[0])
+            for workflow in workflows
+        ],
     )
 
 
@@ -812,19 +805,17 @@ def session_list(state: CLIContext, json_output: bool) -> None:
     if json_output:
         _emit_json(sessions)
         return
-    click.echo(
-        _table(
-            ("session", "workflow", "status", "updated"),
-            [
-                (
-                    item["session_id"],
-                    item["workflow"],
-                    item["status"],
-                    item["updated_at"],
-                )
-                for item in sessions
-            ],
-        )
+    _print_table(
+        ("session", "workflow", "status", "updated"),
+        [
+            (
+                item["session_id"],
+                item["workflow"],
+                item["status"],
+                item["updated_at"],
+            )
+            for item in sessions
+        ],
     )
 
 
@@ -971,7 +962,7 @@ def run_list(
             ]
             for run in runs
         ]
-        click.echo(_table(columns, rows))
+        _print_table(columns, rows)
 
 
 @main.command("dashboard")
