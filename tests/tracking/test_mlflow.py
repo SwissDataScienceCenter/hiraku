@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +19,24 @@ def test_mlflow_backend_config_accepts_uri_or_database() -> None:
 def test_mlflow_backend_config_rejects_uri_and_database() -> None:
     with pytest.raises(BackendError, match="both"):
         MLflowBackendConfig(tracking_uri="http://localhost:5000", database="mlflow.db")
+
+
+@pytest.mark.parametrize("database", [Path("/tmp/mlflow.db"), Path("../mlflow.db")])
+def test_mlflow_backend_rejects_unsafe_database_paths(tmp_path, database) -> None:
+    config = HirakuConfig.init(tmp_path)
+
+    with pytest.raises(BackendError, match="safe project-relative path"):
+        MLflowBackend(config, database=database)
+
+
+def test_mlflow_backend_rejects_database_symlink_escape(tmp_path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(BackendError, match="outside project root"):
+        MLflowBackend(config, database=Path("linked/mlflow.db"))
 
 
 @pytest.mark.parametrize("database", [None, "custom.db"])
@@ -118,10 +138,93 @@ def test_mlflow_backend_reads_duration_from_start_and_end(
     assert [run.duration for run in backend._read_source_runs()] == [4.25, None]
 
 
+def test_mlflow_backend_reports_missing_optional_dependency(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setitem(sys.modules, "mlflow.tracking", None)
+    backend = MLflowBackend(
+        HirakuConfig.init(tmp_path), tracking_uri="https://mlflow.example.com"
+    )
+
+    with pytest.raises(BackendError, match="optional 'mlflow' dependency"):
+        backend.list_runs()
+
+
+def test_mlflow_backend_returns_no_runs_for_unknown_experiment(
+    tmp_path, monkeypatch
+) -> None:
+    mlflow = pytest.importorskip("mlflow")
+
+    class FakeClient:
+        def __init__(self, tracking_uri: str | None = None) -> None:
+            pass
+
+        def get_experiment_by_name(self, name):
+            assert name == tmp_path.name
+            return None
+
+        def search_runs(self, **kwargs):
+            pytest.fail("runs must not be queried for an unknown experiment")
+
+    monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
+    backend = MLflowBackend(
+        HirakuConfig.init(tmp_path), tracking_uri="https://mlflow.example.com"
+    )
+
+    assert backend._read_source_runs() == []
+
+
+def test_mlflow_backend_wraps_client_query_errors(tmp_path, monkeypatch) -> None:
+    mlflow = pytest.importorskip("mlflow")
+
+    class FakeClient:
+        def __init__(self, tracking_uri: str | None = None) -> None:
+            pass
+
+        def get_experiment_by_name(self, name):
+            return SimpleNamespace(experiment_id="e1")
+
+        def search_runs(self, **kwargs):
+            raise RuntimeError("tracking service unavailable")
+
+    monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
+    backend = MLflowBackend(
+        HirakuConfig.init(tmp_path), tracking_uri="https://mlflow.example.com"
+    )
+
+    with pytest.raises(BackendError, match="mlflow backend query failed"):
+        backend._read_source_runs()
+
+
+def test_mlflow_backend_preserves_backend_errors_from_client(
+    tmp_path, monkeypatch
+) -> None:
+    mlflow = pytest.importorskip("mlflow")
+
+    class FakeClient:
+        def __init__(self, tracking_uri: str | None = None) -> None:
+            pass
+
+        def get_experiment_by_name(self, name):
+            return SimpleNamespace(experiment_id="e1")
+
+        def search_runs(self, **kwargs):
+            raise BackendError("specific backend failure")
+
+    monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
+    backend = MLflowBackend(
+        HirakuConfig.init(tmp_path), tracking_uri="https://mlflow.example.com"
+    )
+
+    with pytest.raises(BackendError, match="specific backend failure"):
+        backend._read_source_runs()
+
+
 @pytest.mark.parametrize(
     "value",
     [
         "not-a-url",
+        "https://[::1",
         "ftp://example.com",
         "https://user:secret@example.com",
         "https://example.com/path?query=1",
