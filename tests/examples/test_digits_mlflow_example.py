@@ -50,7 +50,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     assert not (project / "README.md").exists()
     assert not (project / "example.yml").exists()
     git(project, "add", ".")
-    git(project, "add", "-f", "hiraku/dispatch")
     git(project, "commit", "-m", "initialize Digits MLflow example")
     source_commit = git(project, "rev-parse", "HEAD")
     invoke(

@@ -99,8 +99,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert not (config.hiraku_dir / "programs").exists()
     assert not (config.hiraku_dir / "actions").exists()
     assert config.default_dispatch is None
-    assert list(config.dispatch_dir.iterdir()) == []
-    assert not (config.dispatch_dir / "worktree.sh").exists()
+    assert not config.dispatch_dir.exists()
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
     assert codex_skill.is_file()

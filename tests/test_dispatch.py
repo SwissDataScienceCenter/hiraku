@@ -34,6 +34,7 @@ def test_run_uses_dispatcher_in_current_working_tree(tmp_path: Path) -> None:
 
     config = _repository(tmp_path)
     Record.create("test", config=config)
+    config.dispatch_dir.mkdir()
     (config.dispatch_dir / "test.sh").write_text(
         '#!/bin/sh\n[ "$1" = "--" ] && shift\nexec "$@"\n', encoding="utf-8"
     )

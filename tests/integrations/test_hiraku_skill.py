@@ -46,7 +46,6 @@ def _new_project(tmp_path: Path) -> tuple[Path, HirakuConfig, str]:
         example="heart-disease",
     )
     _git(project, "add", ".")
-    _git(project, "add", "-f", "hiraku/dispatch")
     _git(project, "commit", "-m", "initialize Heart Disease example")
     commit = _git(project, "rev-parse", "HEAD")
     return project, config, commit

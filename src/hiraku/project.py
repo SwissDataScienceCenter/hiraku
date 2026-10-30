@@ -141,7 +141,6 @@ class _ProjectProvisioner:
                 for directory in (
                     config.records_dir,
                     config.workflows_dir,
-                    config.dispatch_dir,
                 ):
                     cls._ensure_directory(directory, created_dirs)
                 resource_root = files("hiraku.resources")

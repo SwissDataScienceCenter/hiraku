@@ -115,7 +115,6 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
 
     invoke(runner, ["example", "create", "iris-wandb", "."])
     git(project, "add", ".")
-    git(project, "add", "-f", "hiraku/dispatch")
     git(project, "commit", "-m", "initialize Iris W&B example")
     source_commit = git(project, "rev-parse", "HEAD")
 

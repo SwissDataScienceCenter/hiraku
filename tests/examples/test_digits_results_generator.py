@@ -101,7 +101,6 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
     for arguments in (
         ["init", "-q"],
         ["add", "."],
-        ["add", "-f", "hiraku/dispatch"],
         [
             "-c",
             "user.name=Test",
