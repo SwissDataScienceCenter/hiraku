@@ -22,7 +22,7 @@ class Run(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="allow")
-    id: str
+    id: str = Field(min_length=1)
     metrics: Mapping[str, Any] = Field(default_factory=dict)
     params: Mapping[str, Any] = Field(default_factory=dict)
     record_id: str | None = None
@@ -32,13 +32,6 @@ class Run(BaseModel):
     entrypoint: str | None = None
     url: str | None = None
     raw: Mapping[str, Any] = Field(default_factory=dict, repr=False)
-
-    @field_validator("id")
-    @classmethod
-    def validate_run_id(cls, value: str) -> str:
-        if not value:
-            raise ValidationError("Run ID must be non-empty")
-        return value
 
     @field_validator("duration")
     @classmethod
@@ -55,8 +48,6 @@ class Run(BaseModel):
 
         for name in ("metrics", "params", "raw"):
             value = getattr(self, name)
-            if not isinstance(value, Mapping):
-                raise ValidationError(f"Run {name} must be a mapping")
             object.__setattr__(self, name, MappingProxyType(dict(value)))
         if self.timestamp is not None:
             value = self.timestamp

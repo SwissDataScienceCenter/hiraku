@@ -65,7 +65,7 @@ class BaseRecord(BaseModel):
         validate_by_name=True,
     )
 
-    id: str = Field(min_length=1)
+    id: str
     markdown: Markdown = Markdown("")
 
     # Persistence metadata (not part of the record's data)
@@ -78,13 +78,6 @@ class BaseRecord(BaseModel):
         if not isinstance(value, str):
             raise TypeError("record ID must be a string")
         validate_identifier(value, label="record ID")
-        return value
-
-    @field_validator("markdown")
-    @classmethod
-    def validate_markdown(cls, value: Any) -> str:
-        if not isinstance(value, str):
-            raise TypeError("Markdown body must be a string")
         return value
 
     @model_validator(mode="after")
@@ -294,6 +287,8 @@ class BaseRecord(BaseModel):
 class Metric(BaseModel):
     """A declared metric and its preferred direction."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1)
     direction: Literal["minimize", "maximize"]
 
@@ -320,7 +315,7 @@ class Record(BaseRecord):
     status: str | None = None
     decision: str | None = None
     branch: str | None = None
-    metrics: list[Any] | None = None
+    metrics: list[Metric] | None = None
     tracking_backend: str | dict[str, Any] | None = None
 
     @field_validator("parent_id")
@@ -353,10 +348,6 @@ class Record(BaseRecord):
     def validate_research_fields(self) -> Self:
         if self.parent_id == self.id or self.id in self.related_to:
             raise ValidationError("A record cannot refer to itself")
-        if self.metrics is not None:
-            self.__dict__["metrics"] = [
-                Metric.model_validate(item) for item in self.metrics
-            ]
         return self
 
     def save(self, path: Path | str | None = None, *, overwrite: bool = False) -> Path:

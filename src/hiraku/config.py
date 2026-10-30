@@ -83,8 +83,6 @@ class HirakuConfig(BaseModel):
     @model_validator(mode="after")
     def validate_config(self) -> HirakuConfig:
         """Validate backend consistency and resolve the state directory."""
-        if not self.hiraku_dir_name:
-            raise ValidationError("Configuration key 'hiraku_dir' must be a string")
         raw = Path(self.hiraku_dir_name)
         if raw.is_absolute():
             resolved = raw.resolve(strict=False)

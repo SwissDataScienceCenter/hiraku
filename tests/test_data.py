@@ -32,6 +32,11 @@ def test_inheritance_and_guarded_delete(tmp_path: Path) -> None:
         parent.delete(config=config)
     with pytest.raises(PydanticValidationError):
         Record(id="invalid", metrics=[{"name": "loss", "direction": "sideways"}])
+    with pytest.raises(PydanticValidationError):
+        Record(
+            id="invalid",
+            metrics=[{"name": "loss", "direction": "minimize", "unit": "s"}],
+        )
 
 
 def test_record_rejects_command_metadata(tmp_path: Path) -> None:
