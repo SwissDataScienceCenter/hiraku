@@ -1,6 +1,5 @@
 /.agents/
 /.venv/
-/hiraku.yml
 /hiraku/*
 !/hiraku/dispatch/
 /mlflow.db

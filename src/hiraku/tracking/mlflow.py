@@ -22,7 +22,8 @@ class MLflowBackendConfig(BaseModel):
     Attributes:
         type: Backend discriminator; must be "mlflow".
         tracking_uri: Optional remote MLflow URI.
-        experiment_name: Optional MLflow experiment name.
+        experiment_name: MLflow experiment; defaults to the project directory
+            name.
         database: Optional project-relative SQLite database path.
         ui_url: Optional absolute HTTP(S) base URL of the MLflow web UI.
     """
@@ -53,6 +54,7 @@ class MLflowBackend(TrackingBackend):
 
     Args:
         config: Project configuration.
+        settings: Pre-validated MLflow settings used by the factory.
         tracking_uri: Optional MLflow tracking URI.
         experiment_name: Optional MLflow experiment name.
         database: Optional project-relative SQLite database path.
@@ -63,6 +65,7 @@ class MLflowBackend(TrackingBackend):
         self,
         config: HirakuConfig,
         *,
+        settings: MLflowBackendConfig | None = None,
         tracking_uri: str | None = None,
         experiment_name: str | None = None,
         database: Path | None = None,
@@ -72,8 +75,10 @@ class MLflowBackend(TrackingBackend):
 
         Args:
             config: Project configuration.
+            settings: Pre-validated MLflow settings used by the factory.
             tracking_uri: Optional remote tracking URI.
-            experiment_name: Optional experiment name.
+            experiment_name: Experiment name; defaults to the project directory
+                name.
             database: Optional local database path.
             ui_url: Optional web UI base URL. Defaults to an HTTP(S)
                 ``tracking_uri``, which MLflow servers also serve the UI from.
@@ -82,13 +87,21 @@ class MLflowBackend(TrackingBackend):
             hiraku.errors.BackendError: If URI and database settings conflict
                 or ``ui_url`` is not a plain HTTP(S) URL.
         """
+        if settings is None:
+            settings = MLflowBackendConfig(
+                tracking_uri=tracking_uri,
+                experiment_name=experiment_name,
+                database=database,
+                ui_url=ui_url,
+            )
+        elif any(
+            value is not None
+            for value in (tracking_uri, experiment_name, database, ui_url)
+        ):
+            raise BackendError("Pass MLflow backend settings or options, not both")
+        if not isinstance(settings, MLflowBackendConfig):
+            raise BackendError("MLflow backend settings must be MLflowBackendConfig")
         self.config = config
-        settings = MLflowBackendConfig(
-            tracking_uri=tracking_uri,
-            experiment_name=experiment_name,
-            database=database,
-            ui_url=ui_url,
-        )
         self.tracking_uri = settings.tracking_uri or _mlflow_uri(
             config, settings.database
         )
@@ -97,13 +110,13 @@ class MLflowBackend(TrackingBackend):
             if settings.tracking_uri is None
             else None
         )
-        self.experiment_name = settings.experiment_name
+        self.experiment_name = settings.experiment_name or config.root.name
         # Credential-bearing tracking URIs stay usable but never become links.
         self.ui_url = settings.ui_url or (
             self.tracking_uri if _is_web_base(self.tracking_uri) else None
         )
 
-    def _read_source_runs(self, **options: Any) -> list[Run]:
+    def _read_source_runs(self) -> list[Run]:
         from ..run import Run
 
         if self._database is not None and not self._database.is_file():

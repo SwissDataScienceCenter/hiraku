@@ -32,21 +32,21 @@ git commit -m "initialize Iris W&B example"
 uv run wandb login
 ```
 
-The example uses the `hiraku-iris` project, model-specific groups, and
-built-in tags by default.
+The example uses the `iris-wandb` project (the project directory name),
+model-specific groups, and built-in tags by default.
 
 Set `WANDB_ENTITY` only if you want to log under a specific team or account.
 
 ## 3. Define the research root
 
-Create a research root configured with the W&B backend:
+The example ships with W&B configured as the project-wide tracking backend.
+Create the research root:
 
 ```bash
 hiraku record create iris --type task \
   --set "goal=Maximize Iris test accuracy" \
   --set "question=How accurately can model families classify Iris?" \
-  --set 'metrics=[{name: test/accuracy, direction: maximize}, {name: test/f1_macro, direction: maximize}, {name: test/log_loss, direction: minimize}]' \
-  --set 'tracking_backend={type: wandb, project: hiraku-iris}'
+  --set 'metrics=[{name: test/accuracy, direction: maximize}, {name: test/f1_macro, direction: maximize}, {name: test/log_loss, direction: minimize}]'
 
 hiraku record show iris
 hiraku status

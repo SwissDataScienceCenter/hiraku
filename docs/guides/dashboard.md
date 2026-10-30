@@ -258,10 +258,10 @@ def _(alt, runs_df):
 
 ## Tracking backends
 
-Runs, metrics, parameters, and links come from the tracking backend that each
-record resolves, whether CSV, MLflow, W&B, or a
-[custom backend](tracking-custom.md); the dashboard has no backend-specific
-code. Records that share a backend configuration are queried once.
+Runs, metrics, parameters, and links come from the built-in tracking backend
+that each record resolves: CSV, MLflow, or W&B. The dashboard has no
+backend-specific query code. Records that share a backend configuration are
+queried once.
 
 A run's link label names its backend, for example **Open in mlflow**. Links
 appear when the backend provides an HTTP(S) URL for the run. For MLflow, set
@@ -290,12 +290,16 @@ hiraku dashboard --include-code --record digits
 hiraku dashboard --init --edit --record digits
 ```
 
-The bundled root record has no `ui_url`, so run details initially have no
-**Open in mlflow** link. To enable it, add `ui_url` to that record's
-`tracking_backend` mapping:
+The project backend has no `ui_url`, so run details initially have no
+**Open in mlflow** link. To enable it, add `ui_url` to `tracking_backend` in
+`hiraku.yml`:
 
 ```yaml
-ui_url: http://127.0.0.1:5000
+tracking_backend:
+  type: mlflow
+  database: mlflow.db
+  experiment_name: hiraku-digits
+  ui_url: http://127.0.0.1:5000
 ```
 
 Then start the UI in another terminal before refreshing the dashboard:

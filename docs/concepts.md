@@ -25,16 +25,16 @@ A root *record* defines a working scope and goal, and documents the research pro
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared research and tracking defaults. |
+| **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared research defaults. |
 | **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
 | **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
 Records are stored as Markdown with YAML front matter. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent, and all descendants are stored flat in their root's folder. IDs are unique across the project.
 
-Fields inherit through `parent_id` by default: the nearest definition wins and an explicit `null` clears an inherited field. When a child is created, its effective `metrics` and `tracking_backend` are copied into its YAML front matter unless explicitly set on the child. These values are snapshots: later parent edits do not rewrite existing children. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
+Fields inherit through `parent_id` by default: the nearest definition wins and an explicit `null` clears an inherited field. When a child is created, its effective `metrics` are copied into its YAML front matter unless explicitly set on the child. These values are snapshots: later parent edits do not rewrite existing children. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
-At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. The current status can be queried with `hiraku status`; its `tracking_backend` field shows the active record's effective backend.
+At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. The current status can be queried with `hiraku status`; its `tracking_backend` field shows the project's backend.
 
 !!! note
     Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
@@ -79,22 +79,21 @@ from hiraku.run import Run
 
 ## Tracking Backend
 
-A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters; additional adapters can be registered by users. The backend needs to:
+A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters. Record configuration and the CLI select these built-in backends. The backend needs to:
 
 - List runs from the tracking source selected by a record.
 - Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, historical entrypoint, and URL attribution may be absent.
 
-Set `tracking_backend` on a root record to select the default tracking source
-for new records in that tree. When a child is created, the effective backend is
-stored in its front matter; an explicit child value overrides it. Backend
-configuration uses one common mapping shape, with `type` identifying the adapter:
+Set `tracking_backend` in `hiraku.yml` to select the tracking source for every
+record in the project. Records cannot override the project setting. Backend
+configuration can use a shorthand name or a mapping with `type` identifying the
+adapter:
 
 ```yaml
-tracking_backend:
-  type: csv
+tracking_backend: csv
 ```
 
-`hiraku runs` lists runs attributed to the active record, or to the record given with `--record ID`. Add `--all` to list every attributed run from the tracking source resolved for that record, for example to compare sibling records under a root. In Python, `record.runs(config=config)` returns the record's own runs, and `record.resolve_tracking_backend(config=config).list_runs()` lists the whole source. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
+`hiraku runs` lists runs attributed to the active record, or to the record given with `--record ID`. Add `--all` to list every attributed run from the project tracking source. In Python, `record.runs(config=config)` returns the record's own runs, and `record.resolve_tracking_backend(config=config).list_runs()` lists the whole source. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
 
 ## Command execution
 

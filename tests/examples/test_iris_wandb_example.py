@@ -104,6 +104,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     (project / "wandb.py").write_text(FAKE_WANDB, encoding="utf-8")
     store = tmp_path / "wandb-runs.json"
     monkeypatch.setenv("FAKE_WANDB_STORE", str(store))
+    monkeypatch.delenv("WANDB_PROJECT", raising=False)
     monkeypatch.chdir(project)
     monkeypatch.syspath_prepend(str(project))
     monkeypatch.delitem(sys.modules, "wandb", raising=False)
@@ -133,12 +134,12 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "{name: test/f1_macro, direction: maximize}, "
             "{name: test/log_loss, direction: minimize}]",
             "--set",
-            "tracking_backend={type: wandb, project: hiraku-iris}",
+            "tracking_backend=wandb",
         ],
     )
     config = HirakuConfig.discover(project)
     root = load_record("iris", config=config)
-    assert root.tracking_backend == {"type": "wandb", "project": "hiraku-iris"}
+    assert root.tracking_backend == "wandb"
 
     invoke(
         runner,
@@ -194,7 +195,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     assert row["raw"]["tags"] == ["hiraku", "iris", "logistic"]
     stored = json.loads(store.read_text(encoding="utf-8"))[0]
     assert stored["id"] == run_id
-    assert stored["project"] == "hiraku-iris"
+    assert stored["project"] == "iris-wandb"
     assert stored["config"]["hiraku.record_id"] == "logistic"
     assert stored["config"]["hiraku.commit"] == source_commit
 

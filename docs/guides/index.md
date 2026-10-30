@@ -10,7 +10,6 @@ working with research records.
     - [CSV](tracking-csv.md)
     - [Weights &amp; Biases](tracking-wandb.md)
     - [MLflow](tracking-mlflow.md)
-    - [Custom backend](tracking-custom.md)
 - [MCP server](mcp.md)
 - [Dashboard](dashboard.md)
 - Advanced usage:

@@ -42,7 +42,9 @@ The commit records the exact
 training code and dataset that the initial baseline experiments will evaluate.
 
 ??? note "Tracking Hiraku metadata in Git"
-    In this example, `.gitignore` excludes hiraku metadata (`hiraku.yml`, `hiraku/*`) and the `runs.csv` file.
+    The project config `hiraku.yml` is committed with the project, including its
+    CSV tracking backend. `.gitignore` excludes generated Hiraku state
+    (`hiraku/*`) and `runs.csv`.
 
     Hiraku runs commands directly in the working tree, including local changes.
     Merging research records is a user (or agent) responsibility.
@@ -96,11 +98,11 @@ Expect one run with `val/log_loss` and `val/accuracy`. The default dispatcher
 executes a snapshot of the Git-visible source. The
 training program writes the CSV row to project-root `runs.csv`.
 
-??? tip "Tracking backends: CSV, Weights & Biases, MLflow and custom backends"
+??? tip "Tracking backends: CSV, Weights & Biases, and MLflow"
     Hiraku does **not** handle, control or own metric logging. Training scripts log metrics directly to a user-managed tracking backend, independently of Hiraku.
 
 
-    In this example, results are written to `runs.csv`, but more advanced projects can use [Weights & Biases](../../guides/tracking-wandb.md), [MLflow](../../guides/tracking-mlflow.md), or [custom backends](../../guides/tracking-custom.md).
+    In this example, results are written to `runs.csv`, but more advanced projects can use [Weights & Biases](../../guides/tracking-wandb.md) or [MLflow](../../guides/tracking-mlflow.md).
 
     Hiraku only **queries the tracking backend for existing runs and metrics**. This means the same training and logging setup can be used with or without Hiraku.
 

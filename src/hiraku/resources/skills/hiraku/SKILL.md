@@ -15,15 +15,15 @@ through an existing record lifecycle.
 ## Core concepts
 
 - **Record:** A research scope or focused investigation. A root may record the
-  goal, question, metrics, branch, tracking defaults, and evolving findings.
+  goal, question, metrics, branch, and evolving findings.
   A child has one `parent_id`, may begin as an unbound proposal, and may bind
   the source commit being evaluated. Its
   optional `type` describes its role, such as experiment, diagnostic, or
   ablation. `related_to` links records without inheritance.
   Fields inherit from the nearest parent definition by default. On child
-  creation, inherited `metrics` and `tracking_backend` values are copied into
-  the child record unless explicitly set there; later parent edits do not
-  update those snapshots. `id`,
+  creation, inherited `metrics` values are copied into the child record unless
+  explicitly set there; later parent edits do not update those snapshots.
+  Tracking backend selection is project-wide in `hiraku.yml`. `id`,
   `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and invocation attribution together with
@@ -60,7 +60,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
 Use `record show` to inspect canonical records and effective research and
-tracking defaults before making changes or running commands.
+  project tracking backend before making changes or running commands.
 
 ## Operating scope
 
@@ -264,9 +264,9 @@ different source state appear to be the same attempt.
 
 ## Run records and inspect evidence
 
-A run is an execution trace owned by CSV, MLflow, W&B, or a custom tracking
-backend. Hiraku launches commands and queries runs; the training or evaluation
-code writes the run to its backend.
+A run is an execution trace owned by CSV, MLflow, or W&B. Hiraku launches
+commands and queries runs; the training or evaluation code writes the run to
+its backend.
 
 For a high-level run request:
 

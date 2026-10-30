@@ -14,12 +14,21 @@ In the training project:
 
 ```bash
 uv add mlflow
-hiraku record update my-task \
-  --set 'tracking_backend={type: mlflow, database: mlflow.db, experiment_name: my-task}'
 ```
 
-The record must already exist. The database path is relative to the Hiraku
-project root. For a remote server, specify `tracking_uri` instead of
+For a local project, this shorthand is enough:
+
+```yaml
+tracking_backend: mlflow
+```
+
+Hiraku uses `mlflow.db` in the project root and an experiment named after the
+project directory. `hiraku run` supplies `MLFLOW_TRACKING_URI` and
+`MLFLOW_EXPERIMENT_NAME` to the training process, so standard MLflow logging
+uses the same store Hiraku queries. Existing environment values are preserved.
+
+For a remote server or a different local database, use a mapping. The database
+path is relative to the Hiraku project root. Specify `tracking_uri` instead of
 `database`; the options are mutually exclusive.
 
 Runs read from an HTTP(S) `tracking_uri` link to that server's web UI. For a
@@ -39,7 +48,8 @@ are never turned into links.
 
 ## Log from your script
 
-Set an absolute URI pointing to that same database before launch:
+`hiraku run` sets the tracking URI and experiment name from `hiraku.yml`. For
+commands run outside Hiraku, set the URI yourself:
 
 ```bash
 export MLFLOW_TRACKING_URI="sqlite:///$PWD/mlflow.db"
@@ -61,9 +71,7 @@ with mlflow.start_run():
     mlflow.log_metric("val/accuracy", accuracy)  # calculated by your code
 ```
 
-The launcher inherits the environment; it does not derive the training
-process's MLflow URI from the record's backend settings. An absolute URI keeps
-snapshot dispatches writing to the original database.
+An absolute URI keeps snapshot dispatches writing to the original database.
 
 ## Inspect
 

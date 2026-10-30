@@ -64,6 +64,8 @@ def execute_command(
     tracking_spec = record.tracking_backend_spec(config=selected)
     if tracking_spec.get("type") == "wandb":
         wandb_project = tracking_spec.get("project")
+        if wandb_project is None:
+            wandb_project = selected.root.name
         if (
             isinstance(wandb_project, str)
             and wandb_project
@@ -71,6 +73,22 @@ def execute_command(
             and "WANDB_PROJECT" not in os.environ
         ):
             additions["WANDB_PROJECT"] = wandb_project
+    elif tracking_spec.get("type") == "mlflow":
+        from .tracking import create_backend
+
+        backend = create_backend(tracking_spec, selected)
+        if (
+            "MLFLOW_TRACKING_URI" not in additions
+            and "MLFLOW_TRACKING_URI" not in os.environ
+        ):
+            additions["MLFLOW_TRACKING_URI"] = backend.tracking_uri
+        if (
+            "MLFLOW_EXPERIMENT_NAME" not in additions
+            and "MLFLOW_EXPERIMENT_NAME" not in os.environ
+        ):
+            additions["MLFLOW_EXPERIMENT_NAME"] = (
+                backend.experiment_name or selected.root.name
+            )
 
     commit = ""
     git_state = "unavailable"

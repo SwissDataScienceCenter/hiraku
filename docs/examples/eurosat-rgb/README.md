@@ -41,14 +41,14 @@ Set `WANDB_ENTITY` only if you want to log under a specific team or account.
 
 ## 3. Define the research root
 
-Create a research root configured with the W&B backend:
+The example ships with W&B configured as the project-wide tracking backend.
+Create the research root:
 
 ```bash
 hiraku record create eurosat --type task \
   --set "goal=Maximize EuroSAT RGB validation accuracy" \
   --set "question=How accurately can MLP and CNN architectures classify EuroSAT RGB land-cover images?" \
-  --set 'metrics=[{name: val/accuracy, direction: maximize}, {name: val/loss, direction: minimize}]' \
-  --set 'tracking_backend={type: wandb, project: eurosat-rgb}'
+  --set 'metrics=[{name: val/accuracy, direction: maximize}, {name: val/loss, direction: minimize}]'
 
 hiraku record show eurosat
 hiraku status

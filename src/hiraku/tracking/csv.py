@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -47,25 +47,38 @@ class CSVBackend(TrackingBackend):
         "url",
     }
 
-    def __init__(self, config: HirakuConfig, path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        config: HirakuConfig,
+        path: Path | str | None = None,
+        *,
+        settings: CSVBackendConfig | None = None,
+    ) -> None:
         """Create a CSV adapter.
 
         Args:
             config: Project configuration.
             path: Optional CSV path override.
+            settings: Pre-validated CSV backend settings used by the factory.
         """
+        if settings is not None and path is not None:
+            raise BackendError("Pass CSV backend settings or path, not both")
+        if settings is None:
+            settings = CSVBackendConfig(path=path)
+        if not isinstance(settings, CSVBackendConfig):
+            raise BackendError("CSV backend settings must be CSVBackendConfig")
         self.config = config
-        if path is None:
+        if settings.path is None:
             self.path = None
         else:
-            candidate = Path(path).expanduser()
+            candidate = settings.path.expanduser()
             self.path = (
                 candidate.resolve()
                 if candidate.is_absolute()
                 else (config.root / candidate).resolve()
             )
 
-    def _read_source_runs(self, **options: Any) -> list[Run]:
+    def _read_source_runs(self) -> list[Run]:
         from ..run import Run
 
         path = self.path or self.config.root / "runs.csv"

@@ -1,7 +1,6 @@
 .venv/
 __pycache__/
 *.py[cod]
-/hiraku.yml
 /hiraku/*
 !/hiraku/dispatch/
 /runs.csv

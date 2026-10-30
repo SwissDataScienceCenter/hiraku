@@ -45,7 +45,7 @@ class Metric(BaseModel):
 _LOCAL_FIELDS = frozenset(
     {"id", "parent_id", "related_to", "type", "commit", "status", "decision"}
 )
-_MATERIALIZED_INHERITED_FIELDS = ("metrics", "tracking_backend")
+_MATERIALIZED_INHERITED_FIELDS = ("metrics",)
 
 
 @dataclass(frozen=True)
@@ -101,7 +101,6 @@ class Record(BaseModel):
     decision: str | None = None
     branch: str | None = None
     metrics: builtins.list[Metric] | None = None
-    tracking_backend: str | dict[str, Any] | None = None
 
     @field_validator("id")
     @classmethod
@@ -143,12 +142,26 @@ class Record(BaseModel):
             raise ValidationError("A record cannot refer to itself")
         return self
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_record_tracking_backend(cls, values: Any) -> Any:
+        if isinstance(values, Mapping) and "tracking_backend" in values:
+            raise ValidationError(
+                "tracking_backend must be configured in hiraku.yml, "
+                "not record front matter"
+            )
+        return values
+
     @model_validator(mode="after")
     def validate_yaml_fields(self) -> Self:
         type(self)._validate_yaml_value(self.to_dict())
         return self
 
     def __setattr__(self, name: str, value: Any) -> None:
+        if name == "tracking_backend":
+            raise ValidationError(
+                "tracking_backend must be configured in hiraku.yml, not on a record"
+            )
         if name == "id":
             persisted_id = getattr(self, "_persisted_id", None)
             if persisted_id is not None and value != persisted_id:
@@ -357,7 +370,7 @@ class Record(BaseModel):
         config: Any = None,
         **fields: Any,
     ) -> Record:
-        """Create a record, materializing inherited metrics and tracking defaults."""
+        """Create a record, materializing inherited metrics."""
         selected = _config(config)
         index = _record_index(selected)
         if record_id in index:
@@ -532,23 +545,35 @@ class Record(BaseModel):
         return [item for item in index.values() if _is_descendant(item, self.id, index)]
 
     def tracking_backend_spec(self, *, config: Any = None) -> dict[str, Any]:
-        """Return the nearest tracking backend, defaulting to CSV."""
-        specification = self.resolve(config=config).values.get("tracking_backend")
-        if specification is None:
-            return {"type": "csv"}
+        """Return the project-wide tracking backend configuration."""
+        selected = _config(config)
+        specification = selected.tracking_backend
         if isinstance(specification, str):
             return {"type": specification}
         return dict(specification)
 
     def resolve_tracking_backend(self, *, config: Any = None) -> TrackingBackend:
-        """Create the tracking backend inherited by this record."""
+        """Create the tracking backend configured for this project."""
         selected = _config(config)
         return create_backend(self.tracking_backend_spec(config=selected), selected)
 
-    def runs(self, *, config: Any = None, **query: Any) -> list[Run]:
-        """Return runs attributed to this record."""
+    def runs(
+        self,
+        *,
+        config: Any = None,
+        sort: str | None = None,
+        ascending: bool | None = None,
+        limit: int | None = None,
+    ) -> list[Run]:
+        """Return runs attributed to this record.
+
+        Sorting and limiting use the same options as `TrackingBackend.list_runs`.
+        """
         return self.resolve_tracking_backend(config=config).list_runs(
-            record_id=self.id, **query
+            record_id=self.id,
+            sort=sort,
+            ascending=ascending,
+            limit=limit,
         )
 
     def delete(self, *, config: Any = None) -> None:

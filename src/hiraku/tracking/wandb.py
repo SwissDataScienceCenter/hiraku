@@ -21,7 +21,7 @@ class WandbBackendConfig(BaseModel):
     Attributes:
         type: Backend discriminator; must be "wandb".
         entity: Optional W&B entity.
-        project: Required W&B project.
+        project: W&B project; defaults to the Hiraku project directory name.
         id: Optional W&B run ID.
         experiment_name: Optional W&B experiment name.
         notes: Optional W&B run notes.
@@ -35,7 +35,7 @@ class WandbBackendConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["wandb"] = "wandb"
     entity: str | None = None
-    project: str = Field(..., min_length=1)
+    project: str | None = Field(default=None, min_length=1)
     id: str | None = None
     experiment_name: str | None = Field(default=None, min_length=1)
     notes: str | None = None
@@ -51,8 +51,9 @@ class WandbBackend(TrackingBackend):
 
     Args:
         config: Project configuration.
+        settings: Pre-validated W&B settings used by the factory.
         entity: Optional W&B entity.
-        project: Required W&B project.
+        project: W&B project; defaults to the Hiraku project directory name.
         id: Optional W&B run ID.
         experiment_name: Optional W&B experiment name.
         notes: Optional W&B run notes.
@@ -67,8 +68,9 @@ class WandbBackend(TrackingBackend):
         self,
         config: HirakuConfig,
         *,
+        settings: WandbBackendConfig | None = None,
         entity: str | None = None,
-        project: str = "",
+        project: str | None = None,
         id: str | None = None,
         experiment_name: str | None = None,
         notes: str | None = None,
@@ -82,8 +84,9 @@ class WandbBackend(TrackingBackend):
 
         Args:
             config: Project configuration.
+            settings: Pre-validated W&B settings used by the factory.
             entity: Optional W&B entity.
-            project: Required W&B project.
+            project: W&B project; defaults to the Hiraku project directory name.
             id: Optional W&B run ID.
             experiment_name: Optional W&B experiment name.
             notes: Optional W&B run notes.
@@ -96,21 +99,43 @@ class WandbBackend(TrackingBackend):
         Raises:
             hiraku.errors.BackendError: If any settings has conflicts.
         """
+        if settings is None:
+            settings = WandbBackendConfig(
+                entity=entity,
+                project=project,
+                id=id,
+                experiment_name=experiment_name,
+                notes=notes,
+                tags=tags,
+                group=group,
+                job_type=job_type,
+                mode=mode,
+                api_key=api_key,
+            )
+        elif any(
+            [
+                entity is not None,
+                project is not None,
+                id is not None,
+                experiment_name is not None,
+                notes is not None,
+                tags is not None,
+                group is not None,
+                job_type is not None,
+                mode != "online",
+                api_key is not None,
+            ]
+        ):
+            raise BackendError("Pass W&B backend settings or options, not both")
+        if not isinstance(settings, WandbBackendConfig):
+            raise BackendError("W&B backend settings must be WandbBackendConfig")
         self.config = config
-        settings = WandbBackendConfig(
-            entity=entity,
-            project=project,
-            id=id,
-            experiment_name=experiment_name,
-            notes=notes,
-            tags=tags,
-            group=group,
-            job_type=job_type,
-            mode=mode,
-            api_key=api_key,
-        )
         self.entity = settings.entity
-        self.project = settings.project
+        self.project = settings.project or config.root.name
+        if not self.project:
+            raise BackendError(
+                "W&B project is required when the Hiraku root has no directory name"
+            )
         self.id = settings.id
         self.experiment_name = settings.experiment_name
         self.notes = settings.notes
@@ -203,7 +228,7 @@ class WandbBackend(TrackingBackend):
             raw=self._run_raw(run),
         )
 
-    def _read_source_runs(self, **options: Any) -> list[Run]:
+    def _read_source_runs(self) -> list[Run]:
         try:
             runs = self._get_runs()
             return [self._normalize_run(run) for run in runs]

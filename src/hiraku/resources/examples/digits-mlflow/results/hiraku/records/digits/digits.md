@@ -4,10 +4,6 @@ parent_id: null
 related_to: []
 type: task
 status: concluded
-tracking_backend:
-  type: mlflow
-  database: mlflow.db
-  experiment_name: hiraku-digits
 metrics:
 - name: val/log_loss
   direction: minimize

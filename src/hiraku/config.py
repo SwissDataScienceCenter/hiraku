@@ -14,7 +14,7 @@ from pydantic import (
     model_validator,
 )
 
-from .errors import ProjectNotFoundError, ValidationError
+from .errors import BackendError, ProjectNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
 
 if TYPE_CHECKING:
@@ -29,6 +29,7 @@ class HirakuConfig(BaseModel):
         root: Project root directory.
         hiraku_dir_name: Relative state directory name.
         default_dispatch: Default command dispatcher.
+        tracking_backend: Project-wide run tracking backend; defaults to CSV.
 
     Raises:
         pydantic.ValidationError: If configuration values are invalid or inconsistent.
@@ -42,6 +43,7 @@ class HirakuConfig(BaseModel):
         "hiraku_dir": "hiraku",
         "default_dispatch": "launch.sh",
         "active_record_id": None,
+        "tracking_backend": "csv",
     }
     model_config = ConfigDict(
         extra="allow", validate_assignment=True, populate_by_name=True
@@ -54,19 +56,20 @@ class HirakuConfig(BaseModel):
     )
     default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
     active_record_id: str | None = DEFAULTS["active_record_id"]
+    tracking_backend: str | dict[str, Any] = DEFAULTS["tracking_backend"]
     _hiraku_dir: Path = PrivateAttr()
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name in {"command", "tracking_backend"}:
+        if name == "command":
             raise ValidationError(
-                f"{name} must be configured on a root record, not hiraku.yml"
+                f"{name} must be configured on a record, not hiraku.yml"
             )
         super().__setattr__(name, value)
 
     @model_validator(mode="before")
     @classmethod
     def reject_record_defaults(cls, values: Any) -> Any:
-        """Keep research defaults on records, not project configuration."""
+        """Keep commands on records rather than project configuration."""
         if not isinstance(values, Mapping):
             return values
         raw = dict(values)
@@ -75,11 +78,11 @@ class HirakuConfig(BaseModel):
                 "Configuration key 'default_program' is no longer supported: "
                 "programs were removed. Remove the key from hiraku.yml."
             )
-        misplaced = {"command", "tracking_backend"}.intersection(raw)
+        misplaced = {"command"}.intersection(raw)
         if misplaced:
             names = ", ".join(sorted(misplaced))
             raise ValidationError(
-                f"{names} must be configured on a root record, not hiraku.yml"
+                f"{names} must be configured on a record, not hiraku.yml"
             )
         return raw
 
@@ -100,6 +103,14 @@ class HirakuConfig(BaseModel):
                 f"hiraku_dir resolves outside project root {self.root}: {resolved}"
             ) from exc
         object.__setattr__(self, "_hiraku_dir", resolved)
+        from .tracking.factory import validate_backend_config
+
+        try:
+            validate_backend_config(self.tracking_backend)
+        except BackendError as exc:
+            raise ValidationError(
+                f"Invalid tracking_backend in hiraku.yml: {exc}"
+            ) from exc
         return self
 
     @classmethod

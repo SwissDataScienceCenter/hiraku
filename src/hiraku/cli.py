@@ -343,10 +343,9 @@ def status_command(state: CLIContext, json_output: bool) -> None:
         branch = GitRepository(config.root).current_branch
     except GitError:
         branch = None
-    tracking_backend = {"type": "csv"}
-    if config.active_record_id is not None:
-        active_record = load_record(config.active_record_id, config=config)
-        tracking_backend = active_record.tracking_backend_spec(config=config)
+    tracking_backend = config.tracking_backend
+    if isinstance(tracking_backend, str):
+        tracking_backend = {"type": tracking_backend}
     result = {
         "project_root": config.root,
         "active_record_id": config.active_record_id,

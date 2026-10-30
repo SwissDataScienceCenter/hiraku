@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -44,21 +43,14 @@ class TrackingBackend(ABC):
 
     @staticmethod
     def _apply_query(
-        runs: list[Run], query: Mapping[str, Any], backend: str
+        runs: list[Run],
+        *,
+        sort: str | None,
+        ascending: bool | None,
+        limit: int | None,
     ) -> list[Run]:
-        allowed = {"sort", "ascending", "limit"}
-        unknown = set(query) - allowed
-        if unknown:
-            raise BackendError(
-                f"{backend} backend does not support query options: {sorted(unknown)}"
-            )
         result = list(runs)
-        sort = query.get("sort")
-        if sort is None and "ascending" in query:
-            raise BackendError(f"{backend} backend ascending requires a sort field")
         if sort is not None:
-            if not isinstance(sort, str):
-                raise BackendError(f"{backend} backend sort must be a string")
 
             def value(run: Run) -> Any:
                 value = getattr(run, sort, None)
@@ -86,7 +78,7 @@ class TrackingBackend(ABC):
 
             ranked.sort(
                 key=numeric_key,
-                reverse=not bool(query.get("ascending", True)),
+                reverse=ascending is False,
             )
             result = [*ranked, *sorted(unranked, key=lambda run: run.id)]
         else:
@@ -97,35 +89,73 @@ class TrackingBackend(ABC):
                     run.id,
                 )
             )
-        limit = query.get("limit")
         if limit is not None:
-            if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
-                raise BackendError(
-                    f"{backend} backend limit must be a non-negative integer"
-                )
             result = result[:limit]
         return result
 
-    def list_runs(self, *, record_id: str | None = None, **query: Any) -> list[Run]:
+    def _validate_query(
+        self,
+        *,
+        sort: str | None,
+        ascending: bool | None,
+        limit: int | None,
+    ) -> None:
+        if sort is not None and (not isinstance(sort, str) or not sort):
+            raise BackendError(
+                f"{self.backend_name} backend sort must be a non-empty string"
+            )
+        if ascending is not None and not isinstance(ascending, bool):
+            raise BackendError(
+                f"{self.backend_name} backend ascending must be a boolean"
+            )
+        if sort is None and ascending is not None:
+            raise BackendError(
+                f"{self.backend_name} backend ascending requires a sort field"
+            )
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+        ):
+            raise BackendError(
+                f"{self.backend_name} backend limit must be a non-negative integer"
+            )
+
+    def list_runs(
+        self,
+        *,
+        record_id: str | None = None,
+        sort: str | None = None,
+        ascending: bool | None = None,
+        limit: int | None = None,
+    ) -> list[Run]:
         """Return normalized runs with record attribution.
 
         Args:
             record_id: Optional record ID to filter runs by; all attributed runs
                 are returned when omitted.
-            query: Optional query parameters to sort, limit, or filter the results.
+            sort: Run field, metric, or parameter. Numeric values sort first;
+                runs without a numeric value follow, ordered by ID.
+            ascending: Sort order; requires ``sort``. Defaults to ascending.
+            limit: Maximum number of returned runs. Without ``sort``, runs are
+                ordered by timestamp, with missing timestamps last.
 
         Returns:
             A list of normalized Run objects matching the specified filters and query.
         """
         if record_id is not None:
             self._validate_filters(record_id)
+        self._validate_query(sort=sort, ascending=ascending, limit=limit)
         runs = [run for run in self._read_source_runs() if run.record_id]
         if record_id is not None:
             runs = [run for run in runs if run.record_id == record_id]
-        return self._apply_query(runs, query, self.backend_name)
+        return self._apply_query(
+            runs,
+            sort=sort,
+            ascending=ascending,
+            limit=limit,
+        )
 
     @abstractmethod
-    def _read_source_runs(self, **options: Any) -> list[Run]:
+    def _read_source_runs(self) -> list[Run]:
         """Read all runs from the configured source once."""
         raise NotImplementedError
 

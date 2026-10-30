@@ -1,0 +1,4 @@
+tracking_backend:
+  type: mlflow
+  database: mlflow.db
+  experiment_name: hiraku-digits

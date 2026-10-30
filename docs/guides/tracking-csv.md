@@ -1,9 +1,15 @@
 # Track with CSV
 
-CSV is the default backend. Records normally read `runs.csv` from the Hiraku
-project root. Override this per record with
-`tracking_backend: {type: csv, path: results/runs.csv}`; relative paths resolve
-from the project root.
+CSV is the default backend. It reads `runs.csv` from the Hiraku project root.
+To choose another CSV path, set the project-wide backend in `hiraku.yml`:
+
+```yaml
+tracking_backend:
+  type: csv
+  path: results/runs.csv
+```
+
+Relative paths resolve from the project root.
 
 ## Log from your script
 

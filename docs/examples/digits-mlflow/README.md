@@ -37,24 +37,25 @@ hiraku dashboard --record digits
 The dashboard reads the prepared `mlflow.db` directly, so an MLflow server is
 not required. Use `hiraku dashboard --init --edit --record digits` to copy the
 notebook into the project and edit it. Run details only show an MLflow link
-after you start the MLflow UI and set
-`ui_url: http://127.0.0.1:5000` in the root record's `tracking_backend`.
+after you start the MLflow UI. See the dashboard guide for adding a UI link to
+a custom project.
 
 MLflow creates `mlflow.db` in the project root on the first launch. The training
 script uses the Hiraku project root to keep that location stable. Set
 `MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
 when you want to override the local defaults. These variables affect the
-training process only, so update the root record's `tracking_backend` with the matching
-`tracking_uri` and `experiment_name` before using `hiraku runs`.
+training process only; see the MLflow guide when adapting the example to a
+custom tracking store.
 
 ## Create the research root and child records
+
+The example ships with MLflow configured as the project-wide tracking backend.
 
 ```bash
 hiraku record create digits --type task \
   --set "goal=Understand how L2 regularization affects Digits learning curves" \
   --set "question=Does stronger regularization reduce overfitting on the Digits dataset?" \
-  --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]' \
-  --set 'tracking_backend={type: mlflow, database: mlflow.db, experiment_name: hiraku-digits}'
+  --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]'
 
 hiraku record create weak-l2 --parent digits --type experiment \
   --set "summary=Weak L2 baseline" \
@@ -104,9 +105,8 @@ hiraku runs --record digits --all
 ```
 
 Or browse them, with a per-run plot and links into the MLflow UI, in the
-[dashboard](../../guides/dashboard.md). Add
-`ui_url: http://127.0.0.1:5000` to the root record's `tracking_backend` so
-each run links to the MLflow UI started above:
+[dashboard](../../guides/dashboard.md). See that guide to add a UI link to a
+custom project. Then open the dashboard:
 
 ```bash
 hiraku dashboard --record digits

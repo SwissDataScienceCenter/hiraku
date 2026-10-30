@@ -15,13 +15,18 @@ In the training project, install the SDK and authenticate:
 ```bash
 uv add wandb
 uv run wandb login
-hiraku record update iris \
-  --set 'tracking_backend={type: wandb, entity: your-team, project: hiraku-iris}'
 ```
 
-Replace the entity/project with your workspace. The record must already exist.
-The CLI and training process can have separate Python environments; both need
-W&B installed.
+Set the project-wide backend in `hiraku.yml`. With the `wandb` shorthand,
+Hiraku uses the project directory name as the W&B project and leaves the entity
+unset, allowing the authenticated W&B account to resolve it. The CLI and
+training process can have separate Python environments; both need W&B installed.
+
+The equivalent configuration value in YAML is:
+
+```yaml
+tracking_backend: wandb
+```
 
 ## Log from your script
 
@@ -30,7 +35,6 @@ import os
 import wandb
 
 with wandb.init(
-    entity="your-team",
     group=os.environ["HIRAKU_RECORD_ID"],
     config={
         "seed": 42,
@@ -39,11 +43,10 @@ with wandb.init(
     run.log({"test/accuracy": accuracy})  # calculated by your evaluation code
 ```
 
-Use the same entity/project in logging and Hiraku configuration. W&B assigns
-the run ID. Hiraku supplies the W&B project from the selected record's
-`tracking_backend` configuration unless `WANDB_PROJECT` is already set. Your
-script only needs its ordinary `wandb.init()` call; there is no Hiraku-specific
-W&B config to add. Record settings select the query backend and do not
+W&B assigns the run ID. Hiraku supplies `WANDB_PROJECT` from the project
+configuration unless it is already set. Your script only needs its ordinary
+`wandb.init()` call; there is no Hiraku-specific
+W&B config to add. The project setting selects the query backend and does not
 initialize a W&B run.
 
 ## Inspect
