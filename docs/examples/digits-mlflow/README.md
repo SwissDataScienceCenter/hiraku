@@ -116,7 +116,7 @@ hiraku dashboard --record digits
     The table is a compact, illustrative view of final MLflow values. Click a
     column heading to sort it; full epoch histories remain available in MLflow.
 
-    | id | record | timestamp | commit | metric:val/log_loss | metric:val/accuracy |
+    | id | record | timestamp | commit | val/log_loss | val/accuracy |
     | --- | --- | --- | --- | ---: | ---: |
     | `15895756` | `weak-l2` | `2026-09-10 06:35:05Z` | `17f59bac` | 0.12493475669652965 | 0.9688888888888889 |
     | `f6f6de2f` | `strong-l2` | `2026-09-10 06:35:10Z` | `17f59bac` | 0.4801207515207299 | 0.9266666666666666 |

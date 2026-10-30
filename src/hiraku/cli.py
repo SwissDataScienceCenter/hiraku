@@ -787,7 +787,7 @@ def run_list(
     else:
         columns = ["id", "record", "timestamp", "duration", "commit"]
         columns.extend(f"param:{name}" for name in param_names)
-        columns.extend(f"metric:{name}" for name in metric_names)
+        columns.extend(metric_names)
         rows = [
             [
                 run.id,
