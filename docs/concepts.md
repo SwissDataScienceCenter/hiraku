@@ -21,18 +21,18 @@ Hiraku uses records, foreground command execution, and tracked runs to document 
 
 Records and command execution are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
-A root *record* defines a working scope and goal, and documents the research progress. Child records are focused, reproducible units within that scope that can link code, execution commands, and runs. Records carry no required semantic type; users may create them for baselines, hypotheses, diagnostics, model runs, ablations, hyperparameter optimization, etc. *Runs* record execution traces attributed to one record and, when available, a code commit.
+A root *record* defines a working scope and goal, and documents the research progress. Child records are focused, reproducible units within that scope that can link code, explicit command executions, and runs. Records carry no required semantic type; users may create them for baselines, hypotheses, diagnostics, model runs, ablations, hyperparameter optimization, etc. *Runs* record execution traces attributed to one record and, when available, a code commit.
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared fields and commands. |
-| **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit and commands. A proposed investigation may have no commit. |
+| **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared research and tracking defaults. |
+| **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
 | **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
 Records are stored as Markdown with YAML front matter. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent, and all descendants are stored flat in their root's folder. IDs are unique across the project.
 
-Fields inherit through `parent_id` by default: the nearest definition wins, an explicit `null` clears an inherited field, and commands replace inherited argv lists. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
+Fields inherit through `parent_id` by default: the nearest definition wins and an explicit `null` clears an inherited field. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
 At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. The current status can be queried with `hiraku status`; its `tracking_backend` field shows the active record's effective backend.
 
@@ -98,24 +98,11 @@ tracking_backend:
 
 ## Command execution
 
-Root records define an optional command argv list; children inherit it and may
-override it:
-
-```yaml
-command: [uv, run, --locked, python, train.py, --seed, "42"]
-```
-
-The nearest record command wins. An explicit null clears an inherited command;
-there is no project-level command fallback. Arguments after `--` replace the
-complete invocation.
-
-```bash
-hiraku run --record baseline
-hiraku runs --record baseline --json
-```
-
-Command execution runs synchronously in the project working tree; tracked runs
-own measurements and can be inspected after the command exits. See
+Commands are not record metadata. Pass the complete argv directly to
+`hiraku run`; a dispatcher can prepare repeatable project-specific runtime
+behavior around that invocation. Command execution runs synchronously in the
+project working tree; tracked runs own measurements and can be inspected after
+the command exits. See
 [Command execution](guides/execution.md) for details.
 
 ## Agent Skill

@@ -99,8 +99,6 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
             "task.md",
             "--set",
             "metrics=[{name: val_bpb, direction: minimize}]",
-            "--set",
-            "command=[uv, run, python, train.py]",
         ],
     )
     return project, runner
@@ -198,7 +196,6 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
         "`val_bpb` within the fixed 5-minute training budget."
     )
     assert task.type == "task"
-    assert task.command == ["uv", "run", "python", "train.py"]
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
     assert (project / "hiraku/dispatch/autoresearch.sh").stat().st_mode & 0o111

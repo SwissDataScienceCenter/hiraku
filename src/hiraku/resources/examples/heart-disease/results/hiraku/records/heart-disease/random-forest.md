@@ -4,15 +4,6 @@ parent_id: heart-disease
 related_to: []
 type: hypothesis
 status: concluded
-command:
-- uv
-- run
-- python
-- train.py
-- --model
-- random_forest
-- --validation-fraction
-- '0.2'
 ---
 ## random-forest
 

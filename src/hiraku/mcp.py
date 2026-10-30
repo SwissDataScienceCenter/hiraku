@@ -260,7 +260,7 @@ def create_server(config: HirakuConfig | None = None) -> Any:
     @server.tool()
     def execute(
         record_id: str,
-        command: list[str] | None = None,
+        command: list[str],
         dispatch: str | None = None,
     ) -> dict[str, Any]:
         """Run a command in the foreground and return its output and exit code."""

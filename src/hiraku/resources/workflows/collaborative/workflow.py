@@ -50,10 +50,7 @@ class Collaborative(Workflow):
         task: Annotated[
             str | None, "Task record; defaults to the active record."
         ] = None,
-        command: Annotated[
-            list[str] | None,
-            "Optional argv command; otherwise use the task's inherited command.",
-        ] = None,
+        command: Annotated[list[str], "Command argv to use for each experiment."],
         rounds: Annotated[int, "Most experiments to run.", Field(gt=0)] = 3,
     ) -> Experiments:
         """Start collaborative research on a task record."""
@@ -61,8 +58,9 @@ class Collaborative(Workflow):
             task = task or self.config.active_record_id
             if task is None:
                 raise EventRejected("No active record; pass the task record ID")
-            if command is not None:
-                command = validate_command(command)
+            command = validate_command(command)
+            if command is None:
+                raise EventRejected("command must be a non-empty argv sequence")
             return Experiments(task=task, command=command, rounds=rounds)
         except EventRejected:
             raise
@@ -90,9 +88,7 @@ class Collaborative(Workflow):
             "--record",
             record.id,
         ]
-        command = experiments.command or record.resolve_command(config=self.config)
-        if command:
-            argv.extend(["--", *command])
+        argv.extend(["--", *experiments.command])
         context["command"] = shlex.join(argv)
         return self._step(experiments, "## Launch", context)
 

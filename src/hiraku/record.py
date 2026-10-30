@@ -16,7 +16,7 @@ from .errors import RecordExistsError, RecordNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml
 from .run import Run
 from .tracking import TrackingBackend, create_backend
-from .validation import reject_entrypoints, validate_command, validate_identifier
+from .validation import reject_entrypoints, reject_record_command, validate_identifier
 
 
 class Metric(BaseModel):
@@ -47,11 +47,10 @@ class Record(BaseRecord):
     status: str | None = None
     decision: str | None = None
     branch: str | None = None
-    command: list[str] | None = None
     metrics: list[Any] | None = None
     tracking_backend: str | dict[str, Any] | None = None
 
-    _validate_command = field_validator("command", mode="before")(validate_command)
+    _reject_command = model_validator(mode="before")(reject_record_command)
     _reject_entrypoints = model_validator(mode="before")(reject_entrypoints)
 
     @field_validator("parent_id")
@@ -293,12 +292,6 @@ class Record(BaseRecord):
     def descendants(self, *, config: Any = None) -> list[Record]:
         index = {item.id: item for item in list_records(config=config)}
         return [item for item in index.values() if _is_descendant(item, self.id, index)]
-
-    def resolve_command(self, *, config: Any = None) -> list[str] | None:
-        """Return the nearest command, including an explicit null override."""
-        selected = _config(config)
-        command = self.resolve(config=selected).values.get("command")
-        return list(command) if command is not None else None
 
     def tracking_backend_spec(self, *, config: Any = None) -> dict[str, Any]:
         """Return the nearest tracking backend, defaulting to CSV."""

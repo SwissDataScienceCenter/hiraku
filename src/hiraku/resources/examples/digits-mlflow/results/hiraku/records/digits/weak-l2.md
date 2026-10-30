@@ -4,19 +4,6 @@ parent_id: digits
 related_to: []
 type: hypothesis
 status: concluded
-command:
-- uv
-- run
-- python
-- train.py
-- --alpha
-- '0.0001'
-- --epochs
-- '20'
-- --hidden-units
-- '64'
-- --validation-fraction
-- '0.25'
 ---
 ## weak-l2
 

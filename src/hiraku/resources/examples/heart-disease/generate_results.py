@@ -98,20 +98,20 @@ def generate(config: HirakuConfig) -> None:
                 if identifier == "forest-tuning"
                 else ""
             ),
-            command=[
-                "uv",
-                "run",
-                "python",
-                "train.py",
-                "--model",
-                model,
-                "--validation-fraction",
-                str(fraction),
-            ],
         )
+        command = [
+            "uv",
+            "run",
+            "python",
+            "train.py",
+            "--model",
+            model,
+            "--validation-fraction",
+            str(fraction),
+        ]
         for seed in (1, 2, 3):
             result = execute_command(
-                [*record.command, "--seed", str(seed)],
+                [*command, "--seed", str(seed)],
                 record_id=identifier,
                 config=config,
             )

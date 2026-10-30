@@ -76,10 +76,9 @@ the Markdown body. Set a field to `null` to clear its value. IDs and persistence
 paths cannot be changed; use `record_reparent` to change the organizational parent.
 Expected failures are returned as MCP tool errors.
 
-`execute` accepts explicit command arguments or resolves the selected record's
-inherited command. It waits for completion and returns the exit code, stdout,
-and stderr. A connected client can run commands with the user's local
-permissions.
+`execute` requires explicit command arguments. Commands are not stored in
+records. It waits for completion and returns the exit code, stdout, and stderr.
+A connected client can run commands with the user's local permissions.
 
 ## Resources and evidence
 

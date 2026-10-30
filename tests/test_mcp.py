@@ -36,15 +36,11 @@ def test_tools_and_validation(tmp_path: Path) -> None:
             record_id="root",
             fields={
                 "status": "new",
-                "command": ["echo"],
             },
         )
         await call("record_create", record_id="child", parent_id="root")
         await call("record_update", record_id="child", fields={"status": "done"})
         assert load_record("child", config=config).status == "done"
-        assert load_record("child", config=config).resolve_command(config=config) == [
-            "echo"
-        ]
         for name, args in [
             ("record_create", {"record_id": "bad", "parent_id": "missing"}),
             ("record_create", {"record_id": "../escape"}),
@@ -138,9 +134,7 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
     server = create_server(config)
 
     async def exercise() -> None:
-        await server.call_tool(
-            "record_create", {"record_id": "demo", "fields": {"command": ["echo"]}}
-        )
+        await server.call_tool("record_create", {"record_id": "demo"})
         result = await server.call_tool(
             "execute",
             {

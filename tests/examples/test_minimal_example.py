@@ -64,12 +64,13 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
             "my-task",
             "--commit",
             "HEAD",
-            "--set",
-            f"command=[{sys.executable}, evaluate.py]",
         ],
     )
 
-    invoke(runner, ["run", "--record", "baseline"])
+    invoke(
+        runner,
+        ["run", "--record", "baseline", "--", sys.executable, "evaluate.py"],
+    )
 
     config = HirakuConfig.discover(project)
     runs = load_record("baseline", config=config).runs(config=config)

@@ -158,7 +158,7 @@ def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
     assert table[2].split() == ["a", "root", "4.25"]
 
 
-def test_record_cli_command_and_runs(tmp_path: Path, monkeypatch) -> None:
+def test_record_cli_explicit_run_and_runs(tmp_path: Path, monkeypatch) -> None:
     HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
@@ -168,16 +168,7 @@ def test_record_cli_command_and_runs(tmp_path: Path, monkeypatch) -> None:
         cwd=tmp_path,
         check=True,
     )
-    assert (
-        invoke(
-            "record",
-            "create",
-            "root",
-            "--set",
-            'command=[python, -c, "print(7)"]',
-        ).exit_code
-        == 0
-    )
+    assert invoke("record", "create", "root").exit_code == 0
     assert invoke("record", "create", "child", "--parent", "root").exit_code == 0
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-qm", "records"], cwd=tmp_path, check=True)

@@ -103,7 +103,6 @@ def config(tmp_path: Path) -> HirakuConfig:
         "task",
         type="task",
         config=selected,
-        command=["python", "train.py"],
     )
     experiment(selected, "base")
     return selected
@@ -154,11 +153,16 @@ def run_experiment(harness: Harness, config: HirakuConfig, record_id: str) -> st
     return sha
 
 
+def start_collaborative(harness: Harness, **arguments):
+    arguments.setdefault("command", ["python", "train.py"])
+    return harness.start("collaborative", task="task", **arguments)
+
+
 def test_collaborative_runs_each_step_and_stops_after_the_rounds(
     config: HirakuConfig,
 ) -> None:
     harness = Harness(config)
-    started = harness.start("collaborative", task="task", rounds=2)
+    started = start_collaborative(harness, rounds=2)
     assert started["status"] == "accepted"
     assert harness.section() == "## Draft"
     # Until gates exist, the agent gets the user's approval in the conversation.
@@ -240,7 +244,7 @@ def test_collaborative_runs_each_step_and_stops_after_the_rounds(
 
 def test_collaborative_can_finish_from_any_step(config: HirakuConfig) -> None:
     harness = Harness(config)
-    harness.start("collaborative", task="task")
+    start_collaborative(harness)
     draft(harness, "c1")
     done = harness.send("finish")
     assert done["session_status"] == "completed"
@@ -253,7 +257,9 @@ def test_collaborative_rejects_invalid_input(config: HirakuConfig) -> None:
     assert unknown["status"] == "rejected"
     assert "non-empty string" in unknown["message"]
 
-    harness.start("collaborative", task="task")
+    missing = harness.start("collaborative", task="task")
+    assert missing["status"] == "rejected"
+    start_collaborative(harness)
     exists = draft(harness, "base")
     assert exists["status"] == "rejected"
     assert "already exists" in exists["message"]
@@ -286,7 +292,7 @@ def test_collaborative_rejects_invalid_input(config: HirakuConfig) -> None:
 @pytest.mark.parametrize("record_id", ["experiment one", "experiment;echo unsafe"])
 def test_collaborative_quotes_launch_arguments(config, record_id):
     harness = Harness(config)
-    harness.start("collaborative", task="task")
+    start_collaborative(harness)
     assert draft(harness, record_id)["status"] == "accepted"
     sha = commit(config, "implementation")
     assert harness.send("implemented", commit=sha)["status"] == "accepted"
@@ -303,7 +309,7 @@ def test_collaborative_quotes_launch_arguments(config, record_id):
 
 def test_collaborative_uses_only_requested_tracking_run(config):
     harness = Harness(config)
-    harness.start("collaborative", task="task")
+    start_collaborative(harness)
     draft(harness, "c1")
     sha = commit(config, "implementation")
     harness.send("implemented", commit=sha)

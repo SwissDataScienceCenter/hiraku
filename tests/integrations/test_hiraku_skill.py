@@ -138,16 +138,6 @@ def _create_logistic_experiment(
         commit=commit,
         summary="Logistic regression baseline",
         hypothesis="Regularized logistic regression provides a calibrated baseline",
-        command=[
-            sys.executable,
-            "train.py",
-            "--model",
-            "logistic",
-            "--seed",
-            str(42),
-            "--validation-fraction",
-            str(0.25),
-        ],
     )
 
 
@@ -196,10 +186,8 @@ def test_agent_creates_experiment_from_high_level_request(tmp_path: Path) -> Non
         project,
         """Use the $hiraku skill to create a child record named logistic-baseline
 under heart-disease. Use the summary 'Logistic regression baseline' and the
-hypothesis 'Regularized logistic regression provides a calibrated baseline'. It
-should use uv run to invoke train.py with the logistic model, seed 42, and a
-validation fraction of 0.25. Bind it to the current commit. Only create and
-verify the record; do not run it.""",
+hypothesis 'Regularized logistic regression provides a calibrated baseline'.
+Bind it to the current commit. Only create and verify the record; do not run it.""",
     )
 
     experiments = task.children(config=config)
@@ -211,18 +199,7 @@ verify the record; do not run it.""",
         "Regularized logistic regression provides a calibrated baseline"
     )
     assert experiment.commit == commit
-    assert experiment.command == [
-        "uv",
-        "run",
-        "python",
-        "train.py",
-        "--model",
-        "logistic",
-        "--seed",
-        "42",
-        "--validation-fraction",
-        "0.25",
-    ]
+    assert "command" not in experiment.model_dump()
     assert CSVBackend(config).list_runs(record_id=task.id) == []
     assert _git(project, "status", "--porcelain") == ""
 

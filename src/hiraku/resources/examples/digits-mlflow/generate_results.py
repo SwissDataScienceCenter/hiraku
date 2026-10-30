@@ -93,7 +93,7 @@ def generate(config: HirakuConfig) -> None:
         "Measured CPU training results; no statistical significance is claimed.\n",
     )
     for identifier, alpha in EXPERIMENTS:
-        record = Record.create(
+        Record.create(
             identifier,
             parent_id="digits",
             type="hypothesis",
@@ -102,24 +102,24 @@ def generate(config: HirakuConfig) -> None:
             config=config,
             markdown=f"## {identifier}\n\nL2 alpha: {alpha}; seeds: 1, 2, 3; "
             f"epochs: {EPOCHS}; hidden units: 64; validation fraction: 0.25.\n",
-            command=[
-                "uv",
-                "run",
-                "python",
-                "train.py",
-                "--alpha",
-                str(alpha),
-                "--epochs",
-                str(EPOCHS),
-                "--hidden-units",
-                str(64),
-                "--validation-fraction",
-                str(0.25),
-            ],
         )
+        command = [
+            "uv",
+            "run",
+            "python",
+            "train.py",
+            "--alpha",
+            str(alpha),
+            "--epochs",
+            str(EPOCHS),
+            "--hidden-units",
+            str(64),
+            "--validation-fraction",
+            str(0.25),
+        ]
         for seed in (1, 2, 3):
             result = execute_command(
-                [*record.command, "--seed", str(seed)],
+                [*command, "--seed", str(seed)],
                 record_id=identifier,
                 config=config,
                 env={

@@ -53,16 +53,12 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
     assert git_state == "unavailable"
 
 
-def test_run_resolves_inherited_command_and_cli_streams_output(
+def test_run_requires_explicit_command_and_streams_output(
     tmp_path: Path, monkeypatch
 ) -> None:
     config = HirakuConfig.init(tmp_path)
     monkeypatch.chdir(tmp_path)
-    Record.create(
-        "root",
-        command=[sys.executable, "-c", "print('inherited')"],
-        config=config,
-    )
+    Record.create("root", config=config)
 
     seen: list[tuple[str, ...] | None] = []
 
@@ -71,9 +67,15 @@ def test_run_resolves_inherited_command_and_cli_streams_output(
         return subprocess.CompletedProcess([], 0, stdout="inherited\n", stderr="")
 
     monkeypatch.setattr("hiraku.cli.execute_command", run)
-    cli = CliRunner().invoke(main, ["run", "--record", "root"])
+    cli = CliRunner().invoke(
+        main,
+        ["run", "--record", "root", "--", sys.executable, "-c", "print('explicit')"],
+    )
     assert cli.exit_code == 0, cli.output
-    assert seen == [None]
+    assert seen == [(sys.executable, "-c", "print('explicit')")]
+    missing = CliRunner().invoke(main, ["run", "--record", "root"])
+    assert missing.exit_code != 0
+    assert "command" in missing.output.lower()
 
 
 def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:

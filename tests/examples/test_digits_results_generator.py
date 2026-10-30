@@ -112,7 +112,20 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         ],
     ):
         subprocess.run(["git", *arguments], cwd=config.root, check=True)
-    command = [*weak.command, "--seed", "4", "--epochs", "1"]
+    command = [
+        sys.executable,
+        "train.py",
+        "--alpha",
+        "0.0001",
+        "--epochs",
+        "8",
+        "--hidden-units",
+        "64",
+        "--seed",
+        "4",
+        "--validation-fraction",
+        "0.25",
+    ]
     result = execute_command(
         command,
         record_id=weak.id,

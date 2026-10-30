@@ -111,7 +111,7 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
 
     def export(output):
         generated = HirakuConfig.init(output, install_skill=False)
-        Record.create("generated", command=["python", "train.py"], config=generated)
+        Record.create("generated", config=generated)
         (output / "runs.csv").write_text("id,record_id\nrun,generated\n")
 
     monkeypatch.setattr(

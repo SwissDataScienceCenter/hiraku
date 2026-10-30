@@ -4,15 +4,6 @@ parent_id: heart-disease
 related_to: []
 type: baseline
 status: concluded
-command:
-- uv
-- run
-- python
-- train.py
-- --model
-- logistic
-- --validation-fraction
-- '0.2'
 ---
 ## logistic-baseline
 

@@ -870,7 +870,7 @@ def session_cancel(state: CLIContext, session_id: str) -> None:
 
 
 @main.command("run")
-@click.argument("command", nargs=-1, type=click.UNPROCESSED)
+@click.argument("command", nargs=-1, required=True, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
 @click.option(
     "--dispatch",
@@ -885,14 +885,8 @@ def run_command(
 ) -> None:
     """Run a project command in the foreground."""
     state: CLIContext = context.obj
-    if not command and all(
-        context.get_parameter_source(name) == click.core.ParameterSource.DEFAULT
-        for name in ("record_id", "dispatch")
-    ):
-        click.echo(context.get_help())
-        return
     result = execute_command(
-        command or None,
+        command,
         record_id=record_id,
         dispatch=dispatch,
         config=state.config,

@@ -66,7 +66,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             "experiment_name: hiraku-digits}",
         ],
     )
-    for record_id, alpha in (("weak-l2", 0.0001), ("strong-l2", 1.0)):
+    for record_id in ("weak-l2", "strong-l2"):
         invoke(
             runner,
             [
@@ -77,14 +77,30 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
                 "digits",
                 "--commit",
                 "HEAD",
-                "--set",
-                f"command=[{sys.executable}, train.py, --alpha, '{alpha}', "
-                "--epochs, '8', --hidden-units, '64', --seed, '42', "
-                "--validation-fraction, '0.25']",
             ],
         )
-    for record_id in ("weak-l2", "strong-l2"):
-        invoke(runner, ["run", "--record", record_id])
+    for record_id, alpha in (("weak-l2", 0.0001), ("strong-l2", 1.0)):
+        invoke(
+            runner,
+            [
+                "run",
+                "--record",
+                record_id,
+                "--",
+                sys.executable,
+                "train.py",
+                "--alpha",
+                str(alpha),
+                "--epochs",
+                "8",
+                "--hidden-units",
+                "64",
+                "--seed",
+                "42",
+                "--validation-fraction",
+                "0.25",
+            ],
+        )
     rows = json.loads(
         invoke(
             runner,

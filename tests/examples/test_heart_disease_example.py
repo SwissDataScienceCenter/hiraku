@@ -62,18 +62,6 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         ("logistic-baseline", "logistic"),
         ("random-forest", "random_forest"),
     ):
-        command = json.dumps(
-            [
-                sys.executable,
-                "train.py",
-                "--model",
-                model,
-                "--seed",
-                "42",
-                "--validation-fraction",
-                "0.25",
-            ]
-        )
         invoke(
             runner,
             [
@@ -86,12 +74,26 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
                 "experiment",
                 "--commit",
                 "HEAD",
-                "--set",
-                f"command={command}",
             ],
         )
         assert load_record(record_id).commit == source_commit
-        invoke(runner, ["run", "--record", record_id])
+        invoke(
+            runner,
+            [
+                "run",
+                "--record",
+                record_id,
+                "--",
+                sys.executable,
+                "train.py",
+                "--model",
+                model,
+                "--seed",
+                "42",
+                "--validation-fraction",
+                "0.25",
+            ],
+        )
 
     config = HirakuConfig.discover(project)
     root = load_record("heart-disease", config=config)

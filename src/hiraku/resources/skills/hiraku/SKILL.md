@@ -15,9 +15,9 @@ through an existing record lifecycle.
 ## Core concepts
 
 - **Record:** A research scope or focused investigation. A root may record the
-  goal, question, metrics, branch, a shared command, and evolving findings.
-  A child has one `parent_id`, may begin as an unbound proposal, may bind the
-  source commit being evaluated, and may override the inherited command. Its
+  goal, question, metrics, branch, tracking defaults, and evolving findings.
+  A child has one `parent_id`, may begin as an unbound proposal, and may bind
+  the source commit being evaluated. Its
   optional `type` describes its role, such as experiment, diagnostic, or
   ablation. `related_to` links records without inheritance.
   Fields inherit from the nearest parent definition by default; `id`,
@@ -25,8 +25,8 @@ through an existing record lifecycle.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and invocation attribution together with
   parameters, metrics, timestamps, and an external URL.
-- **Command:** One optional argv list inherited from the nearest record,
-  starting at the root record. Explicit commands need no registration.
+- **Command:** Explicit argv passed to each `hiraku run` invocation. Commands
+  are not stored in records.
 - **Execution:** A foreground command in the current project working tree.
   Hiraku streams output, returns the command's exit code, and supplies tracking
   attribution for that invocation.
@@ -49,10 +49,8 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage context records | `hiraku context ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
-Use `record show`
-to resolve canonical records and effective commands before making changes or
-launching work. Inspect the resolved command with `hiraku record show` before
-running it when needed.
+Use `record show` to inspect canonical records and effective research and
+tracking defaults before making changes or running commands.
 
 ## Operating scope
 
@@ -141,8 +139,7 @@ additional fields such as `hypothesis`, `result`, `conclusion`, `decision`, and
 Each root and its descendants are stored at
 `hiraku/records/{root_id}/{record_id}.md`. IDs are unique across the project.
 Use `record show` to see effective values and their sources, or `--raw` for
-the stored fields. An explicit `null` clears an inherited field; a command
-replaces the complete inherited argv list.
+the stored fields. An explicit `null` clears an inherited field.
 
 ## Protect user work and use the intended branches
 
@@ -228,13 +225,11 @@ For high-level child-record work:
    relevant code, make and verify the focused change, commit it if authorized,
    then bind that commit with `hiraku record update <record-id> --commit
    HEAD`.
-5. Inspect the runnable code and decide which command to submit. Records do
-   not need a default command; pass the invocation directly after `--`. Set an
-   inherited command only when it is useful for repeated project runs.
+5. Inspect the runnable code and decide which argv to submit to `hiraku run`.
 6. Bind `--commit HEAD` during creation only when the record already
    represents the current source state. Leave a future idea as an unbound
    proposal and update its commit after implementation.
-7. Verify the resulting record, resolved commit, and command.
+7. Verify the resulting record and resolved commit.
 
 ```bash
 hiraku record create <record-id> --parent <root-id> --type experiment \
@@ -246,7 +241,7 @@ hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
 ```
 
 Creating a record activates it by default. Several children may share a
-commit and differ by command arguments. Follow the effective record branch
+commit and use different explicit command arguments. Follow the effective record branch
 recorded for implementation; create or change that branch assignment only when
 the user or selected program asks for it. Ordinary Git operations remain
 responsible for commits and merges.
@@ -264,7 +259,7 @@ code writes the run to its backend.
 
 For a high-level run request:
 
-1. Inspect the record, revision, command, dependencies, and tracking destination.
+1. Inspect the record, revision, runnable code, dependencies, and tracking destination.
 2. Inspect source changes and confirm data and environments are available at
    their configured paths.
 3. Run with explicit record attribution and inspect output and the exit code.
@@ -316,10 +311,10 @@ instructions override program defaults.
 
 ## Commands and tracking details
 
-Records do not need a default command. Pass the invocation directly after `--`,
-for example `hiraku run --record <record-id> -- uv run --locked python train.py
---seed 42`. An optional `command:` on a root record can shorten repeated runs;
-children inherit it, and explicit argv replaces the entire default command.
+Commands are not record metadata. Pass the complete invocation directly after
+`--`, for example `hiraku run --record <record-id> -- uv run --locked python
+train.py --seed 42`. A dispatcher can prepare repeatable project-specific
+runtime behavior around that invocation.
 
 Commands execute in the current project working tree, including uncommitted
 changes. `hiraku run` waits until the command exits.

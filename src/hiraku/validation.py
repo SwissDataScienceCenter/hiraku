@@ -21,6 +21,15 @@ def reject_entrypoints(values: Any) -> Any:
     return values
 
 
+def reject_record_command(values: Any) -> Any:
+    """Keep execution argv out of record metadata."""
+    if isinstance(values, Mapping) and "command" in values:
+        raise ValidationError(
+            "command is not a record field; pass argv to `hiraku run` after --"
+        )
+    return values
+
+
 def validate_command(value: Any) -> list[str] | None:
     """Validate command configuration as a literal argv sequence."""
     if value is None:

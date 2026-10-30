@@ -15,7 +15,7 @@ from .validation import validate_command
 
 
 def execute_command(
-    command: Sequence[str] | None = None,
+    command: Sequence[str],
     *,
     record_id: str | None = None,
     dispatch: str | None = None,
@@ -31,10 +31,11 @@ def execute_command(
     record = load_record(selected_record, config=selected)
     if isinstance(command, str | bytes):
         raise ValidationError("command must be an argv sequence, not a shell string")
-    inherited = record.resolve_command(config=selected)
-    argv = validate_command(list(command) if command is not None else inherited)
+    if command is None or isinstance(command, str | bytes):
+        raise ValidationError("command must be an argv sequence")
+    argv = validate_command(list(command))
     if argv is None:
-        raise ValidationError("No default command; supply a command after --")
+        raise ValidationError("command must be a non-empty argv sequence")
 
     additions = dict(env or {})
     if any(

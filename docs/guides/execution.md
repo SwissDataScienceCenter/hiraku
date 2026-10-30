@@ -10,16 +10,10 @@ command's exit code. No execution receipt or status record is stored.
 hiraku run --record experiment-1 -- uv run python train.py --epochs 20
 ```
 
-If the selected record inherits a default command, omit the command after `--`:
-
-```bash
-hiraku run --record experiment-1
-```
-
-Without `--record`, Hiraku uses the active record. A command after `--`
-replaces the inherited command. Arguments are passed as an argv list; Hiraku
-does not evaluate a shell string. Use `sh -c` explicitly when shell syntax is
-needed.
+Without `--record`, Hiraku uses the active record. Commands are not stored on
+records: pass the complete invocation after `--` each time. Arguments are
+passed as an argv list; Hiraku does not evaluate a shell string. Use `sh -c`
+explicitly when shell syntax is needed.
 
 Execution happens in the existing project working tree. Dirty and uncommitted
 changes are available to the command. Hiraku sets `HIRAKU_RECORD_ID`,
@@ -27,7 +21,8 @@ changes are available to the command. Hiraku sets `HIRAKU_RECORD_ID`,
 creates and owns its run IDs; Hiraku does not create a second identifier for
 the command invocation.
 
-An optional dispatcher can prepare an environment around the command:
+An optional dispatcher can prepare repeatable project-specific runtime
+behavior around the supplied command:
 
 ```bash
 hiraku run --record experiment-1 --dispatch slurm -- uv run python train.py

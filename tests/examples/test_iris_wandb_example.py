@@ -154,25 +154,27 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "hypothesis=A linear classifier provides a strong Iris baseline.",
             "--commit",
             "HEAD",
-            "--set",
-            f"command=[{sys.executable}, train.py, --model, logistic, "
-            "--seed, '42', --test-size, '0.25']",
         ],
     )
     record = load_record("logistic", config=config)
     assert record.commit == source_commit
-    assert record.command == [
-        sys.executable,
-        "train.py",
-        "--model",
-        "logistic",
-        "--seed",
-        "42",
-        "--test-size",
-        "0.25",
-    ]
-
-    invoke(runner, ["run", "--record", "logistic"])
+    invoke(
+        runner,
+        [
+            "run",
+            "--record",
+            "logistic",
+            "--",
+            sys.executable,
+            "train.py",
+            "--model",
+            "logistic",
+            "--seed",
+            "42",
+            "--test-size",
+            "0.25",
+        ],
+    )
     rows = json.loads(
         invoke(runner, ["runs", "--record", "iris", "--all", "--json"]).output
     )
