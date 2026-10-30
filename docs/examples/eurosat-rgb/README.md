@@ -21,7 +21,6 @@ Then create a project and let Hiraku install the training script, model definiti
 ```bash
 hiraku example create eurosat-rgb --git
 cd eurosat-rgb
-uv sync
 
 git add .
 git add hiraku/dispatch
@@ -109,6 +108,3 @@ hiraku runs --record eurosat --all --sort val/accuracy
 ```
 
 Each run stores Hiraku provenance, model and dataset configuration, random seed, training hyperparameters, epoch-level metrics, model parameter count, and W&B metadata.
-### Command execution
-
-Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.
