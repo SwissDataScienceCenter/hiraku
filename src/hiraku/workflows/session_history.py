@@ -17,15 +17,19 @@ CHECKPOINTS = "langgraph-checkpoints.sqlite"
 
 
 def checkpoint_database(config: HirakuConfig) -> Path:
-    """Prepare a local-only home for checkpoints and session locks."""
+    """Return the checkpoint database path without changing the filesystem."""
+    legacy = config.hiraku_dir / CHECKPOINTS
+    return legacy if legacy.exists() else config.hiraku_dir / ".hiraku" / CHECKPOINTS
+
+
+def prepare_checkpoint_storage(config: HirakuConfig) -> Path:
+    """Create the local-only checkpoint directory and return its database path."""
     directory = config.hiraku_dir / ".hiraku"
     directory.mkdir(parents=True, exist_ok=True)
     ignore = directory / ".gitignore"
     if not ignore.exists():
         ignore.write_text("*\n", encoding="utf-8")
-    # Preserve access to databases created by earlier versions.
-    legacy = config.hiraku_dir / CHECKPOINTS
-    return legacy if legacy.exists() else directory / CHECKPOINTS
+    return checkpoint_database(config)
 
 
 def _context_json(context: Mapping[str, Any] | None) -> str:
@@ -87,8 +91,7 @@ def record_event(
     """Atomically append an event and update Hiraku's session index."""
     encoded = _context_json(context)
     timestamp = datetime.now(UTC).isoformat()
-    database = checkpoint_database(config)
-    database.parent.mkdir(parents=True, exist_ok=True)
+    database = prepare_checkpoint_storage(config)
     with closing(sqlite3.connect(database, timeout=30)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         _initialize(connection)

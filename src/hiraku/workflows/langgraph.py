@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-import logging
 import re
 import sys
 from collections.abc import Iterator, Mapping
@@ -21,9 +20,12 @@ from langgraph.types import Command
 from ..config import HirakuConfig
 from ..errors import ValidationError, WorkflowError
 from ..record import Record
-from .session_history import checkpoint_database, record_event, validate_context
+from .session_history import (
+    prepare_checkpoint_storage,
+    record_event,
+    validate_context,
+)
 
-logger = logging.getLogger(__name__)
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 
@@ -81,26 +83,17 @@ def start_workflow(
             config=config,
             context=context,
         )
-        try:
-            graph.invoke(
-                {
-                    "arguments": dict(arguments or {}),
-                    "run_id": workflow_session_id,
-                },
-                _thread_config(workflow_session_id),
-            )
-        except Exception as exc:
-            record_event(
-                workflow_session_id,
-                workflow_id,
-                "failed",
-                "failed",
-                config=config,
-                context=context,
-                error_type=type(exc).__name__,
-            )
-            raise
-        return _record_snapshot(graph, workflow_id, workflow_session_id, config)
+        return _invoke_and_record(
+            graph,
+            workflow_id,
+            workflow_session_id,
+            {
+                "arguments": dict(arguments or {}),
+                "run_id": workflow_session_id,
+            },
+            config,
+            context,
+        )
 
 
 def resume_workflow(
@@ -114,7 +107,7 @@ def resume_workflow(
     """Resume a paused graph with the harness's structured response."""
     validate_context(context)
     lock_dir = config.hiraku_dir / ".hiraku" / "locks"
-    checkpoint_database(config)
+    prepare_checkpoint_storage(config)
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_name = hashlib.sha256(workflow_session_id.encode()).hexdigest()
     with FileLock(str(lock_dir / f"{lock_name}.lock")):
@@ -153,22 +146,14 @@ def _resume_locked(
             context=context,
             checkpoint_id=snapshot.config.get("configurable", {}).get("checkpoint_id"),
         )
-        try:
-            graph.invoke(
-                Command(resume=dict(response)), _thread_config(workflow_session_id)
-            )
-        except Exception as exc:
-            record_event(
-                workflow_session_id,
-                graph_workflow,
-                "failed",
-                "failed",
-                config=config,
-                context=context,
-                error_type=type(exc).__name__,
-            )
-            raise
-        return _record_snapshot(graph, graph_workflow, workflow_session_id, config)
+        return _invoke_and_record(
+            graph,
+            graph_workflow,
+            workflow_session_id,
+            Command(resume=dict(response)),
+            config,
+            context,
+        )
 
 
 def workflow_status(
@@ -193,42 +178,22 @@ def workflow_mermaid(workflow_id: str, *, config: HirakuConfig) -> str:
 def _find_run(workflow_session_id: str, config: HirakuConfig) -> str | None:
     workflow_id, separator, checkpoint_id = workflow_session_id.partition(":")
     if (
-        separator
-        and _WORKFLOW_ID.fullmatch(workflow_id)
-        and re.fullmatch(r"[0-9a-f]{32}", checkpoint_id)
-        and workflow_id in workflow_ids(config=config)
+        not separator
+        or not _WORKFLOW_ID.fullmatch(workflow_id)
+        or not re.fullmatch(r"[0-9a-f]{32}", checkpoint_id)
+        or workflow_id not in workflow_ids(config=config)
     ):
-        try:
-            with _compiled_graph(workflow_id, config) as graph:
-                snapshot = graph.get_state(_thread_config(workflow_session_id))
-            return workflow_id if snapshot.values else None
-        except Exception as exc:
-            logger.warning("LangGraph workflow %s is unavailable: %s", workflow_id, exc)
-            return None
-
-    # Older PoC runs used bare UUIDs. They are unambiguous while only one graph
-    # has checkpoints; fail safely if multiple graphs claim the same thread.
-    matches = []
-    for candidate in workflow_ids(config=config):
-        try:
-            with _compiled_graph(candidate, config) as graph:
-                snapshot = graph.get_state(_thread_config(workflow_session_id))
-            if snapshot.values:
-                matches.append(candidate)
-        except Exception as exc:
-            logger.warning("LangGraph workflow %s is unavailable: %s", candidate, exc)
-    if len(matches) > 1:
-        raise ValidationError(
-            f"Workflow session {workflow_session_id!r} matches multiple graphs: "
-            f"{', '.join(matches)}"
-        )
-    return matches[0] if matches else None
+        return None
+    with _compiled_graph(workflow_id, config) as graph:
+        snapshot = graph.get_state(_thread_config(workflow_session_id))
+    return workflow_id if snapshot.values else None
 
 
 @contextmanager
 def _compiled_graph(workflow_id: str, config: HirakuConfig) -> Iterator[Any]:
-    if workflow_id not in workflow_ids(config=config):
-        available = ", ".join(workflow_ids(config=config)) or "none"
+    available_workflows = workflow_ids(config=config)
+    if workflow_id not in available_workflows:
+        available = ", ".join(available_workflows) or "none"
         raise WorkflowError(
             f"Unknown LangGraph workflow {workflow_id!r}; available: {available}"
         )
@@ -238,8 +203,7 @@ def _compiled_graph(workflow_id: str, config: HirakuConfig) -> Iterator[Any]:
     factory = getattr(module, "build_graph", None)
     if not callable(factory):
         raise WorkflowError(f"{directory / 'workflow.py'} must export build_graph")
-    database = checkpoint_database(config)
-    database.parent.mkdir(parents=True, exist_ok=True)
+    database = prepare_checkpoint_storage(config)
     with SqliteSaver.from_conn_string(str(database)) as checkpointer:
         try:
             graph = factory(checkpointer, config=config)
@@ -278,6 +242,7 @@ def _workflow_input_schema(module: ModuleType, workflow_id: str) -> dict[str, An
 
 
 def _import_graph(path: Path) -> ModuleType:
+    # Reload on each operation so edits to project workflow files take effect.
     digest = hashlib.sha256(str(path.parent.parent.resolve()).encode()).hexdigest()
     name = f"_hiraku_langgraph_{digest[:16]}_{path.parent.name}"
     sys.modules.pop(name, None)
@@ -298,6 +263,30 @@ def _import_graph(path: Path) -> ModuleType:
 
 def _thread_config(workflow_session_id: str) -> dict[str, dict[str, str]]:
     return {"configurable": {"thread_id": workflow_session_id}}
+
+
+def _invoke_and_record(
+    graph: Any,
+    workflow_id: str,
+    workflow_session_id: str,
+    invocation: Any,
+    config: HirakuConfig,
+    context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    try:
+        graph.invoke(invocation, _thread_config(workflow_session_id))
+    except Exception as exc:
+        record_event(
+            workflow_session_id,
+            workflow_id,
+            "failed",
+            "failed",
+            config=config,
+            context=context,
+            error_type=type(exc).__name__,
+        )
+        raise
+    return _record_snapshot(graph, workflow_id, workflow_session_id, config)
 
 
 def _record_snapshot(
