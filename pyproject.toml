@@ -57,6 +57,7 @@ dev = [
   "mkdocs-click>=0.9.0",
   "ty>=0.0.79",
   "bump-my-version>=1.5.1",
+  "pytest-cov>=7.1.0",
 ]
 
 [tool.uv.build-backend]
