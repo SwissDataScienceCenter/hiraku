@@ -22,6 +22,7 @@ hiraku example create iris-wandb --git
 cd iris-wandb
 uv sync
 git add .
+git add hiraku/dispatch
 git commit -m "initialize Iris W&B example"
 ```
 
@@ -57,14 +58,13 @@ hiraku status
 hiraku record create logistic --parent iris --type experiment \
   --set "summary=Logistic regression baseline" \
   --set "hypothesis=A regularized linear classifier provides a strong Iris baseline." \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: logistic, seed: 42, test-size: 0.25}}}'
+  --commit HEAD
 
 hiraku record show logistic
-hiraku record entrypoints logistic
+hiraku record show logistic
 
-hiraku launch train --record logistic --dry-run
-hiraku launch train --record logistic
+hiraku run --record logistic -- \
+  uv run python train.py --model logistic --seed 42 --test-size 0.25
 hiraku runs --record iris --all
 hiraku runs --record logistic
 ```
@@ -75,18 +75,18 @@ hiraku runs --record logistic
 hiraku record create random-forest --parent iris --type experiment \
   --set "summary=Random forest comparison" \
   --set "hypothesis=A random forest improves Iris classification accuracy." \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {model: random_forest, seed: 42, test-size: 0.25}}}'
+  --commit HEAD
 
-hiraku launch train --record random-forest
+hiraku run --record random-forest -- \
+  uv run python train.py --model random_forest --seed 42 --test-size 0.25
 hiraku runs --record iris --all --sort test/accuracy
 ```
 
-Each run stores Hiraku provenance, model and dataset configuration, seed,
-Python version, runtime, tags, group, notes, and summary metrics. The training
-script creates the remote W&B project on its first successful `wandb.init()`
-call. Hiraku itself queries and normalizes W&B runs; it does not create the
-W&B project or run.
+Each run stores model and dataset configuration, seed, Python version, runtime,
+tags, group, notes, and summary metrics. W&B assigns the native run ID. Hiraku
+reads record and commit provenance from run metadata. The training script creates the remote W&B project
+on its first successful `wandb.init()` call. Hiraku queries and normalizes W&B
+runs; it does not create the W&B project or run.
 
 ??? info "Example run results"
     These results are from the example's W&B runs. Click a column heading to
@@ -96,3 +96,7 @@ W&B project or run.
     | --- | --- | --- | ---: | ---: | ---: |
     | `logistic` | `kwh698ea` | Logistic regression | 0.9474 | 0.9487 | 0.1757 |
     | `random-forest` | `y5czffeu` | Random forest | 0.9211 | 0.9230 | 0.1789 |
+
+### Command execution
+
+Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.

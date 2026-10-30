@@ -105,11 +105,42 @@ def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch)
     assert not (tmp_path / "generate_results.py").exists()
 
 
+def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
+    import hiraku.cli as cli
+    from hiraku.record import Record
+
+    def export(output):
+        generated = HirakuConfig.init(output, install_skill=False)
+        Record.create("generated", config=generated)
+        (output / "runs.csv").write_text("id,record_id\nrun,generated\n")
+
+    monkeypatch.setattr(
+        cli.runpy, "run_path", lambda path: {"generate_results": export}
+    )
+    result = CliRunner().invoke(
+        main,
+        [
+            "example",
+            "create",
+            "heart-disease",
+            str(tmp_path),
+            "--generate",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    config = HirakuConfig.discover(tmp_path)
+    assert config.active_record_id == "generated"
+    assert load_record("generated", config=config).runs(config=config)[0].id == "run"
+    assert not (tmp_path / ".git").exists()
+
+
 def test_generator_does_not_publish_failed_batch(generator, tmp_path, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("training failed")
 
-    monkeypatch.setitem(generator["generate_results"].__globals__, "launch", fail)
+    monkeypatch.setitem(
+        generator["generate_results"].__globals__, "execute_command", fail
+    )
     output = tmp_path / "results"
     with pytest.raises(RuntimeError, match="training failed"):
         generator["generate_results"](output)
@@ -147,7 +178,7 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
         "random-forest": 3,
         "forest-tuning": 3,
     }
-    assert all(r.entrypoint == "train" and r.timestamp for r in runs)
+    assert all(r.id and r.timestamp for r in runs)
     assert all(r.decision is None for r in list_records(config=config))
 
 

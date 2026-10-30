@@ -1,5 +1,3 @@
 hiraku_dir: hiraku
 default_dispatch: launch.sh
-tracking_backend:
-  type: csv
 active_record_id: random-forest

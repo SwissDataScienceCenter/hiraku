@@ -182,24 +182,25 @@ class WandbBackend(TrackingBackend):
             "metadata": run.metadata,
         }
 
-    @classmethod
-    def _normalize_run(cls, run: Any) -> Run:
+    def _normalize_run(self, run: Any) -> Run:
         """Convert one W&B public run object into Hiraku's normalized model."""
         from ..run import Run
 
-        config = cls._run_config(run)
+        config = self._run_config(run)
+        record_id = config.get("hiraku.record_id")
+        commit = config.get("hiraku.commit")
         return Run(
             id=run.id,
             metrics=dict(run.summary or {}),
-            params=cls._run_params(run),
-            record_id=config.get("hiraku.record_id"),
-            commit=config.get("hiraku.commit"),
+            params=self._run_params(run),
+            record_id=record_id,
+            commit=commit,
             timestamp=run.created_at,
             # W&B keeps a run's wall-clock seconds in the ``_runtime`` summary key.
             duration=(run.summary or {}).get("_runtime"),
             entrypoint=config.get("hiraku.entrypoint"),
             url=run.url,
-            raw=cls._run_raw(run),
+            raw=self._run_raw(run),
         )
 
     def _read_source_runs(self, **options: Any) -> list[Run]:

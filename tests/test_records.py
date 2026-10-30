@@ -51,6 +51,14 @@ def test_context_material_uses_the_record_registry(tmp_path: Path) -> None:
     assert not (config.hiraku_dir / "contexts").exists()
 
 
+def test_record_commit_is_local_not_inherited(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    root = Record.create("root", commit="a" * 40, config=config)
+    child = Record.create("child", parent_id=root.id, config=config)
+    assert child.commit is None
+    assert "commit" not in child.resolve(config=config).values
+
+
 @pytest.mark.parametrize(
     "content",
     ["id: no-front-matter\n", "---\n- one\n- two\n---\n", "---\nid: [\n---\n"],

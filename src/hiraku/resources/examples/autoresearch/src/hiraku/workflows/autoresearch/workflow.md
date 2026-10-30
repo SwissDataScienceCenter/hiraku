@@ -48,8 +48,8 @@ Once you get confirmation, kick off the experimentation.
 
 Each experiment runs on a single GPU. The training script runs for a **fixed
 time budget of 5 minutes** (wall clock training time, excluding
-startup/compilation). You launch it as:
-`hiraku launch train --record <experiment-id>`.
+startup/compilation). Submit the invocation directly:
+`hiraku run --record <experiment-id> -- uv run python train.py`.
 
 **The first run**: Your very first run should always be to establish the
 baseline, so you will run the training script as is. If no successful baseline
@@ -63,7 +63,7 @@ hiraku record create baseline --parent <root-id> --type experiment \
   --set 'summary=Unmodified upstream baseline' \
   --set 'hypothesis=The upstream implementation establishes the reference val_bpb' \
   --commit HEAD
-hiraku launch train --record baseline > run.log 2>&1
+hiraku run --record baseline -- uv run python train.py
 hiraku runs --record baseline --json
 ```
 
@@ -104,13 +104,13 @@ LOOP FOREVER:
    --set 'summary=<summary>' --set 'hypothesis=<hypothesis>' --commit HEAD`.
    Never rebind a completed attempt to another commit.
 5. Run the experiment:
-   `hiraku launch train --record <experiment-id> > run.log 2>&1` (redirect everything —
-   do NOT use tee or let output flood your context).
+   run `hiraku run --record <experiment-id> -- uv run python train.py` and wait
+   for the command to finish before inspecting measurements.
 6. Inspect the result with
    `hiraku runs --record <experiment-id> --json`.
-7. If the recorded execution crashed or timed out, run `tail -n 50 run.log` to
-   read the Python stack trace or final diagnostics. If the dispatcher did not
-   record a row, inspect the log and treat the missing result as a failure.
+7. If execution fails or times out, inspect the terminal output for the Python
+   stack trace or final diagnostics. If the dispatcher did not record a row,
+   treat the missing result as a failure.
 8. Update the experiment record with its decision and evidence-backed
    conclusion. Do this before changing Git history.
 9. If val_bpb improved (lower), you "advance" the branch, keeping the git

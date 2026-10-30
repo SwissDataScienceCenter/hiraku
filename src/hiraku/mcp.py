@@ -37,7 +37,7 @@ from pydantic_core import to_jsonable_python
 from .base import BaseRecord
 from .config import HirakuConfig
 from .errors import HirakuError, ValidationError, WorkflowError
-from .launch import launch, render_arguments
+from .execution import execute_command
 from .record import Record, list_records, load_record
 from .workflows.session import EventResult, Session, list_sessions, load_session
 from .workflows.workflow import (
@@ -50,10 +50,11 @@ from .workflows.workflow import (
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, and runs workflows that guide you step by step.
-Start a workflow with the tool named after it (workflow_list lists them), and
-answer its instructions by sending events with workflow_send_event, as its
-description explains. Use session_list and session_show to resume earlier
-sessions.\
+Run commands with execute; it waits for the command and returns its output and
+exit code. Start a workflow with the tool named after it
+(workflow_list lists them), and answer its instructions by sending events with
+workflow_send_event, as its description explains. Use session_list and
+session_show to resume earlier sessions.\
 """
 
 EVENT_GUIDE = """\
@@ -219,40 +220,23 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         return {"deleted": record_id}
 
     @server.tool()
-    def launch_entrypoint(
+    def execute(
         record_id: str,
-        entrypoint_name: str,
-        args: dict[str, Any] | None = None,
-        commit: str | None = None,
+        command: list[str],
         dispatch: str | None = None,
-        dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Launch a configured entrypoint with attribution, or preview its command."""
-        entrypoint = load_record(record_id, config=selected).entrypoint(
-            entrypoint_name, config=selected
-        )
-        if dry_run:
-            return {
-                "command": [
-                    *entrypoint.command,
-                    *render_arguments({**entrypoint.args, **(args or {})}),
-                ]
-            }
-        result = launch(
-            entrypoint,
-            name=entrypoint_name,
-            args=args,
+        """Run a command in the foreground and return its output and exit code."""
+        result = execute_command(
+            command,
             record_id=record_id,
-            commit=commit,
             dispatch=dispatch,
             capture_output=True,
-            check=False,
             config=selected,
         )
         return {
             "returncode": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
+            "stdout": result.stdout or "",
+            "stderr": result.stderr or "",
         }
 
     @server.tool()

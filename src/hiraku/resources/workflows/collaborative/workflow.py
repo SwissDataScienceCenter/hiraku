@@ -11,6 +11,7 @@ from hiraku.errors import EventRejected, HirakuError, NotReady
 from hiraku.git import GitRepository
 from hiraku.record import Record, load_record
 from hiraku.run import Run
+from hiraku.validation import validate_command
 from hiraku.workflows.graph import State, event, node, start
 from hiraku.workflows.workflow import Instruction, Workflow
 
@@ -22,9 +23,10 @@ STEPS = ["draft", "implement", "launch", "analyze"]
 class Experiments(State):
     node: str = "draft"
     task: str
-    entrypoint: str
+    command: list[str] | None = None
     rounds: int
     experiment: str | None = None
+    run_id: str | None = None
     feedback: str | None = None
     results: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -48,7 +50,7 @@ class Collaborative(Workflow):
         task: Annotated[
             str | None, "Task record; defaults to the active record."
         ] = None,
-        entrypoint: Annotated[str, "Entrypoint of the task to launch."] = "train",
+        command: Annotated[list[str], "Command argv to use for each experiment."],
         rounds: Annotated[int, "Most experiments to run.", Field(gt=0)] = 3,
     ) -> Experiments:
         """Start collaborative research on a task record."""
@@ -56,10 +58,10 @@ class Collaborative(Workflow):
             task = task or self.config.active_record_id
             if task is None:
                 raise EventRejected("No active record; pass the task record ID")
-            load_record(task, config=self.config).entrypoint(
-                entrypoint, config=self.config
-            )
-            return Experiments(task=task, entrypoint=entrypoint, rounds=rounds)
+            command = validate_command(command)
+            if command is None:
+                raise EventRejected("command must be a non-empty argv sequence")
+            return Experiments(task=task, command=command, rounds=rounds)
         except EventRejected:
             raise
         except HirakuError as exc:
@@ -80,23 +82,20 @@ class Collaborative(Workflow):
     def launching(self, experiments: Experiments) -> Instruction:
         context = self._experiment_context(experiments)
         record = self._experiment(experiments)
-        context["command"] = shlex.join(
-            [
-                "hiraku",
-                "launch",
-                experiments.entrypoint,
-                "--record",
-                record.id,
-                "--commit",
-                str(record.commit),
-            ]
-        )
+        argv = [
+            "hiraku",
+            "run",
+            "--record",
+            record.id,
+        ]
+        argv.extend(["--", *experiments.command])
+        context["command"] = shlex.join(argv)
         return self._step(experiments, "## Launch", context)
 
     @node("analyze")
     def analyzing(self, experiments: Experiments) -> Instruction:
         record = self._experiment(experiments)
-        runs = _runs(record, self, experiments.entrypoint)
+        runs = _runs(record, self, experiments.run_id)
         if not any(run.metrics for run in runs):
             raise NotReady(
                 f"The runs of {record.id!r} have no metrics yet; "
@@ -171,23 +170,31 @@ class Collaborative(Workflow):
             raise EventRejected(str(exc)) from exc
 
     @event(source="launch", dest="analyze")
-    def launched(self, experiments: Experiments) -> Experiments:
-        """Report that the experiment's run is tracked."""
+    def launched(
+        self,
+        experiments: Experiments,
+        *,
+        run_id: Annotated[str, "ID of the newly tracked run."],
+    ) -> Experiments:
+        """Report that the foreground execution produced a tracked run."""
         try:
             record = self._experiment(experiments)
-            runs = _runs(record, self, experiments.entrypoint)
+            runs = _runs(record, self, run_id)
             if not runs:
                 raise NotReady(
-                    f"No run is attributed to {record.id!r} yet; "
-                    "send the event again once the launch is tracked"
+                    f"Run {run_id!r} is not visible in the tracking source yet"
                 )
-            if any(run.commit not in (None, record.commit) for run in runs):
+            run = runs[0]
+            if run.commit not in (None, record.commit):
                 raise EventRejected(
-                    f"A run of {record.id!r} used another commit than {record.commit}"
+                    f"Run {run_id!r} used another commit than {record.commit}"
                 )
+            if not run.metrics:
+                raise NotReady(f"Run {run_id!r} has no metrics yet")
             record.status = "launched"
             record.save()
             experiments.node = "analyze"
+            experiments.run_id = run_id
             experiments.feedback = None
             return experiments
         except EventRejected:
@@ -289,12 +296,10 @@ class Collaborative(Workflow):
         return load_record(experiments.experiment, config=self.config)
 
 
-def _runs(record: Record, workflow: Workflow, entrypoint: str) -> list[Run]:
-    return [
-        run
-        for run in record.runs(config=workflow.config)
-        if run.entrypoint == entrypoint
-    ]
+def _runs(record: Record, workflow: Workflow, run_id: str | None) -> list[Run]:
+    if run_id is None:
+        return []
+    return [run for run in record.runs(config=workflow.config) if run.id == run_id]
 
 
 WORKFLOW = Collaborative

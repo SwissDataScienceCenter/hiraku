@@ -1,47 +1,22 @@
-"""Research records, entrypoints, and metric declarations."""
+"""Research records, commands, and metric declarations."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Self, TypeAlias
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .base import BaseRecord
 from .errors import RecordExistsError, RecordNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml
 from .run import Run
 from .tracking import TrackingBackend, create_backend
-from .validation import validate_identifier
-
-ArgumentScalar: TypeAlias = str | int | float | Path
-ArgumentValue: TypeAlias = ArgumentScalar | bool | None | Sequence[ArgumentScalar]
-
-
-class Entrypoint(BaseModel):
-    """A command and default named arguments."""
-
-    model_config = ConfigDict(extra="forbid")
-    command: list[str]
-    args: dict[str, ArgumentValue] = Field(default_factory=dict)
-
-    @field_validator("args", mode="before")
-    @classmethod
-    def validate_args_mapping(cls, value: Any) -> Any:
-        if not isinstance(value, Mapping):
-            raise ValueError("Entrypoint args must be a mapping")
-        return value
-
-    @field_validator("command")
-    @classmethod
-    def validate_command(cls, value: list[str]) -> list[str]:
-        if not value or any(not item for item in value):
-            raise ValidationError("Entrypoint command must be non-empty strings")
-        return value
+from .validation import reject_entrypoints, reject_record_command, validate_identifier
 
 
 class Metric(BaseModel):
@@ -54,6 +29,7 @@ class Metric(BaseModel):
 _LOCAL_FIELDS = frozenset(
     {"id", "parent_id", "related_to", "type", "commit", "status", "decision"}
 )
+_MATERIALIZED_INHERITED_FIELDS = ("metrics", "tracking_backend")
 
 
 @dataclass(frozen=True)
@@ -72,9 +48,11 @@ class Record(BaseRecord):
     status: str | None = None
     decision: str | None = None
     branch: str | None = None
-    entrypoints: dict[str, Any] | None = None
     metrics: list[Any] | None = None
     tracking_backend: str | dict[str, Any] | None = None
+
+    _reject_command = model_validator(mode="before")(reject_record_command)
+    _reject_entrypoints = model_validator(mode="before")(reject_entrypoints)
 
     @field_validator("parent_id")
     @classmethod
@@ -106,13 +84,6 @@ class Record(BaseRecord):
     def validate_research_fields(self) -> Self:
         if self.parent_id == self.id or self.id in self.related_to:
             raise ValidationError("A record cannot refer to itself")
-        if self.entrypoints is not None:
-            for name in self.entrypoints:
-                validate_identifier(name, label="entrypoint name")
-            self.__dict__["entrypoints"] = {
-                name: Entrypoint.model_validate(value)
-                for name, value in self.entrypoints.items()
-            }
         if self.metrics is not None:
             self.__dict__["metrics"] = [
                 Metric.model_validate(item) for item in self.metrics
@@ -156,6 +127,7 @@ class Record(BaseRecord):
         config: Any = None,
         **fields: Any,
     ) -> Record:
+        """Create a record, materializing inherited metrics and tracking defaults."""
         selected = _config(config)
         index = _record_index(selected)
         if record_id in index:
@@ -166,12 +138,18 @@ class Record(BaseRecord):
         for link in links:
             if link not in index:
                 raise RecordNotFoundError(f"Related record {link!r} not found")
+        values = dict(fields)
+        if parent_id is not None:
+            inherited = index[parent_id].resolve(config=selected).values
+            for name in _MATERIALIZED_INHERITED_FIELDS:
+                if name not in values and name in inherited:
+                    values[name] = inherited[name]
         record = cls(
             id=record_id,
             parent_id=parent_id,
             related_to=links,
             markdown=markdown,
-            **fields,
+            **values,
         )
         root_id = _root_id(parent_id, index) if parent_id else record_id
         record.save(selected.records_dir / root_id / f"{record_id}.md")
@@ -323,22 +301,19 @@ class Record(BaseRecord):
         index = {item.id: item for item in list_records(config=config)}
         return [item for item in index.values() if _is_descendant(item, self.id, index)]
 
-    def entrypoint(self, name: str, *, config: Any = None) -> Any:
-        from .errors import EntrypointNotFoundError
-
-        entrypoints = self.resolve(config=config).values.get("entrypoints") or {}
-        try:
-            return entrypoints[name]
-        except KeyError as exc:
-            raise EntrypointNotFoundError(
-                f"Record {self.id!r} has no entrypoint {name!r}"
-            ) from exc
+    def tracking_backend_spec(self, *, config: Any = None) -> dict[str, Any]:
+        """Return the nearest tracking backend, defaulting to CSV."""
+        specification = self.resolve(config=config).values.get("tracking_backend")
+        if specification is None:
+            return {"type": "csv"}
+        if isinstance(specification, str):
+            return {"type": specification}
+        return dict(specification)
 
     def resolve_tracking_backend(self, *, config: Any = None) -> TrackingBackend:
         """Create the tracking backend inherited by this record."""
         selected = _config(config)
-        specification = self.resolve(config=selected).values.get("tracking_backend")
-        return create_backend(specification or selected.tracking_backend, selected)
+        return create_backend(self.tracking_backend_spec(config=selected), selected)
 
     def runs(self, *, config: Any = None, **query: Any) -> list[Run]:
         """Return runs attributed to this record."""
@@ -536,19 +511,7 @@ def _resolve(
             if key not in _LOCAL_FIELDS
         }
     for key, value in record.to_dict().items():
-        if key == "entrypoints" and isinstance(value, dict):
-            values[key] = {
-                **(values.get(key) or {}),
-                **{
-                    name: Entrypoint.model_validate(item)
-                    for name, item in value.items()
-                },
-            }
-            sources[key] = {
-                **(sources.get(key) or {}),
-                **dict.fromkeys(value, record.id),
-            }
-        elif key == "metrics" and isinstance(value, list):
+        if key == "metrics" and isinstance(value, list):
             values[key] = [Metric.model_validate(item) for item in value]
             sources[key] = record.id
         else:

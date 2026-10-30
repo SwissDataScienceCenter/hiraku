@@ -15,6 +15,8 @@ from .errors import ValidationError
 class Run(BaseModel):
     """An immutable run returned by a tracking backend.
 
+    ``id`` is the tracking backend's run ID.
+
     ``timestamp`` is when the run started and ``duration`` its wall-clock
     length in seconds; either is ``None`` when the backend does not report it.
     """

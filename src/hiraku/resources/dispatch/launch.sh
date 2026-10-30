@@ -21,10 +21,12 @@ done
 
 [ "$#" -gt 0 ] || { echo "launch.sh: missing command after --" >&2; exit 2; }
 
-export HIRAKU_COMMIT=
-export HIRAKU_GIT_STATE=unavailable
+if [ -z "${HIRAKU_SOURCE_DIGEST:-}" ]; then
+  export HIRAKU_COMMIT=
+  export HIRAKU_GIT_STATE=unavailable
+fi
 
-if command -v git >/dev/null 2>&1 &&
+if [ -z "${HIRAKU_SOURCE_DIGEST:-}" ] && command -v git >/dev/null 2>&1 &&
   head=$(git rev-parse --verify 'HEAD^{commit}' 2>/dev/null) &&
   status=$(git status --porcelain --untracked-files=normal 2>/dev/null); then
   export HIRAKU_COMMIT=$head

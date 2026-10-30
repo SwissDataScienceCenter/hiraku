@@ -15,32 +15,32 @@ through an existing record lifecycle.
 ## Core concepts
 
 - **Record:** A research scope or focused investigation. A root may record the
-  goal, question, metrics, branch, shared entrypoints, and evolving findings.
-  A child has one `parent_id`, may begin as an unbound proposal, may bind the
-  source commit being evaluated, and may override inherited entrypoints or
-  arguments. Its optional `type` describes its role, such as experiment,
-  diagnostic, or ablation. `related_to` links records without inheritance.
-  Fields inherit from the nearest parent definition by default; `id`,
+  goal, question, metrics, branch, tracking defaults, and evolving findings.
+  A child has one `parent_id`, may begin as an unbound proposal, and may bind
+  the source commit being evaluated. Its
+  optional `type` describes its role, such as experiment, diagnostic, or
+  ablation. `related_to` links records without inheritance.
+  Fields inherit from the nearest parent definition by default. On child
+  creation, inherited `metrics` and `tracking_backend` values are copied into
+  the child record unless explicitly set there; later parent edits do not
+  update those snapshots. `id`,
   `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local.
 - **Run:** An execution trace returned by the configured tracking backend. A run
-  may include record, commit, and entrypoint attribution together with
+  may include record, commit, and invocation attribution together with
   parameters, metrics, timestamps, and an external URL.
-- **Entrypoint:** A named executable definition consisting of a command argument
-  list and default arguments. A child inherits parent entrypoints by name and
-  can override or extend them. Select a record explicitly for run attribution.
-- **Dispatch script:** A project-owned script under `hiraku/dispatch/` that
-  decides where and how an entrypoint runs. The default `launch.sh` uses the
-  current checkout; `worktree.sh` runs an exact commit in an isolated worktree.
-  Projects may provide additional local or remote dispatchers.
-
-The usual relationship is: a root contains child records; a child can bind
-source and expose one or more effective entrypoints; a dispatch script launches
-an entrypoint; instrumented code independently writes the resulting run to the tracking backend.
+- **Command:** Explicit argv passed to each `hiraku run` invocation. Commands
+  are not stored in records.
+- **Execution:** A foreground command in the current project working tree.
+  Hiraku streams output, returns the command's exit code, and supplies tracking
+  attribution for that invocation.
+- **Dispatch script:** An optional project script under `hiraku/dispatch/`
+  that prepares the runtime before running argv. Tracking backends own
+  experimental measurements.
 
 ## Main CLI entry points
 
 When the connected agent environment provides Hiraku MCP tools, use them for
-record CRUD, project resources, and attributed entrypoint launches.
+record CRUD, project resources, workflows, and foreground command execution.
 The MCP server uses the project directory selected by the host and applies the
 same Hiraku validation and persistence rules as the Python API. Use the CLI
 commands below when the relevant MCP tool is unavailable or the user asks for
@@ -52,18 +52,16 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Purpose | Main commands |
 | --- | --- |
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
-| Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set`, `entrypoints` |
-| Launch an entrypoint | `hiraku launch ENTRYPOINT [--record ID] [--commit REF] [--dispatch NAME]` |
+| Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
+| Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
 | Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_send_event`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow send-event SESSION EVENT` |
 | Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
 | Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
-Use `record show` and `record entrypoints`
-to resolve canonical records and effective executable definitions before making
-changes or launching work. Use `launch --dry-run` when execution resolution
-needs verification without starting the command.
+Use `record show` to inspect canonical records and effective research and
+tracking defaults before making changes or running commands.
 
 ## Operating scope
 
@@ -110,13 +108,12 @@ Classify the request before acting:
 - **Bounded workflow:** Complete every requested stage in order, such as creating
   a research root, defining child records, running them, and comparing results.
   Do not add stages the user did not request.
-- **Hiraku workflow:** Start or continue a workflow, such as
-  `collaborative`, only when the user explicitly requests it. Discover
-  workflows with the `workflow_list` MCP tool, start one with the tool named
-  after it, and follow the user's constraints, permissions, budgets, and
-  stopping condition in addition to the workflow's instructions.
+- **Autonomous or program workflow:** Start or continue a research loop only when
+  the user explicitly requests it. Read the selected program with
+  `hiraku program show <program-id>` and follow both that program and the user's
+  constraints, permissions, budgets, checkpoints, and stopping condition.
 
-Infer routine identifiers, summaries, hypotheses, metrics, and entrypoint
+Infer routine identifiers, summaries, hypotheses, metrics, and command
 arguments from the user's request and the repository. Ask a question only when
 the missing choice would materially change the research outcome or authorized
 scope. If a question can be answered by exploring the codebase or surrounding
@@ -142,7 +139,7 @@ hiraku runs --record <record-id> --json
 ```
 
 When needed, inspect the repository files required to understand available code,
-entrypoints, metrics, data, and project conventions. Resume existing relevant
+commands, metrics, data, and project conventions. Resume existing relevant
 work instead of duplicating it. If command syntax or supported options are
 uncertain, run `hiraku <command> --help`; do not guess flags.
 
@@ -153,8 +150,7 @@ additional fields such as `hypothesis`, `result`, `conclusion`, `decision`, and
 Each root and its descendants are stored at
 `hiraku/records/{root_id}/{record_id}.md`. IDs are unique across the project.
 Use `record show` to see effective values and their sources, or `--raw` for
-the stored fields. An explicit `null` clears an inherited field; entrypoints
-merge by name.
+the stored fields. An explicit `null` clears an inherited field.
 
 ## Protect user work and use the intended branches
 
@@ -240,28 +236,25 @@ For high-level child-record work:
    relevant code, make and verify the focused change, commit it if authorized,
    then bind that commit with `hiraku record update <record-id> --commit
    HEAD`.
-5. Inspect the runnable code and inherited entrypoints. Declare a
-   child entrypoint only when an existing one does not already describe
-   the requested invocation.
+5. Inspect the runnable code and decide which argv to submit to `hiraku run`.
 6. Bind `--commit HEAD` during creation only when the record already
    represents the current source state. Leave a future idea as an unbound
    proposal and update its commit after implementation.
-7. Verify the resulting record, resolved commit, and entrypoint.
+7. Verify the resulting record and resolved commit.
 
 ```bash
 hiraku record create <record-id> --parent <root-id> --type experiment \
   --set 'summary=...' \
   --set 'hypothesis=...' \
-  --commit HEAD \
-  --set 'entrypoints={train: {command: [uv, run, python, train.py], args: {seed: 42}}}'
+  --commit HEAD
 hiraku record show <record-id> --json
-hiraku record entrypoints <record-id> --json
+hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
 ```
 
 Creating a record activates it by default. Several children may share a
-commit and differ by entrypoint arguments. Follow the effective record branch
+commit and use different explicit command arguments. Follow the effective record branch
 recorded for implementation; create or change that branch assignment only when
-the user or the active workflow asks for it. Ordinary Git operations remain
+the user or selected program asks for it. Ordinary Git operations remain
 responsible for commits and merges.
 
 Use repeatable `--set 'key=<YAML value>'` for custom metadata and `--unset key`
@@ -272,30 +265,27 @@ different source state appear to be the same attempt.
 ## Run records and inspect evidence
 
 A run is an execution trace owned by CSV, MLflow, W&B, or a custom tracking
-backend. Hiraku launches entrypoints and queries runs; the training or evaluation
+backend. Hiraku launches commands and queries runs; the training or evaluation
 code writes the run to its backend.
 
 For a high-level run request:
 
-1. Resolve the exact record and entrypoint. Inspect effective entrypoints with
-   `hiraku record entrypoints <record-id>`.
-2. Confirm that the record is bound to the intended commit and that the
-   required code, data, dependencies, and credentials are available.
-3. Use `--dry-run` when it materially helps validate a nontrivial dispatch or
-   argument override.
-4. Launch with `--record <record-id>` so attribution is explicit.
-5. Query that record's direct runs immediately afterward and report the observed
-   result. A successful process without a tracked row is not a tracked run.
+1. Inspect the record, revision, runnable code, dependencies, and tracking destination.
+2. Inspect source changes and confirm data and environments are available at
+   their configured paths.
+3. Run with explicit record attribution and inspect output and the exit code.
+   Then query tracked runs; a successful command without measurements is not
+   experimental evidence.
 
 ```bash
-hiraku launch <entrypoint> --record <record-id>
+hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
 hiraku runs --record <record-id> --json
 ```
 
-Everything after `--` overrides entrypoint arguments:
+Tokens after `--` replace the complete invocation:
 
 ```bash
-hiraku launch train --record <record-id> -- --seed 7
+hiraku run --record <record-id> -- uv run --locked python train.py --seed 7
 ```
 
 Do not repeat an existing successful run unless the user or workflow requires a
@@ -325,14 +315,12 @@ commit when appropriate, launch it, inspect its attributed run, and record an
 evidence-backed result. Respect any requested maximum experiments, runs, time,
 cost, or hardware budget.
 
-## Hiraku workflows
+For a named autonomous program, inspect the root, program, child history,
+runs, Git state, and required files before entering its loop. Resume incomplete
+work safely and follow the program's own checkpoints and stopping rules. User
+instructions override program defaults.
 
-Workflows are project-defined procedures under `hiraku/workflows/` that guide
-you step by step through the Hiraku MCP server. The user may start one with
-its prompt, which shows the first instruction directly, or you start it with
-the tool named after it. Start and accepted-event responses contain one instruction: its text, its
-inline `data`, optional research `context`, and, unless it is final, an `events`
-block that says which events it accepts:
+## Commands and tracking details
 
 1. Read attached research records, then carry out the instruction
    text using its `data`. MCP returns native resource links by default; fetch
@@ -348,52 +336,36 @@ block that says which events it accepts:
    the input or check again later. An instruction without an `events` block is
    final: carry it out, then stop.
 
-To resume, find the session with `session_list` and read its current
-instruction with `session_show`; do not start a new session. Before repeating
-consequential work such as creating records or launching experiments, check
-whether it already exists. User instructions override workflow defaults; if
-they conflict with the workflow, explain the conflict, or stop the session with
-its `stop` or `finish` event when it has one. If a workflow's tool is missing, the workflow
-may have failed to load or been added after the MCP server started; ask the
-user to reconnect the MCP server.
+Commands are not record metadata. Pass the complete invocation directly after
+`--`, for example `hiraku run --record <record-id> -- uv run --locked python
+train.py --seed 42`. A dispatcher can prepare repeatable project-specific
+runtime behavior around that invocation.
 
-## Entrypoints, dispatch, and tracking details
+Commands execute in the current project working tree, including uncommitted
+changes. `hiraku run` waits until the command exits.
 
-Entrypoints are command argument lists, not shell expressions:
+Hiraku injects `HIRAKU_RECORD_ID`,
+`HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, `HIRAKU_COMMIT`,
+`HIRAKU_GIT_STATE`. `HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, and cwd point to the
+project directory. Use the dispatcher to prepare the runtime when needed.
 
-```yaml
-entrypoints:
-  train:
-    command: [uv, run, python, train.py]
-    args: {seed: 42, epochs: 40}
-```
-
-An entrypoint resolves from the selected record through its parent chain.
-The nearest definition of each name wins. `--record <record-id>` attributes
-the run to that record; the active record is used when no ID is supplied.
-
-`--dispatch NAME` selects `hiraku/dispatch/NAME.sh`; the configured default is
-`launch.sh`. The default dispatcher reports the current commit and clean/dirty
-state. The `worktree` dispatcher runs the requested commit in a temporary
-worktree. Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`,
-`HIRAKU_ROOT`, and `HIRAKU_ENTRYPOINT`. Dispatchers report `HIRAKU_COMMIT`
-and `HIRAKU_GIT_STATE`.
-
-The default CSV backend uses project-root `runs.csv`. MLflow and W&B require the
-training code and Hiraku adapter to use the same configured backend destination.
-Hiraku exposes normalized summaries; full curves and artifacts remain in the
-tracking backend.
+The CSV backend queries project-root `runs.csv`. Tracking backends generate
+and own run IDs. Tracking adapters read record and commit attribution from run
+metadata. Tracking code and adapters must use the same destination. Hiraku does
+not create tracking runs automatically; curves and artifacts remain with the
+tracker.
 
 ## Finish clearly
 
 Verify the requested end state with `show`, `list`, or `runs --json`. Report
-what was created, changed, or run; include record IDs, entrypoint,
+what was created, changed, or run; include record IDs, command,
 commit, run ID, and key metrics when applicable. Mention failures or missing
 attribution explicitly. Stop when the user's requested scope is complete.
 
 The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
-`Entrypoint`, `Metric`, loaders, and listing functions in `hiraku.record`;
+`Metric`, loaders, and listing functions in `hiraku.record`;
 `BaseRecord` in `hiraku.base`; `Run` in `hiraku.run`;
-and `hiraku.launch.launch` for scripted use. Records with `type: context` store
-supporting material. Workflows run in the current coding agent through the
-Hiraku MCP server (`hiraku mcp`).
+and `execute_command` in `hiraku.execution` for scripted execution.
+Records with `type: context` store supporting material. Workflows run in the
+current coding agent through the Hiraku MCP server (`hiraku mcp`). V1 does not
+provide a `hiraku-agent` runner; the current coding agent executes the skill.

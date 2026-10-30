@@ -64,10 +64,9 @@ nav = [
           { "Record" = "api/python/records.md" },
           { "Run" = "api/python/run.md" },
           { "Metric" = "api/python/metric.md" },
-          { "Entrypoint" = "api/python/entrypoint.md" },
       ] },
       { "Tracking" = "api/python/tracking.md" },
-      { "Launching" = "api/python/launch.md" },
+      { "Command execution" = "guides/execution.md" },
       ] },
 ]
 

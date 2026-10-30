@@ -36,7 +36,6 @@ class ProjectInitializer:
         root: Path | str = ".",
         *,
         install_skill: bool = True,
-        tracking_backend: str | None = None,
         template: Path | str | None = None,
         example: str | None = None,
         results: bool = False,
@@ -48,7 +47,6 @@ class ProjectInitializer:
             root: Root directory where the project will be created.
             install_skill: Whether to install repository-local skill resources for
                 supported coding agents.
-            tracking_backend: Optional default tracking backend name.
             template: Optional local directory copied over the initialized project.
             example: Optional packaged example name whose ``src`` tree is copied.
             results: Include the example's prepared records and tracked runs.
@@ -64,7 +62,6 @@ class ProjectInitializer:
         return cls.create_with_report(
             root,
             install_skill=install_skill,
-            tracking_backend=tracking_backend,
             template=template,
             example=example,
             results=results,
@@ -77,7 +74,6 @@ class ProjectInitializer:
         root: Path | str = ".",
         *,
         install_skill: bool = True,
-        tracking_backend: str | None = None,
         template: Path | str | None = None,
         example: str | None = None,
         results: bool = False,
@@ -135,8 +131,6 @@ class ProjectInitializer:
                 result_marker = result_overlay / "hiraku.yml"
                 if result_marker.is_file():
                     data.update(load_yaml_mapping(result_marker))
-            if tracking_backend is not None:
-                data["tracking_backend"] = {"type": tracking_backend}
             config = HirakuConfig(path=marker, root=project_root, **data)
             try:
                 project_root.mkdir(parents=True, exist_ok=True)

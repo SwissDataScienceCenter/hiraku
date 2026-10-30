@@ -6,7 +6,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    model_validator,
+)
 
 from .errors import ProjectNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
@@ -19,8 +25,7 @@ class HirakuConfig(BaseModel):
         path: Path to the project configuration file.
         root: Project root directory.
         hiraku_dir_name: Relative state directory name.
-        default_dispatch: Default launcher script.
-        tracking_backend: Backend configuration mapping with a required ``type``.
+        default_dispatch: Default command dispatcher.
 
     Raises:
         pydantic.ValidationError: If configuration values are invalid or inconsistent.
@@ -33,7 +38,6 @@ class HirakuConfig(BaseModel):
     DEFAULTS: ClassVar[dict[str, Any]] = {
         "hiraku_dir": "hiraku",
         "default_dispatch": "launch.sh",
-        "tracking_backend": {"type": "csv"},
         "active_record_id": None,
     }
     model_config = ConfigDict(
@@ -46,16 +50,20 @@ class HirakuConfig(BaseModel):
         default=DEFAULTS["hiraku_dir"], alias="hiraku_dir", min_length=1
     )
     default_dispatch: str = Field(default=DEFAULTS["default_dispatch"], min_length=1)
-    tracking_backend: dict[str, Any] = Field(
-        default_factory=lambda: dict(HirakuConfig.DEFAULTS["tracking_backend"])
-    )
     active_record_id: str | None = DEFAULTS["active_record_id"]
     _hiraku_dir: Path = PrivateAttr()
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in {"command", "tracking_backend"}:
+            raise ValidationError(
+                f"{name} must be configured on a root record, not hiraku.yml"
+            )
+        super().__setattr__(name, value)
+
     @model_validator(mode="before")
     @classmethod
-    def normalize_tracking_backend(cls, values: Any) -> Any:
-        """Normalize shorthand backend names to the common mapping syntax."""
+    def reject_record_defaults(cls, values: Any) -> Any:
+        """Keep research defaults on records, not project configuration."""
         if not isinstance(values, Mapping):
             return values
         raw = dict(values)
@@ -64,23 +72,12 @@ class HirakuConfig(BaseModel):
                 "Configuration key 'default_program' is no longer supported: "
                 "programs were removed. Remove the key from hiraku.yml."
             )
-        backend = raw.get("tracking_backend")
-        if isinstance(backend, str):
-            raw["tracking_backend"] = {"type": backend}
-        elif backend is not None and not isinstance(backend, Mapping):
+        misplaced = {"command", "tracking_backend"}.intersection(raw)
+        if misplaced:
+            names = ", ".join(sorted(misplaced))
             raise ValidationError(
-                "tracking_backend must be a backend name or mapping with a type"
+                f"{names} must be configured on a root record, not hiraku.yml"
             )
-        elif isinstance(backend, Mapping):
-            backend_mapping = dict(backend)
-            if (
-                not isinstance(backend_mapping.get("type"), str)
-                or not backend_mapping["type"]
-            ):
-                raise ValidationError(
-                    "tracking_backend mapping requires a non-empty string type"
-                )
-            raw["tracking_backend"] = backend_mapping
         return raw
 
     @model_validator(mode="after")
@@ -150,7 +147,6 @@ class HirakuConfig(BaseModel):
         root: Path | str = ".",
         *,
         install_skill: bool = True,
-        tracking_backend: str | None = None,
         template: Path | str | None = None,
         example: str | None = None,
         results: bool = False,
@@ -162,7 +158,6 @@ class HirakuConfig(BaseModel):
             root: Directory to initialize.
             install_skill: Whether to install the repository-local skill for
                 supported coding agents.
-            tracking_backend: Optional default tracking backend name.
             template: Optional local directory copied over the initialized project.
             example: Optional packaged example name whose ``src`` tree is copied.
             results: Include the example's prepared records and tracked runs.
@@ -179,7 +174,6 @@ class HirakuConfig(BaseModel):
         return ProjectInitializer.create(
             root,
             install_skill=install_skill,
-            tracking_backend=tracking_backend,
             template=template,
             example=example,
             results=results,
@@ -242,7 +236,7 @@ class HirakuConfig(BaseModel):
 
     @property
     def dispatch_dir(self) -> Path:
-        """Return the directory containing launcher dispatch scripts."""
+        """Return the directory containing command dispatcher scripts."""
         return self.hiraku_dir / "dispatch"
 
     def set_active_record(self, record: str | Any) -> None:
