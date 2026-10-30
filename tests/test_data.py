@@ -39,15 +39,17 @@ def test_inheritance_and_guarded_delete(tmp_path: Path) -> None:
         )
 
 
-def test_record_rejects_command_metadata(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
-    with pytest.raises(ValidationError, match="command is not a record field"):
-        Record.create("root", config=config, command=["python", "train.py"])
-
-
-def test_record_rejects_entrypoint_metadata() -> None:
-    with pytest.raises(ValidationError, match="entrypoints configuration"):
-        Record(id="root", entrypoints={"train": {"command": ["python"]}})
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("command", ["python", "train.py"]),
+        ("entrypoints", {"train": {"command": ["python"]}}),
+    ],
+)
+def test_removed_launch_fields_are_not_record_schema_fields(name, value) -> None:
+    assert name not in Record.model_fields
+    record = Record(id="root", **{name: value})
+    assert record.model_extra[name] == value
 
 
 def test_commit_local_and_validated(tmp_path: Path) -> None:

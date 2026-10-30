@@ -6,7 +6,6 @@ import pytest
 pytest.importorskip("marimo")
 pytest.importorskip("altair")
 
-from hiraku.base import BaseRecord
 from hiraku.dashboard import components as hc
 from hiraku.dashboard.data import RECORD_COLUMNS, RUN_COLUMNS, arrow_frame
 from hiraku.record import Record
@@ -14,7 +13,7 @@ from hiraku.record import Record
 
 def test_markdown_view_renders_generic_content_and_preserves_placeholders() -> None:
     content = hc.markdown_view(
-        BaseRecord(
+        Record(
             id="workflow",
             markdown="## Workflow\n\nRun **training**.\n\n"
             "- Keep {{record_id}}\n\n```python\nx = 1\n```",
@@ -32,7 +31,7 @@ def test_markdown_view_renders_generic_content_and_preserves_placeholders() -> N
 @pytest.mark.parametrize("body", ["", " \n\t"])
 def test_markdown_view_handles_empty_bodies_without_hiding_metadata(body: str) -> None:
     content = hc.markdown_view(
-        BaseRecord(id="context", markdown=body), empty_message="No notes yet."
+        Record(id="context", markdown=body), empty_message="No notes yet."
     ).text
 
     assert "No notes yet." in content
@@ -43,7 +42,7 @@ def test_markdown_view_handles_empty_bodies_without_hiding_metadata(body: str) -
 
 def test_markdown_front_matter_is_displayed_as_text() -> None:
     content = hc.markdown_view(
-        BaseRecord(id="notes", markdown="Notes", title="<script>bad()</script>")
+        Record(id="notes", markdown="Notes", title="<script>bad()</script>")
     ).text
 
     assert "id: notes" in content
@@ -51,9 +50,8 @@ def test_markdown_front_matter_is_displayed_as_text() -> None:
     assert "<script>bad()</script>" not in content
 
 
-@pytest.mark.parametrize("record_type", [BaseRecord, Record])
-def test_markdown_view_accepts_any_record(record_type) -> None:
-    record = record_type(
+def test_markdown_view_accepts_record() -> None:
+    record = Record(
         id="notes",
         markdown="## Findings\n\n**Useful** results.",
         custom="metadata",
@@ -74,7 +72,7 @@ def test_markdown_view_accepts_any_record(record_type) -> None:
 
 def test_markdown_view_handles_missing_or_empty_records() -> None:
     assert "No record selected." in hc.markdown_view(None).text
-    empty = hc.markdown_view(BaseRecord(id="empty")).text
+    empty = hc.markdown_view(Record(id="empty")).text
     assert "This record has no Markdown." in empty
     assert "id: empty" in empty
 

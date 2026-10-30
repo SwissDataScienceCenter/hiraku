@@ -1,6 +1,6 @@
 """Reusable marimo widgets and rendering for Hiraku dashboards.
 
-Components consume prepared tables or BaseRecord objects without loading or
+Components consume prepared tables or Record objects without loading or
 saving project files or querying tracking sources. The notebook owns selection state;
 the optional Markdown editor owns drafts and delegates saves to a callback.
 Branding stays in the Studio view.
@@ -18,7 +18,6 @@ import altair as alt
 import marimo as mo
 import pandas as pd
 
-from ..base import BaseRecord
 from ..errors import HirakuError
 from ..io import dump_yaml
 from ..record import Record
@@ -26,16 +25,15 @@ from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
 
 
 def markdown_view(
-    record: BaseRecord | None,
+    record: Record | None,
     *,
     editor: MarkdownEditor | None = None,
     empty_message: str = "This record has no Markdown.",
 ) -> mo.Html:
-    """Render a BaseRecord's front matter and Markdown body.
+    """Render a Record's front matter and Markdown body.
 
-    Accept any subtype, including generic Markdown and research records. Loading,
-    parsing, and persistence belong to the caller. Pass an editor to opt into
-    editing; without one this is a read-only viewer.
+    Loading, parsing, and persistence belong to the caller. Pass an editor to
+    opt into editing; without one this is a read-only viewer.
     """
     if editor is not None:
         return editor.render(record, empty_message=empty_message)
@@ -48,7 +46,7 @@ def markdown_view(
 
 @dataclass
 class _MarkdownDraft:
-    record: BaseRecord
+    record: Record
     markdown: str
     error: str = ""
 
@@ -63,7 +61,7 @@ class MarkdownEditor:
 
     def __init__(
         self,
-        on_save: Callable[[BaseRecord, str], BaseRecord],
+        on_save: Callable[[Record, str], Record],
         on_change: Callable[[], None] = lambda: None,
     ) -> None:
         self._on_save = on_save
@@ -75,7 +73,7 @@ class MarkdownEditor:
     def _refresh(self) -> None:
         self._on_change()
 
-    def _start(self, record: BaseRecord) -> None:
+    def _start(self, record: Record) -> None:
         assert record.path is not None
         self._drafts[record.path] = _MarkdownDraft(
             record.model_copy(deep=True), str(record.markdown)
@@ -86,7 +84,7 @@ class MarkdownEditor:
         self._drafts.pop(path, None)
         self._refresh()
 
-    def _save(self, record: BaseRecord) -> None:
+    def _save(self, record: Record) -> None:
         draft = self._drafts[record.path]
         try:
             saved = self._on_save(draft.record, draft.markdown)
@@ -99,7 +97,7 @@ class MarkdownEditor:
 
     def render(
         self,
-        record: BaseRecord | None,
+        record: Record | None,
         *,
         empty_message: str = "This record has no Markdown.",
     ) -> mo.Html:

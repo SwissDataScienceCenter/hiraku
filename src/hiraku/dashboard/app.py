@@ -24,10 +24,10 @@ with app.setup:
 
     import marimo as mo
 
-    from hiraku.base import BaseRecord
     from hiraku.config import HirakuConfig
     from hiraku.dashboard import components as hc
     from hiraku.dashboard import data as hd
+    from hiraku.record import Record
 
 
 @app.cell
@@ -139,7 +139,7 @@ def record_navigation(project, select_key, selected_record):
 def record_editor():
     get_editor_revision, _set_editor_revision = mo.state(0, allow_self_loops=True)
     markdown_editor = hc.MarkdownEditor(
-        on_save=BaseRecord.save_markdown,
+        on_save=Record.save_markdown,
         on_change=lambda: _set_editor_revision(lambda revision: revision + 1),
     )
     return get_editor_revision, markdown_editor

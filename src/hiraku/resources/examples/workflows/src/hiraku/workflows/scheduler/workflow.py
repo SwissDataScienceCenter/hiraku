@@ -14,7 +14,6 @@ from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.markdown import Markdown, render
@@ -55,7 +54,7 @@ def _input_model(defaults: dict[str, Any]) -> type[BaseModel]:
 
 def input_schema() -> dict[str, Any]:
     """Return the JSON Schema for starting scheduler."""
-    fields, _ = BaseRecord._parse_markdown(Path(__file__).with_name("workflow.md"))
+    fields, _ = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
     defaults = fields.get("arguments", {})
     if not isinstance(defaults, dict):
         raise ValueError("workflow.md must define scheduler argument defaults")
@@ -72,7 +71,7 @@ def input_schema() -> dict[str, Any]:
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
     """Build the graph that creates and schedules experiment records."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = BaseRecord._parse_markdown(path)
+    fields, body = Record._parse_markdown(path)
     if fields.get("id") != "scheduler":
         raise ValueError("workflow.md must declare id: scheduler")
     defaults = fields.get("arguments", {})

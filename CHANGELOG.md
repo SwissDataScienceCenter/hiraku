@@ -34,9 +34,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Add project-local Codex and Claude Code hooks installed by `hiraku init` to attribute workflow event attempts to client conversations. Generated MCP and hook commands are portable: `uv run hiraku` when the project contains `uv.lock`, otherwise `hiraku`. Session history records one entry per event attempt with its outcome. Resubmissions for answered instructions return `stale` with the current instruction instead of acknowledging identical duplicates as accepted.
 - Add `Run.duration`, a run's wall-clock length in seconds. The CSV backend reads an optional `duration` column, MLflow uses the run's end minus start time, and W&B its `_runtime` summary. `hiraku runs` shows it, and the dashboard adds a Duration column, run detail and plot tooltip next to the start time.
 - Add optional, collapsible dashboard record navigation sharing selection with the run table and highlighting a selected run's owning record.
-- Add a generic dashboard Markdown viewer accepting any `BaseRecord` subtype with expandable front matter, and show the selected record's Markdown or a selected run's owning record in the dashboard.
+- Add a dashboard Markdown viewer for records with expandable front matter, and show the selected record's Markdown or a selected run's owning record in the dashboard.
 - Add optional dashboard Markdown editing with explicit Save/Cancel, session-local drafts, and detection of external record changes before saving.
-- Add `BaseRecord.save_markdown()` for saving a replacement body with metadata preserved and checking for external changes, independent of dashboard dependencies.
+- Add `Record.save_markdown()` for saving a replacement body with metadata preserved and checking for external changes, independent of dashboard dependencies.
 - Workflow instructions now separate inline `data` from research record references. MCP returns native resource links for attached records. **Breaking:** move previous arbitrary instruction `context` values to `data`; old saved instructions are not migrated. Instruction context references now accept record IDs only.
 - Add the local stdio MCP server (`hiraku mcp`) with record CRUD, attributed launches, run queries, source resources, and an evidence-based proposal prompt; `hiraku init` registers it for Claude Code and Codex ([issue #80](https://github.com/SwissDataScienceCenter/hiraku/issues/80)).
 - Add project-defined workflows under `hiraku/workflows/<id>/`: Python state machines with typed mutable state, annotated event inputs, node instructions, and immutable graphs, or Markdown-only prompts with arguments inferred from YAML scalar defaults. Import APIs from their defining modules under `hiraku.workflows`.
@@ -62,6 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Removed
 
+- **Breaking:** Remove `BaseRecord`; all research material uses `Record`, including task, experiment, context, and literature records.
 - **Breaking:** Remove Programs and Actions, including `hiraku program`, `hiraku action`, `hiraku.agent.Program`, `hiraku.agent.Action`, their `hiraku://programs` and `hiraku://actions` MCP resources, and their bundled resources.
 - **Breaking:** Remove the `default_program` configuration key; `hiraku.yml` files that still contain it are rejected with a migration message.
 - **Breaking:** Remove unused `GitRepository` branch-management methods, `head`, `is_ancestor`, `parent_records`, and `child_records`, and the project-level branch-name template. Use Git directly for branch operations; record-local `branch` metadata is unchanged. Existing configuration keys remain preserved as extra metadata.

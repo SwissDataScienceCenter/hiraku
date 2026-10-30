@@ -14,7 +14,6 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
 from hiraku.errors import HirakuError, ValidationError
 from hiraku.git import GitRepository
@@ -89,7 +88,7 @@ def input_schema() -> dict[str, Any]:
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
     """Build the collaborative research graph from its Markdown instructions."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = BaseRecord._parse_markdown(path)
+    fields, body = Record._parse_markdown(path)
     if fields.get("id") != "collaborative":
         raise ValueError("workflow.md must declare id: collaborative")
     markdown = Markdown(body)

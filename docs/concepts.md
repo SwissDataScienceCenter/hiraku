@@ -72,7 +72,6 @@ hiraku runs --record <root-id> --all --params seed,lr --metrics train/accuracy,v
 Hiraku data records are managed by the [Python API](api/python/index.md). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible.
 
 ```python
-from hiraku.base import BaseRecord
 from hiraku.record import Metric, Record, list_records, load_record
 from hiraku.run import Run
 ```

@@ -11,7 +11,8 @@ from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hiraku import HirakuConfig, execute_command
+from hiraku import HirakuConfig
+from hiraku.execution import execute_command
 from hiraku.record import Record
 
 EXPERIMENTS = (("weak-l2", 0.0001), ("strong-l2", 1.0))

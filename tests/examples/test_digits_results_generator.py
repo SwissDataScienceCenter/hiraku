@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from hiraku import HirakuConfig, execute_command
+from hiraku import HirakuConfig
+from hiraku.execution import execute_command
 from hiraku.record import load_record
 
 

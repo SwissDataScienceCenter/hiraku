@@ -34,7 +34,7 @@ the foreground and reports the dispatcher's exit code.
 The Python API provides the same behavior:
 
 ```python
-from hiraku import execute_command
+from hiraku.execution import execute_command
 
 result = execute_command(
     ["python", "train.py", "--epochs", "20"], record_id="experiment-1"

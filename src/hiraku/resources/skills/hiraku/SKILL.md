@@ -368,8 +368,8 @@ attribution explicitly. Stop when the user's requested scope is complete.
 
 The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
 `Metric`, loaders, and listing functions in `hiraku.record`;
-`BaseRecord` in `hiraku.base`; `Run` in `hiraku.run`;
-and `execute_command` in `hiraku.execution` for scripted execution.
+`Run` in `hiraku.run`; and `execute_command` in `hiraku.execution` for scripted
+execution.
 Records with `type: context` store supporting material. Workflows run in the
 current coding agent through the Hiraku MCP server (`hiraku mcp`). V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.

@@ -33,8 +33,29 @@ _FRONT_MATTER = re.compile(
 )
 
 
-class BaseRecord(BaseModel):
-    """Base class for detached or persisted Markdown records.
+class Metric(BaseModel):
+    """A declared metric and its preferred direction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    direction: Literal["minimize", "maximize"]
+
+
+_LOCAL_FIELDS = frozenset(
+    {"id", "parent_id", "related_to", "type", "commit", "status", "decision"}
+)
+_MATERIALIZED_INHERITED_FIELDS = ("metrics", "tracking_backend")
+
+
+@dataclass(frozen=True)
+class ResolvedRecord:
+    values: dict[str, Any]
+    sources: dict[str, Any]
+
+
+class Record(BaseModel):
+    """A research record stored as Markdown with YAML front matter.
 
     Attributes:
         id: Stable identifier used in the record path.
@@ -43,7 +64,7 @@ class BaseRecord(BaseModel):
         path: Persistence path, populated after saving or loading.
 
     Example:
-        ``BaseRecord(id="demo", markdown="## Objective\\nMeasure accuracy.")``
+        ``Record(id="demo", markdown="## Objective\\nMeasure accuracy.")``
 
     Raises:
         pydantic.ValidationError: If the identifier or Markdown value is invalid.
@@ -72,6 +93,16 @@ class BaseRecord(BaseModel):
     path: Path | None = Field(default=None, exclude=True)
     _persisted_id: str | None = PrivateAttr(default=None)
 
+    parent_id: str | None = None
+    related_to: builtins.list[str] = Field(default_factory=list)
+    type: str | None = None
+    commit: str | None = None
+    status: str | None = None
+    decision: str | None = None
+    branch: str | None = None
+    metrics: builtins.list[Metric] | None = None
+    tracking_backend: str | dict[str, Any] | None = None
+
     @field_validator("id")
     @classmethod
     def validate_id(cls, value: Any) -> str:
@@ -79,6 +110,38 @@ class BaseRecord(BaseModel):
             raise TypeError("record ID must be a string")
         validate_identifier(value, label="record ID")
         return value
+
+    @field_validator("parent_id")
+    @classmethod
+    def validate_parent(cls, value: str | None) -> str | None:
+        if value is not None:
+            validate_identifier(value, label="parent ID")
+        return value
+
+    @field_validator("related_to")
+    @classmethod
+    def validate_links(cls, value: list[str]) -> list[str]:
+        for identifier in value:
+            validate_identifier(identifier, label="related record ID")
+        if len(value) != len(set(value)):
+            raise ValidationError("related_to contains duplicate IDs")
+        return value
+
+    @field_validator("commit")
+    @classmethod
+    def validate_commit(cls, value: str | None) -> str | None:
+        if value is not None and (
+            len(value) not in {40, 64}
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise ValidationError("commit must be a full lowercase Git hash")
+        return value
+
+    @model_validator(mode="after")
+    def validate_research_fields(self) -> Self:
+        if self.parent_id == self.id or self.id in self.related_to:
+            raise ValidationError("A record cannot refer to itself")
+        return self
 
     @model_validator(mode="after")
     def validate_yaml_fields(self) -> Self:
@@ -204,8 +267,11 @@ class BaseRecord(BaseModel):
 
         Example:
             ```python
-            record = BaseRecord(id="demo")
-            record.save("demo.md")
+            from hiraku.config import HirakuConfig
+
+            config = HirakuConfig.discover()
+            record = Record(id="demo")
+            record.save(config.records_dir / "demo" / "demo.md")
             ```
         """
         if self.path is None and path is None:
@@ -214,6 +280,17 @@ class BaseRecord(BaseModel):
             )
         target = Path(path).expanduser().absolute() if path is not None else self.path
         assert target is not None
+        from .config import HirakuConfig
+
+        selected = HirakuConfig.discover(target)
+        index = _record_index(selected)
+        existing = index.get(self.id)
+        if existing is not None and existing.path != target:
+            raise RecordExistsError(f"Record {self.id!r} already exists")
+        candidate = self.model_copy(deep=True)
+        candidate.path = target
+        index[self.id] = candidate
+        _validate_tree(index, selected.records_dir)
         if self.path is not None and target != self.path:
             raise ValidationError(
                 f"Persisted {type(self).__name__} {self.id!r} cannot move from "
@@ -234,10 +311,10 @@ class BaseRecord(BaseModel):
         return target
 
     def save_markdown(self, markdown: Markdown) -> Self:
-        """Save a new body and return the saved copy, leaving this object unchanged.
+        """Save a new body and return a saved copy, leaving this object unchanged.
 
         The record must already have a path. Reject changes to its body or
-        metadata on disk since loading, then save through the subtype's API.
+        metadata on disk since loading, then save through the record API.
         This check does not lock out concurrent writers during the save.
 
         Args:
@@ -260,113 +337,6 @@ class BaseRecord(BaseModel):
         current.markdown = markdown
         current.save()
         return current
-
-    def delete(self) -> None:
-        """Delete this persisted record from disk.
-
-        Raises:
-            hiraku.errors.ValidationError: If the record is detached or deletion fails.
-            hiraku.errors.RecordNotFoundError: If the persisted file is missing.
-        """
-        if self.path is None:
-            raise ValidationError(
-                f"Detached {type(self).__name__} {self.id!r} has no path to delete"
-            )
-        target = self.path
-        if not target.exists():
-            raise RecordNotFoundError(
-                f"{type(self).__name__} record not found: {target}"
-            )
-        try:
-            target.unlink()
-        except OSError as exc:
-            raise ValidationError(f"Cannot delete record at {target}: {exc}") from exc
-        self.path = None
-
-
-class Metric(BaseModel):
-    """A declared metric and its preferred direction."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1)
-    direction: Literal["minimize", "maximize"]
-
-
-_LOCAL_FIELDS = frozenset(
-    {"id", "parent_id", "related_to", "type", "commit", "status", "decision"}
-)
-_MATERIALIZED_INHERITED_FIELDS = ("metrics", "tracking_backend")
-
-
-@dataclass(frozen=True)
-class ResolvedRecord:
-    values: dict[str, Any]
-    sources: dict[str, Any]
-
-
-class Record(BaseRecord):
-    """A research record with one organizational parent and optional links."""
-
-    parent_id: str | None = None
-    related_to: list[str] = Field(default_factory=list)
-    type: str | None = None
-    commit: str | None = None
-    status: str | None = None
-    decision: str | None = None
-    branch: str | None = None
-    metrics: list[Metric] | None = None
-    tracking_backend: str | dict[str, Any] | None = None
-
-    @field_validator("parent_id")
-    @classmethod
-    def validate_parent(cls, value: str | None) -> str | None:
-        if value is not None:
-            validate_identifier(value, label="parent ID")
-        return value
-
-    @field_validator("related_to")
-    @classmethod
-    def validate_links(cls, value: list[str]) -> list[str]:
-        for identifier in value:
-            validate_identifier(identifier, label="related record ID")
-        if len(value) != len(set(value)):
-            raise ValidationError("related_to contains duplicate IDs")
-        return value
-
-    @field_validator("commit")
-    @classmethod
-    def validate_commit(cls, value: str | None) -> str | None:
-        if value is not None and (
-            len(value) not in {40, 64}
-            or any(character not in "0123456789abcdef" for character in value)
-        ):
-            raise ValidationError("commit must be a full lowercase Git hash")
-        return value
-
-    @model_validator(mode="after")
-    def validate_research_fields(self) -> Self:
-        if self.parent_id == self.id or self.id in self.related_to:
-            raise ValidationError("A record cannot refer to itself")
-        return self
-
-    def save(self, path: Path | str | None = None, *, overwrite: bool = False) -> Path:
-        """Persist only when project references and root placement are valid."""
-        from .config import HirakuConfig
-
-        target = Path(path).expanduser().absolute() if path is not None else self.path
-        if target is None:
-            raise ValidationError(f"Detached record {self.id!r} requires a save path")
-        selected = HirakuConfig.discover(target)
-        index = _record_index(selected)
-        existing = index.get(self.id)
-        if existing is not None and existing.path != target:
-            raise RecordExistsError(f"Record {self.id!r} already exists")
-        candidate = self.model_copy(deep=True)
-        candidate.path = target
-        index[self.id] = candidate
-        _validate_tree(index, selected.records_dir)
-        return super().save(target, overwrite=overwrite)
 
     def resolve(self, *, config: Any = None) -> ResolvedRecord:
         """Return inherited values and their defining record IDs."""
@@ -595,7 +565,16 @@ class Record(BaseRecord):
             raise ValidationError(f"Cannot delete record {self.id!r} with children")
         if any(self.id in item.related_to for item in records if item.id != self.id):
             raise ValidationError(f"Cannot delete referenced record {self.id!r}")
-        super().delete()
+        if self.path is None:
+            raise RecordNotFoundError(f"Record {self.id!r} not found")
+        target = self.path
+        if not target.exists():
+            raise RecordNotFoundError(f"Record not found: {target}")
+        try:
+            target.unlink()
+        except OSError as exc:
+            raise ValidationError(f"Cannot delete record at {target}: {exc}") from exc
+        self.path = None
 
 
 def _config(config: Any) -> Any:

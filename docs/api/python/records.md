@@ -1,24 +1,17 @@
 # Records
 
-## `BaseRecord`
-
-::: hiraku.base.BaseRecord
-
-`BaseRecord` provides generic Markdown/YAML persistence. Research content,
-including context and supporting material, is stored as a `Record` and described
-with its `type` field.
-
-Use `record.save_markdown(body)` to save a replacement body while preserving
-metadata. It returns a saved copy of the same subtype and leaves the supplied
-object unchanged. The record must already have a path; changes on disk since
-loading are rejected. This check does not lock the file against concurrent writers.
-
 ## `Record`
 
 ::: hiraku.record.Record
 
-`Record` is the research entity. It adds a single parent, optional related
-records, inheritance, commands, run queries, and project registry methods.
+`Record` is Hiraku's only research entity. Tasks, experiments, contexts, and
+literature share the same model and use `type` to describe their role. A record
+stores validated YAML front matter and a Markdown body.
+
+Use `record.save_markdown(body)` to save a replacement body while preserving
+metadata. It returns a saved copy and leaves the supplied object unchanged. The
+record must already have a path; changes on disk since loading are rejected.
+This check does not lock the file against concurrent writers.
 
 ## Registry helpers
 

@@ -25,7 +25,7 @@ from pydantic_core import to_jsonable_python
 from .config import HirakuConfig
 from .errors import HirakuError, ValidationError
 from .execution import execute_command
-from .record import BaseRecord, Record, list_records, load_record
+from .record import Record, list_records, load_record
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details
@@ -57,13 +57,11 @@ class WorkflowApproval(BaseModel):
     feedback: str = Field(default="", description="Optional revision feedback.")
 
 
-def _data(record: BaseRecord) -> dict[str, Any]:
+def _data(record: Record) -> dict[str, Any]:
     return record.model_dump(mode="json", exclude={"path"})
 
 
-def _update(
-    record: BaseRecord, fields: dict[str, Any], markdown: str | None
-) -> BaseRecord:
+def _update(record: Record, fields: dict[str, Any], markdown: str | None) -> Record:
     protected = {"id", "path", "markdown", "parent_id"}
     if protected.intersection(fields):
         raise ValidationError(f"Cannot update fields: {sorted(protected)}")

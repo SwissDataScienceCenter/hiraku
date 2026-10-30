@@ -74,9 +74,8 @@ The repository is a single `uv`-managed Python project.
 | Path | Purpose |
 | --- | --- |
 | `src/hiraku/` | Installed Python package |
-| `src/hiraku/base.py` | Generic Markdown record serialization and validation |
 | `src/hiraku/markdown.py` | Markdown section parsing for record bodies |
-| `src/hiraku/record.py` | Research records, entrypoints, and metrics |
+| `src/hiraku/record.py` | Research records, Markdown/YAML persistence, and metrics |
 | `src/hiraku/run.py` | Normalized tracked runs |
 | `src/hiraku/config.py` | Project discovery, configuration, and active context |
 | `src/hiraku/cli.py` | Click-based command-line interface |
@@ -103,8 +102,8 @@ Generated or transient paths:
 
 ### Architecture boundaries
 
-- `BaseRecord` owns generic Markdown/YAML persistence and validation.
-- `Record` owns research hierarchy, inheritance, and record-local fields.
+- `Record` owns Markdown/YAML persistence, research hierarchy, inheritance,
+  and record-local fields.
 - `HirakuConfig` owns project discovery and persistent active-context state.
 - The CLI should call the public record/config/launch APIs rather than duplicate
   persistence or validation logic.

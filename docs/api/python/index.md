@@ -6,7 +6,7 @@ validate their input immediately; persistence is handled through explicit paths.
 - [Configuration](config.md) — discover and persist project configuration.
 - [Records](records.md) — work with validated Markdown-backed records.
 - Data models:
-    - [Record and BaseRecord](records.md)
+    - [Record](records.md)
     - [Run](run.md)
     - [Metric](metric.md)
 - [Tracking](tracking.md) — configure and query tracking backends.

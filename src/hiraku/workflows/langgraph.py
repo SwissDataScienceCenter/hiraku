@@ -18,9 +18,9 @@ from filelock import FileLock
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
-from ..base import BaseRecord
 from ..config import HirakuConfig
 from ..errors import ValidationError, WorkflowError
+from ..record import Record
 from .session_history import checkpoint_database, record_event, validate_context
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ def workflow_details(*, config: HirakuConfig) -> list[dict[str, Any]]:
     details = []
     for workflow_id in workflow_ids(config=config):
         path = config.workflows_dir / workflow_id / "workflow.md"
-        fields, _ = BaseRecord._parse_markdown(path)
+        fields, _ = Record._parse_markdown(path)
         detail: dict[str, Any] = {
             "id": workflow_id,
             "description": fields.get("description"),
