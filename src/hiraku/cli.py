@@ -344,8 +344,8 @@ def status_command(state: CLIContext, json_output: bool) -> None:
     except GitError:
         branch = None
     tracking_backend = config.tracking_backend
-    if isinstance(tracking_backend, str):
-        tracking_backend = {"type": tracking_backend}
+    if isinstance(tracking_backend, Mapping):
+        tracking_backend = tracking_backend.get("type", tracking_backend.get("name"))
     result = {
         "project_root": config.root,
         "active_record_id": config.active_record_id,
