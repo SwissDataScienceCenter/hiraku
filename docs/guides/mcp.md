@@ -1,7 +1,8 @@
 # MCP server
 
 Hiraku includes an MCP server that works with any initialized Hiraku project.
-`hiraku init` adds project-scoped MCP configuration for Claude Code and Codex.
+`hiraku init` and `hiraku example create` add project-scoped MCP configuration
+for Claude Code, Codex, and Pi.
 The server process discovers the nearest `hiraku.yml` from its working directory,
 so each client starts it in the project it is working on:
 
@@ -36,9 +37,21 @@ command = "hiraku"
 args = ["mcp"]
 ```
 
+Pi's `.pi/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "hiraku": {
+      "command": "hiraku",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
 An existing `hiraku` server entry is left as it is. If an existing file cannot
-be extended, for example because `mcp_servers` is an inline TOML table,
-initialization fails without changing it; add the entry manually.
+be extended, initialization fails without changing it; add the entry manually.
 
 The host must be able to find the installed `hiraku` command. Claude Code asks
 for approval before using a project MCP server. Codex loads project config only

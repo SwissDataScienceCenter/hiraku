@@ -203,44 +203,116 @@ class _ProjectProvisioner:
         created_dirs: list[Path],
         replaced_files: dict[Path, bytes],
     ) -> None:
-        """Register the stdio server for Claude Code and Codex project configs."""
+        """Register the stdio server for supported project agent configs."""
         command, *arguments = cls._hiraku_command(project_root)
         server = {"command": command, "args": [*arguments, "mcp"]}
-        claude_path = project_root / ".mcp.json"
-        claude_data: dict[str, object] = {}
-        if claude_path.is_symlink():
+        cls._install_claude_mcp_config(
+            project_root, server, created_files, created_dirs, replaced_files
+        )
+        cls._install_codex_mcp_config(
+            project_root, server, created_files, created_dirs, replaced_files
+        )
+        cls._install_pi_mcp_config(
+            project_root, server, created_files, created_dirs, replaced_files
+        )
+
+    @classmethod
+    def _install_claude_mcp_config(
+        cls,
+        project_root: Path,
+        server: dict[str, str | list[str]],
+        created_files: list[Path],
+        created_dirs: list[Path],
+        replaced_files: dict[Path, bytes],
+    ) -> None:
+        """Install the MCP server in Claude Code's project configuration."""
+        cls._install_json_mcp_config(
+            project_root / ".mcp.json",
+            server,
+            created_files,
+            created_dirs,
+            replaced_files,
+        )
+
+    @classmethod
+    def _install_pi_mcp_config(
+        cls,
+        project_root: Path,
+        server: dict[str, str | list[str]],
+        created_files: list[Path],
+        created_dirs: list[Path],
+        replaced_files: dict[Path, bytes],
+    ) -> None:
+        """Install the MCP server in Pi's project configuration."""
+        cls._install_json_mcp_config(
+            project_root / ".pi" / "mcp.json",
+            server,
+            created_files,
+            created_dirs,
+            replaced_files,
+        )
+
+    @classmethod
+    def _install_json_mcp_config(
+        cls,
+        path: Path,
+        server: dict[str, str | list[str]],
+        created_files: list[Path],
+        created_dirs: list[Path],
+        replaced_files: dict[Path, bytes],
+    ) -> None:
+        """Merge the server into a JSON MCP client configuration."""
+        if path.parent.is_symlink():
             raise ValidationError(
-                f"MCP configuration cannot be a symbolic link: {claude_path}"
+                f"MCP configuration directory cannot be a symbolic link: {path.parent}"
             )
-        if claude_path.exists():
-            if not claude_path.is_file():
+        if path.is_symlink():
+            raise ValidationError(
+                f"MCP configuration cannot be a symbolic link: {path}"
+            )
+        data: dict[str, object] = {}
+        existed = path.exists()
+        original: bytes | None = None
+        if existed:
+            if not path.is_file():
                 raise ValidationError(
-                    f"MCP configuration is not a regular file: {claude_path}"
+                    f"MCP configuration is not a regular file: {path}"
                 )
-            original = claude_path.read_bytes()
+            original = path.read_bytes()
             try:
                 parsed = json.loads(original)
             except (UnicodeError, json.JSONDecodeError) as exc:
                 raise ValidationError(
-                    f"Cannot merge MCP configuration {claude_path}: {exc}"
+                    f"Cannot merge MCP configuration {path}: {exc}"
                 ) from exc
             if not isinstance(parsed, dict):
                 raise ValidationError(
-                    f"MCP configuration must be a JSON object: {claude_path}"
+                    f"MCP configuration must be a JSON object: {path}"
                 )
-            claude_data = parsed
-        servers = claude_data.setdefault("mcpServers", {})
+            data = parsed
+        servers = data.setdefault("mcpServers", {})
         if not isinstance(servers, dict):
-            raise ValidationError(f"mcpServers must be a JSON object: {claude_path}")
+            raise ValidationError(f"mcpServers must be a JSON object: {path}")
         if "hiraku" not in servers:
             servers["hiraku"] = server
-            if claude_path.exists():
-                replaced_files[claude_path] = original
+            if existed:
+                assert original is not None
+                replaced_files[path] = original
             else:
-                cls._ensure_directory(claude_path.parent, created_dirs)
-                created_files.append(claude_path)
-            atomic_write(claude_path, json.dumps(claude_data, indent=2) + "\n")
+                cls._ensure_directory(path.parent, created_dirs)
+                created_files.append(path)
+            atomic_write(path, json.dumps(data, indent=2) + "\n")
 
+    @classmethod
+    def _install_codex_mcp_config(
+        cls,
+        project_root: Path,
+        server: dict[str, str | list[str]],
+        created_files: list[Path],
+        created_dirs: list[Path],
+        replaced_files: dict[Path, bytes],
+    ) -> None:
+        """Install the MCP server in Codex's project configuration."""
         codex_path = project_root / ".codex" / "config.toml"
         codex_text = ""
         if codex_path.parent.is_symlink():
