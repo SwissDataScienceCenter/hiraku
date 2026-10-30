@@ -71,7 +71,9 @@ with mlflow.start_run():
     mlflow.log_metric("val/accuracy", accuracy)  # calculated by your code
 ```
 
-An absolute URI keeps snapshot dispatches writing to the original database.
+Hiraku resolves `database` from the project root and supplies the resulting
+absolute tracking URI to commands it runs. For commands run outside Hiraku, set
+the URI yourself as shown above.
 
 ## Inspect
 

@@ -9,6 +9,7 @@ concurrency:
   cancel-in-progress: true
 permissions:
   contents: read
+  code-quality: write
 jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
@@ -19,14 +20,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --all-extras
-      - run: uv run pytest
+      - name: Install dependencies
+        run: uv sync --group test --all-extras --no-default-groups
+      - name: Run tests
+        run: uv run --no-sync pytest
 
   lint:
     runs-on: ubuntu-latest
@@ -38,8 +43,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --all-extras
-      - run: uv run ruff check .
+      - run: uv sync --only-group lint
+      - run: uv run --no-sync ruff check .
 
   docs-build:
     runs-on: ubuntu-latest
@@ -51,5 +56,5 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --all-extras
-      - run: uv run zensical build --clean
+      - run: uv sync --group docs --no-default-groups
+      - run: uv run --no-sync zensical build --clean
