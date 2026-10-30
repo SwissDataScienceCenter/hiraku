@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import mimetypes
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
@@ -38,12 +37,10 @@ Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, runs commands with execute, and runs LangGraph
 workflows. Use workflow_start, workflow_status, and workflow_resume to operate
 a workflow. When an interrupt requests approval, workflow_approval opens a
-structured MCP elicitation and waits for the user's answer.\
+structured MCP elicitation and waits for the user's answer.
 Use workflow_sessions and workflow_session_history to inspect recorded
-sessions and their history.\
+sessions and their history.
 """
-
-logger = logging.getLogger(__name__)
 
 
 class WorkflowApproval(BaseModel):
@@ -57,14 +54,45 @@ class WorkflowApproval(BaseModel):
     feedback: str = Field(default="", description="Optional revision feedback.")
 
 
+class ProjectMCP(MCPServer):
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any], context: Any = None
+    ) -> Any:
+        try:
+            return await super().call_tool(name, arguments, context)
+        except UnexpectedToolError as exc:
+            # The SDK hides unexpected messages; Hiraku's validation errors
+            # tell the agent how to correct its call.
+            cause = exc.__cause__
+            if isinstance(cause, HirakuError | PydanticValidationError):
+                raise ToolError(str(cause)) from cause
+            raise
+
+    async def read_resource(self, uri: Any, context: Any = None) -> Any:
+        try:
+            contents = await super().read_resource(uri, context)
+        except UnexpectedResourceError as exc:
+            # As for tools, keep the reason a Hiraku resource is unavailable.
+            if isinstance(exc.__cause__, HirakuError):
+                raise ResourceError(str(exc.__cause__)) from exc.__cause__
+            raise
+        # Source templates contain many file types; MIME depends on the URI.
+        if str(uri).startswith("hiraku://sources/"):
+            mime = mimetypes.guess_type(unquote(str(uri)))[0]
+            for item in contents:
+                item.mime_type = mime or "application/octet-stream"
+        return contents
+
+
 def _data(record: Record) -> dict[str, Any]:
     return record.model_dump(mode="json", exclude={"path"})
 
 
 def _update(record: Record, fields: dict[str, Any], markdown: str | None) -> Record:
     protected = {"id", "path", "markdown", "parent_id"}
-    if protected.intersection(fields):
-        raise ValidationError(f"Cannot update fields: {sorted(protected)}")
+    invalid = protected.intersection(fields)
+    if invalid:
+        raise ValidationError(f"Cannot update fields: {sorted(invalid)}")
     values = {
         **record.model_dump(exclude_unset=True, exclude={"path"}),
         **fields,
@@ -83,35 +111,6 @@ def create_server(config: HirakuConfig | None = None) -> Any:
     each request so external edits and tool mutations remain visible.
     """
     selected = config or HirakuConfig.discover()
-
-    class ProjectMCP(MCPServer):
-        async def call_tool(
-            self, name: str, arguments: dict[str, Any], context: Any = None
-        ) -> Any:
-            try:
-                return await super().call_tool(name, arguments, context)
-            except UnexpectedToolError as exc:
-                # The SDK hides unexpected messages; Hiraku's validation errors
-                # tell the agent how to correct its call.
-                cause = exc.__cause__
-                if isinstance(cause, HirakuError | PydanticValidationError):
-                    raise ToolError(str(cause)) from cause
-                raise
-
-        async def read_resource(self, uri: Any, context: Any = None) -> Any:
-            try:
-                contents = await super().read_resource(uri, context)
-            except UnexpectedResourceError as exc:
-                # As for tools, keep the reason a Hiraku resource is unavailable.
-                if isinstance(exc.__cause__, HirakuError):
-                    raise ResourceError(str(exc.__cause__)) from exc.__cause__
-                raise
-            # Source templates contain many file types; MIME depends on the URI.
-            if str(uri).startswith("hiraku://sources/"):
-                mime = mimetypes.guess_type(unquote(str(uri)))[0]
-                for item in contents:
-                    item.mime_type = mime or "application/octet-stream"
-            return contents
 
     server = ProjectMCP("Hiraku", instructions=INSTRUCTIONS)
 
@@ -244,8 +243,9 @@ def create_server(config: HirakuConfig | None = None) -> Any:
     @server.resource("hiraku://catalog", mime_type="application/json")
     def catalog() -> str:
         """Discover current records and attached source files."""
-        uris = [f"hiraku://records/{item.id}" for item in list_records(config=selected)]
-        for record in list_records(config=selected):
+        records = list_records(config=selected)
+        uris = [f"hiraku://records/{item.id}" for item in records]
+        for record in records:
             root = (selected.records_dir / record.path.parent.name).resolve()
             for path in sorted(root.rglob("*")):
                 if path.is_file() and path.resolve().is_relative_to(root):
@@ -257,7 +257,7 @@ def create_server(config: HirakuConfig | None = None) -> Any:
 
     @server.resource("hiraku://records/{record_id}", mime_type="application/json")
     def record_resource(record_id: str) -> str:
-        return _research_content("records", record_id, selected)
+        return _research_content(record_id, selected)
 
     @server.resource("hiraku://sources/{record_id}/{source_path}")
     def source_resource(record_id: str, source_path: str) -> bytes:
@@ -476,9 +476,10 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         mime_type="text/markdown",
     )
     def workflow_resource(workflow_id: str) -> str:
-        if workflow_id not in workflow_ids(config=project()):
+        current = project()
+        if workflow_id not in workflow_ids(config=current):
             raise ResourceError(f"Unknown workflow {workflow_id!r}")
-        markdown_path = project().workflows_dir / workflow_id / "workflow.md"
+        markdown_path = current.workflows_dir / workflow_id / "workflow.md"
         if not markdown_path.is_file():
             return ""
         return markdown_path.read_text(encoding="utf-8").strip()
@@ -493,6 +494,6 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         return workflow_mermaid(workflow_id, config=project())
 
 
-def _research_content(kind: str, identifier: str, config: HirakuConfig) -> str:
+def _research_content(identifier: str, config: HirakuConfig) -> str:
     """Read the same live representation for resources and tool attachments."""
     return json.dumps(_data(load_record(identifier, config=config)))
