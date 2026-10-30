@@ -4,7 +4,9 @@
 
 ::: hiraku.base.BaseRecord
 
-`BaseRecord` provides generic Markdown/YAML persistence. Contexts extend it.
+`BaseRecord` provides generic Markdown/YAML persistence. Research content,
+including context and supporting material, is stored as a `Record` and described
+with its `type` field.
 
 Use `record.save_markdown(body)` to save a replacement body while preserving
 metadata. It returns a saved copy of the same subtype and leaves the supplied

@@ -17,7 +17,6 @@ from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E4
 
 from hiraku.cli import main  # noqa: E402
 from hiraku.config import HirakuConfig  # noqa: E402
-from hiraku.context import load_context  # noqa: E402
 from hiraku.mcp import create_server  # noqa: E402
 from hiraku.record import load_record  # noqa: E402
 
@@ -54,21 +53,24 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         assert load_record("child", config=config).related_to == []
         await call("record_reparent", record_id="child", parent_id=None)
         await call("record_delete", record_id="child")
-        await call("context_create", context_id="sources", markdown="Evidence")
-        with pytest.raises(ToolError):
-            await call("context_create", context_id="sources")
-        with pytest.raises(ToolError):
-            await call("context_create", context_id="../escape")
         await call(
-            "context_update", context_id="sources", fields={}, markdown="Updated"
+            "record_create",
+            record_id="sources",
+            fields={"type": "context"},
+            markdown="Evidence",
         )
-        assert load_context("sources", config=config).markdown == "Updated"
-        await call("context_show", context_id="sources")
-        await call("context_list")
+        with pytest.raises(ToolError):
+            await call("record_create", record_id="sources")
+        with pytest.raises(ToolError):
+            await call("record_create", record_id="../escape")
+        await call("record_update", record_id="sources", fields={}, markdown="Updated")
+        assert load_record("sources", config=config).markdown == "Updated"
+        await call("record_show", record_id="sources")
+        await call("record_list")
         await call("record_show", record_id="root")
         await call("record_list")
-        await call("context_delete", context_id="sources")
-        assert list(config.contexts_dir.glob("*/context.md")) == []
+        await call("record_delete", record_id="sources")
+        assert list(config.records_dir.glob("*/sources.md")) == []
 
     asyncio.run(exercise())
 
@@ -80,13 +82,14 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     async def exercise() -> None:
         await server.call_tool("record_create", {"record_id": "demo"})
         await server.call_tool(
-            "context_create",
+            "record_create",
             {
-                "context_id": "literature",
+                "record_id": "literature",
+                "fields": {"type": "context"},
                 "markdown": "Curated evidence",
             },
         )
-        folder = config.contexts_dir / "literature"
+        folder = config.records_dir / "literature"
         (folder / "papers").mkdir()
         pdf = b"%PDF-1.4\nsource bytes"
         (folder / "papers" / "paper one.pdf").write_bytes(pdf)
@@ -112,7 +115,7 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
                 await server.read_resource(f"hiraku://sources/literature/{path}")
         for uri in [
             "hiraku://records/demo",
-            "hiraku://contexts/literature",
+            "hiraku://records/literature",
         ]:
             assert list(await server.read_resource(uri))[0].content
         with pytest.raises(ResourceError, match="'missing' not found"):
@@ -121,7 +124,7 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
             "propose_implementation",
             {
                 "record_id": "demo",
-                "context_ids": "literature",
+                "related_record_ids": "literature",
             },
         )
         assert "Curated evidence" in prompt.messages[0].content.text
@@ -187,7 +190,7 @@ def test_runs(tmp_path: Path) -> None:
 
 def test_stdio_session(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
-    source = config.contexts_dir / "papers"
+    source = config.records_dir / "papers"
     source.mkdir()
 
     async def exercise() -> None:
@@ -211,16 +214,17 @@ def test_stdio_session(tmp_path: Path) -> None:
                 )
                 assert (
                     len((await client.list_resource_templates()).resource_templates)
-                    == 6
+                    == 5
                 )
                 assert (await client.list_prompts()).prompts[
                     0
                 ].name == "propose_implementation"
                 assert not (
                     await client.call_tool(
-                        "context_create",
+                        "record_create",
                         {
-                            "context_id": "papers",
+                            "record_id": "papers",
+                            "fields": {"type": "context"},
                             "markdown": "Literature",
                         },
                     )

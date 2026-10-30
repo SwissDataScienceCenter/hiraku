@@ -39,6 +39,14 @@ through an existing record lifecycle.
 
 ## Main CLI entry points
 
+When the connected agent environment provides Hiraku MCP tools, use them for
+record CRUD, project resources, workflows, and foreground command execution.
+The MCP server uses the project directory selected by the host and applies the
+same Hiraku validation and persistence rules as the Python API. Use the CLI
+commands below when the relevant MCP tool is unavailable or the user asks for
+CLI commands. MCP tools may be listed under names such as `record_create`,
+`record_show`, or `record_list`.
+
 Prefer `--json` for state that will be inspected or verified programmatically.
 
 | Purpose | Main commands |
@@ -47,9 +55,9 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
 | Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
-| Manage program records | `hiraku program list`, `hiraku program show PROGRAM` |
-| Manage action records | `hiraku action ...` |
-| Manage context records | `hiraku context ...` |
+| Run a workflow | MCP tool named after the workflow (see `workflow_list`), then `workflow_send_event`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow send-event SESSION EVENT` |
+| Inspect or resume workflow sessions | MCP tools `session_list`, `session_show`; terminal: `hiraku session list`, `hiraku session show ID` |
+| Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
 Use `record show` to inspect canonical records and effective research and
@@ -314,6 +322,20 @@ instructions override program defaults.
 
 ## Commands and tracking details
 
+1. Read attached research records, then carry out the instruction
+   text using its `data`. MCP returns native resource links by default; fetch
+   them before use to retrieve their current contents.
+2. Follow any requests for user approval in the instruction text before sending
+   an event. Approval is a conversational contract.
+3. Send one of `events.accepted` with the `workflow_send_event` tool, never in
+   the chat: its arguments as the event's schema describes, and the events
+   block's `session_id` and `instruction_id` unchanged. Sending an identical
+   event again is safe; a `stale` status means the instruction moved on, so
+   continue from the one returned.
+4. A `rejected` or `not_ready` response keeps the same instruction current; fix
+   the input or check again later. An instruction without an `events` block is
+   final: carry it out, then stop.
+
 Commands are not record metadata. Pass the complete invocation directly after
 `--`, for example `hiraku run --record <record-id> -- uv run --locked python
 train.py --seed 42`. A dispatcher can prepare repeatable project-specific
@@ -344,6 +366,6 @@ The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
 `Metric`, loaders, and listing functions in `hiraku.record`;
 `BaseRecord` in `hiraku.base`; `Run` in `hiraku.run`;
 and `execute_command` in `hiraku.execution` for scripted execution.
-`hiraku context`, `hiraku action`,
-and `hiraku program` manage supporting material and instructions. V1 does not
+Records with `type: context` store supporting material. Workflows run in the
+current coding agent through the Hiraku MCP server (`hiraku mcp`). V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.

@@ -33,7 +33,7 @@ def markdown_view(
 ) -> mo.Html:
     """Render a BaseRecord's front matter and Markdown body.
 
-    Accept any subtype, including contexts and research records. Loading,
+    Accept any subtype, including generic Markdown and research records. Loading,
     parsing, and persistence belong to the caller. Pass an editor to opt into
     editing; without one this is a read-only viewer.
     """

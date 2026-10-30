@@ -7,7 +7,6 @@ from pydantic import ValidationError as ModelValidationError
 
 from hiraku.base import BaseRecord
 from hiraku.config import HirakuConfig
-from hiraku.context import Context
 from hiraku.errors import RecordExistsError, ValidationError
 from hiraku.record import Record, list_records, load_record
 
@@ -41,6 +40,17 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
         loaded.save(config.records_dir / "moved/sample.md")
 
 
+def test_context_material_uses_the_record_registry(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    context = Record.create(
+        "protocol", type="context", markdown="Guidance", config=config
+    )
+
+    assert context.path == config.records_dir / "protocol/protocol.md"
+    assert load_record("protocol", config=config).type == "context"
+    assert not (config.hiraku_dir / "contexts").exists()
+
+
 def test_record_commit_is_local_not_inherited(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     root = Record.create("root", commit="a" * 40, config=config)
@@ -62,7 +72,7 @@ def test_malformed_records_are_rejected(tmp_path: Path, content: str) -> None:
         Record.load(path)
 
 
-@pytest.mark.parametrize("record_type", [BaseRecord, Context, Record])
+@pytest.mark.parametrize("record_type", [BaseRecord, Record])
 def test_save_markdown_preserves_metadata_and_type(record_type, tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     record = record_type(id="notes", markdown="Original", custom=["value"])

@@ -141,7 +141,6 @@ class ProjectInitializer:
                 for directory in (
                     config.records_dir,
                     config.workflows_dir,
-                    config.contexts_dir,
                     config.dispatch_dir,
                 ):
                     cls._ensure_directory(directory, created_dirs)

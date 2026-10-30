@@ -26,7 +26,6 @@ from rich.table import Table
 
 from .base import BaseRecord
 from .config import HirakuConfig
-from .context import Context, list_contexts, load_context
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
@@ -480,6 +479,8 @@ def record_update(
     changes = _fields(set_values)
     if any(key in changes for key in ("id", "parent_id")):
         raise ValidationError("id and parent_id require dedicated operations")
+    if "markdown" in changes:
+        raise ValidationError("Use --markdown-file to update Markdown")
     if related_to:
         changes["related_to"] = list(related_to)
     if commit is not None:
@@ -566,92 +567,6 @@ def record_tree(state: CLIContext, json_output: bool) -> None:
             visit(child.id, depth + 1)
 
     visit(None, 0)
-
-
-def _install_generic(
-    name: str, cls: type[BaseRecord], loader: Any, lister: Any, directory: str
-) -> None:
-    @main.group(name=name)
-    def group() -> None:
-        """Manage generic Markdown records."""
-
-    @group.command("create")
-    @click.argument("identifier")
-    @click.option("--set", "set_values", multiple=True)
-    @click.option("--markdown-file", type=click.Path(path_type=Path))
-    @click.pass_obj
-    def create(
-        state: CLIContext,
-        identifier: str,
-        set_values: tuple[str, ...],
-        markdown_file: Path | None,
-    ) -> None:
-        validate_identifier(identifier)
-        record = cls(
-            id=identifier, markdown=_markdown(markdown_file), **_fields(set_values)
-        )
-        path = getattr(state.config, directory) / identifier / f"{name}.md"
-        record.save(path)
-        click.echo(f"Created {name} {identifier} at {path}")
-
-    @group.command("list")
-    @click.option("--json", "json_output", is_flag=True)
-    @click.pass_obj
-    def listing(state: CLIContext, json_output: bool) -> None:
-        records = lister(config=state.config)
-        _emit_json(records) if json_output else _print_table(
-            ("id",), [(r.id,) for r in records]
-        )
-
-    @group.command("show")
-    @click.argument("identifier")
-    @click.option("--json", "json_output", is_flag=True)
-    @click.pass_obj
-    def show(state: CLIContext, identifier: str, json_output: bool) -> None:
-        record = loader(identifier, config=state.config)
-        _emit_json(record) if json_output else click.echo(
-            f"---\n{dump_yaml(record.to_dict())}---\n{record.markdown}", nl=False
-        )
-
-    @group.command("update")
-    @click.argument("identifier")
-    @click.option("--set", "set_values", multiple=True)
-    @click.option("--unset", "unset_values", multiple=True)
-    @click.option("--markdown-file", type=click.Path(path_type=Path))
-    @click.pass_obj
-    def update(
-        state: CLIContext,
-        identifier: str,
-        set_values: tuple[str, ...],
-        unset_values: tuple[str, ...],
-        markdown_file: Path | None,
-    ) -> None:
-        record = loader(identifier, config=state.config)
-        _update_fields(record, set_values, unset_values, markdown_file)
-        click.echo(f"Updated {name} {identifier}")
-
-    @group.command("edit")
-    @click.argument("identifier")
-    @click.pass_obj
-    def edit(state: CLIContext, identifier: str) -> None:
-        path = getattr(state.config, directory) / identifier / f"{name}.md"
-        _edit_recoverable(
-            path,
-            lambda: loader(identifier, config=state.config),
-            f"{name} {identifier!r}",
-        )
-        click.echo(f"Validated {name} {identifier}")
-
-    @group.command("delete")
-    @click.argument("identifier")
-    @click.pass_obj
-    def delete(state: CLIContext, identifier: str) -> None:
-        record = loader(identifier, config=state.config)
-        record.delete()
-        click.echo(f"Deleted {name} {identifier}")
-
-
-_install_generic("context", Context, load_context, list_contexts, "contexts_dir")
 
 
 @main.group("workflow")

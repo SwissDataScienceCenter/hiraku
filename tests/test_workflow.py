@@ -10,7 +10,6 @@ from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.context import Context
 from hiraku.errors import SessionNotFoundError, ValidationError, WorkflowError
 from hiraku.record import Record
 from hiraku.workflows.graph import Event, EventArguments, Node, State, WorkflowGraph
@@ -913,8 +912,8 @@ def test_instruction_renders_itself():
     [
         {"documents": ["protocol"]},
         {"records": "task"},
-        {"contexts": [42]},
-        {"contexts": None},
+        {"records": [42]},
+        {"records": None},
     ],
 )
 def test_instruction_rejects_invalid_context_shape(context):
@@ -924,21 +923,20 @@ def test_instruction_rejects_invalid_context_shape(context):
 
 def test_instruction_context_roundtrip():
     instruction = Instruction(
-        "Work", data=[1, "value"], context={"contexts": ["protocol"]}
+        "Work", data=[1, "value"], context={"records": ["protocol"]}
     )
     restored = Instruction.model_validate_json(instruction.model_dump_json())
     assert restored == instruction
-    assert restored.context == {"contexts": ["protocol"]}
+    assert restored.context == {"records": ["protocol"]}
     assert "Context:" in restored.to_text()
     assert Instruction("Work", context={}).context == {}
 
 
-@pytest.mark.parametrize("kind", ["contexts", "records"])
 @pytest.mark.parametrize("identifier", ["missing", "../outside"])
-def test_missing_or_invalid_instruction_reference(config, kind, identifier):
+def test_missing_or_invalid_instruction_reference(config, identifier):
     source = TOY.replace(
         'data={"total": state.total}',
-        f'data={{"total": state.total}}, context={{{kind!r}: [{identifier!r}]}}',
+        f'data={{"total": state.total}}, context={{"records": [{identifier!r}]}}',
     )
     write_workflow(config, source)
     result = Session.run_start(load_workflow("toy", config=config))
@@ -948,14 +946,12 @@ def test_missing_or_invalid_instruction_reference(config, kind, identifier):
 
 
 def test_workflow_context_validation_before_persistence(config, tmp_path, monkeypatch):
-    Context(id="protocol", markdown="Protocol").save(
-        config.contexts_dir / "protocol" / "context.md"
-    )
+    Record.create("protocol", type="context", markdown="Protocol", config=config)
     Record.create("task", type="task", config=config)
     source = TOY.replace(
         'data={"total": state.total}',
         'data={"total": state.total}, '
-        'context={"contexts": ["protocol", "protocol"], "records": ["task"]}',
+        'context={"records": ["protocol", "protocol", "task"]}',
     )
     write_workflow(config, source)
     workflow = load_workflow("toy", config=config)
@@ -966,11 +962,10 @@ def test_workflow_context_validation_before_persistence(config, tmp_path, monkey
     assert result.status == "accepted"
     session = load_session(result.session_id, config=config)
     assert session.instruction.context == {
-        "contexts": ["protocol"],
-        "records": ["task"],
+        "records": ["protocol", "task"],
     }
     before = session.model_dump(mode="json")
-    (config.contexts_dir / "protocol" / "context.md").unlink()
+    (config.records_dir / "protocol" / "protocol.md").unlink()
     failed = session.run_event(workflow, result.instruction_id, "add", {"amount": 1})
     assert failed.status == "error"
     assert "protocol" in failed.message

@@ -122,25 +122,28 @@ or `/hiraku` in Claude Code.
 
 Hiraku manages agent integration with actions, programs, and context. *Actions* define one-step execution patterns that combine deterministic hooks with LLM instructions and have a validated start and end state.  A *program* defines complex research workflows and loops end-to-end, with defined permissions and limits. Actions and programs are executed by the `hiraku-agent`. Hiraku ships default programs and actions, and these can be customized by the user. *Context* files can be used to provide project-relevant information to the agent.
 
+A *workflow* is a project-defined research procedure that runs inside your
+coding agent. Its Python code decides what happens next and validates what the
+agent reports; its Markdown holds the guidance the agent follows. The agent
+starts a workflow and continues it through the Hiraku MCP server, which
+`hiraku init` configures for Claude Code and Codex. Records with
+`type: context` provide project-relevant information to the agent and can be
+linked to other records.
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Action** | `hiraku/actions/{entity}/{action_id}/{action.md,action.py}` | A named action that can be invoked by the hiraku-agent agent. |
-| **Program** | `hiraku/programs/{program_id}/{program.md,program.py}` | A named research workflow that defines agent instructions, permissions, resource limits, checkpoints, and stopping conditions. |
-| **Context** | `hiraku/contexts/{context_id}/context.md` | Curated context files, e.g. literature, cross-task summaries, etc. that can be referenced. |
+| **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A record with an `id`, settings, and prompts (`workflow.md`) whose class adds the operations (`workflow.py`). |
+| **Session** | `hiraku/sessions/{session_id}.json` | One invocation of a workflow: its state, history, and current instruction. Sessions are local and not committed. |
+| **Record** | `hiraku/records/{root_id}/{record_id}.md` | Research content of any kind, including tasks, experiments, literature, datasets, and context. Use `type` to describe the record. |
 
 Programs, action and context records are managed via CLI, e.g.
 
 ```bash
-hiraku program create <program-id>
-hiraku program list
-hiraku context create <context-id>
-hiraku context list
-hiraku action create <entity>/<action-id>
-hiraku action list
+hiraku workflow list
+hiraku session list
+hiraku record create literature --type context
+hiraku record list
 ```
-
-
 
 ## Example workflows
 
@@ -153,14 +156,9 @@ The following sequence illustrates the intended workflow.
 hiraku init
 hiraku status
 
-# 1. optionally, initialize context (not implement yet)
-hiraku context create literature
-hiraku-agent context update literature "Create a curated literature review for heart-disease prediction"
-
-# add literature to the active context
-hiraku context set literature
-# print files that would be added to the context
-hiraku context
+# 1. optionally, create a context record
+hiraku record create literature --type context
+# Ask your coding agent to create a curated literature review.
 
 # 2. create the research root; creation makes it active
 hiraku record create heart-disease --type task \
