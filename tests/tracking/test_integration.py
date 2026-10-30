@@ -53,11 +53,8 @@ def test_backend_runs_rejects_empty_record_id_before_reading_source(
 def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     mlflow = pytest.importorskip("mlflow")
     config = HirakuConfig.init(tmp_path)
-    task = Record.create(
-        "task",
-        config=config,
-        tracking_backend={"type": "mlflow", "experiment_name": "hiraku-test"},
-    )
+    config.tracking_backend = {"type": "mlflow", "experiment_name": "hiraku-test"}
+    task = Record.create("task", config=config)
     Record.create("exp", parent_id=task.id, config=config)
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
     mlflow.set_experiment("hiraku-test")

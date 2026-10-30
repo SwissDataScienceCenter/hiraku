@@ -62,7 +62,3 @@ For other tracking backends, see [W&B](../../guides/tracking-wandb.md) or
 
 For the next experiment, implement and commit the source changes, then create a
 new experiment bound to that commit.
-
-### Command execution
-
-Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.

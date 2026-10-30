@@ -40,43 +40,6 @@ At any time, a single record can be set as "active". By default, creation activa
     Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
 
 
-### CLI
-
-The CLI provides a standardized interface for managing data records, .e.g
-
-```bash
-hiraku init  # initialize in the current directory; Git is optional
-hiraku init PATH --git  # also initialize the code Git repository
-hiraku init --template ./path/to/template  # apply a local project overlay
-hiraku example create <name> .  # apply a packaged example in the current directory
-
-hiraku record create <root-id>
-hiraku record create <child-id> --parent <root-id> --type experiment
-hiraku record list
-hiraku record tree
-hiraku record show <record-id>  # effective fields and their sources
-hiraku record show <record-id> --raw  # stored fields
-hiraku record update <record-id> --commit HEAD
-hiraku record delete <record-id>
-
-hiraku status  # show the active record
-
-hiraku runs                         # runs attributed to the active record
-hiraku runs --record <record-id>    # runs attributed to a specific record
-hiraku runs --all                   # all attributed runs in the active record's tracking source
-hiraku runs --record <root-id> --all --params seed,lr --metrics train/accuracy,val/accuracy --sort val/accuracy --descending
-```
-
-### Python API
-
-Hiraku data records are managed by the [Python API](api/python/index.md). All other user interfaces (CLI, dashboard, agent harness, ...) should refer to the Python API wherever possible.
-
-```python
-from hiraku.record import Metric, Record, list_records, load_record
-from hiraku.run import Run
-```
-
-
 ## Tracking Backend
 
 A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters. Record configuration and the CLI select these built-in backends. The backend needs to:

@@ -67,7 +67,7 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
     gitignore.write_text(
         gitignore.read_text(encoding="utf-8")
         + "\n# Hiraku local files and run artifacts\n"
-        + "/.agents/\n/.claude/\n/.codex/\n/.mcp.json\n/hiraku/*\n/hiraku.yml\n"
+        + "/.agents/\n/.claude/\n/.codex/\n/.pi/\n/.mcp.json\n/hiraku/*\n/hiraku.yml\n"
         + "/task.md\n"
         + "/runs.csv\n/run.log\n",
         encoding="utf-8",

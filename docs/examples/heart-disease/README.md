@@ -270,7 +270,3 @@ the new implementation commit and use the same evaluation settings.
 
     These tests invoke `codex exec` with GPT-5.6 Luna and require local Codex
     authentication. They are skipped during the normal test suite and CI.
-
-### Command execution
-
-Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.

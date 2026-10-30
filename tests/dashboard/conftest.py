@@ -27,7 +27,6 @@ def project(tmp_path: Path) -> HirakuConfig:
         "root",
         type="task",
         metrics=[{"name": "loss", "direction": "minimize"}],
-        tracking_backend={"type": "csv"},
         config=config,
     )
     Record.create("a", parent_id="root", config=config)

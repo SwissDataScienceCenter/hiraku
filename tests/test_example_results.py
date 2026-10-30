@@ -38,12 +38,12 @@ def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
         install_skill=False,
     )
     assert config.active_record_id == "weak-l2"
-    root = Record.load(config.records_dir / "digits" / "digits.md")
-    assert root.tracking_backend == {
+    assert config.tracking_backend == {
         "type": "mlflow",
         "database": "mlflow.db",
         "experiment_name": "hiraku-digits",
     }
+    root = Record.load(config.records_dir / "digits" / "digits.md")
     assert root.resolve_tracking_backend(config=config).backend_name == "mlflow"
 
 

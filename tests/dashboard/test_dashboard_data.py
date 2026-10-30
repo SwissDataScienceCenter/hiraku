@@ -66,22 +66,19 @@ def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:
 def test_load_reports_unavailable_source_without_failing(
     project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    Record.create(
-        "broken", tracking_backend={"type": "csv", "path": "other.csv"}, config=project
-    )
-    original = Record.resolve_tracking_backend
+    Record.create("broken", config=project)
 
     def resolve(self: Record, **options):
-        if self.id == "broken":
-            raise BackendError("source offline")
-        return original(self, **options)
+        raise BackendError("source offline")
 
     monkeypatch.setattr(Record, "resolve_tracking_backend", resolve)
 
     loaded = load(project)
 
-    assert loaded.errors == ["Tracking source for 'broken' unavailable: source offline"]
-    assert len(loaded.runs) == 5
+    assert loaded.errors == [
+        f"Tracking source for {loaded.records[0].id!r} unavailable: source offline"
+    ]
+    assert loaded.runs == []
 
 
 def test_run_rows_flatten_runs_in_execution_order(project: HirakuConfig) -> None:

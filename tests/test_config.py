@@ -143,19 +143,18 @@ def test_init_falls_back_to_copy_when_skill_symlinks_are_unavailable(
     assert claude_skill.read_text() == canonical_skill.read_text()
 
 
-@pytest.mark.parametrize("key", ["command", "tracking_backend"])
-def test_project_config_rejects_record_defaults(tmp_path: Path, key: str) -> None:
+def test_project_config_rejects_record_command(tmp_path: Path) -> None:
     marker = tmp_path / "hiraku.yml"
-    marker.write_text(f"{key}: value\n")
-    with pytest.raises(ValidationError, match="root record"):
+    marker.write_text("command: value\n")
+    with pytest.raises(ValidationError, match="configured on a record"):
         HirakuConfig.load(marker)
 
 
-def test_project_config_cannot_be_assigned_record_defaults(tmp_path: Path) -> None:
+def test_project_config_tracking_backend_is_project_wide(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
-    with pytest.raises(ValidationError, match="root record"):
-        config.tracking_backend = {"type": "wandb"}
-    with pytest.raises(ValidationError, match="root record"):
+    config.tracking_backend = {"type": "wandb", "project": "research"}
+    assert config.tracking_backend == {"type": "wandb", "project": "research"}
+    with pytest.raises(ValidationError, match="configured on a record"):
         config.command = ["python", "train.py"]
 
 

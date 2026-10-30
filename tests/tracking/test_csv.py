@@ -91,11 +91,8 @@ def test_csv_source_listing_returns_all_attributed_runs(tmp_path: Path) -> None:
 
 def test_csv_backend_resolves_record_path_from_project_root(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path)
-    record = Record.create(
-        "iris",
-        config=config,
-        tracking_backend={"type": "csv", "path": "results/iris.csv"},
-    )
+    config.tracking_backend = {"type": "csv", "path": "results/iris.csv"}
+    record = Record.create("iris", config=config)
     path = tmp_path / "results" / "iris.csv"
     path.parent.mkdir()
     path.write_text("id,record_id\na,iris\n", encoding="utf-8")

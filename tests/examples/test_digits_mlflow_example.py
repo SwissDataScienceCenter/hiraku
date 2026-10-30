@@ -60,9 +60,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             "digits",
             "--set",
             "goal=Compare regularization curves",
-            "--set",
-            "tracking_backend={type: mlflow, database: mlflow.db, "
-            "experiment_name: hiraku-digits}",
         ],
     )
     for record_id in ("weak-l2", "strong-l2"):

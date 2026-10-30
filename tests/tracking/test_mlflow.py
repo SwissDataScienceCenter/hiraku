@@ -65,7 +65,9 @@ def _native_run(
     )
 
 
-def test_mlflow_backend_paginates_experiments_and_runs(tmp_path, monkeypatch) -> None:
+def test_mlflow_backend_paginates_runs_in_named_experiment(
+    tmp_path, monkeypatch
+) -> None:
     mlflow = pytest.importorskip("mlflow")
     calls: list[str | None] = []
 
@@ -73,13 +75,12 @@ def test_mlflow_backend_paginates_experiments_and_runs(tmp_path, monkeypatch) ->
         def __init__(self, tracking_uri: str | None = None) -> None:
             pass
 
-        def search_experiments(self, page_token=None):
-            if page_token is None:
-                return _Page([SimpleNamespace(experiment_id="e1")], "more")
-            return _Page([SimpleNamespace(experiment_id="e2")])
+        def get_experiment_by_name(self, name):
+            assert name == tmp_path.name
+            return SimpleNamespace(experiment_id="e1")
 
         def search_runs(self, experiment_ids, max_results, page_token=None):
-            assert experiment_ids == ["e1", "e2"]
+            assert experiment_ids == ["e1"]
             calls.append(page_token)
             if page_token is None:
                 return _Page([_native_run("r1")], "next")
@@ -102,8 +103,9 @@ def test_mlflow_backend_reads_duration_from_start_and_end(
         def __init__(self, tracking_uri: str | None = None) -> None:
             pass
 
-        def search_experiments(self, page_token=None):
-            return _Page([SimpleNamespace(experiment_id="e1")])
+        def get_experiment_by_name(self, name):
+            assert name == tmp_path.name
+            return SimpleNamespace(experiment_id="e1")
 
         def search_runs(self, experiment_ids, max_results, page_token=None):
             return _Page([_native_run("done"), _native_run("running", end_time=None)])

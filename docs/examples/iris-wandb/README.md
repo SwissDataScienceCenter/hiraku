@@ -95,7 +95,3 @@ runs; it does not create the W&B project or run.
     | --- | --- | --- | ---: | ---: | ---: |
     | `logistic` | `kwh698ea` | Logistic regression | 0.9474 | 0.9487 | 0.1757 |
     | `random-forest` | `y5czffeu` | Random forest | 0.9211 | 0.9230 | 0.1789 |
-
-### Command execution
-
-Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.

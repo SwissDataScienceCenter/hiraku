@@ -144,7 +144,3 @@ Track the agent's progress with:
 hiraku record list --json
 hiraku runs --record sep10 --all --sort val_bpb --ascending
 ```
-
-### Command execution
-
-Commands run in the current project working tree. Output streams to the terminal, and Hiraku returns the command's exit code. Arguments after `--` replace the record's inherited command.

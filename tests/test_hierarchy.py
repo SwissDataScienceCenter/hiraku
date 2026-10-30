@@ -453,23 +453,14 @@ def test_committed_journal_errors_when_new_authoritative_copy_is_missing(
     assert journal_path.exists()
 
 
-def test_resolve_tracking_backend_inherits_closest_setting(tmp_path: Path) -> None:
+def test_resolve_tracking_backend_uses_project_setting(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
-    root = Record.create(
-        "root",
-        config=config,
-        tracking_backend={"type": "csv", "path": "results/root.csv"},
-    )
+    config.tracking_backend = {"type": "csv", "path": "results/root.csv"}
+    root = Record.create("root", config=config)
     child = Record.create("child", parent_id=root.id, config=config)
     other = Record.create("other", config=config)
 
-    inherited = child.resolve_tracking_backend(config=config)
-    assert isinstance(inherited, CSVBackend)
-    assert inherited.path == (tmp_path / "results" / "root.csv").resolve()
-    child.tracking_backend = {"type": "csv", "path": "results/child.csv"}
-    child.save(overwrite=True)
-    overridden = Record.load(child.path).resolve_tracking_backend(config=config)
-    assert overridden.path == (tmp_path / "results" / "child.csv").resolve()
-    default = other.resolve_tracking_backend(config=config)
-    assert isinstance(default, CSVBackend)
-    assert default.path is None
+    for record in (root, child, other):
+        backend = record.resolve_tracking_backend(config=config)
+        assert isinstance(backend, CSVBackend)
+        assert backend.path == (tmp_path / "results" / "root.csv").resolve()

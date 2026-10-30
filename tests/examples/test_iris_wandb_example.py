@@ -132,13 +132,12 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "metrics=[{name: test/accuracy, direction: maximize}, "
             "{name: test/f1_macro, direction: maximize}, "
             "{name: test/log_loss, direction: minimize}]",
-            "--set",
-            "tracking_backend=wandb",
         ],
     )
     config = HirakuConfig.discover(project)
     root = load_record("iris", config=config)
-    assert root.tracking_backend == "wandb"
+    assert config.tracking_backend == "wandb"
+    assert "tracking_backend" not in root.to_dict()
 
     invoke(
         runner,

@@ -88,10 +88,10 @@ def test_record_cli_active_and_validation(tmp_path: Path, monkeypatch) -> None:
     assert invoke("record", "update", "second", "--related-to", "first").exit_code == 0
 
 
-def test_status_reports_active_record_tracking_backend(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_status_reports_project_tracking_backend(tmp_path: Path, monkeypatch) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
+    config.tracking_backend = {"type": "wandb", "project": "eurosat-rgb"}
+    config.save()
     monkeypatch.chdir(tmp_path)
     result = invoke(
         "record",
@@ -101,8 +101,6 @@ def test_status_reports_active_record_tracking_backend(
         "task",
         "--set",
         "metrics=[{name: val/accuracy, direction: maximize}]",
-        "--set",
-        "tracking_backend={type: wandb, project: eurosat-rgb}",
     )
     assert result.exit_code == 0
     child = invoke(
@@ -114,21 +112,13 @@ def test_status_reports_active_record_tracking_backend(
     assert shown["values"]["metrics"] == [
         {"name": "val/accuracy", "direction": "maximize"}
     ]
-    assert shown["values"]["tracking_backend"] == {
-        "type": "wandb",
-        "project": "eurosat-rgb",
-    }
     assert shown["sources"]["metrics"] == "mlp"
-    assert shown["sources"]["tracking_backend"] == "mlp"
+    assert "tracking_backend" not in shown["values"]
 
     raw = json.loads(invoke("record", "show", "mlp", "--raw", "--json").output)
     assert raw["values"]["metrics"] == [
         {"name": "val/accuracy", "direction": "maximize"}
     ]
-    assert raw["values"]["tracking_backend"] == {
-        "type": "wandb",
-        "project": "eurosat-rgb",
-    }
 
     override = invoke(
         "record",
@@ -140,42 +130,15 @@ def test_status_reports_active_record_tracking_backend(
         "experiment",
         "--set",
         "metrics=[{name: val/loss, direction: minimize}]",
-        "--set",
-        "tracking_backend={type: csv}",
     )
     assert override.exit_code == 0
     cnn = json.loads(invoke("record", "show", "cnn", "--raw", "--json").output)
     assert cnn["values"]["metrics"] == [{"name": "val/loss", "direction": "minimize"}]
-    assert cnn["values"]["tracking_backend"] == {"type": "csv"}
 
     assert invoke("record", "set", "mlp").exit_code == 0
     status = json.loads(invoke("status", "--json").output)
-    assert status["tracking_backend"] == {
-        "type": "wandb",
-        "project": "eurosat-rgb",
-    }
-    assert "project_tracking_backend" not in status
-    assert (
-        load_record("mlp", config=config)
-        .resolve(config=config)
-        .values["tracking_backend"]
-        == status["tracking_backend"]
-    )
-    assert (
-        invoke(
-            "record",
-            "update",
-            "eurosat",
-            "--set",
-            "tracking_backend={type: csv}",
-        ).exit_code
-        == 0
-    )
-    stored_child = json.loads(invoke("record", "show", "mlp", "--raw", "--json").output)
-    assert stored_child["values"]["tracking_backend"] == {
-        "type": "wandb",
-        "project": "eurosat-rgb",
-    }
+    assert status["tracking_backend"] == "wandb"
+    assert "tracking_backend" not in load_record("mlp", config=config).to_dict()
 
 
 def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
