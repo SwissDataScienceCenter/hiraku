@@ -433,7 +433,7 @@ def record_show(
 ) -> None:
     """Show stored or effective fields with their sources."""
     _validate_json_options(json_output, pretty)
-    record = _active(state.config, record_id)
+    record = load_record(record_id, config=state.config)
     if raw:
         values = record.to_dict()
         sources = {}
