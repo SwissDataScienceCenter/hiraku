@@ -6,12 +6,26 @@ import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from .config import HirakuConfig
 from .errors import ExecutionError, GitError, NoActiveRecordError, ValidationError
 from .git import GitRepository
 from .record import load_record
-from .validation import validate_command
+
+
+def validate_command(value: Any) -> list[str] | None:
+    """Validate command configuration as a literal argv sequence."""
+    if value is None:
+        return None
+    if isinstance(value, str | bytes) or not isinstance(value, list | tuple):
+        raise ValidationError("command must be an argv sequence")
+    command = list(value)
+    if not command or not isinstance(command[0], str) or not command[0]:
+        raise ValidationError("command executable must be a non-empty string")
+    if any(not isinstance(argument, str) or "\x00" in argument for argument in command):
+        raise ValidationError("command arguments must be strings without NUL bytes")
+    return command
 
 
 def execute_command(

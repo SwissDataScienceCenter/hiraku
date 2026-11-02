@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 
 from hiraku.errors import ValidationError
-from hiraku.validation import validate_command, validate_identifier
+from hiraku.execution import validate_command
+from hiraku.record import validate_identifier
 
 
 def test_validate_command_accepts_none_and_copies_argv_sequences() -> None:
