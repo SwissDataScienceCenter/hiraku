@@ -42,7 +42,3 @@ result = execute_command(
 if result.returncode:
     raise SystemExit(result.returncode)
 ```
-
-Older `hiraku job` lifecycle commands and the `Job`/`JobSpec` Python API were
-removed. Run the command directly and inspect its tracking backend with
-`hiraku runs` when it finishes.
