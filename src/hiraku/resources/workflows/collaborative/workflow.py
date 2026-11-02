@@ -16,11 +16,11 @@ from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.config import HirakuConfig
 from hiraku.errors import HirakuError, ValidationError
+from hiraku.execution import validate_command
 from hiraku.git import GitRepository
 from hiraku.markdown import Markdown, render
 from hiraku.record import Record, load_record
 from hiraku.run import Run
-from hiraku.validation import validate_command
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
 STEPS = ("draft", "implement", "launch", "analyze")

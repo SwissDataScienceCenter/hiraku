@@ -26,11 +26,24 @@ from .io import atomic_write, dump_yaml
 from .markdown import Markdown
 from .run import Run
 from .tracking import TrackingBackend, create_backend
-from .validation import validate_identifier
 
 _FRONT_MATTER = re.compile(
     r"\A---\r?\n(.*?)^---[ \t]*(?:\r?\n|\Z)", re.MULTILINE | re.DOTALL
 )
+_SAFE_ID = re.compile(r'^[^<>:"/\\|?*\x00-\x1f\x7f]+$')
+
+
+def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
+    """Validate an identifier used in record paths and references."""
+    if (
+        not isinstance(identifier, str)
+        or not identifier
+        or identifier in {".", ".."}
+        or identifier != identifier.strip()
+        or identifier.endswith(".")
+        or not _SAFE_ID.fullmatch(identifier)
+    ):
+        raise ValidationError(f"Invalid {label}: {identifier!r}")
 
 
 class Metric(BaseModel):

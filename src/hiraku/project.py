@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from .errors import HirakuError, ProjectExistsError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
-from .validation import validate_identifier
+from .record import validate_identifier
 
 if TYPE_CHECKING:
     from .config import HirakuConfig
