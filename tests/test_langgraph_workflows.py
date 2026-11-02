@@ -38,7 +38,7 @@ def _write_workflow(config: HirakuConfig, source: str) -> None:
 def test_start_rejects_invalid_workflow_input_schema(
     tmp_path: Path, source: str, message: str
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = HirakuConfig.init(tmp_path, install_skill=False, records_path="knowledge")
     _write_workflow(config, source)
 
     with pytest.raises(WorkflowError, match=message):
@@ -63,7 +63,7 @@ def test_start_rejects_invalid_workflow_input_schema(
 def test_start_rejects_invalid_graph_factory(
     tmp_path: Path, factory: str, message: str
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = HirakuConfig.init(tmp_path, install_skill=False, records_path="knowledge")
     _write_workflow(
         config,
         "def input_schema(): return {'type': 'object'}\n" + factory,
@@ -74,7 +74,7 @@ def test_start_rejects_invalid_graph_factory(
 
 
 def test_start_wraps_workflow_import_errors(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = HirakuConfig.init(tmp_path, install_skill=False, records_path="knowledge")
     _write_workflow(config, "def input_schema():\n    return [\n")
 
     with pytest.raises(WorkflowError, match="Cannot import LangGraph workflow"):

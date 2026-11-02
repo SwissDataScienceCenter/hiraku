@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 
 from hiraku import HirakuConfig
 from hiraku.execution import execute_command
-from hiraku.record import Record
+from hiraku.record import Record, open_workspace
 
 EXPERIMENTS = (("weak-l2", 0.0001), ("strong-l2", 1.0))
 EPOCHS = 20
@@ -80,12 +80,13 @@ def generate(config: HirakuConfig) -> None:
         "experiment_name": "hiraku-digits",
     }
     config.save()
+    workspace = open_workspace(config)
     Record.create(
-        "digits",
+        workspace,
+        "digits/digits.md",
+        id="digits",
         type="task",
         status="concluded",
-        activate=False,
-        config=config,
         metrics=[
             {"name": "val/log_loss", "direction": "minimize"},
             {"name": "val/accuracy", "direction": "maximize"},
@@ -96,12 +97,12 @@ def generate(config: HirakuConfig) -> None:
     )
     for identifier, alpha in EXPERIMENTS:
         Record.create(
-            identifier,
+            workspace,
+            f"digits/{identifier}.md",
+            id=identifier,
             parent_id="digits",
             type="hypothesis",
             status="concluded",
-            activate=False,
-            config=config,
             markdown=f"## {identifier}\n\nL2 alpha: {alpha}; seeds: 1, 2, 3; "
             f"epochs: {EPOCHS}; hidden units: 64; validation fraction: 0.25.\n",
         )
@@ -149,6 +150,7 @@ def generate_results(output: Path) -> None:
             Path(temporary).resolve() / "project",
             example="digits-mlflow",
             install_skill=False,
+            records_path="hiraku/records",
         )
         for arguments in (
             ["init", "-q"],

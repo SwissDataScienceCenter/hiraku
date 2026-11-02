@@ -1,3 +1,4 @@
+records_path: hiraku/records
 hiraku_dir: hiraku
 active_record_id: random-forest
 tracking_backend: csv

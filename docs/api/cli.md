@@ -5,12 +5,19 @@ The CLI manages research records, foreground command execution, and tracked runs
 Typical workflow:
 
 ```bash
-hiraku init
+hiraku init --records-path ../knowledge
 hiraku record create <root-id>
 hiraku record create <child-id> --parent <root-id>
 hiraku run --record <child-id> -- python train.py
 hiraku runs --record <record-id>
 ```
+
+`hiraku record create PATH` takes a destination relative to the knowledge base.
+Both `random-forest` and `random-forest.md` create `random-forest.md`. A missing
+suffix becomes `.md`; other suffixes are rejected.
+The ID defaults to the filename stem; use `--id ID` to override it, for example
+`hiraku record create notes/baseline --id initial-run --parent research-root`.
+The inferred or explicit ID must satisfy the record identifier rules.
 
 `hiraku record list` includes each record's local `status` in its table.
 Commands with an optional `--json` output accept `--pretty` alongside it to
@@ -22,8 +29,8 @@ Initialization uses the following destinations, creating missing directories:
 
 | Command | Destination |
 | --- | --- |
-| `hiraku init` | Current directory |
-| `hiraku init my-project` | `./my-project` |
+| `hiraku init --records-path ../knowledge` | Current directory |
+| `hiraku init my-project --records-path ../knowledge` | `./my-project` |
 | `hiraku example create minimal` | `./minimal` |
 | `hiraku example create minimal my-project` | `./my-project` |
 | `hiraku example create minimal .` | Current directory |
@@ -43,8 +50,11 @@ initialization with `--git` can add Git to an existing Hiraku project.
 Initialize from an arbitrary local project overlay with `--template`:
 
 ```bash
-hiraku init --template ./path/to/template
+hiraku init --template ./path/to/template --records-path ../knowledge
 ```
+
+New projects require `records_path`, supplied by `--records-path` or the
+template's `hiraku.yml`. Bundled examples include this setting.
 
 List available starting points with `hiraku example list`.
 

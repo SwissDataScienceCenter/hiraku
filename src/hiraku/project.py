@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 
 from .errors import HirakuError, ProjectExistsError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
-from .record import validate_identifier
 
 if TYPE_CHECKING:
     from .config import HirakuConfig
@@ -35,6 +34,7 @@ class _ProjectProvisioner:
         cls,
         root: Path | str = ".",
         *,
+        records_path: str | None = None,
         install_skill: bool = True,
         template: Path | str | None = None,
         example: str | None = None,
@@ -45,6 +45,8 @@ class _ProjectProvisioner:
 
         Args:
             root: Root directory where the project will be created.
+            records_path: Knowledge-base directory, required unless supplied
+                by a template or example.
             install_skill: Whether to install repository-local skill resources for
                 supported coding agents.
             template: Optional local directory copied over the initialized project.
@@ -61,6 +63,7 @@ class _ProjectProvisioner:
         """
         return cls.create_with_report(
             root,
+            records_path=records_path,
             install_skill=install_skill,
             template=template,
             example=example,
@@ -73,6 +76,7 @@ class _ProjectProvisioner:
         cls,
         root: Path | str = ".",
         *,
+        records_path: str | None = None,
         install_skill: bool = True,
         template: Path | str | None = None,
         example: str | None = None,
@@ -131,6 +135,8 @@ class _ProjectProvisioner:
                 result_marker = result_overlay / "hiraku.yml"
                 if result_marker.is_file():
                     data.update(load_yaml_mapping(result_marker))
+            if records_path is not None:
+                data["records_path"] = records_path
             config = HirakuConfig(path=marker, root=project_root, **data)
             try:
                 project_root.mkdir(parents=True, exist_ok=True)
@@ -138,11 +144,8 @@ class _ProjectProvisioner:
                     created_dirs.append(project_root)
                 atomic_write(marker, dump_yaml(config.to_dict()))
                 created_files.append(marker)
-                for directory in (
-                    config.records_dir,
-                    config.workflows_dir,
-                ):
-                    cls._ensure_directory(directory, created_dirs)
+                cls._ensure_directory(config.workflows_dir, created_dirs)
+                cls._ensure_directory(config.records_dir, created_dirs)
                 resource_root = files("hiraku.resources")
                 copies = [(resource_root / "workflows", config.workflows_dir)]
                 if install_skill:
@@ -384,24 +387,22 @@ class _ProjectProvisioner:
             return source
         if example is None:
             return None
-        validate_identifier(example, label="example name")
         examples = files("hiraku.resources") / "examples"
-        source = examples / example / "src"
-        if not source.is_dir():
-            available = (
-                sorted(
-                    item.name
-                    for item in examples.iterdir()
-                    if item.is_dir() and (item / "src").is_dir()
-                )
-                if examples.is_dir()
-                else []
+        available = (
+            sorted(
+                item.name
+                for item in examples.iterdir()
+                if item.is_dir() and (item / "src").is_dir()
             )
+            if examples.is_dir()
+            else []
+        )
+        if example not in available:
             suffix = (
                 f"; available examples: {', '.join(available)}" if available else ""
             )
             raise ValidationError(f"Unknown example {example!r}{suffix}")
-        return stack.enter_context(as_file(source))
+        return stack.enter_context(as_file(examples / example / "src"))
 
     @classmethod
     def _inventory_overlay(
@@ -545,6 +546,7 @@ class _ProjectProvisioner:
 def initialize_project(
     root: Path | str = ".",
     *,
+    records_path: str | None = None,
     install_skill: bool = True,
     template: Path | str | None = None,
     example: str | None = None,
@@ -554,6 +556,7 @@ def initialize_project(
     """Create a Hiraku project and install its bundled resources."""
     return _ProjectProvisioner.create(
         root,
+        records_path=records_path,
         install_skill=install_skill,
         template=template,
         example=example,

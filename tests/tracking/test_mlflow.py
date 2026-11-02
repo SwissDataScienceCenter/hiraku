@@ -23,14 +23,14 @@ def test_mlflow_backend_config_rejects_uri_and_database() -> None:
 
 @pytest.mark.parametrize("database", [Path("/tmp/mlflow.db"), Path("../mlflow.db")])
 def test_mlflow_backend_rejects_unsafe_database_paths(tmp_path, database) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
 
     with pytest.raises(BackendError, match="safe project-relative path"):
         MLflowBackend(config, database=database)
 
 
 def test_mlflow_backend_rejects_database_symlink_escape(tmp_path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     outside = tmp_path.parent / f"{tmp_path.name}-outside"
     outside.mkdir()
     (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
@@ -45,7 +45,7 @@ def test_mlflow_backend_requires_existing_database(
     tmp_path, monkeypatch, database, directory
 ) -> None:
     mlflow = pytest.importorskip("mlflow")
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     path = tmp_path / (database or "mlflow.db")
     if directory:
         path.mkdir()
@@ -107,7 +107,9 @@ def test_mlflow_backend_paginates_runs_in_named_experiment(
             return _Page([_native_run("r2")])
 
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
-    backend = MLflowBackend(HirakuConfig.init(tmp_path), database="mlflow.db")
+    backend = MLflowBackend(
+        HirakuConfig.init(tmp_path, records_path="hiraku/records"), database="mlflow.db"
+    )
     (tmp_path / "mlflow.db").touch()
 
     assert [run.id for run in backend._read_source_runs()] == ["r1", "r2"]
@@ -132,7 +134,8 @@ def test_mlflow_backend_reads_duration_from_start_and_end(
 
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
     backend = MLflowBackend(
-        HirakuConfig.init(tmp_path), tracking_uri="https://mlflow.example.com"
+        HirakuConfig.init(tmp_path, records_path="hiraku/records"),
+        tracking_uri="https://mlflow.example.com",
     )
 
     assert [run.duration for run in backend._read_source_runs()] == [4.25, None]
@@ -143,7 +146,8 @@ def test_mlflow_backend_reports_missing_optional_dependency(
 ) -> None:
     monkeypatch.setitem(sys.modules, "mlflow.tracking", None)
     backend = MLflowBackend(
-        HirakuConfig.init(tmp_path), tracking_uri="https://mlflow.example.com"
+        HirakuConfig.init(tmp_path, records_path="hiraku/records"),
+        tracking_uri="https://mlflow.example.com",
     )
 
     with pytest.raises(BackendError, match="optional 'mlflow' dependency"):
@@ -168,7 +172,8 @@ def test_mlflow_backend_returns_no_runs_for_unknown_experiment(
 
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
     backend = MLflowBackend(
-        HirakuConfig.init(tmp_path), tracking_uri="https://mlflow.example.com"
+        HirakuConfig.init(tmp_path, records_path="hiraku/records"),
+        tracking_uri="https://mlflow.example.com",
     )
 
     assert backend._read_source_runs() == []
@@ -189,7 +194,8 @@ def test_mlflow_backend_wraps_client_query_errors(tmp_path, monkeypatch) -> None
 
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
     backend = MLflowBackend(
-        HirakuConfig.init(tmp_path), tracking_uri="https://mlflow.example.com"
+        HirakuConfig.init(tmp_path, records_path="hiraku/records"),
+        tracking_uri="https://mlflow.example.com",
     )
 
     with pytest.raises(BackendError, match="mlflow backend query failed"):
@@ -213,7 +219,8 @@ def test_mlflow_backend_preserves_backend_errors_from_client(
 
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
     backend = MLflowBackend(
-        HirakuConfig.init(tmp_path), tracking_uri="https://mlflow.example.com"
+        HirakuConfig.init(tmp_path, records_path="hiraku/records"),
+        tracking_uri="https://mlflow.example.com",
     )
 
     with pytest.raises(BackendError, match="specific backend failure"):
@@ -259,6 +266,8 @@ def test_mlflow_backend_config_rejects_unsafe_ui_url(value: str) -> None:
     ],
 )
 def test_mlflow_backend_run_url(tmp_path, settings, expected) -> None:
-    backend = MLflowBackend(HirakuConfig.init(tmp_path), **settings)
+    backend = MLflowBackend(
+        HirakuConfig.init(tmp_path, records_path="hiraku/records"), **settings
+    )
 
     assert backend._run_url("e/1", "r1") == expected

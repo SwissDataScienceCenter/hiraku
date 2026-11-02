@@ -1,4 +1,4 @@
-"""Markdown bodies: section selection by heading and placeholder rendering."""
+"""Markdown documents, section selection by heading, and placeholder rendering."""
 
 from __future__ import annotations
 
@@ -6,8 +6,10 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
+from pathlib import Path
 from typing import Any
 
+import yaml
 from markdown_it import MarkdownIt
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
@@ -17,6 +19,24 @@ from .errors import SectionNotFoundError, ValidationError
 _PARSER = MarkdownIt("commonmark")
 # A heading line; like in Markdown, a closing sequence of # is not part of it.
 _SELECTOR = re.compile(r"^(#{1,6})[ \t]+(\S.*?)(?:[ \t]+#+)?$")
+
+
+def read_markdown(path: Path) -> tuple[dict[str, Any], str]:
+    """Read optional YAML frontmatter and a body without record semantics."""
+    try:
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines(keepends=True)
+        if not lines or lines[0].strip() != "---":
+            return {}, text
+        end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+        if end is None:
+            raise ValidationError(f"Unclosed frontmatter at {path}")
+        fields = yaml.safe_load("".join(lines[1:end]))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise ValidationError(f"Cannot read Markdown at {path}: {exc}") from exc
+    if fields is not None and not isinstance(fields, dict):
+        raise ValidationError(f"Expected a YAML mapping at {path}")
+    return fields or {}, "".join(lines[end + 1 :])
 
 
 @dataclass(frozen=True)

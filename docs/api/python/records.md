@@ -4,17 +4,28 @@
 
 ::: hiraku.record.Record
 
-`Record` is Hiraku's only research entity. Tasks, experiments, contexts, and
-literature share the same model and use `type` to describe their role. A record
-stores validated YAML front matter and a Markdown body.
+## Workspace and validation
 
-Use `record.save_markdown(body)` to save a replacement body while preserving
-metadata. It returns a saved copy and leaves the supplied object unchanged. The
-record must already have a path; changes on disk since loading are rejected.
-This check does not lock the file against concurrent writers.
+::: hiraku.record.open_workspace
 
-## Registry helpers
+::: hiraku.record.validate_records
 
-::: hiraku.record.load_record
+::: hiraku.record.query_records
+
+## Persistence
+
+::: hiraku.record.Record.create
+
+::: hiraku.record.Record.save
+
+::: hiraku.record.Record.update
+
+::: hiraku.record.Record.delete
+
+## Lookup helpers
+
+::: hiraku.record.Record.load
 
 ::: hiraku.record.list_records
+
+::: hiraku.record.resolve_metrics

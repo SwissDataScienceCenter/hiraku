@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.record import Record, open_workspace
 
 
 def git(path: Path, *arguments: str) -> str:
@@ -72,7 +72,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     )
 
     config = HirakuConfig.discover(project)
-    runs = load_record("baseline", config=config).runs(config=config)
+    runs = Record.load(open_workspace(config), "baseline").runs(config=config)
     assert len(runs) == 1
     assert runs[0].commit == commit
     assert runs[0].raw["git_state"] == "clean"

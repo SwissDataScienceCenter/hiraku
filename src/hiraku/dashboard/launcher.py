@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ..config import HirakuConfig
 from ..errors import ValidationError
-from ..record import load_record
+from ..record import Record, open_workspace
 
 DEFAULT_HOST = "127.0.0.1"
 BUNDLED_NOTEBOOK = Path(__file__).with_name("app.py")
@@ -109,7 +109,7 @@ def serve_dashboard(
             "Create one with: hiraku dashboard --init"
         )
     if record_id is not None:
-        load_record(record_id, config=config)
+        Record.load(open_workspace(config), record_id)
     if any(find_spec(name) is None for name in ("marimo", "marimo_studio", "altair")):
         raise ValidationError(
             "The dashboard requires the optional 'dashboard' dependencies. "

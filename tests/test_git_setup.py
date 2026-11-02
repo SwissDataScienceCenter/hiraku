@@ -36,7 +36,11 @@ def source(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "command", [["init", "minimal"], ["example", "create", "minimal"]]
+    "command",
+    [
+        ["init", "minimal", "--records-path", "knowledge"],
+        ["example", "create", "minimal"],
+    ],
 )
 def test_project_creation_does_not_invoke_git(tmp_path, monkeypatch, command):
     def forbidden(*args, **kwargs):
@@ -54,7 +58,9 @@ def test_project_creation_does_not_invoke_git(tmp_path, monkeypatch, command):
 def test_init_without_git_installed(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: None)
     monkeypatch.chdir(tmp_path)
-    assert CliRunner().invoke(main, ["init"]).exit_code == 0
+    assert (
+        CliRunner().invoke(main, ["init", "--records-path", "knowledge"]).exit_code == 0
+    )
     failed = CliRunner().invoke(main, ["init", "other", "--git"])
     assert failed.exit_code == 1
     assert "not found" in failed.output
@@ -64,7 +70,12 @@ def test_init_without_git_installed(tmp_path, monkeypatch):
 def test_init_git_creates_code_repo_and_can_be_repeated(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
-    assert runner.invoke(main, ["init", "project", "--git"]).exit_code == 0
+    assert (
+        runner.invoke(
+            main, ["init", "project", "--git", "--records-path", "knowledge"]
+        ).exit_code
+        == 0
+    )
     root = tmp_path / "project"
     git(root, "config", "hiraku.test", "preserved")
     assert runner.invoke(main, ["init", "project", "--git"]).exit_code == 0
@@ -75,7 +86,7 @@ def test_init_git_creates_code_repo_and_can_be_repeated(tmp_path, monkeypatch):
 def test_git_init_preserves_linked_code_worktree(tmp_path, source):
     checkout = tmp_path / "worktree"
     git(source, "worktree", "add", "-b", "research", str(checkout))
-    config = HirakuConfig.init(checkout)
+    config = HirakuConfig.init(checkout, records_path="knowledge")
     before = (checkout / ".git").read_bytes()
     init_code_repository(config)
     assert (checkout / ".git").read_bytes() == before

@@ -14,8 +14,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
-from hiraku.markdown import Markdown, render
-from hiraku.record import Record
+from hiraku.markdown import Markdown, read_markdown, render
 
 
 class CounterState(BaseModel):
@@ -52,7 +51,7 @@ def _input_model(default_count: int) -> type[BaseModel]:
 
 def input_schema() -> dict[str, Any]:
     """Return the JSON Schema for starting count-steps."""
-    fields, _ = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
+    fields, _ = read_markdown(Path(__file__).with_name("workflow.md"))
     defaults = fields.get("arguments", {})
     if not isinstance(defaults, dict) or type(defaults.get("count")) is not int:
         raise ValueError("workflow.md must define an integer arguments.count default")
@@ -64,7 +63,7 @@ def input_schema() -> dict[str, Any]:
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
     """Build the example graph using the project's workflow.md instructions."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = Record._parse_markdown(path)
+    fields, body = read_markdown(path)
     if fields.get("id") != "count-steps":
         raise ValueError("workflow.md must declare id: count-steps")
     defaults = fields.get("arguments", {})

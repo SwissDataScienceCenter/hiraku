@@ -13,7 +13,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.record import Record, open_workspace
 from hiraku.workflows.langgraph import start_workflow, workflow_ids
 
 REPOSITORY = Path(__file__).parents[2]
@@ -84,7 +84,7 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
         [
             "record",
             "create",
-            "sep10",
+            "sep10/sep10.md",
             "--type",
             "task",
             "--set",
@@ -161,7 +161,7 @@ def test_autoresearch_is_an_overlay() -> None:
 
 def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     project, _ = create_overlay_project(tmp_path, monkeypatch)
-    task = load_record("sep10", config=HirakuConfig.discover(project))
+    task = Record.load(open_workspace(HirakuConfig.discover(project)), "sep10")
 
     assert (project / "README.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "README.md"

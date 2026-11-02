@@ -11,7 +11,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.record import Record, open_workspace
 
 EXPECTED_METRICS = {
     "logistic-baseline": (0.32254890, 0.85526316),
@@ -75,7 +75,10 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
                 "HEAD",
             ],
         )
-        assert load_record(record_id).commit == source_commit
+        assert (
+            Record.load(open_workspace(HirakuConfig.discover()), record_id).commit
+            == source_commit
+        )
         invoke(
             runner,
             [
@@ -95,7 +98,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         )
 
     config = HirakuConfig.discover(project)
-    root = load_record("heart-disease", config=config)
+    root = Record.load(open_workspace(config), "heart-disease")
     runs = root.resolve_tracking_backend(config=config).list_runs(sort="val/log_loss")
     assert len(runs) == 2
     assert {run.record_id for run in runs} == set(EXPECTED_METRICS)

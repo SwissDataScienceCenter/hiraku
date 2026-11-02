@@ -18,10 +18,11 @@ from urllib.parse import urlsplit
 
 import pandas as pd
 import pyarrow as pa
+from fmql import Workspace
 
 from ..config import HirakuConfig
 from ..io import dump_yaml
-from ..record import Record, list_records
+from ..record import Record, list_records, resolve_metrics
 from ..run import Run
 
 _LAST = datetime.max.replace(tzinfo=UTC)
@@ -60,9 +61,9 @@ class ProjectRuns:
     errors: list[str] = field(default_factory=list)
 
 
-def load(config: HirakuConfig) -> ProjectRuns:
+def load(config: HirakuConfig, workspace: Workspace) -> ProjectRuns:
     """Read all records and query each distinct tracking source once."""
-    records = list_records(config=config)
+    records = list_records(workspace)
     by_source: dict[str, Record] = {}
     for record in records:
         key = repr(record.tracking_backend_spec(config=config))
@@ -143,8 +144,10 @@ def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
     ]
 
 
-def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
-    """Return one row per record in tree order, with its declared metrics."""
+def record_rows(
+    records: Sequence[Record], workspace: Workspace
+) -> list[dict[str, Any]]:
+    """Return rows in tree order, resolving metric definitions through fmql."""
     paths = record_paths(records)
     # Sorting with the separator below every other character puts each record
     # right after its parent and before the parent's next sibling.
@@ -160,7 +163,7 @@ def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
             "commit": record.commit,
             "metrics": [
                 {"name": metric.name, "direction": metric.direction}
-                for metric in record.metrics or ()
+                for metric in resolve_metrics(record, workspace)
             ],
             "description": record.markdown.strip() or None,
         }

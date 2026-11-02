@@ -10,7 +10,7 @@ import pytest
 
 from hiraku import HirakuConfig
 from hiraku.execution import execute_command
-from hiraku.record import load_record
+from hiraku.record import Record, open_workspace
 
 
 @pytest.fixture
@@ -40,7 +40,11 @@ def test_digits_refuses_existing_output_and_partial_export(
 
 def test_bundled_digits_database_is_portable(generator, tmp_path):
     HirakuConfig.init(
-        tmp_path, example="digits-mlflow", results=True, install_skill=False
+        tmp_path,
+        example="digits-mlflow",
+        results=True,
+        install_skill=False,
+        records_path="hiraku/records",
     )
     generator["validate_database"](tmp_path / "mlflow.db")
     assert not (tmp_path / "generate_results.py").exists()
@@ -58,7 +62,9 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
 
     from hiraku.dashboard.data import load
 
-    dashboard = load(HirakuConfig.discover(tmp_path))
+    dashboard = load(
+        HirakuConfig.discover(tmp_path), open_workspace(HirakuConfig.discover(tmp_path))
+    )
     assert dashboard.errors == []
     assert Counter(run.record_id for run in dashboard.runs) == {
         "weak-l2": 3,
@@ -86,13 +92,16 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         ),
     }
     config = HirakuConfig.init(
-        tmp_path / "moved", example="digits-mlflow", install_skill=False
+        tmp_path / "moved",
+        example="digits-mlflow",
+        install_skill=False,
+        records_path="hiraku/records",
     )
     import shutil
 
     shutil.copytree(output, config.root, dirs_exist_ok=True)
     config = HirakuConfig.discover(config.root)
-    weak = load_record("weak-l2", config=config)
+    weak = Record.load(open_workspace(config), "weak-l2")
     backend = weak.resolve_tracking_backend(config=config)
     runs = backend.list_runs()
     assert Counter(r.record_id for r in runs) == {"weak-l2": 3, "strong-l2": 3}

@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 from hiraku.config import HirakuConfig
-from hiraku.record import Record, load_record
+from hiraku.record import Record, open_workspace
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import start_workflow, workflow_status
 
@@ -46,12 +46,12 @@ def _approved(response: dict) -> dict:
 
 
 def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
-    Record.create(
-        "task",
-        type="task",
-        config=config,
+    config = HirakuConfig.init(
+        tmp_path, install_skill=False, records_path="hiraku/records"
     )
+    workspace = open_workspace(config)
+    _created_record = Record.create(workspace, "task/task.md", id="task", type="task")
+    config.set_active_record(_created_record)
     commit = _commit(tmp_path)
     command = ["python", "train.py"]
     result = start_workflow(
@@ -116,7 +116,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
         config=config,
     )
     assert completed["status"] == "completed"
-    experiment = load_record("dropout", config=config)
+    experiment = Record.load(open_workspace(config), "dropout")
     assert experiment.status == "analyzed"
     assert experiment.verdict == "supports"
     assert "Summarize the run" in completed["result"]

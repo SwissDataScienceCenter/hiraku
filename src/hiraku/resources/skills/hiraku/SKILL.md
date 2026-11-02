@@ -20,11 +20,8 @@ through an existing record lifecycle.
   the source commit being evaluated. Its
   optional `type` describes its role, such as experiment, diagnostic, or
   ablation. `related_to` links records without inheritance.
-  Fields inherit from the nearest parent definition by default. On child
-  creation, inherited `metrics` values are copied into the child record unless
-  explicitly set there; later parent edits do not update those snapshots.
-  Tracking backend selection is project-wide in `hiraku.yml`. `id`,
-  `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local.
+  Every field, including metrics and branch, belongs to that record alone.
+  Tracking backend selection is project-wide in `hiraku.yml`.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and invocation attribution together with
   parameters, metrics, timestamps, and an external URL.
@@ -52,7 +49,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 
 | Purpose | Main commands |
 | --- | --- |
-| Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
+| Initialize or inspect the project | `hiraku init --records-path PATH`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
 | Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
@@ -60,7 +57,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
-Use `record show` to inspect canonical records and effective research fields.
+Use `record show` to inspect records and their research fields.
 Use `hiraku status --json` to inspect the project tracking backend.
 
 ## Operating scope
@@ -148,10 +145,11 @@ Research records are Markdown files with YAML front matter. Preserve
 existing fields and prose when updating them. Core fields are validated;
 additional fields such as `hypothesis`, `result`, `conclusion`, `decision`, and
 `status` are user metadata rather than an enforced state machine.
-Each root and its descendants are stored at
-`hiraku/records/{root_id}/{record_id}.md`. IDs are unique across the project.
-Use `record show` to see effective values and their sources, or `--raw` for
-the stored fields. An explicit `null` clears an inherited field.
+Records live at user-selected paths in the fmql knowledge base configured by
+`records_path` in `hiraku.yml`. IDs are unique within that workspace. Creation
+requires an explicit destination. Query and traverse records through
+`record_query` or `hiraku record query`; use validated record operations to write.
+`record show` displays the record's own fields and Markdown.
 
 ## Protect user work and use the intended branches
 
@@ -165,7 +163,7 @@ hiraku record show <child-id> --json
 ```
 
 - Put implementation commits on the record's `branch` when that
-  field is set. Otherwise use the nearest inherited `branch`. Do not implement on a
+  field is set. Otherwise agree on a working branch with the user. Do not implement on a
   different branch merely because it is currently checked out.
 - Switch branches only from a clean Git worktree. Never discard, reset, stash,
   commit, or modify user work to make a switch possible. If reaching the
@@ -188,7 +186,7 @@ hiraku record show <child-id> --json
 ## Create and maintain research roots
 
 A root record is a research scope, goal, and evolving account of findings,
-stored in `hiraku/records/{root_id}/{root_id}.md`.
+stored at an explicit user-selected destination.
 
 For a high-level root-creation request:
 
@@ -221,7 +219,7 @@ and preserve the existing Markdown, prepare the revised body, and apply it with
 ## Create and maintain child records
 
 A child is a focused investigation within a root, stored in
-`hiraku/records/{root_id}/{record_id}.md`. It may be a baseline,
+a user-selected path in the knowledge base. It may be a baseline,
 hypothesis, diagnostic, ablation, or other investigation. A child without
 a source commit is a proposal; binding a commit links it to the code being
 evaluated.
@@ -253,7 +251,7 @@ hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
 ```
 
 Creating a record activates it by default. Several children may share a
-commit and use different explicit command arguments. Follow the effective record branch
+commit and use different explicit command arguments. Follow the record branch
 recorded for implementation; create or change that branch assignment only when
 the user or selected workflow asks for it. Ordinary Git operations remain
 responsible for commits and merges.

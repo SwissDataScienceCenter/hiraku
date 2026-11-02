@@ -9,8 +9,7 @@ import shlex
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from importlib.resources import as_file, files
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -18,6 +17,7 @@ from typing import Any
 
 import click
 import yaml
+from fmql import Workspace
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 from rich import box, print_json
@@ -29,7 +29,13 @@ from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
 from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .record import Record, list_records, load_record, validate_identifier
+from .record import (
+    Record,
+    list_records,
+    open_workspace,
+    query_records,
+    resolve_metrics,
+)
 from .run import Run
 
 
@@ -72,6 +78,8 @@ def _json_value(value: Any) -> Any:
         return _json_value(value.model_dump())
     if isinstance(value, datetime):
         return (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
     if isinstance(value, Mapping):
         return {str(key): _json_value(item) for key, item in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, str | bytes):
@@ -137,11 +145,18 @@ def _markdown(path: Path | None) -> str:
         raise ValidationError(f"Cannot read {path}: {exc}") from exc
 
 
-def _active(config: HirakuConfig, record_id: str | None = None) -> Record:
+def _active(
+    config: HirakuConfig,
+    record_id: str | None = None,
+    *,
+    workspace: Workspace | None = None,
+) -> Record:
     identifier = record_id or config.active_record_id
     if identifier is None:
         raise NoActiveRecordError("No active record; supply --record or set one")
-    return load_record(identifier, config=config)
+    return Record.load(
+        workspace if workspace is not None else open_workspace(config), identifier
+    )
 
 
 def _edit(path: Path) -> None:
@@ -221,6 +236,7 @@ def mcp_command() -> None:
 @main.command("init")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
 @click.option("--template", type=click.Path(path_type=Path))
+@click.option("--records-path", type=click.Path(path_type=Path))
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
 )
@@ -228,17 +244,22 @@ def init_command(
     path: Path | None,
     template: Path | None,
     init_git: bool,
+    records_path: Path | None,
 ) -> None:
     """Initialize PATH (default: current directory)."""
     root = path if path is not None else Path.cwd()
     marker = root.expanduser().absolute() / "hiraku.yml"
     if init_git:
         require_git()
-    if marker.is_file() and template is None:
+    if marker.is_file() and template is None and records_path is None:
         config = HirakuConfig.load(marker)
         message = "Hiraku project already initialized"
     else:
-        config = HirakuConfig.init(root, template=template)
+        config = HirakuConfig.init(
+            root,
+            template=template,
+            records_path=str(records_path) if records_path is not None else None,
+        )
         message = "Initialized Hiraku project"
     if init_git:
         init_code_repository(config)
@@ -293,7 +314,6 @@ def example_create_command(
     """
     if generate and results:
         raise click.UsageError("--generate cannot use --with-results")
-    validate_identifier(example, label="example name")
     root = path if path is not None else Path(example)
     if init_git:
         require_git()
@@ -374,7 +394,8 @@ def record_group() -> None:
 
 
 @record_group.command("create")
-@click.argument("record_id")
+@click.argument("destination", type=click.Path(path_type=Path))
+@click.option("--id", "record_id", help="Record ID (defaults to the filename stem).")
 @click.option("--parent", "parent_id")
 @click.option("--related-to", multiple=True)
 @click.option("--type")
@@ -385,7 +406,8 @@ def record_group() -> None:
 @click.pass_obj
 def record_create(
     state: CLIContext,
-    record_id: str,
+    record_id: str | None,
+    destination: Path,
     parent_id: str | None,
     related_to: tuple[str, ...],
     type: str | None,
@@ -394,23 +416,23 @@ def record_create(
     set_values: tuple[str, ...],
     no_activate: bool,
 ) -> None:
-    """Create a root or child record."""
+    """Create a record at DESTINATION; a missing .md suffix is added."""
     fields = _fields(set_values)
-    if any(key in fields for key in ("id", "parent_id", "related_to")):
-        raise ValidationError("Use dedicated options for id, parent_id and related_to")
+    if record_id is not None:
+        fields["id"] = record_id
+    if parent_id is not None:
+        fields["parent_id"] = parent_id
+    if related_to:
+        fields["related_to"] = list(related_to)
     if type is not None:
         fields["type"] = type
     if commit is not None:
         fields["commit"] = GitRepository(state.config.root).resolve(commit)
-    record = Record.create(
-        record_id,
-        parent_id=parent_id,
-        related_to=list(related_to),
-        markdown=_markdown(markdown_file),
-        activate=not no_activate,
-        config=state.config,
-        **fields,
-    )
+    workspace = open_workspace(state.config)
+    fields["markdown"] = _markdown(markdown_file)
+    record = Record.create(workspace, destination, **fields)
+    if not no_activate:
+        state.config.set_active_record(record)
     click.echo(f"Created record {record.id} at {record.path}")
 
 
@@ -421,7 +443,7 @@ def record_create(
 def record_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """List all research records."""
     _validate_json_options(json_output, pretty)
-    records = list_records(config=state.config)
+    records = list_records(open_workspace(state.config))
     if json_output:
         _emit_json(records, pretty=pretty)
     else:
@@ -431,39 +453,36 @@ def record_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
         )
 
 
+@record_group.command("query")
+@click.argument("query")
+@click.pass_obj
+def record_query(state: CLIContext, query: str) -> None:
+    """Run a read-only fmql query against the knowledge base."""
+
+    result = query_records(open_workspace(state.config), query)
+    _emit_json({"columns": result.columns, "rows": result.rows})
+
+
 @record_group.command("show")
 @click.argument("record_id", required=False)
-@click.option("--raw", is_flag=True)
 @click.option("--json", "json_output", is_flag=True)
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
 def record_show(
     state: CLIContext,
     record_id: str | None,
-    raw: bool,
     json_output: bool,
     pretty: bool,
 ) -> None:
-    """Show stored or effective fields with their sources."""
+    """Show a record's own metadata and Markdown."""
     _validate_json_options(json_output, pretty)
     record = _active(state.config, record_id)
-    if raw:
-        values = record.to_dict()
-        sources = {}
-    else:
-        resolved = record.resolve(config=state.config)
-        values, sources = resolved.values, resolved.sources
     if json_output:
-        _emit_json(
-            {"values": values, "sources": sources, "markdown": record.markdown},
-            pretty=pretty,
-        )
+        _emit_json(record, pretty=pretty)
     else:
         click.echo(
-            f"---\n{dump_yaml(_json_value(values))}---\n{record.markdown}", nl=False
+            f"---\n{dump_yaml(record.to_dict())}---\n{record.markdown}", nl=False
         )
-        if sources:
-            click.echo("\nSources:\n" + dump_yaml(sources), nl=False)
 
 
 @record_group.command("update")
@@ -487,38 +506,26 @@ def record_update(
     unset_values: tuple[str, ...],
     markdown_file: Path | None,
 ) -> None:
-    """Update stored fields; --unset removes an override."""
-    record = load_record(record_id, config=state.config)
+    """Update record metadata and Markdown."""
+    workspace = open_workspace(state.config)
+    record = Record.load(workspace, record_id)
+    changes = _fields(set_values)
     if parent_id is not None and make_root:
         raise ValidationError("--parent and --root are mutually exclusive")
-    changes = _fields(set_values)
-    if "markdown" in changes:
-        raise ValidationError("Use --markdown-file to update record Markdown")
-    if any(key in changes for key in ("id", "parent_id")):
-        raise ValidationError("id and parent_id require dedicated operations")
+    if parent_id is not None or make_root:
+        if "parent_id" in changes or "parent_id" in unset_values:
+            raise ValidationError("Conflicting parent updates")
+        changes["parent_id"] = None if make_root else parent_id
     if related_to:
         changes["related_to"] = list(related_to)
     if commit is not None:
         changes["commit"] = GitRepository(state.config.root).resolve(commit)
-    fields = record.to_dict()
-    fields.update(changes)
-    for key in unset_values:
-        if key in {"id", "parent_id"}:
-            raise ValidationError(f"Cannot unset {key}")
-        if key in changes:
-            raise ValidationError(f"Cannot set and unset {key!r} together")
-        fields.pop(key, None)
-    new_parent = None if make_root else parent_id
-    if make_root or parent_id is not None:
-        fields["parent_id"] = new_parent
-    body = _markdown(markdown_file) if markdown_file is not None else record.markdown
-    candidate = Record.model_validate({**fields, "markdown": body})
-    candidate.path = record.path
-    candidate._persisted_id = record.id
-    if make_root or parent_id is not None:
-        candidate.reparent(new_parent, config=state.config)
-    else:
-        candidate.save()
+    record.update(
+        workspace,
+        changes,
+        unset=unset_values,
+        markdown=_markdown(markdown_file) if markdown_file is not None else None,
+    )
     click.echo(f"Updated record {record_id}")
 
 
@@ -527,13 +534,10 @@ def record_update(
 @click.pass_obj
 def record_edit(state: CLIContext, record_id: str) -> None:
     """Edit a record's stored Markdown file."""
-    validate_identifier(record_id)
-    paths = list(state.config.records_dir.glob(f"*/{record_id}.md"))
-    if len(paths) != 1:
-        raise ValidationError(f"Expected one record path for {record_id!r}")
+    record = Record.load(open_workspace(state.config), record_id)
     _edit_recoverable(
-        paths[0],
-        lambda: load_record(record_id, config=state.config),
+        record.path,
+        lambda: Record.load(open_workspace(state.config), record_id),
         f"Record {record_id!r}",
     )
     click.echo(f"Validated record {record_id}")
@@ -544,13 +548,11 @@ def record_edit(state: CLIContext, record_id: str) -> None:
 @click.pass_obj
 def record_delete(state: CLIContext, record_id: str) -> None:
     """Delete a leaf record."""
-    record = load_record(record_id, config=state.config)
-    parent = record.path.parent
-    record.delete(config=state.config)
+    workspace = open_workspace(state.config)
+    record = Record.load(workspace, record_id)
+    record.delete(workspace)
     if state.config.active_record_id == record_id:
         state.config.clear_active_record()
-    with suppress(OSError):
-        parent.rmdir()
     click.echo(f"Deleted record {record_id}")
 
 
@@ -570,7 +572,7 @@ def record_set(state: CLIContext, record_id: str) -> None:
 def record_tree(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """Show the logical parent tree."""
     _validate_json_options(json_output, pretty)
-    records = list_records(config=state.config)
+    records = list_records(open_workspace(state.config))
     if json_output:
         _emit_json(
             [{"id": r.id, "parent_id": r.parent_id} for r in records],
@@ -805,8 +807,9 @@ def run_list(
         raise ValidationError("--ascending and --descending are mutually exclusive")
     if (ascending or descending) and sort is None:
         raise ValidationError("A sort direction requires --sort")
-    record = _active(state.config, record_id)
-    declarations = record.resolve(config=state.config).values.get("metrics") or []
+    workspace = open_workspace(state.config)
+    record = _active(state.config, record_id, workspace=workspace)
+    declarations = resolve_metrics(record, workspace)
     metric_names = (
         _names(metrics, "metric")
         if metrics is not None

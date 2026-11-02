@@ -5,6 +5,14 @@ from hiraku.cli import main
 from hiraku.config import HirakuConfig
 
 
+def test_new_project_requires_records_path(tmp_path):
+    root = tmp_path / "project"
+    result = CliRunner().invoke(main, ["init", str(root)])
+    assert result.exit_code == 1
+    assert "records_path" in result.output
+    assert not root.exists()
+
+
 def test_example_list_outside_project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["example", "list"])
@@ -25,8 +33,8 @@ def test_removed_commands(command):
 @pytest.mark.parametrize(
     ("arguments", "destination", "example"),
     [
-        (["init"], ".", False),
-        (["init", "my-project"], "my-project", False),
+        (["init", "--records-path", "knowledge"], ".", False),
+        (["init", "my-project", "--records-path", "knowledge"], "my-project", False),
         (["example", "create", "minimal"], "minimal", True),
         (["example", "create", "minimal", "my-project"], "my-project", True),
         (["example", "create", "minimal", "."], ".", True),
@@ -53,7 +61,9 @@ def test_init_existing_directory_preserves_unrelated_files(
     (root / "notes.txt").write_text("keep me")
     monkeypatch.chdir(tmp_path)
     destination = str(root) if absolute else "project"
-    result = CliRunner().invoke(main, ["init", destination])
+    result = CliRunner().invoke(
+        main, ["init", destination, "--records-path", "knowledge"]
+    )
     assert result.exit_code == 0, result.output
     assert (root / "notes.txt").read_text() == "keep me"
     assert (root / "hiraku.yml").is_file()
@@ -64,7 +74,7 @@ def test_plain_reinitialization_leaves_project_unchanged(
     tmp_path, monkeypatch, destination
 ):
     root = tmp_path / "project" if destination == "project" else tmp_path
-    config = HirakuConfig.init(root)
+    config = HirakuConfig.init(root, records_path="knowledge")
     config.dispatch_dir.mkdir()
     (config.dispatch_dir / "launch.sh").write_text("custom launcher\n")
     before = {
@@ -83,7 +93,7 @@ def test_plain_reinitialization_leaves_project_unchanged(
 
 
 def test_reinitialization_with_example_option_is_rejected(tmp_path):
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="knowledge")
     before = config.path.read_bytes()
     result = CliRunner().invoke(main, ["example", "create", "minimal", str(tmp_path)])
     assert result.exit_code == 1
@@ -104,7 +114,20 @@ def test_example_collision_leaves_destination_unchanged(tmp_path, monkeypatch):
     assert (root / "evaluate.py").read_text() == "existing code\n"
 
 
-@pytest.mark.parametrize("example", ["missing", "../outside"])
+@pytest.mark.parametrize(
+    "example",
+    [
+        "missing",
+        "../outside",
+        "",
+        ".",
+        "..",
+        " padded",
+        "padded ",
+        "trailing.",
+        "bad?name",
+    ],
+)
 def test_invalid_example_creates_no_destination(tmp_path, monkeypatch, example):
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["example", "create", example])
@@ -119,7 +142,9 @@ def test_template_keeps_current_directory_default(tmp_path, monkeypatch):
     root = tmp_path / "project"
     root.mkdir()
     monkeypatch.chdir(root)
-    result = CliRunner().invoke(main, ["init", "--template", str(template)])
+    result = CliRunner().invoke(
+        main, ["init", "--template", str(template), "--records-path", "knowledge"]
+    )
     assert result.exit_code == 0, result.output
     assert (root / "hello.txt").read_text() == "hello"
     assert (root / "hiraku.yml").is_file()

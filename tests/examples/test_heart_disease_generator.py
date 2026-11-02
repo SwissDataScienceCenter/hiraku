@@ -10,7 +10,7 @@ from click.testing import CliRunner
 
 from hiraku import HirakuConfig
 from hiraku.cli import main
-from hiraku.record import list_records, load_record
+from hiraku.record import Record, list_records, open_workspace
 
 
 @pytest.fixture
@@ -107,11 +107,16 @@ def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch)
 
 def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     import hiraku.cli as cli
-    from hiraku.record import Record
 
     def export(output):
-        generated = HirakuConfig.init(output, install_skill=False)
-        Record.create("generated", config=generated)
+        generated = HirakuConfig.init(
+            output, install_skill=False, records_path="hiraku/records"
+        )
+        workspace = open_workspace(generated)
+        _created_record = Record.create(
+            workspace, "generated/generated.md", id="generated"
+        )
+        generated.set_active_record(_created_record)
         (output / "runs.csv").write_text("id,record_id\nrun,generated\n")
 
     monkeypatch.setattr(
@@ -130,7 +135,10 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     config = HirakuConfig.discover(tmp_path)
     assert config.active_record_id == "generated"
-    assert load_record("generated", config=config).runs(config=config)[0].id == "run"
+    assert (
+        Record.load(open_workspace(config), "generated").runs(config=config)[0].id
+        == "run"
+    )
     assert not (tmp_path / ".git").exists()
 
 
@@ -168,10 +176,13 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
         ),
     }
     config = HirakuConfig.init(
-        tmp_path / "project", template=output, install_skill=False
+        tmp_path / "project",
+        template=output,
+        install_skill=False,
+        records_path="hiraku/records",
     )
-    assert len(list_records(config=config)) == 4
-    record = load_record("random-forest", config=config)
+    assert len(list_records(open_workspace(config))) == 4
+    record = Record.load(open_workspace(config), "random-forest")
     runs = record.resolve_tracking_backend(config=config).list_runs()
     assert Counter(r.record_id for r in runs) == {
         "logistic-baseline": 3,
@@ -179,7 +190,7 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
         "forest-tuning": 3,
     }
     assert all(r.id and r.timestamp for r in runs)
-    assert all(r.decision is None for r in list_records(config=config))
+    assert all(r.decision is None for r in list_records(open_workspace(config)))
 
 
 def test_validation_rejects_incomplete_results(generator, tmp_path):

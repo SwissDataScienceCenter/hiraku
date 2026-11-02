@@ -8,6 +8,7 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+from fmql import Query
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -16,8 +17,8 @@ from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
-from hiraku.markdown import Markdown, render
-from hiraku.record import Record, load_record
+from hiraku.markdown import Markdown, read_markdown, render
+from hiraku.record import Record, open_workspace
 
 
 class SchedulerState(BaseModel):
@@ -54,7 +55,7 @@ def _input_model(defaults: dict[str, Any]) -> type[BaseModel]:
 
 def input_schema() -> dict[str, Any]:
     """Return the JSON Schema for starting scheduler."""
-    fields, _ = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
+    fields, _ = read_markdown(Path(__file__).with_name("workflow.md"))
     defaults = fields.get("arguments", {})
     if not isinstance(defaults, dict):
         raise ValueError("workflow.md must define scheduler argument defaults")
@@ -71,7 +72,7 @@ def input_schema() -> dict[str, Any]:
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
     """Build the graph that creates and schedules experiment records."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = Record._parse_markdown(path)
+    fields, body = read_markdown(path)
     if fields.get("id") != "scheduler":
         raise ValueError("workflow.md must declare id: scheduler")
     defaults = fields.get("arguments", {})
@@ -94,22 +95,24 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             raise ValidationError(str(exc)) from exc
         records, target = arguments.records, arguments.target
 
+        parent_id = f"scheduler-{secrets.token_hex(4)}"
+        workspace = open_workspace(config)
         parent = Record.create(
-            f"scheduler-{secrets.token_hex(4)}",
+            workspace,
+            f"{parent_id}/overview.md",
+            id=parent_id,
             type="task",
             summary=f"Scheduler example: raise each count to {target}",
-            activate=False,
-            config=config,
         )
         for index in range(records):
             Record.create(
-                f"{parent.id}-{index + 1}",
+                workspace,
+                f"{parent.id}/attempt-{index + 1}.md",
+                id=f"{parent.id}-{index + 1}",
                 parent_id=parent.id,
                 type="experiment",
                 priority=random.randint(1, 9),
                 count=0,
-                activate=False,
-                config=config,
             )
         return {"parent": parent.id, "target": target}
 
@@ -177,7 +180,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             return {"error": f"Response does not match the expected schema: {exc}"}
         if response.record_id != state.current:
             return {"error": f"Report the assigned record {state.current!r}."}
-        record = load_record(str(state.current), config=config)
+        record = Record.load(open_workspace(config), str(state.current))
         count = _count(record)
         expected = state.baseline + 1
         if count != expected:
@@ -216,7 +219,10 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
 
 def _children(parent_id: str, config: HirakuConfig) -> list[Record]:
     return sorted(
-        load_record(parent_id, config=config).children(config=config),
+        [
+            Record.from_packet(packet)
+            for packet in Query(open_workspace(config)).where(parent_id=parent_id)
+        ],
         key=lambda item: item.id,
     )
 

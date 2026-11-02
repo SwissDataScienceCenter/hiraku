@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import mimetypes
 from typing import Annotated, Any, Literal
-from urllib.parse import quote, unquote
 
 from mcp.server.mcpserver import Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import (
@@ -24,7 +22,7 @@ from pydantic_core import to_jsonable_python
 from .config import HirakuConfig
 from .errors import HirakuError, ValidationError
 from .execution import execute_command
-from .record import Record, list_records, load_record
+from .record import Record, list_records, open_workspace, query_records
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details
@@ -76,32 +74,11 @@ class ProjectMCP(MCPServer):
             if isinstance(exc.__cause__, HirakuError):
                 raise ResourceError(str(exc.__cause__)) from exc.__cause__
             raise
-        # Source templates contain many file types; MIME depends on the URI.
-        if str(uri).startswith("hiraku://sources/"):
-            mime = mimetypes.guess_type(unquote(str(uri)))[0]
-            for item in contents:
-                item.mime_type = mime or "application/octet-stream"
         return contents
 
 
 def _data(record: Record) -> dict[str, Any]:
     return record.model_dump(mode="json", exclude={"path"})
-
-
-def _update(record: Record, fields: dict[str, Any], markdown: str | None) -> Record:
-    protected = {"id", "path", "markdown", "parent_id"}
-    invalid = protected.intersection(fields)
-    if invalid:
-        raise ValidationError(f"Cannot update fields: {sorted(invalid)}")
-    values = {
-        **record.model_dump(exclude_unset=True, exclude={"path"}),
-        **fields,
-    }
-    if markdown is not None:
-        values["markdown"] = markdown
-    updated = type(record).model_validate(values)
-    updated.save(record.path, overwrite=True)
-    return updated
 
 
 def create_server(config: HirakuConfig | None = None) -> Any:
@@ -117,22 +94,24 @@ def create_server(config: HirakuConfig | None = None) -> Any:
     @server.tool()
     def record_list() -> list[dict[str, Any]]:
         """List research records in the selected project."""
-        return [_data(item) for item in list_records(config=selected)]
+        return [_data(item) for item in list_records(open_workspace(selected))]
 
     @server.tool()
     def record_show(record_id: str) -> dict[str, Any]:
-        """Read a research record and its effective inherited fields."""
-        record = load_record(record_id, config=selected)
-        resolved = record.resolve(config=selected)
-        return {
-            **_data(record),
-            "resolved": resolved.values,
-            "sources": resolved.sources,
-        }
+        """Read a research record's own fields."""
+        return _data(Record.load(open_workspace(selected), record_id))
+
+    @server.tool()
+    def record_query(query: str) -> dict[str, Any]:
+        """Run a read-only fmql query over knowledge-base packets."""
+
+        result = query_records(open_workspace(selected), query)
+        return {"columns": list(result.columns), "rows": list(result.rows)}
 
     @server.tool()
     def record_create(
         record_id: str,
+        path: str,
         parent_id: str | None = None,
         related_to: list[str] | None = None,
         markdown: str = "",
@@ -141,29 +120,18 @@ def create_server(config: HirakuConfig | None = None) -> Any:
     ) -> dict[str, Any]:
         """Create a research record, optionally activating it like the CLI."""
         extras = fields or {}
-        reserved = {
-            "id",
-            "path",
-            "parent_id",
-            "related_to",
-            "markdown",
-            "record_id",
-            "activate",
-            "config",
+        workspace = open_workspace(selected)
+        extras = {
+            **extras,
+            "id": record_id,
+            "parent_id": parent_id,
+            "related_to": related_to or [],
+            "markdown": markdown,
         }
-        if reserved.intersection(extras):
-            raise ValidationError("Use named arguments for identity and relationships")
-        return _data(
-            Record.create(
-                record_id,
-                parent_id=parent_id,
-                related_to=related_to,
-                markdown=markdown,
-                activate=activate,
-                config=selected,
-                **extras,
-            )
-        )
+        record = Record.create(workspace, path, **extras)
+        if activate:
+            selected.set_active_record(record)
+        return _data(record)
 
     @server.tool()
     def record_update(
@@ -172,19 +140,15 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         markdown: str | None = None,
     ) -> dict[str, Any]:
         """Merge record fields and optionally replace Markdown; null clears a field."""
-        return _data(_update(load_record(record_id, config=selected), fields, markdown))
-
-    @server.tool()
-    def record_reparent(record_id: str, parent_id: str | None = None) -> dict[str, Any]:
-        """Move a record subtree under a parent, or make it a root."""
-        record = load_record(record_id, config=selected)
-        record.reparent(parent_id, config=selected)
-        return _data(record)
+        workspace = open_workspace(selected)
+        record = Record.load(workspace, record_id)
+        return _data(record.update(workspace, fields, markdown=markdown))
 
     @server.tool()
     def record_delete(record_id: str) -> dict[str, str]:
         """Delete a record using Hiraku's relationship checks."""
-        load_record(record_id, config=selected).delete(config=selected)
+        workspace = open_workspace(selected)
+        Record.load(workspace, record_id).delete(workspace)
         return {"deleted": record_id}
 
     @server.tool()
@@ -223,10 +187,10 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         """
         if ascending is not None and sort is None:
             raise ValidationError("A sort direction requires sort")
-        record = load_record(record_id, config=selected)
+        record = Record.load(open_workspace(selected), record_id)
         query: dict[str, Any] = {"limit": limit} if limit is not None else {}
         if sort is not None:
-            declarations = record.resolve(config=selected).values.get("metrics") or []
+            declarations = record.metrics or []
             directions = {item.name: item.direction for item in declarations}
             query["sort"] = sort
             query["ascending"] = (
@@ -242,38 +206,21 @@ def create_server(config: HirakuConfig | None = None) -> Any:
 
     @server.resource("hiraku://catalog", mime_type="application/json")
     def catalog() -> str:
-        """Discover current records and attached source files."""
-        records = list_records(config=selected)
+        """Discover current record resources."""
+        records = list_records(open_workspace(selected))
         uris = [f"hiraku://records/{item.id}" for item in records]
-        for record in records:
-            root = (selected.records_dir / record.path.parent.name).resolve()
-            for path in sorted(root.rglob("*")):
-                if path.is_file() and path.resolve().is_relative_to(root):
-                    relative = path.relative_to(root).as_posix()
-                    uris.append(
-                        f"hiraku://sources/{record.id}/{quote(relative, safe='')}"
-                    )
         return json.dumps(uris)
 
     @server.resource("hiraku://records/{record_id}", mime_type="application/json")
     def record_resource(record_id: str) -> str:
         return _research_content(record_id, selected)
 
-    @server.resource("hiraku://sources/{record_id}/{source_path}")
-    def source_resource(record_id: str, source_path: str) -> bytes:
-        record = load_record(record_id, config=selected)
-        root = (selected.records_dir / record.path.parent.name).resolve()
-        path = (root / unquote(source_path)).resolve()
-        if not path.is_relative_to(root) or not path.is_file():
-            raise ResourceError("Source must be a file inside its record directory")
-        return path.read_bytes()
-
     @server.prompt()
     def propose_implementation(record_id: str, related_record_ids: str = "") -> str:
         """Ground a proposal in a record and comma-separated related records."""
-        record = load_record(record_id, config=selected)
+        record = Record.load(open_workspace(selected), record_id)
         related = [
-            load_record(identifier.strip(), config=selected)
+            Record.load(open_workspace(selected), identifier.strip())
             for identifier in related_record_ids.split(",")
             if identifier.strip()
         ]
@@ -281,7 +228,7 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         return (
             "Propose the next implementation for this research record. Cite the "
             "curated evidence, distinguish observations from assumptions, and "
-            "describe validation before making changes. Inspect attached sources "
+            "describe validation before making changes. Inspect related records "
             "through hiraku://catalog when needed.\n\n"
             f"Record: {json.dumps(_data(record))}\n\nRelated records:\n{evidence}"
         )
@@ -496,4 +443,4 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
 
 def _research_content(identifier: str, config: HirakuConfig) -> str:
     """Read the same live representation for resources and tool attachments."""
-    return json.dumps(_data(load_record(identifier, config=config)))
+    return json.dumps(_data(Record.load(open_workspace(config), identifier)))

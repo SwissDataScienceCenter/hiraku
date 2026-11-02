@@ -19,26 +19,42 @@ This fragmentation creates an inherent barrier for effective Human-AI collaborat
 
 Hiraku uses records, foreground command execution, and tracked runs to document the model-development lifecycle.
 
-Records and command execution are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
+Records are user-owned Markdown queried through fmql. Hiraku validates record metadata and executes commands. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
 A root *record* defines a working scope and goal, and documents the research progress. Child records are focused, reproducible units within that scope that can link code, explicit command executions, and runs. Records carry no required semantic type; users may create them for baselines, hypotheses, diagnostics, model runs, ablations, hyperparameter optimization, etc. *Runs* record execution traces attributed to one record and, when available, a code commit.
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared research defaults. |
-| **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
+| **Root record** | user-selected Markdown path | Defines the scope of a research effort and carries its own research metadata. |
+| **Child record** | user-selected Markdown path | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
 | **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
-Records are stored as Markdown with YAML front matter. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent, and all descendants are stored flat in their root's folder. IDs are unique across the project.
+Records are fmql packets with YAML frontmatter and a Markdown body. Configure
+`records_path` in `hiraku.yml` with an absolute path or one relative to the code
+project. The knowledge base may live outside the checkout; users own its layout
+and versioning. Hiraku does not initialize a Git repository for it.
 
-Fields inherit through `parent_id` by default: the nearest definition wins and an explicit `null` clears an inherited field. When a child is created, its effective `metrics` are copied into its YAML front matter unless explicitly set on the child. These values are snapshots: later parent edits do not rewrite existing children. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
+Frontmatter `id` is unique within the knowledge base and stays independent of the
+filename. `parent_id` and `related_to` refer to these IDs. Reparenting updates
+metadata without moving files. Fields, including metrics, are local to each
+record. Creation requires an explicit destination relative to the knowledge base
+(or an absolute path within it).
+
+All record selection and traversal use fmql. The read-only query interface also
+supports ordinary packets without a record ID:
+
+```bash
+hiraku record query 'MATCH (r)-[:parent_id]->(p) RETURN r.id, p.id'
+```
+
+Hiraku writes validate metadata, unique IDs, reference targets, and parent cycles.
+CLI and MCP requests see external edits through a fresh workspace. Python
+callers refresh their fmql workspace explicitly. Queries can inspect an invalid
+record graph. Writes validate the candidate's references and parent ancestry;
+`validate_records(workspace)` explicitly audits the whole graph after external edits.
 
 At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. The current status can be queried with `hiraku status`; its `tracking_backend` field shows the project's backend.
-
-!!! note
-    Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
-
 
 ## Tracking Backend
 
@@ -88,7 +104,7 @@ records.
 | Term | Data | Summary |
 | --- | --- | --- |
 | **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A LangGraph graph with optional editable instructions and input defaults. |
-| **Record** | `hiraku/records/{root_id}/{record_id}.md` | Research content of any kind, including tasks, experiments, literature, datasets, and context. |
+| **Record** | user-selected Markdown path | Research content of any kind, including tasks, experiments, literature, datasets, and context. |
 | **Workflow session** | `.hiraku/langgraph-checkpoints.sqlite` | One graph execution, identified by a workflow session ID that is also its LangGraph thread ID. |
 
 Hiraku ships the `collaborative` workflow as an editable copy in your
@@ -109,7 +125,7 @@ The following sequence illustrates the intended workflow.
 
 ```bash
 # Setup and status
-hiraku init
+hiraku init --records-path ../knowledge
 hiraku status
 
 # 1. optionally, create a context record

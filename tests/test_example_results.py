@@ -2,14 +2,21 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from fmql import parse_file
 
-from hiraku import HirakuConfig, Record
+from hiraku import HirakuConfig
 from hiraku.cli import main
 from hiraku.errors import ValidationError
+from hiraku.record import Record
 
 
 def test_base_example_has_no_results(tmp_path: Path):
-    config = HirakuConfig.init(tmp_path, example="heart-disease", install_skill=False)
+    config = HirakuConfig.init(
+        tmp_path,
+        example="heart-disease",
+        install_skill=False,
+        records_path="hiraku/records",
+    )
     assert (tmp_path / "train.py").is_file()
     assert not (tmp_path / "runs.csv").exists()
     assert not list(config.records_dir.rglob("*.md"))
@@ -18,14 +25,21 @@ def test_base_example_has_no_results(tmp_path: Path):
 @pytest.mark.parametrize("example", [None, "minimal"])
 def test_unavailable_results_leave_no_project(tmp_path: Path, example):
     with pytest.raises(ValidationError, match="requires|no results"):
-        HirakuConfig.init(tmp_path, example=example, results=True)
+        HirakuConfig.init(
+            tmp_path, example=example, results=True, records_path="hiraku/records"
+        )
     assert not (tmp_path / "hiraku.yml").exists()
 
 
 def test_results_preserve_existing_files(tmp_path: Path):
     (tmp_path / "runs.csv").write_text("existing")
     with pytest.raises(ValidationError, match="overwrite"):
-        HirakuConfig.init(tmp_path, example="heart-disease", results=True)
+        HirakuConfig.init(
+            tmp_path,
+            example="heart-disease",
+            results=True,
+            records_path="hiraku/records",
+        )
     assert (tmp_path / "runs.csv").read_text() == "existing"
     assert not (tmp_path / "train.py").exists()
 
@@ -36,6 +50,7 @@ def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
         example="digits-mlflow",
         results=True,
         install_skill=False,
+        records_path="hiraku/records",
     )
     assert config.active_record_id == "weak-l2"
     assert config.tracking_backend == {
@@ -43,7 +58,7 @@ def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
         "database": "mlflow.db",
         "experiment_name": "hiraku-digits",
     }
-    root = Record.load(config.records_dir / "digits" / "digits.md")
+    root = Record.from_packet(parse_file(config.records_dir / "digits" / "digits.md"))
     assert root.resolve_tracking_backend(config=config).backend_name == "mlflow"
 
 
@@ -62,7 +77,11 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(project, "files", lambda name: resources)
     target = tmp_path / "target"
     config = HirakuConfig.init(
-        target, example="layered", results=True, install_skill=False
+        target,
+        example="layered",
+        results=True,
+        install_skill=False,
+        records_path="hiraku/records",
     )
     assert (target / "train.py").read_text() == "results"
     assert config.branch == "custom/{record_id}"

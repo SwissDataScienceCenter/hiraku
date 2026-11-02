@@ -14,7 +14,7 @@ from tempfile import TemporaryDirectory
 
 from hiraku import HirakuConfig
 from hiraku.execution import execute_command
-from hiraku.record import Record
+from hiraku.record import Record, open_workspace
 
 EXPERIMENTS = (
     ("logistic-baseline", "heart-disease", "logistic", 0.2),
@@ -65,11 +65,13 @@ def generate(config: HirakuConfig) -> None:
     """Generate records and runs in an initialized, empty example project."""
     if list(config.records_dir.rglob("*.md")) or (config.root / "runs.csv").exists():
         raise FileExistsError("Generation requires an example without records or runs")
+    workspace = open_workspace(config)
     Record.create(
-        "heart-disease",
+        workspace,
+        "heart-disease/heart-disease.md",
+        id="heart-disease",
         type="task",
         status="concluded",
-        activate=False,
         metrics=[
             {"name": m, "direction": d}
             for m, d in zip(METRICS, ("minimize", "maximize"), strict=True)
@@ -77,11 +79,12 @@ def generate(config: HirakuConfig) -> None:
         markdown="# Heart disease classification\n\n"
         "Measured runs on the processed Cleveland dataset with seeds 1, 2 and 3.\n"
         "These small validation comparisons are not clinical evidence.\n",
-        config=config,
     )
     for identifier, parent, model, fraction in EXPERIMENTS:
         record = Record.create(
-            identifier,
+            workspace,
+            f"heart-disease/{identifier}.md",
+            id=identifier,
             parent_id=parent,
             type="baseline"
             if model == "logistic"
@@ -89,8 +92,6 @@ def generate(config: HirakuConfig) -> None:
             if identifier == "forest-tuning"
             else "hypothesis",
             status="concluded",
-            activate=False,
-            config=config,
             markdown=f"## {identifier}\n\n"
             f"Model: `{model}`; validation fraction: {fraction}; seeds: 1, 2, 3.\n"
             + (
@@ -124,7 +125,7 @@ def generate(config: HirakuConfig) -> None:
     rows = validate_runs(config.root)
     for identifier, _, _, _ in EXPERIMENTS:
         values = [r for r in rows if r["record_id"] == identifier]
-        record = Record.load(config.records_dir / "heart-disease" / f"{identifier}.md")
+        record = Record.load(open_workspace(config), identifier)
         record.markdown += (
             "\nMean across the three runs:\n\n"
             + "\n".join(
@@ -133,7 +134,7 @@ def generate(config: HirakuConfig) -> None:
             )
             + "\n\nNo statistical significance is claimed.\n"
         )
-        record.save(overwrite=True)
+        record.save(open_workspace(config))
     config.active_record_id = "random-forest"
     config.save()
 
@@ -146,7 +147,10 @@ def generate_results(output: Path) -> None:
     with TemporaryDirectory(prefix="hiraku-heart-disease-") as temporary:
         project = Path(temporary).resolve() / "project"
         config = HirakuConfig.init(
-            project, example="heart-disease", install_skill=False
+            project,
+            example="heart-disease",
+            install_skill=False,
+            records_path="hiraku/records",
         )
         for arguments in (
             ["init", "-q"],

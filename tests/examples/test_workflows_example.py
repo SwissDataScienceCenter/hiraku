@@ -7,10 +7,11 @@ from typing import Any
 
 import pytest
 from click.testing import CliRunner
+from fmql import Query
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.record import Record, open_workspace
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import start_workflow, workflow_status
 
@@ -116,7 +117,10 @@ def test_cli_uses_workflow_session_ids_for_resume_and_status(runner: CliRunner) 
 def children(parent: str) -> list[Any]:
     config = HirakuConfig.discover()
     return sorted(
-        load_record(parent, config=config).children(config=config),
+        [
+            Record.from_packet(packet)
+            for packet in Query(open_workspace(config)).where(parent_id=parent)
+        ],
         key=lambda item: item.id,
     )
 

@@ -199,12 +199,24 @@ Loading and persistence remain with the caller. The component does not load,
 parse, or save files, and rendering and selection do not change record objects
 or Markdown files. Passing `None` displays the empty selection state.
 
-For editing, create `hc.MarkdownEditor(on_save=Record.save_markdown, on_change=...)` once
-in a notebook cell and call `hc.markdown_view(record, editor=editor)` in a
+For editing, pass an explicit workspace to the persistence callback:
+
+```python
+from hiraku.record import open_workspace
+
+workspace = open_workspace(config)
+editor = hc.MarkdownEditor(
+    on_save=lambda record, body: record.save_markdown(workspace, body),
+    on_change=on_change,
+)
+```
+
+Create the workspace and editor once, refresh the workspace with `rescan()` when
+reloading project data, and call `hc.markdown_view(record, editor=editor)` in a
 separate display cell. Omitting `editor` keeps the viewer read-only.
 Wire `on_change` to a `mo.state` setter with `allow_self_loops=True`, and read
 its getter in the display cell so button actions rerender it. The
-`Record.save_markdown` method saves through the record's own API and rejects
+`Record.save_markdown` method saves through the explicit fmql workspace and rejects
 changes made on disk since editing began. The editor changes
 the displayed object's body only after a successful save. Detached records
 remain read-only until saved to a path. Drafts are held in memory, so reloading

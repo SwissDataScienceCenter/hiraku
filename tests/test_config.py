@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError as ModelValidationError
 
 import hiraku.project
 from hiraku.config import HirakuConfig
@@ -15,7 +16,34 @@ from hiraku.errors import (
     ProjectNotFoundError,
     ValidationError,
 )
-from hiraku.record import Record
+from hiraku.record import Record, open_workspace
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {},
+        {"records_path": None},
+        {"records_path": ""},
+        {"records_path": "  "},
+        {"records_path": "bad\x00path"},
+    ],
+)
+def test_records_path_is_required_and_validated_on_load(tmp_path, fields):
+    marker = tmp_path / "hiraku.yml"
+    marker.write_text(yaml.safe_dump(fields))
+    with pytest.raises(ModelValidationError, match="records_path"):
+        HirakuConfig.load(marker)
+
+
+def test_records_path_assignment_is_validated(tmp_path):
+    config = HirakuConfig.init(tmp_path / "code", records_path="../knowledge")
+    assert config.records_dir == tmp_path / "knowledge"
+    with pytest.raises(ModelValidationError, match="records_path"):
+        config.records_path = " "
+    assert config.records_dir == tmp_path / "knowledge"
+    config.records_path = str(tmp_path / "other")
+    assert config.records_dir == tmp_path / "other"
 
 
 def test_init_leaves_client_hooks_out_of_the_project(tmp_path):
@@ -26,7 +54,7 @@ def test_init_leaves_client_hooks_out_of_the_project(tmp_path):
         path.write_text(
             json.dumps({"other": True, "hooks": {"PreToolUse": [existing]}})
         )
-    HirakuConfig.init(tmp_path, install_skill=False)
+    HirakuConfig.init(tmp_path, install_skill=False, records_path="knowledge")
     for relative in (".codex/hooks.json", ".claude/settings.json"):
         path = tmp_path / relative
         assert json.loads(path.read_text()) == {
@@ -43,7 +71,7 @@ def test_init_uses_uv_when_the_project_has_a_lockfile(tmp_path, locked):
     if locked:
         (tmp_path / "uv.lock").touch()
     launcher = ["uv", "run", "hiraku"] if locked else ["hiraku"]
-    HirakuConfig.init(tmp_path, install_skill=False)
+    HirakuConfig.init(tmp_path, install_skill=False, records_path="knowledge")
     server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["hiraku"]
     assert [server["command"], *server["args"]] == [*launcher, "mcp"]
     codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
@@ -58,7 +86,7 @@ def test_init_preserves_hook_configuration_without_inspecting_it(tmp_path, conte
     path = tmp_path / ".claude/settings.json"
     path.parent.mkdir()
     path.write_text(content)
-    HirakuConfig.init(tmp_path, install_skill=False)
+    HirakuConfig.init(tmp_path, install_skill=False, records_path="knowledge")
     assert path.read_text() == content
     assert (tmp_path / "hiraku.yml").is_file()
     assert (tmp_path / ".mcp.json").is_file()
@@ -71,20 +99,20 @@ def _git(path: Path, *arguments: str) -> None:
 
 
 def test_init_without_repository_or_at_nested_directory(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path / "plain")
+    config = HirakuConfig.init(tmp_path / "plain", records_path="knowledge")
     assert config.root == tmp_path / "plain"
 
     repository = tmp_path / "repository"
     repository.mkdir()
     _git(repository, "init", "-q")
     nested = repository / "nested"
-    config = HirakuConfig.init(nested)
+    config = HirakuConfig.init(nested, records_path="knowledge")
     assert config.root == nested
 
 
 def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     root = tmp_path / "project"
-    config = HirakuConfig.init(root)
+    config = HirakuConfig.init(root, records_path="knowledge")
     nested = root / "src" / "module.py"
     nested.parent.mkdir()
     nested.write_text("")
@@ -115,13 +143,13 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
-    HirakuConfig.init(without_skill, install_skill=False)
+    HirakuConfig.init(without_skill, install_skill=False, records_path="knowledge")
     assert not (without_skill / ".agents").exists()
     assert not (without_skill / ".claude/skills").exists()
     assert not (without_skill / ".claude/settings.json").exists()
 
     with pytest.raises(ProjectExistsError):
-        HirakuConfig.init(root)
+        HirakuConfig.init(root, records_path="knowledge")
     with pytest.raises(ProjectNotFoundError):
         HirakuConfig.discover(tmp_path / "missing")
 
@@ -134,7 +162,7 @@ def test_init_falls_back_to_copy_when_skill_symlinks_are_unavailable(
 
     monkeypatch.setattr(Path, "symlink_to", reject_symlink)
     root = tmp_path / "project"
-    HirakuConfig.init(root)
+    HirakuConfig.init(root, records_path="knowledge")
 
     canonical_skill = root / ".agents/skills/hiraku/SKILL.md"
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
@@ -151,7 +179,7 @@ def test_project_config_rejects_record_command(tmp_path: Path) -> None:
 
 
 def test_project_config_tracking_backend_is_project_wide(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = HirakuConfig.init(tmp_path, install_skill=False, records_path="knowledge")
     config.tracking_backend = {"type": "wandb", "project": "research"}
     assert config.tracking_backend == {"type": "wandb", "project": "research"}
     with pytest.raises(ValidationError, match="configured on a record"):
@@ -163,7 +191,7 @@ def test_init_from_template_applies_arbitrary_overlay(tmp_path: Path) -> None:
     (template / "custom/dispatch").mkdir(parents=True)
     (template / "empty").mkdir()
     (template / "hiraku.yml").write_text(
-        "hiraku_dir: custom\nextension:\n  enabled: true\n"
+        "records_path: ../knowledge\nhiraku_dir: custom\nextension:\n  enabled: true\n"
     )
     launcher = template / "custom/dispatch/launch.sh"
     launcher.write_text("#!/bin/sh\necho template\n")
@@ -179,6 +207,7 @@ def test_init_from_template_applies_arbitrary_overlay(tmp_path: Path) -> None:
     )
 
     assert config.hiraku_dir == root / "custom"
+    assert config.records_dir == tmp_path / "knowledge"
     assert config.to_dict()["extension"] == {"enabled": True}
     assert launcher.read_text() == (root / "custom/dispatch/launch.sh").read_text()
     assert (root / "custom/dispatch/launch.sh").stat().st_mode & 0o111
@@ -198,7 +227,7 @@ def test_template_rejects_existing_files_before_initialization(tmp_path: Path) -
     (template / "existing.txt").write_text("replacement")
 
     with pytest.raises(ValidationError, match="overwrite existing path"):
-        HirakuConfig.init(root, template=template)
+        HirakuConfig.init(root, template=template, records_path="knowledge")
 
     assert existing.read_text() == "original"
     assert not (root / "hiraku.yml").exists()
@@ -214,13 +243,15 @@ def test_template_rejects_symlinks_and_invalid_config(tmp_path: Path) -> None:
     linked_root = tmp_path / "linked-root"
 
     with pytest.raises(ValidationError, match="symbolic link"):
-        HirakuConfig.init(linked_root, template=linked_template)
+        HirakuConfig.init(
+            linked_root, template=linked_template, records_path="knowledge"
+        )
     assert not linked_root.exists()
 
     template_link = tmp_path / "template-link"
     template_link.symlink_to(linked_template, target_is_directory=True)
     with pytest.raises(ValidationError, match="cannot be a symbolic link"):
-        HirakuConfig.init(linked_root, template=template_link)
+        HirakuConfig.init(linked_root, template=template_link, records_path="knowledge")
     assert not linked_root.exists()
 
     invalid_template = tmp_path / "invalid-template"
@@ -229,7 +260,9 @@ def test_template_rejects_symlinks_and_invalid_config(tmp_path: Path) -> None:
     invalid_root = tmp_path / "invalid-root"
 
     with pytest.raises(ValidationError, match="parent traversal"):
-        HirakuConfig.init(invalid_root, template=invalid_template)
+        HirakuConfig.init(
+            invalid_root, template=invalid_template, records_path="knowledge"
+        )
     assert not invalid_root.exists()
 
 
@@ -249,7 +282,7 @@ def test_template_failure_rolls_back_created_paths(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(hiraku.project.shutil, "copy2", fail_on_second)
 
     with pytest.raises(ValidationError, match="simulated copy failure"):
-        HirakuConfig.init(root, template=template)
+        HirakuConfig.init(root, template=template, records_path="knowledge")
     assert not root.exists()
 
 
@@ -267,13 +300,17 @@ def test_init_from_packaged_example_copies_only_src(
     monkeypatch.setattr(hiraku.project, "files", lambda package: resources)
 
     root = tmp_path / "project"
-    HirakuConfig.init(root, example="demo", install_skill=False)
+    HirakuConfig.init(
+        root, example="demo", install_skill=False, records_path="knowledge"
+    )
 
     assert (root / "copied.txt").read_text() == "copied"
     assert not (root / "README.md").exists()
     assert not (root / "example.yml").exists()
     with pytest.raises(ValidationError, match="available examples: demo"):
-        HirakuConfig.init(tmp_path / "unknown", example="missing")
+        HirakuConfig.init(
+            tmp_path / "unknown", example="missing", records_path="knowledge"
+        )
 
 
 def test_init_rejects_conflicting_template_sources(tmp_path: Path) -> None:
@@ -281,18 +318,27 @@ def test_init_rejects_conflicting_template_sources(tmp_path: Path) -> None:
     template.mkdir()
 
     with pytest.raises(ValidationError, match="mutually exclusive"):
-        HirakuConfig.init(tmp_path / "project", template=template, example="demo")
+        HirakuConfig.init(
+            tmp_path / "project",
+            template=template,
+            example="demo",
+            records_path="knowledge",
+        )
 
 
 def test_config_preserves_unknown_keys_and_active_record(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     raw = yaml.safe_load(config.path.read_text())
     raw["extension"] = {"enabled": True}
     config.path.write_text(yaml.safe_dump(raw, sort_keys=False))
     config = HirakuConfig.discover(tmp_path)
-    first = Record.create("first", config=config)
-    child = Record.create("trial", parent_id=first.id, config=config)
-    second = Record.create("second", config=config)
+    workspace = open_workspace(config)
+    first = Record.create(workspace, "first/first.md", id="first")
+    config.set_active_record(first)
+    child = Record.create(workspace, "trial/trial.md", id="trial", parent_id=first.id)
+    config.set_active_record(child)
+    second = Record.create(workspace, "second/second.md", id="second")
+    config.set_active_record(second)
 
     assert config.active_record_id == second.id
     config.set_active_record(child)
@@ -304,14 +350,14 @@ def test_config_preserves_unknown_keys_and_active_record(tmp_path: Path) -> None
 
 def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None:
     marker = tmp_path / "hiraku.yml"
-    marker.write_text("hiraku_dir: ../outside\n")
+    marker.write_text("records_path: knowledge\nhiraku_dir: ../outside\n")
     with pytest.raises(ValidationError):
         HirakuConfig.load(marker)
 
     outside = tmp_path.parent / f"{tmp_path.name}-outside"
     outside.mkdir()
     (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
-    marker.write_text("hiraku_dir: linked\n")
+    marker.write_text("records_path: knowledge\nhiraku_dir: linked\n")
     with pytest.raises(ValidationError):
         HirakuConfig.load(marker)
 
@@ -320,7 +366,7 @@ def test_init_adds_hiraku_to_existing_codex_configuration(tmp_path: Path) -> Non
     codex = tmp_path / ".codex" / "config.toml"
     codex.parent.mkdir()
     codex.write_text('model = "x"\n\n[mcp_servers.other]\ncommand = "other"\n')
-    HirakuConfig.init(tmp_path, install_skill=False)
+    HirakuConfig.init(tmp_path, install_skill=False, records_path="knowledge")
     parsed = tomllib.loads(codex.read_text())
     assert parsed["model"] == "x"
     assert parsed["mcp_servers"]["other"] == {"command": "other"}
@@ -333,7 +379,7 @@ def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
     original = 'mcp_servers = { other = { command = "other" } }\n'
     codex.write_text(original)
     with pytest.raises(ValidationError, match=r"\[mcp_servers.hiraku\] table"):
-        HirakuConfig.init(tmp_path, install_skill=False)
+        HirakuConfig.init(tmp_path, install_skill=False, records_path="knowledge")
     assert codex.read_text() == original
     assert not (tmp_path / "hiraku.yml").exists()
     assert not (tmp_path / ".mcp.json").exists()

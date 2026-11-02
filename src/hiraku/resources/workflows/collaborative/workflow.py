@@ -18,8 +18,8 @@ from hiraku.config import HirakuConfig
 from hiraku.errors import HirakuError, ValidationError
 from hiraku.execution import validate_command
 from hiraku.git import GitRepository
-from hiraku.markdown import Markdown, render
-from hiraku.record import Record, load_record
+from hiraku.markdown import Markdown, read_markdown, render
+from hiraku.record import Record, open_workspace
 from hiraku.run import Run
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
@@ -88,7 +88,7 @@ def input_schema() -> dict[str, Any]:
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
     """Build the collaborative research graph from its Markdown instructions."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = Record._parse_markdown(path)
+    fields, body = read_markdown(path)
     if fields.get("id") != "collaborative":
         raise ValueError("workflow.md must declare id: collaborative")
     markdown = Markdown(body)
@@ -110,7 +110,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         if type(rounds) is not int or rounds < 1:
             raise ValidationError("rounds must be a positive integer")
         try:
-            load_record(task, config=config)
+            Record.load(open_workspace(config), task)
         except HirakuError as exc:
             raise ValidationError(str(exc)) from exc
         return Command(
@@ -252,16 +252,17 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 goto="draft",
             )
         try:
+            workspace = open_workspace(config)
             record = Record.create(
-                arguments["record_id"],
+                workspace,
+                f"experiments/{arguments['record_id']}.md",
+                id=arguments["record_id"],
                 parent_id=state["task"],
                 type="experiment",
                 status="drafted",
                 summary=arguments["summary"],
                 hypothesis=arguments["hypothesis"],
                 markdown=f"## Change\n\n{arguments['change'].strip()}\n",
-                activate=False,
-                config=config,
             )
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="draft")
@@ -274,7 +275,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         identifier = state.get("experiment")
         if not identifier:
             raise ValidationError("No experiment has been drafted")
-        return load_record(identifier, config=config)
+        return Record.load(open_workspace(config), identifier)
 
     def experiment_context(state: ResearchState) -> dict[str, Any]:
         record = experiment(state)
@@ -317,7 +318,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             record = experiment(state)
             record.commit = sha
             record.status = "implemented"
-            record.save()
+            record.save(open_workspace(config))
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="implement")
         return Command(update={"feedback": "", "step": "launch"}, goto="launch")
@@ -356,7 +357,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 goto="launch",
             )
         record.status = "launched"
-        record.save()
+        record.save(open_workspace(config))
         return Command(update={"feedback": "", "step": "analyze"}, goto="analyze")
 
     def analyze(state: ResearchState) -> Command[Literal["analyze", "draft", "done"]]:
@@ -402,7 +403,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         record.status = "analyzed"
         record.verdict = verdict
         record.conclusion = conclusion
-        record.save()
+        record.save(open_workspace(config))
         results = [
             *state.get("results", []),
             {"record_id": record.id, "verdict": verdict},

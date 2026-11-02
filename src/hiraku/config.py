@@ -11,6 +11,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    field_validator,
     model_validator,
 )
 
@@ -30,6 +31,7 @@ class HirakuConfig(BaseModel):
         hiraku_dir_name: Relative state directory name.
         default_dispatch: Default command dispatcher.
         tracking_backend: Project-wide run tracking backend; defaults to CSV.
+        records_path: User-owned knowledge base, relative to root or absolute.
 
     Raises:
         pydantic.ValidationError: If configuration values are invalid or inconsistent.
@@ -58,8 +60,17 @@ class HirakuConfig(BaseModel):
         default=DEFAULTS["default_dispatch"], min_length=1
     )
     active_record_id: str | None = DEFAULTS["active_record_id"]
+    records_path: str = Field(min_length=1)
     tracking_backend: str | dict[str, Any] = DEFAULTS["tracking_backend"]
     _hiraku_dir: Path = PrivateAttr()
+
+    @field_validator("records_path")
+    @classmethod
+    def validate_records_path(cls, value: str) -> str:
+        if not value.strip() or "\x00" in value:
+            raise ValueError("records_path must be a non-empty directory path")
+        Path(value).expanduser()
+        return value
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "command":
@@ -160,6 +171,7 @@ class HirakuConfig(BaseModel):
         cls,
         root: Path | str = ".",
         *,
+        records_path: str | None = None,
         install_skill: bool = True,
         template: Path | str | None = None,
         example: str | None = None,
@@ -170,6 +182,8 @@ class HirakuConfig(BaseModel):
 
         Args:
             root: Directory to initialize.
+            records_path: Knowledge-base directory, required unless a template
+                or example supplies it.
             install_skill: Whether to install the repository-local skill for
                 supported coding agents.
             template: Optional local directory copied over the initialized project.
@@ -187,6 +201,7 @@ class HirakuConfig(BaseModel):
 
         return initialize_project(
             root,
+            records_path=records_path,
             install_skill=install_skill,
             template=template,
             example=example,
@@ -235,8 +250,9 @@ class HirakuConfig(BaseModel):
 
     @property
     def records_dir(self) -> Path:
-        """Return the directory containing research records."""
-        return self.hiraku_dir / "records"
+        """Return the user-managed knowledge base, independent of project state."""
+        path = Path(self.records_path).expanduser()
+        return (self.root / path).resolve()
 
     @property
     def workflows_dir(self) -> Path:
@@ -249,14 +265,15 @@ class HirakuConfig(BaseModel):
         return self.hiraku_dir / "dispatch"
 
     def set_active_record(self, record: str | Record) -> None:
-        """Persist the active research record."""
-        from .record import Record, load_record
+        """Persist a loaded record's ID, or look up an ID before activating it."""
+        from .record import Record, open_workspace
 
         identifier = record.id if isinstance(record, Record) else record
-        selected = load_record(identifier, config=self)
+        if not isinstance(record, Record) or record.path is None:
+            Record.load(open_workspace(self), identifier)
         old = self.active_record_id
         try:
-            self.active_record_id = selected.id
+            self.active_record_id = identifier
             self.save()
         except Exception:
             self.active_record_id = old

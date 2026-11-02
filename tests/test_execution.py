@@ -11,14 +11,38 @@ from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.execution import execute_command
-from hiraku.record import Record
+from hiraku.record import Record, open_workspace
+
+
+def test_execution_resolves_moved_record_in_external_knowledge_base(tmp_path):
+    config = HirakuConfig.init(tmp_path / "code", records_path="../knowledge")
+    workspace = open_workspace(config)
+    record = Record.create(workspace, "original.md", id="stable")
+    config.set_active_record(record)
+    moved = config.records_dir / "renamed.md"
+    record.path.rename(moved)
+    result = execute_command(
+        [
+            sys.executable,
+            "-c",
+            "import os; print(os.getcwd()); print(os.environ['HIRAKU_RECORD_ID']); "
+            "print(os.environ['HIRAKU_RECORD_FILE'])",
+        ],
+        record_id="stable",
+        config=config,
+        capture_output=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == [str(config.root), "stable", str(moved)]
 
 
 def test_run_executes_in_project_and_returns_output_and_exit_code(
     tmp_path: Path,
 ) -> None:
-    config = HirakuConfig.init(tmp_path)
-    Record.create("root", config=config)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
+    workspace = open_workspace(config)
+    _created_record = Record.create(workspace, "root/root.md", id="root")
+    config.set_active_record(_created_record)
     result = execute_command(
         [sys.executable, "-c", "import os; print(os.getcwd()); raise SystemExit(7)"],
         record_id="root",
@@ -35,8 +59,10 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
     tmp_path: Path,
 ) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    config = HirakuConfig.init(tmp_path)
-    Record.create("root", config=config)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
+    workspace = open_workspace(config)
+    _created_record = Record.create(workspace, "root/root.md", id="root")
+    config.set_active_record(_created_record)
     (tmp_path / "uncommitted.txt").write_text("dirty")
     command = [
         sys.executable,
@@ -56,9 +82,11 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
 def test_run_requires_explicit_command_and_streams_output(
     tmp_path: Path, monkeypatch
 ) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     monkeypatch.chdir(tmp_path)
-    Record.create("root", config=config)
+    workspace = open_workspace(config)
+    _created_record = Record.create(workspace, "root/root.md", id="root")
+    config.set_active_record(_created_record)
 
     seen: list[tuple[str, ...] | None] = []
 
@@ -79,8 +107,10 @@ def test_run_requires_explicit_command_and_streams_output(
 
 
 def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
-    Record.create("root", config=config)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
+    workspace = open_workspace(config)
+    _created_record = Record.create(workspace, "root/root.md", id="root")
+    config.set_active_record(_created_record)
     with pytest.raises(ValidationError, match="reserved run attribution"):
         execute_command(
             ["echo", "hello"], env={"HIRAKU_RECORD_ID": "other"}, config=config
@@ -88,8 +118,10 @@ def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:
 
 
 def test_cli_propagates_nonzero_exit_code(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path)
-    Record.create("root", config=config)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
+    workspace = open_workspace(config)
+    _created_record = Record.create(workspace, "root/root.md", id="root")
+    config.set_active_record(_created_record)
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         main,

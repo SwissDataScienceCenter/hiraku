@@ -28,15 +28,16 @@ from hiraku.dashboard.data import (
     within,
 )
 from hiraku.errors import BackendError
-from hiraku.record import Record
+from hiraku.record import Record, open_workspace
 from hiraku.run import Run
 
 
 def tables(project: HirakuConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build ``records_df`` and ``runs_df`` as the notebook does."""
-    loaded = load(project)
+    workspace = open_workspace(project)
+    loaded = load(project, workspace)
     return (
-        arrow_frame(record_rows(loaded.records), RECORD_COLUMNS),
+        arrow_frame(record_rows(loaded.records, workspace), RECORD_COLUMNS),
         arrow_frame(run_rows(loaded), RUN_COLUMNS),
     )
 
@@ -54,7 +55,7 @@ def test_selection_scope_preserves_subtree_for_descendant_runs(
 
 
 def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:
-    loaded = load(project)
+    loaded = load(project, open_workspace(project))
 
     assert [record.id for record in loaded.records] == ["a", "a1", "b", "root"]
     # Runs attributed to records outside the project are dropped.
@@ -66,14 +67,16 @@ def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:
 def test_load_reports_unavailable_source_without_failing(
     project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    Record.create("broken", config=project)
+    workspace = open_workspace(project)
+    _created_record = Record.create(workspace, "broken/broken.md", id="broken")
+    project.set_active_record(_created_record)
 
     def resolve(self: Record, **options):
         raise BackendError("source offline")
 
     monkeypatch.setattr(Record, "resolve_tracking_backend", resolve)
 
-    loaded = load(project)
+    loaded = load(project, open_workspace(project))
 
     assert loaded.errors == [
         f"Tracking source for {loaded.records[0].id!r} unavailable: source offline"
@@ -82,7 +85,7 @@ def test_load_reports_unavailable_source_without_failing(
 
 
 def test_run_rows_flatten_runs_in_execution_order(project: HirakuConfig) -> None:
-    rows = run_rows(load(project))
+    rows = run_rows(load(project, open_workspace(project)))
 
     assert [row["run"] for row in rows] == ["r0", "r1", "r2", "r3", "r4"]
     assert rows[0]["record_path"] == "root/a"
@@ -128,7 +131,7 @@ def test_tradeoff_frame_identifies_non_dominated_runs() -> None:
     assert excluded == 2
 
 
-def test_record_rows_list_records_in_tree_order() -> None:
+def test_record_rows_list_records_in_tree_order(tmp_path) -> None:
     records = [
         Record(id="root", metrics=[{"name": "loss", "direction": "minimize"}]),
         Record(id="a-b", parent_id="root"),
@@ -136,7 +139,12 @@ def test_record_rows_list_records_in_tree_order() -> None:
         Record(id="x", parent_id="a"),
     ]
 
-    rows = record_rows(records)
+    workspace = open_workspace(
+        HirakuConfig(path=tmp_path / "hiraku.yml", root=tmp_path, records_path=".")
+    )
+    for record in records:
+        record.save(workspace, f"{record.id}.md")
+    rows = record_rows(records, workspace)
 
     # "a-b" sorts before "a/x" as text, but x belongs right under a.
     assert [row["record_path"] for row in rows] == [
@@ -146,7 +154,7 @@ def test_record_rows_list_records_in_tree_order() -> None:
         "root/a-b",
     ]
     assert rows[0]["metrics"] == [{"name": "loss", "direction": "minimize"}]
-    assert rows[1]["metrics"] == []
+    assert all(row["metrics"] == rows[0]["metrics"] for row in rows)
 
 
 def test_arrow_frame_types_columns_and_falls_back_to_text() -> None:
@@ -219,13 +227,16 @@ def test_format_duration(seconds: float | None, expected: str) -> None:
     assert format_duration(seconds) == expected
 
 
-def test_deep_trees_do_not_hit_the_recursion_limit() -> None:
+def test_deep_trees_do_not_hit_the_recursion_limit(tmp_path) -> None:
     depth = 5000
     records = [
         Record(id=f"r{index}", parent_id=f"r{index - 1}" if index else None)
         for index in range(depth)
     ]
-    records_df = arrow_frame(record_rows(records), RECORD_COLUMNS)
+    workspace = open_workspace(
+        HirakuConfig(path=tmp_path / "hiraku.yml", root=tmp_path, records_path=".")
+    )
+    records_df = arrow_frame(record_rows(records, workspace), RECORD_COLUMNS)
 
     rows = tree_rows(records_df, arrow_frame([], RUN_COLUMNS), None)
 

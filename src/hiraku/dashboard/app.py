@@ -27,7 +27,7 @@ with app.setup:
     from hiraku.config import HirakuConfig
     from hiraku.dashboard import components as hc
     from hiraku.dashboard import data as hd
-    from hiraku.record import Record
+    from hiraku.record import open_workspace
 
 
 @app.cell
@@ -40,7 +40,8 @@ def data_setup():
         else HirakuConfig.discover(mo.notebook_dir())
     )
     requested_record = os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
-    return config, requested_record
+    workspace = open_workspace(config)
+    return config, requested_record, workspace
 
 
 @app.cell
@@ -57,11 +58,14 @@ def refresh_control():
 
 
 @app.cell
-def project_data(config, refresh):
+def project_data(config, refresh, workspace):
     _refreshes = refresh.value
-    project = hd.load(config)
+    workspace.rescan()
+    project = hd.load(config, workspace)
     runs_df = hd.arrow_frame(hd.run_rows(project), hd.RUN_COLUMNS)
-    records_df = hd.arrow_frame(hd.record_rows(project.records), hd.RECORD_COLUMNS)
+    records_df = hd.arrow_frame(
+        hd.record_rows(project.records, workspace), hd.RECORD_COLUMNS
+    )
     return project, records_df, runs_df
 
 
@@ -136,10 +140,10 @@ def record_navigation(project, select_key, selected_record):
 
 
 @app.cell
-def record_editor():
+def record_editor(workspace):
     get_editor_revision, _set_editor_revision = mo.state(0, allow_self_loops=True)
     markdown_editor = hc.MarkdownEditor(
-        on_save=Record.save_markdown,
+        on_save=lambda record, body: record.save_markdown(workspace, body),
         on_change=lambda: _set_editor_revision(lambda revision: revision + 1),
     )
     return get_editor_revision, markdown_editor

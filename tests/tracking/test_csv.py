@@ -17,7 +17,9 @@ def test_csv_backend_config_is_validated() -> None:
 
 
 def test_csv_tracking_run_and_historical_entrypoint_attribution(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = HirakuConfig.init(
+        tmp_path, install_skill=False, records_path="hiraku/records"
+    )
     (tmp_path / "runs.csv").write_text(
         "id,record_id,entrypoint\nnew,record,\nold,record,train\n"
     )
@@ -27,8 +29,7 @@ def test_csv_tracking_run_and_historical_entrypoint_attribution(tmp_path: Path) 
 
 
 def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
-    Record.create("iris", config=config)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     path = config.root / "runs.csv"
     path.write_text(
         "id,record_id,timestamp,metric.accuracy,param.seed,note\n"
@@ -48,8 +49,7 @@ def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
 
 
 def test_csv_backend_reads_duration_in_seconds(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
-    Record.create("iris", config=config)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     (config.root / "runs.csv").write_text(
         "id,record_id,timestamp,duration\n"
         "a,iris,2026-01-01T00:00:00Z,4.25\n"
@@ -65,8 +65,7 @@ def test_csv_backend_reads_duration_in_seconds(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("value", ["-1", "nan", "soon"])
 def test_csv_backend_rejects_invalid_duration(tmp_path: Path, value: str) -> None:
-    config = HirakuConfig.init(tmp_path)
-    Record.create("iris", config=config)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     (config.root / "runs.csv").write_text(
         f"id,record_id,duration\na,iris,{value}\n", encoding="utf-8"
     )
@@ -76,7 +75,7 @@ def test_csv_backend_rejects_invalid_duration(tmp_path: Path, value: str) -> Non
 
 
 def test_csv_source_listing_returns_all_attributed_runs(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     path = config.root / "runs.csv"
     path.write_text("id,record_id\none,first\ntwo,second\nthree,\n", encoding="utf-8")
 
@@ -90,9 +89,9 @@ def test_csv_source_listing_returns_all_attributed_runs(tmp_path: Path) -> None:
 
 
 def test_csv_backend_resolves_record_path_from_project_root(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     config.tracking_backend = {"type": "csv", "path": "results/iris.csv"}
-    record = Record.create("iris", config=config)
+    record = Record(id="iris")
     path = tmp_path / "results" / "iris.csv"
     path.parent.mkdir()
     path.write_text("id,record_id\na,iris\n", encoding="utf-8")
@@ -104,7 +103,7 @@ def test_csv_backend_resolves_record_path_from_project_root(tmp_path: Path) -> N
 
 def test_csv_backend_preserves_absolute_path_override(tmp_path: Path) -> None:
     project = tmp_path / "project"
-    config = HirakuConfig.init(project)
+    config = HirakuConfig.init(project, records_path="hiraku/records")
     path = tmp_path / "external.csv"
     path.write_text("id,record_id\na,iris\n", encoding="utf-8")
 
@@ -114,7 +113,7 @@ def test_csv_backend_preserves_absolute_path_override(tmp_path: Path) -> None:
 
 
 def test_csv_backend_requires_record_id_column(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     (tmp_path / "runs.csv").write_text("id,note\na,missing\n")
     with pytest.raises(BackendError, match="no record_id column"):
         CSVBackend(config).list_runs(record_id="child")

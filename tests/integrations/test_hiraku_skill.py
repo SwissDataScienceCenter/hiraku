@@ -7,9 +7,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from fmql import Query
 
 from hiraku.config import HirakuConfig
-from hiraku.record import Record, list_records, load_record
+from hiraku.record import Record, list_records, open_workspace
 from hiraku.tracking import CSVBackend
 
 RUN_AGENT_TESTS = os.environ.get("HIRAKU_RUN_CODEX_SKILL_TESTS") == "1"
@@ -42,8 +43,7 @@ def _new_project(tmp_path: Path) -> tuple[Path, HirakuConfig, str]:
     _git(project, "config", "user.email", "test@example.invalid")
     _git(project, "config", "user.name", "Test")
     config = HirakuConfig.init(
-        project,
-        example="heart-disease",
+        project, example="heart-disease", records_path="hiraku/records"
     )
     _git(project, "add", ".")
     _git(project, "commit", "-m", "initialize Heart Disease example")
@@ -106,23 +106,23 @@ def _run_codex(project: Path, prompt: str) -> str:
 
 
 def _create_task(config: HirakuConfig) -> Record:
-    return Record.create(
-        "heart-disease",
-        config=config,
+    workspace = open_workspace(config)
+    _created_record = Record.create(
+        workspace,
+        "heart-disease/heart-disease.md",
+        id="heart-disease",
         branch="main",
-        goal=(
-            "Develop and evaluate predictive models for heart disease on a fixed "
-            "Cleveland cohort"
-        ),
-        question=(
-            "Which modeling approaches achieve the best validation log loss and "
-            "accuracy on this cohort?"
-        ),
+        goal="Develop and evaluate predictive models for heart disease "
+        "on a fixed Cleveland cohort",
+        question="Which modeling approaches achieve the best validation log loss "
+        "and accuracy on this cohort?",
         metrics=[
             {"name": "val/log_loss", "direction": "minimize"},
             {"name": "val/accuracy", "direction": "maximize"},
         ],
     )
+    config.set_active_record(_created_record)
+    return _created_record
 
 
 def _create_logistic_experiment(
@@ -130,14 +130,18 @@ def _create_logistic_experiment(
     task: Record,
     commit: str,
 ) -> Record:
-    return Record.create(
-        "logistic-baseline",
+    workspace = open_workspace(config)
+    _created_record = Record.create(
+        workspace,
+        "logistic-baseline/logistic-baseline.md",
+        id="logistic-baseline",
         parent_id=task.id,
-        config=config,
         commit=commit,
         summary="Logistic regression baseline",
         hypothesis="Regularized logistic regression provides a calibrated baseline",
     )
+    config.set_active_record(_created_record)
+    return _created_record
 
 
 def test_agent_creates_task_from_high_level_request(tmp_path: Path) -> None:
@@ -154,7 +158,7 @@ Track val/log_loss to minimize and val/accuracy to maximize. Only create and
 verify the record.""",
     )
 
-    tasks = list_records(config=config)
+    tasks = list_records(open_workspace(config))
     assert len(tasks) == 1, agent_output
     task = tasks[0]
     assert task.id == "heart-disease"
@@ -172,7 +176,10 @@ verify the record.""",
         {"name": "val/log_loss", "direction": "minimize"},
         {"name": "val/accuracy", "direction": "maximize"},
     ]
-    assert task.children(config=config) == []
+    assert [
+        Record.from_packet(packet)
+        for packet in Query(open_workspace(config)).where(parent_id=task.id)
+    ] == []
     assert CSVBackend(config).list_runs(record_id=task.id) == []
     assert _git(project, "status", "--porcelain") == ""
 
@@ -189,7 +196,10 @@ hypothesis 'Regularized logistic regression provides a calibrated baseline'.
 Bind it to the current commit. Only create and verify the record; do not run it.""",
     )
 
-    experiments = task.children(config=config)
+    experiments = [
+        Record.from_packet(packet)
+        for packet in Query(open_workspace(config)).where(parent_id=task.id)
+    ]
     assert len(experiments) == 1, agent_output
     experiment = experiments[0]
     assert experiment.id == "logistic-baseline"
@@ -217,9 +227,15 @@ report its tracked validation metrics. Do not create or update other records."""
     )
 
     assert task.path.read_bytes() == task_before, agent_output
-    current = load_record(experiment.id, config=config)
+    current = Record.load(open_workspace(config), experiment.id)
     assert current.path.read_bytes() == experiment_before
-    assert [item.id for item in task.children(config=config)] == ["logistic-baseline"]
+    assert [
+        item.id
+        for item in [
+            Record.from_packet(packet)
+            for packet in Query(open_workspace(config)).where(parent_id=task.id)
+        ]
+    ] == ["logistic-baseline"]
     runs = CSVBackend(config).list_runs(
         record_id=experiment.id,
     )

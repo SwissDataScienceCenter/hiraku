@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from hiraku.config import HirakuConfig
-from hiraku.record import Record
+from hiraku.record import Record, open_workspace
 
 # (run ID, record, minute started or None, seconds taken or None, loss)
 RUNS = [
@@ -22,16 +22,24 @@ RUNS = [
 @pytest.fixture
 def project(tmp_path: Path) -> HirakuConfig:
     """A CSV-tracked tree ``root -> {a -> a1, b}`` with attributed runs."""
-    config = HirakuConfig.init(tmp_path, install_skill=False)
-    Record.create(
-        "root",
+    config = HirakuConfig.init(
+        tmp_path, install_skill=False, records_path="hiraku/records"
+    )
+    workspace = open_workspace(config)
+    _created_record = Record.create(
+        workspace,
+        "root/root.md",
+        id="root",
         type="task",
         metrics=[{"name": "loss", "direction": "minimize"}],
-        config=config,
     )
-    Record.create("a", parent_id="root", config=config)
-    Record.create("b", parent_id="root", config=config)
-    Record.create("a1", parent_id="a", config=config)
+    config.set_active_record(_created_record)
+    _created_record = Record.create(workspace, "a/a.md", id="a", parent_id="root")
+    config.set_active_record(_created_record)
+    _created_record = Record.create(workspace, "b/b.md", id="b", parent_id="root")
+    config.set_active_record(_created_record)
+    _created_record = Record.create(workspace, "a1/a1.md", id="a1", parent_id="a")
+    config.set_active_record(_created_record)
     with (tmp_path / "runs.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(

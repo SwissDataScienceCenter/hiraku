@@ -99,8 +99,9 @@ Generated or transient paths:
 
 ### Architecture boundaries
 
-- `Record` owns Markdown/YAML persistence, research hierarchy, inheritance,
-  and record-local fields.
+- `Record` is a validated metadata and Markdown view of an fmql packet.
+  Its lifecycle methods own validated persistence and relationship checks;
+  queries and traversal use native fmql workspaces. Fields do not inherit.
 - `HirakuConfig` owns project discovery and persistent active-context state.
 - The CLI should call the public record/config/execution APIs rather than duplicate
   persistence or validation logic.

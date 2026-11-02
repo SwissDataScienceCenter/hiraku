@@ -2,8 +2,34 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import SectionNotFoundError, ValidationError
-from hiraku.markdown import Markdown, placeholders, render
+from hiraku.markdown import Markdown, placeholders, read_markdown, render
 from hiraku.record import Record
+
+
+@pytest.mark.parametrize(
+    ("text", "fields", "body"),
+    [
+        ("# Workflow\n---\nBody", {}, "# Workflow\n---\nBody"),
+        ("---\ntitle: Workflow\n---\n\n# Step\n", {"title": "Workflow"}, "\n# Step\n"),
+        ("---\n---\nBody", {}, "Body"),
+        ("", {}, ""),
+    ],
+)
+def test_read_markdown_without_record_metadata(tmp_path, text, fields, body):
+    path = tmp_path / "workflow.md"
+    path.write_text(text)
+    assert read_markdown(path) == (fields, body)
+
+
+@pytest.mark.parametrize(
+    "text", ["---\nunclosed", "---\n- list\n---", "---\nx: [\n---"]
+)
+def test_read_markdown_rejects_invalid_frontmatter(tmp_path, text):
+    path = tmp_path / "workflow.md"
+    path.write_text(text)
+    with pytest.raises(ValidationError):
+        read_markdown(path)
+
 
 DOCUMENT = """\
 # Research

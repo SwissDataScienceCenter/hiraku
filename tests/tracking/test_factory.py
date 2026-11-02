@@ -11,18 +11,18 @@ from hiraku.tracking.csv import CSVBackend
 
 
 def test_factory_constructs_csv_backend_from_mapping(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     backend = create_backend({"type": "csv"}, config)
     assert isinstance(backend, CSVBackend)
 
 
 def test_factory_rejects_unknown_backend(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     with pytest.raises(BackendError, match="tracking backend configuration"):
         create_backend({"type": "json"}, config)
 
 
 def test_factory_rejects_unknown_backend_options(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     with pytest.raises(BackendError, match="Invalid tracking backend configuration"):
         create_backend({"type": "csv", "extra": True}, config)

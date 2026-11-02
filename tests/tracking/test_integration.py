@@ -7,14 +7,13 @@ import pytest
 
 from hiraku.config import HirakuConfig
 from hiraku.errors import BackendError
-from hiraku.record import Record, load_record
+from hiraku.record import Record
 from hiraku.tracking import CSVBackend
 
 
 def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
-    task = Record.create("task", config=config)
-    Record.create("exp", parent_id=task.id, config=config)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
+    task = Record(id="task")
     (config.root / "runs.csv").write_text(
         "id,record_id,commit,timestamp,entrypoint,url,metric.loss,param.seed,note\n"
         "later,exp,abc,2026-01-02T00:00:00Z,train,,1.5,2,kept\n"
@@ -39,7 +38,7 @@ def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
 def test_backend_runs_rejects_empty_record_id_before_reading_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     backend = CSVBackend(config)
     monkeypatch.setattr(
         backend,
@@ -52,10 +51,9 @@ def test_backend_runs_rejects_empty_record_id_before_reading_source(
 
 def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     mlflow = pytest.importorskip("mlflow")
-    config = HirakuConfig.init(tmp_path)
+    config = HirakuConfig.init(tmp_path, records_path="hiraku/records")
     config.tracking_backend = {"type": "mlflow", "experiment_name": "hiraku-test"}
-    task = Record.create("task", config=config)
-    Record.create("exp", parent_id=task.id, config=config)
+    task = Record(id="task")
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
     mlflow.set_experiment("hiraku-test")
     with mlflow.start_run() as active:
@@ -86,4 +84,4 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     assert run.metrics["loss"] == 1.0
     assert run.timestamp is not None and run.timestamp.tzinfo is UTC
     assert run.raw["tags"]["unmapped"] == "kept"
-    assert load_record("exp", config=config).runs(config=config)[0].id == run_id
+    assert Record(id="exp").runs(config=config)[0].id == run_id

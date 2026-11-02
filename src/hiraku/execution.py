@@ -11,7 +11,7 @@ from typing import Any
 from .config import HirakuConfig
 from .errors import ExecutionError, GitError, NoActiveRecordError, ValidationError
 from .git import GitRepository
-from .record import load_record
+from .record import Record, open_workspace
 
 
 def validate_command(value: Any) -> list[str] | None:
@@ -42,7 +42,7 @@ def execute_command(
     selected_record = record_id or selected.active_record_id
     if selected_record is None:
         raise NoActiveRecordError("Select a record with --record or hiraku record set")
-    record = load_record(selected_record, config=selected)
+    record = Record.load(open_workspace(selected), selected_record)
     if isinstance(command, str | bytes):
         raise ValidationError("command must be an argv sequence, not a shell string")
     if command is None or isinstance(command, str | bytes):

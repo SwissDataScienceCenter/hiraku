@@ -64,17 +64,17 @@ and fall back to the CLI when the host has not connected the server.
 
 | Tools | Behavior |
 | --- | --- |
-| `record_list`, `record_show` | Read records; show includes inherited values and their sources. |
+| `record_list`, `record_show` | Read validated record metadata and Markdown. |
+| `record_query` | Execute read-only fmql queries, including projections and traversal. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
-| `record_reparent` | Move a record subtree under a parent, or make it a root. |
 | `execute` | Run a command in the foreground and return its exit code, stdout, and stderr. |
 | `runs` | List tracked runs attributed to a record, like `hiraku runs`; `all_records` lists every attributed run in its tracking source. |
 
-Create tools accept a Markdown body and a `fields` object for additional metadata.
+Record creation requires an explicit `path` within the knowledge base. Create tools accept a Markdown body and a `fields` object for additional metadata.
 Record creation activates the record by default; pass `activate: false` to leave
 the active record unchanged. Update tools merge `fields` and optionally replace
-the Markdown body. Set a field to `null` to clear its value. IDs and persistence
-paths cannot be changed; use `record_reparent` to change the organizational parent.
+the Markdown body. Set a field to `null` to clear its value, including `parent_id`
+to make a record a root. IDs are stable; users may move files externally.
 Expected failures are returned as MCP tool errors.
 
 `execute` requires explicit command arguments. Commands are not stored in
@@ -90,15 +90,7 @@ resources are loaded on each request, including after changes made outside MCP.
 | --- | --- |
 | `hiraku://records/{record_id}` | Record fields and Markdown as JSON. |
 | `hiraku://workflows/{workflow_id}` | Prompt document of a workflow. |
-| `hiraku://sources/{record_id}/{source_path}` | File attached to a record as an MCP blob with its inferred MIME type. |
 | `hiraku://workflows/{workflow_id}/graph` | LangGraph topology as Mermaid text. |
-
-Place PDFs, literature reviews and other source files inside a record directory,
-for example `hiraku/records/literature/study.pdf`, alongside `literature.md`.
-The catalog returns percent-encoded source paths, including encoded
-slashes for nested directories. Use those URIs directly. File access rejects
-paths and symlinks escaping the selected record directory. PDF bytes are served
-with `application/pdf`; interpretation depends on the MCP client's capabilities.
 
 ## Workflows
 

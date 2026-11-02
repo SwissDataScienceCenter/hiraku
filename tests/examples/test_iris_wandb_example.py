@@ -11,7 +11,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.record import Record, open_workspace
 
 EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "iris-wandb"
 
@@ -135,7 +135,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     config = HirakuConfig.discover(project)
-    root = load_record("iris", config=config)
+    root = Record.load(open_workspace(config), "iris")
     assert config.tracking_backend == "wandb"
     assert "tracking_backend" not in root.to_dict()
 
@@ -155,7 +155,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "HEAD",
         ],
     )
-    record = load_record("logistic", config=config)
+    record = Record.load(open_workspace(config), "logistic")
     assert record.commit == source_commit
     invoke(
         runner,

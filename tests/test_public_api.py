@@ -2,7 +2,7 @@ from hiraku import HirakuConfig, Metric, Record, Run, initialize_project
 from hiraku.errors import GitError, HirakuError
 from hiraku.execution import execute_command
 from hiraku.io import atomic_write, dump_yaml, load_yaml_mapping
-from hiraku.record import list_records, load_record
+from hiraku.record import list_records
 from hiraku.tracking import TrackingBackend
 
 
@@ -20,7 +20,7 @@ def test_documented_imports() -> None:
             TrackingBackend,
             execute_command,
             list_records,
-            load_record,
+            Record.load,
             atomic_write,
             dump_yaml,
             load_yaml_mapping,
