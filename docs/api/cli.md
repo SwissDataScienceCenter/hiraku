@@ -13,6 +13,10 @@ hiraku runs --record <record-id>
 ```
 
 `hiraku record list` includes each record's local `status` in its table.
+Commands with an optional `--json` output accept `--pretty` alongside it to
+render the JSON with Rich. For example, use `hiraku runs --json --pretty`.
+Workflow start, sessions, history, status, and resume commands always return
+JSON and accept `--pretty` directly.
 
 Initialization uses the following destinations, creating missing directories:
 
