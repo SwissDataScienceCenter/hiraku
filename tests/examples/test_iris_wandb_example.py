@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import ast
 import json
+import runpy
 import shutil
 import subprocess
 import sys
+import tomllib
+import types
 from pathlib import Path
 
 import pytest
@@ -45,6 +49,13 @@ class _Handle:
             "WANDB_PROJECT"
         )
         self.summary = {}
+        self.classifier_plot = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.finish()
 
     def log(self, metrics):
         self.summary.update(metrics)
@@ -52,10 +63,19 @@ class _Handle:
     def finish(self):
         record = dict(self.options)
         record["summary"] = self.summary
+        record["classifier_plot"] = self.classifier_plot
         STORE.write_text(json.dumps([record]), encoding="utf-8")
 
 
 _active = None
+
+
+class _Sklearn:
+    def plot_classifier(self, *args, **kwargs):
+        _active.classifier_plot = kwargs.get("model_name")
+
+
+sklearn = _Sklearn()
 
 
 def init(**options):
@@ -98,6 +118,22 @@ def invoke(runner: CliRunner, arguments: list[str]):
     return result
 
 
+def test_iris_attribution_without_launch(monkeypatch):
+    monkeypatch.setitem(sys.modules, "wandb", types.ModuleType("wandb"))
+    monkeypatch.delenv("HIRAKU_RECORD_ID", raising=False)
+    script_path = (
+        Path(__file__).parents[2]
+        / "src/hiraku/resources/examples/iris-wandb/src/train.py"
+    )
+    script = runpy.run_path(str(script_path))
+    assert script["hiraku_config"]() == {}
+    monkeypatch.setenv("HIRAKU_RECORD_ID", "baseline")
+    monkeypatch.setenv("HIRAKU_GIT_STATE", "unavailable")
+    assert script["hiraku_config"]() == {
+        "hiraku.record_id": "baseline",
+    }
+
+
 def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "iris-wandb"
     shutil.copytree(EXAMPLE, project)
@@ -114,6 +150,15 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
 
     invoke(runner, ["example", "create", "iris-wandb", "."])
+    project_settings = tomllib.loads((project / "pyproject.toml").read_text())
+    assert "hiraku" not in project_settings["project"]["dependencies"]
+    script = ast.parse((project / "train.py").read_text())
+    assert not any(
+        isinstance(node, ast.ImportFrom)
+        and node.module
+        and (node.module == "hiraku" or node.module.startswith("hiraku."))
+        for node in ast.walk(script)
+    )
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize Iris W&B example")
     source_commit = git(project, "rev-parse", "HEAD")
@@ -185,17 +230,15 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     assert row["params"]["model"] == "logistic"
     assert row["params"]["seed"] == 42
     assert row["params"]["test_size"] == 0.25
-    assert row["params"]["dataset.name"] == "scikit-learn iris"
-    assert row["params"]["dataset.samples"] == 150
-    assert row["params"]["dataset.features"] == 4
-    assert row["params"]["python.version"]
+    assert set(row["params"]) == {"model", "seed", "test_size"}
     assert row["metrics"]["test/accuracy"] == pytest.approx(0.9473684210526316)
-    assert row["raw"]["tags"] == ["hiraku", "iris", "logistic"]
+    assert set(row["metrics"]) == {"test/accuracy", "test/f1_macro", "test/log_loss"}
     stored = json.loads(store.read_text(encoding="utf-8"))[0]
     assert stored["id"] == run_id
     assert stored["project"] == "iris-wandb"
     assert stored["config"]["hiraku.record_id"] == "logistic"
-    assert stored["config"]["hiraku.commit"] == source_commit
+    assert stored["classifier_plot"] == "logistic"
+    assert "hiraku.commit" not in stored["config"]
 
     filtered = json.loads(
         invoke(

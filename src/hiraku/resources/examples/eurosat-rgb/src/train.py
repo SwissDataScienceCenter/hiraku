@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import os
 import random
-import time
 
 import torch
 import wandb
@@ -13,17 +12,41 @@ from torchvision import datasets, transforms
 
 IMAGE_SIZE = 64
 DEFAULT_EPOCHS = 10
-PROVENANCE_VARIABLES = (
-    "HIRAKU_RECORD_ID",
-    "HIRAKU_COMMIT",
-    "HIRAKU_GIT_STATE",
-    "HIRAKU_ROOT",
-)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+FIELDS = [
+    "record_id",
+    "git_state",
+]
 
-# Models
+
+def hiraku_config() -> dict[str, str]:
+    """Return available Hiraku launch attribution for W&B."""
+    record_id = os.environ.get("HIRAKU_RECORD_ID")
+    if not record_id:
+        return {}
+    return {
+        f"hiraku.{field}": value
+        for field in FIELDS
+        if (value := os.environ.get(f"HIRAKU_{field.upper()}"))
+        and not (field == "git_state" and value == "unavailable")
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model", required=True, help="Name of the implemented experiment model"
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--validation-fraction", type=float, default=0.2)
+    parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--learning-rate", type=float, default=0.001)
+    return parser.parse_args()
+
+
 class MLP(nn.Module):
     """Fully connected baseline for RGB image classification."""
 
@@ -105,13 +128,6 @@ def stratified_indices(
     return train_indices, validation_indices
 
 
-def provenance() -> dict[str, str]:
-    missing = [name for name in PROVENANCE_VARIABLES if name not in os.environ]
-    if missing:
-        raise RuntimeError(f"Missing Hiraku provenance variables: {', '.join(missing)}")
-    return {name: os.environ[name] for name in PROVENANCE_VARIABLES}
-
-
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -156,19 +172,6 @@ def evaluate(
     return total_loss / total, correct / total
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--model", required=True, help="Name of the implemented experiment model"
-    )
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--validation-fraction", type=float, default=0.2)
-    parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
-    parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--learning-rate", type=float, default=0.001)
-    return parser.parse_args()
-
-
 def main() -> None:
     args = parse_args()
     if args.epochs < 1:
@@ -178,20 +181,14 @@ def main() -> None:
     if args.batch_size < 1 or not 0 < args.learning_rate < float("inf"):
         raise ValueError("batch size and learning rate must be positive")
 
-    attribution = provenance()
+    run_config = hiraku_config()
     with wandb.init(
-        entity=os.environ.get("WANDB_ENTITY") or None,
-        project=os.environ.get("WANDB_PROJECT", "eurosat-rgb"),
-        group=attribution["HIRAKU_RECORD_ID"],
+        project="eurosat-rgb",
+        group=run_config.get("hiraku.record_id"),
         name=os.environ.get("WANDB_RUN_NAME"),
         tags=["hiraku", "eurosat-rgb", args.model],
         config={
-            "hiraku.record_id": attribution["HIRAKU_RECORD_ID"],
-            "hiraku.commit": attribution["HIRAKU_COMMIT"],
-            "hiraku.git_state": attribution["HIRAKU_GIT_STATE"],
-            "dataset.name": "EuroSAT RGB",
-            "dataset.classes": 10,
-            "dataset.image_size": IMAGE_SIZE,
+            **run_config,
             "model": args.model,
             "seed": args.seed,
             "validation_fraction": args.validation_fraction,
@@ -200,66 +197,51 @@ def main() -> None:
             "learning_rate": args.learning_rate,
         },
     ) as run:
-        try:
-            _train_and_log(args, run)
-        except Exception:
-            run.summary["status"] = "failed"
-            raise
+        random.seed(args.seed)
+        torch.manual_seed(args.seed)
 
-
-def _train_and_log(args: argparse.Namespace, run: wandb.sdk.wandb_run.Run) -> None:
-    random.seed(args.seed)
-    torch.manual_seed(args.seed)
-
-    dataset = datasets.EuroSAT(
-        root="data", download=True, transform=transforms.ToTensor()
-    )
-    train_indices, validation_indices = stratified_indices(
-        dataset.targets, args.validation_fraction, args.seed
-    )
-    generator = torch.Generator().manual_seed(args.seed)
-    train_loader = DataLoader(
-        Subset(dataset, train_indices),
-        batch_size=args.batch_size,
-        shuffle=True,
-        generator=generator,
-    )
-    validation_loader = DataLoader(
-        Subset(dataset, validation_indices),
-        batch_size=args.batch_size,
-        shuffle=False,
-    )
-
-    model = build_model(args.model, len(dataset.classes)).to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    criterion = nn.CrossEntropyLoss()
-    model_parameters = sum(parameter.numel() for parameter in model.parameters())
-    for epoch in range(1, args.epochs + 1):
-        epoch_started = time.process_time()
-        train_loss, train_accuracy = train_one_epoch(
-            model, train_loader, optimizer, criterion
+        dataset = datasets.EuroSAT(
+            root="data", download=True, transform=transforms.ToTensor()
         )
-        train_cpu_seconds = time.process_time() - epoch_started
-        validation_loss, validation_accuracy = evaluate(
-            model, validation_loader, criterion
+        train_indices, validation_indices = stratified_indices(
+            dataset.targets, args.validation_fraction, args.seed
         )
-        metrics = {
-            "epoch": epoch,
-            "train/loss": train_loss,
-            "train/accuracy": train_accuracy,
-            "val/loss": validation_loss,
-            "val/accuracy": validation_accuracy,
-            "train/cpu_seconds": train_cpu_seconds,
-            "model/parameters": model_parameters,
-        }
-        run.log(metrics, step=epoch)
-        print(
-            f"epoch={epoch} model={args.model} train_loss={train_loss:.4f} "
-            f"train_accuracy={train_accuracy:.4f} val_loss={validation_loss:.4f} "
-            f"val_accuracy={validation_accuracy:.4f}"
+        generator = torch.Generator().manual_seed(args.seed)
+        train_loader = DataLoader(
+            Subset(dataset, train_indices),
+            batch_size=args.batch_size,
+            shuffle=True,
+            generator=generator,
+        )
+        validation_loader = DataLoader(
+            Subset(dataset, validation_indices),
+            batch_size=args.batch_size,
+            shuffle=False,
         )
 
-    run.summary["status"] = "completed"
+        model = build_model(args.model, len(dataset.classes)).to(DEVICE)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+        criterion = nn.CrossEntropyLoss()
+        for epoch in range(1, args.epochs + 1):
+            train_loss, train_accuracy = train_one_epoch(
+                model, train_loader, optimizer, criterion
+            )
+            validation_loss, validation_accuracy = evaluate(
+                model, validation_loader, criterion
+            )
+            metrics = {
+                "epoch": epoch,
+                "train/loss": train_loss,
+                "train/accuracy": train_accuracy,
+                "val/loss": validation_loss,
+                "val/accuracy": validation_accuracy,
+            }
+            run.log(metrics, step=epoch)
+            print(
+                f"epoch={epoch} model={args.model} train_loss={train_loss:.4f} "
+                f"train_accuracy={train_accuracy:.4f} val_loss={validation_loss:.4f} "
+                f"val_accuracy={validation_accuracy:.4f}"
+            )
 
 
 if __name__ == "__main__":

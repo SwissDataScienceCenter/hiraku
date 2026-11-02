@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import os
 import uuid
 from datetime import UTC, datetime
@@ -48,13 +47,26 @@ RUN_FIELDS = [
     "metric.val/log_loss",
     "metric.val/accuracy",
 ]
-PROVENANCE_VARIABLES = [
-    "HIRAKU_RECORD_ID",
-    "HIRAKU_COMMIT",
-    "HIRAKU_GIT_STATE",
-    "HIRAKU_ROOT",
-    "HIRAKU_TRACKING_ROOT",
-]
+
+
+def hiraku_csv_fields() -> dict[str, str]:
+    """Return available Hiraku launch attribution for a CSV row."""
+    if not os.environ.get("HIRAKU_RECORD_ID"):
+        return {}
+    return {
+        field: value
+        for field in ("record_id", "commit", "git_state")
+        if (value := os.environ.get(f"HIRAKU_{field.upper()}"))
+        and not (field == "git_state" and value == "unavailable")
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", choices=["logistic", "random_forest"], required=True)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--validation-fraction", type=float, default=0.25)
+    return parser.parse_args()
 
 
 def build_model(model_name: str, seed: int) -> Pipeline:
@@ -90,40 +102,23 @@ def build_model(model_name: str, seed: int) -> Pipeline:
     return Pipeline([("preprocess", preprocessing), ("classifier", classifier)])
 
 
-def provenance() -> dict[str, str]:
-    missing = [name for name in PROVENANCE_VARIABLES if name not in os.environ]
-    if missing:
-        raise RuntimeError(f"Missing Hiraku provenance variables: {', '.join(missing)}")
-    return {name: os.environ[name] for name in PROVENANCE_VARIABLES}
-
-
 def append_run(path: Path, row: dict[str, str]) -> None:
     if path.exists() and path.stat().st_size:
-        with path.open(newline="", encoding="utf-8") as stream:
-            header = next(csv.reader(stream), None)
+        header = pd.read_csv(path, nrows=0).columns.tolist()
         if header != RUN_FIELDS:
             raise RuntimeError(f"Unexpected runs CSV header in {path}: {header!r}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_header = not path.exists() or path.stat().st_size == 0
-    with path.open("a", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=RUN_FIELDS)
-        if write_header:
-            writer.writeheader()
-        writer.writerow(row)
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["logistic", "random_forest"], required=True)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--validation-fraction", type=float, default=0.25)
-    return parser.parse_args()
+    pd.DataFrame([row], columns=RUN_FIELDS).to_csv(
+        path,
+        mode="a",
+        header=not path.exists() or path.stat().st_size == 0,
+        index=False,
+    )
 
 
 def main() -> None:
     started = datetime.now(UTC)
     args = parse_args()
-    attribution = provenance()
     frame = pd.read_csv(
         Path("data/processed.cleveland.data"), names=COLUMNS, na_values="?"
     )
@@ -144,14 +139,12 @@ def main() -> None:
         "log_loss": log_loss(validation_y, probabilities),
         "accuracy": accuracy_score(validation_y, predictions),
     }
-    runs_path = Path(attribution["HIRAKU_TRACKING_ROOT"]) / "runs.csv"
+    runs_path = Path(os.environ.get("HIRAKU_TRACKING_ROOT", ".")) / "runs.csv"
     append_run(
         runs_path,
         {
             "id": uuid.uuid4().hex,
-            "record_id": attribution["HIRAKU_RECORD_ID"],
-            "commit": attribution["HIRAKU_COMMIT"],
-            "git_state": attribution["HIRAKU_GIT_STATE"],
+            **hiraku_csv_fields(),
             "timestamp": started.isoformat(),
             "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
             "param.model": args.model,

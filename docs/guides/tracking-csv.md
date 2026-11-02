@@ -35,10 +35,9 @@ from pathlib import Path
 runs_path = Path(os.environ["HIRAKU_TRACKING_ROOT"]) / "runs.csv"
 ```
 
-Use `HIRAKU_RECORD_ID`, `HIRAKU_COMMIT`, and
-`HIRAKU_GIT_STATE` to populate attribution. See
-Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
-`hiraku example create heart-disease` to get a complete writer in `train.py`.
+Use `HIRAKU_RECORD_ID`, `HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE` to populate
+attribution. The [Heart Disease example](../examples/heart-disease/README.md)
+includes a complete CSV writer in `train.py`.
 
 The `id` column is the tracking backend's run ID.
 

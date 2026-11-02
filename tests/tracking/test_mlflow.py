@@ -81,7 +81,14 @@ def _native_run(
             start_time=1700000000000,
             end_time=end_time,
         ),
-        data=SimpleNamespace(tags={"hiraku.record_id": "root"}, metrics={}, params={}),
+        data=SimpleNamespace(
+            tags={
+                "hiraku.record_id": "root",
+                "mlflow.source.git.commit": "a" * 40,
+            },
+            metrics={},
+            params={},
+        ),
     )
 
 

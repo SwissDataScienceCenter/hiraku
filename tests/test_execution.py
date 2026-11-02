@@ -41,16 +41,17 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
     command = [
         sys.executable,
         "-c",
-        "import os; print('|'.join(os.environ[k] for k in "
-        "('HIRAKU_RECORD_ID','HIRAKU_COMMIT','HIRAKU_GIT_STATE'))) ",
+        "import os; print('|'.join((os.environ.get('HIRAKU_RECORD_ID', ''), "
+        "os.environ.get('HIRAKU_GIT_STATE', ''), "
+        "os.environ.get('HIRAKU_COMMIT', '<missing>'))) ",
     ]
     result = execute_command(
         command, record_id="root", config=config, capture_output=True
     )
-    record_id, commit, git_state = result.stdout.strip().split("|")
+    record_id, git_state, commit = result.stdout.strip().split("|")
     assert record_id == "root"
+    assert git_state == "dirty"
     assert commit == ""
-    assert git_state == "unavailable"
 
 
 def test_run_requires_explicit_command_and_streams_output(

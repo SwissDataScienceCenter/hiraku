@@ -69,9 +69,9 @@ hiraku record create strong-l2 --parent digits --type experiment \
 hiraku record list
 
 hiraku run --record weak-l2 -- uv run python train.py --alpha 0.0001 \
-  --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
+  --epochs 10 --hidden-units 64 --seed 42 --validation-fraction 0.25
 hiraku run --record strong-l2 -- uv run python train.py --alpha 1.0 \
-  --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
+  --epochs 10 --hidden-units 64 --seed 42 --validation-fraction 0.25
 ```
 
 ## Compare final metrics and inspect curves
@@ -93,9 +93,10 @@ uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port
 Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs
 in the native MLflow interface.
 
-One MLflow experiment contains both Hiraku child records. Native MLflow tags
-`hiraku.record_id` and `hiraku.commit`
-link each run back to Hiraku. The script owns logging; Hiraku queries the latest
+One MLflow experiment contains both Hiraku child records. The
+`hiraku.record_id` tag links each run back to Hiraku. MLflow records the Git
+commit when it detects a repository, and Hiraku
+reports that value while listing runs. The script owns logging; Hiraku queries the latest
 value of each metric. Full epoch histories remain in MLflow and its UI.
 
 You can list the same runs using Hiraku:

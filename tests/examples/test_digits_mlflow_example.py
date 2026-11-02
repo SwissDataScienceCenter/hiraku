@@ -159,8 +159,10 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     assert {row["record_id"] for row in filtered} == {"strong-l2"}
 
 
-def test_digits_requires_provenance_before_creating_runs(tmp_path):
+def test_digits_runs_without_hiraku_attribution(tmp_path):
     pytest.importorskip("mlflow")
+    from mlflow.tracking import MlflowClient
+
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("HIRAKU_")
     }
@@ -173,20 +175,26 @@ def test_digits_requires_provenance_before_creating_runs(tmp_path):
         text=True,
         capture_output=True,
     )
-    assert result.returncode != 0
-    assert "Missing launch environment variables: HIRAKU_RECORD_ID" in result.stderr
-    assert not (tmp_path / "mlflow.db").exists()
+    assert result.returncode == 0, result.stderr
+    client = MlflowClient(tracking_uri=env["MLFLOW_TRACKING_URI"])
+    experiment = client.get_experiment_by_name("hiraku-digits")
+    runs = client.search_runs([experiment.experiment_id])
+    assert len(runs) == 1
+    assert "hiraku.record_id" not in runs[0].data.tags
 
 
-def test_digits_requires_root_for_default_tracking(tmp_path):
+def test_digits_defaults_tracking_to_working_directory(tmp_path):
     pytest.importorskip("mlflow")
+    from mlflow.tracking import MlflowClient
+
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("HIRAKU_")
     }
+    env.pop("MLFLOW_TRACKING_URI", None)
+    env.pop("MLFLOW_EXPERIMENT_NAME", None)
     env.update(
         {
             "HIRAKU_RECORD_ID": "baseline",
-            "HIRAKU_COMMIT": "a" * 40,
         }
     )
     result = subprocess.run(
@@ -196,6 +204,10 @@ def test_digits_requires_root_for_default_tracking(tmp_path):
         text=True,
         capture_output=True,
     )
-    assert result.returncode != 0
-    assert "Missing launch environment variables: HIRAKU_ROOT" in result.stderr
-    assert not (tmp_path / "mlflow.db").exists()
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "mlflow.db").exists()
+    client = MlflowClient(tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}")
+    experiment = client.get_experiment_by_name("hiraku-digits")
+    runs = client.search_runs([experiment.experiment_id])
+    assert len(runs) == 1
+    assert runs[0].data.tags["hiraku.record_id"] == "baseline"

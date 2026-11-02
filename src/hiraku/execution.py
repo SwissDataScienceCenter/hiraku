@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from .config import HirakuConfig
 from .errors import ExecutionError, GitError, NoActiveRecordError, ValidationError
 from .git import GitRepository
 from .record import load_record
+from .tracking.launch import LaunchContext, environment_for_launch
 
 
 def validate_command(value: Any) -> list[str] | None:
@@ -75,41 +77,13 @@ def execute_command(
     if reserved.intersection(additions):
         raise ValidationError("Environment cannot override reserved run attribution")
 
-    tracking_spec = record.tracking_backend_spec(config=selected)
-    if tracking_spec.get("type") == "wandb":
-        wandb_project = tracking_spec.get("project")
-        if wandb_project is None:
-            wandb_project = selected.root.name
-        if (
-            isinstance(wandb_project, str)
-            and wandb_project
-            and "WANDB_PROJECT" not in additions
-            and "WANDB_PROJECT" not in os.environ
-        ):
-            additions["WANDB_PROJECT"] = wandb_project
-    elif tracking_spec.get("type") == "mlflow":
-        from .tracking import create_backend
-
-        backend = create_backend(tracking_spec, selected)
-        if (
-            "MLFLOW_TRACKING_URI" not in additions
-            and "MLFLOW_TRACKING_URI" not in os.environ
-        ):
-            additions["MLFLOW_TRACKING_URI"] = backend.tracking_uri
-        if (
-            "MLFLOW_EXPERIMENT_NAME" not in additions
-            and "MLFLOW_EXPERIMENT_NAME" not in os.environ
-        ):
-            additions["MLFLOW_EXPERIMENT_NAME"] = (
-                backend.experiment_name or selected.root.name
-            )
-
-    commit = ""
     git_state = "unavailable"
+    commit = ""
     try:
         repository = GitRepository(selected.root)
-        commit = repository.resolve("HEAD")
         git_state = "dirty" if repository.is_dirty else "clean"
+        with suppress(GitError):
+            commit = repository.resolve("HEAD")
     except GitError:
         pass
 
@@ -123,9 +97,20 @@ def execute_command(
             "HIRAKU_RECORD_FILE": str(record.path),
             "HIRAKU_ROOT": str(selected.root),
             "HIRAKU_TRACKING_ROOT": str(selected.root),
-            "HIRAKU_COMMIT": commit,
             "HIRAKU_GIT_STATE": git_state,
         }
+    )
+    environment.update(
+        environment_for_launch(
+            selected,
+            LaunchContext(
+                project_root=selected.root,
+                record_id=record.id,
+                commit=commit or None,
+                git_state=git_state,
+            ),
+            inherited={**os.environ, **additions},
+        )
     )
 
     dispatcher_name = dispatch if dispatch is not None else selected.default_dispatch

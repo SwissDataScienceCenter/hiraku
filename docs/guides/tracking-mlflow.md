@@ -55,21 +55,28 @@ commands run outside Hiraku, set the URI yourself:
 export MLFLOW_TRACKING_URI="sqlite:///$PWD/mlflow.db"
 ```
 
-Your script uses native MLflow logging and Hiraku attribution tags:
+Your script uses native MLflow logging and can copy launch attribution from the
+environment without depending on Hiraku:
 
 ```python
 import os
+
 import mlflow
 
 mlflow.set_experiment("my-task")
-with mlflow.start_run():
-    mlflow.set_tags({
-        "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
-    })
-    if os.environ.get("HIRAKU_COMMIT"):
-        mlflow.set_tag("hiraku.commit", os.environ["HIRAKU_COMMIT"])
+tags = {}
+record_id = os.environ.get("HIRAKU_RECORD_ID")
+if record_id:
+    tags["hiraku.record_id"] = record_id
+    git_state = os.environ.get("HIRAKU_GIT_STATE")
+    if git_state and git_state != "unavailable":
+        tags["hiraku.git_state"] = git_state
+
+with mlflow.start_run(tags=tags):
     mlflow.log_metric("val/accuracy", accuracy)  # calculated by your code
 ```
+
+Runs without a record ID are not returned by Hiraku's attributed-run queries.
 
 Hiraku resolves `database` from the project root and supplies the resulting
 absolute tracking URI to commands it runs. For commands run outside Hiraku, set

@@ -16,10 +16,11 @@ passed as an argv list; Hiraku does not evaluate a shell string. Use `sh -c`
 explicitly when shell syntax is needed.
 
 Execution happens in the existing project working tree. Dirty and uncommitted
-changes are available to the command. Hiraku sets `HIRAKU_RECORD_ID`,
-`HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE` for provenance. The tracking backend
-creates and owns its run IDs; Hiraku does not create a second identifier for
-the command invocation.
+changes are available to the command. Hiraku sets `HIRAKU_RECORD_ID` and
+`HIRAKU_GIT_STATE` for provenance. For CSV tracking, it also sets
+`HIRAKU_COMMIT`; MLflow and W&B detect the Git commit themselves. The tracking
+backend creates and owns its run IDs; Hiraku does not create a second
+identifier for the command invocation.
 
 An optional dispatcher can prepare repeatable project-specific runtime
 behavior around the supplied command:

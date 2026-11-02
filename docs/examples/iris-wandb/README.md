@@ -14,8 +14,7 @@ cd hiraku
 uv tool install --force '.[wandb]'
 ```
 
-Then create a project and let Hiraku install the training script, processed
-dataset, and dependencies for this example.
+Then create a project with the training script and its dependencies.
 
 ```bash
 hiraku example create iris-wandb --git
@@ -31,8 +30,7 @@ git commit -m "initialize Iris W&B example"
 uv run wandb login
 ```
 
-The example uses the `iris-wandb` project (the project directory name),
-model-specific groups, and built-in tags by default.
+The example uses the `iris-wandb` project (the project directory name) by default.
 
 Set `WANDB_ENTITY` only if you want to log under a specific team or account.
 
@@ -60,7 +58,6 @@ hiraku record create logistic --parent iris --type experiment \
   --commit HEAD
 
 hiraku record show logistic
-hiraku record show logistic
 
 hiraku run --record logistic -- \
   uv run python train.py --model logistic --seed 42 --test-size 0.25
@@ -81,11 +78,11 @@ hiraku run --record random-forest -- \
 hiraku runs --record iris --all --sort test/accuracy
 ```
 
-Each run stores model and dataset configuration, seed, Python version, runtime,
-tags, group, notes, and summary metrics. W&B assigns the native run ID. Hiraku
-reads record and commit provenance from run metadata. The training script creates the remote W&B project
-on its first successful `wandb.init()` call. Hiraku queries and normalizes W&B
-runs; it does not create the W&B project or run.
+Each run stores the model and the hyperparameters used.
+W&B assigns the native run ID. Hiraku reads the record ID
+from run metadata, while W&B detects the Git commit.
+The training script creates the remote W&B project on `wandb.init()` call.
+Hiraku queries W&B runs and converts them to Hiraku `Run` objects.
 
 ??? info "Example run results"
     These results are from the example's W&B runs. Click a column heading to

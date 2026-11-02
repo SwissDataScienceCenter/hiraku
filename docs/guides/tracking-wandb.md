@@ -32,22 +32,27 @@ tracking_backend: wandb
 
 ```python
 import os
+
 import wandb
 
+config = {"seed": 42}
+record_id = os.environ.get("HIRAKU_RECORD_ID")
+if record_id:
+    config["hiraku.record_id"] = record_id
+    git_state = os.environ.get("HIRAKU_GIT_STATE")
+    if git_state and git_state != "unavailable":
+        config["hiraku.git_state"] = git_state
+
 with wandb.init(
-    group=os.environ["HIRAKU_RECORD_ID"],
-    config={
-        "seed": 42,
-    },
+    config=config,
 ) as run:
     run.log({"test/accuracy": accuracy})  # calculated by your evaluation code
 ```
 
 W&B assigns the run ID. Hiraku supplies `WANDB_PROJECT` from the project
-configuration unless it is already set. Your script only needs its ordinary
-`wandb.init()` call; there is no Hiraku-specific
-W&B config to add. The project setting selects the query backend and does not
-initialize a W&B run.
+configuration unless it is already set. The project setting selects the query
+backend and does not initialize a W&B run.
+Runs without a record ID are not returned by Hiraku's attributed-run queries.
 
 ## Inspect
 

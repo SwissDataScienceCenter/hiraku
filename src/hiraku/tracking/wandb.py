@@ -213,7 +213,7 @@ class WandbBackend(TrackingBackend):
 
         config = self._run_config(run)
         record_id = config.get("hiraku.record_id")
-        commit = config.get("hiraku.commit")
+        commit = getattr(run, "commit", None)
         return Run(
             id=run.id,
             metrics=dict(run.summary or {}),
