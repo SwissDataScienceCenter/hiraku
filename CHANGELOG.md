@@ -8,15 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-- **Breaking:** Replace named record entrypoints and `hiraku launch` with
-  `hiraku run --record ID -- COMMAND [ARGS...]`, which runs the supplied argv
-  in the foreground with record and Git attribution. Existing `entrypoints`
-  fields are no longer accepted ([issue #90](https://github.com/SwissDataScienceCenter/hiraku/issues/90), [PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
-- **Breaking:** Configure `tracking_backend` on a root record instead of in
-  `hiraku.yml`. New child records store their parent's effective metrics and
-  tracking backend as snapshots, unless explicitly overridden ([PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
-- Render human-readable CLI tables with Rich; JSON output remains available
-  for programmatic use ([PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
+- **Breaking:** Replace named record entrypoints and `hiraku launch` with `hiraku run --record ID -- COMMAND [ARGS...]`, which runs the supplied argv in the foreground with record and Git attribution. Existing `entrypoints` fields are no longer accepted ([issue #90](https://github.com/SwissDataScienceCenter/hiraku/issues/90), [PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
+- **Breaking:** Configure `tracking_backend` in `hiraku.yml` instead of on a record. Tracking backend configuration is project-wide ([PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
+- Render human-readable CLI tables with Rich; JSON output remains available for programmatic use ([PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
 - Separate dashboard performance and trade-off plots into independently placeable components and named cells with their own controls, removing the analysis mode selector.
 - Exclude generated Marimo and Studio session/build caches from distribution archives.
 - Extract reusable dashboard widgets and rendering into `hiraku.dashboard.components`, keeping notebook cells focused on data and reactive selection wiring.
