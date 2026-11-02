@@ -676,7 +676,7 @@ def workflow_resume_command(
 
 @main.command("run")
 @click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
-@click.option("--record", "record_id")
+@click.option("--record", "record_id", required=True)
 @click.option(
     "--dispatch", help="Dispatcher name from the project's dispatch directory."
 )
@@ -684,10 +684,12 @@ def workflow_resume_command(
 def run_command(
     context: click.Context,
     command: tuple[str, ...],
-    record_id: str | None,
+    record_id: str,
     dispatch: str | None,
 ) -> None:
     """Run a project command in the foreground."""
+    if not record_id:
+        raise click.BadParameter("Record ID must not be empty", param_hint="--record")
     state: CLIContext = context.obj
     result = execute_command(
         command,

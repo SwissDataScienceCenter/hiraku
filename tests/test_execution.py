@@ -90,11 +90,18 @@ def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:
         )
 
 
-def test_run_requires_an_explicit_record(tmp_path: Path) -> None:
+def test_run_requires_an_explicit_record(tmp_path: Path, monkeypatch) -> None:
     config = HirakuConfig.init(tmp_path)
     Record.create("root", config=config)
-    with pytest.raises(ValidationError, match="record ID"):
+    with pytest.raises(ValidationError, match="record_id argument"):
         execute_command(["echo", "hello"], config=config)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["run", "--", "echo", "hello"])
+    assert result.exit_code != 0
+    assert "Missing option '--record'" in result.output
+    assert "record_id" not in result.output
+    empty = CliRunner().invoke(main, ["run", "--record", "", "--", "echo"])
+    assert "Invalid value for --record" in empty.output
 
 
 def test_record_creation_does_not_dirty_a_clean_project(tmp_path: Path) -> None:

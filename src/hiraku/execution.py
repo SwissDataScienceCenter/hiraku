@@ -40,7 +40,7 @@ def execute_command(
     """Run a command in the current project and return when it exits."""
     selected = config or HirakuConfig.discover()
     if not record_id:
-        raise ValidationError("Supply a record ID with --record or record_id")
+        raise ValidationError("Supply a record ID using the record_id argument")
     record = load_record(record_id, config=selected)
     if isinstance(command, str | bytes):
         raise ValidationError("command must be an argv sequence, not a shell string")
