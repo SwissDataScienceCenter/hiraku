@@ -20,7 +20,7 @@ import click
 import yaml
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
-from rich import box
+from rich import box, print_json
 from rich.console import Console
 from rich.table import Table
 
@@ -81,8 +81,17 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def _emit_json(value: Any) -> None:
-    click.echo(json.dumps(_json_value(value), sort_keys=True, ensure_ascii=False))
+def _emit_json(value: Any, pretty: bool = False) -> None:
+    serialized = json.dumps(_json_value(value), sort_keys=True, ensure_ascii=False)
+    if not pretty:
+        click.echo(serialized)
+    else:
+        print_json(json=serialized)
+
+
+def _validate_json_options(json_output: bool, pretty: bool) -> None:
+    if pretty and not json_output:
+        raise ValidationError("--pretty requires --json")
 
 
 def _print_table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
@@ -334,9 +343,11 @@ def example_create_command(
 
 @main.command("status")
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def status_command(state: CLIContext, json_output: bool) -> None:
+def status_command(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """Show project and active record."""
+    _validate_json_options(json_output, pretty)
     config = state.config
     try:
         branch = GitRepository(config.root).current_branch
@@ -352,7 +363,7 @@ def status_command(state: CLIContext, json_output: bool) -> None:
         "git_branch": branch,
     }
     if json_output:
-        _emit_json(result)
+        _emit_json(result, pretty=pretty)
     else:
         _print_table(("field", "value"), list(result.items()))
 
@@ -405,12 +416,14 @@ def record_create(
 
 @record_group.command("list")
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def record_list(state: CLIContext, json_output: bool) -> None:
+def record_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """List all research records."""
+    _validate_json_options(json_output, pretty)
     records = list_records(config=state.config)
     if json_output:
-        _emit_json(records)
+        _emit_json(records, pretty=pretty)
     else:
         _print_table(
             ("id", "parent", "type", "status"),
@@ -422,11 +435,17 @@ def record_list(state: CLIContext, json_output: bool) -> None:
 @click.argument("record_id", required=False)
 @click.option("--raw", is_flag=True)
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
 def record_show(
-    state: CLIContext, record_id: str | None, raw: bool, json_output: bool
+    state: CLIContext,
+    record_id: str | None,
+    raw: bool,
+    json_output: bool,
+    pretty: bool,
 ) -> None:
     """Show stored or effective fields with their sources."""
+    _validate_json_options(json_output, pretty)
     record = _active(state.config, record_id)
     if raw:
         values = record.to_dict()
@@ -435,7 +454,10 @@ def record_show(
         resolved = record.resolve(config=state.config)
         values, sources = resolved.values, resolved.sources
     if json_output:
-        _emit_json({"values": values, "sources": sources, "markdown": record.markdown})
+        _emit_json(
+            {"values": values, "sources": sources, "markdown": record.markdown},
+            pretty=pretty,
+        )
     else:
         click.echo(
             f"---\n{dump_yaml(_json_value(values))}---\n{record.markdown}", nl=False
@@ -543,12 +565,17 @@ def record_set(state: CLIContext, record_id: str) -> None:
 
 @record_group.command("tree")
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def record_tree(state: CLIContext, json_output: bool) -> None:
+def record_tree(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """Show the logical parent tree."""
+    _validate_json_options(json_output, pretty)
     records = list_records(config=state.config)
     if json_output:
-        _emit_json([{"id": r.id, "parent_id": r.parent_id} for r in records])
+        _emit_json(
+            [{"id": r.id, "parent_id": r.parent_id} for r in records],
+            pretty=pretty,
+        )
         return
     children: dict[str | None, list[Record]] = {}
     for record in records:
@@ -569,14 +596,16 @@ def workflow_group() -> None:
 
 @workflow_group.command("list")
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def workflow_list(state: CLIContext, json_output: bool) -> None:
+def workflow_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """List project LangGraph workflows."""
+    _validate_json_options(json_output, pretty)
     from .workflows.langgraph import workflow_details
 
     workflows = workflow_details(config=state.config)
     if json_output:
-        _emit_json(workflows)
+        _emit_json(workflows, pretty=pretty)
         return
     _print_table(
         ("id", "description"),
@@ -625,9 +654,14 @@ def _arguments(arguments_file: Any, *, name: str = "arguments") -> dict[str, Any
 @click.argument("workflow_id")
 @_ARGUMENTS_FILE
 @_CONTEXT_FILE
+@click.option("--pretty", is_flag=True, help="Pretty-print the JSON response.")
 @click.pass_obj
 def workflow_start(
-    state: CLIContext, workflow_id: str, arguments_file: Any, context_file: Any
+    state: CLIContext,
+    workflow_id: str,
+    arguments_file: Any,
+    context_file: Any,
+    pretty: bool,
 ) -> None:
     """Start a LangGraph workflow and print its interrupt or result."""
     from .workflows.langgraph import start_workflow
@@ -638,37 +672,43 @@ def workflow_start(
             _arguments(arguments_file),
             config=state.config,
             context=_arguments(context_file, name="context"),
-        )
+        ),
+        pretty=pretty,
     )
 
 
 @workflow_group.command("sessions")
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def workflow_sessions(state: CLIContext) -> None:
+def workflow_sessions(state: CLIContext, pretty: bool) -> None:
     """List recorded workflow sessions as JSON."""
     from .workflows.session_history import list_sessions
 
-    _emit_json(list_sessions(config=state.config))
+    _emit_json(list_sessions(config=state.config), pretty=pretty)
 
 
 @workflow_group.command("history")
 @click.argument("workflow_session_id")
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def workflow_history(state: CLIContext, workflow_session_id: str) -> None:
+def workflow_history(state: CLIContext, workflow_session_id: str, pretty: bool) -> None:
     """Show a workflow session's recorded metadata and history."""
     from .workflows.session_history import session_history
 
-    _emit_json(session_history(workflow_session_id, config=state.config))
+    _emit_json(session_history(workflow_session_id, config=state.config), pretty=pretty)
 
 
 @workflow_group.command("status")
 @click.argument("workflow_session_id")
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def workflow_status_command(state: CLIContext, workflow_session_id: str) -> None:
+def workflow_status_command(
+    state: CLIContext, workflow_session_id: str, pretty: bool
+) -> None:
     """Inspect a checkpointed LangGraph workflow run."""
     from .workflows.langgraph import workflow_status
 
-    _emit_json(workflow_status(workflow_session_id, config=state.config))
+    _emit_json(workflow_status(workflow_session_id, config=state.config), pretty=pretty)
 
 
 @workflow_group.command("resume")
@@ -676,6 +716,7 @@ def workflow_status_command(state: CLIContext, workflow_session_id: str) -> None
 @click.option("--checkpoint-id", required=True, help="Checkpoint ID from status.")
 @_ARGUMENTS_FILE
 @_CONTEXT_FILE
+@click.option("--pretty", is_flag=True, help="Pretty-print the JSON response.")
 @click.pass_obj
 def workflow_resume_command(
     state: CLIContext,
@@ -683,6 +724,7 @@ def workflow_resume_command(
     checkpoint_id: str,
     arguments_file: Any,
     context_file: Any,
+    pretty: bool,
 ) -> None:
     """Resume a paused LangGraph workflow with a JSON response."""
     from .workflows.langgraph import resume_workflow
@@ -694,7 +736,8 @@ def workflow_resume_command(
             config=state.config,
             checkpoint_id=checkpoint_id,
             context=_arguments(context_file, name="context"),
-        )
+        ),
+        pretty=pretty,
     )
 
 
@@ -738,6 +781,7 @@ def run_command(
 @click.option("--descending", is_flag=True)
 @click.option("--limit", type=click.IntRange(min=0))
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
 def run_list(
     state: CLIContext,
@@ -750,11 +794,13 @@ def run_list(
     descending: bool,
     limit: int | None,
     json_output: bool,
+    pretty: bool,
 ) -> None:
     """List runs attributed to the selected record.
 
     Use --all for every attributed run in the record's tracking source.
     """
+    _validate_json_options(json_output, pretty)
     if ascending and descending:
         raise ValidationError("--ascending and --descending are mutually exclusive")
     if (ascending or descending) and sort is None:
@@ -782,7 +828,7 @@ def run_list(
         **query,
     )
     if json_output:
-        _emit_json(runs)
+        _emit_json(runs, pretty=pretty)
     else:
         columns = ["id", "record", "timestamp", "duration", "commit"]
         columns.extend(f"param:{name}" for name in param_names)
