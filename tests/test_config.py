@@ -112,7 +112,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert not (root / ".pi/skills").exists()
     assert not (root / ".gemini/skills").exists()
     assert codex_skill.read_text() == claude_skill.read_text()
-    assert config.active_record_id is None
+    assert "active_record_id" not in config.to_dict()
 
     without_skill = tmp_path / "without-skill"
     HirakuConfig.init(without_skill, install_skill=False)
@@ -284,21 +284,22 @@ def test_init_rejects_conflicting_template_sources(tmp_path: Path) -> None:
         HirakuConfig.init(tmp_path / "project", template=template, example="demo")
 
 
-def test_config_preserves_unknown_keys_and_active_record(tmp_path: Path) -> None:
+def test_config_preserves_unknown_keys_and_ignores_legacy_selection(
+    tmp_path: Path,
+) -> None:
     config = HirakuConfig.init(tmp_path)
     raw = yaml.safe_load(config.path.read_text())
     raw["extension"] = {"enabled": True}
     config.path.write_text(yaml.safe_dump(raw, sort_keys=False))
     config = HirakuConfig.discover(tmp_path)
-    first = Record.create("first", config=config)
-    child = Record.create("trial", parent_id=first.id, config=config)
-    second = Record.create("second", config=config)
-
-    assert config.active_record_id == second.id
-    config.set_active_record(child)
-    assert config.active_record_id == "trial"
-    config.clear_active_record()
-    assert config.active_record_id is None
+    raw["active_record_id"] = "first"
+    config.path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    with pytest.warns(UserWarning, match="ignored"):
+        config = HirakuConfig.load(config.path)
+    assert "active_record_id" not in config.to_dict()
+    Record.create("first", config=config)
+    config.save()
+    assert yaml.safe_load(config.path.read_text())["active_record_id"] == "first"
     assert yaml.safe_load(config.path.read_text())["extension"] == {"enabled": True}
 
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import HirakuConfig
-from .errors import ExecutionError, GitError, NoActiveRecordError, ValidationError
+from .errors import ExecutionError, GitError, ValidationError
 from .git import GitRepository
 from .record import load_record
 
@@ -39,10 +39,9 @@ def execute_command(
 ) -> subprocess.CompletedProcess[str]:
     """Run a command in the current project and return when it exits."""
     selected = config or HirakuConfig.discover()
-    selected_record = record_id or selected.active_record_id
-    if selected_record is None:
-        raise NoActiveRecordError("Select a record with --record or hiraku record set")
-    record = load_record(selected_record, config=selected)
+    if not record_id:
+        raise ValidationError("Supply a record ID with --record or record_id")
+    record = load_record(record_id, config=selected)
     if isinstance(command, str | bytes):
         raise ValidationError("command must be an argv sequence, not a shell string")
     if command is None or isinstance(command, str | bytes):

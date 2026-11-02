@@ -70,15 +70,18 @@ def test_record_cli_lifecycle(tmp_path: Path, monkeypatch) -> None:
     assert invoke("record", "delete", "root").exit_code == 0
 
 
-def test_record_cli_active_and_validation(tmp_path: Path, monkeypatch) -> None:
+def test_record_cli_explicit_selection_and_validation(
+    tmp_path: Path, monkeypatch
+) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
+    original = config.path.read_text()
     assert invoke("record", "create", "first").exit_code == 0
-    assert HirakuConfig.load(config.path).active_record_id == "first"
-    assert invoke("record", "create", "second", "--no-activate").exit_code == 0
-    assert HirakuConfig.load(config.path).active_record_id == "first"
-    assert invoke("record", "set", "second").exit_code == 0
-    assert json.loads(invoke("status", "--json").output)["active_record_id"] == "second"
+    assert invoke("record", "create", "second").exit_code == 0
+    assert config.path.read_text() == original
+    assert "active_record_id" not in json.loads(invoke("status", "--json").output)
+    assert invoke("record", "show").exit_code != 0
+    assert invoke("record", "set", "second").exit_code != 0
     assert invoke("record", "create", "third", "--parent", "missing").exit_code != 0
     assert invoke("record", "create", "first").exit_code != 0
     assert invoke("record", "update", "first", "--set", "id=other").exit_code != 0
@@ -134,7 +137,6 @@ def test_status_reports_project_tracking_backend(tmp_path: Path, monkeypatch) ->
     cnn = json.loads(invoke("record", "show", "cnn", "--raw", "--json").output)
     assert cnn["values"]["metrics"] == [{"name": "val/loss", "direction": "minimize"}]
 
-    assert invoke("record", "set", "mlp").exit_code == 0
     status = json.loads(invoke("status", "--json").output)
     assert status["tracking_backend"] == "wandb"
     assert "tracking_backend" not in load_record("mlp", config=config).to_dict()

@@ -37,7 +37,7 @@ def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
         results=True,
         install_skill=False,
     )
-    assert config.active_record_id == "weak-l2"
+    assert "active_record_id" not in config.to_dict()
     assert config.tracking_backend == {
         "type": "mlflow",
         "database": "mlflow.db",
@@ -58,7 +58,7 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
     (base / "train.py").write_text("base")
     (base / "hiraku.yml").write_text("branch: custom/{record_id}\n")
     (results / "train.py").write_text("results")
-    (results / "hiraku.yml").write_text("active_record_id: root\n")
+    (results / "hiraku.yml").write_text("tracking_backend: csv\n")
     monkeypatch.setattr(project, "files", lambda name: resources)
     target = tmp_path / "target"
     config = HirakuConfig.init(
@@ -66,7 +66,7 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
     )
     assert (target / "train.py").read_text() == "results"
     assert config.branch == "custom/{record_id}"
-    assert config.active_record_id == "root"
+    assert config.tracking_backend == "csv"
 
 
 def test_results_flag_requires_example(tmp_path: Path):

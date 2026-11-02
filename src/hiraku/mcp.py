@@ -137,9 +137,8 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         related_to: list[str] | None = None,
         markdown: str = "",
         fields: dict[str, Any] | None = None,
-        activate: bool = True,
     ) -> dict[str, Any]:
-        """Create a research record, optionally activating it like the CLI."""
+        """Create a research record."""
         extras = fields or {}
         reserved = {
             "id",
@@ -159,7 +158,6 @@ def create_server(config: HirakuConfig | None = None) -> Any:
                 parent_id=parent_id,
                 related_to=related_to,
                 markdown=markdown,
-                activate=activate,
                 config=selected,
                 **extras,
             )

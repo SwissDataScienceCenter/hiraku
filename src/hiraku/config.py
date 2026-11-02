@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from pydantic import (
     BaseModel,
@@ -16,9 +17,6 @@ from pydantic import (
 
 from .errors import BackendError, ProjectNotFoundError, ValidationError
 from .io import atomic_write, dump_yaml, load_yaml_mapping
-
-if TYPE_CHECKING:
-    from .record import Record
 
 
 class HirakuConfig(BaseModel):
@@ -42,7 +40,6 @@ class HirakuConfig(BaseModel):
     DEFAULTS: ClassVar[dict[str, Any]] = {
         "hiraku_dir": "hiraku",
         "default_dispatch": None,
-        "active_record_id": None,
         "tracking_backend": "csv",
     }
     model_config = ConfigDict(
@@ -57,11 +54,12 @@ class HirakuConfig(BaseModel):
     default_dispatch: str | None = Field(
         default=DEFAULTS["default_dispatch"], min_length=1
     )
-    active_record_id: str | None = DEFAULTS["active_record_id"]
     tracking_backend: str | dict[str, Any] = DEFAULTS["tracking_backend"]
     _hiraku_dir: Path = PrivateAttr()
 
     def __setattr__(self, name: str, value: Any) -> None:
+        if name == "active_record_id":
+            raise ValidationError("Active record selection is no longer supported")
         if name == "command":
             raise ValidationError(
                 f"{name} must be configured on a record, not hiraku.yml"
@@ -75,6 +73,14 @@ class HirakuConfig(BaseModel):
         if not isinstance(values, Mapping):
             return values
         raw = dict(values)
+        if "active_record_id" in raw:
+            raw.pop("active_record_id")
+            warnings.warn(
+                "active_record_id in hiraku.yml is ignored and should be removed; "
+                "select records explicitly",
+                UserWarning,
+                stacklevel=2,
+            )
         if "default_program" in raw:
             raise ValidationError(
                 "Configuration key 'default_program' is no longer supported: "
@@ -207,7 +213,12 @@ class HirakuConfig(BaseModel):
             ```
         """
         try:
-            atomic_write(self.path, dump_yaml(self.to_dict()))
+            values = self.to_dict()
+            if self.path.exists():
+                old = load_yaml_mapping(self.path)
+                if "active_record_id" in old:
+                    values["active_record_id"] = old["active_record_id"]
+            atomic_write(self.path, dump_yaml(values))
         except OSError as exc:
             raise ValidationError(
                 f"Cannot save configuration at {self.path}: {exc}"
@@ -247,27 +258,3 @@ class HirakuConfig(BaseModel):
     def dispatch_dir(self) -> Path:
         """Return the directory containing command dispatcher scripts."""
         return self.hiraku_dir / "dispatch"
-
-    def set_active_record(self, record: str | Record) -> None:
-        """Persist the active research record."""
-        from .record import Record, load_record
-
-        identifier = record.id if isinstance(record, Record) else record
-        selected = load_record(identifier, config=self)
-        old = self.active_record_id
-        try:
-            self.active_record_id = selected.id
-            self.save()
-        except Exception:
-            self.active_record_id = old
-            raise
-
-    def clear_active_record(self) -> None:
-        """Clear the active research record."""
-        old = self.active_record_id
-        try:
-            self.active_record_id = None
-            self.save()
-        except Exception:
-            self.active_record_id = old
-            raise

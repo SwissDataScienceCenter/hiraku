@@ -69,7 +69,6 @@ def generate(config: HirakuConfig) -> None:
         "heart-disease",
         type="task",
         status="concluded",
-        activate=False,
         metrics=[
             {"name": m, "direction": d}
             for m, d in zip(METRICS, ("minimize", "maximize"), strict=True)
@@ -89,7 +88,6 @@ def generate(config: HirakuConfig) -> None:
             if identifier == "forest-tuning"
             else "hypothesis",
             status="concluded",
-            activate=False,
             config=config,
             markdown=f"## {identifier}\n\n"
             f"Model: `{model}`; validation fraction: {fraction}; seeds: 1, 2, 3.\n"
@@ -134,8 +132,6 @@ def generate(config: HirakuConfig) -> None:
             + "\n\nNo statistical significance is claimed.\n"
         )
         record.save(overwrite=True)
-    config.active_record_id = "random-forest"
-    config.save()
 
 
 def generate_results(output: Path) -> None:

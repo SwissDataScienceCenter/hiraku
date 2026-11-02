@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Breaking:** Remove active record selection. Pass a record explicitly to execution, record display, and collaborative workflows. Legacy `active_record_id` configuration is ignored with a warning and can be removed.
 - **Breaking:** Replace named record entrypoints and `hiraku launch` with `hiraku run --record ID -- COMMAND [ARGS...]`, which runs the supplied argv in the foreground with record and Git attribution. Existing `entrypoints` fields are no longer accepted ([issue #90](https://github.com/SwissDataScienceCenter/hiraku/issues/90), [PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
 - **Breaking:** Configure `tracking_backend` in `hiraku.yml` instead of on a record. Tracking backend configuration is project-wide ([PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
 - Render human-readable CLI tables with Rich; JSON output remains available for programmatic use ([PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
@@ -19,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - The dashboard is served through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view with the same layout, and `hiraku dashboard --edit` opens the copy in marimo-studio. `--init` also copies the view to `hiraku/dashboard/studio/`. The `dashboard` extra now installs `marimo-studio`.
 - **Breaking:** `hiraku init` initializes a project independently of Git. Add `--git` to initialize the code repository explicitly.
 - **Breaking:** `hiraku example create NAME [PATH]` copies a bundled example into `./NAME` by default without Git history or network access. Use `--with-results`, `--with-generator`, and `--generate` with `example create`. `hiraku init [PATH]` targets the current or explicit directory, and repeating plain initialization leaves the project unchanged ([issue #104](https://github.com/SwissDataScienceCenter/hiraku/issues/104)).
-- **Breaking:** `hiraku runs` and `Record.runs()` now list only runs attributed to the selected record (the active record, or `--record ID`). Previously they returned every attributed run from the record's tracking source ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
+- `hiraku runs` lists all attributed project runs by default; `--record ID` filters them. `Record.runs()` lists runs attributed to that record ([issue #66](https://github.com/SwissDataScienceCenter/hiraku/issues/66)).
 - **Breaking:** Store all research material as `Record` objects under `hiraku/records/`; use `type: context` for supporting context. Remove `hiraku.context`, `Context`, the `hiraku context` CLI group, context-specific MCP tools and resources, and the separate `hiraku/contexts/` directory ([issue #133](https://github.com/SwissDataScienceCenter/hiraku/issues/133)).
 
 ### Added

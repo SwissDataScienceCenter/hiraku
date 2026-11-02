@@ -379,12 +379,13 @@ class Record(BaseModel):
         parent_id: str | None = None,
         related_to: list[str] | None = None,
         markdown: str = "",
-        activate: bool = True,
         config: Any = None,
         **fields: Any,
     ) -> Record:
         """Create a record, materializing inherited metrics."""
         selected = _config(config)
+        if "activate" in fields:
+            raise ValidationError("Record activation is no longer supported")
         index = _record_index(selected)
         if record_id in index:
             raise RecordExistsError(f"Record {record_id!r} already exists")
@@ -409,8 +410,6 @@ class Record(BaseModel):
         )
         root_id = _root_id(parent_id, index) if parent_id else record_id
         record.save(selected.records_dir / root_id / f"{record_id}.md")
-        if activate:
-            selected.set_active_record(record)
         return record
 
     def children(self, *, config: Any = None) -> list[Record]:

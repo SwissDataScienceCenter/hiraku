@@ -83,8 +83,53 @@ def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:
     Record.create("root", config=config)
     with pytest.raises(ValidationError, match="reserved run attribution"):
         execute_command(
-            ["echo", "hello"], env={"HIRAKU_RECORD_ID": "other"}, config=config
+            ["echo", "hello"],
+            record_id="root",
+            env={"HIRAKU_RECORD_ID": "other"},
+            config=config,
         )
+
+
+def test_run_requires_an_explicit_record(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path)
+    Record.create("root", config=config)
+    with pytest.raises(ValidationError, match="record ID"):
+        execute_command(["echo", "hello"], config=config)
+
+
+def test_record_creation_does_not_dirty_a_clean_project(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("/hiraku/\nignored.txt\n")
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    Record.create("root", config=config)
+    (tmp_path / "ignored.txt").write_text("ignored")
+    command = [sys.executable, "-c", "import os; print(os.environ['HIRAKU_GIT_STATE'])"]
+    result = execute_command(
+        command, record_id="root", config=config, capture_output=True
+    )
+    assert result.stdout.strip() == "clean"
+    (tmp_path / "untracked.txt").write_text("untracked")
+    result = execute_command(
+        command, record_id="root", config=config, capture_output=True
+    )
+    assert result.stdout.strip() == "dirty"
 
 
 def test_cli_propagates_nonzero_exit_code(tmp_path: Path, monkeypatch) -> None:

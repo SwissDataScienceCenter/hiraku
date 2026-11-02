@@ -25,7 +25,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import HirakuConfig
-from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
+from .errors import GitError, HirakuError, ValidationError
 from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
@@ -126,13 +126,6 @@ def _markdown(path: Path | None) -> str:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ValidationError(f"Cannot read {path}: {exc}") from exc
-
-
-def _active(config: HirakuConfig, record_id: str | None = None) -> Record:
-    identifier = record_id or config.active_record_id
-    if identifier is None:
-        raise NoActiveRecordError("No active record; supply --record or set one")
-    return load_record(identifier, config=config)
 
 
 def _edit(path: Path) -> None:
@@ -323,8 +316,6 @@ def example_create_command(
                         for result in overlay.iterdir():
                             if result.is_file() and result.name != "hiraku.yml":
                                 shutil.copyfile(result, config.root / result.name)
-                        config.active_record_id = generated.active_record_id
-                        config.save()
             except Exception as exc:
                 raise click.ClickException(
                     "Generation failed; initialized project and completed runs kept: "
@@ -336,7 +327,7 @@ def example_create_command(
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def status_command(state: CLIContext, json_output: bool) -> None:
-    """Show project and active record."""
+    """Show project status."""
     config = state.config
     try:
         branch = GitRepository(config.root).current_branch
@@ -347,7 +338,6 @@ def status_command(state: CLIContext, json_output: bool) -> None:
         tracking_backend = tracking_backend.get("type", tracking_backend.get("name"))
     result = {
         "project_root": config.root,
-        "active_record_id": config.active_record_id,
         "tracking_backend": tracking_backend,
         "git_branch": branch,
     }
@@ -370,7 +360,6 @@ def record_group() -> None:
 @click.option("--commit")
 @click.option("--markdown-file", type=click.Path(path_type=Path))
 @click.option("--set", "set_values", multiple=True, metavar="KEY=VALUE")
-@click.option("--no-activate", is_flag=True)
 @click.pass_obj
 def record_create(
     state: CLIContext,
@@ -381,7 +370,6 @@ def record_create(
     commit: str | None,
     markdown_file: Path | None,
     set_values: tuple[str, ...],
-    no_activate: bool,
 ) -> None:
     """Create a root or child record."""
     fields = _fields(set_values)
@@ -396,7 +384,6 @@ def record_create(
         parent_id=parent_id,
         related_to=list(related_to),
         markdown=_markdown(markdown_file),
-        activate=not no_activate,
         config=state.config,
         **fields,
     )
@@ -419,15 +406,15 @@ def record_list(state: CLIContext, json_output: bool) -> None:
 
 
 @record_group.command("show")
-@click.argument("record_id", required=False)
+@click.argument("record_id")
 @click.option("--raw", is_flag=True)
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def record_show(
-    state: CLIContext, record_id: str | None, raw: bool, json_output: bool
+    state: CLIContext, record_id: str, raw: bool, json_output: bool
 ) -> None:
     """Show stored or effective fields with their sources."""
-    record = _active(state.config, record_id)
+    record = load_record(record_id, config=state.config)
     if raw:
         values = record.to_dict()
         sources = {}
@@ -525,20 +512,9 @@ def record_delete(state: CLIContext, record_id: str) -> None:
     record = load_record(record_id, config=state.config)
     parent = record.path.parent
     record.delete(config=state.config)
-    if state.config.active_record_id == record_id:
-        state.config.clear_active_record()
     with suppress(OSError):
         parent.rmdir()
     click.echo(f"Deleted record {record_id}")
-
-
-@record_group.command("set")
-@click.argument("record_id")
-@click.pass_obj
-def record_set(state: CLIContext, record_id: str) -> None:
-    """Set the active record."""
-    state.config.set_active_record(record_id)
-    click.echo(f"Active record: {record_id}")
 
 
 @record_group.command("tree")
@@ -729,7 +705,7 @@ def run_command(
     "--all",
     "all_records",
     is_flag=True,
-    help="List all attributed runs from the record's tracking source.",
+    help="List all attributed runs, ignoring --record.",
 )
 @click.option("--metrics")
 @click.option("--params")
@@ -751,16 +727,19 @@ def run_list(
     limit: int | None,
     json_output: bool,
 ) -> None:
-    """List runs attributed to the selected record.
-
-    Use --all for every attributed run in the record's tracking source.
-    """
+    """List attributed project runs, optionally filtering by record."""
     if ascending and descending:
         raise ValidationError("--ascending and --descending are mutually exclusive")
     if (ascending or descending) and sort is None:
         raise ValidationError("A sort direction requires --sort")
-    record = _active(state.config, record_id)
-    declarations = record.resolve(config=state.config).values.get("metrics") or []
+    from .tracking import create_backend
+
+    record = load_record(record_id, config=state.config) if record_id else None
+    declarations = (
+        record.resolve(config=state.config).values.get("metrics") or []
+        if record is not None and not all_records
+        else []
+    )
     metric_names = (
         _names(metrics, "metric")
         if metrics is not None
@@ -777,8 +756,8 @@ def run_list(
         query["ascending"] = (
             ascending if ascending or descending else directions.get(sort) != "maximize"
         )
-    runs = record.resolve_tracking_backend(config=state.config).list_runs(
-        record_id=None if all_records else record.id,
+    runs = create_backend(state.config.tracking_backend, state.config).list_runs(
+        record_id=None if all_records or record is None else record.id,
         **query,
     )
     if json_output:

@@ -66,17 +66,12 @@ def project_data(config, refresh):
 
 
 @app.cell
-def selection_state(config, records_df, requested_record, runs_df):
+def selection_state(records_df, requested_record, runs_df):
     paths = dict(zip(records_df["record"], records_df["record_path"], strict=True))
     metrics = hd.metric_names(runs_df)
     tree_metric = hd.default_metric(records_df, metrics)
-    initial_record = next(
-        (
-            record_id
-            for record_id in (requested_record, config.active_record_id)
-            if record_id in paths
-        ),
-        next(iter(paths), None),
+    initial_record = (
+        requested_record if requested_record in paths else next(iter(paths), None)
     )
     get_selection, _set_selection = mo.state(
         (f"record:{initial_record}" if initial_record else None, initial_record)

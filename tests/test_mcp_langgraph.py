@@ -191,7 +191,7 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     )
     started = start_workflow(
         "collaborative",
-        {"rounds": 1, "command": ["python", "train.py"]},
+        {"task": "task", "rounds": 1, "command": ["python", "train.py"]},
         config=config,
     )
     assert started["status"] == "waiting"
@@ -232,7 +232,7 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
     )
     started = start_workflow(
         "collaborative",
-        {"rounds": 1, "command": ["python", "train.py"]},
+        {"task": "task", "rounds": 1, "command": ["python", "train.py"]},
         config=config,
     )
     requested = []
@@ -296,7 +296,7 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
     )
     started = start_workflow(
         "collaborative",
-        {"rounds": 1, "command": ["python", "train.py"]},
+        {"task": "task", "rounds": 1, "command": ["python", "train.py"]},
         config=config,
     )
 
@@ -394,7 +394,7 @@ def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
     )
     first = start_workflow(
         "collaborative",
-        {"rounds": 1, "command": ["python", "train.py"]},
+        {"task": "task", "rounds": 1, "command": ["python", "train.py"]},
         config=config,
     )
 

@@ -129,7 +129,6 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     config = HirakuConfig.discover(tmp_path)
-    assert config.active_record_id == "generated"
     assert load_record("generated", config=config).runs(config=config)[0].id == "run"
     assert not (tmp_path / ".git").exists()
 

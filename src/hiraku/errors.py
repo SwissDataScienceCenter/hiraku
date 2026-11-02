@@ -29,10 +29,6 @@ class AmbiguousReferenceError(ValidationError):
     """A record reference cannot be resolved to one record."""
 
 
-class NoActiveRecordError(HirakuError):
-    """An operation requires an active research record."""
-
-
 class GitError(HirakuError):
     """A Git operation failed."""
 

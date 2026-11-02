@@ -108,7 +108,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
             expected_accuracy, rel=1e-3
         )
         assert run.commit == source_commit
-        assert run.raw["git_state"] == "dirty"
+        assert run.raw["git_state"] == "clean"
         assert math.isfinite(float(run.metrics["val/log_loss"]))
     queried = json.loads(
         invoke(

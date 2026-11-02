@@ -98,7 +98,6 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             f"scheduler-{secrets.token_hex(4)}",
             type="task",
             summary=f"Scheduler example: raise each count to {target}",
-            activate=False,
             config=config,
         )
         for index in range(records):
@@ -108,7 +107,6 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 type="experiment",
                 priority=random.randint(1, 9),
                 count=0,
-                activate=False,
                 config=config,
             )
         return {"parent": parent.id, "target": target}

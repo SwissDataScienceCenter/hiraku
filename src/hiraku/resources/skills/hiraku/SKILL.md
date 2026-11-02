@@ -54,7 +54,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | --- | --- |
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
-| Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
+| Run a command | `hiraku run --record ID [--dispatch DISPATCHER] -- COMMAND ...` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
 | Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; collaborative approvals use `workflow_approval`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
 | Manage records, including supporting material | `hiraku record ...` |
@@ -208,8 +208,7 @@ hiraku record create <root-id> --type task \
 hiraku record show <root-id> --json
 ```
 
-Creating a record activates it by default. Use `--no-activate` only when it
-should not become active. Hiraku does not switch Git branches automatically.
+Hiraku does not switch Git branches automatically.
 Store `branch` with `--set` only when the user or project workflow specifies one.
 
 Use `hiraku record update` for requested changes or evidence-backed summaries.
@@ -228,7 +227,7 @@ evaluated.
 
 For high-level child-record work:
 
-1. Resolve the intended parent from the request or active record and inspect it.
+1. Resolve the intended parent from the request and inspect it.
 2. Check that the record ID is not already in use anywhere in the project.
 3. Capture a short summary and a falsifiable hypothesis when the request
    provides enough information. Brainstorming may produce one or more unbound
@@ -252,7 +251,7 @@ hiraku record show <record-id> --json
 hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
 ```
 
-Creating a record activates it by default. Several children may share a
+Several children may share a
 commit and use different explicit command arguments. Follow the effective record branch
 recorded for implementation; create or change that branch assignment only when
 the user or selected workflow asks for it. Ordinary Git operations remain

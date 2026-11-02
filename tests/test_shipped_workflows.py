@@ -3,7 +3,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from hiraku.config import HirakuConfig
+from hiraku.errors import ValidationError
 from hiraku.record import Record, load_record
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import start_workflow, workflow_status
@@ -52,10 +55,14 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
         type="task",
         config=config,
     )
+    with pytest.raises(ValidationError, match="task"):
+        start_workflow("collaborative", {"command": ["python"]}, config=config)
     commit = _commit(tmp_path)
     command = ["python", "train.py"]
     result = start_workflow(
-        "collaborative", {"rounds": 1, "command": command}, config=config
+        "collaborative",
+        {"task": "task", "rounds": 1, "command": command},
+        config=config,
     )
     assert _interrupt(result)["step"] == "draft"
 

@@ -84,7 +84,6 @@ def generate(config: HirakuConfig) -> None:
         "digits",
         type="task",
         status="concluded",
-        activate=False,
         config=config,
         metrics=[
             {"name": "val/log_loss", "direction": "minimize"},
@@ -100,7 +99,6 @@ def generate(config: HirakuConfig) -> None:
             parent_id="digits",
             type="hypothesis",
             status="concluded",
-            activate=False,
             config=config,
             markdown=f"## {identifier}\n\nL2 alpha: {alpha}; seeds: 1, 2, 3; "
             f"epochs: {EPOCHS}; hidden units: 64; validation fraction: 0.25.\n",
@@ -135,8 +133,6 @@ def generate(config: HirakuConfig) -> None:
                     f"exit code {result.returncode}"
                 )
     validate_database(database)
-    config.active_record_id = "weak-l2"
-    config.save()
 
 
 def generate_results(output: Path) -> None:

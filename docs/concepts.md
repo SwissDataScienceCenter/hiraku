@@ -34,7 +34,7 @@ Records are stored as Markdown with YAML front matter. This allows users and age
 
 Fields inherit through `parent_id` by default: the nearest definition wins and an explicit `null` clears an inherited field. When a child is created, its effective `metrics` are copied into its YAML front matter unless explicitly set on the child. These values are snapshots: later parent edits do not rewrite existing children. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
-At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. The current status can be queried with `hiraku status`; its `tracking_backend` field shows the project's backend.
+Record selection is explicit: supply an ID to commands and workflows that need one. `hiraku status` shows the project's tracking backend. The legacy `active_record_id` in `hiraku.yml` is ignored; remove it from existing project configuration.
 
 !!! note
     Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
@@ -56,7 +56,7 @@ adapter:
 tracking_backend: csv
 ```
 
-`hiraku runs` lists runs attributed to the active record, or to the record given with `--record ID`. Add `--all` to list every attributed run from the project tracking source. In Python, `record.runs(config=config)` returns the record's own runs, and `record.resolve_tracking_backend(config=config).list_runs()` lists the whole source. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
+`hiraku runs` lists all attributed project runs; use `--record ID` to filter them. Unattributed runs are excluded. In Python, `record.runs(config=config)` returns the record's own runs, and `record.resolve_tracking_backend(config=config).list_runs()` lists the whole source. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
 
 ## Command execution
 

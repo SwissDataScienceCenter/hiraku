@@ -66,8 +66,7 @@ hiraku record show heart-disease
 hiraku status
 ```
 
-You should see `active_record_id` set to `heart-disease` and the tracking
-backend set to CSV.
+You should see the record details and the tracking backend set to CSV.
 
 ??? tip "Defining a working branch"
     Store a branch name with `--set 'branch=main'` if the record should point to

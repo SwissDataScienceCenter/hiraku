@@ -41,9 +41,7 @@ class ResearchState(TypedDict, total=False):
 class CollaborativeInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    task: str | None = Field(
-        default=None, description="Task record ID; defaults to active context."
-    )
+    task: str = Field(min_length=1, description="Task record ID.")
     command: list[str] = Field(min_length=1)
     rounds: int = Field(default=3, ge=1)
 
@@ -99,11 +97,11 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             arguments = CollaborativeInput.model_validate(state.get("arguments", {}))
         except PydanticValidationError as exc:
             raise ValidationError(str(exc)) from exc
-        task = arguments.task or config.active_record_id
+        task = arguments.task
         command = arguments.command
         rounds = arguments.rounds
         if not isinstance(task, str) or not task:
-            raise ValidationError("Pass task or set an active Hiraku record")
+            raise ValidationError("Pass a task record ID")
         if not isinstance(command, list):
             raise ValidationError("command must be an argv list")
         command = validate_command(command)
@@ -260,7 +258,6 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 summary=arguments["summary"],
                 hypothesis=arguments["hypothesis"],
                 markdown=f"## Change\n\n{arguments['change'].strip()}\n",
-                activate=False,
                 config=config,
             )
         except HirakuError as exc:

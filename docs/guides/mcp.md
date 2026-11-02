@@ -71,8 +71,7 @@ and fall back to the CLI when the host has not connected the server.
 | `runs` | List tracked runs attributed to a record, like `hiraku runs`; `all_records` lists every attributed run in its tracking source. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
-Record creation activates the record by default; pass `activate: false` to leave
-the active record unchanged. Update tools merge `fields` and optionally replace
+Update tools merge `fields` and optionally replace
 the Markdown body. Set a field to `null` to clear its value. IDs and persistence
 paths cannot be changed; use `record_reparent` to change the organizational parent.
 Expected failures are returned as MCP tool errors.

@@ -30,7 +30,7 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     assert not project.joinpath("generate_results.py").exists()
     assert not project.joinpath("README.md").exists()
     config = HirakuConfig.discover(project)
-    assert config.active_record_id == "random-forest"
+    assert "active_record_id" not in config.to_dict()
     records = list_records(config=config)
     assert len(records) == 4
     forest = load_record("random-forest", config=config)
