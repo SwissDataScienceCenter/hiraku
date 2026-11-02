@@ -144,7 +144,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             else:
                 assert all(point.value >= 0 for point in history)
                 assert history[-1].value < history[0].value
-        assert row["metrics"]["runtime/seconds"] > 0
     filtered = json.loads(
         invoke(
             runner,

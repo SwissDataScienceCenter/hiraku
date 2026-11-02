@@ -41,9 +41,8 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
     command = [
         sys.executable,
         "-c",
-        "import os; print('|'.join((os.environ.get('HIRAKU_RECORD_ID', ''), "
-        "os.environ.get('HIRAKU_GIT_STATE', ''), "
-        "os.environ.get('HIRAKU_COMMIT', '<missing>'))) ",
+        "import os; print(os.environ['HIRAKU_RECORD_ID'], "
+        "os.environ['HIRAKU_GIT_STATE'], os.environ['HIRAKU_COMMIT'], sep='|')",
     ]
     result = execute_command(
         command, record_id="root", config=config, capture_output=True

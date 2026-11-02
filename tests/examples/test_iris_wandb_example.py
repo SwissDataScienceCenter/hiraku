@@ -22,6 +22,7 @@ EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "iris-wandb"
 FAKE_WANDB = r"""
 import json
 import os
+import subprocess
 from pathlib import Path
 
 STORE = Path(os.environ["FAKE_WANDB_STORE"])
@@ -40,6 +41,7 @@ class _Run:
         self.project = options.get("project") or os.environ.get("WANDB_PROJECT")
         self.notes = options.get("notes")
         self.metadata = {"python": "test"}
+        self.commit = options.get("commit")
 
 
 class _Handle:
@@ -60,6 +62,9 @@ class _Handle:
     def log(self, metrics):
         self.summary.update(metrics)
 
+    def log_code(self):
+        pass
+
     def finish(self):
         record = dict(self.options)
         record["summary"] = self.summary
@@ -74,6 +79,9 @@ class _Sklearn:
     def plot_classifier(self, *args, **kwargs):
         _active.classifier_plot = kwargs.get("model_name")
 
+    def plot_summary_metrics(self, *args, **kwargs):
+        pass
+
 
 sklearn = _Sklearn()
 
@@ -81,6 +89,12 @@ sklearn = _Sklearn()
 def init(**options):
     global _active
     options["id"] = os.environ.get("WANDB_RUN_ID", "fake-run-1")
+    options["commit"] = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     _active = _Handle(options)
     return _active
 
@@ -119,7 +133,9 @@ def invoke(runner: CliRunner, arguments: list[str]):
 
 
 def test_iris_attribution_without_launch(monkeypatch):
-    monkeypatch.setitem(sys.modules, "wandb", types.ModuleType("wandb"))
+    wandb = types.ModuleType("wandb")
+    wandb.sklearn = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "wandb", wandb)
     monkeypatch.delenv("HIRAKU_RECORD_ID", raising=False)
     script_path = (
         Path(__file__).parents[2]
