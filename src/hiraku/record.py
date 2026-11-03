@@ -403,22 +403,29 @@ def list_records(workspace: Workspace) -> list[Record]:
 
 
 def resolve_metrics(record: Record, workspace: Workspace) -> list[Metric]:
-    """Return the nearest defined metric list, following parents through fmql.
+    """Fetch ancestors once through fmql and select the nearest metric list.
 
     An empty list stops the lookup; None continues to the parent.
     The supplied workspace is used without refreshing it.
     """
+    if record.metrics is not None:
+        return record.metrics
+    packets = {
+        packet.frontmatter["id"]: packet
+        for packet in Query(workspace)
+        .where(id=record.id)
+        .follow("parent_id", depth="*", include_origin=True)
+    }
     seen: set[str] = set()
     while record.id not in seen:
         if record.metrics is not None:
             return record.metrics
         seen.add(record.id)
-        parents = list(Query(workspace).where(id=record.id).follow("parent_id"))
-        if not parents:
+        packet = packets.get(record.id)
+        parent = packets.get(packet.frontmatter.get("parent_id")) if packet else None
+        if parent is None:
             return []
-        if len(parents) != 1:
-            raise ValidationError(f"Ambiguous parent for record {record.id!r}")
-        record = Record.from_packet(parents[0])
+        record = Record.from_packet(parent)
     raise ValidationError("Record parent cycle")
 
 
