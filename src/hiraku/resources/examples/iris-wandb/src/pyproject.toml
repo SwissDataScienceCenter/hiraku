@@ -6,5 +6,5 @@ dependencies = [
   "numpy==2.4.6",
   "scikit-learn==1.9.0",
   "wandb>=0.29.0",
-  "hiraku @ git+https://github.com/SwissDataScienceCenter/hiraku.git",
+  "hiraku @ git+https://github.com/SwissDataScienceCenter/hiraku.git@feat/hiraku-jobs",
 ]
