@@ -21,7 +21,7 @@ Then create a project and let Hiraku install the training script, model definiti
 ```bash
 hiraku example create eurosat-rgb --git
 cd eurosat-rgb
-
+uv sync
 git add .
 git commit -m "initialize EuroSAT RGB example"
 ```
@@ -67,8 +67,7 @@ hiraku record create mlp --parent eurosat --type experiment \
 
 hiraku record show mlp
 
-hiraku run --record mlp -- uv run python train.py --model mlp --seed 42 \
-  --epochs 10 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
+hiraku run --record mlp -- uv run python train.py --model mlp --seed 42 --epochs 10 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
 
 hiraku runs --record eurosat --all
 hiraku runs --record mlp

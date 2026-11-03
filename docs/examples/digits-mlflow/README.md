@@ -53,7 +53,7 @@ The example ships with MLflow configured as the project-wide tracking backend.
 ```bash
 hiraku record create digits --type task \
   --set "goal=Understand how L2 regularization affects Digits learning curves" \
-  --set "question=Does stronger regularization reduce overfitting on the Digits dataset?" \
+  --set "question=Does stronger regularization reduce **overfitting** on the Digits dataset?" \
   --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]'
 
 hiraku record create weak-l2 --parent digits --type experiment \
@@ -68,10 +68,8 @@ hiraku record create strong-l2 --parent digits --type experiment \
 
 hiraku record list
 
-hiraku run --record weak-l2 -- uv run python train.py --alpha 0.0001 \
-  --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
-hiraku run --record strong-l2 -- uv run python train.py --alpha 1.0 \
-  --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
+hiraku run --record weak-l2 -- uv run python train.py --alpha 0.0001 --seed 42 --validation-fraction 0.25
+hiraku run --record strong-l2 -- uv run python train.py --alpha 1.0 --seed 42 --validation-fraction 0.25
 ```
 
 ## Compare final metrics and inspect curves
