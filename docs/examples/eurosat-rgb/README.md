@@ -67,7 +67,7 @@ hiraku record create mlp --parent eurosat --type experiment \
 
 hiraku record show mlp
 
-hiraku job run --record mlp -- uv run python train.py --model mlp --seed 42 \
+hiraku run --record mlp -- uv run python train.py --model mlp --seed 42 \
   --epochs 10 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
 
 hiraku runs --record eurosat --all
@@ -91,7 +91,7 @@ hiraku record create cnn --parent eurosat --type experiment \
 hiraku record show cnn
 hiraku record show cnn
 
-hiraku job run --record cnn -- uv run python train.py --model cnn --seed 42 \
+hiraku run --record cnn -- uv run python train.py --model cnn --seed 42 \
   --epochs 10 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
 hiraku runs --record eurosat --all --sort val/accuracy
 ```

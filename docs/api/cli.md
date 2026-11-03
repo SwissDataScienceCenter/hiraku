@@ -8,7 +8,7 @@ Typical workflow:
 hiraku init
 hiraku record create <root-id>
 hiraku record create <child-id> --parent <root-id>
-hiraku job run --record <child-id> -- python train.py
+hiraku run --record <child-id> -- python train.py
 hiraku runs --record <record-id>
 ```
 

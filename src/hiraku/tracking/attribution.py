@@ -7,27 +7,10 @@ from ..errors import ValidationError
 
 
 def _tracking_metadata(values: dict[str, Any] | None) -> dict[str, Any]:
-    """Add current job metadata to the native tracker's metadata mapping."""
-    from ..jobs import current_job
-
+    """Add available Hiraku job metadata to the native tracker's mapping."""
     result = dict(values or {})
-    job = current_job()
-    job_id = job.id if job else os.environ.get("HIRAKU_JOB_ID")
-    job_metadata = (
-        {
-            "record_id": job.record_id,
-            "commit": job.commit,
-            "git_state": job.git_state,
-        }
-        if job
-        else {}
-    )
     for field in ("job_id", "record_id", "commit", "git_state"):
-        value = (
-            job_id
-            if field == "job_id" and job_id
-            else job_metadata.get(field) or os.environ.get(f"HIRAKU_{field.upper()}")
-        )
+        value = os.environ.get(f"HIRAKU_{field.upper()}")
         if value:
             key = f"hiraku.{field}"
             if key in result and result[key] != value:

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from hiraku import HirakuConfig
-from hiraku.execution import execute_command
+from hiraku.jobs import execute_command
 from hiraku.record import load_record
 
 

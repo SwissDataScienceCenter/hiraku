@@ -22,22 +22,24 @@ run-001,job-id,baseline,abc123,clean,2026-01-01T12:00:00Z,0.84,42
 ```
 
 Choose a unique run ID for each execution. Prefix metric columns with
-`metric.` and parameter columns with `param.`. For CSV writers, retrieve the
-current job explicitly:
+`metric.` and parameter columns with `param.`. CSV writers can read the job
+attribution variables provided to the child process:
 
 ```python
-from hiraku.config import HirakuConfig
-from hiraku.jobs import current_job
+import os
+from pathlib import Path
 
-job = current_job()
-if job is None:
+job_id = os.environ.get("HIRAKU_JOB_ID")
+record_id = os.environ.get("HIRAKU_RECORD_ID")
+if not job_id or not record_id:
     raise RuntimeError("Run through Hiraku to associate this CSV row with a job")
-project_root = HirakuConfig.discover().root
+commit = os.environ.get("HIRAKU_COMMIT", "")
+git_state = os.environ.get("HIRAKU_GIT_STATE", "unavailable")
+project_root = Path(os.environ["HIRAKU_TRACKING_ROOT"])
 ```
 
-Use `job.id`, `job.record_id`, `job.commit`, and `job.git_state` to populate
-the CSV columns. Write the tracking table under the project root (or the
-configured CSV path):
+Use these values to populate the CSV columns. Write the tracking table under
+the project root (or the configured CSV path):
 
 ```python
 runs_path = project_root / "runs.csv"

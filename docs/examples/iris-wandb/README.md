@@ -60,10 +60,8 @@ hiraku record create logistic --parent iris --type experiment \
   --commit HEAD
 
 hiraku record show logistic
-hiraku record show logistic
 
-hiraku job run --record logistic -- \
-  uv run python train.py --model logistic --seed 42 --test-size 0.25
+hiraku run --record logistic -- uv run python train.py --model logistic --seed 42 --test-size 0.25
 hiraku runs --record iris --all
 hiraku runs --record logistic
 ```
@@ -76,7 +74,7 @@ hiraku record create random-forest --parent iris --type experiment \
   --set "hypothesis=A random forest improves Iris classification accuracy." \
   --commit HEAD
 
-hiraku job run --record random-forest -- \
+hiraku run --record random-forest -- \
   uv run python train.py --model random_forest --seed 42 --test-size 0.25
 hiraku runs --record iris --all --sort test/accuracy
 ```
@@ -86,6 +84,10 @@ tags, group, notes, and summary metrics. W&B assigns the native run ID. Hiraku
 reads record and commit provenance from run metadata. The training script creates the remote W&B project
 on its first successful `wandb.init()` call. Hiraku queries and normalizes W&B
 runs; it does not create the W&B project or run.
+
+The scikit-learn integration also logs classifier diagnostics, including a
+confusion matrix, ROC and precision-recall curves, and summary metrics as W&B
+plots. Run completion and failure are represented by W&B's native run state.
 
 ??? info "Example run results"
     These results are from the example's W&B runs. Click a column heading to

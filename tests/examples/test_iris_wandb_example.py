@@ -46,6 +46,13 @@ class _Handle:
         )
         self.summary = {}
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.options["native_state"] = "failed" if exc_type else "finished"
+        self.finish()
+
     def log(self, metrics):
         self.summary.update(metrics)
 
@@ -56,6 +63,14 @@ class _Handle:
 
 
 _active = None
+
+
+class _Sklearn:
+    def plot_classifier(self, *args, model_name="Classifier", **kwargs):
+        _active.options["classifier_plot"] = model_name
+
+
+sklearn = _Sklearn()
 
 
 def init(**options):
@@ -160,7 +175,6 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     invoke(
         runner,
         [
-            "job",
             "run",
             "--record",
             "logistic",
@@ -186,17 +200,23 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     assert row["params"]["model"] == "logistic"
     assert row["params"]["seed"] == 42
     assert row["params"]["test_size"] == 0.25
-    assert row["params"]["dataset.name"] == "scikit-learn iris"
-    assert row["params"]["dataset.samples"] == 150
-    assert row["params"]["dataset.features"] == 4
-    assert row["params"]["python.version"]
     assert row["metrics"]["test/accuracy"] == pytest.approx(0.9473684210526316)
-    assert row["raw"]["tags"] == ["hiraku", "iris", "logistic"]
+    assert set(row["params"]) == {"model", "seed", "test_size"}
+    assert set(row["metrics"]) == {
+        "test/accuracy",
+        "test/f1_macro",
+        "test/log_loss",
+        "runtime/seconds",
+    }
+    assert row["raw"]["tags"] == []
     stored = json.loads(store.read_text(encoding="utf-8"))[0]
     assert stored["id"] == run_id
     assert stored["project"] == "iris-wandb"
     assert stored["config"]["hiraku.record_id"] == "logistic"
     assert stored["config"]["hiraku.commit"] == source_commit
+    assert stored["classifier_plot"] == "logistic"
+    assert stored["native_state"] == "finished"
+    assert "status" not in stored["summary"]
 
     filtered = json.loads(
         invoke(

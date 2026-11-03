@@ -29,7 +29,7 @@ def _repository(path: Path) -> HirakuConfig:
 
 
 def test_run_uses_dispatcher_in_current_working_tree(tmp_path: Path) -> None:
-    from hiraku.execution import execute_command
+    from hiraku.jobs import execute_command
     from hiraku.record import Record
 
     config = _repository(tmp_path)

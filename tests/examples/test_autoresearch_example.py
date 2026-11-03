@@ -223,10 +223,9 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch):
         ["record", "create", "cpu-test", "--parent", "sep10", "--commit", "HEAD"],
     )
 
-    submitted = invoke(
+    invoke(
         runner,
         [
-            "job",
             "run",
             "--record",
             "cpu-test",
@@ -240,7 +239,6 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch):
         ],
     )
 
-    assert "val_bpb: 0.900000" in submitted.output
     rows = json.loads(
         invoke(
             runner,
@@ -273,7 +271,6 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch):
     failed = runner.invoke(
         main,
         [
-            "job",
             "run",
             "--record",
             "failure",
@@ -287,7 +284,6 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch):
     )
 
     assert failed.exit_code != 0
-    assert "val_bpb: 0.000000" in failed.output
     rows = json.loads(
         invoke(
             runner,

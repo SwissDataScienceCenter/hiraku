@@ -84,7 +84,7 @@ hiraku record create logistic-baseline --parent heart-disease --type experiment 
 hiraku record show logistic-baseline
 
 # run the command and stream its output
-hiraku job run --record logistic-baseline -- uv run python train.py \
+hiraku run --record logistic-baseline -- uv run python train.py \
   --model logistic --seed 42 --validation-fraction 0.25
 
 # query all runs under the root's tracking source
@@ -117,7 +117,7 @@ hiraku record create random-forest --parent heart-disease --type experiment \
   --set "hypothesis=Nonlinear feature interactions improve validation log loss" \
   --commit HEAD
 
-hiraku job run --record random-forest -- uv run python train.py \
+hiraku run --record random-forest -- uv run python train.py \
   --model random_forest --seed 42 --validation-fraction 0.25
 hiraku runs --record heart-disease --all --sort val/log_loss
 ```

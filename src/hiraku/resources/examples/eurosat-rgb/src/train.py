@@ -184,11 +184,7 @@ def main() -> None:
             "learning_rate": args.learning_rate,
         },
     ) as run:
-        try:
-            _train_and_log(args, run)
-        except Exception:
-            run.summary["status"] = "failed"
-            raise
+        _train_and_log(args, run)
 
 
 def _train_and_log(args: argparse.Namespace, run: wandb.sdk.wandb_run.Run) -> None:
@@ -242,8 +238,6 @@ def _train_and_log(args: argparse.Namespace, run: wandb.sdk.wandb_run.Run) -> No
             f"train_accuracy={train_accuracy:.4f} val_loss={validation_loss:.4f} "
             f"val_accuracy={validation_accuracy:.4f}"
         )
-
-    run.summary["status"] = "completed"
 
 
 if __name__ == "__main__":

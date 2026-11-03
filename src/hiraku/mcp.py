@@ -23,7 +23,7 @@ from pydantic_core import to_jsonable_python
 
 from .config import HirakuConfig
 from .errors import HirakuError, ValidationError
-from .execution import execute_command
+from .jobs import execute_command
 from .record import Record, list_records, load_record
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow

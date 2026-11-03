@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import csv
+import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,9 +15,6 @@ from sklearn.metrics import accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-
-from hiraku.config import HirakuConfig
-from hiraku.jobs import current_job
 
 COLUMNS = [
     "age",
@@ -87,44 +84,38 @@ def build_model(model_name: str, seed: int) -> Pipeline:
 
 
 def provenance() -> dict[str, str]:
-    job = current_job()
-    if job is None:
+    names = (
+        "HIRAKU_JOB_ID",
+        "HIRAKU_RECORD_ID",
+        "HIRAKU_COMMIT",
+        "HIRAKU_GIT_STATE",
+        "HIRAKU_ROOT",
+        "HIRAKU_TRACKING_ROOT",
+    )
+    if not os.environ.get("HIRAKU_JOB_ID"):
         raise RuntimeError("Run this example through Hiraku to record job attribution")
-    config = HirakuConfig.discover()
-    return {
-        "HIRAKU_JOB_ID": job.id,
-        "HIRAKU_RECORD_ID": job.record_id,
-        "HIRAKU_COMMIT": job.commit or "",
-        "HIRAKU_GIT_STATE": job.git_state,
-        "HIRAKU_ROOT": str(config.root),
-        "HIRAKU_TRACKING_ROOT": str(config.root),
-    }
+    return {name: os.environ.get(name, "") for name in names}
 
 
 def append_run(path: Path, row: dict[str, str]) -> None:
     if path.exists() and path.stat().st_size:
-        with path.open(newline="", encoding="utf-8") as stream:
-            reader = csv.DictReader(stream)
-            header = reader.fieldnames
-            existing = list(reader)
-        if header is None or "id" not in header:
-            raise RuntimeError(f"Unexpected runs CSV header in {path}: {header!r}")
-        expanded_header = list(dict.fromkeys([*header, *RUN_FIELDS]))
-        if expanded_header != header:
-            with path.open("w", newline="", encoding="utf-8") as stream:
-                writer = csv.DictWriter(stream, fieldnames=expanded_header)
-                writer.writeheader()
-                writer.writerows(existing)
+        existing = pd.read_csv(path, dtype=str, keep_default_na=False)
+        if "id" not in existing.columns:
+            raise RuntimeError(
+                f"Unexpected runs CSV columns in {path}: {list(existing.columns)!r}"
+            )
+        columns = list(dict.fromkeys([*existing.columns, *RUN_FIELDS]))
+        rows = pd.concat(
+            [
+                existing.reindex(columns=columns),
+                pd.DataFrame([row]).reindex(columns=columns),
+            ],
+            ignore_index=True,
+        )
+    else:
+        rows = pd.DataFrame([row], columns=RUN_FIELDS)
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_header = not path.exists() or path.stat().st_size == 0
-    with path.open("a", newline="", encoding="utf-8") as stream:
-        with path.open(newline="", encoding="utf-8") as source:
-            header = next(csv.reader(source), None)
-        fields = list(dict.fromkeys([*(header or []), *RUN_FIELDS]))
-        writer = csv.DictWriter(stream, fieldnames=fields)
-        if write_header:
-            writer.writeheader()
-        writer.writerow(row)
+    rows.to_csv(path, index=False)
 
 
 def parse_args() -> argparse.Namespace:

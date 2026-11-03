@@ -25,10 +25,8 @@ def track_run(*args: Any, **kwargs: Any):
 
     kwargs["config"] = _tracking_metadata(kwargs.get("config"))
     run = wandb.init(*args, **kwargs)
-    try:
+    with run:
         yield run
-    finally:
-        run.finish()
 
 
 class WandbBackendConfig(BaseModel):

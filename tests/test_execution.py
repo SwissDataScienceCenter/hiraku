@@ -10,7 +10,7 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
-from hiraku.execution import execute_command
+from hiraku.jobs import execute_command
 from hiraku.record import Record
 
 
@@ -28,7 +28,6 @@ def test_run_executes_in_project_and_returns_output_and_exit_code(
     assert result.returncode == 7
     assert result.stdout.strip() == str(tmp_path)
     assert result.stderr == ""
-    assert not (tmp_path / ".jobs").exists()
 
 
 def test_run_allows_dirty_tree_and_supplies_provenance(
@@ -53,9 +52,7 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
     assert git_state == "unavailable"
 
 
-def test_run_requires_explicit_command_and_streams_output(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_executes_command_in_foreground(tmp_path: Path, monkeypatch) -> None:
     config = HirakuConfig.init(tmp_path)
     monkeypatch.chdir(tmp_path)
     Record.create("root", config=config)
@@ -63,7 +60,6 @@ def test_run_requires_explicit_command_and_streams_output(
     cli = CliRunner().invoke(
         main,
         [
-            "job",
             "run",
             "--record",
             "root",
@@ -74,8 +70,7 @@ def test_run_requires_explicit_command_and_streams_output(
         ],
     )
     assert cli.exit_code == 0, cli.output
-    assert "explicit" in cli.output
-    missing = CliRunner().invoke(main, ["job", "run", "--record", "root"])
+    missing = CliRunner().invoke(main, ["run", "--record", "root"])
     assert missing.exit_code != 0
     assert "command" in missing.output.lower()
 
@@ -96,7 +91,6 @@ def test_cli_propagates_nonzero_exit_code(tmp_path: Path, monkeypatch) -> None:
     result = CliRunner().invoke(
         main,
         [
-            "job",
             "run",
             "--record",
             "root",
@@ -107,9 +101,3 @@ def test_cli_propagates_nonzero_exit_code(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     assert result.exit_code == 4
-
-
-def test_run_command_is_retired() -> None:
-    result = CliRunner().invoke(main, ["run", "--help"])
-    assert result.exit_code != 0
-    assert "No such command 'run'" in result.output

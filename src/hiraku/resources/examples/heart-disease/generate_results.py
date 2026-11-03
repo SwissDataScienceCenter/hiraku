@@ -13,7 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from hiraku import HirakuConfig
-from hiraku.execution import execute_command
+from hiraku.jobs import execute_command
 from hiraku.record import Record
 
 EXPERIMENTS = (

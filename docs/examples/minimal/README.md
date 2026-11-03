@@ -47,8 +47,8 @@ hiraku record create baseline --parent my-task --type experiment \
   --set "hypothesis=The existing representation establishes a reference." \
   --commit HEAD
 
-hiraku job run --record baseline -- uv run python evaluate.py --seed 0
-hiraku job run --record baseline -- uv run python evaluate.py --seed 1
+hiraku run --record baseline -- uv run python evaluate.py --seed 0
+hiraku run --record baseline -- uv run python evaluate.py --seed 1
 hiraku record list
 hiraku runs --record baseline
 ```

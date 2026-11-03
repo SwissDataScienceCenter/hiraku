@@ -1,130 +1,231 @@
-"""Persistent Hiraku jobs backed by PSI/J.
-
-- Record/Job/TrackingBackend are distinct concepts.
-- PSI/J owns submission and scheduler status; Hiraku persists job attribution.
-- Executed projects receive only HIRAKU_JOB_ID from Hiraku.
-- Tracking integration is deliberately outside this module.
-- Optional project dispatchers configure the command, not the scheduler.
-"""
+"""Local foreground jobs and the small executor interface Hiraku needs."""
 
 from __future__ import annotations
 
-import contextlib
 import os
-import time
+import subprocess
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
-
-import psutil
-from psij import Job as PsiJob
-from psij import JobAttributes, JobExecutor, JobSpec, JobState, ResourceSpec
-from pydantic import BaseModel, ConfigDict, Field
-from pydantic import ValidationError as PydanticValidationError
 
 from .errors import (
     ExecutionError,
     GitError,
-    HirakuError,
     NoActiveRecordError,
     ValidationError,
 )
-from .io import atomic_write
 
 if TYPE_CHECKING:
     from .config import HirakuConfig
     from .run import Run
     from .tracking.base import TrackingBackend
 
-JobStatus = Literal[
-    "created",
-    "submitting",
-    "submitted",
-    "queued",
-    "running",
-    "canceling",
-    "completed",
-    "failed",
-    "canceled",
-    "unknown",
-]
-TERMINAL = frozenset({"completed", "failed", "canceled"})
+
+class JobState(StrEnum):
+    """Lifecycle states for a foreground Hiraku job."""
+
+    NEW = "new"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELED = "canceled"
 
 
-class Job(BaseModel):
-    """Durable research-execution identity (not a PSI/J Job or tracked Run)."""
+@dataclass
+class JobStatus:
+    """Current state and result of a local job execution."""
 
-    model_config = ConfigDict(extra="forbid")
-
-    id: str = Field(default_factory=lambda: uuid4().hex, pattern=r"^[0-9a-f]{32}$")
-    record_id: str
-    command: list[str]  # User-facing, unwrapped argv.
-    directory: str
-    commit: str | None = None
-    git_state: Literal["clean", "dirty", "unavailable"] = "unavailable"
-    executor: str = "local"
-    dispatch: str | None = None
-    state: JobStatus = "created"
+    state: JobState = JobState.NEW
+    time: datetime = field(default_factory=lambda: datetime.now(UTC))
+    message: str | None = None
     exit_code: int | None = None
-    native_id: str | None = None
-    native_process_created: float | None = None  # Local PID-reuse guard.
-    stdout: str | None = None
-    stderr: str | None = None
-    cancel_requested: bool = False
-    error: str | None = None  # Submission/inspection diagnostics, not run logs.
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class JobSpec:
+    """Command and environment needed to execute one local job."""
+
+    executable: str
+    arguments: Sequence[str] = ()
+    directory: Path = Path(".")
+    environment: Mapping[str, str] = field(default_factory=dict)
+    inherit_environment: bool = True
+    capture_output: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.executable, str) or not self.executable:
+            raise ValidationError("Job executable must be a non-empty string")
+        arguments = tuple(self.arguments)
+        if any(not isinstance(arg, str) or "\x00" in arg for arg in arguments):
+            raise ValidationError("Job arguments must be strings without NUL bytes")
+        if "\x00" in self.executable:
+            raise ValidationError("Job executable must not contain NUL bytes")
+        if not isinstance(self.directory, Path):
+            object.__setattr__(self, "directory", Path(self.directory))
+        environment = dict(self.environment)
+        if any(
+            not isinstance(key, str)
+            or not key
+            or "=" in key
+            or "\x00" in key
+            or not isinstance(value, str)
+            or "\x00" in value
+            for key, value in environment.items()
+        ):
+            raise ValidationError("Job environment must map valid strings to strings")
+        object.__setattr__(self, "arguments", arguments)
+        object.__setattr__(self, "environment", MappingProxyType(environment))
+
+    @property
+    def command(self) -> list[str]:
+        """Return the executable and arguments as an argv list."""
+        return [self.executable, *self.arguments]
+
+
+@dataclass
+class Job:
+    """One Hiraku command execution with record and Git provenance."""
+
+    spec: JobSpec
+    record_id: str | None = None
+    commit: str | None = None
+    git_state: str = "unavailable"
+    record_file: Path | None = None
+    id: str = field(default_factory=lambda: uuid4().hex)
+    status: JobStatus = field(default_factory=JobStatus)
+
+    def execute(
+        self, executor: JobExecutor | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        """Execute this job with the selected executor, local by default."""
+        selected = executor or LocalJobExecutor()
+        return selected.execute(self)
+
+    def attribution_environment(self) -> dict[str, str]:
+        """Return the Hiraku metadata variables associated with this job."""
+        values = {
+            "HIRAKU_JOB_ID": self.id,
+            "HIRAKU_COMMIT": self.commit or "",
+            "HIRAKU_GIT_STATE": self.git_state,
+            "HIRAKU_ROOT": str(self.spec.directory),
+            "HIRAKU_TRACKING_ROOT": str(self.spec.directory),
+        }
+        if self.record_id is not None:
+            values["HIRAKU_RECORD_ID"] = self.record_id
+        if self.record_file is not None:
+            values["HIRAKU_RECORD_FILE"] = str(self.record_file)
+        return values
 
     def tracked_runs(self, backend: TrackingBackend) -> list[Run]:
         """Return tracked runs attributed to this job."""
+        if self.record_id is None:
+            return []
         return [
             run
             for run in backend.list_runs(record_id=self.record_id)
             if run.job_id == self.id
         ]
 
-    def save(self, directory: Path) -> None:
-        directory.mkdir(parents=True, exist_ok=True)
-        atomic_write(directory / f"{self.id}.json", self.model_dump_json(indent=2))
 
-    @classmethod
-    def load(cls, directory: Path, job_id: str) -> Job:
-        if len(job_id) != 32 or any(c not in "0123456789abcdef" for c in job_id):
-            raise ExecutionError(f"Invalid job ID: {job_id!r}")
+class JobExecutor(ABC):
+    """Interface implemented by Hiraku command executors."""
+
+    @abstractmethod
+    def execute(self, job: Job) -> subprocess.CompletedProcess[str]:
+        """Run a job and return its process result."""
+
+
+class LocalJobExecutor(JobExecutor):
+    """Execute a command directly in the foreground on the local machine."""
+
+    def execute(self, job: Job) -> subprocess.CompletedProcess[str]:
+        spec = job.spec
+        environment = os.environ.copy() if spec.inherit_environment else {}
+        for name in (
+            "HIRAKU_JOB_ID",
+            "HIRAKU_RECORD_ID",
+            "HIRAKU_RECORD_FILE",
+            "HIRAKU_ROOT",
+            "HIRAKU_TRACKING_ROOT",
+            "HIRAKU_COMMIT",
+            "HIRAKU_GIT_STATE",
+        ):
+            environment.pop(name, None)
+        environment.update(spec.environment)
+        environment.update(job.attribution_environment())
+        job.status = JobStatus(state=JobState.ACTIVE)
         try:
-            content = (directory / f"{job_id}.json").read_text(encoding="utf-8")
-            job = cls.model_validate_json(content)
-        except (OSError, PydanticValidationError, ValueError) as exc:
-            raise ExecutionError(f"Cannot load job {job_id!r}: {exc}") from exc
-        if job.id != job_id:
-            raise ExecutionError(f"Job metadata ID mismatch: {job_id!r}")
-        return job
+            result = subprocess.run(
+                spec.command,
+                cwd=spec.directory,
+                env=environment,
+                check=False,
+                capture_output=spec.capture_output,
+                text=True,
+            )
+        except KeyboardInterrupt:
+            job.status = JobStatus(
+                state=JobState.CANCELED,
+                message="Interrupted by user",
+            )
+            raise
+        except OSError as exc:
+            job.status = JobStatus(state=JobState.FAILED, message=str(exc))
+            raise ExecutionError(
+                f"Could not execute command {spec.executable!r}: {exc}"
+            ) from exc
+
+        state = JobState.COMPLETED if result.returncode == 0 else JobState.FAILED
+        job.status = JobStatus(state=state, exit_code=result.returncode)
+        return result
 
 
-def job_directory(config: HirakuConfig) -> Path:
-    return config.hiraku_dir / "jobs"
-
-
-def current_job(config: HirakuConfig | None = None) -> Job | None:
-    """Return the persisted job associated with this process, if available."""
-    job_id = os.environ.get("HIRAKU_JOB_ID")
-    if not job_id:
+def validate_command(value: Any) -> list[str] | None:
+    """Validate command configuration as a literal argv sequence."""
+    if value is None:
         return None
-    try:
-        from .config import HirakuConfig as Config
-
-        selected = config
-        if selected is None:
-            root = os.environ.get("HIRAKU_ROOT")
-            selected = Config.discover(Path(root) if root else None)
-        return Job.load(job_directory(selected), job_id)
-    except (HirakuError, OSError, ValueError):
-        return None
+    if isinstance(value, str | bytes) or not isinstance(value, list | tuple):
+        raise ValidationError("command must be an argv sequence")
+    command = list(value)
+    if not command or not isinstance(command[0], str) or not command[0]:
+        raise ValidationError("command executable must be a non-empty string")
+    if any(not isinstance(argument, str) or "\x00" in argument for argument in command):
+        raise ValidationError("command arguments must be strings without NUL bytes")
+    return command
 
 
-def _environment(additions: Mapping[str, str] | None, job_id: str) -> dict[str, str]:
-    environment = dict(additions or {})
+def execute_command(
+    command: Sequence[str],
+    *,
+    record_id: str | None = None,
+    dispatch: str | None = None,
+    env: Mapping[str, str] | None = None,
+    capture_output: bool = False,
+    config: HirakuConfig | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Prepare and execute a local job in the current project."""
+    from .config import HirakuConfig as Config
+    from .git import GitRepository
+    from .record import load_record
+
+    selected = config or Config.discover()
+    selected_record = record_id or selected.active_record_id
+    if selected_record is None:
+        raise NoActiveRecordError("Select a record with --record or hiraku record set")
+    record = load_record(selected_record, config=selected)
+    if isinstance(command, str | bytes):
+        raise ValidationError("command must be an argv sequence, not a shell string")
+    argv = validate_command(list(command) if command is not None else None)
+    if argv is None:
+        raise ValidationError("command must be a non-empty argv sequence")
+
+    additions = dict(env or {})
     if any(
         not isinstance(key, str)
         or not key
@@ -132,341 +233,97 @@ def _environment(additions: Mapping[str, str] | None, job_id: str) -> dict[str, 
         or "\x00" in key
         or not isinstance(value, str)
         or "\x00" in value
-        for key, value in environment.items()
+        for key, value in additions.items()
     ):
-        raise ValidationError("Environment additions must map valid strings to strings")
-    if "HIRAKU_JOB_ID" in environment:
-        raise ValidationError("Cannot override HIRAKU_JOB_ID")
-    # Do not inject HIRAKU_RECORD_ID, HIRAKU_ROOT, MLflow, or W&B settings here.
-    environment["HIRAKU_JOB_ID"] = job_id
-    return environment
+        raise ValidationError("Environment additions must map strings to strings")
+    reserved = {
+        "HIRAKU_RECORD_ID",
+        "HIRAKU_JOB_ID",
+        "HIRAKU_RECORD_FILE",
+        "HIRAKU_ROOT",
+        "HIRAKU_TRACKING_ROOT",
+        "HIRAKU_COMMIT",
+        "HIRAKU_GIT_STATE",
+        "HIRAKU_SOURCE_DIGEST",
+        "HIRAKU_ENTRYPOINT",
+    }
+    if reserved.intersection(additions):
+        raise ValidationError("Environment cannot override reserved run attribution")
 
+    tracking_spec = record.tracking_backend_spec(config=selected)
+    if tracking_spec.get("type") == "wandb":
+        wandb_project = tracking_spec.get("project") or selected.root.name
+        if (
+            isinstance(wandb_project, str)
+            and wandb_project
+            and "WANDB_PROJECT" not in additions
+            and "WANDB_PROJECT" not in os.environ
+        ):
+            additions["WANDB_PROJECT"] = wandb_project
+    elif tracking_spec.get("type") == "mlflow":
+        from .tracking import create_backend
 
-def _resolve_dispatch(
-    argv: list[str], dispatch: str | None, config: HirakuConfig
-) -> tuple[list[str], str | None]:
-    name = dispatch if dispatch is not None else config.default_dispatch
-    if name is None:
-        return argv, None
-    if (
-        not isinstance(name, str)
-        or not name
-        or name in {".", ".."}
-        or "/" in name
-        or "\\" in name
-        or "\x00" in name
-    ):
-        raise ValidationError(f"Invalid dispatcher name: {name!r}")
-    filename = name if Path(name).suffix else f"{name}.sh"
-    script = config.dispatch_dir / filename
-    if not script.is_file():
-        if dispatch is not None:
-            raise ExecutionError(f"Dispatcher does not exist: {script}")
-        return argv, None  # Backwards-compatible absent default dispatcher.
-    return [str(script), "--", *argv], name
-
-
-def _source_revision(root: Path) -> tuple[str | None, str]:
-    from .git import GitRepository
-
-    try:
-        repository = GitRepository(root)
-        return repository.resolve("HEAD"), ("dirty" if repository.is_dirty else "clean")
-    except GitError:
-        return None, "unavailable"
-
-
-def _prepare(
-    command: Sequence[str] | None,
-    *,
-    record_id: str | None,
-    config: HirakuConfig,
-    executor: str,
-    dispatch: str | None,
-) -> tuple[Job, list[str]]:
-    from .execution import validate_command
-    from .record import load_record
-
-    selected = record_id or config.active_record_id
-    if selected is None:
-        raise NoActiveRecordError("Specify --record or select an active record")
-    record = load_record(selected, config=config)
-
-    if command is None:
-        # Commands are record-local and never inherited from project settings.
-        command = (record.model_extra or {}).get("command")
-    if command is None or isinstance(command, (str, bytes)):
-        raise ExecutionError(
-            "Specify a command after -- or define record 'command' argv"
-        )
-    argv = validate_command(list(command))
-    if argv is None:
-        raise ExecutionError("Command is required")
-
-    actual, used_dispatch = _resolve_dispatch(argv, dispatch, config)
-    commit, git_state = _source_revision(config.root)
-    job = Job(
-        record_id=record.id,
-        command=argv,
-        directory=str(config.root),
-        commit=commit,
-        git_state=git_state,
-        executor=executor,
-        dispatch=used_dispatch,
-    )
-    folder = job_directory(config)
-    job.stdout = str(folder / f"{job.id}.out")
-    job.stderr = str(folder / f"{job.id}.err")
-    return job, actual
-
-
-class ComputeBackend:
-    """Thin PSI/J adapter for local or scheduler-backed execution.
-
-    `directory`, stdout and stderr paths must exist on the target compute system.
-    Stage-in/out and SSH code deployment are intentionally not implemented.
-    """
-
-    def __init__(self, executor_name: str = "local") -> None:
-        self.executor_name = executor_name
-        self._native_jobs: dict[str, PsiJob] = {}
-
-    def _executor(self) -> JobExecutor:
-        return JobExecutor.get_instance(self.executor_name)
-
-    def submit(
-        self,
-        job: Job,
-        argv: list[str],
-        environment: Mapping[str, str],
-        *,
-        resources: ResourceSpec | None = None,
-        attributes: JobAttributes | None = None,
-    ) -> Job:
-        """Submit prepared job; the caller owns persistence and preparation."""
-        if job.executor != self.executor_name or not argv or job.state != "created":
-            raise ExecutionError("Invalid prepared job for submission")
-        executable, arguments = argv[0], argv[1:]
-        spec = JobSpec(
-            executable=executable,
-            arguments=arguments,
-            directory=job.directory,
-            environment=dict(environment),
-            inherit_environment=True,
-            stdout_path=job.stdout,
-            stderr_path=job.stderr,
-            resources=resources,
-            attributes=attributes,
-        )
-        psi_job = PsiJob(spec)
-        folder = Path(job.stdout).parent if job.stdout else Path(job.directory)
-        job.state = "submitting"
-        job.save(folder)
-        try:
-            self._executor().submit(psi_job)
-        except Exception as exc:
-            job.state = "failed"
-            job.error = f"PSI/J submission failed: {exc}"
-            job.save(folder)
-            raise ExecutionError(job.error) from exc
-
-        if psi_job.native_id is None:
-            job.state = "failed"
-            job.error = "PSI/J did not return a native job ID"
-            job.save(folder)
-            raise ExecutionError(job.error)
-        job.native_id = str(psi_job.native_id)
-        self._native_jobs[job.id] = psi_job
-        if self.executor_name == "local" and job.native_id:
-            with contextlib.suppress(ValueError, psutil.Error, OSError):
-                job.native_process_created = psutil.Process(
-                    int(job.native_id)
-                ).create_time()
-        job.state = "submitted"
-        try:
-            job.save(folder)
-        except OSError as exc:
-            raise ExecutionError(
-                f"Submitted job {job.id} (native_id={job.native_id!r}), "
-                f"but saving the submission metadata failed: {exc}"
-            ) from exc
-        return job
-
-    def _attach(self, job: Job) -> tuple[JobExecutor, PsiJob]:
-        if not job.native_id:
-            raise ExecutionError(f"Job {job.id} has no native execution ID")
-        executor = self._executor()
-        native = PsiJob()
-        executor.attach(native, job.native_id)
-        return executor, native
-
-    def refresh(self, folder: Path, job_id: str) -> Job:
-        job = Job.load(folder, job_id)
-        if job.executor != self.executor_name:
-            raise ExecutionError(f"Job {job_id} belongs to executor {job.executor!r}")
-        if job.state in TERMINAL:
-            return job
-
-        if not job.native_id:
-            return job  # Persisted before submit; not safe to infer failure.
-        try:
-            native = self._native_jobs.get(job.id)
-            if native is None:
-                _, native = self._attach(job)
-            status = native.wait(
-                timeout=timedelta(seconds=2), target_states=[JobState.QUEUED]
+        tracking_backend = create_backend(tracking_spec, selected)
+        if (
+            "MLFLOW_TRACKING_URI" not in additions
+            and "MLFLOW_TRACKING_URI" not in os.environ
+        ):
+            additions["MLFLOW_TRACKING_URI"] = tracking_backend.tracking_uri
+        if (
+            "MLFLOW_EXPERIMENT_NAME" not in additions
+            and "MLFLOW_EXPERIMENT_NAME" not in os.environ
+        ):
+            additions["MLFLOW_EXPERIMENT_NAME"] = (
+                tracking_backend.experiment_name or selected.root.name
             )
-        except Exception as exc:
-            # Inspection failures must not silently become execution failures.
-            job.error = f"Cannot inspect job status: {exc}"
-            job.save(folder)
-            return job
 
-        if status is None or status.state == JobState.NEW:
-            return job
+    commit = ""
+    git_state = "unavailable"
+    try:
+        repository = GitRepository(selected.root)
+        commit = repository.resolve("HEAD")
+        git_state = "dirty" if repository.is_dirty else "clean"
+    except GitError:
+        pass
 
-        mapping = {
-            JobState.QUEUED: "queued",
-            JobState.ACTIVE: "running",
-            JobState.COMPLETED: "completed",
-            JobState.FAILED: "failed",
-            JobState.CANCELED: "canceled",
-        }
-        state = mapping.get(status.state, "unknown")
-        job.state = (
-            "canceling" if job.cancel_requested and state not in TERMINAL else state
+    job_id = uuid4().hex
+    environment = os.environ.copy()
+    for name in reserved:
+        environment.pop(name, None)
+    environment.update(additions)
+
+    dispatcher_name = dispatch if dispatch is not None else selected.default_dispatch
+    if dispatcher_name:
+        if (
+            not isinstance(dispatcher_name, str)
+            or dispatcher_name in {".", ".."}
+            or "/" in dispatcher_name
+            or "\\" in dispatcher_name
+            or "\x00" in dispatcher_name
+        ):
+            raise ValidationError(f"Invalid dispatcher name: {dispatcher_name!r}")
+        filename = (
+            dispatcher_name if Path(dispatcher_name).suffix else f"{dispatcher_name}.sh"
         )
-        job.exit_code = status.exit_code
-        job.error = None
-        job.save(folder)
-        return job
+        dispatcher_path = selected.dispatch_dir / filename
+        if dispatch is not None and not dispatcher_path.is_file():
+            raise ExecutionError(f"Dispatcher does not exist: {dispatcher_path}")
+        if dispatcher_path.is_file():
+            argv = [str(dispatcher_path), "--", *argv]
 
-    def cancel(self, folder: Path, job_id: str) -> Job:
-        job = self.refresh(folder, job_id)
-        if job.state in TERMINAL:
-            raise ExecutionError(f"Job {job_id} is already {job.state}")
-        if not job.native_id:
-            raise ExecutionError(f"Job {job_id} has no native execution ID")
-        if job.executor == "local":
-            # PSI/J's local native ID is a PID; ensure it was not reused.
-            if job.native_process_created is None:
-                raise ExecutionError(
-                    "Cannot safely cancel local job without PID identity"
-                )
-            try:
-                process = psutil.Process(int(job.native_id))
-                if abs(process.create_time() - job.native_process_created) > 0.01:
-                    raise ExecutionError("Cannot cancel: native PID has been reused")
-                for child in process.children(recursive=True):
-                    with contextlib.suppress(psutil.NoSuchProcess):
-                        child.kill()
-                process.kill()
-                process.wait(timeout=5)
-            except (ValueError, psutil.Error, OSError) as exc:
-                raise ExecutionError(
-                    f"Cannot cancel local job {job_id}: {exc}"
-                ) from exc
-            job.state = "canceled"
-        else:
-            executor, native = self._attach(job)
-            try:
-                executor.cancel(native)
-            except Exception as exc:
-                raise ExecutionError(
-                    f"Cannot request cancellation of {job_id}: {exc}"
-                ) from exc
-            # Cancellation is asynchronous; wait for the scheduler to confirm.
-            job.state = "canceling"
-            job.cancel_requested = True
-        job.save(folder)
-        return job
-
-    def logs(self, job: Job) -> tuple[Path | None, Path | None]:
-        return (
-            Path(job.stdout) if job.stdout else None,
-            Path(job.stderr) if job.stderr else None,
-        )
-
-    def wait(
-        self,
-        folder: Path,
-        job_id: str,
-        *,
-        timeout: float | None = None,
-        poll_interval: float = 1.0,
-    ) -> Job:
-        """Poll until terminal; raise on timeout, never invent a terminal state."""
-        if poll_interval <= 0 or (timeout is not None and timeout < 0):
-            raise ValueError("timeout must be non-negative and poll_interval positive")
-        deadline = time.monotonic() + timeout if timeout is not None else None
-        while True:
-            job = self.refresh(folder, job_id)
-            if job.state in TERMINAL:
-                return job
-            if deadline is not None and time.monotonic() >= deadline:
-                raise ExecutionError(
-                    f"Timed out waiting for job {job_id} ({job.state})"
-                )
-            time.sleep(poll_interval)
-
-
-class LocalBackend(ComputeBackend):
-    def __init__(self) -> None:
-        super().__init__("local")
-
-
-def submit(
-    command: Sequence[str] | None = None,
-    *,
-    record_id: str | None = None,
-    executor: str = "local",
-    config: HirakuConfig,
-    dispatch: str | None = None,
-    env: Mapping[str, str] | None = None,
-    resources: ResourceSpec | None = None,
-    attributes: JobAttributes | None = None,
-    _backend: ComputeBackend | None = None,
-) -> Job:
-    """High-level entry point for the CLI, MCP, and workflows.
-
-    The tracking layer may later use HIRAKU_JOB_ID to resolve the persisted Job,
-    derive record/commit attribution, and tag a tracked Run with job_id.
-    This module must never import or instantiate a TrackingBackend.
-    """
-    prepared, argv = _prepare(
-        command,
-        record_id=record_id,
-        config=config,
-        executor=executor,
-        dispatch=dispatch,
+    job = Job(
+        spec=JobSpec(
+            executable=argv[0],
+            arguments=argv[1:],
+            directory=selected.root,
+            environment=environment,
+            inherit_environment=False,
+            capture_output=capture_output,
+        ),
+        record_id=record.id,
+        commit=commit or None,
+        git_state=git_state,
+        record_file=record.path,
+        id=job_id,
     )
-    environment = _environment(env, prepared.id)
-    prepared.save(job_directory(config))
-    backend = _backend or (
-        LocalBackend() if executor == "local" else ComputeBackend(executor)
-    )
-    if backend.executor_name != executor:
-        raise ExecutionError(
-            f"Backend {backend.executor_name!r} does not match executor {executor!r}"
-        )
-    return backend.submit(
-        prepared, argv, environment, resources=resources, attributes=attributes
-    )
-
-
-def refresh(config: HirakuConfig, job_id: str) -> Job:
-    folder = job_directory(config)
-    job = Job.load(folder, job_id)
-    backend = (
-        LocalBackend() if job.executor == "local" else ComputeBackend(job.executor)
-    )
-    return backend.refresh(folder, job_id)
-
-
-def cancel(config: HirakuConfig, job_id: str) -> Job:
-    folder = job_directory(config)
-    job = Job.load(folder, job_id)
-    backend = (
-        LocalBackend() if job.executor == "local" else ComputeBackend(job.executor)
-    )
-    return backend.cancel(folder, job_id)
+    return LocalJobExecutor().execute(job)

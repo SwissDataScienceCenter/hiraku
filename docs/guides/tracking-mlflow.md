@@ -23,7 +23,7 @@ tracking_backend: mlflow
 ```
 
 Hiraku uses `mlflow.db` in the project root and an experiment named after the
-project directory. `hiraku job run` supplies `MLFLOW_TRACKING_URI` and
+project directory. `hiraku run` supplies `MLFLOW_TRACKING_URI` and
 `MLFLOW_EXPERIMENT_NAME` to the training process, so standard MLflow logging
 uses the same store Hiraku queries. Existing environment values are preserved.
 
@@ -48,7 +48,7 @@ are never turned into links.
 
 ## Log from your script
 
-`hiraku job run` sets the tracking URI and experiment name from `hiraku.yml`. For
+`hiraku run` sets the tracking URI and experiment name from `hiraku.yml`. For
 commands run outside Hiraku, set the URI yourself:
 
 ```bash

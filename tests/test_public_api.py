@@ -1,7 +1,7 @@
 from hiraku import HirakuConfig, Metric, Record, Run, initialize_project
 from hiraku.errors import GitError, HirakuError
-from hiraku.execution import execute_command
 from hiraku.io import atomic_write, dump_yaml, load_yaml_mapping
+from hiraku.jobs import execute_command
 from hiraku.record import list_records, load_record
 from hiraku.tracking import TrackingBackend
 

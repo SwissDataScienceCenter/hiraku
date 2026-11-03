@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from hiraku.errors import ValidationError
-from hiraku.execution import validate_command
+from hiraku.jobs import validate_command
 from hiraku.record import validate_identifier
 
 

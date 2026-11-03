@@ -1,10 +1,11 @@
 import argparse
-import csv
+import os
 import uuid
 from datetime import UTC, datetime
 
+import pandas as pd
+
 from hiraku.config import HirakuConfig
-from hiraku.jobs import current_job
 
 FIELDS = [
     "id",
@@ -29,26 +30,23 @@ expected = [0, 1, 1, 0]
 predicted = [int(value >= 0.5) for value in [0.1, 0.8, 0.7, 0.2]]
 accuracy = sum(a == b for a, b in zip(expected, predicted, strict=True)) / len(expected)
 
-job = current_job()
-if job is None:
+if not os.environ.get("HIRAKU_JOB_ID"):
     raise RuntimeError("Run this example through Hiraku to record job attribution")
 runs_file = HirakuConfig.discover().root / "runs.csv"
-write_header = not runs_file.exists() or runs_file.stat().st_size == 0
-
-with runs_file.open("a", encoding="utf-8", newline="") as stream:
-    writer = csv.DictWriter(stream, fieldnames=FIELDS)
-    if write_header:
-        writer.writeheader()
-    writer.writerow(
-        {
-            "id": uuid.uuid4().hex,
-            "job_id": job.id,
-            "record_id": job.record_id,
-            "commit": job.commit or "",
-            "git_state": job.git_state,
-            "timestamp": started.isoformat(),
-            "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
-            "param.seed": args.seed,
-            "metric.val/accuracy": accuracy,
-        }
-    )
+row = {
+    "id": uuid.uuid4().hex,
+    "job_id": os.environ["HIRAKU_JOB_ID"],
+    "record_id": os.environ["HIRAKU_RECORD_ID"],
+    "commit": os.environ.get("HIRAKU_COMMIT", ""),
+    "git_state": os.environ.get("HIRAKU_GIT_STATE", "unavailable"),
+    "timestamp": started.isoformat(),
+    "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
+    "param.seed": args.seed,
+    "metric.val/accuracy": accuracy,
+}
+pd.DataFrame([row], columns=FIELDS).to_csv(
+    runs_file,
+    mode="a",
+    header=not runs_file.exists() or runs_file.stat().st_size == 0,
+    index=False,
+)

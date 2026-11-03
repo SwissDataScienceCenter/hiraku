@@ -61,7 +61,7 @@ tracking_backend: csv
 ## Command execution
 
 Commands are not record metadata. Pass the complete argv directly to
-`hiraku job run`; a dispatcher can prepare repeatable project-specific runtime
+`hiraku run`; a dispatcher can prepare repeatable project-specific runtime
 behavior around that invocation. Command execution runs synchronously in the
 project working tree; tracked runs own measurements and can be inspected after
 the command exits. See
@@ -139,7 +139,7 @@ git commit -m "implement logistic baseline"
 hiraku record update logistic-baseline --commit HEAD
 
 # 4. run an arbitrary command and list attributed runs
-hiraku job run --record logistic-baseline -- uv run python train.py
+hiraku run --record logistic-baseline -- uv run python train.py
 hiraku runs --record logistic-baseline --sort val/log_loss --ascending
 
 # 5. review the runs and document the conclusion on the child record

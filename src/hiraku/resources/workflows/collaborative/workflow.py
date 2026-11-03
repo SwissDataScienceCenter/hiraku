@@ -16,8 +16,8 @@ from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.config import HirakuConfig
 from hiraku.errors import HirakuError, ValidationError
-from hiraku.execution import validate_command
 from hiraku.git import GitRepository
+from hiraku.jobs import validate_command
 from hiraku.markdown import Markdown, render
 from hiraku.record import Record, load_record
 from hiraku.run import Run
@@ -328,7 +328,6 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         data["command"] = shlex.join(
             [
                 "hiraku",
-                "job",
                 "run",
                 "--record",
                 record.id,
