@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,6 +14,21 @@ from .base import TrackingBackend
 
 if TYPE_CHECKING:
     from ..run import Run
+
+
+@contextmanager
+def track_run(*args: Any, **kwargs: Any):
+    """Start a W&B run with available Hiraku attribution."""
+    import wandb
+
+    from .attribution import _tracking_metadata
+
+    kwargs["config"] = _tracking_metadata(kwargs.get("config"))
+    run = wandb.init(*args, **kwargs)
+    try:
+        yield run
+    finally:
+        run.finish()
 
 
 class WandbBackendConfig(BaseModel):
@@ -205,6 +221,7 @@ class WandbBackend(TrackingBackend):
             "group": getattr(run, "group", None),
             "job_type": getattr(run, "job_type", None),
             "metadata": run.metadata,
+            "entrypoint": (run.config or {}).get("hiraku.entrypoint"),
         }
 
     def _normalize_run(self, run: Any) -> Run:
@@ -219,11 +236,11 @@ class WandbBackend(TrackingBackend):
             metrics=dict(run.summary or {}),
             params=self._run_params(run),
             record_id=record_id,
+            job_id=config.get("hiraku.job_id"),
             commit=commit,
             timestamp=run.created_at,
             # W&B keeps a run's wall-clock seconds in the ``_runtime`` summary key.
             duration=(run.summary or {}).get("_runtime"),
-            entrypoint=config.get("hiraku.entrypoint"),
             url=run.url,
             raw=self._run_raw(run),
         )

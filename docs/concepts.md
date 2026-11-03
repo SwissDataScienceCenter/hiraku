@@ -45,7 +45,7 @@ At any time, a single record can be set as "active". By default, creation activa
 A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters. Record configuration and the CLI select these built-in backends. The backend needs to:
 
 - List runs from the tracking source selected by a record.
-- Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, historical entrypoint, and URL attribution may be absent.
+- Return normalized runs with a required backend run ID, metrics, and parameters; job ID, record ID, commit, timestamp, and URL attribution may be absent. Backend-specific fields remain in `raw`.
 
 Set `tracking_backend` in `hiraku.yml` to select the tracking source for every
 record in the project. Records cannot override the project setting. Backend
@@ -61,7 +61,7 @@ tracking_backend: csv
 ## Command execution
 
 Commands are not record metadata. Pass the complete argv directly to
-`hiraku run`; a dispatcher can prepare repeatable project-specific runtime
+`hiraku job run`; a dispatcher can prepare repeatable project-specific runtime
 behavior around that invocation. Command execution runs synchronously in the
 project working tree; tracked runs own measurements and can be inspected after
 the command exits. See
@@ -139,7 +139,7 @@ git commit -m "implement logistic baseline"
 hiraku record update logistic-baseline --commit HEAD
 
 # 4. run an arbitrary command and list attributed runs
-hiraku run --record logistic-baseline -- uv run python train.py
+hiraku job run --record logistic-baseline -- uv run python train.py
 hiraku runs --record logistic-baseline --sort val/log_loss --ascending
 
 # 5. review the runs and document the conclusion on the child record

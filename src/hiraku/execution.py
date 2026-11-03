@@ -11,6 +11,7 @@ from typing import Any
 from .config import HirakuConfig
 from .errors import ExecutionError, GitError, NoActiveRecordError, ValidationError
 from .git import GitRepository
+from .jobs import Job
 from .record import load_record
 
 
@@ -64,6 +65,7 @@ def execute_command(
         raise ValidationError("Environment additions must map strings to strings")
     reserved = {
         "HIRAKU_RECORD_ID",
+        "HIRAKU_JOB_ID",
         "HIRAKU_RECORD_FILE",
         "HIRAKU_ROOT",
         "HIRAKU_TRACKING_ROOT",
@@ -113,6 +115,14 @@ def execute_command(
     except GitError:
         pass
 
+    job = Job(
+        record_id=record.id,
+        command=argv,
+        directory=str(selected.root),
+        commit=commit or None,
+        git_state=git_state,
+    )
+    job_directory = selected.hiraku_dir / "jobs"
     environment = os.environ.copy()
     for name in reserved:
         environment.pop(name, None)
@@ -120,6 +130,7 @@ def execute_command(
     environment.update(
         {
             "HIRAKU_RECORD_ID": record.id,
+            "HIRAKU_JOB_ID": job.id,
             "HIRAKU_RECORD_FILE": str(record.path),
             "HIRAKU_ROOT": str(selected.root),
             "HIRAKU_TRACKING_ROOT": str(selected.root),
@@ -147,8 +158,10 @@ def execute_command(
         if dispatcher_path.is_file():
             argv = [str(dispatcher_path), "--", *argv]
 
+    job.state = "running"
+    job.save(job_directory)
     try:
-        return subprocess.run(
+        result = subprocess.run(
             argv,
             cwd=selected.root,
             env=environment,
@@ -157,4 +170,10 @@ def execute_command(
             text=True,
         )
     except OSError as exc:
+        job.state = "failed"
+        job.save(job_directory)
         raise ExecutionError(f"Could not execute command {argv[0]!r}: {exc}") from exc
+    job.exit_code = result.returncode
+    job.state = "completed" if result.returncode == 0 else "failed"
+    job.save(job_directory)
+    return result

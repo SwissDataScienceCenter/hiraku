@@ -68,9 +68,9 @@ hiraku record create strong-l2 --parent digits --type experiment \
 
 hiraku record list
 
-hiraku run --record weak-l2 -- uv run python train.py --alpha 0.0001 \
+hiraku job run --record weak-l2 -- uv run python train.py --alpha 0.0001 \
   --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
-hiraku run --record strong-l2 -- uv run python train.py --alpha 1.0 \
+hiraku job run --record strong-l2 -- uv run python train.py --alpha 1.0 \
   --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
 ```
 

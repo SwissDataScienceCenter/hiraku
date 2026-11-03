@@ -79,6 +79,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         invoke(
             runner,
             [
+                "job",
                 "run",
                 "--record",
                 record_id,

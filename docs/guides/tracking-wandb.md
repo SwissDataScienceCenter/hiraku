@@ -31,23 +31,18 @@ tracking_backend: wandb
 ## Log from your script
 
 ```python
-import os
-import wandb
+from hiraku import track_run
 
-with wandb.init(
-    group=os.environ["HIRAKU_RECORD_ID"],
-    config={
-        "seed": 42,
-    },
+with track_run(
+    backend="wandb", project="my-project", config={"seed": 42}
 ) as run:
     run.log({"test/accuracy": accuracy})  # calculated by your evaluation code
 ```
 
-W&B assigns the run ID. Hiraku supplies `WANDB_PROJECT` from the project
-configuration unless it is already set. Your script only needs its ordinary
-`wandb.init()` call; there is no Hiraku-specific
-W&B config to add. The project setting selects the query backend and does not
-initialize a W&B run.
+W&B assigns the run ID. Hiraku's wrapper adds the current job ID and resolves
+record and Git provenance from the saved job. Choose the W&B project as usual;
+the project's `tracking_backend` setting selects Hiraku's query adapter and
+does not initialize a W&B run.
 
 ## Inspect
 

@@ -17,28 +17,34 @@ The CSV adapter reads records; it does not write them. Your evaluation script
 can append a row using this schema:
 
 ```csv
-id,record_id,commit,git_state,timestamp,metric.val/accuracy,param.seed
-run-001,baseline,abc123,clean,2026-01-01T12:00:00Z,0.84,42
+id,job_id,record_id,commit,git_state,timestamp,metric.val/accuracy,param.seed
+run-001,job-id,baseline,abc123,clean,2026-01-01T12:00:00Z,0.84,42
 ```
 
 Choose a unique run ID for each execution. Prefix metric columns with
-`metric.` and parameter columns with `param.`. Use `HIRAKU_GIT_STATE` to record
-whether the current working tree had changes.
-
-During execution, `HIRAKU_ROOT` and `HIRAKU_TRACKING_ROOT` point to the project
-directory. Write the tracking table there:
+`metric.` and parameter columns with `param.`. For CSV writers, retrieve the
+current job explicitly:
 
 ```python
-import os
-from pathlib import Path
+from hiraku.config import HirakuConfig
+from hiraku.jobs import current_job
 
-runs_path = Path(os.environ["HIRAKU_TRACKING_ROOT"]) / "runs.csv"
+job = current_job()
+if job is None:
+    raise RuntimeError("Run through Hiraku to associate this CSV row with a job")
+project_root = HirakuConfig.discover().root
 ```
 
-Use `HIRAKU_RECORD_ID`, `HIRAKU_COMMIT`, and
-`HIRAKU_GIT_STATE` to populate attribution. See
-Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
-`hiraku example create heart-disease` to get a complete writer in `train.py`.
+Use `job.id`, `job.record_id`, `job.commit`, and `job.git_state` to populate
+the CSV columns. Write the tracking table under the project root (or the
+configured CSV path):
+
+```python
+runs_path = project_root / "runs.csv"
+```
+
+See the [Heart Disease example](../examples/heart-disease/README.md) for a
+complete writer. Initialize it with `hiraku example create heart-disease`.
 
 The `id` column is the tracking backend's run ID.
 

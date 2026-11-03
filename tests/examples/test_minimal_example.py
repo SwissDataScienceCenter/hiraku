@@ -68,7 +68,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
 
     invoke(
         runner,
-        ["run", "--record", "baseline", "--", sys.executable, "evaluate.py"],
+        ["job", "run", "--record", "baseline", "--", sys.executable, "evaluate.py"],
     )
 
     config = HirakuConfig.discover(project)

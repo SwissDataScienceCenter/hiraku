@@ -7,12 +7,13 @@ import os
 import platform
 import time
 
-import wandb
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, log_loss
 from sklearn.model_selection import train_test_split
+
+from hiraku import track_run
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,8 +34,10 @@ def main() -> None:
     if os.environ.get("WANDB_TAGS"):
         tags.extend(tag.strip() for tag in os.environ["WANDB_TAGS"].split(","))
 
-    run = wandb.init(
+    with track_run(
+        backend="wandb",
         entity=entity,
+        project=os.environ.get("WANDB_PROJECT", "iris-wandb"),
         name=os.environ.get("WANDB_RUN_NAME"),
         group=group,
         job_type=os.environ.get("WANDB_JOB_TYPE", "train"),
@@ -43,8 +46,6 @@ def main() -> None:
             "WANDB_NOTES", "Deterministic Iris classification experiment"
         ),
         config={
-            "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
-            "hiraku.commit": os.environ["HIRAKU_COMMIT"],
             "dataset.name": "scikit-learn iris",
             "dataset.samples": 150,
             "dataset.features": 4,
@@ -53,41 +54,39 @@ def main() -> None:
             "test_size": args.test_size,
             "python.version": platform.python_version(),
         },
-    )
-    started = time.perf_counter()
-    try:
-        data = load_iris()
-        train_x, test_x, train_y, test_y = train_test_split(
-            data.data,
-            data.target,
-            test_size=args.test_size,
-            random_state=args.seed,
-            stratify=data.target,
-        )
-        model = (
-            LogisticRegression(max_iter=500, random_state=args.seed)
-            if args.model == "logistic"
-            else RandomForestClassifier(
-                n_estimators=100, random_state=args.seed, n_jobs=1
+    ) as run:
+        started = time.perf_counter()
+        try:
+            data = load_iris()
+            train_x, test_x, train_y, test_y = train_test_split(
+                data.data,
+                data.target,
+                test_size=args.test_size,
+                random_state=args.seed,
+                stratify=data.target,
             )
-        )
-        model.fit(train_x, train_y)
-        probabilities = model.predict_proba(test_x)
-        predictions = model.predict(test_x)
-        metrics = {
-            "test/accuracy": float(accuracy_score(test_y, predictions)),
-            "test/f1_macro": float(f1_score(test_y, predictions, average="macro")),
-            "test/log_loss": float(log_loss(test_y, probabilities)),
-            "runtime/seconds": time.perf_counter() - started,
-        }
-        wandb.log(metrics)
-        run.summary["status"] = "completed"
-        print(" ".join(f"{name}={value:.6f}" for name, value in metrics.items()))
-    except Exception:
-        run.summary["status"] = "failed"
-        raise
-    finally:
-        run.finish()
+            model = (
+                LogisticRegression(max_iter=500, random_state=args.seed)
+                if args.model == "logistic"
+                else RandomForestClassifier(
+                    n_estimators=100, random_state=args.seed, n_jobs=1
+                )
+            )
+            model.fit(train_x, train_y)
+            probabilities = model.predict_proba(test_x)
+            predictions = model.predict(test_x)
+            metrics = {
+                "test/accuracy": float(accuracy_score(test_y, predictions)),
+                "test/f1_macro": float(f1_score(test_y, predictions, average="macro")),
+                "test/log_loss": float(log_loss(test_y, probabilities)),
+                "runtime/seconds": time.perf_counter() - started,
+            }
+            run.log(metrics)
+            run.summary["status"] = "completed"
+            print(" ".join(f"{name}={value:.6f}" for name, value in metrics.items()))
+        except Exception:
+            run.summary["status"] = "failed"
+            raise
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ Pass the returned result to `workflow_resume`.
 
 Call `workflow_approval` with the interrupt ID and `{"event": "launched"}` as
 the proposed response. Run the explicit argv supplied when starting the
-workflow with `hiraku run --record <experiment> -- <command...>` only after
+workflow with `hiraku job run --record <experiment> -- <command...>` only after
 approval, then resume with the result once the run is tracked; check with
 `hiraku runs --record <experiment>`.
 

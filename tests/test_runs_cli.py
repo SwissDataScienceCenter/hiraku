@@ -49,6 +49,7 @@ def test_record_cli_explicit_run_and_runs(tmp_path: Path, monkeypatch) -> None:
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-qm", "records"], cwd=tmp_path, check=True)
     result = invoke(
+        "job",
         "run",
         "--record",
         "child",

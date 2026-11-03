@@ -79,6 +79,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         invoke(
             runner,
             [
+                "job",
                 "run",
                 "--record",
                 record_id,
@@ -159,7 +160,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     assert {row["record_id"] for row in filtered} == {"strong-l2"}
 
 
-def test_digits_requires_provenance_before_creating_runs(tmp_path):
+def test_digits_runs_without_hiraku_provenance(tmp_path):
     pytest.importorskip("mlflow")
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("HIRAKU_")
@@ -173,20 +174,18 @@ def test_digits_requires_provenance_before_creating_runs(tmp_path):
         text=True,
         capture_output=True,
     )
-    assert result.returncode != 0
-    assert "Missing launch environment variables: HIRAKU_RECORD_ID" in result.stderr
-    assert not (tmp_path / "mlflow.db").exists()
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "mlflow.db").exists()
 
 
-def test_digits_requires_root_for_default_tracking(tmp_path):
+def test_digits_uses_job_id_from_environment_without_persisted_metadata(tmp_path):
     pytest.importorskip("mlflow")
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("HIRAKU_")
     }
     env.update(
         {
-            "HIRAKU_RECORD_ID": "baseline",
-            "HIRAKU_COMMIT": "a" * 40,
+            "HIRAKU_JOB_ID": "missing-job-id",
         }
     )
     result = subprocess.run(
@@ -196,6 +195,13 @@ def test_digits_requires_root_for_default_tracking(tmp_path):
         text=True,
         capture_output=True,
     )
-    assert result.returncode != 0
-    assert "Missing launch environment variables: HIRAKU_ROOT" in result.stderr
-    assert not (tmp_path / "mlflow.db").exists()
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "mlflow.db").exists()
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}")
+    experiment = client.get_experiment_by_name("hiraku-digits")
+    assert experiment is not None
+    runs = client.search_runs([experiment.experiment_id])
+    assert len(runs) == 1
+    assert runs[0].data.tags["hiraku.job_id"] == "missing-job-id"

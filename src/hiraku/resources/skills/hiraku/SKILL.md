@@ -28,7 +28,7 @@ through an existing record lifecycle.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and invocation attribution together with
   parameters, metrics, timestamps, and an external URL.
-- **Command:** Explicit argv passed to each `hiraku run` invocation. Commands
+- **Command:** Explicit argv passed to each `hiraku job run` invocation. Commands
   are not stored in records.
 - **Execution:** A foreground command in the current project working tree.
   Hiraku streams output, returns the command's exit code, and supplies tracking
@@ -54,7 +54,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | --- | --- |
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
-| Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
+| Run a command | `hiraku job run [--record ID] [--dispatch DISPATCHER] -- COMMAND ...` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
 | Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; collaborative approvals use `workflow_approval`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
 | Manage records, including supporting material | `hiraku record ...` |
@@ -237,7 +237,7 @@ For high-level child-record work:
    relevant code, make and verify the focused change, commit it if authorized,
    then bind that commit with `hiraku record update <record-id> --commit
    HEAD`.
-5. Inspect the runnable code and decide which argv to submit to `hiraku run`.
+5. Inspect the runnable code and decide which argv to submit to `hiraku job run`.
 6. Bind `--commit HEAD` during creation only when the record already
    represents the current source state. Leave a future idea as an unbound
    proposal and update its commit after implementation.
@@ -249,7 +249,7 @@ hiraku record create <record-id> --parent <root-id> --type experiment \
   --set 'hypothesis=...' \
   --commit HEAD
 hiraku record show <record-id> --json
-hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
+hiraku job run --record <record-id> -- uv run --locked python train.py --seed 42
 ```
 
 Creating a record activates it by default. Several children may share a
@@ -279,14 +279,14 @@ For a high-level run request:
    experimental evidence.
 
 ```bash
-hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
+hiraku job run --record <record-id> -- uv run --locked python train.py --seed 42
 hiraku runs --record <record-id> --json
 ```
 
 Tokens after `--` replace the complete invocation:
 
 ```bash
-hiraku run --record <record-id> -- uv run --locked python train.py --seed 7
+hiraku job run --record <record-id> -- uv run --locked python train.py --seed 7
 ```
 
 Do not repeat an existing successful run unless the user or workflow requires a
@@ -342,17 +342,18 @@ paused; do not resume it or launch the experiment. Do not replace elicitation
 with an ordinary assistant question.
 
 Commands are not record metadata. Pass the complete invocation directly after
-`--`, for example `hiraku run --record <record-id> -- uv run --locked python
+`--`, for example `hiraku job run --record <record-id> -- uv run --locked python
 train.py --seed 42`. A dispatcher can prepare repeatable project-specific
 runtime behavior around that invocation.
 
 Commands execute in the current project working tree, including uncommitted
-changes. `hiraku run` waits until the command exits.
+changes. `hiraku job run` waits until the command exits.
 
-Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`,
-`HIRAKU_TRACKING_ROOT`, `HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE`.
-`HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, and cwd point to the project directory.
-Use a project dispatcher to prepare the runtime when needed.
+`hiraku job run` and `hiraku job submit` inject `HIRAKU_JOB_ID`. Tracking
+helpers resolve record and Git attribution from the saved job. The separate
+`execute_command` Python API also provides record and Git metadata as
+environment variables. Use a project dispatcher to prepare the runtime when
+needed.
 
 The CSV backend queries project-root `runs.csv`. Tracking backends generate
 and own run IDs. Tracking adapters read record and commit attribution from run

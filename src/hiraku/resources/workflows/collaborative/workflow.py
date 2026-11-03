@@ -326,7 +326,15 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         record = experiment(state)
         data = experiment_context(state)
         data["command"] = shlex.join(
-            ["hiraku", "run", "--record", record.id, "--", *state["command"]]
+            [
+                "hiraku",
+                "job",
+                "run",
+                "--record",
+                record.id,
+                "--",
+                *state["command"],
+            ]
         )
         response = response_for(state, "launch", data)
         event, arguments = response["event"], response["arguments"]

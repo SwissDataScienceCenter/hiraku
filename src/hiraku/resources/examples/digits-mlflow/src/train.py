@@ -16,6 +16,8 @@ from sklearn.neural_network import MLPClassifier
 from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
+from hiraku import track_run
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -36,22 +38,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    required = (
-        "HIRAKU_RECORD_ID",
-        "HIRAKU_COMMIT",
-        "HIRAKU_ROOT",
-        "HIRAKU_TRACKING_ROOT",
-    )
-    missing = [name for name in required if name not in os.environ]
-    if missing:
-        raise RuntimeError(
-            f"Missing launch environment variables: {', '.join(missing)}"
-        )
-    tags = {
-        f"hiraku.{key}": os.environ[f"HIRAKU_{key.upper()}"]
-        for key in ("record_id", "commit")
-    }
-    database = Path(os.environ["HIRAKU_TRACKING_ROOT"]) / "mlflow.db"
+    database = Path.cwd() / "mlflow.db"
     default_tracking_uri = f"sqlite:///{database}"
     mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", default_tracking_uri))
     mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT_NAME", "hiraku-digits"))
@@ -72,7 +59,7 @@ def main() -> None:
         learning_rate_init=0.001,
         random_state=args.seed,
     )
-    with mlflow.start_run(run_name=tags["hiraku.record_id"], tags=tags):
+    with track_run(backend="mlflow"):
         mlflow.log_params(
             {
                 **vars(args),

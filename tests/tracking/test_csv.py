@@ -16,14 +16,25 @@ def test_csv_backend_config_is_validated() -> None:
     assert config.path == Path("runs.csv")
 
 
-def test_csv_tracking_run_and_historical_entrypoint_attribution(tmp_path: Path) -> None:
+def test_csv_keeps_historical_entrypoint_as_raw_metadata(tmp_path: Path) -> None:
     config = HirakuConfig.init(tmp_path, install_skill=False)
     (tmp_path / "runs.csv").write_text(
         "id,record_id,entrypoint\nnew,record,\nold,record,train\n"
     )
     runs = {run.id: run for run in CSVBackend(config).list_runs()}
     assert runs["new"].id == "new"
-    assert runs["old"].entrypoint == "train"
+    assert runs["old"].raw["entrypoint"] == "train"
+
+
+def test_csv_backend_reads_job_attribution(tmp_path: Path) -> None:
+    config = HirakuConfig.init(tmp_path, install_skill=False)
+    (tmp_path / "runs.csv").write_text(
+        "id,record_id,job_id\nrun-1,record,job-1\n", encoding="utf-8"
+    )
+
+    run = CSVBackend(config).list_runs()[0]
+
+    assert run.job_id == "job-1"
 
 
 def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:

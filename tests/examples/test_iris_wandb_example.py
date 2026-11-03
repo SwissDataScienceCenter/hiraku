@@ -160,6 +160,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     invoke(
         runner,
         [
+            "job",
             "run",
             "--record",
             "logistic",

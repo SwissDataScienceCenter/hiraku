@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote, urlsplit
@@ -14,6 +15,18 @@ from .base import TrackingBackend
 
 if TYPE_CHECKING:
     from ..run import Run
+
+
+@contextmanager
+def track_run(*args: Any, **kwargs: Any):
+    """Start an MLflow run with available Hiraku attribution."""
+    import mlflow
+
+    from .attribution import _tracking_metadata
+
+    kwargs["tags"] = _tracking_metadata(kwargs.get("tags"))
+    with mlflow.start_run(*args, **kwargs) as run:
+        yield run
 
 
 class MLflowBackendConfig(BaseModel):
@@ -164,9 +177,9 @@ class MLflowBackend(TrackingBackend):
                 tags = dict(data.tags)
                 native_record = tags.get("hiraku.record_id")
                 known_tags = {
+                    "hiraku.job_id",
                     "hiraku.record_id",
                     "hiraku.commit",
-                    "hiraku.entrypoint",
                 }
                 raw = {
                     "status": info.status,
@@ -182,8 +195,8 @@ class MLflowBackend(TrackingBackend):
                     Run(
                         id=info.run_id,
                         record_id=native_record,
+                        job_id=tags.get("hiraku.job_id"),
                         commit=tags.get("hiraku.commit"),
-                        entrypoint=tags.get("hiraku.entrypoint"),
                         timestamp=self._timestamp(
                             info.start_time,
                             backend="mlflow",

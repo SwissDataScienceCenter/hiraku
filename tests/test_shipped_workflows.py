@@ -83,7 +83,10 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     )
     launch = _interrupt(result)
     assert launch["step"] == "launch"
-    assert "hiraku run --record dropout -- python train.py" in launch["data"]["command"]
+    assert (
+        "hiraku job run --record dropout -- python train.py"
+        in launch["data"]["command"]
+    )
 
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
         stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,\n")

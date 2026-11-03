@@ -39,11 +39,11 @@ class CSVBackend(TrackingBackend):
 
     STANDARD = {
         "id",
+        "job_id",
         "record_id",
         "commit",
         "timestamp",
         "duration",
-        "entrypoint",
         "url",
     }
 
@@ -121,6 +121,7 @@ class CSVBackend(TrackingBackend):
                             key: value
                             for key, value in row.items()
                             if key not in self.STANDARD
+                            and value != ""
                             and not key.startswith("metric.")
                             and not key.startswith("param.")
                         }
@@ -130,6 +131,7 @@ class CSVBackend(TrackingBackend):
                         }
                         run = Run(
                             id=run_id,
+                            job_id=normalized.get("job_id"),
                             record_id=normalized.get("record_id"),
                             commit=normalized.get("commit"),
                             timestamp=self._timestamp(
@@ -138,7 +140,6 @@ class CSVBackend(TrackingBackend):
                                 context=f"{path} row {row_number}",
                             ),
                             duration=normalized.get("duration"),
-                            entrypoint=normalized.get("entrypoint"),
                             url=normalized.get("url"),
                             metrics=metrics,
                             params=params,

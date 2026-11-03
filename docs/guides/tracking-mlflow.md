@@ -23,7 +23,7 @@ tracking_backend: mlflow
 ```
 
 Hiraku uses `mlflow.db` in the project root and an experiment named after the
-project directory. `hiraku run` supplies `MLFLOW_TRACKING_URI` and
+project directory. `hiraku job run` supplies `MLFLOW_TRACKING_URI` and
 `MLFLOW_EXPERIMENT_NAME` to the training process, so standard MLflow logging
 uses the same store Hiraku queries. Existing environment values are preserved.
 
@@ -48,32 +48,29 @@ are never turned into links.
 
 ## Log from your script
 
-`hiraku run` sets the tracking URI and experiment name from `hiraku.yml`. For
+`hiraku job run` sets the tracking URI and experiment name from `hiraku.yml`. For
 commands run outside Hiraku, set the URI yourself:
 
 ```bash
 export MLFLOW_TRACKING_URI="sqlite:///$PWD/mlflow.db"
 ```
 
-Your script uses native MLflow logging and Hiraku attribution tags:
+Use Hiraku's MLflow context manager to attach the current job's persisted
+record, commit, and Git state to the run. It remains compatible with MLflow's
+normal logging API:
 
 ```python
-import os
 import mlflow
+from hiraku import track_run
 
 mlflow.set_experiment("my-task")
-with mlflow.start_run():
-    mlflow.set_tags({
-        "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
-    })
-    if os.environ.get("HIRAKU_COMMIT"):
-        mlflow.set_tag("hiraku.commit", os.environ["HIRAKU_COMMIT"])
+with track_run(backend="mlflow"):
     mlflow.log_metric("val/accuracy", accuracy)  # calculated by your code
 ```
 
-Hiraku resolves `database` from the project root and supplies the resulting
-absolute tracking URI to commands it runs. For commands run outside Hiraku, set
-the URI yourself as shown above.
+Configure the tracking URI as usual, for example with `MLFLOW_TRACKING_URI` or
+`mlflow.set_tracking_uri`. The wrapper handles Hiraku attribution; it does not
+choose a tracking destination or experiment for you.
 
 ## Inspect
 

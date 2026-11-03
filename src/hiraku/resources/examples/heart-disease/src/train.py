@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +15,9 @@ from sklearn.metrics import accuracy_score, log_loss
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+from hiraku.config import HirakuConfig
+from hiraku.jobs import current_job
 
 COLUMNS = [
     "age",
@@ -37,6 +39,7 @@ CATEGORICAL = ["sex", "cp", "fbs", "restecg", "exang", "slope", "thal"]
 NUMERIC = [column for column in COLUMNS[:-1] if column not in CATEGORICAL]
 RUN_FIELDS = [
     "id",
+    "job_id",
     "record_id",
     "commit",
     "git_state",
@@ -47,13 +50,6 @@ RUN_FIELDS = [
     "param.validation_fraction",
     "metric.val/log_loss",
     "metric.val/accuracy",
-]
-PROVENANCE_VARIABLES = [
-    "HIRAKU_RECORD_ID",
-    "HIRAKU_COMMIT",
-    "HIRAKU_GIT_STATE",
-    "HIRAKU_ROOT",
-    "HIRAKU_TRACKING_ROOT",
 ]
 
 
@@ -91,22 +87,41 @@ def build_model(model_name: str, seed: int) -> Pipeline:
 
 
 def provenance() -> dict[str, str]:
-    missing = [name for name in PROVENANCE_VARIABLES if name not in os.environ]
-    if missing:
-        raise RuntimeError(f"Missing Hiraku provenance variables: {', '.join(missing)}")
-    return {name: os.environ[name] for name in PROVENANCE_VARIABLES}
+    job = current_job()
+    if job is None:
+        raise RuntimeError("Run this example through Hiraku to record job attribution")
+    config = HirakuConfig.discover()
+    return {
+        "HIRAKU_JOB_ID": job.id,
+        "HIRAKU_RECORD_ID": job.record_id,
+        "HIRAKU_COMMIT": job.commit or "",
+        "HIRAKU_GIT_STATE": job.git_state,
+        "HIRAKU_ROOT": str(config.root),
+        "HIRAKU_TRACKING_ROOT": str(config.root),
+    }
 
 
 def append_run(path: Path, row: dict[str, str]) -> None:
     if path.exists() and path.stat().st_size:
         with path.open(newline="", encoding="utf-8") as stream:
-            header = next(csv.reader(stream), None)
-        if header != RUN_FIELDS:
+            reader = csv.DictReader(stream)
+            header = reader.fieldnames
+            existing = list(reader)
+        if header is None or "id" not in header:
             raise RuntimeError(f"Unexpected runs CSV header in {path}: {header!r}")
+        expanded_header = list(dict.fromkeys([*header, *RUN_FIELDS]))
+        if expanded_header != header:
+            with path.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.DictWriter(stream, fieldnames=expanded_header)
+                writer.writeheader()
+                writer.writerows(existing)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not path.exists() or path.stat().st_size == 0
     with path.open("a", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=RUN_FIELDS)
+        with path.open(newline="", encoding="utf-8") as source:
+            header = next(csv.reader(source), None)
+        fields = list(dict.fromkeys([*(header or []), *RUN_FIELDS]))
+        writer = csv.DictWriter(stream, fieldnames=fields)
         if write_header:
             writer.writeheader()
         writer.writerow(row)
@@ -149,6 +164,7 @@ def main() -> None:
         runs_path,
         {
             "id": uuid.uuid4().hex,
+            "job_id": attribution["HIRAKU_JOB_ID"],
             "record_id": attribution["HIRAKU_RECORD_ID"],
             "commit": attribution["HIRAKU_COMMIT"],
             "git_state": attribution["HIRAKU_GIT_STATE"],

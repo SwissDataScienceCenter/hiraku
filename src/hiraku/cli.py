@@ -26,7 +26,6 @@ from rich.table import Table
 
 from .config import HirakuConfig
 from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
-from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
 from .record import Record, list_records, load_record, validate_identifier
@@ -61,10 +60,10 @@ def _json_value(value: Any) -> Any:
             "metrics": _json_value(value.metrics),
             "params": _json_value(value.params),
             "record_id": value.record_id,
+            "job_id": value.job_id,
             "commit": value.commit,
             "timestamp": _json_value(value.timestamp),
             "duration": value.duration,
-            "entrypoint": value.entrypoint,
             "url": value.url,
             "raw": _json_value(value.raw),
         }
@@ -142,6 +141,12 @@ def _active(config: HirakuConfig, record_id: str | None = None) -> Record:
     if identifier is None:
         raise NoActiveRecordError("No active record; supply --record or set one")
     return load_record(identifier, config=config)
+
+
+def _job_command(command: Sequence[str]) -> list[str]:
+    """Remove Click's preserved option separator from the child argv."""
+    values = list(command)
+    return values[1:] if values and values[0] == "--" else values
 
 
 def _edit(path: Path) -> None:
@@ -741,29 +746,141 @@ def workflow_resume_command(
     )
 
 
-@main.command("run")
-@click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
+@main.group("job")
+def job_group() -> None:
+    """Submit and inspect jobs."""
+
+
+@job_group.command("submit")
 @click.option("--record", "record_id")
-@click.option(
-    "--dispatch", help="Dispatcher name from the project's dispatch directory."
-)
-@click.pass_context
-def run_command(
-    context: click.Context,
-    command: tuple[str, ...],
+@click.option("--dispatch", help="Dispatcher name from the project.")
+@click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
+@click.pass_obj
+def job_submit(
+    state: CLIContext,
     record_id: str | None,
     dispatch: str | None,
+    command: tuple[str, ...],
 ) -> None:
-    """Run a project command in the foreground."""
-    state: CLIContext = context.obj
-    result = execute_command(
-        command,
-        record_id=record_id,
-        dispatch=dispatch,
+    """Submit a local command through PSI/J."""
+
+    record = _active(state.config, record_id)
+    from .jobs import submit
+
+    job = submit(
+        _job_command(command),
+        record_id=record.id,
         config=state.config,
+        dispatch=dispatch,
     )
-    code = result.returncode
-    raise click.exceptions.Exit(128 - code if code < 0 else code)
+    click.echo(f"Job submitted with ID {job.id}")
+
+
+@job_group.command("run")
+@click.option("--record", "record_id")
+@click.option("--dispatch", help="Dispatcher name from the project.")
+@click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
+@click.pass_obj
+def job_run(
+    state: CLIContext,
+    record_id: str | None,
+    dispatch: str | None,
+    command: tuple[str, ...],
+) -> None:
+    """Run a local job and follow its output until it exits."""
+    from .jobs import LocalBackend, submit
+
+    record = _active(state.config, record_id)
+    backend = LocalBackend()
+    job = submit(
+        _job_command(command),
+        record_id=record.id,
+        config=state.config,
+        dispatch=dispatch,
+        _backend=backend,
+    )
+    code = follow_job(state.config.hiraku_dir / "jobs", job.id, backend=backend)
+    raise click.exceptions.Exit(code)
+
+
+@job_group.command("status")
+@click.argument("job_id")
+@click.pass_obj
+def job_status(state: CLIContext, job_id: str) -> None:
+    """Show stored job metadata and current backend status."""
+    from .jobs import refresh
+
+    _emit_json(refresh(state.config, job_id))
+
+
+@job_group.command("cancel")
+@click.argument("job_id")
+@click.pass_obj
+def job_cancel(state: CLIContext, job_id: str) -> None:
+    """Request cancellation of a submitted job."""
+    from .jobs import cancel
+
+    job = cancel(state.config, job_id)
+    click.echo(f"Cancellation requested for {job.id}")
+
+
+@job_group.command("wait")
+@click.argument("job_id")
+@click.pass_obj
+def job_wait(state: CLIContext, job_id: str) -> None:
+    """Follow a job's output and wait for its exit status."""
+    code = follow_job(state.config.hiraku_dir / "jobs", job_id)
+    raise click.exceptions.Exit(code)
+
+
+@job_group.command("logs")
+@click.argument("job_id")
+@click.option("--follow", is_flag=True)
+@click.pass_obj
+def job_logs(state: CLIContext, job_id: str, follow: bool) -> None:
+    """Show captured output for a submitted job."""
+    directory = state.config.hiraku_dir / "jobs"
+    follow_job(directory, job_id, follow=follow)
+
+
+def follow_job(
+    directory: Path,
+    job_id: str,
+    *,
+    follow: bool = True,
+    backend: Any | None = None,
+) -> int:
+    """Display job output, optionally waiting for its final status."""
+    import time
+
+    from .jobs import ComputeBackend, Job
+
+    job = Job.load(directory, job_id)
+    backend = backend or ComputeBackend(job.executor)
+    paths = backend.logs(job)
+    positions: dict[str, int] = {}
+    while True:
+        for path in paths:
+            if path and path.exists():
+                with path.open("r", encoding="utf-8", errors="replace") as stream:
+                    stream.seek(positions.get(str(path), 0))
+                    click.echo(stream.read(), nl=False, err=path == paths[1])
+                    positions[str(path)] = stream.tell()
+        if not follow:
+            return 0
+        job = backend.refresh(directory, job_id)
+        if job.state in {"completed", "failed", "canceled"}:
+            for path in paths:
+                if path and path.exists():
+                    with path.open("r", encoding="utf-8", errors="replace") as stream:
+                        stream.seek(positions.get(str(path), 0))
+                        click.echo(stream.read(), nl=False, err=path == paths[1])
+            if job.exit_code is None:
+                return 0 if job.state == "completed" else 1
+            return 128 - job.exit_code if job.exit_code < 0 else job.exit_code
+        if job.state == "unknown":
+            raise click.ClickException("Job status is unknown; cannot follow logs")
+        time.sleep(1)
 
 
 @main.command("runs")

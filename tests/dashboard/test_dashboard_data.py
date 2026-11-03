@@ -86,6 +86,7 @@ def test_run_rows_flatten_runs_in_execution_order(project: HirakuConfig) -> None
 
     assert [row["run"] for row in rows] == ["r0", "r1", "r2", "r3", "r4"]
     assert rows[0]["record_path"] == "root/a"
+    assert rows[0]["job_id"] is None
     assert rows[0]["source"] == "csv"
     assert rows[0]["started"] == datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
     assert rows[0]["duration"] == 4.5
@@ -271,8 +272,8 @@ def test_find_run_and_run_text(project: HirakuConfig) -> None:
     # Values appear as the backend reports them; the CSV backend reports text.
     assert run_text(run) == (
         "id: r0\n"
+        "job_id: null\n"
         "record: a\n"
-        "entrypoint: train\n"
         "commit: null\n"
         "started: '2026-10-14T10:00:00+00:00'\n"
         "duration: 4.5\n"

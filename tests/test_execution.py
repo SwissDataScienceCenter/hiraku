@@ -60,20 +60,22 @@ def test_run_requires_explicit_command_and_streams_output(
     monkeypatch.chdir(tmp_path)
     Record.create("root", config=config)
 
-    seen: list[tuple[str, ...] | None] = []
-
-    def run(command=None, **kwargs):
-        seen.append(tuple(command) if command is not None else None)
-        return subprocess.CompletedProcess([], 0, stdout="inherited\n", stderr="")
-
-    monkeypatch.setattr("hiraku.cli.execute_command", run)
     cli = CliRunner().invoke(
         main,
-        ["run", "--record", "root", "--", sys.executable, "-c", "print('explicit')"],
+        [
+            "job",
+            "run",
+            "--record",
+            "root",
+            "--",
+            sys.executable,
+            "-c",
+            "print('explicit')",
+        ],
     )
     assert cli.exit_code == 0, cli.output
-    assert seen == [(sys.executable, "-c", "print('explicit')")]
-    missing = CliRunner().invoke(main, ["run", "--record", "root"])
+    assert "explicit" in cli.output
+    missing = CliRunner().invoke(main, ["job", "run", "--record", "root"])
     assert missing.exit_code != 0
     assert "command" in missing.output.lower()
 
@@ -94,6 +96,7 @@ def test_cli_propagates_nonzero_exit_code(tmp_path: Path, monkeypatch) -> None:
     result = CliRunner().invoke(
         main,
         [
+            "job",
             "run",
             "--record",
             "root",
@@ -104,3 +107,9 @@ def test_cli_propagates_nonzero_exit_code(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     assert result.exit_code == 4
+
+
+def test_run_command_is_retired() -> None:
+    result = CliRunner().invoke(main, ["run", "--help"])
+    assert result.exit_code != 0
+    assert "No such command 'run'" in result.output

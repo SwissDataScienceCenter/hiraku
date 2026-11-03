@@ -45,12 +45,26 @@ while (($# > 0)); do
 done
 (($# > 0)) || usage
 
-for name in HIRAKU_TRACKING_ROOT HIRAKU_RECORD_ID; do
-  if [[ -z ${!name:-} ]]; then
-    echo "autoresearch.sh: missing required environment variable: $name" >&2
+if [[ -z ${HIRAKU_TRACKING_ROOT:-} || -z ${HIRAKU_RECORD_ID:-} ]]; then
+  if [[ -z ${HIRAKU_JOB_ID:-} ]]; then
+    echo "autoresearch.sh: HIRAKU_JOB_ID is required to resolve job metadata" >&2
     exit 2
   fi
-done
+  if ! metadata=$(uv run --quiet python -c '
+import os
+from hiraku.config import HirakuConfig
+from hiraku.jobs import Job, job_directory
+
+config = HirakuConfig.discover()
+job = Job.load(job_directory(config), os.environ["HIRAKU_JOB_ID"])
+print(f"{job.record_id}\t{config.root}")
+'); then
+    echo "autoresearch.sh: could not resolve Hiraku job metadata" >&2
+    exit 2
+  fi
+  IFS=$'\t' read -r HIRAKU_RECORD_ID HIRAKU_TRACKING_ROOT <<< "$metadata"
+fi
+export HIRAKU_RECORD_ID HIRAKU_TRACKING_ROOT
 
 timeout_seconds=${HIRAKU_AUTORESEARCH_TIMEOUT_SECONDS:-600}
 if [[ ! $timeout_seconds =~ ^[0-9]+([.][0-9]+)?$ ]] ||

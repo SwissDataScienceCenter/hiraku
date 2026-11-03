@@ -215,7 +215,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
 
 
 @LINUX_ONLY
-def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
+def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch):
     project, runner = create_overlay_project(tmp_path, monkeypatch)
     commit = git(project, "rev-parse", "HEAD")
     invoke(
@@ -223,9 +223,10 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
         ["record", "create", "cpu-test", "--parent", "sep10", "--commit", "HEAD"],
     )
 
-    invoke(
+    submitted = invoke(
         runner,
         [
+            "job",
             "run",
             "--record",
             "cpu-test",
@@ -239,7 +240,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
         ],
     )
 
-    assert "val_bpb: 0.900000" in capfd.readouterr().out
+    assert "val_bpb: 0.900000" in submitted.output
     rows = json.loads(
         invoke(
             runner,
@@ -263,7 +264,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
 
 
 @LINUX_ONLY
-def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
+def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch):
     _, runner = create_overlay_project(tmp_path, monkeypatch)
     invoke(
         runner, ["record", "create", "failure", "--parent", "sep10", "--commit", "HEAD"]
@@ -272,6 +273,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
     failed = runner.invoke(
         main,
         [
+            "job",
             "run",
             "--record",
             "failure",
@@ -285,7 +287,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
     )
 
     assert failed.exit_code != 0
-    assert "val_bpb: 0.000000" in capfd.readouterr().out
+    assert "val_bpb: 0.000000" in failed.output
     rows = json.loads(
         invoke(
             runner,

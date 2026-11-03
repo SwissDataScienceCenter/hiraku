@@ -11,15 +11,10 @@ from torch import nn
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
+from hiraku import track_run
+
 IMAGE_SIZE = 64
 DEFAULT_EPOCHS = 10
-PROVENANCE_VARIABLES = (
-    "HIRAKU_RECORD_ID",
-    "HIRAKU_COMMIT",
-    "HIRAKU_GIT_STATE",
-    "HIRAKU_ROOT",
-)
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -105,13 +100,6 @@ def stratified_indices(
     return train_indices, validation_indices
 
 
-def provenance() -> dict[str, str]:
-    missing = [name for name in PROVENANCE_VARIABLES if name not in os.environ]
-    if missing:
-        raise RuntimeError(f"Missing Hiraku provenance variables: {', '.join(missing)}")
-    return {name: os.environ[name] for name in PROVENANCE_VARIABLES}
-
-
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -178,17 +166,13 @@ def main() -> None:
     if args.batch_size < 1 or not 0 < args.learning_rate < float("inf"):
         raise ValueError("batch size and learning rate must be positive")
 
-    attribution = provenance()
-    with wandb.init(
+    with track_run(
+        backend="wandb",
         entity=os.environ.get("WANDB_ENTITY") or None,
         project=os.environ.get("WANDB_PROJECT", "eurosat-rgb"),
-        group=attribution["HIRAKU_RECORD_ID"],
         name=os.environ.get("WANDB_RUN_NAME"),
         tags=["hiraku", "eurosat-rgb", args.model],
         config={
-            "hiraku.record_id": attribution["HIRAKU_RECORD_ID"],
-            "hiraku.commit": attribution["HIRAKU_COMMIT"],
-            "hiraku.git_state": attribution["HIRAKU_GIT_STATE"],
             "dataset.name": "EuroSAT RGB",
             "dataset.classes": 10,
             "dataset.image_size": IMAGE_SIZE,

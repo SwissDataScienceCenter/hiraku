@@ -28,12 +28,12 @@ _LAST = datetime.max.replace(tzinfo=UTC)
 
 RUN_COLUMNS = (
     "run",
+    "job_id",
     "record",
     "record_path",
     "source",
     "started",
     "duration",
-    "entrypoint",
     "commit",
     "url",
 )
@@ -128,12 +128,12 @@ def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
     return [
         {
             "run": run.id,
+            "job_id": run.job_id,
             "record": run.record_id,
             "record_path": paths.get(str(run.record_id)),
             "source": project.sources.get(run.id),
             "started": run.timestamp,
             "duration": run.duration,
-            "entrypoint": run.entrypoint,
             "commit": run.commit,
             "url": run.url,
             **{f"metric.{name}": value for name, value in run.metrics.items()},
@@ -270,7 +270,6 @@ def _row(key: str, depth: int, label: str, item: Mapping[str, Any]) -> dict[str,
         "depth": depth,
         "Record / run": label,
         "Type": item.get("type") or "",
-        "Entrypoint": item.get("entrypoint") or "",
         "Commit": (item.get("commit") or "")[:7],
         "Started": started.strftime("%Y-%m-%d %H:%M:%S") if started else "",
         "Duration": format_duration(item.get("duration")),
@@ -330,8 +329,8 @@ def run_text(run: Mapping[str, Any]) -> str:
     return dump_yaml(
         {
             "id": run["run"],
+            "job_id": run.get("job_id"),
             "record": run.get("record"),
-            "entrypoint": run.get("entrypoint"),
             "commit": run.get("commit"),
             "started": started.isoformat() if started else None,
             "duration": run.get("duration"),
