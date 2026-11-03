@@ -131,6 +131,24 @@ def test_tradeoff_frame_identifies_non_dominated_runs() -> None:
     assert excluded == 2
 
 
+def test_tradeoff_frame_accepts_arrow_metrics_with_missing_values() -> None:
+    # As in the notebook: arrow_frame columns, an integer metric, and a run
+    # (e.g. a crash) without metrics.
+    runs = pd.DataFrame(
+        {
+            "run": ["a", "b", "crashed"],
+            "record": ["x", "x", "y"],
+            "metric.steps": pd.array([100, 200, None], dtype="int64[pyarrow]"),
+            "metric.score": pd.array([0.5, 0.7, None], dtype="double[pyarrow]"),
+        }
+    )
+
+    points, excluded = tradeoff_frame(runs, "steps", "score", "minimize", "maximize")
+
+    assert points["run"].tolist() == ["a", "b"]
+    assert excluded == 1
+
+
 def test_record_rows_list_records_in_tree_order() -> None:
     records = [
         Record(id="root", metrics=[{"name": "loss", "direction": "minimize"}]),
