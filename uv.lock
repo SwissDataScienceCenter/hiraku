@@ -1204,7 +1204,6 @@ dependencies = [
     { name = "langgraph-checkpoint-sqlite" },
     { name = "markdown-it-py" },
     { name = "mcp" },
-    { name = "psij-python" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -1271,7 +1270,6 @@ requires-dist = [
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "mlflow", marker = "extra == 'mlflow'", specifier = "==3.16.0" },
     { name = "pandas", marker = "extra == 'dashboard'", specifier = ">=2.3.3" },
-    { name = "psij-python", specifier = ">=0.9.11" },
     { name = "pyarrow", marker = "extra == 'dashboard'", specifier = ">=21" },
     { name = "pydantic", specifier = ">=2.13.5" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -3172,21 +3170,6 @@ wheels = [
 ]
 
 [[package]]
-name = "psij-python"
-version = "0.9.11"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "packaging" },
-    { name = "psutil" },
-    { name = "pystache" },
-    { name = "typeguard" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/9e/8dc7a406b6f052c336c5a6b9a536b366f34d5be3ad08bdfbe6f03709d2c0/psij-python-0.9.11.tar.gz", hash = "sha256:de069062d96e6a75a646594cecac67dfa090ab9a0f13a112c0efb97526286e37", size = 68091, upload-time = "2025-05-30T21:44:40.989Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/16/2d/4e3116628ac2d2ee7cce1d03207c47469d4f1736257d2632d75ca7f1bc7c/psij_python-0.9.11-py3-none-any.whl", hash = "sha256:2087b69d4a4858ad1c5ae038e17662da3f8c241c5b74c86b675db5b3fa23fae8", size = 89155, upload-time = "2025-05-30T21:44:39.447Z" },
-]
-
-[[package]]
 name = "psutil"
 version = "7.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3448,15 +3431,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc", size = 6851574, upload-time = "2026-01-21T03:57:59.36Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d", size = 122781, upload-time = "2026-01-21T03:57:55.912Z" },
-]
-
-[[package]]
-name = "pystache"
-version = "0.6.8"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/85/89/0a712ca22930b8c71bced8703e5bb45669c31690ea81afe15f6cb284550c/pystache-0.6.8.tar.gz", hash = "sha256:3707518e6a4d26dd189b07c10c669b1fc17df72684617c327bd3550e7075c72c", size = 101892, upload-time = "2025-03-18T11:54:47.595Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/78/ffd13a516219129cef6a754a11ba2a1c0d69f1e281af4f6bca9ed5327219/pystache-0.6.8-py3-none-any.whl", hash = "sha256:7211e000974a6e06bce2d4d5cad8df03bcfffefd367209117376e4527a1c3cb8", size = 82051, upload-time = "2025-03-18T11:54:45.813Z" },
 ]
 
 [[package]]
@@ -4454,18 +4428,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/10/7d/f357f5768872ffa3a026707477a880aba7582af5f6c7c7eab74f61167f3d/ty-0.0.79-py3-none-win32.whl", hash = "sha256:ca266de079a187ed6f0f5b802f6fc3b26164753c7347a04daed21d86c938d33d", size = 12833644, upload-time = "2026-09-07T21:51:50.766Z" },
     { url = "https://files.pythonhosted.org/packages/f9/f5/2a2d967be6286ee8fb626161e610fd48624ba5e6712cea932adb2d6b40b6/ty-0.0.79-py3-none-win_amd64.whl", hash = "sha256:88cb357d36ad79181015581365769fff4b1ec580cd12de83addfa98663214fd3", size = 13494258, upload-time = "2026-09-07T21:51:53.105Z" },
     { url = "https://files.pythonhosted.org/packages/8b/74/49b88f104f88d9757497758bf57ba53e3612442b49500d1092d4d6f1daa3/ty-0.0.79-py3-none-win_arm64.whl", hash = "sha256:d29da73f2840ae2631bc62ef8f8d509a94edea596e5b3072851f67e4729d744c", size = 13327517, upload-time = "2026-09-07T21:51:55.602Z" },
-]
-
-[[package]]
-name = "typeguard"
-version = "4.6.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b4/de/4420db493fa8fc0856d5e5c1b159c63a323d2de2317babe36b01568928e8/typeguard-4.6.0.tar.gz", hash = "sha256:e7414f09111317de3e335de92cd397c5c0ca00b1cc1676de12e1d444a79b3f21", size = 82330, upload-time = "2026-07-26T08:40:23.207Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8f/eb/461d5f167b6f5c7d97696f397c82f82e3480e003fce3f0a1cd1dd26e2eb2/typeguard-4.6.0-py3-none-any.whl", hash = "sha256:79878165bb86f2cf5d41d159a0ff1792a796cf496882d2fe1b1c6c7049b9cdd7", size = 36884, upload-time = "2026-07-26T08:40:21.868Z" },
 ]
 
 [[package]]
