@@ -47,6 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The dashboard's trade-off plot no longer fails with an internal error when a run lacks a metric (e.g. a crashed run) or a metric is an integer, as with pandas 3, where the run table's columns are Arrow-backed.
 - The Heart Disease and minimal example writers and the autoresearch dispatcher now record when a run started instead of when it finished in `timestamp`, which the dashboard shows as the start time, and write the new `duration` column. **Breaking:** their CSV header gains `duration`, so append to a new `runs.csv` after updating them.
 - Embed dashboard logos in the HTML entry document so Studio can build the branded view without rejecting local image references.
 - Fix `hiraku record list`, `context list`, `program list`, `action list` (and other table output) crashing when there are no rows ([issue #96](https://github.com/SwissDataScienceCenter/hiraku/issues/96)).

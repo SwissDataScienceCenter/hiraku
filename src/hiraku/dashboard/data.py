@@ -374,14 +374,10 @@ def tradeoff_frame(
     y_objective: str,
 ) -> tuple[pd.DataFrame, int]:
     """Return comparable runs with a trade-off highlight and excluded count."""
-    x_values = pd.to_numeric(runs_df[f"metric.{x_metric}"], errors="coerce")
-    y_values = pd.to_numeric(runs_df[f"metric.{y_metric}"], errors="coerce")
-    valid = (
-        x_values.notna()
-        & y_values.notna()
-        & x_values.map(math.isfinite)
-        & y_values.map(math.isfinite)
-    )
+    # As floats: Arrow-backed columns hold pd.NA, which math.isfinite rejects.
+    x_values = metric_values(runs_df, x_metric)
+    y_values = metric_values(runs_df, y_metric)
+    valid = x_values.notna() & y_values.notna()
     points = pd.DataFrame(
         {
             "run": runs_df.loc[valid, "run"].astype(str).to_numpy(),
