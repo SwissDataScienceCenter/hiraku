@@ -1037,6 +1037,7 @@ def run_list(
     help="Use this port; otherwise automatically choose a free port from 2718.",
 )
 @click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
+@click.option("--watch", is_flag=True, help="Reload when the notebook changes.")
 @click.option(
     "--init",
     "initialize",
@@ -1057,6 +1058,7 @@ def dashboard_command(
     record_id: str | None,
     port: int | None,
     no_browser: bool,
+    watch: bool,
     initialize: bool,
     edit: bool,
     include_code: bool,
@@ -1075,6 +1077,7 @@ def dashboard_command(
         no_browser=no_browser,
         edit=edit,
         include_code=include_code,
+        watch=watch,
     )
     if exit_code:
         raise click.exceptions.Exit(exit_code)

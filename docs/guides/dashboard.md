@@ -19,6 +19,7 @@ Run every command from inside a Hiraku project.
 | Command | Mode | What it does |
 | --- | --- | --- |
 | `hiraku dashboard` | View | Serves the dashboard with record Markdown editing. |
+| `hiraku dashboard --watch` | Watch | Reloads the notebook when it changes on disk. |
 | `hiraku dashboard --include-code` | View with code | Same page; marimo's menu can also show each cell's code. |
 | `hiraku dashboard --init` | Customize | Copies the notebook to `hiraku/dashboard/app.py` and exits. |
 | `hiraku dashboard --edit` | Edit | Opens that copy in marimo-studio. |

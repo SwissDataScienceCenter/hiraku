@@ -58,6 +58,7 @@ def build_command(
     no_browser: bool = False,
     edit: bool = False,
     include_code: bool = False,
+    watch: bool = False,
 ) -> list[str]:
     """Return the marimo command serving ``notebook`` on localhost.
 
@@ -70,9 +71,9 @@ def build_command(
     command.extend(["--host", DEFAULT_HOST])
     if port is not None:
         command.extend(["--port", str(port)])
-    if edit:
+    if edit or watch:
         command.append("--watch")
-    else:
+    if not edit:
         command.append("--no-token")
         if include_code:
             command.append("--include-code")
@@ -90,6 +91,7 @@ def serve_dashboard(
     no_browser: bool = False,
     edit: bool = False,
     include_code: bool = False,
+    watch: bool = False,
 ) -> int:
     """Serve the dashboard until interrupted and return marimo's exit code.
 
@@ -129,6 +131,7 @@ def serve_dashboard(
             no_browser=no_browser,
             edit=edit,
             include_code=include_code,
+            watch=watch,
         )
         return _wait(subprocess.Popen(command, cwd=notebook.parent, env=environment))
 

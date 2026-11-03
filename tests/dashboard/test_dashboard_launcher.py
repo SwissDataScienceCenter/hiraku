@@ -18,12 +18,14 @@ from hiraku.errors import RecordNotFoundError, ValidationError
     ("options", "flags"),
     [
         ({}, ["run", "--no-token"]),
+        ({"watch": True}, ["run", "--watch", "--no-token"]),
         (
             {"no_browser": True, "include_code": True},
             ["run", "--no-token", "--include-code", "--headless"],
         ),
         # The editor runs code, so it keeps marimo's token; it always shows code.
         ({"edit": True, "include_code": True}, ["edit", "--watch"]),
+        ({"edit": True, "watch": True}, ["edit", "--watch"]),
     ],
 )
 def test_build_command(options: dict, flags: list[str]) -> None:
@@ -221,6 +223,7 @@ def test_dashboard_cli_forwards_options(
             "9000",
             "--no-browser",
             "--include-code",
+            "--watch",
         ],
     )
 
@@ -231,6 +234,7 @@ def test_dashboard_cli_forwards_options(
         "no_browser": True,
         "edit": False,
         "include_code": True,
+        "watch": True,
         "root": project.root,
     }
 
