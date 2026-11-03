@@ -48,8 +48,7 @@ nav = [
       { "Tracking Backends" = [
         { "CSV" = "guides/tracking-csv.md" },
         { "W&B" = "guides/tracking-wandb.md" },
-        { "MLflow" = "guides/tracking-mlflow.md" },
-        { "Custom Backend" = "guides/tracking-custom.md"}
+        { "MLflow" = "guides/tracking-mlflow.md" }
       ] },
       { "MCP server" = "guides/mcp.md" },
       { "Dashboard" = "guides/dashboard.md" },

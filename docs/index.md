@@ -34,49 +34,37 @@ Launch commands, compare runs, and keep the research history visible.
 
 ## Installation
 
-From a Hiraku source checkout, install the CLI with the optional adapters you
-need:
+First, clone the Hiraku source repository:
 
 ```bash
-uv tool install --force '.[mlflow,wandb]'
+git clone https://github.com/SwissDataScienceCenter/hiraku.git
+cd hiraku
+```
+
+then install the Hiraku CLI with:
+
+```bash
+uv tool install --force '.'
 hiraku --help
 ```
 
-The MLflow and W&amp;B extras are optional. Use `uv tool install .` if you only
-need Hiraku's core CLI. `--force` replaces an existing tool installation, which
-is useful when reinstalling from a checkout after code changes that did not
-change the package version; it can be omitted for a first install.
-
-For Hiraku development, install the full environment and run the checkout
-directly:
-
-```bash
-uv sync --all-extras
-uv run hiraku --help
-```
-
-
 ## The Hiraku workflow
 
-Hiraku connects research records, command executions, and tracked measurements:
+Hiraku connects **records**, **command executions**, and **tracked measurements**:
 
 ```mermaid
 flowchart LR
     T[Root record<br/>research goal] --> E[Child record<br/>focused attempt] --> C[Foreground command<br/>execution and provenance] --> R[Run<br/>metric trace]
 ```
 
-* A root `Record` may define a research goal and metrics. Project-wide
-  settings, including the tracking backend, live in `hiraku.yml`. The record
-  lives at `hiraku/records/{root-id}/{root-id}.md`.
+* A `Record` may define a research goal and metrics and is stored as a Markdown file at `hiraku/records/{root-id}/{root-id}.md`.
 * A child `Record` may focus on an experiment, diagnosis, or review. It inherits through `parent_id` and may bind its own code commit.
-* A `Run` records one execution attributed to a `record_id`. Runs are managed by CSV, MLflow, W&B, or another backend and queried by Hiraku.
-* `hiraku run` executes interactively in the current working tree and returns the command's exit code. The future `hiraku job` interface is reserved for PSI/J-managed execution.
+* A `Run` records one execution attributed to a `record_id` with some tracking backend (e.g., CSV, MLflow, W&B).
 
 ??? tip "Branching and experiment lineage"
-    Git remains responsible for commits, branches, and source history.
-    Branches are optional for the core workflow.
+    Git remains responsible for commits, branches, and source history. Branches are optional for the core workflow.
 
-### Start here
+## See the examples
 
 Follow the [heart disease example](examples/heart-disease/README.md) for a complete workflow.
 

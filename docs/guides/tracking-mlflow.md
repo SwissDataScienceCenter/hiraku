@@ -16,7 +16,7 @@ In the training project:
 uv add mlflow
 ```
 
-For a local project, this shorthand is enough:
+Set the project-wide backend in `hiraku.yml` as follows:
 
 ```yaml
 tracking_backend: mlflow
@@ -48,8 +48,7 @@ are never turned into links.
 
 ## Log from your script
 
-`hiraku run` sets the tracking URI and experiment name from `hiraku.yml`. For
-commands run outside Hiraku, set the URI yourself:
+Set an explicit tracking URI for a local database or leave it unset to use the default `mlflow.db` in the project root.
 
 ```bash
 export MLFLOW_TRACKING_URI="sqlite:///$PWD/mlflow.db"

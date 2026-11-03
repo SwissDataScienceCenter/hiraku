@@ -17,7 +17,7 @@ This fragmentation creates an inherent barrier for effective Human-AI collaborat
 
 ## Records and runs
 
-Hiraku uses records, foreground command execution, and tracked runs to document the model-development lifecycle.
+Hiraku uses records, command execution, and tracked runs to document the model-development lifecycle.
 
 Records and command execution are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
@@ -27,7 +27,7 @@ A root *record* defines a working scope and goal, and documents the research pro
 | --- | ---  | --- |
 | **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared research defaults. |
 | **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
-| **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
+| **Command execution** | subprocess | Exit code, streamed output, and tracking attribution. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
 Records are stored as Markdown with YAML front matter. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent, and all descendants are stored flat in their root's folder. IDs are unique across the project.
@@ -45,7 +45,7 @@ At any time, a single record can be set as "active". By default, creation activa
 A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters. Record configuration and the CLI select these built-in backends. The backend needs to:
 
 - List runs from the tracking source selected by a record.
-- Return normalized runs with a required backend run ID, metrics, and parameters; job ID, record ID, commit, timestamp, and URL attribution may be absent. Backend-specific fields remain in `raw`.
+- Return normalized runs with a required backend run ID, metrics, and parameters; job ID, record ID, commit, timestamp, and URL attribution may be absent.
 
 Set `tracking_backend` in `hiraku.yml` to select the tracking source for every
 record in the project. Records cannot override the project setting. Backend

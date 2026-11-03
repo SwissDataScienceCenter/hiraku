@@ -1,16 +1,25 @@
 # Guides
 
-Practical workflows for setting up Hiraku, choosing a tracking backend, and
-working with research records.
+Some guides to help you get started with Hiraku and make the most of its features.
 
-- [Start from scratch](../examples/minimal/README.md)
-- [Workflows](workflows.md): run and write research workflows in your coding
-  agent.
-- Tracking backends:
-    - [CSV](tracking-csv.md)
-    - [Weights &amp; Biases](tracking-wandb.md)
-    - [MLflow](tracking-mlflow.md)
+## Tracking backends
+
+- [CSV](tracking-csv.md)
+- [Weights &amp; Biases](tracking-wandb.md)
+- [MLflow](tracking-mlflow.md)
+
+## Workflows
+
+- [Workflows](workflows.md): run and write research workflows using your favorite coding agent.
+
+## MCP Server
+
 - [MCP server](mcp.md)
+
+## Dashboard
+
 - [Dashboard](dashboard.md)
-- Advanced usage:
-    - [Branches and record provenance](experiment-branches.md)
+
+## Branches and record provenance
+
+- [Branches and record provenance](experiment-branches.md)
