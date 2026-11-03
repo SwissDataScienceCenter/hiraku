@@ -17,7 +17,6 @@ Both `random-forest` and `random-forest.md` create `random-forest.md`. A missing
 suffix becomes `.md`; other suffixes are rejected.
 The ID defaults to the filename stem; use `--id ID` to override it, for example
 `hiraku record create notes/baseline --id initial-run --parent research-root`.
-The inferred or explicit ID must satisfy the record identifier rules.
 
 `hiraku record list` includes each record's local `status` in its table.
 Commands with an optional `--json` output accept `--pretty` alongside it to
