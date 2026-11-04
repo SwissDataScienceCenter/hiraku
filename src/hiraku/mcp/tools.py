@@ -189,7 +189,7 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
         command: list[str],
         dispatch: str | None = None,
     ) -> dict[str, Any]:
-        """Run a command in the foreground and return output and exit code."""
+        """Run a command and return output with exit code."""
         project = _get_project(config)
         result = execute_command(
             command,
