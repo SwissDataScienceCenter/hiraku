@@ -10,6 +10,16 @@ so each client starts it in the project it is working on:
 uv run hiraku mcp
 ```
 
+For local development, launch the MCP Inspector with:
+
+```bash
+uv run hiraku mcp --dev
+```
+
+This requires the MCP CLI (`mcp[cli]`) and Node.js with `npx` on `PATH`. The
+Inspector can start without an initialized project; project operations need a
+project to be discoverable when they are called.
+
 There is no project-path flag; the process uses its working directory. Each
 initialized project gets its own host configuration, and agents connected from
 that project receive the same Hiraku tools and resources.
@@ -119,6 +129,13 @@ standard approve, revise, or stop decision. Pass its result to
 Approval is cooperative: Python, CLI, and MCP callers can submit decisions
 directly and must be trusted. MCP elicitation does not restrict other tools or
 local shell access.
+
+The server also registers one MCP prompt per workflow, named with the workflow
+ID. Prompt arguments are derived from the workflow's `input_schema`; they are
+presented as strings with field descriptions, and object, array, numeric, and
+boolean values should be supplied as JSON text. The prompt converts those
+values and returns a suggested `workflow_start` call. Retrieving the prompt
+does not start a workflow session; call `workflow_start` to run it.
 
 ## Prompt template
 

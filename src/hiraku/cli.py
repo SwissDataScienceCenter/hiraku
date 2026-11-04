@@ -11,6 +11,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
+from importlib.metadata import version as package_version
 from importlib.resources import as_file, files
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -208,12 +209,35 @@ def main(ctx: click.Context) -> None:
 
 
 @main.command("mcp")
-def mcp_command() -> None:
-    """Serve the Hiraku project discovered from the current directory over stdio."""
+@click.option("--dev", "dev_mode", is_flag=True, help="Launch the MCP Inspector.")
+def mcp_command(dev_mode: bool) -> None:
+    """Serve over stdio, or launch the MCP Inspector with --dev."""
     try:
+        if dev_mode:
+            mcp_cli = shutil.which("mcp")
+            if mcp_cli is None:
+                raise click.ClickException(
+                    "MCP Inspector requires the MCP CLI (`mcp[cli]`) and Node.js "
+                    "with `npx` available on PATH."
+                )
+            package_dir = Path(__file__).resolve().parent
+            inspector = package_dir / "mcp" / "inspector.py"
+            project_root = package_dir.parent.parent
+            command = [mcp_cli, "dev", str(inspector)]
+            if (project_root / "pyproject.toml").is_file():
+                command.extend(["--with-editable", str(project_root)])
+            else:
+                command.extend(["--with", f"hiraku=={package_version('hiraku')}"])
+            subprocess.run(command, check=True)
+            return
+
         from .mcp import create_server
 
         server = create_server(Project.discover())
+    except subprocess.CalledProcessError as exc:
+        raise click.ClickException(
+            f"MCP Inspector exited with status {exc.returncode}."
+        ) from exc
     except ModuleNotFoundError as exc:
         if exc.name == "mcp" or (exc.name or "").startswith("mcp."):
             raise click.ClickException(

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
 
 from mcp.server.mcpserver import Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import ResourceError
+from mcp.server.mcpserver.prompts import Prompt
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_core import to_jsonable_python
@@ -86,6 +88,7 @@ def register_tools(server: MCPServer, config: Project | None) -> None:
     register_record_resources(server, config)
     register_record_prompts(server, config)
     register_workflow_tools(server, config)
+    register_workflow_prompts(server, config)
     register_workflow_resources(server, config)
 
 
@@ -499,6 +502,100 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
         ),
         annotations=ToolAnnotations(read_only_hint=False),
     )
+
+
+def register_workflow_prompts(server: MCPServer, config: Project | None) -> None:
+    """Register a typed MCP prompt for each workflow without starting it."""
+    project = _get_project(config)
+    for workflow in langgraph_workflow_details(config=project):
+        workflow_id = workflow["id"]
+        schema = workflow["input_schema"]
+        properties = schema.get("properties", {})
+        required = set(schema.get("required", []))
+        parameters = []
+
+        for name, field in properties.items():
+            description = field.get("description", "")
+            field_type = field.get("type")
+            if isinstance(field_type, list):
+                field_type = next(
+                    (item for item in field_type if item != "null"), "string"
+                )
+            representation = (
+                "JSON text" if field_type in {"object", "array"} else field_type
+            )
+            if representation:
+                description = f"Provide {representation}. {description}".strip()
+            parameters.append(
+                inspect.Parameter(
+                    name,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    default=(inspect.Parameter.empty if name in required else None),
+                    annotation=Annotated[
+                        str if name in required else str | None,
+                        Field(description=description or None),
+                    ],
+                )
+            )
+
+        def make_prompt(
+            selected_id: str,
+            input_schema: dict[str, Any],
+            prompt_parameters: list[inspect.Parameter],
+        ) -> Any:
+            def prompt(**values: str | None) -> str:
+                supplied: dict[str, Any] = {}
+                for key, value in values.items():
+                    if value is None:
+                        continue
+                    field = input_schema.get("properties", {}).get(key, {})
+                    field_type = field.get("type")
+                    if isinstance(field_type, list):
+                        field_type = next(
+                            (item for item in field_type if item != "null"), "string"
+                        )
+                    if field_type in {
+                        "object",
+                        "array",
+                        "integer",
+                        "number",
+                        "boolean",
+                    }:
+                        try:
+                            supplied[key] = json.loads(value)
+                        except json.JSONDecodeError as exc:
+                            raise ValidationError(
+                                f"Workflow argument {key!r} must be valid "
+                                f"{field_type} JSON text"
+                            ) from exc
+                    else:
+                        supplied[key] = value
+
+                return (
+                    "Call the workflow_start tool with:\n"
+                    f"workflow_id: {json.dumps(selected_id)}\n"
+                    "arguments:\n"
+                    f"{json.dumps(supplied, ensure_ascii=False, indent=2)}\n\n"
+                    "This prompt prepares the call; it does not start the workflow."
+                )
+
+            prompt.__name__ = selected_id.replace("-", "_")
+            prompt.__signature__ = inspect.Signature(prompt_parameters)
+            prompt.__annotations__ = {
+                parameter.name: parameter.annotation for parameter in prompt_parameters
+            }
+            return prompt
+
+        server.add_prompt(
+            Prompt.from_function(
+                make_prompt(workflow_id, schema, parameters),
+                name=workflow_id,
+                description=(
+                    f"Prepare typed inputs for the {workflow_id} workflow and "
+                    "return a suggested workflow_start call."
+                ),
+            )
+        )
 
 
 def register_workflow_resources(server: MCPServer, config: Project | None) -> None:
