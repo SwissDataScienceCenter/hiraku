@@ -1,46 +1,27 @@
-"""Optional local MCP interface to a single Hiraku project."""
+"""MCP tools, resources, and prompts for a Hiraku project."""
 
 from __future__ import annotations
 
 import json
-import mimetypes
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
 
 from mcp.server.mcpserver import Elicit, ElicitationResult, MCPServer, Resolve
-from mcp.server.mcpserver.exceptions import (
-    ResourceError,
-    ToolError,
-    UnexpectedResourceError,
-    UnexpectedToolError,
-)
-from mcp.types import (
-    ToolAnnotations,
-)
+from mcp.server.mcpserver.exceptions import ResourceError
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .errors import HirakuError, ValidationError
-from .execution import execute_command
-from .project import Project
-from .record import Record, list_records, load_record
-from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
-from .workflows.langgraph import start_workflow as start_langgraph_workflow
-from .workflows.langgraph import workflow_details as langgraph_workflow_details
-from .workflows.langgraph import workflow_ids, workflow_mermaid
-from .workflows.langgraph import workflow_status as langgraph_workflow_status
-from .workflows.session_history import list_sessions, session_history
-
-INSTRUCTIONS = """\
-Hiraku documents research in records (goals, hypotheses, experiments, findings),
-attributes tracked runs to them, runs commands with execute, and runs LangGraph
-workflows. Use workflow_start, workflow_status, and workflow_resume to operate
-a workflow. When an interrupt requests approval, workflow_approval opens a
-structured MCP elicitation and waits for the user's answer.
-Use workflow_sessions and workflow_session_history to inspect recorded
-sessions and their history.
-"""
+from ..errors import ValidationError
+from ..execution import execute_command
+from ..project import Project
+from ..record import Record, list_records, load_record
+from ..workflows.langgraph import resume_workflow as resume_langgraph_workflow
+from ..workflows.langgraph import start_workflow as start_langgraph_workflow
+from ..workflows.langgraph import workflow_details as langgraph_workflow_details
+from ..workflows.langgraph import workflow_ids, workflow_mermaid
+from ..workflows.langgraph import workflow_status as langgraph_workflow_status
+from ..workflows.session_history import list_sessions, session_history
 
 
 class WorkflowApproval(BaseModel):
@@ -52,36 +33,6 @@ class WorkflowApproval(BaseModel):
         description="Whether to approve, request a revision, or stop."
     )
     feedback: str = Field(default="", description="Optional revision feedback.")
-
-
-class ProjectMCP(MCPServer):
-    async def call_tool(
-        self, name: str, arguments: dict[str, Any], context: Any = None
-    ) -> Any:
-        try:
-            return await super().call_tool(name, arguments, context)
-        except UnexpectedToolError as exc:
-            # The SDK hides unexpected messages; Hiraku's validation errors
-            # tell the agent how to correct its call.
-            cause = exc.__cause__
-            if isinstance(cause, HirakuError | PydanticValidationError):
-                raise ToolError(str(cause)) from cause
-            raise
-
-    async def read_resource(self, uri: Any, context: Any = None) -> Any:
-        try:
-            contents = await super().read_resource(uri, context)
-        except UnexpectedResourceError as exc:
-            # As for tools, keep the reason a Hiraku resource is unavailable.
-            if isinstance(exc.__cause__, HirakuError):
-                raise ResourceError(str(exc.__cause__)) from exc.__cause__
-            raise
-        # Source templates contain many file types; MIME depends on the URI.
-        if str(uri).startswith("hiraku://sources/"):
-            mime = mimetypes.guess_type(unquote(str(uri)))[0]
-            for item in contents:
-                item.mime_type = mime or "application/octet-stream"
-        return contents
 
 
 def _data(record: Record) -> dict[str, Any]:
@@ -104,26 +55,68 @@ def _update(record: Record, fields: dict[str, Any], markdown: str | None) -> Rec
     return updated
 
 
-def create_server(project: Project | None = None) -> Any:
-    """Create a stdio-capable server bound to a discovered or supplied project.
+def _get_project(config: Project | None) -> Project:
+    return config or Project.discover()
 
-    The MCP SDK is a regular Hiraku dependency. Resources are read afresh on
-    each request so external edits and tool mutations remain visible.
+
+def register_project_tools(server: MCPServer, config: Project | None) -> None:
     """
-    selected = project or Project.discover()
+    Register project-level tools.
 
-    server = ProjectMCP("Hiraku", instructions=INSTRUCTIONS)
+    Tools:
+    - `project_info`: Read the current project configuration and metadata.
+    """
+
+    @server.tool()
+    def project_info() -> dict[str, Any]:
+        """Read the current project configuration and metadata."""
+        return to_jsonable_python(_get_project(config).to_dict(), fallback=dict)
+
+
+def register_tools(server: MCPServer, config: Project | None) -> None:
+    """
+    Register all Hiraku MCP capabilities on a server.
+
+    Features include:
+    - Project-level tools and resources
+    - Record management tools and resources
+    - Workflow management tools and resources
+    """
+    register_project_tools(server, config)
+    register_record_tools(server, config)
+    register_record_resources(server, config)
+    register_record_prompts(server, config)
+    register_workflow_tools(server, config)
+    register_workflow_resources(server, config)
+
+
+def register_record_tools(server: MCPServer, config: Project | None) -> None:
+    """
+    Register record, execution, and tracked-run tools.
+
+    Tools:
+    - `record_list`: List research records in the selected project.
+    - `record_show`: Read a research record and its effective inherited fields.
+    - `record_create`: Create a research record, optionally activating it.
+    - `record_update`: Merge record fields and optionally replace Markdown.
+    - `record_reparent`: Move a record subtree under a parent, or make it a root.
+    - `record_delete`: Delete a record using Hiraku's relationship checks.
+    - `execute`: Run a command in the foreground and return output and exit code.
+    - `runs`: List tracked runs attributed to a record, like `hiraku runs`.
+    """
 
     @server.tool()
     def record_list() -> list[dict[str, Any]]:
         """List research records in the selected project."""
-        return [_data(item) for item in list_records(project=selected)]
+        project = _get_project(config)
+        return [_data(item) for item in list_records(project=project)]
 
     @server.tool()
     def record_show(record_id: str) -> dict[str, Any]:
         """Read a research record and its effective inherited fields."""
-        record = load_record(record_id, project=selected)
-        resolved = record.resolve(project=selected)
+        project = _get_project(config)
+        record = load_record(record_id, project=project)
+        resolved = record.resolve(project=project)
         return {
             **_data(record),
             "resolved": resolved.values,
@@ -140,6 +133,7 @@ def create_server(project: Project | None = None) -> Any:
         activate: bool = True,
     ) -> dict[str, Any]:
         """Create a research record, optionally activating it like the CLI."""
+        project = _get_project(config)
         extras = fields or {}
         reserved = {
             "id",
@@ -149,7 +143,7 @@ def create_server(project: Project | None = None) -> Any:
             "markdown",
             "record_id",
             "activate",
-            "project",
+            "config",
         }
         if reserved.intersection(extras):
             raise ValidationError("Use named arguments for identity and relationships")
@@ -160,7 +154,7 @@ def create_server(project: Project | None = None) -> Any:
                 related_to=related_to,
                 markdown=markdown,
                 activate=activate,
-                project=selected,
+                project=project,
                 **extras,
             )
         )
@@ -172,21 +166,22 @@ def create_server(project: Project | None = None) -> Any:
         markdown: str | None = None,
     ) -> dict[str, Any]:
         """Merge record fields and optionally replace Markdown; null clears a field."""
-        return _data(
-            _update(load_record(record_id, project=selected), fields, markdown)
-        )
+        project = _get_project(config)
+        return _data(_update(load_record(record_id, project=project), fields, markdown))
 
     @server.tool()
     def record_reparent(record_id: str, parent_id: str | None = None) -> dict[str, Any]:
         """Move a record subtree under a parent, or make it a root."""
-        record = load_record(record_id, project=selected)
-        record.reparent(parent_id, project=selected)
+        project = _get_project(config)
+        record = load_record(record_id, project=project)
+        record.reparent(parent_id, project=project)
         return _data(record)
 
     @server.tool()
     def record_delete(record_id: str) -> dict[str, str]:
         """Delete a record using Hiraku's relationship checks."""
-        load_record(record_id, project=selected).delete(project=selected)
+        project = _get_project(config)
+        load_record(record_id, project=project).delete(project=project)
         return {"deleted": record_id}
 
     @server.tool()
@@ -196,12 +191,13 @@ def create_server(project: Project | None = None) -> Any:
         dispatch: str | None = None,
     ) -> dict[str, Any]:
         """Run a command in the foreground and return output and exit code."""
+        project = _get_project(config)
         result = execute_command(
             command,
             record_id=record_id,
             dispatch=dispatch,
             capture_output=True,
-            project=selected,
+            project=project,
         )
         return {
             "returncode": result.returncode,
@@ -210,25 +206,21 @@ def create_server(project: Project | None = None) -> Any:
         }
 
     @server.tool()
-    def runs(
+    def record_runs(
         record_id: str,
         all_records: bool = False,
         sort: str | None = None,
         ascending: bool | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """List tracked runs attributed to a record, like `hiraku runs`.
-
-        With all_records, list every attributed run in the record's tracking
-        source. Sorting by a declared metric follows its direction unless
-        ascending is given.
-        """
+        """List tracked runs attributed to a record, like `hiraku runs`."""
         if ascending is not None and sort is None:
             raise ValidationError("A sort direction requires sort")
-        record = load_record(record_id, project=selected)
+        project = _get_project(config)
+        record = load_record(record_id, project=project)
         query: dict[str, Any] = {"limit": limit} if limit is not None else {}
         if sort is not None:
-            declarations = record.resolve(project=selected).values.get("metrics") or []
+            declarations = record.resolve(project=project).values.get("metrics") or []
             directions = {item.name: item.direction for item in declarations}
             query["sort"] = sort
             query["ascending"] = (
@@ -236,46 +228,87 @@ def create_server(project: Project | None = None) -> Any:
                 if ascending is not None
                 else directions.get(sort) != "maximize"
             )
-        found = record.resolve_tracking_backend(project=selected).list_runs(
-            record_id=None if all_records else record.id, **query
+        runs = record.resolve_tracking_backend(project=project).list_runs(
+            record_id=None if all_records else record.id,
+            **query,
         )
-        # Runs keep their fields in read-only mappings.
-        return to_jsonable_python(found, fallback=dict)
+        return to_jsonable_python(runs, fallback=dict)
 
-    @server.resource("hiraku://catalog", mime_type="application/json")
+
+def register_record_resources(
+    server: MCPServer,
+    config: Project | None,
+) -> None:
+    """Register actual attached files, excluding Markdown records."""
+
+    @server.resource(
+        "hiraku://catalog",
+        mime_type="application/json",
+    )
     def catalog() -> str:
-        """Discover current records and attached source files."""
-        records = list_records(project=selected)
-        uris = [f"hiraku://records/{item.id}" for item in records]
-        for record in records:
-            root = (selected.records_dir / record.path.parent.name).resolve()
-            for path in sorted(root.rglob("*")):
-                if path.is_file() and path.resolve().is_relative_to(root):
-                    relative = path.relative_to(root).as_posix()
-                    uris.append(
-                        f"hiraku://sources/{record.id}/{quote(relative, safe='')}"
-                    )
-        return json.dumps(uris)
+        project = _get_project(config)
+        records = list_records(project=project)
 
-    @server.resource("hiraku://records/{record_id}", mime_type="application/json")
-    def record_resource(record_id: str) -> str:
-        return _research_content(record_id, selected)
+        # Identify all record Markdown files.
+        record_paths = {record.path.resolve() for record in records}
+
+        uris: list[str] = []
+
+        for record in records:
+            root = record.path.parent.resolve()
+
+            for path in sorted(root.rglob("*")):
+                resolved = path.resolve()
+
+                if not resolved.is_file():
+                    continue
+
+                if not resolved.is_relative_to(root):
+                    continue
+
+                # Do not expose tasks or experiments as attachments.
+                if resolved in record_paths:
+                    continue
+
+                relative = path.relative_to(root).as_posix()
+
+                uris.append(f"hiraku://sources/{record.id}/{quote(relative, safe='')}")
+
+        return json.dumps(sorted(set(uris)))
 
     @server.resource("hiraku://sources/{record_id}/{source_path}")
-    def source_resource(record_id: str, source_path: str) -> bytes:
-        record = load_record(record_id, project=selected)
-        root = (selected.records_dir / record.path.parent.name).resolve()
+    def source_resource(
+        record_id: str,
+        source_path: str,
+    ) -> bytes:
+        project = _get_project(config)
+        record = load_record(record_id, project=project)
+
+        root = record.path.parent.resolve()
         path = (root / unquote(source_path)).resolve()
+
         if not path.is_relative_to(root) or not path.is_file():
-            raise ResourceError("Source must be a file inside its record directory")
+            raise ResourceError("Source must be inside the record directory")
+
+        # Also enforce the exclusion when reading directly.
+        record_paths = {item.path.resolve() for item in list_records(project=project)}
+
+        if path in record_paths:
+            raise ResourceError("Record Markdown files are not attached sources")
+
         return path.read_bytes()
+
+
+def register_record_prompts(server: MCPServer, config: Project | None) -> None:
+    """Register prompts grounded in records and related evidence."""
 
     @server.prompt()
     def propose_implementation(record_id: str, related_record_ids: str = "") -> str:
         """Ground a proposal in a record and comma-separated related records."""
-        record = load_record(record_id, project=selected)
+        project = _get_project(config)
+        record = load_record(record_id, project=project)
         related = [
-            load_record(identifier.strip(), project=selected)
+            load_record(identifier.strip(), project=project)
             for identifier in related_record_ids.split(",")
             if identifier.strip()
         ]
@@ -288,18 +321,16 @@ def create_server(project: Project | None = None) -> Any:
             f"Record: {json.dumps(_data(record))}\n\nRelated records:\n{evidence}"
         )
 
-    add_workflow_tools(server, selected)
-    return server
 
-
-def add_workflow_tools(server: MCPServer, project: Project) -> None:
-    """Add LangGraph workflow tools and definitions to a server."""
-    path = project.path
+def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
+    """Register workflow lifecycle, session history, and approval tools."""
 
     def pending_approval(
         workflow_session_id: str, interrupt_id: str | None = None
     ) -> dict[str, Any]:
-        status = langgraph_workflow_status(workflow_session_id, project=project())
+        status = langgraph_workflow_status(
+            workflow_session_id, project=_get_project(config)
+        )
         interrupts = status["interrupts"]
         if status["status"] != "waiting" or len(interrupts) != 1:
             raise ValidationError("Workflow must have exactly one pending interrupt")
@@ -313,11 +344,8 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
             )
         return pending
 
-    def project() -> Project:
-        return Project.load(path)
-
     def workflow_list() -> list[dict[str, Any]]:
-        return langgraph_workflow_details(project=project())
+        return langgraph_workflow_details(project=_get_project(config))
 
     def workflow_start(
         workflow_id: Annotated[str, Field(description="Project workflow ID.")],
@@ -330,25 +358,27 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
         ] = None,
     ) -> dict[str, Any]:
         return start_langgraph_workflow(
-            workflow_id, arguments, project=project(), context=context
+            workflow_id, arguments, project=_get_project(config), context=context
         )
 
     def workflow_sessions() -> list[dict[str, Any]]:
-        return list_sessions(project=project())
+        return list_sessions(project=_get_project(config))
 
     def workflow_session_history(
         workflow_session_id: Annotated[
             str, Field(description="Workflow session ID returned by workflow_start.")
         ],
     ) -> dict[str, Any]:
-        return session_history(workflow_session_id, project=project())
+        return session_history(workflow_session_id, project=_get_project(config))
 
     def workflow_status(
         workflow_session_id: Annotated[
             str, Field(description="Workflow session ID returned by workflow_start.")
         ],
     ) -> dict[str, Any]:
-        return langgraph_workflow_status(workflow_session_id, project=project())
+        return langgraph_workflow_status(
+            workflow_session_id, project=_get_project(config)
+        )
 
     def workflow_resume(
         workflow_session_id: Annotated[
@@ -369,7 +399,7 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
         return resume_langgraph_workflow(
             workflow_session_id,
             response,
-            project=project(),
+            project=_get_project(config),
             checkpoint_id=checkpoint_id,
             context=context,
         )
@@ -471,6 +501,10 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
         annotations=ToolAnnotations(read_only_hint=False),
     )
 
+
+def register_workflow_resources(server: MCPServer, config: Project | None) -> None:
+    """Register workflow definition and graph resources."""
+
     @server.resource(
         "hiraku://workflows/{workflow_id}",
         name="workflow",
@@ -478,7 +512,8 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
         mime_type="text/markdown",
     )
     def workflow_resource(workflow_id: str) -> str:
-        current = project()
+        """Read the Markdown definition for a project LangGraph workflow."""
+        current = _get_project(config)
         if workflow_id not in workflow_ids(project=current):
             raise ResourceError(f"Unknown workflow {workflow_id!r}")
         markdown_path = current.workflows_dir / workflow_id / "workflow.md"
@@ -493,9 +528,4 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
         mime_type="text/vnd.mermaid",
     )
     def workflow_graph_resource(workflow_id: str) -> str:
-        return workflow_mermaid(workflow_id, project=project())
-
-
-def _research_content(identifier: str, project: Project) -> str:
-    """Read the same live representation for resources and tool attachments."""
-    return json.dumps(_data(load_record(identifier, project=project)))
+        return workflow_mermaid(workflow_id, project=_get_project(config))
