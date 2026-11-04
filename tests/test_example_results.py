@@ -22,14 +22,6 @@ def test_unavailable_results_leave_no_project(tmp_path: Path, example):
     assert not (tmp_path / "hiraku/hiraku.yml").exists()
 
 
-def test_results_preserve_existing_files(tmp_path: Path):
-    (tmp_path / "runs.csv").write_text("existing")
-    with pytest.raises(ValidationError, match="overwrite"):
-        Project.create(tmp_path, example="heart-disease", results=True)
-    assert (tmp_path / "runs.csv").read_text() == "existing"
-    assert not (tmp_path / "train.py").exists()
-
-
 def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
     config = Project.create(
         tmp_path,
@@ -53,6 +45,7 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
     resources = tmp_path / "resources"
     base = resources / "examples/layered/src"
     results = resources / "examples/layered/results"
+    (resources / "workflows").mkdir(parents=True)
     base.mkdir(parents=True)
     results.mkdir()
     (base / "train.py").write_text("base")

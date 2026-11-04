@@ -100,6 +100,8 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
             "metrics=[{name: val_bpb, direction: minimize}]",
         ],
     )
+    git(project, "add", "hiraku")
+    git(project, "commit", "-m", "add autoresearch task record")
     return project, runner
 
 
@@ -219,11 +221,13 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
 @LINUX_ONLY
 def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     project, runner = create_overlay_project(tmp_path, monkeypatch)
-    commit = git(project, "rev-parse", "HEAD")
     invoke(
         runner,
         ["record", "create", "cpu-test", "--parent", "sep10", "--commit", "HEAD"],
     )
+    git(project, "add", "hiraku")
+    git(project, "commit", "-m", "add cpu test record")
+    commit = git(project, "rev-parse", "HEAD")
 
     invoke(
         runner,

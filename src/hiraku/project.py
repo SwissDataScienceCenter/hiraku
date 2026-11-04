@@ -135,17 +135,6 @@ class Project(BaseModel):
             default_marker = directory / "hiraku" / "hiraku.yml"
             if default_marker.is_file():
                 return cls.load(default_marker)
-            try:
-                markers = (
-                    child / "hiraku.yml"
-                    for child in directory.iterdir()
-                    if child.is_dir() and not child.name.startswith(".")
-                )
-                for marker in markers:
-                    if marker.is_file():
-                        return cls.load(marker)
-            except OSError:
-                pass
         raise ProjectNotFoundError(f"No hiraku/hiraku.yml found from {candidate}")
 
     @property
@@ -251,15 +240,14 @@ class Project(BaseModel):
         Raises:
             hiraku.errors.ProjectExistsError: If ``root`` already has a project.
             hiraku.errors.ValidationError: If settings or resources are invalid.
-            ValueError: If template and example options conflict.
         """
         root = Path(root).expanduser().resolve()
         if (root / "hiraku" / "hiraku.yml").is_file():
             raise ProjectExistsError(f"Hiraku project already exists at {root}")
         if template and example:
-            raise ValueError("Choose template or example, not both")
+            raise ValidationError("template and example are mutually exclusive")
         if (results or with_generator) and not example:
-            raise ValueError("results and with_generator require example")
+            raise ValidationError("results requires an example")
 
         resources = files("hiraku.resources")
         with ExitStack() as stack:
@@ -274,10 +262,27 @@ class Project(BaseModel):
                     or Path(example).name != example
                     or "\\" in example
                 ):
-                    raise ValueError("Invalid example name")
+                    raise ValidationError("Invalid example name")
                 bundle = resources / "examples" / example
+                if not (bundle / "src").is_dir():
+                    try:
+                        available = sorted(
+                            item.name
+                            for item in (resources / "examples").iterdir()
+                            if (item / "src").is_dir()
+                        )
+                    except OSError:
+                        available = []
+                    names = ", ".join(available) or "none"
+                    raise ValidationError(
+                        f"Unknown example {example!r}; available examples: {names}"
+                    )
                 overlay = stack.enter_context(as_file(bundle / "src"))
                 if results:
+                    if not (bundle / "results").is_dir():
+                        raise ValidationError(
+                            f"Example {example!r} has no results to include"
+                        )
                     result_overlay = stack.enter_context(as_file(bundle / "results"))
 
             data = {}
@@ -361,7 +366,22 @@ class Project(BaseModel):
 
         path = root / ".codex" / "config.toml"
         content = path.read_text(encoding="utf-8") if path.exists() else ""
-        if "hiraku" not in tomllib.loads(content).get("mcp_servers", {}):
+        try:
+            codex_config = tomllib.loads(content)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValidationError(
+                f"Cannot merge MCP settings in {path}: {exc}"
+            ) from exc
+        mcp_servers = codex_config.get("mcp_servers", {})
+        inline_mcp_servers = any(
+            line.lstrip().startswith("mcp_servers =") for line in content.splitlines()
+        )
+        if not isinstance(mcp_servers, dict) or inline_mcp_servers:
+            raise ValidationError(
+                f"Cannot merge MCP settings in {path}: [mcp_servers.hiraku] table "
+                "cannot be added when mcp_servers is an inline value"
+            )
+        if "hiraku" not in mcp_servers:
             entry = (
                 "[mcp_servers.hiraku]\n"
                 f"command = {json.dumps(command)}\n"

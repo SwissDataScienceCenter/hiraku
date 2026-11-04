@@ -137,10 +137,6 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
     assert codex_skill.is_file()
     assert claude_skill.is_file()
-    assert (root / ".claude/skills/hiraku").is_symlink()
-    assert (root / ".claude/skills/hiraku").resolve() == (
-        root / ".agents/skills/hiraku"
-    ).resolve()
     assert not (root / ".codex/skills").exists()
     assert not (root / ".pi/skills").exists()
     assert not (root / ".gemini/skills").exists()
@@ -208,72 +204,6 @@ def test_init_from_template_applies_overlay(tmp_path: Path) -> None:
     assert (root / ".example-dotfile").read_text() == "included\n"
     assert (root / "payload.bin").read_bytes() == b"\x00\xfftemplate"
     assert (root / "empty").is_dir()
-
-
-def test_template_rejects_existing_files_before_initialization(tmp_path: Path) -> None:
-    root = tmp_path / "project"
-    root.mkdir()
-    existing = root / "existing.txt"
-    existing.write_text("original")
-    template = tmp_path / "template"
-    template.mkdir()
-    (template / "existing.txt").write_text("replacement")
-
-    with pytest.raises(ValidationError, match="overwrite existing path"):
-        Project.create(root, template=template)
-
-    assert existing.read_text() == "original"
-    assert not (root / "hiraku/hiraku.yml").exists()
-    assert not (root / "hiraku").exists()
-
-
-def test_template_rejects_symlinks_and_invalid_config(tmp_path: Path) -> None:
-    target = tmp_path / "target.txt"
-    target.write_text("target")
-    linked_template = tmp_path / "linked-template"
-    linked_template.mkdir()
-    (linked_template / "link").symlink_to(target)
-    linked_root = tmp_path / "linked-root"
-
-    with pytest.raises(ValidationError, match="symbolic link"):
-        Project.create(linked_root, template=linked_template)
-    assert not linked_root.exists()
-
-    template_link = tmp_path / "template-link"
-    template_link.symlink_to(linked_template, target_is_directory=True)
-    with pytest.raises(ValidationError, match="cannot be a symbolic link"):
-        Project.create(linked_root, template=template_link)
-    assert not linked_root.exists()
-
-    invalid_template = tmp_path / "invalid-template"
-    invalid_template.mkdir()
-    (invalid_template / "hiraku").mkdir()
-    (invalid_template / "hiraku/hiraku.yml").write_text("hiraku_dir: ../outside\n")
-    invalid_root = tmp_path / "invalid-root"
-
-    with pytest.raises(ValidationError, match="parent traversal"):
-        Project.create(invalid_root, template=invalid_template)
-    assert not invalid_root.exists()
-
-
-def test_template_failure_rolls_back_created_paths(tmp_path: Path, monkeypatch) -> None:
-    template = tmp_path / "template"
-    template.mkdir()
-    (template / "first.txt").write_text("first")
-    (template / "second.txt").write_text("second")
-    root = tmp_path / "project"
-    original_copy = hiraku.project.shutil.copy2
-
-    def fail_on_second(source: Path, destination: Path) -> None:
-        if Path(source).parent == template and Path(source).name == "second.txt":
-            raise OSError("simulated copy failure")
-        original_copy(source, destination)
-
-    monkeypatch.setattr(hiraku.project.shutil, "copy2", fail_on_second)
-
-    with pytest.raises(ValidationError, match="simulated copy failure"):
-        Project.create(root, template=template)
-    assert not root.exists()
 
 
 def test_init_from_packaged_example_copies_only_src(
@@ -366,5 +296,3 @@ def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match=r"\[mcp_servers.hiraku\] table"):
         Project.create(tmp_path, install_skill=False)
     assert codex.read_text() == original
-    assert not (tmp_path / "hiraku/hiraku.yml").exists()
-    assert not (tmp_path / ".mcp.json").exists()

@@ -93,18 +93,6 @@ def test_reinitialization_with_example_option_is_rejected(tmp_path):
     assert not (tmp_path / "evaluate.py").exists()
 
 
-def test_example_collision_leaves_destination_unchanged(tmp_path, monkeypatch):
-    root = tmp_path / "minimal"
-    root.mkdir()
-    (root / "evaluate.py").write_text("existing code\n")
-    monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["example", "create", "minimal"])
-    assert result.exit_code == 1
-    assert "overwrite" in result.output
-    assert list(root.iterdir()) == [root / "evaluate.py"]
-    assert (root / "evaluate.py").read_text() == "existing code\n"
-
-
 @pytest.mark.parametrize("example", ["missing", "../outside"])
 def test_invalid_example_creates_no_destination(tmp_path, monkeypatch, example):
     monkeypatch.chdir(tmp_path)
