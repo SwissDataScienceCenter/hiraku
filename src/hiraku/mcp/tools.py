@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic_core import to_jsonable_python
 
 from ..errors import ValidationError
-from ..execution import execute_command
 from ..project import Project
 from ..record import Record, list_records, load_record
 from ..workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -101,8 +100,8 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
     - `record_update`: Merge record fields and optionally replace Markdown.
     - `record_reparent`: Move a record subtree under a parent, or make it a root.
     - `record_delete`: Delete a record using Hiraku's relationship checks.
-    - `execute`: Run a command in the foreground and return output and exit code.
-    - `runs`: List tracked runs attributed to a record, like `hiraku runs`.
+    - `record_runs`: List tracked runs attributed to a record, like `hiraku runs`.
+    - `execute_command`: Run a command and return output with exit code.
     """
 
     @server.tool()
@@ -185,7 +184,7 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
         return {"deleted": record_id}
 
     @server.tool()
-    def execute(
+    def execute_command(
         record_id: str,
         command: list[str],
         dispatch: str | None = None,
