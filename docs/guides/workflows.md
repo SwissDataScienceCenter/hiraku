@@ -82,15 +82,16 @@ validating inputs and interrupt responses. Capability names describe needs, not
 specific tools; an executor maps them to its own tools. The bundled workflows
 demonstrate these contracts with Pydantic models.
 
-Workflows can declare an `approval` object in an interrupt payload. The MCP
-`workflow_approval` tool presents its message and a proposed response and
-gathers the standard approve, revise, or stop decision without depending on a
-particular workflow or step name. Supply the workflow session ID and current
-interrupt ID, then pass the result to `workflow_resume`. The graph checks the
-decision before processing the workflow response. This is a cooperative
-workflow convention:
-callers can submit decisions directly and must be trusted. MCP elicitation does
-not restrict other tools or local shell access.
+Workflows can declare an `approval` object in an interrupt payload. When an MCP
+client calls `workflow_resume`, the server checks the pending interrupt and
+opens a structured elicitation for the standard approve, revise, or stop
+decision. On acceptance, that decision and the proposed workflow response are
+combined and sent to the graph in the same resume call. If elicitation is
+cancelled or declined, the graph stays paused. The graph checks the decision
+before processing the workflow response. The graph-level check is a cooperative
+convention: trusted Python and CLI callers can submit decisions directly. MCP
+approval resumes go through elicitation, though it does not restrict other tools
+or local shell access.
 
 ## Define a workflow
 

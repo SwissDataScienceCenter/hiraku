@@ -89,7 +89,8 @@ Expected failures are returned as MCP tool errors.
 
 `execute` requires explicit command arguments. Commands are not stored in
 records. It waits for completion and returns the exit code, stdout, and stderr.
-A connected client can run commands with the user's local permissions.
+A connected client can run commands with the user's local permissions. If the
+client cancels the MCP call, Hiraku terminates the running command.
 
 ## Resources and evidence
 
@@ -122,13 +123,16 @@ LangGraph thread ID, and resumable graph state is checkpointed in
 `.hiraku/langgraph-checkpoints.sqlite` by default. See the [Workflows guide](workflows.md).
 
 Any workflow interrupt can request approval by including an `approval` object
-in its interrupt payload. `workflow_approval` takes the workflow session ID, interrupt ID,
-proposal, and proposed response, and uses MCP elicitation to collect the
-standard approve, revise, or stop decision. Pass its result to
-`workflow_resume`. If elicitation is cancelled, leave the graph paused.
-Approval is cooperative: Python, CLI, and MCP callers can submit decisions
-directly and must be trusted. MCP elicitation does not restrict other tools or
-local shell access.
+in its interrupt payload. Call `workflow_resume` with the workflow session ID,
+checkpoint ID, and proposed response. If the current interrupt requests
+approval, the tool uses MCP elicitation to collect the standard approve, revise,
+or stop decision and resumes in the same call. If elicitation is cancelled,
+leave the graph paused.
+If the client lacks form elicitation support, `workflow_resume` returns a
+capability error with reconnect guidance and leaves the graph paused.
+The graph-level approval check is a cooperative convention for trusted Python
+and CLI callers. MCP approval resumes use elicitation; it does not restrict
+other tools or local shell access.
 
 The server also registers one MCP prompt per workflow, named with the workflow
 ID. Prompt arguments are derived from the workflow's `input_schema`; they are

@@ -42,3 +42,6 @@ result = execute_command(
 if result.returncode:
     raise SystemExit(result.returncode)
 ```
+
+In-process adapters may pass `cancel_check` to stop a running child process when
+the calling request is cancelled. Ordinary Python and CLI callers can omit it.

@@ -23,8 +23,8 @@ INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, runs commands with execute, and runs LangGraph
 workflows. Use workflow_start, workflow_status, and workflow_resume to operate
-a workflow. When an interrupt requests approval, workflow_approval opens a
-structured MCP elicitation and waits for the user's answer.
+a workflow. When an interrupt requests approval, workflow_resume opens a
+structured MCP elicitation and waits for the user's answer before resuming.
 Use workflow_sessions and workflow_session_history to inspect recorded
 sessions and their history.
 """

@@ -57,7 +57,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
 | Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
-| Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; collaborative approvals use `workflow_approval`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
+| Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; approval interrupts elicit a decision during `workflow_resume`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
 | Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
@@ -112,8 +112,8 @@ Classify the request before acting:
 - **LangGraph workflow:** Start or continue a research loop only when the user
   explicitly requests it. Read the workflow definition and follow its guidance
   and the user's constraints, permissions, budgets, checkpoints, and stopping
-  condition. For collaborative workflow approval gates, call
-  `workflow_approval` and wait for its structured MCP elicitation result.
+  condition. For collaborative workflow approval gates, call `workflow_resume`
+  with the proposed response and wait for its structured MCP elicitation.
 
 Infer routine identifiers, summaries, hypotheses, metrics, and command
 arguments from the user's request and the repository. Ask a question only when
@@ -335,9 +335,9 @@ they conflict with a workflow, explain the conflict and do not bypass its
 validation. If a workflow is missing, check `workflow_list` or reconnect MCP
 after adding it to the project.
 
-For an interrupt requesting approval, call `workflow_approval` with the workflow session ID,
-interrupt ID, proposal, and proposed response. It uses MCP elicitation to wait
-for approve, revise, or stop. Pass the returned result to `workflow_resume`.
+For an interrupt requesting approval, call `workflow_resume` with the workflow
+session ID, checkpoint ID, and proposed response. It uses MCP elicitation to
+wait for approve, revise, or stop before resuming.
 If elicitation is cancelled or declined, tell the user and leave the workflow
 paused; do not resume it or launch the experiment. Do not replace elicitation
 with an ordinary assistant question.

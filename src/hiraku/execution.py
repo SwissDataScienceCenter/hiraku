@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -36,8 +37,13 @@ def execute_command(
     env: Mapping[str, str] | None = None,
     capture_output: bool = False,
     project: Project | None = None,
+    cancel_check: Callable[[], None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a command in the current project and return when it exits."""
+    """Run a command in the current project and return when it exits.
+
+    ``cancel_check`` lets an in-process caller stop the child when its request is
+    cancelled. It is called between short subprocess wait intervals.
+    """
     selected = project or Project.discover()
     selected_record = record_id or selected.active_record_id
     if selected_record is None:
@@ -148,13 +154,34 @@ def execute_command(
             argv = [str(dispatcher_path), "--", *argv]
 
     try:
-        return subprocess.run(
+        process = subprocess.Popen(
             argv,
             cwd=selected.root,
             env=environment,
-            check=False,
-            capture_output=capture_output,
+            stdout=subprocess.PIPE if capture_output else None,
+            stderr=subprocess.PIPE if capture_output else None,
             text=True,
         )
     except OSError as exc:
         raise ExecutionError(f"Could not execute command {argv[0]!r}: {exc}") from exc
+
+    try:
+        while True:
+            if cancel_check is not None:
+                cancel_check()
+            try:
+                stdout, stderr = process.communicate(timeout=0.1)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    except BaseException:
+        with suppress(ProcessLookupError):
+            process.terminate()
+        try:
+            process.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+        raise
+
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)

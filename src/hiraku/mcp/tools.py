@@ -4,17 +4,27 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NotRequired, TypedDict, cast
 from urllib.parse import quote, unquote
 
-from mcp.server.mcpserver import Elicit, ElicitationResult, MCPServer, Resolve
+from anyio.from_thread import check_cancelled
+from mcp import MCPError
+from mcp.server.mcpserver import Context, Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import ResourceError
 from mcp.server.mcpserver.prompts import Prompt
-from mcp.types import ToolAnnotations
+from mcp.types import (
+    MISSING_REQUIRED_CLIENT_CAPABILITY,
+    ClientCapabilities,
+    ElicitationCapability,
+    FormElicitationCapability,
+    MissingRequiredClientCapabilityErrorData,
+    ToolAnnotations,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_core import to_jsonable_python
 
 from ..errors import ValidationError
+from ..execution import execute_command as execute_project_command
 from ..project import Project
 from ..record import Record, list_records, load_record
 from ..workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -33,7 +43,52 @@ class WorkflowApproval(BaseModel):
     decision: Literal["approve", "revise", "stop"] = Field(
         description="Whether to approve, request a revision, or stop."
     )
-    feedback: str = Field(default="", description="Optional revision feedback.")
+
+
+class WorkflowInterrupt(TypedDict):
+    id: str
+    value: Any
+
+
+class WorkflowResult(TypedDict):
+    workflow_session_id: str
+    workflow_id: str
+    status: Literal["waiting", "completed"]
+    interrupts: list[WorkflowInterrupt]
+    checkpoint_id: str | None
+    result: NotRequired[Any]
+    decision: NotRequired[Literal["decline", "cancel"]]
+
+
+class WorkflowSession(TypedDict):
+    workflow_session_id: str
+    workflow_id: str
+    status: str
+    created_at: str
+    updated_at: str
+    context: dict[str, Any]
+    checkpoint_id: str | None
+
+
+class WorkflowSessionEvent(TypedDict):
+    id: int
+    event: str
+    timestamp: str
+    context: dict[str, Any]
+    checkpoint_id: str | None
+    error_type: str | None
+
+
+class WorkflowHistory(TypedDict):
+    session: WorkflowSession
+    events: list[WorkflowSessionEvent]
+
+
+class WorkflowDetail(TypedDict):
+    id: str
+    description: str | None
+    required_capabilities: NotRequired[list[str]]
+    input_schema: dict[str, Any]
 
 
 def _data(record: Record) -> dict[str, Any]:
@@ -68,7 +123,10 @@ def register_project_tools(server: MCPServer, config: Project | None) -> None:
     - `project_info`: Read the current project configuration and metadata.
     """
 
-    @server.tool()
+    @server.tool(
+        title="Project information",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
     def project_info() -> dict[str, Any]:
         """Read the current project configuration and metadata."""
         return to_jsonable_python(_get_project(config).to_dict(), fallback=dict)
@@ -107,13 +165,19 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
     - `execute_command`: Run a command and return output with exit code.
     """
 
-    @server.tool()
+    @server.tool(
+        title="List research records",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
     def record_list() -> list[dict[str, Any]]:
         """List research records in the selected project."""
         project = _get_project(config)
         return [_data(item) for item in list_records(project=project)]
 
-    @server.tool()
+    @server.tool(
+        title="Show research record",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
     def record_show(record_id: str) -> dict[str, Any]:
         """Read a research record and its effective inherited fields."""
         project = _get_project(config)
@@ -125,7 +189,15 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
             "sources": resolved.sources,
         }
 
-    @server.tool()
+    @server.tool(
+        title="Create research record",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+    )
     def record_create(
         record_id: str,
         parent_id: str | None = None,
@@ -161,7 +233,15 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
             )
         )
 
-    @server.tool()
+    @server.tool(
+        title="Update research record",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+    )
     def record_update(
         record_id: str,
         fields: dict[str, Any],
@@ -171,7 +251,15 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
         project = _get_project(config)
         return _data(_update(load_record(record_id, project=project), fields, markdown))
 
-    @server.tool()
+    @server.tool(
+        title="Reparent research record",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+    )
     def record_reparent(record_id: str, parent_id: str | None = None) -> dict[str, Any]:
         """Move a record subtree under a parent, or make it a root."""
         project = _get_project(config)
@@ -179,14 +267,30 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
         record.reparent(parent_id, project=project)
         return _data(record)
 
-    @server.tool()
+    @server.tool(
+        title="Delete research record",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+    )
     def record_delete(record_id: str) -> dict[str, str]:
         """Delete a record using Hiraku's relationship checks."""
         project = _get_project(config)
         load_record(record_id, project=project).delete(project=project)
         return {"deleted": record_id}
 
-    @server.tool()
+    @server.tool(
+        title="Execute project command",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=True,
+        ),
+    )
     def execute_command(
         record_id: str,
         command: list[str],
@@ -194,12 +298,13 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
     ) -> dict[str, Any]:
         """Run a command and return output with exit code."""
         project = _get_project(config)
-        result = execute_command(
+        result = execute_project_command(
             command,
             record_id=record_id,
             dispatch=dispatch,
             capture_output=True,
             project=project,
+            cancel_check=check_cancelled,
         )
         return {
             "returncode": result.returncode,
@@ -207,7 +312,10 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
             "stderr": result.stderr or "",
         }
 
-    @server.tool()
+    @server.tool(
+        title="List tracked runs",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
     def record_runs(
         record_id: str,
         all_records: bool = False,
@@ -304,8 +412,16 @@ def register_record_resources(
 def register_record_prompts(server: MCPServer, config: Project | None) -> None:
     """Register prompts grounded in records and related evidence."""
 
-    @server.prompt()
-    def propose_implementation(record_id: str, related_record_ids: str = "") -> str:
+    @server.prompt(title="Propose implementation")
+    def propose_implementation(
+        record_id: Annotated[
+            str, Field(description="Research record ID to ground the proposal in.")
+        ],
+        related_record_ids: Annotated[
+            str,
+            Field(description="Optional comma-separated related record IDs."),
+        ] = "",
+    ) -> str:
         """Ground a proposal in a record and comma-separated related records."""
         project = _get_project(config)
         record = load_record(record_id, project=project)
@@ -325,29 +441,73 @@ def register_record_prompts(server: MCPServer, config: Project | None) -> None:
 
 
 def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
-    """Register workflow lifecycle, session history, and approval tools."""
+    """Register workflow lifecycle and session history tools."""
 
-    def pending_approval(
-        workflow_session_id: str, interrupt_id: str | None = None
-    ) -> dict[str, Any]:
+    def resolve_resume_response(
+        workflow_session_id: str,
+        response: dict[str, Any],
+        checkpoint_id: str,
+        context: Context,
+    ) -> Elicit[WorkflowApproval] | dict[str, Any]:
         status = langgraph_workflow_status(
             workflow_session_id, project=_get_project(config)
         )
+        if status["checkpoint_id"] != checkpoint_id:
+            raise ValidationError("Workflow checkpoint has changed; check its status")
         interrupts = status["interrupts"]
-        if status["status"] != "waiting" or len(interrupts) != 1:
-            raise ValidationError("Workflow must have exactly one pending interrupt")
-        pending = interrupts[0]
-        if interrupt_id is not None and pending["id"] != interrupt_id:
-            raise ValidationError("Workflow interrupt has changed")
-        value = pending["value"]
-        if not isinstance(value, dict) or not isinstance(value.get("approval"), dict):
+        if status["status"] != "waiting":
+            raise ValidationError("Workflow is not waiting for a response")
+        approval_interrupts = [
+            interrupt
+            for interrupt in interrupts
+            if isinstance(interrupt.get("value"), dict)
+            and isinstance(interrupt["value"].get("approval"), dict)
+        ]
+        if not approval_interrupts:
+            return response
+        if len(interrupts) != 1:
             raise ValidationError(
-                "The current workflow interrupt does not request approval"
+                "Approval elicitation requires exactly one pending interrupt"
             )
-        return pending
+        capabilities = context.client_capabilities
+        elicitation = capabilities.elicitation if capabilities is not None else None
+        if elicitation is None or (
+            elicitation.form is None and elicitation.url is not None
+        ):
+            required_capabilities = ClientCapabilities(
+                elicitation=ElicitationCapability(form=FormElicitationCapability())
+            )
+            error_data = MissingRequiredClientCapabilityErrorData(
+                required_capabilities=required_capabilities
+            )
+            raise MCPError(
+                code=MISSING_REQUIRED_CLIENT_CAPABILITY,
+                message=(
+                    "This workflow requires approval, but this MCP client does "
+                    "not support form elicitation. Reconnect with an "
+                    "elicitation-capable client, then call workflow_resume again. "
+                    "The workflow is still paused."
+                ),
+                data=error_data.model_dump(
+                    by_alias=True, mode="json", exclude_none=True
+                ),
+            )
+        approval = approval_interrupts[0]["value"]["approval"]
+        return Elicit(
+            message=(
+                f"{approval.get('message', 'Review the proposed workflow action.')}"
+                f"\n\nProposed workflow response:\n"
+                f"{json.dumps(response, sort_keys=True)}"
+                "\n\nChoose approve, revise, or stop."
+            ),
+            schema=WorkflowApproval,
+        )
 
-    def workflow_list() -> list[dict[str, Any]]:
-        return langgraph_workflow_details(project=_get_project(config))
+    def workflow_list() -> list[WorkflowDetail]:
+        return cast(
+            list[WorkflowDetail],
+            langgraph_workflow_details(project=_get_project(config)),
+        )
 
     def workflow_start(
         workflow_id: Annotated[str, Field(description="Project workflow ID.")],
@@ -358,28 +518,37 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
             dict[str, Any] | None,
             Field(description="Optional caller-provided session context."),
         ] = None,
-    ) -> dict[str, Any]:
-        return start_langgraph_workflow(
-            workflow_id, arguments, project=_get_project(config), context=context
+    ) -> WorkflowResult:
+        return cast(
+            WorkflowResult,
+            start_langgraph_workflow(
+                workflow_id, arguments, project=_get_project(config), context=context
+            ),
         )
 
-    def workflow_sessions() -> list[dict[str, Any]]:
-        return list_sessions(project=_get_project(config))
+    def workflow_sessions() -> list[WorkflowSession]:
+        return cast(list[WorkflowSession], list_sessions(project=_get_project(config)))
 
     def workflow_session_history(
         workflow_session_id: Annotated[
             str, Field(description="Workflow session ID returned by workflow_start.")
         ],
-    ) -> dict[str, Any]:
-        return session_history(workflow_session_id, project=_get_project(config))
+    ) -> WorkflowHistory:
+        return cast(
+            WorkflowHistory,
+            session_history(workflow_session_id, project=_get_project(config)),
+        )
 
     def workflow_status(
         workflow_session_id: Annotated[
             str, Field(description="Workflow session ID returned by workflow_start.")
         ],
-    ) -> dict[str, Any]:
-        return langgraph_workflow_status(
-            workflow_session_id, project=_get_project(config)
+    ) -> WorkflowResult:
+        return cast(
+            WorkflowResult,
+            langgraph_workflow_status(
+                workflow_session_id, project=_get_project(config)
+            ),
         )
 
     def workflow_resume(
@@ -393,121 +562,104 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
         checkpoint_id: Annotated[
             str, Field(description="Checkpoint ID from workflow status.")
         ],
+        approval: Annotated[
+            ElicitationResult[WorkflowApproval], Resolve(resolve_resume_response)
+        ],
         context: Annotated[
             dict[str, Any] | None,
             Field(description="Optional caller-provided transition context."),
         ] = None,
-    ) -> dict[str, Any]:
-        return resume_langgraph_workflow(
-            workflow_session_id,
-            response,
-            project=_get_project(config),
-            checkpoint_id=checkpoint_id,
-            context=context,
-        )
-
-    def resolve_workflow_approval(
-        workflow_session_id: str,
-        interrupt_id: str,
-        proposal: str,
-        response: dict[str, Any],
-    ) -> Elicit[WorkflowApproval]:
-        pending = pending_approval(workflow_session_id, interrupt_id)
-        approval = pending["value"]["approval"]
-        return Elicit(
-            message=(
-                f"{approval.get('message', 'Review the proposed workflow action.')}\n\n"
-                f"{proposal}\n\nWorkflow response: "
-                f"{json.dumps(response, sort_keys=True)}"
-                "\n\nChoose approve, revise, or stop."
-            ),
-            schema=WorkflowApproval,
-        )
-
-    def workflow_approval(
-        workflow_session_id: Annotated[
-            str, Field(description="Workflow session ID returned by workflow_start.")
-        ],
-        proposal: Annotated[
-            str, Field(description="Concise proposal or result to show the user.")
-        ],
-        interrupt_id: Annotated[str, Field(description="Current interrupt ID.")],
-        response: Annotated[dict[str, Any], Field(description="Response to approve.")],
-        approval: Annotated[
-            ElicitationResult[WorkflowApproval], Resolve(resolve_workflow_approval)
-        ],
-    ) -> dict[str, Any]:
-        """Ask the user to resolve an approval request in the current interrupt."""
-        if approval.action == "accept":
-            pending_approval(workflow_session_id, interrupt_id)
-            result = {
+    ) -> WorkflowResult:
+        if approval.action != "accept":
+            result = langgraph_workflow_status(
+                workflow_session_id, project=_get_project(config)
+            )
+            result["decision"] = approval.action
+            return cast(WorkflowResult, result)
+        if isinstance(approval.data, WorkflowApproval):
+            resume_response: dict[str, Any] = {
                 "approval": {
                     "decision": approval.data.decision,
-                    **(
-                        {"feedback": approval.data.feedback}
-                        if approval.data.feedback
-                        else {}
-                    ),
                 }
             }
             if approval.data.decision == "approve":
-                result["response"] = response
-            return result
-        return {"decision": approval.action}
+                resume_response["response"] = response
+        else:
+            resume_response = approval.data
+        return cast(
+            WorkflowResult,
+            resume_langgraph_workflow(
+                workflow_session_id,
+                resume_response,
+                project=_get_project(config),
+                checkpoint_id=checkpoint_id,
+                context=context,
+            ),
+        )
 
-    workflow_approval.__annotations__["approval"] = Annotated[
-        ElicitationResult[WorkflowApproval], Resolve(resolve_workflow_approval)
+    workflow_resume.__annotations__["approval"] = Annotated[
+        ElicitationResult[WorkflowApproval], Resolve(resolve_resume_response)
     ]
 
     server.add_tool(
         workflow_list,
+        title="List workflows",
         description="List project LangGraph workflows.",
-        annotations=ToolAnnotations(read_only_hint=True),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     server.add_tool(
         workflow_start,
+        title="Start workflow",
         description=(
             "Start a LangGraph workflow and return its interrupt or final result."
         ),
-        annotations=ToolAnnotations(read_only_hint=False),
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=True,
+        ),
     )
     server.add_tool(
         workflow_sessions,
+        title="List workflow sessions",
         description="List recorded workflow sessions and their metadata.",
-        annotations=ToolAnnotations(read_only_hint=True),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     server.add_tool(
         workflow_session_history,
+        title="Read workflow session history",
         description="Read a workflow session's recorded metadata and history.",
-        annotations=ToolAnnotations(read_only_hint=True),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     server.add_tool(
         workflow_status,
+        title="Check workflow status",
         description=(
             "Inspect a checkpointed LangGraph workflow run without advancing it."
         ),
-        annotations=ToolAnnotations(read_only_hint=True),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     server.add_tool(
         workflow_resume,
-        description="Resume a paused LangGraph run with the response to its interrupt.",
-        annotations=ToolAnnotations(read_only_hint=False),
-    )
-    server.add_tool(
-        workflow_approval,
+        title="Resume workflow",
         description=(
-            "Open a structured MCP approval prompt when the current workflow "
-            "interrupt declares an approval request. Supply the current interrupt "
-            "ID and proposed response; pass its result to workflow_resume."
+            "Resume a paused LangGraph run. Approval interrupts elicit the user's "
+            "approve, revise, or stop decision during this call."
         ),
-        annotations=ToolAnnotations(read_only_hint=False),
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=True,
+        ),
     )
 
 
 def register_workflow_prompts(server: MCPServer, config: Project | None) -> None:
     """Register a typed MCP prompt for each workflow without starting it."""
     project = _get_project(config)
-    for workflow in langgraph_workflow_details(config=project):
+    for workflow in langgraph_workflow_details(project=project):
         workflow_id = workflow["id"]
         schema = workflow["input_schema"]
         properties = schema.get("properties", {})
@@ -590,6 +742,7 @@ def register_workflow_prompts(server: MCPServer, config: Project | None) -> None
             Prompt.from_function(
                 make_prompt(workflow_id, schema, parameters),
                 name=workflow_id,
+                title=f"{workflow_id.replace('-', ' ').title()} workflow",
                 description=(
                     f"Prepare typed inputs for the {workflow_id} workflow and "
                     "return a suggested workflow_start call."
