@@ -8,8 +8,8 @@ from typing import Annotated, Any
 from pydantic import Field, TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 
-from ..config import HirakuConfig
 from ..errors import BackendError
+from ..project import Project
 from .base import TrackingBackend
 from .csv import CSVBackend, CSVBackendConfig
 from .mlflow import MLflowBackend, MLflowBackendConfig
@@ -47,7 +47,7 @@ def validate_backend_config(
 
 
 def create_backend(
-    specification: str | Mapping[str, Any], config: HirakuConfig
+    specification: str | Mapping[str, Any], config: Project
 ) -> TrackingBackend:
     """Create a built-in backend from a name or validated configuration mapping."""
     parsed = validate_backend_config(specification)

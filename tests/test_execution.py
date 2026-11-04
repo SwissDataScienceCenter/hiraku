@@ -8,16 +8,16 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.execution import execute_command
+from hiraku.project import Project
 from hiraku.record import Record
 
 
 def test_run_executes_in_project_and_returns_output_and_exit_code(
     tmp_path: Path,
 ) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     Record.create("root", config=config)
     result = execute_command(
         [sys.executable, "-c", "import os; print(os.getcwd()); raise SystemExit(7)"],
@@ -35,7 +35,7 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
     tmp_path: Path,
 ) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     Record.create("root", config=config)
     (tmp_path / "uncommitted.txt").write_text("dirty")
     command = [
@@ -56,7 +56,7 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
 def test_run_requires_explicit_command_and_streams_output(
     tmp_path: Path, monkeypatch
 ) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     monkeypatch.chdir(tmp_path)
     Record.create("root", config=config)
 
@@ -79,7 +79,7 @@ def test_run_requires_explicit_command_and_streams_output(
 
 
 def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     Record.create("root", config=config)
     with pytest.raises(ValidationError, match="reserved run attribution"):
         execute_command(
@@ -88,7 +88,7 @@ def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:
 
 
 def test_cli_propagates_nonzero_exit_code(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     Record.create("root", config=config)
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(

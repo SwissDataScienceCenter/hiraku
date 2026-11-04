@@ -4,7 +4,7 @@ import sys
 import types
 from pathlib import Path
 
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.tracking.wandb import WandbBackend, WandbBackendConfig
 
 
@@ -54,7 +54,7 @@ def test_wandb_config_accepts_common_mapping() -> None:
 
 def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "wandb", types.SimpleNamespace(Api=FakeApi))
-    backend = WandbBackend(HirakuConfig.init(tmp_path), entity="team", project="iris")
+    backend = WandbBackend(Project.create(tmp_path), entity="team", project="iris")
     runs = backend.list_runs(record_id="logistic")
     assert len(runs) == 1
     run = runs[0]
@@ -68,6 +68,6 @@ def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) 
 
 def test_wandb_backend_reads_runtime_as_duration(tmp_path: Path) -> None:
     backend = object.__new__(WandbBackend)
-    backend.config = HirakuConfig.init(tmp_path)
+    backend.config = Project.create(tmp_path)
     assert backend._normalize_run(FakeTimedRun()).duration == 12.5
     assert backend._normalize_run(FakeRun()).duration is None

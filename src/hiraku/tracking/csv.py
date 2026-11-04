@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from ..config import HirakuConfig
 from ..errors import BackendError, ValidationError
+from ..project import Project
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
@@ -49,7 +49,7 @@ class CSVBackend(TrackingBackend):
 
     def __init__(
         self,
-        config: HirakuConfig,
+        config: Project,
         path: Path | str | None = None,
         *,
         settings: CSVBackendConfig | None = None,

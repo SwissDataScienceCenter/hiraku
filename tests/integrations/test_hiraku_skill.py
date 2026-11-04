@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import Record, list_records, load_record
 from hiraku.tracking import CSVBackend
 
@@ -35,13 +35,13 @@ def _git(project: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-def _new_project(tmp_path: Path) -> tuple[Path, HirakuConfig, str]:
+def _new_project(tmp_path: Path) -> tuple[Path, Project, str]:
     project = tmp_path / "heart-disease"
     project.mkdir()
     _git(project, "init", "-b", "main")
     _git(project, "config", "user.email", "test@example.invalid")
     _git(project, "config", "user.name", "Test")
-    config = HirakuConfig.init(
+    config = Project.create(
         project,
         example="heart-disease",
     )
@@ -105,7 +105,7 @@ def _run_codex(project: Path, prompt: str) -> str:
     return result.stdout
 
 
-def _create_task(config: HirakuConfig) -> Record:
+def _create_task(config: Project) -> Record:
     return Record.create(
         "heart-disease",
         config=config,
@@ -126,7 +126,7 @@ def _create_task(config: HirakuConfig) -> Record:
 
 
 def _create_logistic_experiment(
-    config: HirakuConfig,
+    config: Project,
     task: Record,
     commit: str,
 ) -> Record:

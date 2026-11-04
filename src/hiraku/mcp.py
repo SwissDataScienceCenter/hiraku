@@ -21,9 +21,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .config import HirakuConfig
 from .errors import HirakuError, ValidationError
 from .execution import execute_command
+from .project import Project
 from .record import Record, list_records, load_record
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
@@ -104,13 +104,13 @@ def _update(record: Record, fields: dict[str, Any], markdown: str | None) -> Rec
     return updated
 
 
-def create_server(config: HirakuConfig | None = None) -> Any:
+def create_server(config: Project | None = None) -> Any:
     """Create a stdio-capable server bound to a discovered or supplied project.
 
     The MCP SDK is a regular Hiraku dependency. Resources are read afresh on
     each request so external edits and tool mutations remain visible.
     """
-    selected = config or HirakuConfig.discover()
+    selected = config or Project.discover()
 
     server = ProjectMCP("Hiraku", instructions=INSTRUCTIONS)
 
@@ -290,7 +290,7 @@ def create_server(config: HirakuConfig | None = None) -> Any:
     return server
 
 
-def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
+def add_workflow_tools(server: MCPServer, config: Project) -> None:
     """Add LangGraph workflow tools and definitions to a server."""
     path = config.path
 
@@ -311,8 +311,8 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
             )
         return pending
 
-    def project() -> HirakuConfig:
-        return HirakuConfig.load(path)
+    def project() -> Project:
+        return Project.load(path)
 
     def workflow_list() -> list[dict[str, Any]]:
         return langgraph_workflow_details(config=project())
@@ -494,6 +494,6 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         return workflow_mermaid(workflow_id, config=project())
 
 
-def _research_content(identifier: str, config: HirakuConfig) -> str:
+def _research_content(identifier: str, config: Project) -> str:
     """Read the same live representation for resources and tool attachments."""
     return json.dumps(_data(load_record(identifier, config=config)))

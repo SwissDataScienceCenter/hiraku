@@ -19,7 +19,7 @@ dataset, and dependencies for this example.
 hiraku example create heart-disease --git
 cd heart-disease
 ```
-Initialization creates `hiraku.yml`, metadata directories, and the agent
+Initialization creates `hiraku/hiraku.yml`, metadata directories, and the agent
 skill. The `heart-disease` example also copies `train.py`, `pyproject.toml`, and
 `data/processed.cleveland.data` into the project.
 Logistic regression and a random forest are included as initial baselines.
@@ -41,9 +41,9 @@ The commit records the exact
 training code and dataset that the initial baseline experiments will evaluate.
 
 ??? note "Tracking Hiraku metadata in Git"
-    The project config `hiraku.yml` is committed with the project, including its
-    CSV tracking backend. `.gitignore` excludes generated Hiraku state
-    (`hiraku/*`) and `runs.csv`.
+    The project config `hiraku/hiraku.yml` is committed with the project, including its
+    CSV tracking backend. `.gitignore` excludes generated Hiraku files while
+    keeping `hiraku/hiraku.yml` and research records trackable, plus `runs.csv`.
 
     Hiraku runs commands directly in the working tree, including local changes.
     Merging research records is a user (or agent) responsibility.
@@ -66,8 +66,8 @@ hiraku record show heart-disease
 hiraku status
 ```
 
-You should see `active_record_id` set to `heart-disease` and the tracking
-backend set to CSV.
+`hiraku status` should report `heart-disease` as the active record and CSV as
+the tracking backend. Both values are stored in `hiraku/hiraku.yml`.
 
 ??? tip "Defining a working branch"
     Store a branch name with `--set 'branch=main'` if the record should point to

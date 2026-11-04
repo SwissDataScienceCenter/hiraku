@@ -10,7 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import load_record
 
 EXPECTED_METRICS = {
@@ -94,7 +94,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
             ],
         )
 
-    config = HirakuConfig.discover(project)
+    config = Project.discover(project)
     root = load_record("heart-disease", config=config)
     runs = root.resolve_tracking_backend(config=config).list_runs(sort="val/log_loss")
     assert len(runs) == 2

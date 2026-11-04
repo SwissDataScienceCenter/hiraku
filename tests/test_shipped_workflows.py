@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import Record, load_record
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import start_workflow, workflow_status
@@ -46,7 +46,7 @@ def _approved(response: dict) -> dict:
 
 
 def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     Record.create(
         "task",
         type="task",

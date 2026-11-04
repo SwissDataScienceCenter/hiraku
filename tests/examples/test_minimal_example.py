@@ -7,7 +7,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import load_record
 
 
@@ -71,7 +71,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
         ["run", "--record", "baseline", "--", sys.executable, "evaluate.py"],
     )
 
-    config = HirakuConfig.discover(project)
+    config = Project.discover(project)
     runs = load_record("baseline", config=config).runs(config=config)
     assert len(runs) == 1
     assert runs[0].commit == commit

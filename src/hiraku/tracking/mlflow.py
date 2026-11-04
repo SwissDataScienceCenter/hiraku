@@ -8,8 +8,8 @@ from urllib.parse import quote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ..config import HirakuConfig
 from ..errors import BackendError
+from ..project import Project
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
@@ -63,7 +63,7 @@ class MLflowBackend(TrackingBackend):
 
     def __init__(
         self,
-        config: HirakuConfig,
+        config: Project,
         *,
         settings: MLflowBackendConfig | None = None,
         tracking_uri: str | None = None,
@@ -232,7 +232,7 @@ def _is_web_base(value: str) -> bool:
     )
 
 
-def _mlflow_uri(config: HirakuConfig, database: Path | None = None) -> str:
+def _mlflow_uri(config: Project, database: Path | None = None) -> str:
     relative = Path(database or "mlflow.db")
     if relative.is_absolute() or ".." in relative.parts:
         raise BackendError(

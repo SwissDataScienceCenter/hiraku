@@ -23,7 +23,8 @@ through an existing record lifecycle.
   Fields inherit from the nearest parent definition by default. On child
   creation, inherited `metrics` values are copied into the child record unless
   explicitly set there; later parent edits do not update those snapshots.
-  Tracking backend selection is project-wide in `hiraku.yml`. `id`,
+  Tracking backend selection and the active record are project-wide settings in
+  `hiraku/hiraku.yml`. `id`,
   `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and invocation attribution together with
@@ -367,7 +368,7 @@ what was created, changed, or run; include record IDs, command,
 commit, run ID, and key metrics when applicable. Mention failures or missing
 attribution explicitly. Stop when the user's requested scope is complete.
 
-The Python API exposes `HirakuConfig` in `hiraku.config`; `Record`,
+The Python API exposes `Project` in `hiraku.project`; `Record`,
 `Metric`, loaders, and listing functions in `hiraku.record`;
 `Run` in `hiraku.run`; and `execute_command` in `hiraku.execution` for scripted
 execution.

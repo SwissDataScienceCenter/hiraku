@@ -14,9 +14,9 @@ from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.markdown import Markdown, render
+from hiraku.project import Project
 from hiraku.record import Record, load_record
 
 
@@ -68,7 +68,7 @@ def input_schema() -> dict[str, Any]:
     return _input_model(defaults).model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> Any:
     """Build the graph that creates and schedules experiment records."""
     path = Path(__file__).with_name("workflow.md")
     fields, body = Record._parse_markdown(path)
@@ -214,7 +214,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     return builder.compile(checkpointer=checkpointer)
 
 
-def _children(parent_id: str, config: HirakuConfig) -> list[Record]:
+def _children(parent_id: str, config: Project) -> list[Record]:
     return sorted(
         load_record(parent_id, config=config).children(config=config),
         key=lambda item: item.id,

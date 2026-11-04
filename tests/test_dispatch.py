@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 
 
 def _git(path: Path, *arguments: str, check: bool = True) -> str:
@@ -17,11 +17,11 @@ def _git(path: Path, *arguments: str, check: bool = True) -> str:
     return result.stdout.strip()
 
 
-def _repository(path: Path) -> HirakuConfig:
+def _repository(path: Path) -> Project:
     _git(path, "init", "-q")
     _git(path, "config", "user.email", "test@example.invalid")
     _git(path, "config", "user.name", "Test")
-    config = HirakuConfig.init(path)
+    config = Project.create(path)
     (path / "marker.txt").write_text("committed", encoding="utf-8")
     _git(path, "add", ".")
     _git(path, "commit", "-qm", "initial")

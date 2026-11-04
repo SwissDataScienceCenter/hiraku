@@ -7,8 +7,8 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
 from hiraku.git import init_code_repository
+from hiraku.project import Project
 
 
 def git(path: Path, *args: str) -> str:
@@ -46,7 +46,7 @@ def test_project_creation_does_not_invoke_git(tmp_path, monkeypatch, command):
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, command)
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "minimal/hiraku.yml").is_file()
+    assert (tmp_path / "minimal/hiraku/hiraku.yml").is_file()
     assert (tmp_path / "minimal/evaluate.py").is_file() == (command[0] == "example")
     assert not (tmp_path / "minimal/.git").exists()
 
@@ -75,7 +75,7 @@ def test_init_git_creates_code_repo_and_can_be_repeated(tmp_path, monkeypatch):
 def test_git_init_preserves_linked_code_worktree(tmp_path, source):
     checkout = tmp_path / "worktree"
     git(source, "worktree", "add", "-b", "research", str(checkout))
-    config = HirakuConfig.init(checkout)
+    config = Project.create(checkout)
     before = (checkout / ".git").read_bytes()
     init_code_repository(config)
     assert (checkout / ".git").read_bytes() == before

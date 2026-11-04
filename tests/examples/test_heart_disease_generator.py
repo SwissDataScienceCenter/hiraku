@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from hiraku import HirakuConfig
+from hiraku import Project
 from hiraku.cli import main
 from hiraku.record import list_records, load_record
 
@@ -77,7 +77,7 @@ def test_init_generates_once(tmp_path, monkeypatch, copy_generator):
 def test_invalid_generation_options_leave_no_project(tmp_path, arguments):
     result = CliRunner().invoke(main, [*arguments, str(tmp_path)])
     assert result.exit_code != 0
-    assert not (tmp_path / "hiraku.yml").exists()
+    assert not (tmp_path / "hiraku/hiraku.yml").exists()
 
 
 def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch):
@@ -100,7 +100,7 @@ def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch)
     )
     assert result.exit_code == 1
     assert "completed runs kept" in result.output
-    assert (tmp_path / "hiraku.yml").is_file()
+    assert (tmp_path / "hiraku/hiraku.yml").is_file()
     assert (tmp_path / "completed.txt").is_file()
     assert not (tmp_path / "generate_results.py").exists()
 
@@ -110,7 +110,7 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     from hiraku.record import Record
 
     def export(output):
-        generated = HirakuConfig.init(output, install_skill=False)
+        generated = Project.create(output, install_skill=False)
         Record.create("generated", config=generated)
         (output / "runs.csv").write_text("id,record_id\nrun,generated\n")
 
@@ -128,7 +128,7 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
         ],
     )
     assert result.exit_code == 0, result.output
-    config = HirakuConfig.discover(tmp_path)
+    config = Project.discover(tmp_path)
     assert config.active_record_id == "generated"
     assert load_record("generated", config=config).runs(config=config)[0].id == "run"
     assert not (tmp_path / ".git").exists()
@@ -155,7 +155,7 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
     assert {
         p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()
     } == {
-        "hiraku.yml",
+        "hiraku/hiraku.yml",
         "runs.csv",
         *(
             f"hiraku/records/heart-disease/{name}.md"
@@ -167,9 +167,7 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
             )
         ),
     }
-    config = HirakuConfig.init(
-        tmp_path / "project", template=output, install_skill=False
-    )
+    config = Project.create(tmp_path / "project", template=output, install_skill=False)
     assert len(list_records(config=config)) == 4
     record = load_record("random-forest", config=config)
     runs = record.resolve_tracking_backend(config=config).list_runs()

@@ -2,7 +2,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 
 
 def test_example_list_outside_project(tmp_path, monkeypatch):
@@ -37,9 +37,10 @@ def test_project_destination(tmp_path, monkeypatch, arguments, destination, exam
     result = CliRunner().invoke(main, arguments)
     assert result.exit_code == 0, result.output
     root = (tmp_path / destination).resolve()
-    assert HirakuConfig.load(root / "hiraku.yml").root == root
+    assert Project.load(root / "hiraku/hiraku.yml").root == root
     assert (root / "evaluate.py").is_file() == example
-    assert (tmp_path / "hiraku.yml").exists() == (destination == ".")
+    assert (root / "hiraku/hiraku.yml").exists()
+    assert not (tmp_path / "hiraku.yml").exists()
     if destination == "my-project":
         assert not (tmp_path / "minimal").exists()
 
@@ -56,7 +57,7 @@ def test_init_existing_directory_preserves_unrelated_files(
     result = CliRunner().invoke(main, ["init", destination])
     assert result.exit_code == 0, result.output
     assert (root / "notes.txt").read_text() == "keep me"
-    assert (root / "hiraku.yml").is_file()
+    assert (root / "hiraku/hiraku.yml").is_file()
 
 
 @pytest.mark.parametrize("destination", [None, ".", "project"])
@@ -64,7 +65,7 @@ def test_plain_reinitialization_leaves_project_unchanged(
     tmp_path, monkeypatch, destination
 ):
     root = tmp_path / "project" if destination == "project" else tmp_path
-    config = HirakuConfig.init(root)
+    config = Project.create(root)
     config.dispatch_dir.mkdir()
     (config.dispatch_dir / "launch.sh").write_text("custom launcher\n")
     before = {
@@ -83,7 +84,7 @@ def test_plain_reinitialization_leaves_project_unchanged(
 
 
 def test_reinitialization_with_example_option_is_rejected(tmp_path):
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     before = config.path.read_bytes()
     result = CliRunner().invoke(main, ["example", "create", "minimal", str(tmp_path)])
     assert result.exit_code == 1
@@ -122,7 +123,7 @@ def test_template_keeps_current_directory_default(tmp_path, monkeypatch):
     result = CliRunner().invoke(main, ["init", "--template", str(template)])
     assert result.exit_code == 0, result.output
     assert (root / "hello.txt").read_text() == "hello"
-    assert (root / "hiraku.yml").is_file()
+    assert (root / "hiraku/hiraku.yml").is_file()
 
 
 @pytest.mark.parametrize(

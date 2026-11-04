@@ -6,8 +6,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .config import HirakuConfig
 from .errors import GitError
+from .project import Project
 
 
 class GitRepository:
@@ -71,7 +71,7 @@ def require_git() -> str:
     return executable
 
 
-def init_code_repository(config: HirakuConfig) -> None:
+def init_code_repository(config: Project) -> None:
     """Initialize the code repository, preserving existing repositories/worktrees."""
     require_git()
     if (config.root / ".git").exists():

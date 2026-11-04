@@ -12,7 +12,7 @@ from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hiraku import HirakuConfig
+from hiraku import Project
 from hiraku.execution import execute_command
 from hiraku.record import Record
 
@@ -61,7 +61,7 @@ def validate_runs(project: Path) -> list[dict[str, str]]:
     return rows
 
 
-def generate(config: HirakuConfig) -> None:
+def generate(config: Project) -> None:
     """Generate records and runs in an initialized, empty example project."""
     if list(config.records_dir.rglob("*.md")) or (config.root / "runs.csv").exists():
         raise FileExistsError("Generation requires an example without records or runs")
@@ -145,9 +145,7 @@ def generate_results(output: Path) -> None:
         raise FileExistsError(f"Output already exists: {output}")
     with TemporaryDirectory(prefix="hiraku-heart-disease-") as temporary:
         project = Path(temporary).resolve() / "project"
-        config = HirakuConfig.init(
-            project, example="heart-disease", install_skill=False
-        )
+        config = Project.create(project, example="heart-disease", install_skill=False)
         for arguments in (
             ["init", "-q"],
             ["add", "."],
@@ -169,7 +167,7 @@ def generate_results(output: Path) -> None:
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
             overlay = Path(staging) / "overlay"
             shutil.copytree(config.records_dir, overlay / "hiraku/records")
-            for name in ("hiraku.yml", "runs.csv"):
+            for name in ("hiraku/hiraku.yml", "runs.csv"):
                 shutil.copyfile(project / name, overlay / name)
             overlay.rename(output)
 
@@ -183,4 +181,4 @@ if __name__ == "__main__":
     if args.output is not None:
         generate_results(args.output)
     else:
-        generate(HirakuConfig.discover())
+        generate(Project.discover())

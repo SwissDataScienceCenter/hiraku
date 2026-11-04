@@ -3,13 +3,13 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import Record
 from hiraku.tracking.csv import CSVBackend
 
 
 def test_runs_list_attributed_runs_from_current_backend(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     root = Record.create("root", config=config)
     child = Record.create("child", parent_id=root.id, config=config)
     with (tmp_path / "runs.csv").open("w", newline="") as stream:
@@ -26,7 +26,7 @@ def test_runs_list_attributed_runs_from_current_backend(tmp_path: Path) -> None:
 def test_default_run_list_returns_attributed_runs_from_selected_source(
     tmp_path: Path,
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     root = Record.create("root", config=config)
     child = Record.create("child", parent_id=root.id, config=config)
     (config.root / "runs.csv").write_text(
@@ -39,7 +39,7 @@ def test_default_run_list_returns_attributed_runs_from_selected_source(
 
 
 def test_run_query_scans_selected_csv_once(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     root = Record.create("root", config=config)
     child = Record.create("child", parent_id=root.id, config=config)
     Record.create("leaf", parent_id=child.id, config=config)
@@ -67,7 +67,7 @@ def test_run_query_scans_selected_csv_once(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_resolve_tracking_backend_uses_project_setting(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     config.tracking_backend = {"type": "csv", "path": "results/root.csv"}
     root = Record.create("root", config=config)
     child = Record.create("child", parent_id=root.id, config=config)

@@ -17,8 +17,8 @@ from filelock import FileLock
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
-from ..config import HirakuConfig
 from ..errors import ValidationError, WorkflowError
+from ..project import Project
 from ..record import Record
 from .session_history import (
     prepare_checkpoint_storage,
@@ -29,7 +29,7 @@ from .session_history import (
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 
-def workflow_ids(*, config: HirakuConfig) -> list[str]:
+def workflow_ids(*, config: Project) -> list[str]:
     """List project workflow folders that define a LangGraph workflow.py."""
     if not config.workflows_dir.is_dir():
         return []
@@ -43,7 +43,7 @@ def workflow_ids(*, config: HirakuConfig) -> list[str]:
     )
 
 
-def workflow_details(*, config: HirakuConfig) -> list[dict[str, Any]]:
+def workflow_details(*, config: Project) -> list[dict[str, Any]]:
     """Return lightweight listing data for LangGraph workflows."""
     details = []
     for workflow_id in workflow_ids(config=config):
@@ -68,7 +68,7 @@ def start_workflow(
     workflow_id: str,
     arguments: Mapping[str, Any] | None = None,
     *,
-    config: HirakuConfig,
+    config: Project,
     context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Start a LangGraph workflow and run until it completes or interrupts."""
@@ -100,7 +100,7 @@ def resume_workflow(
     workflow_session_id: str,
     response: Mapping[str, Any],
     *,
-    config: HirakuConfig,
+    config: Project,
     checkpoint_id: str,
     context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -119,7 +119,7 @@ def resume_workflow(
 def _resume_locked(
     workflow_session_id: str,
     response: Mapping[str, Any],
-    config: HirakuConfig,
+    config: Project,
     checkpoint_id: str,
     context: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
@@ -156,9 +156,7 @@ def _resume_locked(
         )
 
 
-def workflow_status(
-    workflow_session_id: str, *, config: HirakuConfig
-) -> dict[str, Any]:
+def workflow_status(workflow_session_id: str, *, config: Project) -> dict[str, Any]:
     """Inspect a checkpointed graph run without advancing it."""
     graph_workflow = _session_workflow_id(workflow_session_id, config)
     with _compiled_graph(graph_workflow, config) as graph:
@@ -170,13 +168,13 @@ def workflow_status(
         return _snapshot_result(graph_workflow, workflow_session_id, snapshot)
 
 
-def workflow_mermaid(workflow_id: str, *, config: HirakuConfig) -> str:
+def workflow_mermaid(workflow_id: str, *, config: Project) -> str:
     """Render a workflow's compiled LangGraph topology as Mermaid text."""
     with _compiled_graph(workflow_id, config) as graph:
         return graph.get_graph().draw_mermaid()
 
 
-def _session_workflow_id(workflow_session_id: str, config: HirakuConfig) -> str:
+def _session_workflow_id(workflow_session_id: str, config: Project) -> str:
     """Resolve the workflow encoded in a current-format session ID."""
     workflow_id, separator, checkpoint_id = workflow_session_id.partition(":")
     if (
@@ -192,7 +190,7 @@ def _session_workflow_id(workflow_session_id: str, config: HirakuConfig) -> str:
 
 
 @contextmanager
-def _compiled_graph(workflow_id: str, config: HirakuConfig) -> Iterator[Any]:
+def _compiled_graph(workflow_id: str, config: Project) -> Iterator[Any]:
     available_workflows = workflow_ids(config=config)
     if workflow_id not in available_workflows:
         available = ", ".join(available_workflows) or "none"
@@ -272,7 +270,7 @@ def _invoke_and_record(
     workflow_id: str,
     workflow_session_id: str,
     invocation: Any,
-    config: HirakuConfig,
+    config: Project,
     context: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     try:
@@ -292,7 +290,7 @@ def _invoke_and_record(
 
 
 def _record_snapshot(
-    graph: Any, workflow_id: str, workflow_session_id: str, config: HirakuConfig
+    graph: Any, workflow_id: str, workflow_session_id: str, config: Project
 ) -> dict[str, Any]:
     snapshot = graph.get_state(_thread_config(workflow_session_id))
     result = _snapshot_result(workflow_id, workflow_session_id, snapshot)

@@ -7,7 +7,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import list_records, load_record
 
 
@@ -29,7 +29,7 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     assert project.joinpath("data/processed.cleveland.data").is_file()
     assert not project.joinpath("generate_results.py").exists()
     assert not project.joinpath("README.md").exists()
-    config = HirakuConfig.discover(project)
+    config = Project.discover(project)
     assert config.active_record_id == "random-forest"
     records = list_records(config=config)
     assert len(records) == 4

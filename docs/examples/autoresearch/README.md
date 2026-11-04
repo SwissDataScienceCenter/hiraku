@@ -53,8 +53,9 @@ cat >> .gitignore <<'EOF'
 /.codex/
 /.mcp.json
 /hiraku/*
+!/hiraku/hiraku.yml
 !/hiraku/dispatch/
-/hiraku.yml
+!/hiraku/records/
 /task.md
 /runs.csv
 /run.log

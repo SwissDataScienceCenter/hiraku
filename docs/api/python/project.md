@@ -1,5 +1,9 @@
 # Project initialization API
 
-## `initialize_project`
+`Project.create(path)` initializes a project, while `Project.discover(path)`
+finds an existing one. The project object owns its persisted settings and paths.
+Creation also prepares the root `.hiraku/` directory for future project data.
 
-::: hiraku.project.initialize_project
+## `Project`
+
+::: hiraku.project.Project

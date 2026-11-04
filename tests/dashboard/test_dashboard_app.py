@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from hiraku.config import HirakuConfig
 from hiraku.dashboard.data import tree_rows
+from hiraku.project import Project
 
 pytest.importorskip("marimo")
 pytest.importorskip("altair")
 
 
 def test_app_runs_every_cell_against_a_project(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "a")
@@ -46,7 +46,7 @@ def test_app_runs_every_cell_against_a_project(
     [("record:a", "a", "a"), ("run:r2", "a", "a1"), ("run:r1", "b", "b")],
 )
 def test_record_details_follow_selection_without_changing_subtree_semantics(
-    project: HirakuConfig,
+    project: Project,
     monkeypatch: pytest.MonkeyPatch,
     key: str,
     scope: str,
@@ -83,7 +83,7 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
 
 
 def test_navigation_selection_updates_table_and_clears_run(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     from hiraku.dashboard.app import app
@@ -111,7 +111,7 @@ def test_navigation_selection_updates_table_and_clears_run(
 
 
 def test_project_copy_finds_its_project_without_the_launcher(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from marimo import App
 

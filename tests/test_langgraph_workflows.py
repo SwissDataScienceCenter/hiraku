@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError, WorkflowError
+from hiraku.project import Project
 from hiraku.workflows.langgraph import (
     resume_workflow,
     start_workflow,
@@ -13,7 +13,7 @@ from hiraku.workflows.langgraph import (
 )
 
 
-def _write_workflow(config: HirakuConfig, source: str) -> None:
+def _write_workflow(config: Project, source: str) -> None:
     directory = config.workflows_dir / "broken"
     directory.mkdir()
     (directory / "workflow.py").write_text(source, encoding="utf-8")
@@ -38,7 +38,7 @@ def _write_workflow(config: HirakuConfig, source: str) -> None:
 def test_start_rejects_invalid_workflow_input_schema(
     tmp_path: Path, source: str, message: str
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     _write_workflow(config, source)
 
     with pytest.raises(WorkflowError, match=message):
@@ -63,7 +63,7 @@ def test_start_rejects_invalid_workflow_input_schema(
 def test_start_rejects_invalid_graph_factory(
     tmp_path: Path, factory: str, message: str
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     _write_workflow(
         config,
         "def input_schema(): return {'type': 'object'}\n" + factory,
@@ -74,7 +74,7 @@ def test_start_rejects_invalid_graph_factory(
 
 
 def test_start_wraps_workflow_import_errors(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     _write_workflow(config, "def input_schema():\n    return [\n")
 
     with pytest.raises(WorkflowError, match="Cannot import LangGraph workflow"):
@@ -82,14 +82,14 @@ def test_start_wraps_workflow_import_errors(tmp_path: Path) -> None:
 
 
 def test_workflow_status_rejects_unknown_session(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
+    config = Project.create(tmp_path, example="workflows", install_skill=False)
 
     with pytest.raises(ValidationError, match="was not found"):
         workflow_status(f"unknown:{'0' * 32}", config=config)
 
 
 def test_resume_rejects_stale_checkpoint(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
+    config = Project.create(tmp_path, example="workflows", install_skill=False)
     started = start_workflow("count-steps", {"count": 1}, config=config)
 
     with pytest.raises(ValidationError, match="checkpoint has changed"):

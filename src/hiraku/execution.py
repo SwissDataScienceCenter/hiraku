@@ -8,9 +8,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .config import HirakuConfig
 from .errors import ExecutionError, GitError, NoActiveRecordError, ValidationError
 from .git import GitRepository
+from .project import Project
 from .record import load_record
 
 
@@ -35,10 +35,10 @@ def execute_command(
     dispatch: str | None = None,
     env: Mapping[str, str] | None = None,
     capture_output: bool = False,
-    config: HirakuConfig | None = None,
+    config: Project | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command in the current project and return when it exits."""
-    selected = config or HirakuConfig.discover()
+    selected = config or Project.discover()
     selected_record = record_id or selected.active_record_id
     if selected_record is None:
         raise NoActiveRecordError("Select a record with --record or hiraku record set")

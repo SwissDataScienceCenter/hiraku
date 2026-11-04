@@ -160,7 +160,7 @@ class Record(BaseModel):
     def reject_record_tracking_backend(cls, values: Any) -> Any:
         if isinstance(values, Mapping) and "tracking_backend" in values:
             raise ValidationError(
-                "tracking_backend must be configured in hiraku.yml, "
+                "tracking_backend must be configured in hiraku/hiraku.yml, "
                 "not record front matter"
             )
         return values
@@ -173,7 +173,8 @@ class Record(BaseModel):
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "tracking_backend":
             raise ValidationError(
-                "tracking_backend must be configured in hiraku.yml, not on a record"
+                "tracking_backend must be configured in hiraku/hiraku.yml, "
+                "not on a record"
             )
         if name == "id":
             persisted_id = getattr(self, "_persisted_id", None)
@@ -293,9 +294,9 @@ class Record(BaseModel):
 
         Example:
             ```python
-            from hiraku.config import HirakuConfig
+            from hiraku.project import Project
 
-            config = HirakuConfig.discover()
+            config = Project.discover()
             record = Record(id="demo")
             record.save(config.records_dir / "demo" / "demo.md")
             ```
@@ -306,9 +307,9 @@ class Record(BaseModel):
             )
         target = Path(path).expanduser().absolute() if path is not None else self.path
         assert target is not None
-        from .config import HirakuConfig
+        from .project import Project
 
-        selected = HirakuConfig.discover(target)
+        selected = Project.discover(target)
         index = _record_index(selected)
         existing = index.get(self.id)
         if existing is not None and existing.path != target:
@@ -618,9 +619,9 @@ class Record(BaseModel):
 def _config(config: Any) -> Any:
     if config is not None:
         return config
-    from .config import HirakuConfig
+    from .project import Project
 
-    return HirakuConfig.discover()
+    return Project.discover()
 
 
 def _reparent_journal_path(config: Any) -> Path:

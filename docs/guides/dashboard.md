@@ -292,7 +292,7 @@ hiraku dashboard --init --edit --record digits
 
 The project backend has no `ui_url`, so run details initially have no
 **Open in mlflow** link. To enable it, add `ui_url` to `tracking_backend` in
-`hiraku.yml`:
+`hiraku/hiraku.yml`:
 
 ```yaml
 tracking_backend:

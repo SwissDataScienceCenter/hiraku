@@ -119,7 +119,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict
 
 from hiraku.record import Record
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.markdown import Markdown, render
 
 
@@ -139,7 +139,7 @@ def input_schema() -> dict[str, Any]:
     return GreetingInput.model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig):
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project):
     _, body = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
     prompt = Markdown(body)
 

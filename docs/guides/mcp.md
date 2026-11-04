@@ -3,7 +3,7 @@
 Hiraku includes an MCP server that works with any initialized Hiraku project.
 `hiraku init` and `hiraku example create` add project-scoped MCP configuration
 for Claude Code, Codex, and Pi.
-The server process discovers the nearest `hiraku.yml` from its working directory,
+The server process discovers the nearest `hiraku/hiraku.yml` from its working directory,
 so each client starts it in the project it is working on:
 
 ```bash
@@ -131,5 +131,5 @@ instructions only; it does not run an agent or modify the project.
 ## Python
 
 `hiraku.mcp.create_server(config=None)` returns the SDK server. Pass an existing
-`HirakuConfig` to select a project explicitly; otherwise it discovers the
+`Project` to select a project explicitly; otherwise it discovers the
 current project. Call `server.run(transport="stdio")` to serve it.

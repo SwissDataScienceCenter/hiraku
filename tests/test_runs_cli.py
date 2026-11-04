@@ -8,7 +8,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 
 
 def invoke(*args: str):
@@ -16,7 +16,7 @@ def invoke(*args: str):
 
 
 def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     assert invoke("record", "create", "root").exit_code == 0
     (tmp_path / "runs.csv").write_text("id,record_id,duration\na,root,4.25\nb,root,\n")
@@ -35,7 +35,7 @@ def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_record_cli_explicit_run_and_runs(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
@@ -90,7 +90,7 @@ def test_record_cli_explicit_run_and_runs(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "runs.csv").write_text("id,record_id\na,root\nb,child\nc,\n")
     no_active = invoke("runs", "--json")

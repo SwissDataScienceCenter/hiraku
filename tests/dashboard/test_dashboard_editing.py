@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import Record
 
 
@@ -11,7 +11,7 @@ def test_markdown_view_opts_into_editing_explicitly(tmp_path: Path) -> None:
     pytest.importorskip("altair")
     from hiraku.dashboard.components import MarkdownEditor, markdown_view
 
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     record = Record.create("notes", config=config)
     editor = MarkdownEditor(Record.save_markdown)
 
@@ -33,7 +33,7 @@ def test_editor_retains_drafts_across_selection_and_cancels(tmp_path: Path) -> N
     pytest.importorskip("altair")
     from hiraku.dashboard.components import MarkdownEditor
 
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     first = Record.create("first", markdown="Original", config=config)
     other = Record.create("other", config=config)
     editor = MarkdownEditor(Record.save_markdown)
@@ -56,7 +56,7 @@ def test_editor_saves_and_retains_failed_draft(tmp_path: Path) -> None:
     pytest.importorskip("altair")
     from hiraku.dashboard.components import MarkdownEditor
 
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     record = Record.create("notes", markdown="Original", config=config)
     editor = MarkdownEditor(Record.save_markdown)
     editor._start(record)

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
-from hiraku.config import HirakuConfig
 from hiraku.mcp import create_server
+from hiraku.project import Project
 
 
 def test_workflow_mcp_uses_generic_langgraph_controls(tmp_path) -> None:
-    config = HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
+    config = Project.create(tmp_path, example="workflows", install_skill=False)
     server = create_server(config)
 
     tools = asyncio.run(server.list_tools())

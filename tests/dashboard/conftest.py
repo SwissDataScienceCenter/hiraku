@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import Record
 
 # (run ID, record, minute started or None, seconds taken or None, loss)
@@ -20,9 +20,9 @@ RUNS = [
 
 
 @pytest.fixture
-def project(tmp_path: Path) -> HirakuConfig:
+def project(tmp_path: Path) -> Project:
     """A CSV-tracked tree ``root -> {a -> a1, b}`` with attributed runs."""
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     Record.create(
         "root",
         type="task",
@@ -41,4 +41,4 @@ def project(tmp_path: Path) -> HirakuConfig:
             started = "" if minute is None else f"2026-10-14T10:0{minute}:00+00:00"
             duration = "" if duration is None else duration
             writer.writerow([run_id, record_id, started, duration, "train", loss])
-    return HirakuConfig.load(tmp_path / "hiraku.yml")
+    return Project.load(tmp_path / "hiraku" / "hiraku.yml")

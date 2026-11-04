@@ -10,9 +10,9 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.markdown import Markdown, render
+from hiraku.project import Project
 from hiraku.record import Record
 
 
@@ -23,7 +23,7 @@ class GreetState(BaseModel):
     final: str = ""
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> Any:
     """Build the one-step graph from the example's Markdown prompt."""
     path = Path(__file__).with_name("workflow.md")
     fields, body = Record._parse_markdown(path)

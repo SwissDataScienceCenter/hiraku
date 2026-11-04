@@ -11,7 +11,7 @@ from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hiraku import HirakuConfig
+from hiraku import Project
 from hiraku.execution import execute_command
 from hiraku.record import Record
 
@@ -69,7 +69,7 @@ def validate_database(database: Path) -> None:
                 raise ValueError("Unexpected experiment seeds")
 
 
-def generate(config: HirakuConfig) -> None:
+def generate(config: Project) -> None:
     """Run a small local batch without contacting a remote tracking service."""
     database = config.root / "mlflow.db"
     if database.exists() or list(config.records_dir.rglob("*.md")):
@@ -145,7 +145,7 @@ def generate_results(output: Path) -> None:
     if output.exists():
         raise FileExistsError(f"Output already exists: {output}")
     with TemporaryDirectory(prefix="hiraku-digits-") as temporary:
-        config = HirakuConfig.init(
+        config = Project.create(
             Path(temporary).resolve() / "project",
             example="digits-mlflow",
             install_skill=False,
@@ -171,7 +171,7 @@ def generate_results(output: Path) -> None:
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
             overlay = Path(staging) / "overlay"
             shutil.copytree(config.records_dir, overlay / "hiraku/records")
-            shutil.copyfile(config.path, overlay / "hiraku.yml")
+            shutil.copyfile(config.path, overlay / "hiraku/hiraku.yml")
             with (
                 sqlite3.connect(config.root / "mlflow.db") as source,
                 sqlite3.connect(overlay / "mlflow.db") as snapshot,
@@ -197,6 +197,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     if args.output is None:
-        generate(HirakuConfig.discover())
+        generate(Project.discover())
     else:
         generate_results(args.output)

@@ -8,7 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import load_record
 
 
@@ -17,7 +17,7 @@ def invoke(*args: str):
 
 
 def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setitem(sys.modules, "mcp.server.mcpserver", None)
     monkeypatch.delitem(sys.modules, "hiraku.mcp", raising=False)
@@ -41,7 +41,7 @@ def test_workflow_cli_exposes_langgraph_controls_only() -> None:
 
 
 def test_record_cli_lifecycle(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     assert invoke("record", "create", "root", "--set", "goal=Improve").exit_code == 0
     assert invoke("record", "create", "child", "--parent", "root").exit_code == 0
@@ -71,12 +71,12 @@ def test_record_cli_lifecycle(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_record_cli_active_and_validation(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     assert invoke("record", "create", "first").exit_code == 0
-    assert HirakuConfig.load(config.path).active_record_id == "first"
+    assert Project.load(config.path).active_record_id == "first"
     assert invoke("record", "create", "second", "--no-activate").exit_code == 0
-    assert HirakuConfig.load(config.path).active_record_id == "first"
+    assert Project.load(config.path).active_record_id == "first"
     assert invoke("record", "set", "second").exit_code == 0
     assert json.loads(invoke("status", "--json").output)["active_record_id"] == "second"
     assert invoke("record", "create", "third", "--parent", "missing").exit_code != 0
@@ -88,7 +88,7 @@ def test_record_cli_active_and_validation(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_status_reports_project_tracking_backend(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     config.tracking_backend = {"type": "wandb", "project": "eurosat-rgb"}
     config.save()
     monkeypatch.chdir(tmp_path)
@@ -141,7 +141,7 @@ def test_status_reports_project_tracking_backend(tmp_path: Path, monkeypatch) ->
 
 
 def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     invoke("record", "create", "root", "--type", "task", "--set", "status=active")
     invoke("record", "create", "child", "--parent", "root")
@@ -156,7 +156,7 @@ def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_record_list_with_no_records(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
 
     result = invoke("record", "list")
@@ -167,7 +167,7 @@ def test_record_list_with_no_records(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_record_cli_reparents_and_makes_root(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     invoke("record", "create", "one")
     invoke("record", "create", "two")
@@ -182,7 +182,7 @@ def test_record_cli_reparents_and_makes_root(tmp_path: Path, monkeypatch) -> Non
 def test_record_update_rejects_invalid_markdown(
     value: str, tmp_path: Path, monkeypatch
 ) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     assert invoke("record", "create", "test", "--type", "context").exit_code == 0
     result = invoke("record", "update", "test", "--set", f"markdown={value}")
@@ -192,7 +192,7 @@ def test_record_update_rejects_invalid_markdown(
 
 
 def test_contexts_use_record_commands(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     assert (
         invoke(
@@ -222,7 +222,7 @@ def test_contexts_use_record_commands(tmp_path: Path, monkeypatch) -> None:
 def test_generic_list_with_no_entries(
     command: str, header: list[str], tmp_path: Path, monkeypatch
 ) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     result = invoke(command, "list")
     assert result.exit_code == 0
@@ -230,7 +230,7 @@ def test_generic_list_with_no_entries(
 
 
 def test_edit_uses_stored_file(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     invoke("record", "create", "one")
     monkeypatch.setenv("EDITOR", "true")

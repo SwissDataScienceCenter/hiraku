@@ -10,9 +10,9 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.markdown import Markdown
+from hiraku.project import Project
 from hiraku.record import Record
 
 
@@ -32,7 +32,7 @@ def input_schema() -> dict[str, Any]:
     return AutoresearchInput.model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> Any:
     """Build the prompt-only workflow graph."""
     _, body = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
     prompt = str(Markdown(body)).strip()

@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 import pandas as pd
 import pytest
 
-from hiraku.config import HirakuConfig
 from hiraku.dashboard.data import (
     RECORD_COLUMNS,
     RUN_COLUMNS,
@@ -28,11 +27,12 @@ from hiraku.dashboard.data import (
     within,
 )
 from hiraku.errors import BackendError
+from hiraku.project import Project
 from hiraku.record import Record
 from hiraku.run import Run
 
 
-def tables(project: HirakuConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
+def tables(project: Project) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build ``records_df`` and ``runs_df`` as the notebook does."""
     loaded = load(project)
     return (
@@ -46,14 +46,14 @@ def tables(project: HirakuConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
     [("record:b", "b"), ("run:r2", "a"), ("run:r1", "b"), (None, "a")],
 )
 def test_selection_scope_preserves_subtree_for_descendant_runs(
-    project: HirakuConfig, key: str | None, expected: str
+    project: Project, key: str | None, expected: str
 ) -> None:
     records, runs = tables(project)
     paths = dict(zip(records["record"], records["record_path"], strict=True))
     assert selection_scope(key, "a", paths, runs) == expected
 
 
-def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:
+def test_load_reads_records_and_attributed_runs(project: Project) -> None:
     loaded = load(project)
 
     assert [record.id for record in loaded.records] == ["a", "a1", "b", "root"]
@@ -64,7 +64,7 @@ def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:
 
 
 def test_load_reports_unavailable_source_without_failing(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     Record.create("broken", config=project)
 
@@ -81,7 +81,7 @@ def test_load_reports_unavailable_source_without_failing(
     assert loaded.runs == []
 
 
-def test_run_rows_flatten_runs_in_execution_order(project: HirakuConfig) -> None:
+def test_run_rows_flatten_runs_in_execution_order(project: Project) -> None:
     rows = run_rows(load(project))
 
     assert [row["run"] for row in rows] == ["r0", "r1", "r2", "r3", "r4"]
@@ -184,7 +184,7 @@ def test_arrow_frame_types_columns_and_falls_back_to_text() -> None:
 
 
 def test_tree_rows_nest_runs_under_records_in_execution_order(
-    project: HirakuConfig,
+    project: Project,
 ) -> None:
     records_df, runs_df = tables(project)
 
@@ -250,7 +250,7 @@ def test_deep_trees_do_not_hit_the_recursion_limit() -> None:
     assert [row["depth"] for row in rows] == list(range(depth))
 
 
-def test_metric_choice_prefers_declared_metrics(project: HirakuConfig) -> None:
+def test_metric_choice_prefers_declared_metrics(project: Project) -> None:
     records_df, _ = tables(project)
     runs_df = arrow_frame(
         [{"run": "r0", "metric.runtime": 1.0, "metric.loss": 0.1, "metric.note": "x"}]
@@ -262,7 +262,7 @@ def test_metric_choice_prefers_declared_metrics(project: HirakuConfig) -> None:
     assert default_metric(records_df, []) is None
 
 
-def test_find_run_and_run_text(project: HirakuConfig) -> None:
+def test_find_run_and_run_text(project: Project) -> None:
     _, runs_df = tables(project)
 
     run = find_run(runs_df, "r0")
@@ -282,7 +282,7 @@ def test_find_run_and_run_text(project: HirakuConfig) -> None:
     )
 
 
-def test_subtree_selects_descendants_by_record_path(project: HirakuConfig) -> None:
+def test_subtree_selects_descendants_by_record_path(project: Project) -> None:
     _, runs_df = tables(project)
 
     assert subtree(runs_df, "root/a")["run"].tolist() == ["r0", "r2", "r3"]
@@ -293,7 +293,7 @@ def test_subtree_selects_descendants_by_record_path(project: HirakuConfig) -> No
 
 
 def test_plot_frame_numbers_runs_and_skips_unusable_values(
-    project: HirakuConfig,
+    project: Project,
 ) -> None:
     loss = ["0.5", "nan", "n/a", None, 0.25]
     runs_df = arrow_frame(

@@ -9,7 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import load_record
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import start_workflow, workflow_status
@@ -66,7 +66,7 @@ def test_all_examples_use_the_langgraph_cli(
 def test_greet_is_one_final_prompt_filled_from_its_arguments(
     runner: CliRunner,
 ) -> None:
-    config = HirakuConfig.discover()
+    config = Project.discover()
     response = start_workflow("greet", {"name": "Ada", "times": 3}, config=config)
     assert response["status"] == "completed"
     assert response["workflow_id"] == "greet"
@@ -114,7 +114,7 @@ def test_cli_uses_workflow_session_ids_for_resume_and_status(runner: CliRunner) 
 
 
 def children(parent: str) -> list[Any]:
-    config = HirakuConfig.discover()
+    config = Project.discover()
     return sorted(
         load_record(parent, config=config).children(config=config),
         key=lambda item: item.id,
@@ -128,7 +128,7 @@ def set_count(runner: CliRunner, record_id: str, count: int) -> None:
 def test_scheduler_langgraph_works_by_priority_until_every_record_reaches_target(
     runner: CliRunner,
 ) -> None:
-    config = HirakuConfig.discover()
+    config = Project.discover()
     response = start_workflow("scheduler", {"records": 3, "target": 2}, config=config)
     interruption = response["interrupts"][0]["value"]
     parent = interruption["data"]["parent"]
@@ -172,7 +172,7 @@ def test_scheduler_langgraph_works_by_priority_until_every_record_reaches_target
 
 
 def test_langgraph_runs_are_routed_to_their_own_workflow(runner: CliRunner) -> None:
-    config = HirakuConfig.discover()
+    config = Project.discover()
     count_run = start_workflow("count-steps", {"count": 1}, config=config)
     scheduler_run = start_workflow("scheduler", {"records": 1}, config=config)
 

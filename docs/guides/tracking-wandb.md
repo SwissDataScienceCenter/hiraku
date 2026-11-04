@@ -17,7 +17,7 @@ uv add wandb
 uv run wandb login
 ```
 
-Set the project-wide backend in `hiraku.yml`. With the `wandb` shorthand,
+Set the project-wide backend in `hiraku/hiraku.yml`. With the `wandb` shorthand,
 Hiraku uses the project directory name as the W&B project and leaves the entity
 unset, allowing the authenticated W&B account to resolve it. The CLI and
 training process can have separate Python environments; both need W&B installed.

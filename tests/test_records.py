@@ -5,13 +5,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError as ModelValidationError
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import RecordExistsError, ValidationError
+from hiraku.project import Project
 from hiraku.record import Record, list_records, load_record
 
 
 def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     task = Record(
         id="sample", markdown="# Body\n\nVerbatim.\n", zeta=1, alpha={"x": True}
     )
@@ -40,7 +40,7 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
 
 
 def test_context_material_uses_the_record_registry(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     context = Record.create(
         "protocol", type="context", markdown="Guidance", config=config
     )
@@ -51,7 +51,7 @@ def test_context_material_uses_the_record_registry(tmp_path: Path) -> None:
 
 
 def test_record_commit_is_local_not_inherited(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     root = Record.create("root", commit="a" * 40, config=config)
     child = Record.create("child", parent_id=root.id, config=config)
     assert child.commit is None
@@ -63,7 +63,7 @@ def test_record_commit_is_local_not_inherited(tmp_path: Path) -> None:
     ["id: no-front-matter\n", "---\n- one\n- two\n---\n", "---\nid: [\n---\n"],
 )
 def test_malformed_records_are_rejected(tmp_path: Path, content: str) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     path = config.records_dir / "bad/bad.md"
     path.parent.mkdir()
     path.write_text(content)
@@ -72,7 +72,7 @@ def test_malformed_records_are_rejected(tmp_path: Path, content: str) -> None:
 
 
 def test_save_markdown_preserves_metadata(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     record = Record.create(
         "notes", markdown="Original", config=config, custom=["value"]
     )
@@ -90,7 +90,7 @@ def test_save_markdown_preserves_metadata(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("field", ["markdown", "title"])
 def test_save_markdown_rejects_external_changes(tmp_path: Path, field: str) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     record = Record.create("notes", markdown="Original", config=config)
     external = Record.load(record.path)
     setattr(external, field, "External change")
@@ -110,7 +110,7 @@ def test_save_markdown_rejects_detached_records() -> None:
 
 
 def test_save_markdown_validates_body_before_writing(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     record = Record.create("notes", markdown="Original", config=config)
     contents = record.path.read_bytes()
 
@@ -124,7 +124,7 @@ def test_save_markdown_validates_body_before_writing(tmp_path: Path) -> None:
 def test_save_markdown_leaves_original_unchanged_on_save_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     record = Record.create("notes", markdown="Original", config=config)
     contents = record.path.read_bytes()
 

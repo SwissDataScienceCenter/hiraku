@@ -10,7 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import load_record
 
 EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "iris-wandb"
@@ -134,7 +134,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "{name: test/log_loss, direction: minimize}]",
         ],
     )
-    config = HirakuConfig.discover(project)
+    config = Project.discover(project)
     root = load_record("iris", config=config)
     assert config.tracking_backend == "wandb"
     assert "tracking_backend" not in root.to_dict()

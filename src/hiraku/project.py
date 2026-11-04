@@ -3,32 +3,224 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import tomllib
-from contextlib import ExitStack, suppress
-from dataclasses import dataclass
+from contextlib import ExitStack
 from importlib.resources import as_file, files
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
-from .errors import HirakuError, ProjectExistsError, ValidationError
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+from .errors import (
+    ProjectExistsError,
+    ProjectNotFoundError,
+    ValidationError,
+)
 from .io import atomic_write, dump_yaml, load_yaml_mapping
-from .record import validate_identifier
 
 if TYPE_CHECKING:
-    from .config import HirakuConfig
+    from .record import Record
 
 
-@dataclass(frozen=True, slots=True)
-class _InitializationResult:
-    config: HirakuConfig
-    created_files: tuple[Path, ...]
-    created_dirs: tuple[Path, ...]
+def _validate_tracking_backend(value: str | dict[str, Any]) -> str | dict[str, Any]:
+    """Validate a backend setting and preserve its original representation."""
+    from .tracking.factory import validate_backend_config
+
+    validate_backend_config(value)
+    return value
 
 
-class _ProjectProvisioner:
-    """Implement transactional filesystem provisioning for one operation."""
+class Project(BaseModel):
+    """A project, its persisted settings, and its managed files."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        validate_assignment=True,
+    )
+
+    root: Path = Field(exclude=True)
+    hiraku_dir_name: str = Field(default="hiraku", alias="hiraku_dir", min_length=1)
+    default_dispatch: str | None = Field(default=None, min_length=1)
+    tracking_backend: Annotated[
+        str | dict[str, Any], AfterValidator(_validate_tracking_backend)
+    ] = "csv"
+    active_record_id: str | None = None
+
+    def __init__(self, root: Path | str, **data: Any) -> None:
+        """Create a project model from its root and persisted settings.
+
+        Args:
+            root: Project directory.
+            **data: Project settings validated by Pydantic.
+        """
+        super().__init__(root=root, **data)
+
+    @field_validator("root", mode="before")
+    @classmethod
+    def resolve_root(cls, value: Path | str) -> Path:
+        """Expand and resolve the project root."""
+        return Path(value).expanduser().resolve()
+
+    @model_validator(mode="after")
+    def validate_hiraku_dir(self) -> Project:
+        """Ensure the managed directory stays within the project root."""
+        raw = Path(self.hiraku_dir_name)
+        if raw.is_absolute() or ".." in raw.parts:
+            raise ValueError("hiraku_dir cannot contain parent traversal")
+        resolved = (self.root / raw).resolve(strict=False)
+        try:
+            resolved.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError(
+                f"hiraku_dir resolves outside project root: {resolved}"
+            ) from exc
+        return self
+
+    @classmethod
+    def load(cls, path: Path | str) -> Project:
+        """Load a project from its ``hiraku/hiraku.yml`` file.
+
+        Args:
+            path: Path to the project configuration file.
+
+        Returns:
+            The project rooted at the configuration file's parent directory.
+
+        Raises:
+            hiraku.errors.ValidationError: If the file or its settings are invalid.
+        """
+        marker = Path(path).expanduser().absolute()
+        data = load_yaml_mapping(marker)
+        try:
+            project = cls(marker.parent.parent, **data)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                f"Invalid project configuration {marker}: {exc}"
+            ) from exc
+        if project.path != marker:
+            raise ValidationError(
+                f"Project configuration path does not match hiraku_dir: {marker}"
+            )
+        return project
+
+    @classmethod
+    def discover(cls, start: Path | str | None = None) -> Project:
+        """Find the nearest project by searching ``start`` and its parents.
+
+        Args:
+            start: Starting directory or file. Defaults to the current directory.
+
+        Returns:
+            The nearest discovered project.
+
+        Raises:
+            hiraku.errors.ProjectNotFoundError: If no project is found.
+        """
+        candidate = Path.cwd() if start is None else Path(start)
+        candidate = candidate.expanduser().absolute()
+        if candidate.is_file():
+            if candidate.name == "hiraku.yml":
+                return cls.load(candidate)
+            candidate = candidate.parent
+        for directory in (candidate, *candidate.parents):
+            default_marker = directory / "hiraku" / "hiraku.yml"
+            if default_marker.is_file():
+                return cls.load(default_marker)
+            try:
+                markers = (
+                    child / "hiraku.yml"
+                    for child in directory.iterdir()
+                    if child.is_dir() and not child.name.startswith(".")
+                )
+                for marker in markers:
+                    if marker.is_file():
+                        return cls.load(marker)
+            except OSError:
+                pass
+        raise ProjectNotFoundError(f"No hiraku/hiraku.yml found from {candidate}")
+
+    @property
+    def hiraku_dir(self) -> Path:
+        """Return the resolved directory for Hiraku-managed project data."""
+        raw = Path(self.hiraku_dir_name)
+        resolved = (self.root / raw).resolve(strict=False)
+        try:
+            resolved.relative_to(self.root)
+        except ValueError as exc:
+            raise ValidationError(
+                f"hiraku_dir resolves outside project root: {resolved}"
+            ) from exc
+        return resolved
+
+    @property
+    def path(self) -> Path:
+        """Return the path to the project's ``hiraku/hiraku.yml`` file."""
+        return self.hiraku_dir / "hiraku.yml"
+
+    @property
+    def records_dir(self) -> Path:
+        """Return the directory containing research record files."""
+        return self.hiraku_dir / "records"
+
+    @property
+    def workflows_dir(self) -> Path:
+        """Return the directory containing installed workflows."""
+        return self.hiraku_dir / "workflows"
+
+    @property
+    def dispatch_dir(self) -> Path:
+        """Return the directory reserved for project dispatchers."""
+        return self.hiraku_dir / "dispatch"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the persisted project settings."""
+        return {
+            "hiraku_dir": self.hiraku_dir_name,
+            "default_dispatch": self.default_dispatch,
+            "active_record_id": self.active_record_id,
+            "tracking_backend": self.tracking_backend,
+        }
+
+    def save(self) -> None:
+        """Atomically save the project's settings to ``hiraku/hiraku.yml``.
+
+        Raises:
+            hiraku.errors.ValidationError: If the configuration cannot be written.
+        """
+        try:
+            atomic_write(self.path, dump_yaml(self.to_dict()))
+        except OSError as exc:
+            raise ValidationError(
+                f"Cannot save configuration at {self.path}: {exc}"
+            ) from exc
+
+    def set_active_record(self, record: str | Record) -> None:
+        """Validate and persist the active research record.
+
+        Args:
+            record: A record object or its stable ID.
+        """
+        from .record import Record, load_record
+
+        selected = load_record(
+            record.id if isinstance(record, Record) else record, config=self
+        )
+        self.active_record_id = selected.id
+        self.save()
+
+    def clear_active_record(self) -> None:
+        """Clear the active record and persist the project settings."""
+        self.active_record_id = None
+        self.save()
 
     @classmethod
     def create(
@@ -36,527 +228,149 @@ class _ProjectProvisioner:
         root: Path | str = ".",
         *,
         install_skill: bool = True,
+        install_mcp: bool = True,
         template: Path | str | None = None,
         example: str | None = None,
         results: bool = False,
         with_generator: bool = False,
-    ) -> HirakuConfig:
-        """Create and initialize a project directory.
+    ) -> Project:
+        """Create a project and install its selected resources.
 
         Args:
-            root: Root directory where the project will be created.
-            install_skill: Whether to install repository-local skill resources for
-                supported coding agents.
-            template: Optional local directory copied over the initialized project.
-            example: Optional packaged example name whose ``src`` tree is copied.
-            results: Include the example's prepared records and tracked runs.
-            with_generator: Copy the example's optional generation script.
+            root: Directory to initialize.
+            install_skill: Whether to install the bundled Hiraku skill.
+            install_mcp: Whether to add the project MCP server configuration.
+            template: Optional directory whose contents are copied into the project.
+            example: Optional packaged example name to initialize from.
+            results: Whether to include the example's prepared records and runs.
+            with_generator: Whether to copy the example's result generator.
 
         Returns:
-            The initialized `hiraku.config.HirakuConfig`.
+            The initialized project.
 
         Raises:
-            hiraku.errors.ProjectExistsError: If the project marker already exists.
-            hiraku.errors.ValidationError: If provisioning fails.
+            hiraku.errors.ProjectExistsError: If ``root`` already has a project.
+            hiraku.errors.ValidationError: If settings or resources are invalid.
+            ValueError: If template and example options conflict.
         """
-        return cls.create_with_report(
-            root,
-            install_skill=install_skill,
-            template=template,
-            example=example,
-            results=results,
-            with_generator=with_generator,
-        ).config
+        root = Path(root).expanduser().resolve()
+        if (root / "hiraku" / "hiraku.yml").is_file():
+            raise ProjectExistsError(f"Hiraku project already exists at {root}")
+        if template and example:
+            raise ValueError("Choose template or example, not both")
+        if (results or with_generator) and not example:
+            raise ValueError("results and with_generator require example")
 
-    @classmethod
-    def create_with_report(
-        cls,
-        root: Path | str = ".",
-        *,
-        install_skill: bool = True,
-        template: Path | str | None = None,
-        example: str | None = None,
-        results: bool = False,
-        with_generator: bool = False,
-    ) -> _InitializationResult:
-        """Initialize a project and report paths created by the operation."""
-        from .config import HirakuConfig
-
-        if template is not None and example is not None:
-            raise ValidationError("template and example are mutually exclusive")
-        if results and example is None:
-            raise ValidationError("results requires a packaged example")
-        if with_generator and example is None:
-            raise ValidationError("with_generator requires a packaged example")
-        project_root = Path(root).expanduser().absolute()
-        marker = project_root / "hiraku.yml"
-        if marker.exists():
-            raise ProjectExistsError(f"Hiraku project already exists at {marker}")
-        created_files: list[Path] = []
-        created_dirs: list[Path] = []
-        replaced_files: dict[Path, bytes] = {}
-        root_existed = project_root.exists()
+        resources = files("hiraku.resources")
         with ExitStack() as stack:
-            overlay = cls._resolve_overlay(template, example, stack)
-            entries = cls._inventory_overlay(overlay, project_root)
-            if with_generator:
-                generator = (
-                    files("hiraku.resources")
-                    / "examples"
-                    / example
-                    / "generate_results.py"
-                )
-                if not generator.is_file():
-                    raise ValidationError(f"Example {example!r} has no generator")
-                destination = project_root / "generate_results.py"
-                cls._validate_existing_destination(destination, False)
-                entries.append(
-                    (
-                        stack.enter_context(as_file(generator)),
-                        Path("generate_results.py"),
-                    )
-                )
+            overlay = None
             result_overlay = None
-            if results:
-                source = files("hiraku.resources") / "examples" / example / "results"
-                if not source.is_dir():
-                    raise ValidationError(f"Example {example!r} has no results")
-                result_overlay = stack.enter_context(as_file(source))
-                entries.extend(cls._inventory_overlay(result_overlay, project_root))
-            data = dict(HirakuConfig.DEFAULTS)
-            overlay_marker = overlay / "hiraku.yml" if overlay is not None else None
-            if overlay_marker is not None and overlay_marker.is_file():
-                data = load_yaml_mapping(overlay_marker)
-            if result_overlay is not None:
-                result_marker = result_overlay / "hiraku.yml"
-                if result_marker.is_file():
-                    data.update(load_yaml_mapping(result_marker))
-            config = HirakuConfig(path=marker, root=project_root, **data)
-            try:
-                project_root.mkdir(parents=True, exist_ok=True)
-                if not root_existed:
-                    created_dirs.append(project_root)
-                atomic_write(marker, dump_yaml(config.to_dict()))
-                created_files.append(marker)
-                for directory in (
-                    config.records_dir,
-                    config.workflows_dir,
+            if template is not None:
+                overlay = Path(template).expanduser().resolve()
+            elif example is not None:
+                if (
+                    not example
+                    or example in {".", ".."}
+                    or Path(example).name != example
+                    or "\\" in example
                 ):
-                    cls._ensure_directory(directory, created_dirs)
-                resource_root = files("hiraku.resources")
-                copies = [(resource_root / "workflows", config.workflows_dir)]
-                if install_skill:
-                    skill_source = resource_root / "skills/hiraku"
-                    canonical_skill = project_root / ".agents/skills/hiraku"
-                    copies.append((skill_source, canonical_skill))
-                for source, target in copies:
-                    with as_file(source) as source_path:
-                        cls._copy_resource_tree(
-                            source_path, target, created_files, created_dirs
+                    raise ValueError("Invalid example name")
+                bundle = resources / "examples" / example
+                overlay = stack.enter_context(as_file(bundle / "src"))
+                if results:
+                    result_overlay = stack.enter_context(as_file(bundle / "results"))
+
+            data = {}
+            for source in (overlay, result_overlay):
+                if source is not None:
+                    if not source.is_dir():
+                        raise FileNotFoundError(source)
+                    config_file = source / "hiraku" / "hiraku.yml"
+                    if not config_file.is_file():
+                        config_file = next(
+                            (
+                                child / "hiraku.yml"
+                                for child in source.iterdir()
+                                if child.is_dir() and (child / "hiraku.yml").is_file()
+                            ),
+                            config_file,
                         )
-                if install_skill:
-                    cls._link_skill_alias(
-                        canonical_skill,
-                        project_root / ".claude/skills/hiraku",
-                        created_files,
-                        created_dirs,
-                    )
-                cls._apply_overlay(entries, project_root, created_files, created_dirs)
-                cls._install_mcp_configs(
-                    project_root, created_files, created_dirs, replaced_files
-                )
-                return _InitializationResult(
-                    config=config,
-                    created_files=tuple(dict.fromkeys(created_files)),
-                    created_dirs=tuple(dict.fromkeys(created_dirs)),
-                )
-            except Exception as exc:
-                for path, content in replaced_files.items():
-                    with suppress(OSError):
-                        atomic_write(path, content.decode("utf-8"))
-                for path in reversed(created_files):
-                    path.unlink(missing_ok=True)
-                for path in sorted(
-                    created_dirs, key=lambda item: len(item.parts), reverse=True
-                ):
-                    with suppress(OSError):
-                        path.rmdir()
-                if isinstance(exc, HirakuError):
-                    raise
-                raise ValidationError(
-                    f"Could not initialize Hiraku project at {project_root}: {exc}"
-                ) from exc
+                    if config_file.is_file():
+                        data.update(load_yaml_mapping(config_file))
 
-    @classmethod
-    def _install_mcp_configs(
-        cls,
-        project_root: Path,
-        created_files: list[Path],
-        created_dirs: list[Path],
-        replaced_files: dict[Path, bytes],
-    ) -> None:
-        """Register the stdio server for supported project agent configs."""
-        command, *arguments = cls._hiraku_command(project_root)
-        server = {"command": command, "args": [*arguments, "mcp"]}
-        cls._install_claude_mcp_config(
-            project_root, server, created_files, created_dirs, replaced_files
-        )
-        cls._install_codex_mcp_config(
-            project_root, server, created_files, created_dirs, replaced_files
-        )
-        cls._install_pi_mcp_config(
-            project_root, server, created_files, created_dirs, replaced_files
-        )
-
-    @classmethod
-    def _install_claude_mcp_config(
-        cls,
-        project_root: Path,
-        server: dict[str, str | list[str]],
-        created_files: list[Path],
-        created_dirs: list[Path],
-        replaced_files: dict[Path, bytes],
-    ) -> None:
-        """Install the MCP server in Claude Code's project configuration."""
-        cls._install_json_mcp_config(
-            project_root / ".mcp.json",
-            server,
-            created_files,
-            created_dirs,
-            replaced_files,
-        )
-
-    @classmethod
-    def _install_pi_mcp_config(
-        cls,
-        project_root: Path,
-        server: dict[str, str | list[str]],
-        created_files: list[Path],
-        created_dirs: list[Path],
-        replaced_files: dict[Path, bytes],
-    ) -> None:
-        """Install the MCP server in Pi's project configuration."""
-        cls._install_json_mcp_config(
-            project_root / ".pi" / "mcp.json",
-            server,
-            created_files,
-            created_dirs,
-            replaced_files,
-        )
-
-    @classmethod
-    def _install_json_mcp_config(
-        cls,
-        path: Path,
-        server: dict[str, str | list[str]],
-        created_files: list[Path],
-        created_dirs: list[Path],
-        replaced_files: dict[Path, bytes],
-    ) -> None:
-        """Merge the server into a JSON MCP client configuration."""
-        if path.parent.is_symlink():
-            raise ValidationError(
-                f"MCP configuration directory cannot be a symbolic link: {path.parent}"
-            )
-        if path.is_symlink():
-            raise ValidationError(
-                f"MCP configuration cannot be a symbolic link: {path}"
-            )
-        data: dict[str, object] = {}
-        existed = path.exists()
-        original: bytes | None = None
-        if existed:
-            if not path.is_file():
-                raise ValidationError(
-                    f"MCP configuration is not a regular file: {path}"
-                )
-            original = path.read_bytes()
+            data["hiraku_dir_name"] = data.pop("hiraku_dir", "hiraku")
             try:
-                parsed = json.loads(original)
-            except (UnicodeError, json.JSONDecodeError) as exc:
-                raise ValidationError(
-                    f"Cannot merge MCP configuration {path}: {exc}"
-                ) from exc
-            if not isinstance(parsed, dict):
-                raise ValidationError(
-                    f"MCP configuration must be a JSON object: {path}"
+                project = cls(root, **data)
+            except (TypeError, ValueError) as exc:
+                if isinstance(exc, ValidationError):
+                    raise
+                raise ValidationError(f"Invalid project configuration: {exc}") from exc
+            if project.path.exists():
+                raise ProjectExistsError(
+                    f"Hiraku project already exists at {project.root}"
                 )
-            data = parsed
-        servers = data.setdefault("mcpServers", {})
-        if not isinstance(servers, dict):
-            raise ValidationError(f"mcpServers must be a JSON object: {path}")
-        if "hiraku" not in servers:
-            servers["hiraku"] = server
-            if existed:
-                assert original is not None
-                replaced_files[path] = original
-            else:
-                cls._ensure_directory(path.parent, created_dirs)
-                created_files.append(path)
+            root.mkdir(parents=True, exist_ok=True)
+            project.records_dir.mkdir(parents=True, exist_ok=True)
+            project.workflows_dir.mkdir(parents=True, exist_ok=True)
+            (root / ".hiraku").mkdir(parents=True, exist_ok=True)
+
+            with as_file(resources / "workflows") as source:
+                shutil.copytree(source, project.workflows_dir, dirs_exist_ok=True)
+            if install_skill:
+                with as_file(resources / "skills" / "hiraku") as source:
+                    for destination in (
+                        root / ".agents/skills/hiraku",
+                        root / ".claude/skills/hiraku",
+                    ):
+                        shutil.copytree(source, destination, dirs_exist_ok=True)
+
+            for source in (overlay, result_overlay):
+                if source is not None:
+                    shutil.copytree(
+                        source,
+                        root,
+                        dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("hiraku.yml"),
+                    )
+            if with_generator:
+                generator = resources / "examples" / example / "generate_results.py"
+                with as_file(generator) as source:
+                    shutil.copy2(source, root / "generate_results.py")
+
+            project.save()
+            if install_mcp:
+                project._install_mcp_configs()
+            return project
+
+    def _install_mcp_configs(self) -> None:
+        """Register the stdio server in supported project agent configs.
+
+        Claude, Pi, and Codex configuration files are merged while preserving
+        other configured MCP servers.
+        """
+        root = self.root
+        command = "uv" if (root / "uv.lock").is_file() else "hiraku"
+        args = ["run", "hiraku", "mcp"] if command == "uv" else ["mcp"]
+        server = {"command": command, "args": args}
+
+        for path in (root / ".mcp.json", root / ".pi" / "mcp.json"):
+            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            data.setdefault("mcpServers", {}).setdefault("hiraku", server)
+            path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(path, json.dumps(data, indent=2) + "\n")
 
-    @classmethod
-    def _install_codex_mcp_config(
-        cls,
-        project_root: Path,
-        server: dict[str, str | list[str]],
-        created_files: list[Path],
-        created_dirs: list[Path],
-        replaced_files: dict[Path, bytes],
-    ) -> None:
-        """Install the MCP server in Codex's project configuration."""
-        codex_path = project_root / ".codex" / "config.toml"
-        codex_text = ""
-        if codex_path.parent.is_symlink():
-            raise ValidationError(
-                "MCP configuration directory cannot be a symbolic link: "
-                f"{codex_path.parent}"
+        path = root / ".codex" / "config.toml"
+        content = path.read_text(encoding="utf-8") if path.exists() else ""
+        if "hiraku" not in tomllib.loads(content).get("mcp_servers", {}):
+            entry = (
+                "[mcp_servers.hiraku]\n"
+                f"command = {json.dumps(command)}\n"
+                f"args = {json.dumps(args)}\n"
             )
-        if codex_path.is_symlink():
-            raise ValidationError(
-                f"MCP configuration cannot be a symbolic link: {codex_path}"
+            new_content = (
+                content.rstrip() + "\n\n" + entry if content.strip() else entry
             )
-        if codex_path.exists():
-            if not codex_path.is_file():
-                raise ValidationError(
-                    f"MCP configuration is not a regular file: {codex_path}"
-                )
-            original = codex_path.read_bytes()
-            try:
-                parsed_codex = tomllib.loads(original.decode("utf-8"))
-            except (UnicodeError, tomllib.TOMLDecodeError) as exc:
-                raise ValidationError(
-                    f"Cannot merge MCP configuration {codex_path}: {exc}"
-                ) from exc
-            if not isinstance(parsed_codex.get("mcp_servers", {}), dict):
-                raise ValidationError(f"mcp_servers must be a TOML table: {codex_path}")
-            if "hiraku" in parsed_codex.get("mcp_servers", {}):
-                return
-            replaced_files[codex_path] = original
-            codex_text = original.decode("utf-8")
-        else:
-            cls._ensure_directory(codex_path.parent, created_dirs)
-            created_files.append(codex_path)
-        suffix = "\n" if codex_text and not codex_text.endswith("\n") else ""
-        if codex_text and not codex_text.endswith("\n\n"):
-            suffix += "\n"
-        codex_text += (
-            f"{suffix}[mcp_servers.hiraku]\n"
-            f"command = {json.dumps(server['command'])}\n"
-            f"args = {json.dumps(server['args'])}\n"
-        )
-        # Appending a table cannot extend every valid layout, such as an inline
-        # mcp_servers table, so check the result before replacing the file.
-        try:
-            merged = tomllib.loads(codex_text)["mcp_servers"]["hiraku"]
-        except (tomllib.TOMLDecodeError, KeyError, TypeError):
-            merged = None
-        if merged != server:
-            raise ValidationError(
-                f"Cannot add the hiraku MCP server to {codex_path}; add a "
-                "[mcp_servers.hiraku] table manually"
-            )
-        atomic_write(codex_path, codex_text)
-
-    @staticmethod
-    def _hiraku_command(project_root: Path) -> list[str]:
-        """Use the project environment when a uv lockfile is present."""
-        return (
-            ["uv", "run", "hiraku"]
-            if (project_root / "uv.lock").is_file()
-            else ["hiraku"]
-        )
-
-    @staticmethod
-    def _resolve_overlay(
-        template: Path | str | None, example: str | None, stack: ExitStack
-    ) -> Path | None:
-        if template is not None:
-            source = Path(template).expanduser().absolute()
-            if source.is_symlink():
-                raise ValidationError(
-                    f"Template directory cannot be a symbolic link: {source}"
-                )
-            if not source.is_dir():
-                raise ValidationError(f"Template directory not found: {source}")
-            if not os.access(source, os.R_OK | os.X_OK):
-                raise ValidationError(f"Template directory is not readable: {source}")
-            return source
-        if example is None:
-            return None
-        validate_identifier(example, label="example name")
-        examples = files("hiraku.resources") / "examples"
-        source = examples / example / "src"
-        if not source.is_dir():
-            available = (
-                sorted(
-                    item.name
-                    for item in examples.iterdir()
-                    if item.is_dir() and (item / "src").is_dir()
-                )
-                if examples.is_dir()
-                else []
-            )
-            suffix = (
-                f"; available examples: {', '.join(available)}" if available else ""
-            )
-            raise ValidationError(f"Unknown example {example!r}{suffix}")
-        return stack.enter_context(as_file(source))
-
-    @classmethod
-    def _inventory_overlay(
-        cls, source: Path | None, project_root: Path
-    ) -> list[tuple[Path, Path]]:
-        if source is None:
-            return []
-        entries: list[tuple[Path, Path]] = []
-        root = project_root.resolve(strict=False)
-        try:
-            items = list(source.rglob("*"))
-        except OSError as exc:
-            raise ValidationError(
-                f"Cannot read template directory {source}: {exc}"
-            ) from exc
-        for item in items:
-            if item.is_symlink():
-                raise ValidationError(f"Template contains a symbolic link: {item}")
-            if not item.is_dir() and not item.is_file():
-                raise ValidationError(f"Template contains a special file: {item}")
-            relative = item.relative_to(source)
-            destination = project_root / relative
-            try:
-                destination.resolve(strict=False).relative_to(root)
-            except ValueError as exc:
-                raise ValidationError(
-                    f"Template path resolves outside project root: {relative}"
-                ) from exc
-            cls._validate_existing_destination(destination, item.is_dir())
-            entries.append((item, relative))
-        return entries
-
-    @staticmethod
-    def _validate_existing_destination(destination: Path, source_is_dir: bool) -> None:
-        current = destination
-        while current != current.parent:
-            if current.is_symlink():
-                raise ValidationError(
-                    f"Template destination uses a symbolic link: {current}"
-                )
-            current = current.parent
-        if not destination.exists():
-            return
-        if source_is_dir and destination.is_dir():
-            return
-        raise ValidationError(f"Template would overwrite existing path: {destination}")
-
-    @staticmethod
-    def _ensure_directory(directory: Path, created_dirs: list[Path]) -> None:
-        missing: list[Path] = []
-        current = directory
-        while not current.exists():
-            missing.append(current)
-            current = current.parent
-        if not current.is_dir():
-            raise ValidationError(f"Initialization path is not a directory: {current}")
-        for path in reversed(missing):
-            path.mkdir()
-            created_dirs.append(path)
-
-    @classmethod
-    def _apply_overlay(
-        cls,
-        entries: list[tuple[Path, Path]],
-        project_root: Path,
-        created_files: list[Path],
-        created_dirs: list[Path],
-    ) -> None:
-        created = set(created_files)
-        for source, relative in entries:
-            if relative == Path("hiraku.yml"):
-                continue
-            destination = project_root / relative
-            if source.is_dir():
-                cls._ensure_directory(destination, created_dirs)
-            elif destination.exists():
-                if destination not in created or not destination.is_file():
-                    raise ValidationError(
-                        f"Template would overwrite existing path: {destination}"
-                    )
-                shutil.copy2(source, destination)
-            else:
-                cls._ensure_directory(destination.parent, created_dirs)
-                shutil.copy2(source, destination)
-                created_files.append(destination)
-                created.add(destination)
-
-    @staticmethod
-    def _copy_resource_tree(
-        source: Path, target: Path, created_files: list[Path], created_dirs: list[Path]
-    ) -> None:
-        missing: list[Path] = []
-        current = target
-        while not current.exists():
-            missing.append(current)
-            current = current.parent
-        for directory in reversed(missing):
-            directory.mkdir()
-            created_dirs.append(directory)
-        for item in source.rglob("*"):
-            relative = item.relative_to(source)
-            destination = target / relative
-            if item.is_dir():
-                if not destination.exists():
-                    destination.mkdir(parents=True)
-                    created_dirs.append(destination)
-            elif destination.exists():
-                raise ValidationError(
-                    "Initialization resource would overwrite existing file: "
-                    f"{destination}"
-                )
-            else:
-                shutil.copy2(item, destination)
-                created_files.append(destination)
-
-    @classmethod
-    def _link_skill_alias(
-        cls,
-        source: Path,
-        target: Path,
-        created_files: list[Path],
-        created_dirs: list[Path],
-    ) -> None:
-        """Link a harness-specific skill path to the canonical project skill."""
-        if target.exists() or target.is_symlink():
-            raise ValidationError(
-                f"Initialization resource would overwrite existing path: {target}"
-            )
-        cls._ensure_directory(target.parent, created_dirs)
-        link_target = Path(os.path.relpath(source, start=target.parent))
-        try:
-            target.symlink_to(link_target, target_is_directory=True)
-        except (NotImplementedError, OSError):
-            # Some Windows configurations do not allow creating directory links.
-            # Keep initialization usable there, with a generated copy as fallback.
-            cls._copy_resource_tree(source, target, created_files, created_dirs)
-        else:
-            created_files.append(target)
-
-
-def initialize_project(
-    root: Path | str = ".",
-    *,
-    install_skill: bool = True,
-    template: Path | str | None = None,
-    example: str | None = None,
-    results: bool = False,
-    with_generator: bool = False,
-) -> HirakuConfig:
-    """Create a Hiraku project and install its bundled resources."""
-    return _ProjectProvisioner.create(
-        root,
-        install_skill=install_skill,
-        template=template,
-        example=example,
-        results=results,
-        with_generator=with_generator,
-    )
+            if tomllib.loads(new_content)["mcp_servers"]["hiraku"] != server:
+                raise ValidationError(f"Cannot merge MCP settings in {path}")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write(path, new_content)

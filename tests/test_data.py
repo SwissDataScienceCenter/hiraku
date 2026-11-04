@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
+from hiraku.project import Project
 from hiraku.record import Record, load_record
 from hiraku.run import Run
 
 
 def test_inheritance_and_guarded_delete(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     parent = Record.create(
         "task",
         config=config,
@@ -53,7 +53,7 @@ def test_removed_launch_fields_are_not_record_schema_fields(name, value) -> None
 
 
 def test_commit_local_and_validated(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     parent = Record.create("parent", commit="a" * 40, config=config)
     child = Record.create("child", parent_id=parent.id, config=config)
     assert "commit" not in child.resolve(config=config).values
@@ -66,7 +66,7 @@ def test_commit_local_and_validated(tmp_path: Path) -> None:
 
 
 def test_run_immutable_and_missing_csv_empty(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     record = Record.create("record", config=config)
     assert record.runs(config=config) == []
     run = Run(id="one", metrics={}, params={})

@@ -9,14 +9,14 @@ Choose the backend that matches the stage of your project:
 - [W&B](guides/tracking-wandb.md) for hosted run tracking and collaboration;
 - [MLflow](guides/tracking-mlflow.md) for local SQLite or a remote MLflow server.
 
-Set `tracking_backend` in `hiraku.yml` to choose one backend for the whole
+Set `tracking_backend` in `hiraku/hiraku.yml` to choose one backend for the whole
 project. Records cannot override it, and it is not stored in record front
 matter. Remove any existing `tracking_backend` field from record front matter
-and move its value into `hiraku.yml`. If omitted there, Hiraku uses CSV. The
+and move its value into `hiraku/hiraku.yml`. If omitted there, Hiraku uses CSV. The
 [tracking API reference](api/python/tracking.md) documents the shared backend
 contract and normalized run model.
 
-For a custom project, configure the backend once in `hiraku.yml`:
+For a custom project, configure the backend once in `hiraku/hiraku.yml`:
 
 ```yaml
 tracking_backend: wandb

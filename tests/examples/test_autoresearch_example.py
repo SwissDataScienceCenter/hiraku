@@ -12,7 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
+from hiraku.project import Project
 from hiraku.record import load_record
 from hiraku.workflows.langgraph import start_workflow, workflow_ids
 
@@ -67,7 +67,9 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
     gitignore.write_text(
         gitignore.read_text(encoding="utf-8")
         + "\n# Hiraku local files and run artifacts\n"
-        + "/.agents/\n/.claude/\n/.codex/\n/.pi/\n/.mcp.json\n/hiraku/*\n/hiraku.yml\n"
+        + "/.agents/\n/.claude/\n/.codex/\n/.pi/\n/.mcp.json\n/hiraku/*\n"
+        + "!/hiraku/hiraku.yml\n"
+        + "!/hiraku/records/\n"
         + "/task.md\n"
         + "/runs.csv\n/run.log\n",
         encoding="utf-8",
@@ -105,7 +107,7 @@ def test_autoresearch_is_an_overlay() -> None:
     expected = {
         "README.md",
         "example.yml",
-        "src/hiraku.yml",
+        "src/hiraku/hiraku.yml",
         "src/task.md",
         "src/cpu_mock.py",
         "src/hiraku/dispatch/autoresearch.sh",
@@ -161,7 +163,7 @@ def test_autoresearch_is_an_overlay() -> None:
 
 def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     project, _ = create_overlay_project(tmp_path, monkeypatch)
-    task = load_record("sep10", config=HirakuConfig.discover(project))
+    task = load_record("sep10", config=Project.discover(project))
 
     assert (project / "README.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "README.md"
@@ -201,7 +203,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     )
     assert task.type == "task"
     assert not hasattr(task, "command")
-    config = HirakuConfig.discover(project)
+    config = Project.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
     assert "autoresearch" in workflow_ids(config=config)
     assert "collaborative" in workflow_ids(config=config)

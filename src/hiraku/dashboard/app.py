@@ -24,9 +24,9 @@ with app.setup:
 
     import marimo as mo
 
-    from hiraku.config import HirakuConfig
     from hiraku.dashboard import components as hc
     from hiraku.dashboard import data as hd
+    from hiraku.project import Project
     from hiraku.record import Record
 
 
@@ -35,9 +35,7 @@ def data_setup():
     _root = os.environ.get("HIRAKU_PROJECT_ROOT")
     # Project copies opened directly in marimo discover their own project.
     config = (
-        HirakuConfig.load(Path(_root) / "hiraku.yml")
-        if _root
-        else HirakuConfig.discover(mo.notebook_dir())
+        Project.discover(Path(_root)) if _root else Project.discover(mo.notebook_dir())
     )
     requested_record = os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
     return config, requested_record

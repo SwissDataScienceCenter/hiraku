@@ -1,4 +1,4 @@
-from hiraku import HirakuConfig, Metric, Record, Run, initialize_project
+from hiraku import Metric, Project, Record, Run
 from hiraku.errors import GitError, HirakuError
 from hiraku.execution import execute_command
 from hiraku.io import atomic_write, dump_yaml, load_yaml_mapping
@@ -11,12 +11,11 @@ def test_documented_imports() -> None:
         value is not None
         for value in (
             GitError,
-            HirakuConfig,
+            Project,
             HirakuError,
             Metric,
             Run,
             Record,
-            initialize_project,
             TrackingBackend,
             execute_command,
             list_records,

@@ -9,9 +9,9 @@ from mcp import Client, types
 from mcp.server.elicitation import render_elicitation_schema
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.mcp import WorkflowApproval, create_server
+from hiraku.project import Project
 from hiraku.record import Record
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import (
@@ -28,8 +28,8 @@ def resume_workflow(session_id, response, *, config):
     )
 
 
-def _project(tmp_path) -> HirakuConfig:
-    return HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
+def _project(tmp_path) -> Project:
+    return Project.create(tmp_path, example="workflows", install_skill=False)
 
 
 def _tool_names(server: Any) -> set[str]:
@@ -183,7 +183,7 @@ def test_workflow_graph_is_available_from_cli_and_mcp(tmp_path, monkeypatch) -> 
 
 
 def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     Record.create(
         "task",
         type="task",
@@ -224,7 +224,7 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
 
 
 def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     Record.create(
         "task",
         type="task",
@@ -288,7 +288,7 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
 
 
 def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     Record.create(
         "task",
         type="task",
@@ -329,7 +329,7 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
 
 
 def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     directory = config.workflows_dir / "review"
     directory.mkdir()
     (directory / "workflow.py").write_text(
@@ -386,7 +386,7 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
 
 
 def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     Record.create(
         "task",
         type="task",

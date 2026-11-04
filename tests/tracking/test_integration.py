@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import BackendError
+from hiraku.project import Project
 from hiraku.record import Record, load_record
 from hiraku.tracking import CSVBackend
 
 
 def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     task = Record.create("task", config=config)
     Record.create("exp", parent_id=task.id, config=config)
     (config.root / "runs.csv").write_text(
@@ -39,7 +39,7 @@ def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
 def test_backend_runs_rejects_empty_record_id_before_reading_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     backend = CSVBackend(config)
     monkeypatch.setattr(
         backend,
@@ -52,7 +52,7 @@ def test_backend_runs_rejects_empty_record_id_before_reading_source(
 
 def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     mlflow = pytest.importorskip("mlflow")
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     config.tracking_backend = {"type": "mlflow", "experiment_name": "hiraku-test"}
     task = Record.create("task", config=config)
     Record.create("exp", parent_id=task.id, config=config)

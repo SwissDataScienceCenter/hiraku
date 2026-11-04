@@ -19,8 +19,8 @@ from urllib.parse import urlsplit
 import pandas as pd
 import pyarrow as pa
 
-from ..config import HirakuConfig
 from ..io import dump_yaml
+from ..project import Project
 from ..record import Record, list_records
 from ..run import Run
 
@@ -60,7 +60,7 @@ class ProjectRuns:
     errors: list[str] = field(default_factory=list)
 
 
-def load(config: HirakuConfig) -> ProjectRuns:
+def load(config: Project) -> ProjectRuns:
     """Read all records and query each distinct tracking source once."""
     records = list_records(config=config)
     by_source: dict[str, Record] = {}

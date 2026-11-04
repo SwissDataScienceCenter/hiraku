@@ -10,8 +10,8 @@ import tempfile
 from importlib.util import find_spec
 from pathlib import Path
 
-from ..config import HirakuConfig
 from ..errors import ValidationError
+from ..project import Project
 from ..record import load_record
 
 DEFAULT_HOST = "127.0.0.1"
@@ -20,12 +20,12 @@ BUNDLED_NOTEBOOK = Path(__file__).with_name("app.py")
 BUNDLED_VIEWS = Path(__file__).with_name("studio")
 
 
-def project_notebook(config: HirakuConfig) -> Path:
+def project_notebook(config: Project) -> Path:
     """Return where ``hiraku dashboard --init`` places the project's notebook."""
     return config.hiraku_dir / "dashboard" / "app.py"
 
 
-def init_dashboard(config: HirakuConfig) -> Path:
+def init_dashboard(config: Project) -> Path:
     """Copy the bundled notebook into the project so it can be edited.
 
     Raises:
@@ -83,7 +83,7 @@ def build_command(
 
 
 def serve_dashboard(
-    config: HirakuConfig,
+    config: Project,
     *,
     record_id: str | None = None,
     port: int | None = None,

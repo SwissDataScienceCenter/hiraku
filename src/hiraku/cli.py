@@ -24,23 +24,28 @@ from rich import box, print_json
 from rich.console import Console
 from rich.table import Table
 
-from .config import HirakuConfig
-from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
+from .errors import (
+    GitError,
+    HirakuError,
+    NoActiveRecordError,
+    ValidationError,
+)
 from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
+from .project import Project
 from .record import Record, list_records, load_record, validate_identifier
 from .run import Run
 
 
 class CLIContext:
     def __init__(self) -> None:
-        self._config: HirakuConfig | None = None
+        self._config: Project | None = None
 
     @property
-    def config(self) -> HirakuConfig:
+    def config(self) -> Project:
         if self._config is None:
-            self._config = HirakuConfig.discover()
+            self._config = Project.discover()
         return self._config
 
 
@@ -137,7 +142,7 @@ def _markdown(path: Path | None) -> str:
         raise ValidationError(f"Cannot read {path}: {exc}") from exc
 
 
-def _active(config: HirakuConfig, record_id: str | None = None) -> Record:
+def _active(config: Project, record_id: str | None = None) -> Record:
     identifier = record_id or config.active_record_id
     if identifier is None:
         raise NoActiveRecordError("No active record; supply --record or set one")
@@ -208,7 +213,7 @@ def mcp_command() -> None:
     try:
         from .mcp import create_server
 
-        server = create_server(HirakuConfig.discover())
+        server = create_server(Project.discover())
     except ModuleNotFoundError as exc:
         if exc.name == "mcp" or (exc.name or "").startswith("mcp."):
             raise click.ClickException(
@@ -231,14 +236,22 @@ def init_command(
 ) -> None:
     """Initialize PATH (default: current directory)."""
     root = path if path is not None else Path.cwd()
-    marker = root.expanduser().absolute() / "hiraku.yml"
     if init_git:
         require_git()
-    if marker.is_file() and template is None:
-        config = HirakuConfig.load(marker)
+    absolute_root = root.expanduser().absolute()
+    markers = [absolute_root / "hiraku" / "hiraku.yml"]
+    if absolute_root.is_dir():
+        markers.extend(
+            child / "hiraku.yml"
+            for child in absolute_root.iterdir()
+            if child.is_dir() and not child.name.startswith(".")
+        )
+    existing_marker = next((marker for marker in markers if marker.is_file()), None)
+    if existing_marker is not None and template is None:
+        config = Project.load(existing_marker)
         message = "Hiraku project already initialized"
     else:
-        config = HirakuConfig.init(root, template=template)
+        config = Project.create(root, template=template)
         message = "Initialized Hiraku project"
     if init_git:
         init_code_repository(config)
@@ -304,7 +317,7 @@ def example_create_command(
         )
         if not generator.is_file():
             raise click.UsageError(f"Example {example!r} has no generator")
-    config = HirakuConfig.init(
+    config = Project.create(
         root,
         example=example,
         results=results,
@@ -323,7 +336,7 @@ def example_create_command(
                     with TemporaryDirectory(prefix="hiraku-generated-") as staging:
                         overlay = Path(staging) / "results"
                         namespace["generate_results"](overlay)
-                        generated = HirakuConfig.load(overlay / "hiraku.yml")
+                        generated = Project.load(overlay / "hiraku" / "hiraku.yml")
                         shutil.copytree(
                             generated.records_dir,
                             config.records_dir,

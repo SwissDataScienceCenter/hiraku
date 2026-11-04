@@ -14,11 +14,11 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import HirakuError, ValidationError
 from hiraku.execution import validate_command
 from hiraku.git import GitRepository
 from hiraku.markdown import Markdown, render
+from hiraku.project import Project
 from hiraku.record import Record, load_record
 from hiraku.run import Run
 
@@ -85,7 +85,7 @@ def input_schema() -> dict[str, Any]:
     return CollaborativeInput.model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> Any:
     """Build the collaborative research graph from its Markdown instructions."""
     path = Path(__file__).with_name("workflow.md")
     fields, body = Record._parse_markdown(path)
@@ -437,7 +437,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     return builder.compile(checkpointer=checkpointer)
 
 
-def _runs(record: Record, config: HirakuConfig) -> list[Run]:
+def _runs(record: Record, config: Project) -> list[Run]:
     return record.runs(config=config)
 
 

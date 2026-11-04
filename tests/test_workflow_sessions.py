@@ -10,9 +10,9 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.mcp import create_server
+from hiraku.project import Project
 from hiraku.workflows.langgraph import resume_workflow, start_workflow
 from hiraku.workflows.session_history import (
     checkpoint_database,
@@ -21,8 +21,8 @@ from hiraku.workflows.session_history import (
 )
 
 
-def _project(tmp_path: Path) -> HirakuConfig:
-    return HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
+def _project(tmp_path: Path) -> Project:
+    return Project.create(tmp_path, example="workflows", install_skill=False)
 
 
 def test_concurrent_resumes_reject_stale_checkpoint(tmp_path: Path) -> None:
@@ -80,7 +80,7 @@ def test_session_history_survives_restart_and_missing_workflow(tmp_path: Path) -
     completed = resume_workflow(
         session_id,
         {"token": token, "decision": "continue"},
-        config=HirakuConfig.load(config.path),
+        config=Project.load(config.path),
         checkpoint_id=started["checkpoint_id"],
         context={"client": "claude"},
     )

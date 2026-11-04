@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..config import HirakuConfig
 from ..errors import BackendError
+from ..project import Project
 from .base import TrackingBackend
 
 if TYPE_CHECKING:
@@ -66,7 +66,7 @@ class WandbBackend(TrackingBackend):
 
     def __init__(
         self,
-        config: HirakuConfig,
+        config: Project,
         *,
         settings: WandbBackendConfig | None = None,
         entity: str | None = None,

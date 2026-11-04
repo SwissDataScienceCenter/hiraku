@@ -16,13 +16,13 @@ from mcp.client.stdio import stdio_client  # noqa: E402
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E402
 
 from hiraku.cli import main  # noqa: E402
-from hiraku.config import HirakuConfig  # noqa: E402
 from hiraku.mcp import create_server  # noqa: E402
+from hiraku.project import Project  # noqa: E402
 from hiraku.record import load_record  # noqa: E402
 
 
 def test_tools_and_validation(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     server = create_server(config)
 
     async def exercise() -> None:
@@ -76,7 +76,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
 
 
 def test_resources_and_prompt(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     server = create_server(config)
 
     async def exercise() -> None:
@@ -133,7 +133,7 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
 
 
 def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     server = create_server(config)
 
     async def exercise() -> None:
@@ -160,7 +160,7 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
 
 
 def test_runs(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     (tmp_path / "runs.csv").write_text(
         "id,record_id,metric.acc\na,task,0.5\nb,task,0.9\nc,other,0.7\n"
     )
@@ -189,7 +189,7 @@ def test_runs(tmp_path: Path) -> None:
 
 
 def test_stdio_session(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     source = config.records_dir / "papers"
     source.mkdir()
 
@@ -245,13 +245,13 @@ def test_cli_project_error(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["mcp"])
     assert result.exit_code == 1
-    assert "No hiraku.yml" in result.output
+    assert "No hiraku/hiraku.yml" in result.output
 
 
 def test_cli_serves_project(tmp_path, monkeypatch):
     from unittest.mock import Mock
 
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     factory = Mock()
     monkeypatch.setattr("hiraku.mcp.create_server", factory)

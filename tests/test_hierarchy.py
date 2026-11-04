@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import RecordExistsError, RecordNotFoundError, ValidationError
 from hiraku.io import atomic_write
+from hiraku.project import Project
 from hiraku.record import Record, list_records, load_record
 
 
 def test_paths_and_cross_root_reparenting(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     first = Record.create("first", config=config)
     other = Record.create("other", config=config)
     middle = Record.create("middle", parent_id=first.id, config=config)
@@ -40,7 +40,7 @@ def test_paths_and_cross_root_reparenting(tmp_path: Path) -> None:
 
 
 def test_invalid_links_cycles_collisions_and_delete(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     first = Record.create("first", config=config)
     second = Record.create("second", parent_id=first.id, config=config)
     third = Record.create("third", related_to=[second.id], config=config)
@@ -64,7 +64,7 @@ def test_invalid_links_cycles_collisions_and_delete(tmp_path: Path) -> None:
 def test_duplicate_record_id_without_reparent_journal_is_an_error(
     tmp_path: Path,
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     record = Record.create("duplicate", config=config)
     atomic_write(
         config.records_dir / "other" / "duplicate.md",
@@ -76,7 +76,7 @@ def test_duplicate_record_id_without_reparent_journal_is_an_error(
 
 
 def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     root = Record.create(
         "root",
         config=config,
@@ -99,7 +99,7 @@ def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
 
 
 def test_reparenting_root_with_other_files_requires_manual_move(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     source = Record.create("source", config=config)
     target = Record.create("target", config=config)
     (source.path.parent / "artifact.bin").write_bytes(b"research output")
@@ -111,7 +111,7 @@ def test_reparenting_root_with_other_files_requires_manual_move(tmp_path: Path) 
 def test_reparenting_retries_transient_old_file_unlink_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     source = Record.create("source", config=config)
     child = Record.create("child", parent_id=source.id, config=config)
     target = Record.create("target", config=config)
@@ -137,7 +137,7 @@ def test_reparenting_retries_transient_old_file_unlink_failure(
 def test_reparenting_journal_keeps_records_listable_during_persistent_unlink_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     source = Record.create("source", config=config)
     child = Record.create("child", parent_id=source.id, config=config)
     target = Record.create("target", config=config)
@@ -189,7 +189,7 @@ def test_reparenting_journal_keeps_records_listable_during_persistent_unlink_fai
 def test_reparenting_cleans_incomplete_destination_copies_after_write_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     source = Record.create("source", config=config)
     child = Record.create("child", parent_id=source.id, config=config)
     target = Record.create("target", config=config)
@@ -222,7 +222,7 @@ def test_reparenting_resolves_commit_journal_write_failure(
     monkeypatch: pytest.MonkeyPatch,
     failure_after_replace: bool,
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     source = Record.create("source", config=config)
     child = Record.create("child", parent_id=source.id, config=config)
     target = Record.create("target", config=config)
@@ -256,7 +256,7 @@ def test_reparenting_resolves_commit_journal_write_failure(
 def test_preparing_journal_keeps_old_copies_authoritative(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     source = Record.create("source", config=config, goal="old value")
     child = Record.create("child", parent_id=source.id, config=config)
     target = Record.create("target", config=config)
@@ -306,7 +306,7 @@ def test_preparing_journal_keeps_old_copies_authoritative(
 def test_preparing_journal_errors_when_old_authoritative_copy_is_missing(
     tmp_path: Path,
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     source = Record.create("source", config=config)
     child = Record.create("child", parent_id=source.id, config=config)
     Record.create("target", config=config)
@@ -350,7 +350,7 @@ def test_preparing_journal_errors_when_old_authoritative_copy_is_missing(
 def test_committed_journal_errors_when_new_authoritative_copy_is_missing(
     tmp_path: Path,
 ) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     source = Record.create("source", config=config)
     child = Record.create("child", parent_id=source.id, config=config)
     Record.create("target", config=config)
