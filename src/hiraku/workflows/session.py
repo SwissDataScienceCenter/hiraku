@@ -2,30 +2,31 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import secrets
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-from pydantic import ValidationError as PydanticValidationError
+from pydantic_core import to_json
 
 from ..config import HirakuConfig
 from ..errors import (
     EventRejected,
+    HirakuError,
     NotReady,
     SessionNotFoundError,
     ValidationError,
     WorkflowError,
 )
 from ..io import atomic_write
-from .graph import Event, EventArguments, State
-from .workflow import Instruction, Workflow, validation_message
+from .graph import State
+from .workflow import Instruction, Workflow
 
 logger = logging.getLogger(__name__)
 LOCK_TIMEOUT_SECONDS = 30
@@ -36,52 +37,112 @@ CANCEL_NOTE = (
 
 
 class EventResult(BaseModel):
-    """Submission outcome without an assignment; IDs name the current revision."""
+    """Submission outcome; the session holds the resulting revision."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     status: Literal["accepted", "rejected", "not_ready", "stale", "error"]
-    session_id: str | None = None
-    instruction_id: int | None = None
     message: str | None = None
 
 
-class HistoryEntry(BaseModel):
-    """One accepted submission, addressing the preceding instruction."""
+class ClientInfo(BaseModel):
+    """Conversation identifiers and model supplied by a client hook."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    client: str
+    client_session_id: str
+    client_turn_id: str | None = None
+    model: str | None = None
+
+
+class EventInvocation(BaseModel):
+    """One workflow event attempt and its outcome."""
 
     instruction_id: int
     event: str
-    arguments: dict[str, Any]
+    node: str | None = None
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result: EventResult
     at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    client_info: ClientInfo | None = None
 
 
 class Session(BaseModel):
-    """A saved execution. The state owns its node; instructions are snapshots."""
+    """A started execution; saved instructions are snapshots."""
 
     model_config = ConfigDict(extra="forbid")
-    format_version: Literal[2] = 2
     id: str
     workflow: str
     status: Literal["active", "completed", "cancelled"] = "active"
-    instruction_id: int = Field(default=0, ge=0)
+    instruction_id: int = Field(ge=1)
     state: State
     instruction: Instruction
-    history: list[HistoryEntry] = Field(default_factory=list)
+    history: list[EventInvocation] = Field(min_length=1)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     _path: Path = PrivateAttr()
+    _write_lock: FileLock | None = PrivateAttr(default=None)
 
-    @staticmethod
-    def run_start(
-        workflow: Workflow, arguments: Mapping[str, Any] | None = None
-    ) -> EventResult:
-        """Run the entry event and store its instruction; return an outcome."""
+    @classmethod
+    def start(
+        cls,
+        workflow: Workflow,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        client_info: ClientInfo | None = None,
+    ) -> Session:
+        """Execute the start event and save a new session; raise if it fails."""
+        event = workflow.graph.start
+        validated = event.arguments.parse(arguments)
         try:
-            validated = workflow.graph.start.arguments.model_validate(
-                {} if arguments is None else arguments
+            state, instruction = workflow.run(event, validated)
+            invocation = EventInvocation(
+                event=event.name,
+                instruction_id=0,
+                arguments=validated.model_dump(mode="json"),
+                result=EventResult(status="accepted"),
+                client_info=client_info,
             )
-        except PydanticValidationError as exc:
-            return EventResult(status="rejected", message=validation_message(exc))
-        return _run(workflow, workflow.graph.start, validated)
+            session = cls(
+                id=f"{workflow.id}-{secrets.token_hex(6)}",
+                workflow=workflow.id,
+                status="completed"
+                if workflow.graph.nodes[state.node].final
+                else "active",
+                instruction_id=1,
+                state=State.model_validate(state.model_dump(mode="json")),
+                instruction=instruction,
+                history=[invocation],
+            )
+            session._path = _session_path(session.id, workflow.config)
+            session._save()
+        except HirakuError:
+            raise
+        except Exception as exc:
+            logger.exception("Workflow %s event %s failed", workflow.id, event.name)
+            raise WorkflowError(
+                f"{type(exc).__name__}: {exc}. No session was saved."
+            ) from exc
+        return session
+
+    @contextmanager
+    def lock(self) -> Iterator[None]:
+        """Refresh this instance under its lock and enable writes until exit."""
+        if self._write_lock is not None and self._write_lock.is_locked:
+            raise ValidationError("Session is already locked by this caller")
+        try:
+            lock = _lock(self._path)
+            lock.acquire()
+        except Timeout as exc:
+            raise ValidationError("Session is busy; retry after it finishes") from exc
+        try:
+            current = _load(self._path)
+            for name in type(self).model_fields:
+                setattr(self, name, getattr(current, name))
+            self._write_lock = lock
+            yield
+        finally:
+            self._write_lock = None
+            lock.release()
 
     def run_event(
         self,
@@ -89,61 +150,64 @@ class Session(BaseModel):
         instruction_id: int,
         event: str,
         arguments: Mapping[str, Any] | None = None,
+        *,
+        client_info: ClientInfo | None = None,
     ) -> EventResult:
-        """Submit against the latest saved revision; this snapshot is unchanged."""
+        """Submit an event while holding the session lock."""
         if type(instruction_id) is not int or instruction_id < 1:
             raise ValidationError("instruction_id must be a positive integer")
-        try:
-            with _lock(self._path):
-                session = _load(self._path)
-                if session.workflow != workflow.id:
-                    return session._result(
-                        "rejected", "Session belongs to another workflow"
-                    )
-                if session.status == "cancelled":
-                    return session._result("rejected", "Session is cancelled")
-                method = workflow.graph.events.get(event)
-                if method is None or method.source is None:
-                    return session._result("rejected", f"Unknown event {event!r}")
+        self._require_lock()
+        method = workflow.graph.events.get(event)
+        status = "rejected"
+        if self.workflow != workflow.id:
+            message = "Session belongs to another workflow"
+        elif self.status == "cancelled":
+            message = "Session is cancelled"
+        elif instruction_id != self.instruction_id:
+            status = "stale"
+            message = "Instruction is no longer pending"
+        elif self.status != "active":
+            message = f"Session is {self.status}"
+        elif method is None or method.source is None:
+            message = f"Unknown event {event!r}"
+        elif event not in self.events or self.state.node not in method.source:
+            message = f"{event!r} is not an event the current instruction accepts"
+        else:
+            try:
+                validated = method.arguments.parse(arguments)
                 try:
-                    validated = method.arguments.model_validate(
-                        {} if arguments is None else arguments
-                    )
-                    values = validated.model_dump(mode="json")
-                except PydanticValidationError as exc:
-                    return session._result("rejected", validation_message(exc))
-                last = session.history[-1]
-                if last.instruction_id == instruction_id:
-                    if last.event == event and last.arguments == values:
-                        return session._result("accepted")
-                    return session._result("stale", "Instruction was already answered")
-                if session.status != "active":
-                    return session._result("rejected", f"Session is {session.status}")
-                if instruction_id != session.instruction_id:
-                    return session._result("stale", "Instruction is no longer pending")
-                if (
-                    event not in session.events
-                    or session.state.node not in method.source
-                ):
-                    return session._result(
-                        "rejected",
-                        f"{event!r} is not an event the current instruction accepts",
-                    )
-                try:
-                    current_state = session.validate_workflow(workflow)
+                    current_state = self.validate_workflow(workflow)
                 except (ValueError, WorkflowError) as exc:
-                    return session._result(
-                        "rejected", f"Incompatible stored state: {exc}"
-                    )
-                return _run(
-                    workflow, method, validated, session, current_state=current_state
+                    raise EventRejected(f"Incompatible stored state: {exc}") from exc
+                state, instruction = workflow.run(method, validated, current_state)
+                result = EventResult(status="accepted")
+                invocation = EventInvocation(
+                    event=event,
+                    node=self.state.node,
+                    instruction_id=self.instruction_id,
+                    arguments=validated.model_dump(mode="json"),
+                    result=result,
+                    client_info=client_info,
                 )
-        except Timeout:
-            return EventResult(
-                status="not_ready",
-                session_id=self.id,
-                message="Session is busy; retry after the other call finishes",
-            )
+                self._save(
+                    status="completed"
+                    if workflow.graph.nodes[state.node].final
+                    else "active",
+                    instruction_id=self.instruction_id + 1,
+                    state=State.model_validate(state.model_dump(mode="json")),
+                    instruction=instruction,
+                    history=[*self.history, invocation],
+                )
+                return result
+            except EventRejected as exc:
+                status = "not_ready" if isinstance(exc, NotReady) else "rejected"
+                message = str(exc)
+            except Exception as exc:
+                logger.exception("Workflow %s event %s failed", workflow.id, event)
+                status = "error"
+                message = f"{type(exc).__name__}: {exc}. No session progress was saved."
+        result = EventResult(status=status, message=message)
+        return self._record_event(event, instruction_id, result, client_info)
 
     def validate_workflow(self, workflow: Workflow) -> State:
         """Return a detached concrete state compatible with this workflow.
@@ -187,19 +251,39 @@ class Session(BaseModel):
             for item in (self.instruction.events or {}).get("accepted", [])
         ]
 
-    def _save(self) -> None:
-        self.updated_at = datetime.now(UTC)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(self._path.parent / ".gitignore", "*\n")
-        atomic_write(self._path, self.model_dump_json(indent=2) + "\n")
+    def _require_lock(self) -> None:
+        if self._write_lock is None or not self._write_lock.is_locked:
+            raise ValidationError("Session writes require 'with session.lock()'")
 
-    def _result(self, status: str, message: str | None = None) -> EventResult:
-        return EventResult(
-            status=status,
-            session_id=self.id,
-            instruction_id=self.instruction_id,
-            message=message,
-        )
+    def _save(self, **changes: Any) -> None:
+        """Persist prepared changes before applying them to this instance."""
+        changes["updated_at"] = datetime.now(UTC)
+        content = to_json({**self.model_dump(), **changes}, indent=2).decode() + "\n"
+        atomic_write(self._path.parent / ".gitignore", "*\n")
+        atomic_write(self._path, content)
+        for name, value in changes.items():
+            setattr(self, name, value)
+
+    def _record_event(
+        self,
+        event: str,
+        instruction_id: int,
+        result: EventResult,
+        client_info: ClientInfo | None,
+    ) -> EventResult:
+        """Record a failed event under the existing lock; preserve its result."""
+        try:
+            invocation = EventInvocation(
+                event=event,
+                node=self.state.node,
+                instruction_id=instruction_id,
+                result=result,
+                client_info=client_info,
+            )
+            self._save(history=[*self.history, invocation])
+        except Exception:
+            logger.warning("Could not record workflow event %s", event, exc_info=True)
+        return result
 
     def _instruction_response(self) -> dict[str, Any]:
         response = {
@@ -240,69 +324,12 @@ class Session(BaseModel):
         return result
 
     def cancel(self) -> dict[str, Any]:
-        """Cancel under the session lock without loading workflow code."""
-        try:
-            with _lock(self._path):
-                current = _load(self._path)
-                if current.status == "completed":
-                    raise ValidationError(f"Session {self.id!r} is already completed")
-                current.status = "cancelled"
-                current._save()
-        except Timeout as exc:
-            raise ValidationError("Session is busy; retry after it finishes") from exc
-        self.status = "cancelled"
+        """Cancel while holding the session lock, without loading workflow code."""
+        self._require_lock()
+        if self.status == "completed":
+            raise ValidationError(f"Session {self.id!r} is already completed")
+        self._save(status="cancelled")
         return {"session_id": self.id, "status": "cancelled", "note": CANCEL_NOTE}
-
-
-def _run(
-    workflow: Workflow,
-    method: Event,
-    arguments: EventArguments,
-    session: Session | None = None,
-    *,
-    current_state: State | None = None,
-) -> EventResult:
-    previous = session
-    if session is not None:
-        session = session.model_copy(deep=True)
-    try:
-        values = arguments.model_dump(mode="json")
-        state, instruction = workflow.run(method, arguments, current_state)
-        snapshot = State.model_validate(state.model_dump(mode="json"))
-        if session is None:
-            session = Session(
-                id=f"{workflow.id}-{secrets.token_hex(6)}",
-                workflow=workflow.id,
-                state=snapshot,
-                instruction=instruction,
-            )
-            session._path = _session_path(session.id, workflow.config)
-        session.history.append(
-            HistoryEntry(
-                instruction_id=session.instruction_id,
-                event=method.name,
-                arguments=values,
-            )
-        )
-        session.instruction_id += 1
-        session.state = snapshot
-        session.instruction = instruction
-        session.status = (
-            "completed" if workflow.graph.nodes[state.node].final else "active"
-        )
-        session._save()
-        return session._result("accepted")
-    except (EventRejected, NotReady) as exc:
-        status = "not_ready" if isinstance(exc, NotReady) else "rejected"
-        if session is not None:
-            return session._result(status, str(exc))
-        return EventResult(status=status, message=str(exc))
-    except Exception as exc:
-        logger.exception("Workflow %s event %s failed", workflow.id, method.name)
-        message = f"{type(exc).__name__}: {exc}. No session progress was saved."
-        if previous is not None:
-            return previous._result("error", message)
-        return EventResult(status="error", message=message)
 
 
 def _session_path(session_id: str, config: HirakuConfig) -> Path:
@@ -324,12 +351,7 @@ def _load(path: Path) -> Session:
     if not path.is_file():
         raise SessionNotFoundError(f"Session {path.stem!r} not found")
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict) or raw.get("format_version") != 2:
-            raise ValidationError("Unsupported session format; start a new session")
-        session = Session.model_validate(raw)
-        if not session.history or session.instruction_id != len(session.history):
-            raise ValidationError("Session revision does not match its history")
+        session = Session.model_validate_json(path.read_text(encoding="utf-8"))
         if session.id != path.stem:
             raise ValidationError("Session ID does not match its filename")
     except (ValueError, OSError) as exc:

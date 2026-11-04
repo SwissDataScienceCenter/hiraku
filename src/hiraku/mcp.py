@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import mimetypes
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any
@@ -40,7 +41,12 @@ from .context import Context, list_contexts, load_context
 from .errors import HirakuError, ValidationError, WorkflowError
 from .launch import launch, render_arguments
 from .record import Record, list_records, load_record
-from .workflows.session import EventResult, Session, list_sessions, load_session
+from .workflows.session import (
+    ClientInfo,
+    Session,
+    list_sessions,
+    load_session,
+)
 from .workflows.workflow import (
     Instruction,
     Workflow,
@@ -75,7 +81,8 @@ unless it is final, an events block that says which events it accepts:
    current: fix the input, or check again later for not_ready. Status stale
    means the event answered an instruction that is no longer current; continue
    from the current instruction in the response.
-6. Sending an identical event again is safe; it never applies the event twice.
+6. Resubmitting an answered instruction returns stale and the current instruction;
+   it never applies the event twice. Continue from that current instruction.
 7. To resume, call session_show with the session_id; it returns the current
    instruction. Do not start a new session to resume an existing one.
 Before repeating consequential work such as creating records or launching
@@ -84,6 +91,14 @@ experiments, check whether it already exists.\
 
 Project = Callable[[], HirakuConfig]
 SessionId = Annotated[str, Field(description="Session ID from session_list.")]
+ClientInfoInput = Annotated[
+    ClientInfo | None,
+    Field(
+        description="Injected by the client hook. Omit this field when calling "
+        "the tool; never invent client or session identifiers."
+    ),
+]
+logger = logging.getLogger(__name__)
 
 
 def _data(record: BaseRecord) -> dict[str, Any]:
@@ -393,7 +408,16 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     def project() -> HirakuConfig:
         return HirakuConfig.load(path)
 
-    workflows = {workflow.id: workflow for workflow in list_workflows(config=config)}
+    workflows = {}
+    for workflow in list_workflows(config=config):
+        if "hiraku_client" in workflow.graph.start.arguments.model_fields:
+            logger.warning(
+                "Workflow %s is unavailable over MCP: start argument "
+                "'hiraku_client' is reserved",
+                workflow.id,
+            )
+            continue
+        workflows[workflow.id] = workflow
 
     def render(response: Mapping[str, Any]) -> CallToolResult:
         return _instruction_result(response, project())
@@ -445,6 +469,7 @@ def _add_workflow_tools(
                 "when only one session is active."
             ),
         ] = None,
+        hiraku_client: ClientInfoInput = None,
     ) -> CallToolResult:
         config = project()
         if session_id is None:
@@ -467,16 +492,21 @@ def _add_workflow_tools(
         session = load_session(session_id, config=config)
         workflow = workflows.get(session.workflow)
         if workflow is None:
-            return render(
-                _over_mcp(
-                    session._result(
-                        "rejected", "Workflow unavailable; reconnect after fixing it"
-                    ).model_dump(exclude_none=True)
-                )
+            raise ToolError("Workflow unavailable; reconnect after fixing it")
+        with session.lock():
+            result = session.run_event(
+                workflow,
+                instruction_id,
+                event,
+                arguments,
+                client_info=hiraku_client,
             )
         return render(
-            _deliver(
-                workflow, session.run_event(workflow, instruction_id, event, arguments)
+            _over_mcp(
+                {
+                    **session.get_instruction(workflow),
+                    **result.model_dump(exclude_none=True),
+                }
             )
         )
 
@@ -521,10 +551,13 @@ def _add_session_tools(
         ]
 
     def session_show(session_id: SessionId) -> CallToolResult:
-        return render(_show(load_session(session_id, config=project()), workflows))
+        session = load_session(session_id, config=project())
+        return render(_show(session, workflows))
 
     def session_cancel(session_id: SessionId) -> dict[str, Any]:
-        return load_session(session_id, config=project()).cancel()
+        session = load_session(session_id, config=project())
+        with session.lock():
+            return session.cancel()
 
     server.add_tool(
         session_list,
@@ -570,7 +603,9 @@ def _start_tool(
     """Return a function whose signature is the workflow's start arguments."""
 
     def run(**arguments: Any) -> CallToolResult:
-        return render(_deliver(workflow, Session.run_start(workflow, arguments)))
+        client_info = arguments.pop("hiraku_client", None)
+        session = Session.start(workflow, arguments, client_info=client_info)
+        return render(_over_mcp(session.get_instruction(workflow)))
 
     parameters = []
     for name, field in workflow.graph.start.arguments.model_fields.items():
@@ -593,6 +628,14 @@ def _start_tool(
                 ],
             )
         )
+    parameters.append(
+        inspect.Parameter(
+            "hiraku_client",
+            inspect.Parameter.KEYWORD_ONLY,
+            default=None,
+            annotation=ClientInfoInput,
+        )
+    )
     return _with_signature(run, workflow.id, parameters)
 
 
@@ -607,15 +650,15 @@ def _start_prompt(workflow: Workflow) -> Callable[..., str]:
         try:
             model = workflow.graph.start.arguments
             inputs = model.from_text(values).model_dump(mode="json")
-        except (ValidationError, PydanticValidationError) as exc:
-            response = {"status": "rejected", "message": str(exc)}
-        else:
-            response = _deliver(workflow, Session.run_start(workflow, inputs))
-        if response["status"] != "accepted":
+            session = Session.start(workflow, inputs)
+            response = _over_mcp(session.get_instruction(workflow))
+        except Exception as exc:
+            if not isinstance(exc, (HirakuError, PydanticValidationError)):
+                logger.exception("Workflow %s prompt failed", workflow.id)
             # The SDK hides exception messages from prompts, so explain in text.
             return (
                 f"The Hiraku workflow `{workflow.id}` did not start: "
-                f"{response.get('message')}. Tell the user and ask for corrected "
+                f"{exc}. Tell the user and ask for corrected "
                 "arguments."
             )
         instruction = response["instruction"]
@@ -736,12 +779,3 @@ def _instruction_result(
                     TextContent(type="text", text=f"Resource {uri} unavailable: {exc}")
                 )
     return CallToolResult(content=content, structured_content=dict(response))
-
-
-def _deliver(workflow: Workflow, result: EventResult) -> dict[str, Any]:
-    """Conversational delivery policy: attach an assignment after submission."""
-    response = result.model_dump(exclude_none=True)
-    if result.session_id is not None and result.status in ("accepted", "stale"):
-        session = load_session(result.session_id, config=workflow.config)
-        response.update(session.get_instruction(workflow))
-    return _over_mcp(response)

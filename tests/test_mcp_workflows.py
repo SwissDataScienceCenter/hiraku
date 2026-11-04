@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-import sys
+import os
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from hiraku.context import Context
 from hiraku.errors import WorkflowError
 from hiraku.mcp import create_server
 from hiraku.record import Record
+from hiraku.workflows.session import ClientInfo, Session, load_session
 from hiraku.workflows.workflow import load_workflow
 
 BUILTINS = {
@@ -23,6 +25,211 @@ BUILTINS = {
     "session_show",
     "session_cancel",
 }
+
+
+def test_codex_normalized_start_name_attributes_initial_entry(tmp_path):
+    from hiraku.cli import _inject_client
+
+    config = HirakuConfig.init(tmp_path, example="workflows", install_skill=False)
+    injected = _inject_client(
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "mcp__hiraku__count_steps",
+            "cwd": str(config.root),
+            "session_id": "codex-chat",
+            "turn_id": "first-turn",
+            "tool_input": {"count": 3},
+        },
+        "codex",
+    )["hookSpecificOutput"]["updatedInput"]
+
+    async def scenario(client, notifications):
+        return payload(await client.call_tool("count-steps", injected))
+
+    response = run(create_server(config), scenario)
+    session = load_session(response["session_id"], config=config)
+    assert len(session.history) == 1
+    entry = session.history[0]
+    assert entry.event == "start"
+    assert entry.result.status == "accepted"
+    assert entry.client_info == ClientInfo(
+        client="codex", client_session_id="codex-chat", client_turn_id="first-turn"
+    )
+    assert session.state.count == 3
+
+
+@pytest.mark.parametrize("client_name", ["codex", "claude"])
+def test_hook_metadata_reaches_session_history(config, client_name):
+    from hiraku.cli import _inject_client
+
+    write_echo(config)
+    server = create_server(config)
+
+    async def scenario(client, notifications):
+        def injected(tool, arguments, turn="turn-1"):
+            return _inject_client(
+                {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": f"mcp__hiraku__{tool}",
+                    "cwd": str(config.root),
+                    "session_id": "chat-1",
+                    "turn_id": turn,
+                    "model": f"test-model-{turn}",
+                    "tool_input": arguments,
+                },
+                client_name,
+            )["hookSpecificOutput"]["updatedInput"]
+
+        first = payload(await client.call_tool("echo", injected("echo", {"task": "a"})))
+        sid = first["session_id"]
+        stored = load_session(sid, config=config)
+        assert stored.history[0].client_info == ClientInfo(
+            client=client_name,
+            client_session_id="chat-1",
+            client_turn_id="turn-1" if client_name == "codex" else None,
+            model="test-model-turn-1",
+        )
+        await client.call_tool("session_show", {"session_id": sid})
+        assert load_session(sid, config=config) == stored
+        arguments = {
+            "session_id": sid,
+            "instruction_id": first["instruction_id"],
+            "event": "complete",
+            "arguments": {"summary": "Done"},
+        }
+        accepted = payload(
+            await client.call_tool(
+                "workflow_send_event",
+                injected("workflow_send_event", arguments, "turn-2"),
+            )
+        )
+        retry = payload(
+            await client.call_tool(
+                "workflow_send_event",
+                injected("workflow_send_event", arguments, "turn-3"),
+            )
+        )
+        assert accepted["status"] == "accepted"
+        assert retry["status"] == "stale"
+        assert retry["instruction_id"] == accepted["instruction_id"] == 2
+        assert retry["instruction"] == accepted["instruction"]
+        stored = load_session(sid, config=config)
+        await client.read_resource(f"hiraku://sessions/{sid}")
+        assert load_session(sid, config=config) == stored
+        return stored
+
+    stored = run(server, scenario)
+    assert [entry.event for entry in stored.history] == [
+        "start",
+        "complete",
+        "complete",
+    ]
+    assert [entry.result.status for entry in stored.history] == [
+        "accepted",
+        "accepted",
+        "stale",
+    ]
+    assert stored.history[1].client_info == ClientInfo(
+        client=client_name,
+        client_session_id="chat-1",
+        client_turn_id="turn-2" if client_name == "codex" else None,
+        model="test-model-turn-2",
+    )
+    assert stored.history[2].client_info == ClientInfo(
+        client=client_name,
+        client_session_id="chat-1",
+        client_turn_id="turn-3" if client_name == "codex" else None,
+        model="test-model-turn-3",
+    )
+    assert stored.history[2].instruction_id == 1
+    assert all("kind" not in entry.model_dump() for entry in stored.history)
+    assert stored.history[1].arguments == {"summary": "Done"}
+    assert stored.history[2].arguments == {}
+
+
+def test_failed_events_are_logged_but_cancellation_is_not(config):
+    write_echo(config)
+    server = create_server(config)
+    info = {"client": "claude", "client_session_id": "chat"}
+
+    async def scenario(client, notifications):
+        first = payload(await client.call_tool("echo", {"task": "a"}))
+        sid = first["session_id"]
+        event = {
+            "session_id": sid,
+            "instruction_id": 1,
+            "event": "complete",
+            "arguments": {},
+            "hiraku_client": info,
+        }
+        rejected = payload(await client.call_tool("workflow_send_event", event))
+        assert rejected["status"] == "rejected"
+        await client.call_tool("session_cancel", {"session_id": sid})
+        rejected = payload(await client.call_tool("workflow_send_event", event))
+        assert rejected["status"] == "rejected"
+        return load_session(sid, config=config)
+
+    stored = run(server, scenario)
+    assert stored.status == "cancelled"
+    assert stored.instruction_id == 1
+    assert [entry.result.status for entry in stored.history[1:]] == [
+        "rejected",
+        "rejected",
+    ]
+    assert all(entry.client_info == ClientInfo(**info) for entry in stored.history[1:])
+
+
+def test_unavailable_workflow_raises_before_event_execution(config, monkeypatch):
+    write_echo(config)
+    workflow = load_workflow("echo", config=config)
+    session = Session.start(workflow, {"task": "a"})
+    before = session._path.read_bytes()
+    (config.workflows_dir / "echo" / "workflow.py").write_text(
+        "raise RuntimeError('broken workflow')"
+    )
+
+    def fail(*args, **kwargs):
+        raise AssertionError("must reject before calling run_event")
+
+    monkeypatch.setattr(Session, "run_event", fail)
+
+    async def scenario(client, notifications):
+        result = await client.call_tool(
+            "workflow_send_event",
+            {"session_id": session.id, "instruction_id": 1, "event": "complete"},
+        )
+        assert result.is_error
+        assert "Workflow unavailable" in result.content[0].text
+
+    run(create_server(config), scenario)
+    assert session._path.read_bytes() == before
+
+
+def test_session_read_failure_leaves_history_unchanged(config, monkeypatch):
+    write_echo(config)
+    server = create_server(config)
+
+    def fail(self, workflow=None):
+        raise RuntimeError("inspection failed")
+
+    async def scenario(client, notifications):
+        first = payload(await client.call_tool("echo", {"task": "a"}))
+        sid = first["session_id"]
+        before = load_session(sid, config=config)
+        monkeypatch.setattr(Session, "show", fail)
+        result = await client.call_tool(
+            "session_show",
+            {"session_id": sid},
+        )
+        assert result.is_error
+        stored = load_session(sid, config=config)
+        assert stored == before
+        return stored
+
+    stored = run(server, scenario)
+    assert len(stored.history) == 1
+    assert stored.history[0].event == "start"
+    assert stored.history[0].result.status == "accepted"
 
 
 @pytest.fixture
@@ -292,13 +499,20 @@ def test_tools_and_prompts_are_fixed_per_workflow(config: HirakuConfig) -> None:
     assert loop["properties"]["iterations"]["default"] == 5
     assert loop["properties"]["task"]["description"] == "Task record"
     assert loop["properties"]["iterations"]["description"] == "Experiments to run"
+    for name in ("loop", "workflow_send_event"):
+        schema = tools[name].input_schema
+        assert "hiraku_client" not in schema.get("required", [])
+        description = schema["properties"]["hiraku_client"]["description"]
+        assert "Injected by the client hook" in description
+        assert "Omit this field" in description
+        assert "never invent" in description
     assert prompts["loop"].arguments[0].description == "Task record"
     arguments = {item.name: item.required for item in prompts["loop"].arguments}
     assert arguments == {"task": True, "iterations": False}
     assert tools["collaborative"].description.startswith("Start a collaborative")
 
 
-def test_prompts_start_sessions(config: HirakuConfig) -> None:
+def test_prompts_start_sessions(config: HirakuConfig, caplog) -> None:
     write_loop(config)
     server = create_server(config)
 
@@ -319,6 +533,34 @@ def test_prompts_start_sessions(config: HirakuConfig) -> None:
     assert len(listing) == 1
     assert "did not start" in invalid.messages[0].content.text
     assert "iterations" in invalid.messages[0].content.text
+    assert not caplog.records
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "hiraku.workflows.graph.EventArguments.from_text",
+        "hiraku.workflows.session.Session.get_instruction",
+        "hiraku.mcp._over_mcp",
+    ],
+)
+def test_prompt_logs_unexpected_errors(config, monkeypatch, caplog, target):
+    write_loop(config)
+    server = create_server(config)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("unexpected prompt failure")
+
+    monkeypatch.setattr(target, fail)
+
+    async def scenario(client, notifications):
+        return await client.get_prompt("loop", {"task": "a"})
+
+    response = run(server, scenario)
+    assert "unexpected prompt failure" in response.messages[0].content.text
+    record = next(item for item in caplog.records if item.name == "hiraku.mcp")
+    assert record.getMessage() == "Workflow loop prompt failed"
+    assert record.exc_info[0] is RuntimeError
 
 
 def test_prompts_render_the_events_block_and_tools_explain_it(
@@ -419,7 +661,7 @@ def test_workflow_send_event_continues_any_session(config: HirakuConfig) -> None
     assert result["invalid"]["status"] == "rejected"
     assert "summary" in result["invalid"]["message"]
     assert result["done"]["session_status"] == "completed"
-    assert "instruction" not in result["invalid"]
+    assert result["invalid"]["instruction"]["events"]["instruction_id"] == 1
     assert result["done"]["instruction"] == {
         "text": "Report the summary.",
         "data": {"summary": "Tried three ideas"},
@@ -506,19 +748,59 @@ def test_stdio_server_keeps_protocol_output_clean(config: HirakuConfig) -> None:
     (noisy / "workflow.md").write_text("---\nid: noisy\n---\n# Noisy\n")
 
     async def main() -> Any:
+        configured = tomllib.loads((config.root / ".codex/config.toml").read_text())[
+            "mcp_servers"
+        ]["hiraku"]
         parameters = StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "hiraku.cli", "mcp"],
+            command=configured["command"],
+            args=configured["args"],
             cwd=config.root,
+            env={"PATH": os.environ["PATH"]},
         )
         async with Client(parameters) as client:
             tools = await client.list_tools()
-            result = await client.call_tool("noisy", {})
+            result = await client.call_tool(
+                "noisy",
+                {
+                    "hiraku_client": {
+                        "client": "codex",
+                        "client_session_id": "chat",
+                    }
+                },
+            )
             return {tool.name for tool in tools.tools}, result
 
     names, result = anyio.run(main)
     assert "noisy" in names
     assert json.loads(result.content[0].text)["instruction"]["data"] == {"ok": True}
+    stored = load_session(payload(result)["session_id"], config=config)
+    assert stored.history[0].client_info == ClientInfo(
+        client="codex", client_session_id="chat"
+    )
+
+
+def test_reserved_start_argument_skips_only_its_workflow(config, caplog):
+    write_loop(config)
+    directory = config.workflows_dir / "reserved"
+    directory.mkdir()
+    (directory / "workflow.md").write_text(
+        "---\nid: reserved\narguments:\n  hiraku_client: value\n---\nRun a task."
+    )
+    server = create_server(config)
+
+    async def scenario(client, notifications):
+        tools = {item.name for item in (await client.list_tools()).tools}
+        prompts = {item.name for item in (await client.list_prompts()).prompts}
+        workflows = items(await client.call_tool("workflow_list", {}))
+        started = payload(await client.call_tool("loop", {"task": "a"}))
+        return tools, prompts, workflows, started
+
+    tools, prompts, workflows, started = run(server, scenario)
+    assert "reserved" not in tools | prompts
+    assert all(workflow["id"] != "reserved" for workflow in workflows)
+    assert "Workflow reserved is unavailable over MCP" in caplog.text
+    assert "'hiraku_client' is reserved" in caplog.text
+    assert started["instruction"]["data"]["task"] == "a"
 
 
 def test_runs_workflow_id_is_reserved(config, caplog):
@@ -547,10 +829,10 @@ def test_workflows_read_current_project_state(config: HirakuConfig) -> None:
     server = create_server(config)
     Record.create("other-task", type="task", config=HirakuConfig.discover(config.root))
 
-    async def scenario(client: Client, notifications: list[str]) -> dict[str, Any]:
-        return payload(await client.call_tool("collaborative", {"entrypoint": "train"}))
+    async def scenario(client: Client, notifications: list[str]) -> Any:
+        return await client.call_tool("collaborative", {"entrypoint": "train"})
 
     started = run(server, scenario)
-    assert started["status"] == "rejected"
-    assert "train" in started["message"]
-    assert "other-task" in started["message"]
+    assert started.is_error
+    assert "train" in started.content[0].text
+    assert "other-task" in started.content[0].text

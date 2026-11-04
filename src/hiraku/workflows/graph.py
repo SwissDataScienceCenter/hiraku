@@ -13,8 +13,9 @@ from types import MappingProxyType
 from typing import Any, Literal, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import ValidationError as PydanticValidationError
 
-from ..errors import ValidationError, WorkflowError
+from ..errors import EventRejected, ValidationError, WorkflowError
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -90,6 +91,21 @@ class EventArguments(BaseModel):
                     raise ValidationError(f"{name}: expected JSON ({exc.msg})") from exc
             arguments[name] = value
         return cls.model_validate(arguments)
+
+    @classmethod
+    def parse(cls, values: Mapping[str, Any] | None) -> Self:
+        """Validate submitted inputs, rejecting the event with a readable message."""
+        try:
+            return cls.model_validate({} if values is None else values)
+        except PydanticValidationError as exc:
+            raise EventRejected(validation_message(exc)) from exc
+
+
+def validation_message(exc: PydanticValidationError) -> str:
+    return "; ".join(
+        f"{'.'.join(map(str, error['loc'])) or 'input'}: {error['msg']}"
+        for error in exc.errors()
+    )
 
 
 def _is_text(annotation: Any) -> bool:

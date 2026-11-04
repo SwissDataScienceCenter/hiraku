@@ -14,7 +14,7 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.config import HirakuConfig
 from hiraku.record import load_record
-from hiraku.workflows.session import Session, load_session
+from hiraku.workflows.session import Session
 from hiraku.workflows.workflow import list_workflows
 
 REPOSITORY = Path(__file__).parents[2]
@@ -182,10 +182,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert "/.agents/" in gitignore
     assert "/.claude/" in gitignore
     mcp_config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
-    assert mcp_config["mcpServers"]["hiraku"] == {
-        "command": "hiraku",
-        "args": ["mcp"],
-    }
+    assert mcp_config["mcpServers"]["hiraku"] == {"command": "hiraku", "args": ["mcp"]}
     codex_config = (project / ".codex/config.toml").read_text(encoding="utf-8")
     assert 'command = "hiraku"' in codex_config
     assert "/runs.csv" in gitignore
@@ -212,14 +209,8 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     config = HirakuConfig.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
     workflows = {workflow.id: workflow for workflow in list_workflows(config=config)}
-    result = Session.run_start(workflows["autoresearch"])
-    response = {
-        **result.model_dump(),
-        **load_session(
-            result.session_id, config=workflows["autoresearch"].config
-        ).get_instruction(workflows["autoresearch"]),
-    }
-    assert response["status"] == "accepted"
+    session = Session.start(workflows["autoresearch"])
+    response = session.get_instruction(workflows["autoresearch"])
     assert response["session_status"] == "completed"
     assert response["instruction"]["text"] == workflows["autoresearch"].markdown.strip()
     assert not (project / "hiraku/workflows/autoresearch/workflow.py").exists()

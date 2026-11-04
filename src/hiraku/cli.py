@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import runpy
 import shlex
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from importlib.resources import as_file, files
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import click
 import yaml
@@ -755,16 +757,12 @@ def _arguments(arguments_file: Any) -> dict[str, Any]:
 @click.pass_obj
 def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> None:
     """Start a workflow session and print the JSON response."""
-    from .workflows.session import Session, load_session
+    from .workflows.session import Session
     from .workflows.workflow import load_workflow
 
     workflow = load_workflow(workflow_id, config=state.config)
-    result = Session.run_start(workflow, _arguments(arguments_file))
-    response = result.model_dump(exclude_none=True)
-    if result.status == "accepted":
-        session = load_session(result.session_id, config=state.config)
-        response.update(session.get_instruction(workflow))
-    _emit_json(response)
+    session = Session.start(workflow, _arguments(arguments_file))
+    _emit_json(session.get_instruction(workflow))
 
 
 @workflow_group.command("send-event")
@@ -791,10 +789,12 @@ def workflow_send_event(
 
     session = load_session(session_id, config=state.config)
     workflow = load_workflow(session.workflow, config=state.config)
-    _emit_json(
-        session.run_event(
+    with session.lock():
+        result = session.run_event(
             workflow, instruction_id, event, _arguments(arguments_file)
-        ).model_dump(exclude_none=True)
+        )
+    _emit_json(
+        {**session.get_instruction(workflow), **result.model_dump(exclude_none=True)}
     )
 
 
@@ -829,6 +829,77 @@ def workflow_graph_command(
 @main.group("session")
 def session_group() -> None:
     """Inspect and cancel workflow sessions."""
+
+
+@session_group.command("hook", hidden=True)
+@click.argument("client", type=click.Choice(["codex", "claude"]))
+def session_hook(client: Literal["codex", "claude"]) -> None:
+    """Inject conversation identifiers from a client PreToolUse payload."""
+    try:
+        payload = json.load(sys.stdin)
+        if not isinstance(payload, dict):
+            raise ValueError("Hook input must be a JSON object")
+        response = _inject_client(payload, client)
+    except (ValueError, OSError, HirakuError) as exc:
+        click.echo(f"Hiraku client hook skipped: {exc}", err=True)
+        return
+    _emit_json(response)
+
+
+def _inject_client(
+    payload: dict[str, Any], client: Literal["codex", "claude"]
+) -> dict[str, Any]:
+    """Return a PreToolUse input rewrite for a Hiraku workflow event tool."""
+    from .workflows.session import ClientInfo
+
+    if payload.get("hook_event_name") != "PreToolUse":
+        return {}
+    prefix = "mcp__hiraku__"
+    tool = payload.get("tool_name", "")
+    if not isinstance(tool, str) or not tool.startswith(prefix):
+        return {}
+    name = tool.removeprefix(prefix)
+    if name != "workflow_send_event":
+        # Codex exposes hyphenated MCP names with underscores in code mode.
+        if client == "codex":
+            name = name.replace("_", "-")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", name):
+            return {}
+        cwd = payload.get("cwd")
+        if not isinstance(cwd, str):
+            return {}
+        config = HirakuConfig.discover(cwd)
+        if not any(
+            (config.workflows_dir / name / filename).is_file()
+            for filename in ("workflow.md", "workflow.py")
+        ):
+            return {}
+    arguments = payload.get("tool_input")
+    session_id = payload.get("session_id")
+    if not isinstance(arguments, dict) or not isinstance(session_id, str):
+        return {}
+    if not session_id:
+        return {}
+    turn_id = payload.get("turn_id") if client == "codex" else None
+    model = payload.get("model")
+    info = ClientInfo(
+        client=client,
+        client_session_id=session_id,
+        client_turn_id=turn_id if isinstance(turn_id, str) and turn_id else None,
+        model=model if isinstance(model, str) and model else None,
+    )
+    output: dict[str, Any] = {
+        "hookEventName": "PreToolUse",
+        "updatedInput": {
+            **arguments,
+            "hiraku_client": info.model_dump(exclude_none=True),
+        },
+    }
+    # Codex requires allow for input rewrites. Claude accepts a rewrite without
+    # a permission decision, preserving its normal approval behavior.
+    if client == "codex":
+        output["permissionDecision"] = "allow"
+    return {"hookSpecificOutput": output}
 
 
 @session_group.command("list")
@@ -904,7 +975,9 @@ def session_cancel(state: CLIContext, session_id: str) -> None:
     """Cancel a session; records, code, and runs are kept."""
     from .workflows.session import load_session
 
-    result = load_session(session_id, config=state.config).cancel()
+    session = load_session(session_id, config=state.config)
+    with session.lock():
+        result = session.cancel()
     click.echo(f"Session {session_id} is {result['status']}. {result['note']}")
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import tomllib
 from pathlib import Path
@@ -15,6 +16,110 @@ from hiraku.errors import (
     ValidationError,
 )
 from hiraku.record import Record
+
+
+def test_init_merges_and_deduplicates_client_hooks(tmp_path):
+    from hiraku.project import ProjectInitializer
+
+    existing = {"matcher": "Write", "hooks": [{"type": "command", "command": "check"}]}
+    for relative in (".codex/hooks.json", ".claude/settings.json"):
+        path = tmp_path / relative
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(
+            json.dumps({"other": True, "hooks": {"PreToolUse": [existing]}})
+        )
+    HirakuConfig.init(tmp_path, install_skill=False)
+    before = {}
+    for relative, client in (
+        (".codex/hooks.json", "codex"),
+        (".claude/settings.json", "claude"),
+    ):
+        path = tmp_path / relative
+        before[path] = path.read_bytes()
+        data = json.loads(path.read_text())
+        assert data["other"] is True
+        assert data["hooks"]["PreToolUse"][0] == existing
+        command = data["hooks"]["PreToolUse"][1]["hooks"][0]["command"]
+        assert command == f"hiraku session hook {client}"
+    ProjectInitializer._install_client_hooks(tmp_path, [], [], {})
+    assert all(path.read_bytes() == content for path, content in before.items())
+
+
+@pytest.mark.parametrize(
+    "client,relative",
+    [("codex", ".codex/hooks.json"), ("claude", ".claude/settings.json")],
+)
+def test_init_replaces_only_the_earlier_hiraku_hook_command(tmp_path, client, relative):
+    from hiraku.project import ProjectInitializer
+
+    path = tmp_path / relative
+    path.parent.mkdir()
+    audit = {"type": "command", "command": "audit-hiraku-call"}
+    old = {
+        "matcher": "^mcp__hiraku__",
+        "custom_setting": True,
+        "hooks": [
+            {
+                "type": "command",
+                "command": f"/elsewhere/python -m hiraku.cli session hook {client}",
+            },
+            audit,
+        ],
+    }
+    policy = {
+        "matcher": "^mcp__hiraku__",
+        "hooks": [{"type": "command", "command": "policy"}],
+    }
+    other = {"matcher": "Write", "hooks": [{"type": "command", "command": "check"}]}
+    path.write_text(json.dumps({"hooks": {"PreToolUse": [old, policy, other]}}))
+    ProjectInitializer._install_client_hooks(tmp_path, [], [], {})
+    entries = json.loads(path.read_text())["hooks"]["PreToolUse"]
+    assert entries == [
+        {"matcher": "^mcp__hiraku__", "custom_setting": True, "hooks": [audit]},
+        policy,
+        other,
+        {
+            "matcher": "^mcp__hiraku__",
+            "hooks": [{"type": "command", "command": f"hiraku session hook {client}"}],
+        },
+    ]
+    before = path.read_bytes()
+    ProjectInitializer._install_client_hooks(tmp_path, [], [], {})
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("locked", [False, True])
+def test_init_uses_uv_when_the_project_has_a_lockfile(tmp_path, locked):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\ndependencies = ["hiraku"]\n'
+    )
+    if locked:
+        (tmp_path / "uv.lock").touch()
+    launcher = ["uv", "run", "hiraku"] if locked else ["hiraku"]
+    HirakuConfig.init(tmp_path, install_skill=False)
+    server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["hiraku"]
+    assert [server["command"], *server["args"]] == [*launcher, "mcp"]
+    codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
+    assert codex["mcp_servers"]["hiraku"] == server
+    hooks = json.loads((tmp_path / ".claude/settings.json").read_text())
+    assert hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == " ".join(
+        [*launcher, "session", "hook", "claude"]
+    )
+
+
+@pytest.mark.parametrize(
+    "content", ["not json", "[]", '{"hooks": []}', '{"hooks":{"PreToolUse":{}}}']
+)
+def test_init_rolls_back_when_hook_configuration_is_invalid(tmp_path, content):
+    path = tmp_path / ".claude/settings.json"
+    path.parent.mkdir()
+    path.write_text(content)
+    with pytest.raises(ValidationError, match="Cannot merge hook configuration"):
+        HirakuConfig.init(tmp_path, install_skill=False)
+    assert path.read_text() == content
+    assert not (tmp_path / "hiraku.yml").exists()
+    assert not (tmp_path / ".codex").exists()
+    assert not (tmp_path / ".mcp.json").exists()
 
 
 def _git(path: Path, *arguments: str) -> None:
@@ -70,7 +175,8 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     without_skill = tmp_path / "without-skill"
     HirakuConfig.init(without_skill, install_skill=False)
     assert not (without_skill / ".agents").exists()
-    assert not (without_skill / ".claude").exists()
+    assert not (without_skill / ".claude/skills").exists()
+    assert (without_skill / ".claude/settings.json").is_file()
 
     with pytest.raises(ProjectExistsError):
         HirakuConfig.init(root)

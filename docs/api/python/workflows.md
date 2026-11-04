@@ -38,6 +38,10 @@ For authoring and execution examples, see the [Workflows guide](../../guides/wor
 
 ::: hiraku.workflows.session.EventResult
 
+::: hiraku.workflows.session.ClientInfo
+
+::: hiraku.workflows.session.EventInvocation
+
 ::: hiraku.workflows.session.load_session
 
 ::: hiraku.workflows.session.list_sessions

@@ -192,13 +192,6 @@ def summary(text: str | None) -> str:
     return text.strip().split("\n\n", 1)[0].replace("\n", " ") if text else ""
 
 
-def validation_message(exc: PydanticValidationError) -> str:
-    return "; ".join(
-        f"{'.'.join(map(str, error['loc'])) or 'input'}: {error['msg']}"
-        for error in exc.errors()
-    )
-
-
 # Exclude underscores to avoid collisions with fixed MCP tool names.
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
