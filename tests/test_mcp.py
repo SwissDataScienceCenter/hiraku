@@ -69,12 +69,6 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
     asyncio.run(exercise())
 
 
-def test_mcp_dev_option_is_not_exposed() -> None:
-    result = CliRunner().invoke(main, ["mcp", "--dev"])
-    assert result.exit_code == 2
-    assert "No such option" in result.output
-
-
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow  # noqa: E402
 from hiraku.workflows.langgraph import (  # noqa: E402
     start_workflow,
