@@ -315,13 +315,42 @@ def _snapshot_result(
         for item in task.interrupts
     ]
     completed = not snapshot.next and not interrupts
+    next_actions = [_next_action(item["value"]) for item in interrupts]
     result = {
         "workflow_session_id": workflow_session_id,
         "workflow_id": workflow_id,
         "status": "completed" if completed else "waiting",
         "interrupts": interrupts,
+        "next_actions": next_actions,
+        # Keep the common single-interrupt case convenient without silently
+        # choosing one when a graph has paused at multiple interrupts.
+        "next_action": next_actions[0] if len(next_actions) == 1 else None,
         "checkpoint_id": snapshot.config.get("configurable", {}).get("checkpoint_id"),
     }
     if completed:
         result["result"] = snapshot.values.get("final")
     return result
+
+
+def _next_action(value: Any) -> dict[str, Any]:
+    """Normalize current and legacy interrupt payloads for workflow clients."""
+    payload = value if isinstance(value, dict) else {}
+    interaction = payload.get("interaction")
+    if isinstance(interaction, dict):
+        interaction_type = interaction.get("type")
+        mode = interaction.get("mode")
+    else:
+        interaction_type = interaction if isinstance(interaction, str) else None
+        mode = payload.get("interaction_mode")
+    actor = payload.get("actor")
+    if actor not in {"agent", "human"}:
+        # Sessions created before ownership was explicit remain inspectable.
+        actor = "human" if mode == "approval" or "approval" in payload else "agent"
+    if interaction_type not in {"task", "review", "approval"}:
+        interaction_type = "approval" if actor == "human" else "task"
+    return {
+        "actor": actor,
+        "interaction": interaction_type,
+        "action": payload.get("action", payload.get("step", "respond")),
+        "requires_approval": actor == "human" and interaction_type == "approval",
+    }

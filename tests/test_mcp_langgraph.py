@@ -53,7 +53,7 @@ def test_workflow_approval_schema_omits_codex_unsupported_root_title() -> None:
         "revise",
         "stop",
     ]
-    assert set(schema["properties"]) == {"decision", "feedback"}
+    assert set(schema["properties"]) == {"decision"}
 
 
 def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
@@ -195,30 +195,45 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     assert started["status"] == "waiting"
     interrupt = _interrupt(started)
     assert interrupt["step"] == "draft"
+    assert started["next_action"] == {
+        "actor": "agent",
+        "interaction": "task",
+        "action": "draft_experiment",
+        "requires_approval": False,
+    }
     assert interrupt["data"]["task"] == "task"
 
-    bypass = resume_workflow(
-        started["workflow_session_id"], {"event": "finish"}, project=config
-    )
-    assert bypass["status"] == "waiting"
-    assert "approval decision is required" in _interrupt(bypass)["error"]
-    invalid = resume_workflow(
-        started["workflow_session_id"], {"approval": {"decision": []}}, project=config
-    )
-    assert "approval decision is required" in _interrupt(invalid)["error"]
-    revised = resume_workflow(
+    drafted = resume_workflow(
         started["workflow_session_id"],
-        {"approval": {"decision": "revise", "feedback": "Use a smaller model."}},
+        {
+            "event": "drafted",
+            "arguments": {
+                "record_id": "draft-1",
+                "summary": "Try a focused change",
+                "hypothesis": "The change improves the metric",
+                "change": "Apply one change",
+                "command": ["python", "train.py"],
+            },
+        },
         project=config,
     )
-    assert _interrupt(revised)["feedback"] == "Use a smaller model."
+    approval_interrupt = _interrupt(drafted)
+    assert approval_interrupt["actor"] == "human"
+    assert approval_interrupt["interaction"]["type"] == "review"
+    assert drafted["next_action"]["requires_approval"] is False
+    invalid = resume_workflow(
+        started["workflow_session_id"],
+        {"approval": {"decision": []}},
+        project=config,
+    )
+    assert "approval" in _interrupt(invalid)["error"].lower()
     completed = resume_workflow(
         started["workflow_session_id"],
         {"approval": {"decision": "stop"}},
         project=config,
     )
     assert completed["status"] == "completed"
-    assert "results" in completed["result"]
+    assert "remaining limitations" in completed["result"]
 
 
 def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
@@ -233,6 +248,21 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
         {"rounds": 1, "command": ["python", "train.py"]},
         project=config,
     )
+    drafted = resume_workflow(
+        started["workflow_session_id"],
+        {
+            "event": "drafted",
+            "arguments": {
+                "record_id": "draft-approval",
+                "summary": "Draft a change",
+                "hypothesis": "It helps",
+                "change": "Change one thing",
+                "command": ["python", "train.py"],
+            },
+        },
+        project=config,
+    )
+    approval_schema = _interrupt(drafted)["response_schema"]
     requested = []
 
     async def elicit(_context, params):
@@ -251,16 +281,17 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
                 "workflow_resume",
                 {
                     "workflow_session_id": started["workflow_session_id"],
-                    "response": {"event": "finish"},
-                    "checkpoint_id": started["checkpoint_id"],
+                    "response": {},
+                    "checkpoint_id": drafted["checkpoint_id"],
                 },
             )
 
     resumed = anyio.run(exercise)
-    assert resumed.structured_content["status"] == "completed"
+    assert resumed.structured_content["status"] == "waiting"
+    assert resumed.structured_content["next_action"]["actor"] == "agent"
     assert len(requested) == 1
-    assert "draft" in requested[0].message
-    assert "larger learning rate" in requested[0].message
+    assert "draft_approval" in requested[0].message
+    assert "Change one thing" in requested[0].message
     schema = requested[0].requested_schema
     assert set(schema) <= {"type", "properties", "required", "$schema"}
     assert schema["properties"]["decision"]["enum"] == [
@@ -268,7 +299,47 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
         "revise",
         "stop",
     ]
-    assert set(schema["properties"]) == {"decision", "feedback"}
+    assert set(schema["properties"]) == {"decision"}
+    assert "revision_feedback" not in approval_schema["properties"]
+
+
+def test_agent_handoff_resumes_without_elicitation(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    Record.create("task", type="task", project=config)
+    started = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        project=config,
+    )
+
+    async def exercise() -> Any:
+        async with Client(create_server(config)) as client:
+            return await client.call_tool(
+                "workflow_resume",
+                {
+                    "workflow_session_id": started["workflow_session_id"],
+                    "checkpoint_id": started["checkpoint_id"],
+                    "response": {
+                        "event": "drafted",
+                        "arguments": {
+                            "record_id": "agent-draft",
+                            "summary": "Draft summary",
+                            "hypothesis": "A change improves the metric",
+                            "change": "Change one setting",
+                            "command": ["python", "train.py", "--setting", "1"],
+                        },
+                    },
+                },
+            )
+
+    resumed = anyio.run(exercise)
+    assert resumed.structured_content["status"] == "waiting"
+    assert resumed.structured_content["next_action"] == {
+        "actor": "human",
+        "interaction": "review",
+        "action": "approve_experiment_draft",
+        "requires_approval": False,
+    }
 
 
 def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
@@ -281,6 +352,20 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
     started = start_workflow(
         "collaborative",
         {"rounds": 1, "command": ["python", "train.py"]},
+        project=config,
+    )
+    drafted = resume_workflow(
+        started["workflow_session_id"],
+        {
+            "event": "drafted",
+            "arguments": {
+                "record_id": "draft-cancel",
+                "summary": "Draft",
+                "hypothesis": "Hypothesis",
+                "change": "Change",
+                "command": ["python", "train.py"],
+            },
+        },
         project=config,
     )
 
@@ -296,8 +381,8 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
                 "workflow_resume",
                 {
                     "workflow_session_id": started["workflow_session_id"],
-                    "response": {"event": "finish"},
-                    "checkpoint_id": started["checkpoint_id"],
+                    "response": {},
+                    "checkpoint_id": drafted["checkpoint_id"],
                 },
             )
             status = await client.call_tool(
@@ -315,6 +400,10 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
     config = Project.create(tmp_path, install_skill=False)
     directory = config.workflows_dir / "review"
     directory.mkdir()
+    (directory / "workflow.md").write_text(
+        "---\nid: review\ndescription: Review task.\n---\n# Review\n",
+        encoding="utf-8",
+    )
     (directory / "workflow.py").write_text(
         "from langgraph.graph import START, END, StateGraph\n"
         "from langgraph.types import interrupt\n"
@@ -369,6 +458,20 @@ def test_mcp_resume_elicits_approval_for_checkpointed_workflow(tmp_path) -> None
     first = start_workflow(
         "collaborative",
         {"rounds": 1, "command": ["python", "train.py"]},
+        project=config,
+    )
+    first = resume_workflow(
+        first["workflow_session_id"],
+        {
+            "event": "drafted",
+            "arguments": {
+                "record_id": "draft-final",
+                "summary": "Draft",
+                "hypothesis": "Hypothesis",
+                "change": "Change",
+                "command": ["python", "train.py"],
+            },
+        },
         project=config,
     )
 

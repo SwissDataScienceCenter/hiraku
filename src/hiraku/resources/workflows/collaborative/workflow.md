@@ -8,41 +8,73 @@ rules: >-
 ---
 # Collaborative research
 
-## Draft
+LangGraph owns workflow state and transitions. The external coding agent performs
+agent-owned tasks, submits each result with `workflow_resume`, and continues
+through agent-owned interrupts. Human-owned interrupts require a decision from a
+trusted client elicitation; ordinary tool arguments cannot authorize them.
 
-Draft one experiment for the task. Read the task record and its earlier
-experiments first, and build on the previous results in the data. Do not
-change code yet. Present the draft to the user, then call `workflow_resume`
-with the workflow session ID, checkpoint ID, and proposed response. For
-approval interrupts, `workflow_resume` opens a structured MCP elicitation and
-waits for the user's choice before resuming. For an approved draft, the proposed
-response is `{"event": "drafted", "arguments":
-{"record_id": "...", "summary": "...", "hypothesis": "...", "change":
-"..."}}`.
-If the elicitation is cancelled, explain that approval was not given and leave
-the workflow paused; do not resume it or proceed with the experiment.
+Interrupts include `actor` (`agent` or `human`), `interaction.type` (`task`,
+`review`, or `approval`), `action`, `step`, `instruction`, `data`, and
+`response_schema`. `interaction.mode` is retained for compatibility. Agent
+interrupts are work requests and do not invoke elicitation. Human reviews use
+structured elicitation; approvals protect consequential transitions. Approval
+payloads bind to a stored revision of the proposal or plan.
 
-## Implement
+## Draft and review
 
-Implement the drafted experiment in the data and commit the change. Show
-the user the change, then call `workflow_resume` with the proposed response.
+Read the task record and earlier experiments. Propose one focused experiment
+with a hypothesis, code change, and exact command argv. Submit the result using
+the `draft` response schema. Hiraku stores the proposal as a draft record, then
+pauses at a human review gate bound to that draft's revision. The user can
+approve, request changes, or stop. On revision, update the same draft record;
+do not create a duplicate. Do not implement before the review is approved.
+
+The workflow-start command is only a suggestion. Save the exact per-experiment
+command on the draft and use it for launch planning.
+
+## Implementation
+
+Prepare a concrete implementation plan and submit it with the `implement` task
+response schema. The workflow stores the plan and returns a separate
+human-owned approval interrupt with its revision. MCP elicitation collects
+approve, revise (with feedback), or stop. Approval applies only to that plan
+revision. After approval, implement that plan, show the user the changes, commit
+them when authorized, and submit the commit reference through the
+`implement_execution` task interrupt.
 
 ## Launch
 
-Call `workflow_resume` with `{"event": "launched"}` as the proposed response.
-The tool elicits approval before resuming. Run the explicit argv supplied when
-starting the workflow with `hiraku run --record <experiment> -- <command...>` only after
-approval, then resume with the result once the run is tracked; check with
-`hiraku runs --record <experiment>`.
+Prepare the launch proposal using the command saved on the experiment record.
+Submit it through the `launch` task response schema. Hiraku stores the exact
+command and returns a separate human approval interrupt tied to its revision.
+After approval, inspect `hiraku runs --record <experiment>`. If a run for the
+implemented commit and approved command already exists, report its run ID
+instead of launching again. If the match is uncertain, ask the user before
+launching. Otherwise run `hiraku run --record <experiment> -- <command...>`,
+inspect the tracked result, and submit its run ID through the
+`launch_execution` task interrupt.
 
-## Analyze
+## Analyze, review, and iterate
 
-Compare the runs in the data with the task's metrics, earlier results, and
-the experiment's hypothesis. Present your verdict and conclusion to the user,
-then call `workflow_resume` with the proposed analysis response. The tool
-elicits approval before resuming.
+Use the attributed run, metrics, earlier results, and hypothesis to prepare an
+evidence-based verdict and conclusion. Submit it through the `analyze` task
+response schema. If metrics are missing, inspect the tracker and do not invent a
+conclusion. The workflow then asks the human to review the result and choose to
+continue, revise the analysis, or stop. A revision returns to agent analysis;
+continuing starts another draft only when rounds remain. The final result is
+reviewed before the workflow completes.
 
-## Done
+## Resume and completion
 
-Summarize the run for the user: each experiment in the data's
-`results` with its verdict, and what you would try next.
+After every `workflow_start` or `workflow_resume`, inspect `next_action` and the
+full `interrupts` list. Complete agent-owned tasks and resume with a response
+matching `response_schema`; continue while the next action is agent-owned and
+within authorized limits. For a human-owned action, present the concrete
+proposal and use trusted MCP elicitation. Never simulate human approval. If the
+client lacks form elicitation, leave the workflow paused and ask the user to
+reconnect with an elicitation-capable client. `workflow_status` inspects state
+without eliciting or advancing it.
+
+At completion, summarize experiment records, commits, tracked run IDs, metrics,
+conclusions, and remaining limitations. Check for completed side effects before
+retrying any interrupted operation.

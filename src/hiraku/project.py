@@ -322,10 +322,13 @@ class Project(BaseModel):
             with as_file(resources / "workflows") as source:
                 shutil.copytree(source, project.workflows_dir, dirs_exist_ok=True)
             if install_skill:
-                with as_file(resources / "skills" / "hiraku") as source:
+                # Install all the skills in the bundled resources
+                with as_file(resources / "skills") as source:
                     for destination in (
-                        root / ".agents/skills/hiraku",
-                        root / ".claude/skills/hiraku",
+                        root / ".agents/skills",
+                        root / ".claude/skills",
+                        root / ".codex/skills",
+                        root / ".pi/skills",
                     ):
                         shutil.copytree(source, destination, dirs_exist_ok=True)
 

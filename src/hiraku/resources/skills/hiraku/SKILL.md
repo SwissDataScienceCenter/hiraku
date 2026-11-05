@@ -1,6 +1,6 @@
 ---
 name: hiraku
-description: Use Hiraku to structure and carry out data-science and machine-learning research from focused record work through bounded investigations and autonomous research workflows.
+description: Use Hiraku to manage research records, run experiments, and inspect tracked evidence in data-science and machine-learning projects.
 ---
 # Hiraku
 
@@ -29,8 +29,7 @@ through an existing record lifecycle.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and invocation attribution together with
   parameters, metrics, timestamps, and an external URL.
-- **Command:** Explicit argv passed to each `hiraku run` invocation. Commands
-  are not stored in records.
+- **Command:** Explicit argv passed to each `hiraku run` invocation.
 - **Execution:** A foreground command in the current project working tree.
   Hiraku streams output, returns the command's exit code, and supplies tracking
   attribution for that invocation.
@@ -42,7 +41,7 @@ through an existing record lifecycle.
 ## Main CLI entry points
 
 When the connected agent environment provides Hiraku MCP tools, use them for
-record CRUD, project resources, workflows, and foreground command execution.
+record CRUD, project resources, and foreground command execution.
 The MCP server uses the project directory selected by the host and applies the
 same Hiraku validation and persistence rules as the Python API. Use the CLI
 commands below when the relevant MCP tool is unavailable or the user asks for
@@ -57,7 +56,6 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
 | Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
 | Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
-| Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; approval interrupts elicit a decision during `workflow_resume`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
 | Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
@@ -66,13 +64,13 @@ Use `hiraku status --json` to inspect the project tracking backend.
 
 ## Operating scope
 
-Use Hiraku at the scope the user requested: a single record operation, a bounded
-sequence of research steps, or an explicitly requested autonomous workflow.
+Use Hiraku at the scope the user requested: a single record operation or a
+bounded sequence of research steps.
 
 ## Development version and feedback
 
 Hiraku is under active development. Be transparent when its behavior,
-instructions, or records do not support the requested workflow cleanly:
+instructions, or records do not support the requested research task cleanly:
 
 - Flag apparent bugs, inconsistencies, missing capabilities, and unclear or
   incomplete documentation to the user. Describe the expected behavior, the
@@ -106,14 +104,9 @@ Classify the request before acting:
   and stop. For example, "create a record" does not also implement or run
   it, and "run this record" does not create another record or rewrite
   its record.
-- **Bounded workflow:** Complete every requested stage in order, such as creating
-  a research root, defining child records, running them, and comparing results.
-  Do not add stages the user did not request.
-- **LangGraph workflow:** Start or continue a research loop only when the user
-  explicitly requests it. Read the workflow definition and follow its guidance
-  and the user's constraints, permissions, budgets, checkpoints, and stopping
-  condition. For collaborative workflow approval gates, call `workflow_resume`
-  with the proposed response and wait for its structured MCP elicitation.
+- **Multi-step research request:** Complete every requested stage in order, such
+  as creating a research root, defining child records, running them, and
+  comparing results. Do not add stages the user did not request.
 
 Infer routine identifiers, summaries, hypotheses, metrics, and command
 arguments from the user's request and the repository. Ask a question only when
@@ -211,7 +204,8 @@ hiraku record show <root-id> --json
 
 Creating a record activates it by default. Use `--no-activate` only when it
 should not become active. Hiraku does not switch Git branches automatically.
-Store `branch` with `--set` only when the user or project workflow specifies one.
+Store `branch` with `--set` only when the user or project instructions specify
+one.
 
 Use `hiraku record update` for requested changes or evidence-backed summaries.
 Do not summarize experiments that have not been run or conclusions that the
@@ -256,7 +250,7 @@ hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
 Creating a record activates it by default. Several children may share a
 commit and use different explicit command arguments. Follow the effective record branch
 recorded for implementation; create or change that branch assignment only when
-the user or selected workflow asks for it. Ordinary Git operations remain
+the user or project instructions ask for it. Ordinary Git operations remain
 responsible for commits and merges.
 
 Use repeatable `--set 'key=<YAML value>'` for custom metadata and `--unset key`
@@ -290,14 +284,13 @@ Tokens after `--` replace the complete invocation:
 hiraku run --record <record-id> -- uv run --locked python train.py --seed 7
 ```
 
-Do not repeat an existing successful run unless the user or workflow requires a
+Do not repeat an existing successful run unless the user explicitly requests a
 replicate. On failure, preserve the evidence, explain whether the launch failed
 or simply produced no tracked row, and stop or continue according to the user's
-requested scope. Record conclusions or decisions only when requested or when
-they are part of the bounded/autonomous workflow, and cite actual run IDs,
-metrics, and source commits.
+requested scope. Record conclusions or decisions only when requested, and cite
+actual run IDs, metrics, and source commits.
 
-## Compare runs and carry out research workflows
+## Compare runs and plan research steps
 
 Use root metrics and compatible runs when comparing child records. Keep data
 splits, budgets, and evaluation definitions comparable, and do not infer
@@ -310,42 +303,16 @@ hiraku runs --record <root-id> --all \
   --sort val/log_loss --ascending --json
 ```
 
-For a bounded research workflow, repeat the relevant cycle until the user's
-requested outcome is reached: inspect prior evidence, formulate one focused
-experiment, make only the necessary code change, bind the resulting source
-commit when appropriate, launch it, inspect its attributed run, and record an
-evidence-backed result. Respect any requested maximum experiments, runs, time,
-cost, or hardware budget.
+For a bounded research request, perform only the requested steps: inspect prior
+evidence, formulate focused experiments, make authorized code changes, bind
+source commits when appropriate, launch runs, inspect attributed evidence, and
+record supported results. Respect requested limits on experiments, runs, time,
+cost, or hardware.
 
-For a named workflow, inspect the root, workflow definition, child history,
-runs, Git state, and required files before starting it. Resume incomplete work
-with the same workflow session and follow its checkpoints and stopping rules.
-User instructions override workflow defaults.
-
-Workflows are project-defined LangGraph procedures under `hiraku/workflows/`.
-Start one with `workflow_start(workflow_id, arguments)`. Follow the current
-interrupt payload and its response schema. Resume the same run with
-`workflow_resume(workflow_session_id, response, checkpoint_id)` using the checkpoint ID
-returned by start or status; inspect it without advancing with
-`workflow_status(workflow_session_id)`. The workflow session ID is the LangGraph thread ID, so do not
-start a new run to continue an interrupted workflow. Before repeating
-consequential work such as creating records or launching experiments, check
-whether it already exists. User instructions override workflow defaults; if
-they conflict with a workflow, explain the conflict and do not bypass its
-validation. If a workflow is missing, check `workflow_list` or reconnect MCP
-after adding it to the project.
-
-For an interrupt requesting approval, call `workflow_resume` with the workflow
-session ID, checkpoint ID, and proposed response. It uses MCP elicitation to
-wait for approve, revise, or stop before resuming.
-If elicitation is cancelled or declined, tell the user and leave the workflow
-paused; do not resume it or launch the experiment. Do not replace elicitation
-with an ordinary assistant question.
-
-Commands are not record metadata. Pass the complete invocation directly after
-`--`, for example `hiraku run --record <record-id> -- uv run --locked python
-train.py --seed 42`. A dispatcher can prepare repeatable project-specific
-runtime behavior around that invocation.
+Pass the complete invocation directly after `--`, for example
+`hiraku run --record <record-id> -- uv run --locked python train.py --seed 42`.
+A dispatcher can prepare repeatable project-specific runtime behavior around
+that invocation.
 
 Commands execute in the current project working tree, including uncommitted
 changes. `hiraku run` waits until the command exits.
@@ -372,6 +339,4 @@ The Python API exposes `Project` in `hiraku.project`; `Record`,
 `Metric`, loaders, and listing functions in `hiraku.record`;
 `Run` in `hiraku.run`; and `execute_command` in `hiraku.execution` for scripted
 execution.
-Records with `type: context` store supporting material. Workflows run in the
-current coding agent through the Hiraku MCP server (`hiraku mcp`). V1 does not
-provide a `hiraku-agent` runner; the current coding agent executes the skill.
+Records with `type: context` store supporting material.

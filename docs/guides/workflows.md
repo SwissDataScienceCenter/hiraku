@@ -82,16 +82,30 @@ validating inputs and interrupt responses. Capability names describe needs, not
 specific tools; an executor maps them to its own tools. The bundled workflows
 demonstrate these contracts with Pydantic models.
 
-Workflows can declare an `approval` object in an interrupt payload. When an MCP
-client calls `workflow_resume`, the server checks the pending interrupt and
-opens a structured elicitation for the standard approve, revise, or stop
-decision. On acceptance, that decision and the proposed workflow response are
-combined and sent to the graph in the same resume call. If elicitation is
-cancelled or declined, the graph stays paused. The graph checks the decision
-before processing the workflow response. The graph-level check is a cooperative
-convention: trusted Python and CLI callers can submit decisions directly. MCP
-approval resumes go through elicitation, though it does not restrict other tools
-or local shell access.
+Workflow interrupts declare an `actor` (`agent` or `human`) and an
+`interaction.type` (`task`, `review`, or `approval`). Agent-owned tasks ask the
+external coding agent to do work and submit a response matching
+`response_schema`; they never trigger MCP elicitation. Human-owned reviews and
+approvals require MCP elicitation. A model's ordinary `workflow_resume`
+arguments cannot authorize a human-owned transition. `interaction.mode` remains
+available for compatibility with older workflow definitions, as does inference
+from legacy `approval` payloads.
+
+Workflow status includes `next_action` when exactly one interrupt is pending,
+and `next_actions` for all pending interrupts. When multiple interrupts are
+pending, `next_action` is `null`; clients must not silently select one.
+
+For consequential actions, checkpoint the proposed plan before requesting
+approval. Bind approval to the workflow session, checkpoint, action, and stored
+proposal revision. After approval, return a separate agent-owned execution task
+with the approved action and a result schema. The agent performs the action,
+then resumes with its result. Launch results should include a tracked `run_id`
+and be checked against the experiment and implemented commit. Before retrying
+an interrupted launch, inspect the record's runs and report an existing match
+instead of launching it again. If elicitation is cancelled, declined, or
+unavailable, keep the graph paused. `workflow_status` only inspects state; it
+never elicits or advances the graph. Local Python and CLI APIs are trusted
+interfaces and should be exposed only to an authorized user.
 
 ## Define a workflow
 

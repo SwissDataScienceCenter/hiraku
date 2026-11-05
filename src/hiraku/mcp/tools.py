@@ -50,11 +50,20 @@ class WorkflowInterrupt(TypedDict):
     value: Any
 
 
+class WorkflowNextAction(TypedDict):
+    actor: Literal["agent", "human"]
+    interaction: Literal["task", "review", "approval"]
+    action: str
+    requires_approval: bool
+
+
 class WorkflowResult(TypedDict):
     workflow_session_id: str
     workflow_id: str
     status: Literal["waiting", "completed"]
     interrupts: list[WorkflowInterrupt]
+    next_action: WorkflowNextAction | None
+    next_actions: list[WorkflowNextAction]
     checkpoint_id: str | None
     result: NotRequired[Any]
     decision: NotRequired[Literal["decline", "cancel"]]
@@ -161,7 +170,7 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
     - `record_update`: Merge record fields and optionally replace Markdown.
     - `record_reparent`: Move a record subtree under a parent, or make it a root.
     - `record_delete`: Delete a record using Hiraku's relationship checks.
-    - `record_runs`: List tracked runs attributed to a record, like `hiraku runs`.
+    - `runs`: List tracked runs attributed to a record, like `hiraku runs`.
     - `execute_command`: Run a command and return output with exit code.
     """
 
@@ -291,7 +300,7 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
             open_world_hint=True,
         ),
     )
-    def execute_command(
+    def execute(
         record_id: str,
         command: list[str],
         dispatch: str | None = None,
@@ -316,7 +325,7 @@ def register_record_tools(server: MCPServer, config: Project | None) -> None:
         title="List tracked runs",
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
-    def record_runs(
+    def runs(
         record_id: str,
         all_records: bool = False,
         sort: str | None = None,
@@ -386,6 +395,12 @@ def register_record_resources(
 
         return json.dumps(sorted(set(uris)))
 
+    @server.resource("hiraku://records/{record_id}", mime_type="application/json")
+    def record_resource(record_id: str) -> str:
+        """Read a live record and its current metadata as JSON."""
+        project = _get_project(config)
+        return json.dumps(_data(load_record(record_id, project=project)))
+
     @server.resource("hiraku://sources/{record_id}/{source_path}")
     def source_resource(
         record_id: str,
@@ -443,7 +458,7 @@ def register_record_prompts(server: MCPServer, config: Project | None) -> None:
 def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
     """Register workflow lifecycle and session history tools."""
 
-    def resolve_resume_response(
+    async def resolve_resume_response(
         workflow_session_id: str,
         response: dict[str, Any],
         checkpoint_id: str,
@@ -457,23 +472,43 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
         interrupts = status["interrupts"]
         if status["status"] != "waiting":
             raise ValidationError("Workflow is not waiting for a response")
-        approval_interrupts = [
-            interrupt
-            for interrupt in interrupts
-            if isinstance(interrupt.get("value"), dict)
-            and isinstance(interrupt["value"].get("approval"), dict)
-        ]
-        if not approval_interrupts:
-            return response
         if len(interrupts) != 1:
             raise ValidationError(
-                "Approval elicitation requires exactly one pending interrupt"
+                "workflow_resume requires exactly one pending interrupt; "
+                "this session has multiple interrupts and cannot be resumed safely"
             )
+        pending = interrupts[0].get("value")
+        if not isinstance(pending, dict):
+            return response
+        interaction = pending.get("interaction")
+        if isinstance(interaction, dict):
+            interaction_type = interaction.get("type")
+            mode = interaction.get("mode")
+        else:
+            interaction_type = interaction if isinstance(interaction, str) else None
+            mode = pending.get("interaction_mode")
+        actor = pending.get("actor")
+        if actor not in {"agent", "human"}:
+            # Older workflow definitions used interaction.mode and approval.
+            actor = "human" if mode == "approval" or "approval" in pending else "agent"
+        if actor == "agent":
+            if not isinstance(response, dict):
+                raise ValidationError("Agent workflow response must be an object")
+            return response
+        if actor != "human":
+            raise ValidationError(f"Unknown workflow interrupt actor: {actor!r}")
+        if interaction_type not in {"review", "approval", None}:
+            raise ValidationError(
+                f"Human workflow interaction must be review or approval, got "
+                f"{interaction_type!r}"
+            )
+        interrupt_value = pending
+        approval = interrupt_value.get("approval", {})
+        if not isinstance(approval, dict):
+            raise ValidationError("Human workflow interrupt has invalid approval data")
         capabilities = context.client_capabilities
         elicitation = capabilities.elicitation if capabilities is not None else None
-        if elicitation is None or (
-            elicitation.form is None and elicitation.url is not None
-        ):
+        if elicitation is None or elicitation.form is None:
             required_capabilities = ClientCapabilities(
                 elicitation=ElicitationCapability(form=FormElicitationCapability())
             )
@@ -492,12 +527,12 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
                     by_alias=True, mode="json", exclude_none=True
                 ),
             )
-        approval = approval_interrupts[0]["value"]["approval"]
+        proposal_context = json.dumps(interrupt_value, sort_keys=True, indent=2)
         return Elicit(
             message=(
                 f"{approval.get('message', 'Review the proposed workflow action.')}"
-                f"\n\nProposed workflow response:\n"
-                f"{json.dumps(response, sort_keys=True)}"
+                f"\n\nPending interrupt and stored proposal:\n"
+                f"{proposal_context}"
                 "\n\nChoose approve, revise, or stop."
             ),
             schema=WorkflowApproval,
@@ -509,7 +544,7 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
             langgraph_workflow_details(project=_get_project(config)),
         )
 
-    def workflow_start(
+    async def workflow_start(
         workflow_id: Annotated[str, Field(description="Project workflow ID.")],
         arguments: Annotated[
             dict[str, Any] | None, Field(description="Workflow input object.")
@@ -526,10 +561,13 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
             ),
         )
 
-    def workflow_sessions() -> list[WorkflowSession]:
-        return cast(list[WorkflowSession], list_sessions(project=_get_project(config)))
+    async def workflow_sessions() -> list[WorkflowSession]:
+        return cast(
+            list[WorkflowSession],
+            list_sessions(project=_get_project(config)),
+        )
 
-    def workflow_session_history(
+    async def workflow_session_history(
         workflow_session_id: Annotated[
             str, Field(description="Workflow session ID returned by workflow_start.")
         ],
@@ -539,7 +577,7 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
             session_history(workflow_session_id, project=_get_project(config)),
         )
 
-    def workflow_status(
+    async def workflow_status(
         workflow_session_id: Annotated[
             str, Field(description="Workflow session ID returned by workflow_start.")
         ],
@@ -551,7 +589,7 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
             ),
         )
 
-    def workflow_resume(
+    async def workflow_resume(
         workflow_session_id: Annotated[
             str, Field(description="Workflow session ID returned by workflow_start.")
         ],
@@ -570,19 +608,39 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
             Field(description="Optional caller-provided transition context."),
         ] = None,
     ) -> WorkflowResult:
-        if approval.action != "accept":
+        if isinstance(approval, dict):
+            resume_response = approval
+        elif approval.action != "accept":
             result = langgraph_workflow_status(
                 workflow_session_id, project=_get_project(config)
             )
             result["decision"] = approval.action
             return cast(WorkflowResult, result)
-        if isinstance(approval.data, WorkflowApproval):
+        elif isinstance(approval.data, WorkflowApproval):
             resume_response: dict[str, Any] = {
                 "approval": {
                     "decision": approval.data.decision,
                 }
             }
-            if approval.data.decision == "approve":
+            pending_status = langgraph_workflow_status(
+                workflow_session_id, project=_get_project(config)
+            )
+            if pending_status["checkpoint_id"] != checkpoint_id:
+                raise ValidationError(
+                    "Workflow checkpoint changed during elicitation; inspect status"
+                )
+            pending = pending_status["interrupts"]
+            if len(pending) != 1 or not isinstance(pending[0].get("value"), dict):
+                raise ValidationError(
+                    "Approval requires exactly one current workflow interrupt"
+                )
+            pending_approval = pending[0]["value"].get("approval", {})
+            revision = pending_approval.get("revision")
+            if revision is not None:
+                resume_response["approval"]["revision"] = revision
+            elif pending[0]["value"].get("actor") != "human":
+                # Pre-ownership workflow interrupts expected the proposal result
+                # to be echoed in ordinary arguments.
                 resume_response["response"] = response
         else:
             resume_response = approval.data
@@ -627,12 +685,6 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     server.add_tool(
-        workflow_session_history,
-        title="Read workflow session history",
-        description="Read a workflow session's recorded metadata and history.",
-        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
-    )
-    server.add_tool(
         workflow_status,
         title="Check workflow status",
         description=(
@@ -644,8 +696,11 @@ def register_workflow_tools(server: MCPServer, config: Project | None) -> None:
         workflow_resume,
         title="Resume workflow",
         description=(
-            "Resume a paused LangGraph run. Approval interrupts elicit the user's "
-            "approve, revise, or stop decision during this call."
+            "Resume a paused LangGraph run. Review and automatic interrupts "
+            "accept their structured response directly; approval-mode interrupts "
+            "elicit the user's approve, revise, or stop decision during this "
+            "call. The run may return another waiting interrupt; inspect it and "
+            "call this tool again for the next phase."
         ),
         annotations=ToolAnnotations(
             read_only_hint=False,

@@ -122,17 +122,27 @@ Hiraku-specific event protocol or per-workflow MCP tool. The workflow session ID
 LangGraph thread ID, and resumable graph state is checkpointed in
 `.hiraku/langgraph-checkpoints.sqlite` by default. See the [Workflows guide](workflows.md).
 
-Any workflow interrupt can request approval by including an `approval` object
-in its interrupt payload. Call `workflow_resume` with the workflow session ID,
-checkpoint ID, and proposed response. If the current interrupt requests
-approval, the tool uses MCP elicitation to collect the standard approve, revise,
-or stop decision and resumes in the same call. If elicitation is cancelled,
-leave the graph paused.
+Workflow interrupts identify the next actor (`agent` or `human`) and interaction
+type (`task`, `review`, or `approval`). Agent-owned tasks are requests for the
+coding agent to perform work and submit a response; they never trigger MCP
+elicitation. Human-owned reviews and approvals use MCP form elicitation, and a
+decision supplied only in ordinary tool arguments cannot authorize the graph.
+Legacy `interaction.mode` and approval-only interrupts remain supported.
+
+`workflow_start`, `workflow_status`, and `workflow_resume` return normalized
+`next_action` for a single pending interrupt and `next_actions` for all
+interrupts. If multiple interrupts are pending, `next_action` is null and the
+MCP resume resolver refuses an ambiguous single response. A workflow may
+checkpoint a proposal first, then return a distinct human approval interrupt
+bound to its stored revision. After approval, it returns a separate agent task
+with the approved action and a result schema. A `waiting` status can indicate
+the next phase rather than a stalled workflow. `workflow_status` only inspects
+the pending interrupt; it does not elicit or advance the workflow. If
+elicitation is cancelled, leave the graph paused.
 If the client lacks form elicitation support, `workflow_resume` returns a
 capability error with reconnect guidance and leaves the graph paused.
-The graph-level approval check is a cooperative convention for trusted Python
-and CLI callers. MCP approval resumes use elicitation; it does not restrict
-other tools or local shell access.
+The actor is declared by workflow code and enforced by the MCP resume resolver.
+Local Python and CLI interfaces should be exposed only to an authorized user.
 
 The server also registers one MCP prompt per workflow, named with the workflow
 ID. Prompt arguments are derived from the workflow's `input_schema`; they are
