@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import mimetypes
 from typing import Annotated, Any, Literal
@@ -111,7 +112,7 @@ def _update(
     return updated
 
 
-def create_server(project: Project | None = None) -> Any:
+def create_server(project: Project | None = None) -> ProjectMCP:
     """Create a stdio-capable server bound to a discovered or supplied project.
 
     The MCP SDK is a regular Hiraku dependency. Resources are read afresh on
@@ -119,14 +120,46 @@ def create_server(project: Project | None = None) -> Any:
     """
     selected = project or Project.discover()
 
-    server = ProjectMCP("Hiraku", instructions=INSTRUCTIONS)
+    server = ProjectMCP(
+        name="Hiraku",
+        title="Hiraku MCP Server",
+        instructions=INSTRUCTIONS,
+        description=INSTRUCTIONS,
+        version=importlib.metadata.version("hiraku"),
+    )
+    register_tools(server, selected)
+    register_workflow_tools(server, selected)
+    return server
 
-    @server.tool()
+
+def register_tools(server: MCPServer, selected: Project) -> None:
+    """Register the project, record, execution, and tracking capabilities.
+
+    Tools: project_info, record_list, record_show, record_create, record_update,
+    record_delete, execute, and runs. Also registers the record catalog and
+    source resources, and the propose_implementation prompt.
+    """
+
+    @server.tool(
+        title="Project information",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
+    def project_info() -> dict[str, Any]:
+        """Read the current project configuration and metadata."""
+        return to_jsonable_python(Project.load(selected.path).to_dict(), fallback=dict)
+
+    @server.tool(
+        title="List research records",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
     def record_list() -> list[dict[str, Any]]:
         """List research records in the selected project."""
         return [_data(item) for item in selected.vault.list()]
 
-    @server.tool()
+    @server.tool(
+        title="Show research record",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
     def record_show(record_id: str) -> dict[str, Any]:
         """Read a research record and its effective inherited fields."""
         record = selected.vault.get(record_id)
@@ -137,7 +170,15 @@ def create_server(project: Project | None = None) -> Any:
             "sources": resolved["sources"],
         }
 
-    @server.tool()
+    @server.tool(
+        title="Create research record",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+    )
     def record_create(
         name: str,
         parent_id: str | None = None,
@@ -172,7 +213,15 @@ def create_server(project: Project | None = None) -> Any:
             selected.set_active_record(record)
         return _data(record)
 
-    @server.tool()
+    @server.tool(
+        title="Update research record",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+    )
     def record_update(
         record_id: str,
         fields: dict[str, Any],
@@ -181,13 +230,29 @@ def create_server(project: Project | None = None) -> Any:
         """Merge record fields and optionally replace Markdown; null clears a field."""
         return _data(_update(selected, selected.vault.get(record_id), fields, markdown))
 
-    @server.tool()
+    @server.tool(
+        title="Delete research record",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+    )
     def record_delete(record_id: str) -> dict[str, str]:
         """Delete a record using Hiraku's relationship checks."""
         selected.vault.delete(selected.vault.get(record_id).id)
         return {"deleted": record_id}
 
-    @server.tool()
+    @server.tool(
+        title="Execute project command",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=True,
+        ),
+    )
     def execute(
         record_id: str,
         command: list[str],
@@ -207,7 +272,10 @@ def create_server(project: Project | None = None) -> Any:
             "stderr": result.stderr or "",
         }
 
-    @server.tool()
+    @server.tool(
+        title="List tracked runs",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
     def runs(
         record_id: str,
         all_records: bool = False,
@@ -280,7 +348,7 @@ def create_server(project: Project | None = None) -> Any:
             raise ResourceError("Source must be a file inside its record directory")
         return path.read_bytes()
 
-    @server.prompt()
+    @server.prompt(title="Propose implementation")
     def propose_implementation(record_id: str, related_record_ids: str = "") -> str:
         """Ground a proposal in a record and comma-separated related records."""
         record = selected.vault.get(record_id)
@@ -298,12 +366,14 @@ def create_server(project: Project | None = None) -> Any:
             f"Record: {json.dumps(_data(record))}\n\nRelated records:\n{evidence}"
         )
 
-    add_workflow_tools(server, selected)
-    return server
 
+def register_workflow_tools(server: MCPServer, project: Project) -> None:
+    """Register workflow discovery, execution, sessions, and approval.
 
-def add_workflow_tools(server: MCPServer, project: Project) -> None:
-    """Add LangGraph workflow tools and definitions to a server."""
+    Tools: workflow_list, workflow_start, workflow_sessions,
+    workflow_session_history, workflow_status, workflow_resume, and
+    workflow_approval. Also registers workflow definition and graph resources.
+    """
     path = project.path
 
     def pending_approval(
@@ -439,11 +509,13 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
 
     server.add_tool(
         workflow_list,
+        title="List workflows",
         description="List project LangGraph workflows.",
         annotations=ToolAnnotations(read_only_hint=True),
     )
     server.add_tool(
         workflow_start,
+        title="Start workflow",
         description=(
             "Start a LangGraph workflow and return its interrupt or final result."
         ),
@@ -451,16 +523,19 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
     )
     server.add_tool(
         workflow_sessions,
+        title="List workflow sessions",
         description="List recorded workflow sessions and their metadata.",
         annotations=ToolAnnotations(read_only_hint=True),
     )
     server.add_tool(
         workflow_session_history,
+        title="Read workflow session history",
         description="Read a workflow session's recorded metadata and history.",
         annotations=ToolAnnotations(read_only_hint=True),
     )
     server.add_tool(
         workflow_status,
+        title="Check workflow status",
         description=(
             "Inspect a checkpointed LangGraph workflow run without advancing it."
         ),
@@ -468,11 +543,13 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
     )
     server.add_tool(
         workflow_resume,
+        title="Resume workflow",
         description="Resume a paused LangGraph run with the response to its interrupt.",
         annotations=ToolAnnotations(read_only_hint=False),
     )
     server.add_tool(
         workflow_approval,
+        title="Request workflow approval",
         description=(
             "Open a structured MCP approval prompt when the current workflow "
             "interrupt declares an approval request. Supply the current interrupt "
@@ -504,6 +581,11 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
     )
     def workflow_graph_resource(workflow_id: str) -> str:
         return workflow_mermaid(workflow_id, project=project())
+
+
+def add_workflow_tools(server: MCPServer, project: Project) -> None:
+    """Register workflow tools using the existing public helper name."""
+    register_workflow_tools(server, project)
 
 
 def _research_content(identifier: str, project: Project) -> str:
