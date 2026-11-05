@@ -8,7 +8,7 @@ Submit user stories through the [issue tracker](https://github.com/SwissDataScie
 
 ## Development setup
 
-Hiraku uses Python 3.11+.
+Hiraku uses Python 3.12+.
 
 ```bash
 git clone https://github.com/SwissDataScienceCenter/hiraku.git
