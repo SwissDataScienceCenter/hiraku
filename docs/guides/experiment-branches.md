@@ -1,9 +1,9 @@
 # Branches and record provenance
 
 Hiraku records may name an optional Git branch and a local implementation
-commit. The `branch` field inherits through `parent_id`, so a child may share
-its parent's working branch or override it. `commit` never inherits: bind each
-record to the exact source commit used for its own runs.
+commit. Both `branch` and `commit` are local to each record. Set a child's
+`branch` explicitly if it uses the same working branch as its parent, and bind
+each record to the exact source commit used for its own runs.
 
 Use Git directly to create branches, commit changes, and merge. Hiraku stores
 record branches as metadata and resolves commit references without managing
@@ -16,5 +16,5 @@ hiraku record create baseline --parent research-root \
 ```
 
 The logical record tree, `related_to` links, and Git commit history capture
-different relationships. Use `parent_id` for hierarchy and inheritance,
+different relationships. Use `parent_id` for hierarchy and metric inheritance,
 `related_to` for cross references, and commit ancestry for code provenance.

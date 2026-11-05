@@ -17,15 +17,15 @@ uv add wandb
 uv run wandb login
 ```
 
-Set the project-wide backend in `hiraku.yml`. With the `wandb` shorthand,
-Hiraku uses the project directory name as the W&B project and leaves the entity
-unset, allowing the authenticated W&B account to resolve it. The CLI and
-training process can have separate Python environments; both need W&B installed.
-
-The equivalent configuration value in YAML is:
+Set the project-wide backend and explicit W&B project name in `hiraku.yml`.
+The entity is optional and can be resolved by the authenticated W&B account.
+The CLI and training process can have separate Python environments; both need
+W&B installed.
 
 ```yaml
-tracking_backend: wandb
+tracking_backend:
+  type: wandb
+  project: my-wandb-project
 ```
 
 ## Log from your script
@@ -35,8 +35,9 @@ import os
 import wandb
 
 with wandb.init(
-    group=os.environ["HIRAKU_RECORD_ID"],
     config={
+        "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
+        "hiraku.commit": os.environ.get("HIRAKU_COMMIT", ""),
         "seed": 42,
     },
 ) as run:
@@ -44,10 +45,10 @@ with wandb.init(
 ```
 
 W&B assigns the run ID. Hiraku supplies `WANDB_PROJECT` from the project
-configuration unless it is already set. Your script only needs its ordinary
-`wandb.init()` call; there is no Hiraku-specific
-W&B config to add. The project setting selects the query backend and does not
-initialize a W&B run.
+configuration unless it is already set. Include `hiraku.record_id` in the
+W&B run configuration so Hiraku can attribute the run; `hiraku.commit` is
+optional. A W&B group alone does not provide record attribution. The project
+setting selects the query backend and does not initialize a W&B run.
 
 ## Inspect
 

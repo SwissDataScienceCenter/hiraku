@@ -19,14 +19,16 @@ contract and normalized run model.
 For a custom project, configure the backend once in `hiraku.yml`:
 
 ```yaml
-tracking_backend: wandb
+tracking_backend:
+  type: wandb
+  project: my-wandb-project
 ```
 
 Use a mapping instead of a shorthand when the backend needs options. The
 backend guides below show each adapter's supported settings.
 
 Normalized runs accept only the documented fields: `id`, `metrics`, `params`,
-`record_id`, `commit`, `timestamp`, `duration`, `entrypoint`, `url`, and `raw`.
+`record_id`, `commit`, `timestamp`, `duration`, `url`, and `raw`.
 Put backend-specific metadata in `raw`. Its mapping, along with `metrics` and
 `params`, is copied and made shallowly immutable; nested values retain their
 original types and mutability.

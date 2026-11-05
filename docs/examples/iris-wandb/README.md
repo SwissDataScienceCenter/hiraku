@@ -31,7 +31,7 @@ git commit -m "initialize Iris W&B example"
 uv run wandb login
 ```
 
-The example uses the `iris-wandb` project (the project directory name),
+The example uses the explicitly configured `iris-wandb` project,
 model-specific groups, and built-in tags by default.
 
 Set `WANDB_ENTITY` only if you want to log under a specific team or account.

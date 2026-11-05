@@ -2,7 +2,7 @@
 
 Instructions for AI coding agents working on `SwissDataScienceCenter/hiraku`.
 
-Hiraku is a Python library and CLI for documenting research records, launching entrypoints, and tracking runs. Keep changes small, focused, and consistent with the existing public API.
+Hiraku is a Python library and CLI for documenting research records, launching commands, and tracking runs. Keep changes small, focused, and consistent with the existing public API.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor workflows.
 
@@ -17,17 +17,17 @@ uv sync --all-extras
 Run focused tests during development:
 
 ```bash
-pytest tests/test_records.py
-pytest tests/test_cli.py::test_name
-ruff check src tests
+uv run pytest tests/test_records.py
+uv run pytest tests/test_cli.py::test_name
+uv run ruff check src tests
 ```
 
 Before finishing a code change, run:
 
 ```bash
-pytest
-ruff check .
-zensical build --clean --strict
+uv run pytest
+uv run ruff check .
+uv run zensical build --clean --strict
 ```
 
 Report any checks that fail or cannot be run. Do not claim validation that was not performed.
@@ -39,8 +39,8 @@ Hiraku is a single Python package under `src/hiraku/`.
 Core responsibilities:
 
 - **`Project`** (`project.py`) — Project discovery, settings, active-record state, and managed paths.
-- **`Record`** (`record.py`) — Research record hierarchy, Markdown/YAML persistence, inheritance, and record-local fields.
-- **`Run`** (`run.py`) — Normalized representation of a tracked execution.
+- **`Record` and `Vault`** (`record.py`) — Research records, hierarchy, Markdown/YAML persistence, and metric inheritance.
+- **`Run`** (`tracking/base.py`) — Normalized representation of a tracked execution.
 - **Execution** (`execution.py`) — Record resolution, command launching, and tracking attribution.
 - **Tracking** (`tracking/`) — Backend adapters implementing `TrackingBackend`; the factory validates settings and creates adapters.
 - **Workflows** (`workflows/`) — LangGraph workflow discovery, execution, session history, and checkpoints.
@@ -50,8 +50,10 @@ Respect these boundaries:
 
 - Keep persistence and validation in their owning modules, not in CLI or MCP handlers.
 - Methods requiring project context accept `project: Project`. Use `config` only for settings data.
-- Record resolution produces a `ResolvedRecord` without modifying persisted records.
+- `Vault.resolve()` returns effective record values and their sources without modifying persisted records; only metric declarations inherit.
 - Tracking adapters return normalized `Run` objects.
+- Tracking backend configuration and the active record are project-wide. Set the active record through `Project.set_active_record()` so its name and ID stay in sync.
+- Records use filesystem-friendly names for Markdown files in the records directory; reject filename collisions and preserve discovery of existing nested records.
 - Import workflow APIs from their defining modules. Do not add eager imports or re-exports to `workflows/__init__.py`.
 - Keep MCP SDK imports in `mcp.py`.
 - Keep CLI and MCP behavior consistent when they expose the same functionality.

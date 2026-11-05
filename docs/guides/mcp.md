@@ -93,8 +93,9 @@ resources are loaded on each request, including after changes made outside MCP.
 | `hiraku://sources/{record_id}/{source_path}` | File attached to a record as an MCP blob with its inferred MIME type. |
 | `hiraku://workflows/{workflow_id}/graph` | LangGraph topology as Mermaid text. |
 
-Place PDFs, literature reviews and other source files inside a record directory,
-for example `hiraku/records/literature/study.pdf`, alongside `literature.md`.
+For a flat record such as `hiraku/records/literature.md`, place PDFs, literature
+reviews and other source files in the matching directory, for example
+`hiraku/records/literature/study.pdf`.
 The catalog returns percent-encoded source paths, including encoded
 slashes for nested directories. Use those URIs directly. File access rejects
 paths and symlinks escaping the selected record directory. PDF bytes are served

@@ -66,8 +66,8 @@ hiraku record show heart-disease
 hiraku status
 ```
 
-`hiraku status` should report `heart-disease` as the active record and CSV as
-the tracking backend. Both values are stored in `hiraku.yml`.
+`hiraku status` should report the active record's ID and CSV as the tracking
+backend. The active record's name and ID are stored in `hiraku.yml`.
 
 ??? tip "Defining a working branch"
     Store a branch name with `--set 'branch=main'` if the record should point to

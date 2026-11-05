@@ -111,7 +111,7 @@ location.
     compare its subtree, or a run to inspect it.
 
 **Run**
-:   The selected run's ID, record, entrypoint, commit, start time, duration,
+:   The selected run's ID, record, commit, start time, duration,
     parameters, and metrics, plus a link to the run in its tracking backend when
     one is available.
 
@@ -218,7 +218,7 @@ details use the already loaded record objects to retain complete front matter.
 
 `runs_df`
 :   One row per run in execution order: `run`, `record`, `record_path`,
-    `source`, `started`, `entrypoint`, `commit`, `url`, plus a
+    `source`, `started`, `commit`, `url`, plus a
     `metric.<name>` and `param.<name>` column for each metric and parameter.
 
 `records_df`

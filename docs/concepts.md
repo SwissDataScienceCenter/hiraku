@@ -30,11 +30,11 @@ A root *record* defines a working scope and goal, and documents the research pro
 | **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
-Records are stored as Markdown with YAML front matter in the records directory. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent. IDs are unique across the project, and names must produce distinct filenames.
+Records are stored as Markdown with YAML front matter in the records directory. Hiraku derives a filesystem-friendly filename from the name, so for example `digits` is stored as `hiraku/records/digits.md`. Names that produce the same filename cannot be saved as separate records. Existing records in one-level subdirectories are also discovered. `parent_id` defines the logical tree: each record has at most one parent, and IDs are unique across the project.
 
-Fields inherit through `parent_id` by default: the nearest definition wins and an explicit `null` clears an inherited field. When a child is created, its effective `metrics` are copied into its YAML front matter unless explicitly set on the child. These values are snapshots: later parent edits do not rewrite existing children. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
+Metric declarations are resolved from the nearest ancestor when a record has no metrics of its own. They are resolved on demand, so later changes to an ancestor can affect the effective metrics of its descendants. An empty metrics list overrides ancestor metrics. Other fields remain local to the record; `related_to` links records without affecting inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
-At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. Hiraku stores the active record in the project config at `hiraku.yml`; the current status can be queried with `hiraku status`, whose `tracking_backend` field shows the project's backend.
+At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. Hiraku stores its name as `active_record` and its stable ID as `active_record_id` in `hiraku.yml`; the current status can be queried with `hiraku status`, whose `tracking_backend` field shows the project's backend.
 
 !!! note
     Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
@@ -42,10 +42,10 @@ At any time, a single record can be set as "active". By default, creation activa
 
 ## Tracking Backend
 
-A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters. Record configuration and the CLI select these built-in backends. The backend needs to:
+A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters. Project configuration selects the backend. The backend needs to:
 
-- List runs from the tracking source selected by a record.
-- Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, historical entrypoint, and URL attribution may be absent.
+- List runs from the project tracking source, optionally filtered by record ID.
+- Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, and URL attribution may be absent.
 
 Set `tracking_backend` in `hiraku.yml` to select the tracking source for every
 record in the project. Records cannot override the project setting. Backend
@@ -68,12 +68,9 @@ the command exits. See the [CLI reference](api/cli.md) for command options.
 
 ## Agent Skill
 
-`hiraku init` installs the canonical project-local skill at
-`.agents/skills/hiraku/`. Codex, Pi, and Gemini CLI discover skills from this
-shared directory. For Claude Code, initialization creates
-`.claude/skills/hiraku/` as a symlink to the canonical skill (or a copy on
-systems that cannot create directory symlinks). Invoke it as `$hiraku` in Codex
-or `/hiraku` in Claude Code.
+`hiraku init` installs copies of the project-local skill under
+`.agents/skills/hiraku/`, `.claude/skills/hiraku/`, `.pi/skills/hiraku/`, and
+`.codex/skills/hiraku/`. Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code.
 
 ## Workflows and context
 
