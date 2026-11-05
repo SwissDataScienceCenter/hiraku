@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import mimetypes
 from typing import Any
 from urllib.parse import unquote
@@ -18,13 +19,14 @@ from pydantic import ValidationError as PydanticValidationError
 from ..errors import HirakuError
 from ..project import Project
 from .tools import register_tools
+from .workflow_tools import register_workflow_tools
 
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, runs commands with execute, and runs LangGraph
 workflows. Use workflow_start, workflow_status, and workflow_resume to operate
-a workflow. When an interrupt requests approval, workflow_resume opens a
-structured MCP elicitation and waits for the user's answer before resuming.
+a workflow. Only human-owned approval interrupts open structured MCP
+elicitation; agent tasks and conversational reviews use direct resume responses.
 Use workflow_sessions and workflow_session_history to inspect recorded
 sessions and their history.
 """
@@ -62,6 +64,13 @@ def create_server(config: Project | None = None) -> ProjectMCP:
     When config is omitted, project discovery is deferred until a project-bound
     tool or resource is called.
     """
-    server = ProjectMCP("Hiraku", instructions=INSTRUCTIONS)
+    server = ProjectMCP(
+        name="Hiraku",
+        title="Hiraku MCP Server",
+        description=INSTRUCTIONS,
+        instructions=INSTRUCTIONS,
+        version=importlib.metadata.version("hiraku"),
+    )
     register_tools(server, config)
+    register_workflow_tools(server, config)
     return server

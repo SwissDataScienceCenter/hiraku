@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import inspect
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import anyio
 import pytest
 from click.testing import CliRunner
 from mcp import Client, types
-from mcp.server.elicitation import render_elicitation_schema
+from mcp.server.elicitation import AcceptedElicitation
+from mcp.server.mcpserver import Elicit
 
 from hiraku.cli import main
 from hiraku.errors import ValidationError
-from hiraku.mcp import WorkflowApproval, create_server
+from hiraku.mcp import create_server
+from hiraku.mcp import tools as record_tools
+from hiraku.mcp.workflow_tools import (
+    register_workflow_tools,
+)
 from hiraku.project import Project
-from hiraku.record import Record
+from hiraku.record import Record, load_record
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import (
     start_workflow,
@@ -45,15 +52,293 @@ def _interrupt(result: dict[str, Any]) -> dict[str, Any]:
     return result["interrupts"][0]["value"]
 
 
-def test_workflow_approval_schema_omits_codex_unsupported_root_title() -> None:
-    schema = render_elicitation_schema(WorkflowApproval)
-    assert set(schema) <= {"type", "properties", "required", "$schema"}
-    assert schema["properties"]["decision"]["enum"] == [
-        "approve",
-        "revise",
-        "stop",
-    ]
-    assert set(schema["properties"]) == {"decision"}
+def _resume_resolver(server):
+    tool = server._tool_manager.get_tool("workflow_resume")
+    return tool.resolved_params["approval"][0].fn
+
+
+def test_workflow_mcp_handlers_and_resolver_are_sync_sdk_handlers(tmp_path) -> None:
+    server = create_server(_project(tmp_path))
+    for name in (
+        "workflow_start",
+        "workflow_resume",
+        "workflow_status",
+        "workflow_sessions",
+        "workflow_session_history",
+    ):
+        tool = server._tool_manager.get_tool(name)
+        assert not inspect.iscoroutinefunction(tool.fn)
+    resume = server._tool_manager.get_tool("workflow_resume")
+    assert resume.resolver_plans[next(iter(resume.resolver_plans))].is_async is False
+
+
+def test_workflow_registration_is_separate_from_record_tools(tmp_path) -> None:
+    assert not hasattr(record_tools, "register_workflow_tools")
+    assert callable(register_workflow_tools)
+    assert {
+        "workflow_list",
+        "workflow_start",
+        "workflow_sessions",
+        "workflow_session_history",
+        "workflow_status",
+        "workflow_resume",
+    } <= _tool_names(create_server(_project(tmp_path)))
+
+
+def test_invalid_agent_response_can_retry_same_checkpoint(tmp_path) -> None:
+    config = _project(tmp_path)
+    Record.create("task", type="task", project=config)
+    started = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        project=config,
+    )
+    nested_response = {
+        "draft": {
+            "record_id": "draft-response",
+            "summary": "Draft summary",
+            "hypothesis": "A change improves the metric",
+            "change": "Change one setting",
+            "command": ["python", "train.py", "--setting", "1"],
+        },
+    }
+    draft = {
+        "record_id": "draft-response",
+        "summary": "Draft summary",
+        "hypothesis": "A change improves the metric",
+        "change": "Change one setting",
+        "command": ["python", "train.py", "--setting", "1"],
+    }
+    tool = create_server(config)._tool_manager.get_tool("workflow_resume")
+    resolver = tool.resolved_params["approval"][0].fn
+    with pytest.raises(
+        ValidationError, match="Invalid response for 'draft_experiment'"
+    ):
+        resolved = resolver(
+            started["workflow_session_id"], nested_response, started["checkpoint_id"]
+        )
+        tool.fn(
+            started["workflow_session_id"],
+            nested_response,
+            started["checkpoint_id"],
+            AcceptedElicitation[dict[str, Any]](data=resolved),
+        )
+
+    unchanged = workflow_status(started["workflow_session_id"], project=config)
+    assert unchanged["checkpoint_id"] == started["checkpoint_id"]
+    assert unchanged["status"] == "waiting"
+
+    resolved = resolver(started["workflow_session_id"], draft, started["checkpoint_id"])
+    result = tool.fn(
+        started["workflow_session_id"],
+        draft,
+        started["checkpoint_id"],
+        AcceptedElicitation[dict[str, Any]](data=resolved),
+    )
+
+    assert result["status"] == "waiting"
+    assert result["checkpoint_id"] != started["checkpoint_id"]
+    assert result["next_action"]["interaction"] == "approval"
+
+
+def test_collaborative_start_uses_context_record_and_task_guidance(tmp_path) -> None:
+    config = _project(tmp_path)
+    Record.create("digits-classification", type="task", project=config)
+    tool = create_server(config)._tool_manager.get_tool("workflow_start")
+    started = tool.fn(
+        "collaborative",
+        {
+            "task": "Improve validation performance while preserving the split.",
+            "command": ["uv", "run", "python", "train.py", "--seed", "42"],
+            "rounds": 3,
+        },
+        {"record_id": "digits-classification"},
+    )
+
+    pending = _interrupt(started)
+    assert pending["data"]["task"] == "digits-classification"
+    assert pending["data"]["objective"] == (
+        "Improve validation performance while preserving the split."
+    )
+
+
+def test_invalid_resume_schema_does_not_advance_checkpoint(tmp_path) -> None:
+    config = _project(tmp_path)
+    started = start_workflow("count-steps", {}, project=config)
+    pending = _interrupt(started)
+
+    with pytest.raises(ValidationError, match="response_schema"):
+        resume_workflow(
+            started["workflow_session_id"],
+            {"token": pending["data"]["token"], "extra": True},
+            project=config,
+        )
+
+    current = workflow_status(started["workflow_session_id"], project=config)
+    assert current["checkpoint_id"] == started["checkpoint_id"]
+    assert current["status"] == "waiting"
+
+
+def test_concurrent_resumes_advance_a_checkpoint_once(tmp_path) -> None:
+    config = _project(tmp_path)
+    started = start_workflow("count-steps", {}, project=config)
+    pending = _interrupt(started)
+    response = {"token": pending["data"]["token"], "decision": "finish"}
+
+    def resume() -> dict[str, Any]:
+        from hiraku.workflows.langgraph import resume_workflow as resume_graph
+
+        return resume_graph(
+            started["workflow_session_id"],
+            response,
+            project=config,
+            checkpoint_id=started["checkpoint_id"],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(resume) for _ in range(2)]
+    results = []
+    errors = []
+    for future in futures:
+        try:
+            results.append(future.result())
+        except ValidationError as exc:
+            errors.append(exc)
+
+    assert len(results) == 1
+    assert results[0]["status"] == "completed"
+    assert len(errors) == 1
+
+
+def test_only_approval_interaction_returns_an_elicitation(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    Record.create("task", type="task", project=config)
+    started = start_workflow(
+        "collaborative", {"rounds": 1, "command": ["python"]}, project=config
+    )
+    resolver = _resume_resolver(create_server(config))
+    draft_response = {
+        "record_id": "resolver-draft",
+        "summary": "Draft",
+        "hypothesis": "It helps",
+        "change": "Change one setting",
+        "command": ["python", "train.py"],
+    }
+    assert (
+        resolver(
+            started["workflow_session_id"],
+            draft_response,
+            started["checkpoint_id"],
+        )
+        == draft_response
+    )
+    drafted = resume_workflow(
+        started["workflow_session_id"], draft_response, project=config
+    )
+    assert _interrupt(drafted)["interaction"] == "approval"
+    elicitation = resolver(started["workflow_session_id"], {}, drafted["checkpoint_id"])
+    assert isinstance(elicitation, Elicit)
+
+
+def test_human_review_is_conversational_and_schema_validated(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    directory = config.workflows_dir / "human-review"
+    directory.mkdir()
+    (directory / "workflow.md").write_text(
+        "---\nid: human-review\ndescription: Review a proposal.\n---\n# Review\n",
+        encoding="utf-8",
+    )
+    (directory / "workflow.py").write_text(
+        "from typing import TypedDict\n"
+        "from langgraph.graph import START, END, StateGraph\n"
+        "from langgraph.types import interrupt\n"
+        "class State(TypedDict, total=False):\n"
+        "    final: str\n"
+        "def input_schema():\n"
+        "    return {\n"
+        "        'type': 'object', 'properties': {}, 'additionalProperties': False\n"
+        "    }\n"
+        "def build_graph(checkpointer, *, project):\n"
+        "    def review(state):\n"
+        "        answer = interrupt({"
+        "'actor': 'human', 'interaction': 'review', "
+        "'response_schema': {'type': 'object', 'properties': {'answer': "
+        "{'type': 'string', 'minLength': 1}}, 'required': ['answer'], "
+        "'additionalProperties': False}})\n"
+        "        return {'final': answer['answer']}\n"
+        "    def prepare(state):\n"
+        "        return {'final': ''}\n"
+        "    graph = StateGraph(State)\n"
+        "    graph.add_node('prepare', prepare)\n"
+        "    graph.add_node('review', review)\n"
+        "    graph.add_edge(START, 'prepare')\n"
+        "    graph.add_edge('prepare', 'review')\n"
+        "    graph.add_edge('review', END)\n"
+        "    return graph.compile(checkpointer=checkpointer)\n",
+        encoding="utf-8",
+    )
+    started = start_workflow("human-review", project=config)
+    resolver = _resume_resolver(create_server(config))
+    with pytest.raises(ValidationError, match="non-empty review response"):
+        resolver(started["workflow_session_id"], {}, started["checkpoint_id"])
+    with pytest.raises(ValidationError, match="response_schema"):
+        resolver(
+            started["workflow_session_id"],
+            {"answer": ""},
+            started["checkpoint_id"],
+        )
+    answer = {"answer": "Approved conversationally"}
+    assert (
+        resolver(started["workflow_session_id"], answer, started["checkpoint_id"])
+        == answer
+    )
+    assert (
+        workflow_status(started["workflow_session_id"], project=config)["checkpoint_id"]
+        == started["checkpoint_id"]
+    )
+
+
+def test_revision_feedback_is_validated_before_checkpoint_resume(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    Record.create("task", type="task", project=config)
+    started = start_workflow(
+        "collaborative", {"rounds": 1, "command": ["python"]}, project=config
+    )
+    drafted = resume_workflow(
+        started["workflow_session_id"],
+        {
+            "record_id": "revision-draft",
+            "summary": "Draft",
+            "hypothesis": "It helps",
+            "change": "Change one setting",
+            "command": ["python", "train.py"],
+        },
+        project=config,
+    )
+    pending = _interrupt(drafted)
+    with pytest.raises(ValidationError, match="human workflow decision"):
+        resume_workflow(
+            started["workflow_session_id"],
+            {"decision": "revise", "revision": pending["revision"]},
+            project=config,
+        )
+    assert (
+        workflow_status(started["workflow_session_id"], project=config)["checkpoint_id"]
+        == drafted["checkpoint_id"]
+    )
+    assert load_record("revision-draft", project=config).status == "drafted"
+
+    revised = resume_workflow(
+        started["workflow_session_id"],
+        {
+            "decision": "revise",
+            "revision": pending["revision"],
+            "feedback": "Use a smaller change",
+        },
+        project=config,
+    )
+    assert _interrupt(revised)["action"] == "draft_experiment"
+    assert _interrupt(revised)["data"]["feedback"] == "Use a smaller change"
 
 
 def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
@@ -83,14 +368,16 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     assert retry["data"] == first["data"]
     assert "does not match" in retry["error"]
 
-    invalid_decision = resume_workflow(
-        started["workflow_session_id"],
-        {"token": first["data"]["token"], "decision": "skip"},
-        project=config,
+    with pytest.raises(ValidationError, match="response_schema"):
+        resume_workflow(
+            started["workflow_session_id"],
+            {"token": first["data"]["token"], "decision": "skip"},
+            project=config,
+        )
+    assert (
+        workflow_status(started["workflow_session_id"], project=config)["checkpoint_id"]
+        == wrong["checkpoint_id"]
     )
-    retry = _interrupt(invalid_decision)
-    assert retry["data"] == first["data"]
-    assert "continue" in retry["error"] and "finish" in retry["error"]
 
     next_step = resume_workflow(
         started["workflow_session_id"],
@@ -194,7 +481,14 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     )
     assert started["status"] == "waiting"
     interrupt = _interrupt(started)
-    assert interrupt["step"] == "draft"
+    assert interrupt["action"] == "draft_experiment"
+    assert interrupt["response_fields"] == [
+        "record_id",
+        "summary",
+        "hypothesis",
+        "change",
+        "command",
+    ]
     assert started["next_action"] == {
         "actor": "agent",
         "interaction": "task",
@@ -206,30 +500,31 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     drafted = resume_workflow(
         started["workflow_session_id"],
         {
-            "event": "drafted",
-            "arguments": {
-                "record_id": "draft-1",
-                "summary": "Try a focused change",
-                "hypothesis": "The change improves the metric",
-                "change": "Apply one change",
-                "command": ["python", "train.py"],
-            },
+            "record_id": "draft-1",
+            "summary": "Try a focused change",
+            "hypothesis": "The change improves the metric",
+            "change": "Apply one change",
+            "command": ["python", "train.py"],
         },
         project=config,
     )
     approval_interrupt = _interrupt(drafted)
     assert approval_interrupt["actor"] == "human"
-    assert approval_interrupt["interaction"]["type"] == "review"
-    assert drafted["next_action"]["requires_approval"] is False
-    invalid = resume_workflow(
-        started["workflow_session_id"],
-        {"approval": {"decision": []}},
-        project=config,
+    assert approval_interrupt["interaction"] == "approval"
+    assert drafted["next_action"]["requires_approval"] is True
+    with pytest.raises(ValidationError, match="human workflow decision"):
+        resume_workflow(
+            started["workflow_session_id"],
+            {"decision": []},
+            project=config,
+        )
+    assert (
+        workflow_status(started["workflow_session_id"], project=config)["checkpoint_id"]
+        == drafted["checkpoint_id"]
     )
-    assert "approval" in _interrupt(invalid)["error"].lower()
     completed = resume_workflow(
         started["workflow_session_id"],
-        {"approval": {"decision": "stop"}},
+        {"decision": "stop", "revision": approval_interrupt["revision"]},
         project=config,
     )
     assert completed["status"] == "completed"
@@ -251,18 +546,16 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
     drafted = resume_workflow(
         started["workflow_session_id"],
         {
-            "event": "drafted",
-            "arguments": {
-                "record_id": "draft-approval",
-                "summary": "Draft a change",
-                "hypothesis": "It helps",
-                "change": "Change one thing",
-                "command": ["python", "train.py"],
-            },
+            "record_id": "draft-approval",
+            "summary": "Draft a change",
+            "hypothesis": "It helps",
+            "change": "Change one thing",
+            "command": ["python", "train.py"],
         },
         project=config,
     )
-    approval_schema = _interrupt(drafted)["response_schema"]
+    approval_interrupt = _interrupt(drafted)
+    assert "response_schema" not in approval_interrupt
     requested = []
 
     async def elicit(_context, params):
@@ -290,7 +583,7 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
     assert resumed.structured_content["status"] == "waiting"
     assert resumed.structured_content["next_action"]["actor"] == "agent"
     assert len(requested) == 1
-    assert "draft_approval" in requested[0].message
+    assert "Approve this experiment draft" in requested[0].message
     assert "Change one thing" in requested[0].message
     schema = requested[0].requested_schema
     assert set(schema) <= {"type", "properties", "required", "$schema"}
@@ -299,8 +592,8 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
         "revise",
         "stop",
     ]
-    assert set(schema["properties"]) == {"decision"}
-    assert "revision_feedback" not in approval_schema["properties"]
+    assert set(schema["properties"]) == {"decision", "feedback"}
+    assert approval_interrupt["revision"]
 
 
 def test_agent_handoff_resumes_without_elicitation(tmp_path) -> None:
@@ -320,14 +613,11 @@ def test_agent_handoff_resumes_without_elicitation(tmp_path) -> None:
                     "workflow_session_id": started["workflow_session_id"],
                     "checkpoint_id": started["checkpoint_id"],
                     "response": {
-                        "event": "drafted",
-                        "arguments": {
-                            "record_id": "agent-draft",
-                            "summary": "Draft summary",
-                            "hypothesis": "A change improves the metric",
-                            "change": "Change one setting",
-                            "command": ["python", "train.py", "--setting", "1"],
-                        },
+                        "record_id": "agent-draft",
+                        "summary": "Draft summary",
+                        "hypothesis": "A change improves the metric",
+                        "change": "Change one setting",
+                        "command": ["python", "train.py", "--setting", "1"],
                     },
                 },
             )
@@ -336,9 +626,9 @@ def test_agent_handoff_resumes_without_elicitation(tmp_path) -> None:
     assert resumed.structured_content["status"] == "waiting"
     assert resumed.structured_content["next_action"] == {
         "actor": "human",
-        "interaction": "review",
+        "interaction": "approval",
         "action": "approve_experiment_draft",
-        "requires_approval": False,
+        "requires_approval": True,
     }
 
 
@@ -357,14 +647,11 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
     drafted = resume_workflow(
         started["workflow_session_id"],
         {
-            "event": "drafted",
-            "arguments": {
-                "record_id": "draft-cancel",
-                "summary": "Draft",
-                "hypothesis": "Hypothesis",
-                "change": "Change",
-                "command": ["python", "train.py"],
-            },
+            "record_id": "draft-cancel",
+            "summary": "Draft",
+            "hypothesis": "Hypothesis",
+            "change": "Change",
+            "command": ["python", "train.py"],
         },
         project=config,
     )
@@ -463,14 +750,11 @@ def test_mcp_resume_elicits_approval_for_checkpointed_workflow(tmp_path) -> None
     first = resume_workflow(
         first["workflow_session_id"],
         {
-            "event": "drafted",
-            "arguments": {
-                "record_id": "draft-final",
-                "summary": "Draft",
-                "hypothesis": "Hypothesis",
-                "change": "Change",
-                "command": ["python", "train.py"],
-            },
+            "record_id": "draft-final",
+            "summary": "Draft",
+            "hypothesis": "Hypothesis",
+            "change": "Change",
+            "command": ["python", "train.py"],
         },
         project=config,
     )

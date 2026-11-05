@@ -53,35 +53,31 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     result = start_workflow(
         "collaborative", {"rounds": 1, "command": command}, project=config
     )
-    assert _interrupt(result)["step"] == "draft"
+    assert _interrupt(result)["action"] == "draft_experiment"
 
     result = resume_workflow(
         result["workflow_session_id"],
         {
-            "event": "drafted",
-            "arguments": {
-                "record_id": "dropout",
-                "summary": "Add dropout",
-                "hypothesis": "Dropout improves validation accuracy",
-                "change": "Add dropout before the head",
-                "command": ["python", "train.py", "--dropout", "0.2"],
-            },
+            "record_id": "dropout",
+            "summary": "Add dropout",
+            "hypothesis": "Dropout improves validation accuracy",
+            "change": "Add dropout before the head",
+            "command": ["python", "train.py", "--dropout", "0.2"],
         },
         project=config,
     )
     draft_gate = _interrupt(result)
     assert draft_gate["actor"] == "human"
+    assert draft_gate["interaction"] == "approval"
     result = resume_workflow(
         result["workflow_session_id"],
         {
-            "approval": {
-                "decision": "approve",
-                "revision": draft_gate["data"]["proposal_revision"],
-            },
+            "decision": "approve",
+            "revision": draft_gate["revision"],
         },
         project=config,
     )
-    assert _interrupt(result)["step"] == "implement"
+    assert _interrupt(result)["action"] == "prepare_implementation_plan"
     assert load_record("dropout", project=config).command == [
         "python",
         "train.py",
@@ -91,83 +87,45 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
 
     result = resume_workflow(
         result["workflow_session_id"],
-        {
-            "event": "implementation_plan",
-            "arguments": {"plan": "Add dropout and commit the change."},
-        },
+        {"plan": "Add dropout and commit the change."},
         project=config,
     )
     plan_gate = _interrupt(result)
-    assert plan_gate["interaction"]["type"] == "approval"
+    assert plan_gate["interaction"] == "approval"
     result = resume_workflow(
         result["workflow_session_id"],
         {
-            "approval": {
-                "decision": "approve",
-                "revision": plan_gate["data"]["plan_revision"],
-            },
-            "response": {
-                "event": "implementation_approved",
-                "arguments": {"revision": plan_gate["data"]["plan_revision"]},
-            },
+            "decision": "approve",
+            "revision": plan_gate["revision"],
         },
         project=config,
     )
-    execution = _interrupt(result)
-    assert execution["step"] == "implement"
-    assert execution["phase"] == "execute"
+    assert _interrupt(result)["action"] == "implement_experiment"
 
     result = resume_workflow(
         result["workflow_session_id"],
-        {"event": "implemented", "arguments": {"commit": commit}},
+        {"commit": commit},
         project=config,
     )
-    launch = _interrupt(result)
-    assert launch["step"] == "launch"
-    assert launch["data"]["command"] == (
-        "hiraku run --record dropout -- python train.py --dropout 0.2"
-    )
+    assert _interrupt(result)["action"] == "prepare_launch"
 
     result = resume_workflow(
         result["workflow_session_id"],
-        {
-            "event": "launch_plan",
-            "arguments": {"command": launch["data"]["command"]},
-        },
+        {"command": "hiraku run --record dropout -- python train.py --dropout 0.2"},
         project=config,
     )
     launch_gate = _interrupt(result)
+    assert launch_gate["interaction"] == "approval"
     result = resume_workflow(
         result["workflow_session_id"],
         {
-            "approval": {
-                "decision": "approve",
-                "revision": launch_gate["data"]["plan_revision"],
-            },
-            "response": {
-                "event": "launch_approved",
-                "arguments": {"revision": launch_gate["data"]["plan_revision"]},
-            },
+            "decision": "approve",
+            "revision": launch_gate["revision"],
         },
         project=config,
     )
-    execution = _interrupt(result)
-    assert execution["step"] == "launch"
-    assert execution["phase"] == "execute"
+    assert _interrupt(result)["action"] == "launch_experiment"
 
-    with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
-        stream.write(
-            "id,record_id,commit,entrypoint,metric.val\n"
-            f"run-1,dropout,{commit},python train.py,\n"
-        )
-    result = resume_workflow(
-        result["workflow_session_id"],
-        {"event": "launched", "arguments": {"run_id": "run-1"}},
-        project=config,
-    )
-    pending = _interrupt(result)
-    assert pending["step"] == "analyze"
-    assert pending["data"]["metrics_pending"] is True
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
         stream.write(
             "id,record_id,commit,entrypoint,metric.val\n"
@@ -175,19 +133,17 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
         )
     result = resume_workflow(
         result["workflow_session_id"],
-        {"event": "revise_analysis", "arguments": {"feedback": "Retry"}},
+        {"run_id": "run-1"},
         project=config,
     )
-    assert _interrupt(result)["step"] == "analyze"
-
+    pending = _interrupt(result)
+    assert pending["action"] == "analyze_results"
+    assert pending["data"]["runs"][0]["metrics"]["val"] == "0.8"
     completed = resume_workflow(
         result["workflow_session_id"],
         {
-            "event": "analyzed",
-            "arguments": {
-                "verdict": "supports",
-                "conclusion": "Accuracy improved.",
-            },
+            "verdict": "supports",
+            "conclusion": "Accuracy improved.",
         },
         project=config,
     )
@@ -195,7 +151,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     assert results_gate["actor"] == "human"
     completed = resume_workflow(
         completed["workflow_session_id"],
-        {"approval": {"decision": "approve"}},
+        {"decision": "approve"},
         project=config,
     )
     assert completed["status"] == "completed"
@@ -203,3 +159,41 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     assert experiment.status == "analyzed"
     assert experiment.verdict == "supports"
     assert "remaining limitations" in completed["result"]
+
+
+def test_collaborative_context_reloads_for_checkpoint_resume(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    Record.create("task", type="task", project=config)
+    started = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        project=config,
+    )
+    initial = _interrupt(started)
+    assert initial["actor"] == "agent"
+    assert "response_schema" not in initial
+
+    restarted_config = Project.discover(tmp_path)
+    restored = workflow_status(started["workflow_session_id"], project=restarted_config)
+    assert restored["checkpoint_id"] == started["checkpoint_id"]
+    assert _interrupt(restored)["action"] == "draft_experiment"
+
+    drafted = resume_workflow(
+        started["workflow_session_id"],
+        {
+            "record_id": "restart-draft",
+            "summary": "Draft after restart",
+            "hypothesis": "The change improves the metric",
+            "change": "Change one setting",
+            "command": ["python", "train.py", "--setting", "1"],
+        },
+        project=restarted_config,
+    )
+    approval = _interrupt(drafted)
+    assert approval["interaction"] == "approval"
+    resumed = resume_workflow(
+        started["workflow_session_id"],
+        {"decision": "approve", "revision": approval["revision"]},
+        project=restarted_config,
+    )
+    assert _interrupt(resumed)["action"] == "prepare_implementation_plan"

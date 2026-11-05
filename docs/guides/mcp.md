@@ -125,9 +125,13 @@ LangGraph thread ID, and resumable graph state is checkpointed in
 Workflow interrupts identify the next actor (`agent` or `human`) and interaction
 type (`task`, `review`, or `approval`). Agent-owned tasks are requests for the
 coding agent to perform work and submit a response; they never trigger MCP
-elicitation. Human-owned reviews and approvals use MCP form elicitation, and a
-decision supplied only in ordinary tool arguments cannot authorize the graph.
-Legacy `interaction.mode` and approval-only interrupts remain supported.
+elicitation. Only a human-owned `approval` interaction uses form elicitation.
+A human-owned `review` is presented conversationally by the harness; its
+non-empty response must match the interrupt's `response_schema`, but it is not
+authorization for a protected action. Revision approvals require non-empty
+feedback, which Hiraku forwards to the graph. Legacy `interaction.mode` and
+approval-only interrupts remain supported when explicit ownership or
+interaction type is absent.
 
 `workflow_start`, `workflow_status`, and `workflow_resume` return normalized
 `next_action` for a single pending interrupt and `next_actions` for all
@@ -138,9 +142,10 @@ bound to its stored revision. After approval, it returns a separate agent task
 with the approved action and a result schema. A `waiting` status can indicate
 the next phase rather than a stalled workflow. `workflow_status` only inspects
 the pending interrupt; it does not elicit or advance the workflow. If
-elicitation is cancelled, leave the graph paused.
-If the client lacks form elicitation support, `workflow_resume` returns a
-capability error with reconnect guidance and leaves the graph paused.
+elicitation is cancelled, leave the graph paused. If the client lacks form
+elicitation support, MCP SDK v2 reports the missing capability and keeps the
+graph paused. Its built-in capability check accepts legacy `elicitation: {}`
+clients and rejects clients that advertise only URL elicitation.
 The actor is declared by workflow code and enforced by the MCP resume resolver.
 Local Python and CLI interfaces should be exposed only to an authorized user.
 

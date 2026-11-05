@@ -49,6 +49,12 @@ transition's event. For example, context can contain an agent name, client
 session ID, or trace reference. Context is supplied by the caller and is not an
 authenticated identity.
 
+The bundled `collaborative` workflow also accepts `context.record_id` to select
+its parent task record. Its `arguments.task` field is optional natural-language
+research guidance; if no record ID is supplied, it uses the project's active
+record. Older callers can still pass a record ID through `arguments.record_id`
+or `arguments.task`.
+
 The journal and LangGraph checkpoints are separate writes. An interrupted
 process can leave a session's recorded status at `running` even when a later
 checkpoint exists; use `workflow status` for the current graph state. Sessions
@@ -74,22 +80,40 @@ and the SQLite checkpointer owns resumable state. A run can be resumed after
 restarting Hiraku as long as its project and checkpoint database remain
 available.
 
+Keep durable values in the graph's typed state and project services in
+LangGraph runtime context. A workflow can declare
+`StateGraph(State, context_schema=Context)`, read dependencies from
+`Runtime[Context]`, and export `build_context(project)`; Hiraku recreates and
+supplies that context for both start and resume. Runtime context is not
+checkpointed. Existing factories with a `config=project` build argument remain
+supported.
+
 Each workflow must expose an `input_schema()` function from `workflow.py`;
-`workflow_list` includes its JSON Schema as `input_schema`. Interrupts include a
-JSON Schema in `response_schema`, and may include `required_capabilities` to
-describe what the agent needs for that step. The graph remains responsible for
-validating inputs and interrupt responses. Capability names describe needs, not
-specific tools; an executor maps them to its own tools. The bundled workflows
-demonstrate these contracts with Pydantic models.
+`workflow_list` includes its JSON Schema as `input_schema`. Interrupts may
+include a JSON Schema in `response_schema` and may include
+`required_capabilities` to describe what the agent needs for that step. MCP
+validates against `response_schema` when present; workflow nodes remain
+responsible for validating every response. The collaborative workflow uses
+internal Pydantic validation and compact typed interrupt payloads instead of
+repeating generated JSON Schemas in checkpoints. Capability names describe
+needs, not specific tools; an executor maps them to its own tools.
 
 Workflow interrupts declare an `actor` (`agent` or `human`) and an
 `interaction.type` (`task`, `review`, or `approval`). Agent-owned tasks ask the
-external coding agent to do work and submit a response matching
-`response_schema`; they never trigger MCP elicitation. Human-owned reviews and
-approvals require MCP elicitation. A model's ordinary `workflow_resume`
-arguments cannot authorize a human-owned transition. `interaction.mode` remains
-available for compatibility with older workflow definitions, as does inference
-from legacy `approval` payloads.
+external coding agent to do work and submit a response matching the workflow's
+declared response contract; they never trigger MCP elicitation. Only a human-owned
+`approval` interaction triggers form elicitation. A human-owned `review` is a
+conversational checkpoint: the harness presents it to the user, then submits a
+non-empty response matching the workflow's declared response contract; Hiraku does not treat review as
+authorization for a protected action. `interaction.mode` and approval-only
+payload inference remain compatibility fallbacks when explicit ownership or
+interaction type is absent.
+
+The bundled collaborative workflow lists the required top-level keys in
+`response_fields`. Hiraku validates these responses against the workflow's
+Pydantic model before passing them to `Command(resume=...)`, so invalid input
+leaves the checkpoint available for a corrected retry. Responses use the
+declared flat contract.
 
 Workflow status includes `next_action` when exactly one interrupt is pending,
 and `next_actions` for all pending interrupts. When multiple interrupts are
@@ -97,7 +121,8 @@ pending, `next_action` is `null`; clients must not silently select one.
 
 For consequential actions, checkpoint the proposed plan before requesting
 approval. Bind approval to the workflow session, checkpoint, action, and stored
-proposal revision. After approval, return a separate agent-owned execution task
+proposal revision. Revision decisions require non-empty feedback, which is
+passed to the graph. After approval, return a separate agent-owned execution task
 with the approved action and a result schema. The agent performs the action,
 then resumes with its result. Launch results should include a tracked `run_id`
 and be checked against the experiment and implemented commit. Before retrying

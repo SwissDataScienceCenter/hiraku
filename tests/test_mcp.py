@@ -120,7 +120,8 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
             "hiraku://records/demo",
             "hiraku://records/literature",
         ]:
-            assert list(await server.read_resource(uri))[0].content
+            with pytest.raises(ResourceError, match="Unknown resource"):
+                await server.read_resource(uri)
         with pytest.raises(ResourceError, match="'missing' not found"):
             await server.read_resource("hiraku://records/missing")
         prompt = await server.get_prompt(
@@ -142,7 +143,7 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
     async def exercise() -> None:
         await server.call_tool("record_create", {"record_id": "demo"})
         result = await server.call_tool(
-            "execute",
+            "execute_command",
             {
                 "record_id": "demo",
                 "command": [
@@ -179,7 +180,9 @@ def test_runs(tmp_path: Path) -> None:
         )
 
         async def ids(**args) -> list[str]:
-            result = await server.call_tool("runs", {"record_id": "task", **args})
+            result = await server.call_tool(
+                "record_runs", {"record_id": "task", **args}
+            )
             return [run["id"] for run in result.structured_content["result"]]
 
         assert await ids(sort="acc") == ["b", "a"]
@@ -217,7 +220,7 @@ def test_stdio_session(tmp_path: Path) -> None:
                 )
                 assert (
                     len((await client.list_resource_templates()).resource_templates)
-                    == 4
+                    == 3
                 )
                 assert (await client.list_prompts()).prompts[
                     0

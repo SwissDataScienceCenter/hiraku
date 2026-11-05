@@ -1,19 +1,21 @@
-"""Collaborative research as a checkpointed LangGraph workflow."""
+"""
+Compact, external-agent collaborative research workflow for Hiraku.
+"""
 
 from __future__ import annotations
 
 import json
 import shlex
-from functools import reduce
+from dataclasses import asdict, dataclass
 from hashlib import sha256
-from operator import or_
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import HirakuError, ValidationError
@@ -22,44 +24,58 @@ from hiraku.git import GitRepository
 from hiraku.markdown import Markdown, render
 from hiraku.project import Project
 from hiraku.record import Record, load_record
-from hiraku.run import Run
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
+
+
+@dataclass(frozen=True)
+class ResearchContext:
+    project: Project
+
+
+def build_context(project: Project) -> ResearchContext:
+    return ResearchContext(project=project)
 
 
 class ResearchState(TypedDict, total=False):
     arguments: dict[str, Any]
     task: str
+    objective: str
     command: list[str]
     rounds: int
-    step: str
     experiment: str
-    draft_revision: str
-    proposed_plan: str
-    proposed_plan_revision: str
+    draft_hash: str
+    plan: str
+    plan_hash: str
     approved_plan: str
-    proposed_launch_command: str
-    proposed_launch_revision: str
-    approved_launch_command: str
-    launched_run_id: str
+    launch_command: str
+    launch_hash: str
+    approved_command: str
+    run_id: str
     feedback: str
     results: list[dict[str, Any]]
     final: str
 
 
+class GraphInput(TypedDict):
+    arguments: dict[str, Any]
+
+
 class CollaborativeInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-
     task: str | None = Field(
-        default=None, description="Task record ID; defaults to active context."
+        default=None, description="Optional natural-language research objective."
+    )
+    record_id: str | None = Field(
+        default=None,
+        description="Parent task record ID; defaults to the active record.",
     )
     command: list[str] = Field(min_length=1)
     rounds: int = Field(default=3, ge=1)
 
 
-class DraftedArguments(BaseModel):
+class Draft(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-
     record_id: str = Field(min_length=1)
     summary: str = Field(min_length=1)
     hypothesis: str = Field(min_length=1)
@@ -67,73 +83,205 @@ class DraftedArguments(BaseModel):
     command: list[str] = Field(min_length=1)
 
 
-class FeedbackArguments(BaseModel):
+class Plan(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-
-    feedback: str = Field(min_length=1)
-
-
-class ImplementedArguments(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    commit: str = Field(min_length=1)
-
-
-class ImplementationPlanArguments(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
     plan: str = Field(min_length=1)
 
 
-class PlanRevisionArguments(BaseModel):
+class LaunchPlan(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-
-    revision: str = Field(min_length=1)
-
-
-class LaunchPlanArguments(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
     command: str = Field(min_length=1)
 
 
-class WorkflowApproval(BaseModel):
-    """Decision required before a protected workflow transition."""
-
+class Implementation(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-
-    decision: Literal["approve", "revise", "stop"] = Field(
-        description="Whether to approve, request a revision, or stop."
-    )
-    revision: str | None = Field(
-        default=None, description="Server-attached revision being authorized."
-    )
+    commit: str = Field(min_length=1)
 
 
-class LaunchedArguments(BaseModel):
+class LaunchResult(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-
     run_id: str = Field(min_length=1)
 
 
-class AnalyzedArguments(BaseModel):
+class Analysis(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-
     verdict: Verdict
     conclusion: str = Field(min_length=1)
 
 
-class EmptyArguments(BaseModel):
+class Decision(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    decision: Literal["approve", "revise", "stop"]
+    feedback: str | None = None
+    revision: str | None = None
+
+    @model_validator(mode="after")
+    def check_feedback(self) -> Decision:
+        if self.decision == "revise" and not (self.feedback or "").strip():
+            raise ValueError("feedback is required when revising")
+        if self.decision != "revise" and self.feedback is not None:
+            raise ValueError("feedback is only allowed for revisions")
+        return self
+
+
+@dataclass(frozen=True)
+class AgentTask:
+    actor: Literal["agent"]
+    action: str
+    instruction: str
+    data: dict[str, Any]
+    response_fields: list[str]
+
+
+@dataclass(frozen=True)
+class HumanDecision:
+    actor: Literal["human"]
+    interaction: Literal["approval", "review"]
+    action: str
+    message: str
+    proposal: dict[str, Any]
+    revision: str | None = None
 
 
 def input_schema() -> dict[str, Any]:
-    """Return the JSON Schema for starting collaborative research."""
     return CollaborativeInput.model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
-    """Build the collaborative research graph from its Markdown instructions."""
+def prepare_start_arguments(
+    arguments: dict[str, Any], context: dict[str, Any]
+) -> dict[str, Any]:
+    """Map the MCP session's selected record into this workflow's input."""
+    record_id = context.get("record_id")
+    if record_id is not None:
+        if not isinstance(record_id, str) or not record_id.strip():
+            raise ValidationError("context.record_id must be a non-empty string")
+        arguments.setdefault("record_id", record_id)
+    return arguments
+
+
+def _hash(value: Any) -> str:
+    serialized = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return sha256(serialized.encode()).hexdigest()
+
+
+def _agent(
+    action: str, instruction: str, data: dict[str, Any], model: type[BaseModel]
+) -> BaseModel:
+    """One interrupt per node, and no side effects before the interrupt."""
+    fields = list(model.model_fields)
+    task = AgentTask(
+        actor="agent",
+        action=action,
+        instruction=(
+            f"{instruction}\nSubmit one JSON object with these top-level fields: "
+            f"{', '.join(fields)}."
+        ),
+        data=data,
+        response_fields=fields,
+    )
+    raw = interrupt(asdict(task))
+    return model.model_validate(raw)
+
+
+def _decision(
+    action: str,
+    message: str,
+    proposal: dict[str, Any],
+    *,
+    revision: str | None = None,
+    interaction: Literal["approval", "review"] = "approval",
+) -> Decision:
+    raw = interrupt(
+        asdict(HumanDecision("human", interaction, action, message, proposal, revision))
+    )
+    # The MCP integration must obtain this via a *trusted human* interaction
+    # for interaction='approval'; a raw agent JSON response is insufficient.
+    value = Decision.model_validate(raw)
+    if revision is not None:
+        # Revision is attached by the trusted server, not user-entered.
+        if not isinstance(raw, dict) or raw.get("revision") != revision:
+            raise ValidationError("Approval does not match proposal revision")
+    elif value.revision is not None:
+        raise ValidationError("Unexpected revision on an unbound workflow decision")
+    return value
+
+
+_AGENT_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
+    "draft_experiment": Draft,
+    "prepare_implementation_plan": Plan,
+    "implement_experiment": Implementation,
+    "prepare_launch": LaunchPlan,
+    "launch_experiment": LaunchResult,
+    "inspect_pending_metrics": Plan,
+    "analyze_results": Analysis,
+}
+
+
+def validate_resume_response(pending: Any, response: dict[str, Any]) -> dict[str, Any]:
+    """Validate input before Command(resume) can write it to a checkpoint."""
+    if not isinstance(pending, dict):
+        raise ValidationError("Pending collaborative interrupt must be an object")
+    if not isinstance(response, dict):
+        raise ValidationError("Workflow response must be an object")
+
+    actor = pending.get("actor")
+    if actor == "agent":
+        action = pending.get("action")
+        model = _AGENT_RESPONSE_MODELS.get(action)
+        if model is None:
+            raise ValidationError(f"Unknown collaborative agent action: {action!r}")
+        try:
+            validated = model.model_validate(response)
+        except PydanticValidationError as exc:
+            raise ValidationError(
+                f"Invalid response for {action!r}; submit top-level fields "
+                f"{list(model.model_fields)}: {exc}"
+            ) from exc
+        return validated.model_dump(mode="python")
+
+    if actor == "human":
+        interaction = pending.get("interaction")
+        if interaction not in ("approval", "review"):
+            raise ValidationError("Unsupported collaborative human interaction")
+        try:
+            decision = Decision.model_validate(response)
+        except PydanticValidationError as exc:
+            raise ValidationError(f"Invalid human workflow decision: {exc}") from exc
+        revision = pending.get("revision")
+        if interaction == "approval" and decision.revision != revision:
+            raise ValidationError("Approval does not match proposal revision")
+        if interaction == "review" and decision.revision is not None:
+            raise ValidationError(
+                "Review decisions cannot include an approval revision"
+            )
+        return decision.model_dump(mode="python", exclude_none=True)
+
+    raise ValidationError("Unsupported collaborative interrupt owner")
+
+
+def _record(state: ResearchState, runtime: Runtime[ResearchContext]) -> Record:
+    record_id = state.get("experiment")
+    if not record_id:
+        raise ValidationError("No experiment has been drafted")
+    return load_record(record_id, project=runtime.context.project)
+
+
+def _experiment_data(
+    state: ResearchState, runtime: Runtime[ResearchContext]
+) -> dict[str, Any]:
+    r = _record(state, runtime)
+    return {
+        "record_id": r.id,
+        "summary": getattr(r, "summary", None),
+        "hypothesis": getattr(r, "hypothesis", None),
+        "change": r.markdown.strip(),
+        "command": getattr(r, "command", None),
+        "commit": r.commit,
+    }
+
+
+def build_graph(checkpointer: BaseCheckpointSaver[Any]) -> Any:
+    """Assemble the durable graph; supply ResearchContext at each invocation."""
     path = Path(__file__).with_name("workflow.md")
     fields, body = Record._parse_markdown(path)
     if fields.get("id") != "collaborative":
@@ -141,758 +289,326 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
     markdown = Markdown(body)
     rules = str(fields.get("rules", "")).strip()
 
-    def initialize(state: ResearchState) -> Command[Literal["draft"]]:
-        try:
-            arguments = CollaborativeInput.model_validate(state.get("arguments", {}))
-        except PydanticValidationError as exc:
-            raise ValidationError(str(exc)) from exc
-        task = arguments.task or project.active_record_id
-        command = arguments.command
-        rounds = arguments.rounds
-        if not isinstance(task, str) or not task:
-            raise ValidationError("Pass task or set an active Hiraku record")
-        if not isinstance(command, list):
-            raise ValidationError("command must be an argv list")
-        command = validate_command(command)
-        if type(rounds) is not int or rounds < 1:
-            raise ValidationError("rounds must be a positive integer")
-        try:
-            load_record(task, project=project)
-        except HirakuError as exc:
-            raise ValidationError(str(exc)) from exc
+    def instructions(section: str) -> str:
+        text = markdown.section(section)
+        return f"{text}\n\n{rules}" if rules else text
+
+    def initialize(state: ResearchState, runtime: Runtime[ResearchContext]):
+        args = CollaborativeInput.model_validate(state.get("arguments", {}))
+        project = runtime.context.project
+        objective = args.task
+        task = args.record_id
+        if task is None and args.task:
+            # Preserve task-as-record callers while treating other task text as
+            # guidance when a parent record is selected or active.
+            try:
+                load_record(args.task, project=project)
+            except HirakuError:
+                task = project.active_record_id
+            else:
+                task = args.task
+                objective = ""
+        if task is None:
+            task = project.active_record_id
+        if not task:
+            raise ValidationError(
+                "Select a parent record with context.record_id or activate one"
+            )
+        load_record(task, project=project)
+        command = validate_command(args.command)
         return Command(
             update={
+                "arguments": {},
                 "task": task,
                 "command": command,
-                "rounds": rounds,
-                "step": "draft",
+                "objective": objective or "",
+                "rounds": args.rounds,
                 "results": [],
+                "feedback": "",
             },
             goto="draft",
         )
 
-    def prompt(
-        state: ResearchState,
-        step: str,
-        data: dict[str, Any],
-        *,
-        mode: Literal["automatic", "review", "approval"],
-        approval_message: str | None = None,
-        interaction_type: Literal["task", "review", "approval"] | None = None,
-    ) -> dict[str, Any]:
-        section = {
-            "draft": "## Draft and review",
-            "draft_approval": "## Draft and review",
-            "implement": "## Implementation",
-            "implement_approval": "## Implementation",
-            "implement_execution": "## Implementation",
-            "launch": "## Launch",
-            "launch_approval": "## Launch",
-            "launch_execution": "## Launch",
-            "analyze": "## Analyze, review, and iterate",
-            "results_review": "## Analyze, review, and iterate",
-            "next_iteration": "## Analyze, review, and iterate",
-        }[step]
-        text = markdown.section(section)
-        if rules:
-            text = f"{text}\n\n{rules}"
-        interaction_type = interaction_type or (
-            "approval" if mode == "approval" else "task"
-        )
-        payload: dict[str, Any] = {
-            "step": step,
-            "action": {
-                "draft": "draft_experiment",
-                "draft_approval": "approve_experiment_draft",
-                "implement": (
-                    "approve_implementation"
-                    if mode == "approval"
-                    else "prepare_implementation_plan"
-                ),
-                "implement_approval": "approve_implementation",
-                "implement_execution": "implement_experiment",
-                "launch": "approve_launch" if mode == "approval" else "prepare_launch",
-                "launch_approval": "approve_launch",
-                "launch_execution": "launch_experiment",
-                "analyze": "analyze_results",
-                "results_review": "review_results",
-            }.get(step, step),
-            "actor": "human" if mode == "approval" else "agent",
-            "interaction_type": interaction_type,
-            "instruction": text,
-            "data": data,
-            "interaction": {
-                "type": interaction_type,
-                "mode": mode,
-                "allowed_decisions": {
-                    "automatic": [],
-                    "review": ["continue", "revise", "stop"],
-                    "approval": ["approve", "revise", "stop"],
-                }[mode],
-            },
-            "required_capabilities": {
-                "draft": ["record.read", "workflow.user_input"],
-                "draft_approval": ["workflow.user_input"],
-                "implement": [
-                    "filesystem.read",
-                    "filesystem.write",
-                    "shell.execute",
-                    "git.commit",
-                    "workflow.user_input",
-                ],
-                "launch": [
-                    "experiment.launch",
-                    "tracking.run.read",
-                    "workflow.user_input",
-                ],
-                "analyze": ["tracking.run.read", "workflow.user_input"],
-                "results_review": ["workflow.user_input"],
-                "next_iteration": ["workflow.user_input"],
-            }[step],
-        }
-        if mode == "approval":
-            payload["approval"] = {
-                "message": approval_message or f"Approve the proposed {step} action?",
-                "schema": WorkflowApproval.model_json_schema(),
-            }
-        if state.get("feedback"):
-            payload["feedback"] = state["feedback"]
-        return payload
-
-    def response_for(
-        state: ResearchState, step: str, data: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload = prompt(state, step, data, mode="review")
-        payload["phase"] = {
-            "draft": "propose",
-            "implement": "plan",
-            "launch": "propose",
-            "analyze": "analyze",
-        }[step]
-        action_adapter, response_schema = _step_response_contract(step, "review")
-        payload["response_schema"] = response_schema
-        while True:
-            response = interrupt(payload)
-            try:
-                action = action_adapter.validate_python(response)
-            except PydanticValidationError as exc:
-                payload = {**payload, "error": str(exc)}
-                continue
-            return action.model_dump()
-
-    def decision_for(
-        state: ResearchState,
-        step: str,
-        data: dict[str, Any],
-        *,
-        expected_event: str | None = None,
-        revision: str | None = None,
-        interaction_type: Literal["review", "approval"] = "approval",
-    ) -> tuple[str, str | None]:
-        payload = prompt(
-            state,
-            step,
-            data,
-            mode="approval",
-            approval_message=f"Approve this exact {step} proposal?",
-            interaction_type=interaction_type,
-        )
-        payload["response_schema"] = _approval_response_schema(expected_event, revision)
-        if revision is not None:
-            payload["approval"]["revision"] = revision
-        while True:
-            response = interrupt(payload)
-            try:
-                approval = WorkflowApproval.model_validate(
-                    response.get("approval") if isinstance(response, dict) else None
-                )
-            except PydanticValidationError as exc:
-                payload = {**payload, "error": str(exc)}
-                continue
-            decision = approval.decision
-            if decision == "stop":
-                return "stop", None
-            if decision == "revise":
-                return "revise", "Please revise the proposal."
-            if expected_event is None:
-                return "approve", None
-            approved_revision = approval.revision
-            if approved_revision is None and isinstance(response, dict):
-                # Accept the prior event-envelope format for persisted sessions.
-                legacy_action = response.get("response")
-                if isinstance(legacy_action, dict):
-                    legacy_arguments = legacy_action.get("arguments")
-                    if legacy_action.get("event") == expected_event and isinstance(
-                        legacy_arguments, dict
-                    ):
-                        approved_revision = legacy_arguments.get("revision")
-            if approved_revision != revision:
-                payload = {
-                    **payload,
-                    "error": "Approval must reference the pending proposal revision.",
-                }
-                continue
-            return "approve", None
-
-    def execution_response_for(
-        state: ResearchState, step: str, data: dict[str, Any]
-    ) -> dict[str, Any]:
-        action_adapter, response_schema = _step_response_contract(step, "execution")
-        instructions = {
-            "implement": (
-                "The implementation plan in data.approved_plan has been approved. "
-                "Apply it, show the user the changes, commit them, and resume with "
-                "the commit reference as the implemented result."
-            ),
-            "launch": (
-                "The exact command in data.command has been approved. Before "
-                "running it, inspect runs attributed to this experiment. If a run "
-                "for the implemented commit and approved command already exists, "
-                "do not launch it again; report its run ID. If the existing run "
-                "cannot be matched confidently, ask the user before starting "
-                "another run. Otherwise run the approved command, inspect its "
-                "tracked result, and resume with its run ID."
-            ),
-        }
-        payload = prompt(state, step, data, mode="automatic")
-        payload.update(
-            {
-                "phase": "execute",
-                "instruction": instructions[step],
-                "response_schema": response_schema,
-            }
-        )
-        if state.get("feedback"):
-            payload["feedback"] = state["feedback"]
-        while True:
-            response = interrupt(payload)
-            try:
-                action = action_adapter.validate_python(response)
-            except PydanticValidationError as exc:
-                payload = {**payload, "error": str(exc)}
-                continue
-            return action.model_dump()
-
-    def finish(state: ResearchState) -> Command[Literal["done"]]:
-        return Command(update={"step": "done"}, goto="done")
-
-    def draft(state: ResearchState) -> Command[Literal["draft", "implement", "done"]]:
+    def draft(state: ResearchState, runtime: Runtime[ResearchContext]):
         data = {
             "task": state["task"],
-            "previous": state.get("results", []),
+            "objective": state.get("objective", ""),
             "suggested_command": state["command"],
+            "previous_results": state.get("results", []),
+            "feedback": state.get("feedback", ""),
         }
         if state.get("experiment"):
-            data["current_draft"] = experiment_context(state)["experiment"]
-        response = response_for(state, "draft", data)
-        event, arguments = response["event"], response["arguments"]
-        if event == "finish":
-            return finish(state)
-        if event == "revise_draft":
-            feedback = arguments.get("feedback")
-            if not isinstance(feedback, str):
-                return Command(
-                    update={"feedback": "Feedback must be a string."}, goto="draft"
-                )
-            return Command(update={"feedback": feedback}, goto="draft")
-        required = ("record_id", "summary", "hypothesis", "change")
-        if any(
-            not isinstance(arguments.get(key), str) or not arguments[key].strip()
-            for key in required
-        ):
-            return Command(
-                update={
-                    "feedback": (
-                        "Provide non-empty record_id, summary, hypothesis, and change, "
-                        "plus a per-experiment command argv list."
-                    )
-                },
-                goto="draft",
-            )
+            data["existing_draft"] = _experiment_data(state, runtime)
+        proposal = _agent(
+            "draft_experiment", instructions("## Draft and review"), data, Draft
+        )
+        project = runtime.context.project
+        command = validate_command(proposal.command)
         try:
-            command = validate_command(arguments.get("command"))
-            if command is None:
-                raise ValidationError("A per-experiment command is required")
-            existing_id = state.get("experiment")
-            if existing_id:
-                if arguments["record_id"] != existing_id:
+            if state.get("experiment"):
+                if proposal.record_id != state["experiment"]:
                     raise ValidationError(
-                        f"A revised draft must keep record_id {existing_id!r}"
+                        "A revision must keep the experiment record ID"
                     )
-                record = load_record(existing_id, project=project)
-                record.summary = arguments["summary"]
-                record.hypothesis = arguments["hypothesis"]
+                record = _record(state, runtime)
+                record.summary = proposal.summary
+                record.hypothesis = proposal.hypothesis
                 record.command = command
-                record.markdown = f"## Change\n\n{arguments['change'].strip()}\n"
+                record.markdown = f"## Change\n\n{proposal.change.strip()}\n"
                 record.save()
             else:
                 record = Record.create(
-                    arguments["record_id"],
+                    proposal.record_id,
                     parent_id=state["task"],
                     type="experiment",
                     status="drafted",
-                    summary=arguments["summary"],
-                    hypothesis=arguments["hypothesis"],
+                    summary=proposal.summary,
+                    hypothesis=proposal.hypothesis,
                     command=command,
-                    markdown=f"## Change\n\n{arguments['change'].strip()}\n",
+                    markdown=f"## Change\n\n{proposal.change.strip()}\n",
                     activate=False,
                     project=project,
                 )
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="draft")
-        revision_data = {
-            "record_id": record.id,
-            "summary": arguments["summary"],
-            "hypothesis": arguments["hypothesis"],
-            "change": arguments["change"],
-            "command": command,
-        }
-        revision = sha256(
-            json.dumps(revision_data, sort_keys=True, separators=(",", ":")).encode(
-                "utf-8"
-            )
-        ).hexdigest()
-        return Command(
-            update={
-                "experiment": record.id,
-                "draft_revision": revision,
-                "feedback": "",
-                "step": "draft_approval",
-            },
-            goto="draft_approval",
-        )
-
-    def draft_approval(
-        state: ResearchState,
-    ) -> Command[Literal["draft", "implement", "done"]]:
-        data = {
-            **experiment_context(state),
-            "proposal_revision": state.get("draft_revision", ""),
-        }
-        decision, feedback = decision_for(
-            state,
-            "draft_approval",
-            data,
-            expected_event="draft_approved",
-            revision=state.get("draft_revision", ""),
-            interaction_type="review",
-        )
-        if decision == "stop":
-            return finish(state)
-        if decision == "revise":
-            return Command(
-                update={"feedback": feedback or "Revise the experiment draft."},
-                goto="draft",
-            )
-        return Command(update={"feedback": "", "step": "implement"}, goto="implement")
-
-    def experiment(state: ResearchState) -> Record:
-        identifier = state.get("experiment")
-        if not identifier:
-            raise ValidationError("No experiment has been drafted")
-        return load_record(identifier, project=project)
-
-    def experiment_context(state: ResearchState) -> dict[str, Any]:
-        record = experiment(state)
-        return {
-            "task": state["task"],
-            "experiment": {
+        digest = _hash(
+            {
                 "record_id": record.id,
-                "summary": getattr(record, "summary", None),
-                "hypothesis": getattr(record, "hypothesis", None),
-                "change": record.markdown.strip(),
-                "command": getattr(record, "command", None),
-                "commit": record.commit,
-            },
-        }
+                "summary": proposal.summary,
+                "hypothesis": proposal.hypothesis,
+                "change": proposal.change,
+                "command": command,
+            }
+        )
+        return Command(
+            update={"experiment": record.id, "draft_hash": digest, "feedback": ""},
+            goto="review_draft",
+        )
 
-    def implement(
-        state: ResearchState,
-    ) -> Command[Literal["implement", "implement_approval", "done"]]:
-        data = experiment_context(state)
-        response = response_for(state, "implement", data)
-        event, arguments = response["event"], response["arguments"]
-        if event == "finish":
-            return finish(state)
-        if event == "revise_implementation":
-            feedback = arguments.get("feedback")
-            return Command(
-                update={
-                    "feedback": feedback
-                    if isinstance(feedback, str)
-                    else "Feedback must be a string."
-                },
-                goto="implement",
-            )
-        if event != "implementation_plan":
-            return Command(
-                update={"feedback": "Provide an implementation plan."},
-                goto="implement",
-            )
-        plan = arguments["plan"]
-        revision = sha256(plan.encode("utf-8")).hexdigest()
+    def review_draft(state: ResearchState, runtime: Runtime[ResearchContext]):
+        decision = _decision(
+            "approve_experiment_draft",
+            "Approve this experiment draft?",
+            _experiment_data(state, runtime),
+            revision=state["draft_hash"],
+        )
+        if decision.decision == "stop":
+            return Command(goto="done")
+        if decision.decision == "revise":
+            return Command(update={"feedback": decision.feedback or ""}, goto="draft")
+        return Command(update={"feedback": ""}, goto="plan_implementation")
+
+    def plan_implementation(state: ResearchState, runtime: Runtime[ResearchContext]):
+        result = _agent(
+            "prepare_implementation_plan",
+            instructions("## Implementation"),
+            {
+                "experiment": _experiment_data(state, runtime),
+                "feedback": state.get("feedback", ""),
+            },
+            Plan,
+        )
         return Command(
             update={
-                "proposed_plan": plan,
-                "proposed_plan_revision": revision,
+                "plan": result.plan,
+                "plan_hash": _hash(result.plan),
                 "feedback": "",
             },
-            goto="implement_approval",
+            goto="approve_implementation",
         )
 
-    def implement_approval(
-        state: ResearchState,
-    ) -> Command[Literal["implement", "implement_execution", "done"]]:
-        data = {
-            **experiment_context(state),
-            "proposed_plan": state.get("proposed_plan", ""),
-            "plan_revision": state.get("proposed_plan_revision", ""),
-        }
-        decision, feedback = decision_for(
-            state,
-            "implement",
-            data,
-            expected_event="implementation_approved",
-            revision=state.get("proposed_plan_revision", ""),
+    def approve_implementation(state: ResearchState, runtime: Runtime[ResearchContext]):
+        decision = _decision(
+            "approve_implementation",
+            "Approve the implementation plan?",
+            {"experiment": _experiment_data(state, runtime), "plan": state["plan"]},
+            revision=state["plan_hash"],
         )
-        if decision == "stop":
-            return finish(state)
-        if decision == "revise":
+        if decision.decision == "stop":
+            return Command(goto="done")
+        if decision.decision == "revise":
             return Command(
-                update={"feedback": feedback or "Revise the implementation plan."},
-                goto="implement",
+                update={"feedback": decision.feedback or ""}, goto="plan_implementation"
             )
         return Command(
-            update={
-                "approved_plan": state.get("proposed_plan", ""),
-                "feedback": "",
+            update={"approved_plan": state["plan"], "feedback": ""}, goto="implement"
+        )
+
+    def implement(state: ResearchState, runtime: Runtime[ResearchContext]):
+        result = _agent(
+            "implement_experiment",
+            (
+                "Implement the approved plan, validate it, show changes, commit, "
+                "and report commit SHA."
+            ),
+            {
+                "experiment": _experiment_data(state, runtime),
+                "approved_plan": state["approved_plan"],
             },
-            goto="implement_execution",
+            Implementation,
         )
+        project = runtime.context.project
+        sha = GitRepository(project.root).resolve(result.commit)
+        record = _record(state, runtime)
+        record.commit = sha
+        record.status = "implemented"
+        record.save()
+        return Command(update={"feedback": ""}, goto="plan_launch")
 
-    def implement_execution(
-        state: ResearchState,
-    ) -> Command[Literal["implement", "launch", "done"]]:
-        data = {
-            **experiment_context(state),
-            "approved_plan": state.get("approved_plan", ""),
-        }
-        response = execution_response_for(state, "implement", data)
-        event, arguments = response["event"], response["arguments"]
-        if event == "finish":
-            return finish(state)
-        if event == "revise_implementation":
-            feedback = arguments.get("feedback")
-            return Command(
-                update={
-                    "feedback": feedback
-                    if isinstance(feedback, str)
-                    else "Feedback must be a string."
-                },
-                goto="implement",
-            )
-        commit = arguments.get("commit")
-        if not isinstance(commit, str):
-            return Command(
-                update={"feedback": "commit must be a Git commit reference."},
-                goto="implement",
-            )
-        try:
-            sha = GitRepository(project.root).resolve(commit)
-            record = experiment(state)
-            record.commit = sha
-            record.status = "implemented"
-            record.save()
-        except HirakuError as exc:
-            return Command(update={"feedback": str(exc)}, goto="implement")
-        return Command(
-            update={"approved_plan": "", "feedback": "", "step": "launch"},
-            goto="launch",
+    def plan_launch(state: ResearchState, runtime: Runtime[ResearchContext]):
+        record = _record(state, runtime)
+        cmd = getattr(record, "command", None) or state["command"]
+        suggested = shlex.join(["hiraku", "run", "--record", record.id, "--", *cmd])
+        proposal = _agent(
+            "prepare_launch",
+            instructions("## Launch"),
+            {
+                "experiment": _experiment_data(state, runtime),
+                "suggested_command": suggested,
+                "feedback": state.get("feedback", ""),
+            },
+            LaunchPlan,
         )
-
-    def launch(
-        state: ResearchState,
-    ) -> Command[Literal["launch", "launch_approval", "done"]]:
-        record = experiment(state)
-        command = getattr(record, "command", None) or state["command"]
-        data = experiment_context(state)
-        data["command"] = shlex.join(
-            ["hiraku", "run", "--record", record.id, "--", *command]
-        )
-        response = response_for(state, "launch", data)
-        event, arguments = response["event"], response["arguments"]
-        if event == "finish":
-            return finish(state)
-        if event == "revise_launch":
-            feedback = arguments.get("feedback")
-            return Command(
-                update={
-                    "feedback": feedback
-                    if isinstance(feedback, str)
-                    else "Feedback must be a string."
-                },
-                goto="launch",
-            )
-        if event != "launch_plan":
-            return Command(
-                update={"feedback": "Provide a launch plan."},
-                goto="launch",
-            )
-        proposed_command = arguments["command"]
-        wrapper = ["hiraku", "run", "--record", record.id, "--"]
         try:
-            tokens = shlex.split(proposed_command)
+            tokens = shlex.split(proposal.command)
         except ValueError as exc:
+            return Command(update={"feedback": str(exc)}, goto="plan_launch")
+        prefix = ["hiraku", "run", "--record", record.id, "--"]
+        if tokens[: len(prefix)] != prefix or len(tokens) <= len(prefix):
             return Command(
-                update={"feedback": f"The launch command is invalid: {exc}"},
-                goto="launch",
+                update={"feedback": "Use the hiraku run --record ... -- form"},
+                goto="plan_launch",
             )
-        if tokens[: len(wrapper)] != wrapper or len(tokens) <= len(wrapper):
+        command = validate_command(tokens[len(prefix) :])
+        canonical = shlex.join([*prefix, *command])
+        if canonical != proposal.command:
             return Command(
-                update={
-                    "feedback": (
-                        "Use the `hiraku run --record <experiment> -- <argv...>` "
-                        "form shown in the launch proposal."
-                    )
-                },
-                goto="launch",
-            )
-        try:
-            command = validate_command(tokens[len(wrapper) :])
-            if command is None:
-                raise ValidationError("The experiment command cannot be empty")
-            if command != getattr(record, "command", None):
-                record.command = command
-                record.save()
-        except HirakuError as exc:
-            return Command(update={"feedback": str(exc)}, goto="launch")
-        approved_command = shlex.join([*wrapper, *command])
-        if approved_command != proposed_command:
-            return Command(
-                update={
-                    "feedback": (
-                        "Resubmit the launch command using the exact shell quoting "
-                        f"shown here: {approved_command}"
-                    )
-                },
-                goto="launch",
-            )
-        revision = sha256(approved_command.encode("utf-8")).hexdigest()
-        return Command(
-            update={
-                "proposed_launch_command": approved_command,
-                "proposed_launch_revision": revision,
-                "feedback": "",
-            },
-            goto="launch_approval",
-        )
-
-    def launch_approval(
-        state: ResearchState,
-    ) -> Command[Literal["launch", "launch_execution", "done"]]:
-        data = {
-            **experiment_context(state),
-            "command": state.get("proposed_launch_command", ""),
-            "plan_revision": state.get("proposed_launch_revision", ""),
-        }
-        decision, feedback = decision_for(
-            state,
-            "launch",
-            data,
-            expected_event="launch_approved",
-            revision=state.get("proposed_launch_revision", ""),
-        )
-        if decision == "stop":
-            return finish(state)
-        if decision == "revise":
-            return Command(
-                update={"feedback": feedback or "Revise the launch plan."},
-                goto="launch",
+                update={"feedback": f"Use exact quoting: {canonical}"},
+                goto="plan_launch",
             )
         return Command(
             update={
-                "approved_launch_command": state.get("proposed_launch_command", ""),
+                "launch_command": canonical,
+                "launch_hash": _hash(canonical),
                 "feedback": "",
             },
-            goto="launch_execution",
+            goto="approve_launch",
         )
 
-    def launch_execution(
-        state: ResearchState,
-    ) -> Command[Literal["launch", "analyze", "done"]]:
-        record = experiment(state)
-        data = experiment_context(state)
-        data["command"] = state.get("approved_launch_command", "")
-        response = execution_response_for(state, "launch", data)
-        event, arguments = response["event"], response["arguments"]
-        if event == "finish":
-            return finish(state)
-        if event == "revise_launch":
-            feedback = arguments.get("feedback")
+    def approve_launch(state: ResearchState, runtime: Runtime[ResearchContext]):
+        decision = _decision(
+            "approve_launch",
+            "Approve this exact experiment command?",
+            {
+                "experiment": _experiment_data(state, runtime),
+                "command": state["launch_command"],
+            },
+            revision=state["launch_hash"],
+        )
+        if decision.decision == "stop":
+            return Command(goto="done")
+        if decision.decision == "revise":
             return Command(
-                update={
-                    "feedback": feedback
-                    if isinstance(feedback, str)
-                    else "Feedback must be a string."
-                },
-                goto="launch",
+                update={"feedback": decision.feedback or ""}, goto="plan_launch"
             )
-        run_id = arguments["run_id"]
-        matching_run = next(
+        # Store only the approved command. Don't mutate the record command
+        # until the approved transition succeeds.
+        return Command(
+            update={"approved_command": state["launch_command"]}, goto="launch"
+        )
+
+    def launch(state: ResearchState, runtime: Runtime[ResearchContext]):
+        record = _record(state, runtime)
+        result = _agent(
+            "launch_experiment",
+            "Check for an existing matching run before executing; otherwise run the "
+            "approved command and report its run ID.",
+            {
+                "experiment": _experiment_data(state, runtime),
+                "approved_command": state["approved_command"],
+            },
+            LaunchResult,
+        )
+        matching = next(
             (
                 run
-                for run in _runs(record, project)
-                if run.id == run_id and run.commit == record.commit
+                for run in record.runs(project=runtime.context.project)
+                if run.id == result.run_id and run.commit == record.commit
             ),
             None,
         )
-        if matching_run is None:
+        if matching is None:
             return Command(
-                update={
-                    "feedback": (
-                        f"Run {run_id!r} is not attributed to {record.id!r} on "
-                        "the implemented commit. Check the run ID and try again."
-                    )
-                },
-                goto="launch_execution",
+                update={"feedback": "Run ID does not match the experiment commit"},
+                goto="launch",
             )
         record.status = "launched"
         record.save()
-        return Command(
-            update={
-                "approved_launch_command": "",
-                "proposed_launch_command": "",
-                "proposed_launch_revision": "",
-                "approved_plan": "",
-                "proposed_plan": "",
-                "proposed_plan_revision": "",
-                "launched_run_id": matching_run.id,
-                "feedback": "",
-                "step": "analyze",
-            },
-            goto="analyze",
-        )
+        return Command(update={"run_id": matching.id, "feedback": ""}, goto="analyze")
 
-    def analyze(
-        state: ResearchState,
-    ) -> Command[Literal["analyze", "next_iteration", "done"]]:
-        record = experiment(state)
-        launched_run_id = state.get("launched_run_id")
-        runs = [run for run in _runs(record, project) if run.id == launched_run_id]
-        data = {
-            **experiment_context(state),
-            "runs": [{"run_id": run.id, "metrics": dict(run.metrics)} for run in runs],
-            "previous": state.get("results", []),
-        }
-        if not any(run.metrics for run in runs):
-            data["metrics_pending"] = True
-            state = {**state, "feedback": "The attributed runs have no metrics yet."}
-        response = response_for(state, "analyze", data)
-        event, arguments = response["event"], response["arguments"]
-        if event == "finish":
-            return finish(state)
-        if not any(run.metrics for run in runs) and event == "analyzed":
-            return Command(
-                update={"feedback": "The attributed runs have no metrics yet."},
-                goto="analyze",
+    def analyze(state: ResearchState, runtime: Runtime[ResearchContext]):
+        record = _record(state, runtime)
+        runs = [
+            run
+            for run in record.runs(project=runtime.context.project)
+            if run.id == state["run_id"]
+        ]
+        if not runs or not any(run.metrics for run in runs):
+            # Return a useful agent handoff rather than inventing a verdict.
+            result = _agent(
+                "inspect_pending_metrics",
+                "Metrics are unavailable. Investigate and report status.",
+                {"run_id": state["run_id"]},
+                Plan,
             )
-        if event == "revise_analysis":
-            feedback = arguments.get("feedback")
-            return Command(
-                update={
-                    "feedback": feedback
-                    if isinstance(feedback, str)
-                    else "Feedback must be a string."
-                },
-                goto="analyze",
-            )
-        verdict, conclusion = arguments.get("verdict"), arguments.get("conclusion")
-        if (
-            verdict not in {"supports", "refutes", "inconclusive"}
-            or not isinstance(conclusion, str)
-            or not conclusion.strip()
-        ):
-            return Command(
-                update={"feedback": "Provide a verdict and non-empty conclusion."},
-                goto="analyze",
-            )
+            return Command(update={"feedback": result.plan}, goto="analyze")
+        result = _agent(
+            "analyze_results",
+            instructions("## Analyze, review, and iterate"),
+            {
+                "experiment": _experiment_data(state, runtime),
+                "runs": [
+                    {"run_id": run.id, "metrics": dict(run.metrics)} for run in runs
+                ],
+                "previous": state.get("results", []),
+                "feedback": state.get("feedback", ""),
+            },
+            Analysis,
+        )
         record.status = "analyzed"
-        record.verdict = verdict
-        record.conclusion = conclusion
+        record.verdict = result.verdict
+        record.conclusion = result.conclusion
         record.save()
-        return Command(
-            update={
-                "feedback": "",
-                "step": "results_review",
-            },
-            goto="results_review",
-        )
+        return Command(update={"feedback": ""}, goto="review_results")
 
-    def results_review(
-        state: ResearchState,
-    ) -> Command[Literal["analyze", "draft", "done"]]:
-        record = experiment(state)
-        result = {
+    def review_results(state: ResearchState, runtime: Runtime[ResearchContext]):
+        record = _record(state, runtime)
+        summary = {
             "record_id": record.id,
-            "verdict": getattr(record, "verdict", "inconclusive"),
-            "conclusion": getattr(record, "conclusion", ""),
+            "verdict": getattr(record, "verdict", None),
+            "conclusion": getattr(record, "conclusion", None),
         }
-        decision, feedback = decision_for(
-            state,
-            "results_review",
+        decision = _decision(
+            "review_results",
+            "Review the analysis and decide whether to iterate.",
             {
-                "task": state["task"],
-                "latest_result": result,
-                "results": [*state.get("results", []), result],
+                "latest": summary,
+                "previous": state.get("results", []),
                 "remaining_rounds": state["rounds"] - len(state.get("results", [])),
             },
-            interaction_type="review",
+            interaction="review",
         )
-        if decision == "revise":
-            return Command(
-                update={
-                    "feedback": feedback or "Revise the analysis.",
-                },
-                goto="analyze",
-            )
-        results = [*state.get("results", []), result]
-        update = {
-            "results": results,
-            "experiment": "",
-            "launched_run_id": "",
-            "feedback": "",
-        }
-        if decision == "stop" or len(results) >= state["rounds"]:
-            return Command(update={**update, "step": "done"}, goto="done")
+        if decision.decision == "revise":
+            return Command(update={"feedback": decision.feedback or ""}, goto="analyze")
+        results = [*state.get("results", []), summary]
+        if decision.decision == "stop" or len(results) >= state["rounds"]:
+            return Command(update={"results": results}, goto="done")
         return Command(
-            update={**update, "step": "draft"},
+            update={"results": results, "experiment": "", "run_id": "", "feedback": ""},
             goto="draft",
         )
 
-    def next_iteration(
-        state: ResearchState,
-    ) -> Command[Literal["draft", "done"]]:
-        """Resume the pre-review-gate node for already-persisted sessions."""
-        decision, feedback = decision_for(
-            state,
-            "next_iteration",
-            {
-                "task": state["task"],
-                "results": state.get("results", []),
-                "remaining_rounds": state["rounds"] - len(state.get("results", [])),
-            },
-        )
-        if decision == "stop":
-            return finish(state)
-        return Command(
-            update={
-                "feedback": feedback or "" if decision == "revise" else "",
-                "step": "draft",
-            },
-            goto="draft",
-        )
-
-    def done(state: ResearchState) -> dict[str, str]:
+    def done(state: ResearchState):
         return {
             "final": render(
                 markdown.section("## Resume and completion"),
@@ -900,112 +616,25 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             )
         }
 
-    builder = StateGraph(ResearchState)
-    builder.add_node("initialize", initialize)
-    builder.add_node("draft", draft)
-    builder.add_node("draft_approval", draft_approval)
-    builder.add_node("implement", implement)
-    builder.add_node("implement_approval", implement_approval)
-    builder.add_node("implement_execution", implement_execution)
-    builder.add_node("launch", launch)
-    builder.add_node("launch_approval", launch_approval)
-    builder.add_node("launch_execution", launch_execution)
-    builder.add_node("analyze", analyze)
-    builder.add_node("results_review", results_review)
-    builder.add_node("next_iteration", next_iteration)
-    builder.add_node("done", done)
+    builder = StateGraph(
+        ResearchState, context_schema=ResearchContext, input_schema=GraphInput
+    )
+    nodes = {
+        "initialize": initialize,
+        "draft": draft,
+        "review_draft": review_draft,
+        "plan_implementation": plan_implementation,
+        "approve_implementation": approve_implementation,
+        "implement": implement,
+        "plan_launch": plan_launch,
+        "approve_launch": approve_launch,
+        "launch": launch,
+        "analyze": analyze,
+        "review_results": review_results,
+        "done": done,
+    }
+    for name, node in nodes.items():
+        builder.add_node(name, node)
     builder.add_edge(START, "initialize")
     builder.add_edge("done", END)
     return builder.compile(checkpointer=checkpointer)
-
-
-def _runs(record: Record, project: Project) -> list[Run]:
-    return record.runs(project=project)
-
-
-def _step_response_contract(
-    step: str, phase: Literal["review", "execution"]
-) -> tuple[TypeAdapter[Any], dict[str, Any]]:
-    arguments_by_event: dict[str, type[BaseModel]] = {
-        "drafted": DraftedArguments,
-        "implementation_plan": ImplementationPlanArguments,
-        "implementation_approved": PlanRevisionArguments,
-        "implemented": ImplementedArguments,
-        "analyzed": AnalyzedArguments,
-        "revise_draft": FeedbackArguments,
-        "revise_implementation": FeedbackArguments,
-        "revise_launch": FeedbackArguments,
-        "revise_analysis": FeedbackArguments,
-        "launched": LaunchedArguments,
-        "launch_plan": LaunchPlanArguments,
-        "launch_approved": PlanRevisionArguments,
-        "finish": EmptyArguments,
-    }
-    proposal_events = {
-        "draft": "drafted",
-        "implement": "implementation_plan",
-        "launch": "launch_plan",
-        "analyze": "analyzed",
-    }
-    result_events = {"implement": "implemented", "launch": "launched"}
-    revise_events = {
-        "draft": "revise_draft",
-        "implement": "revise_implementation",
-        "launch": "revise_launch",
-        "analyze": "revise_analysis",
-    }
-    if phase == "review":
-        events = (
-            (proposal_events[step], revise_events[step])
-            if step == "analyze"
-            else (proposal_events[step], revise_events[step], "finish")
-        )
-    else:
-        result_event = result_events.get(step)
-        if result_event is None:
-            raise ValueError(f"Step {step!r} has no separate execution phase")
-        events = (result_event, revise_events[step], "finish")
-    event_models = []
-    for event in events:
-        arguments_model = arguments_by_event[event]
-        fields: dict[str, Any] = {"event": (Literal[event], ...)}
-        if arguments_model is EmptyArguments:
-            fields["arguments"] = (
-                arguments_model,
-                Field(default_factory=arguments_model),
-            )
-        else:
-            fields["arguments"] = (arguments_model, ...)
-        event_models.append(
-            create_model(
-                f"{step.title()}{event.title().replace('_', '')}Response",
-                __config__=ConfigDict(extra="forbid", strict=True),
-                **fields,
-            )
-        )
-    action_type = Annotated[reduce(or_, event_models), Field(discriminator="event")]
-    action_adapter = TypeAdapter(action_type)
-    return action_adapter, action_adapter.json_schema()
-
-
-def _approval_response_schema(
-    expected_event: str | None, revision: str | None
-) -> dict[str, Any]:
-    fields: dict[str, Any] = {
-        "decision": (Literal["approve", "revise", "stop"], ...),
-    }
-    if expected_event is not None:
-        if revision is None:
-            raise ValueError("An approval revision is required for a protected plan")
-        fields["revision"] = (Literal[revision], ...)
-    approval_model = create_model(
-        "WorkflowApprovalResponse",
-        __config__=ConfigDict(extra="forbid", strict=True),
-        **fields,
-    )
-    envelope_fields: dict[str, Any] = {"approval": (approval_model, ...)}
-    return create_model(
-        "WorkflowApprovalEnvelope",
-        __config__=ConfigDict(extra="forbid", strict=True),
-        **envelope_fields,
-    ).model_json_schema()

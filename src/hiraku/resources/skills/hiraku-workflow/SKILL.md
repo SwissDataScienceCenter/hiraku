@@ -7,7 +7,7 @@ description: Use when the user asks to start, continue, inspect, or complete a H
 Hiraku workflows are project-defined LangGraph procedures that guide work through
 checkpoints. The current coding agent performs the actions; Hiraku stores the
 workflow state and enforces its transitions. Follow the user's requested scope,
-the workflow instructions, and each interrupt's response schema.
+the workflow instructions and each interrupt's response contract.
 
 ## Before starting
 
@@ -64,20 +64,25 @@ approval or advance the graph.
 
 Treat the interrupt payload as authoritative. Follow its `actor`,
 `interaction.type`, `action`, `step`, `phase`, `instruction`, `data`,
-`response_schema`, and `required_capabilities` when present. `next_action` is a
-summary; inspect the full interrupt for details. Do not invent response fields
-or skip a checkpoint.
+`response_schema` and `required_capabilities` when present. Some workflows
+validate responses internally without including a JSON Schema in each
+interrupt. `next_action` is a summary; inspect the full interrupt for details.
+Do not invent response fields or skip a checkpoint.
 
 For `actor: agent`, complete the requested work and submit its result through
-`workflow_resume`, matching `response_schema`. Do not ask the user to perform
+`workflow_resume`, matching the declared response contract (and
+`response_schema` when present). Do not ask the user to perform
 agent-owned work. Inspect the returned state and continue while the next action
-is agent-owned and within authorized limits. For `actor: human`, present the
-concrete proposal or decision and use trusted MCP elicitation. Never put an
-approval decision in ordinary tool arguments as a substitute for human
-authorization. Approval may be bound to a stored revision. If the user revises,
-incorporate feedback and follow the new interrupt. If elicitation is declined
-or cancelled, leave the workflow paused. If the client lacks form elicitation,
-ask the user to reconnect with a capable client; do not bypass the gate.
+is agent-owned and within authorized limits. For `actor: human` and
+`interaction.type: approval`, present the concrete proposal and use trusted MCP
+elicitation. Never put an approval decision in ordinary tool arguments as a
+substitute for human authorization. Revision requires non-empty feedback, which
+must be included in the elicitation answer. Approval may be bound to a stored
+revision. If elicitation is declined or cancelled, leave the workflow paused.
+For `interaction.type: review`, present the review conversationally and wait
+for the user's response; submit a non-empty answer matching `response_schema`.
+Review is not approval for a protected action. If the client lacks form
+elicitation, leave approval gates paused and explain the MCP capability error.
 
 Some workflows separate approval from execution. After approval, resume only
 with the approved action's result when the graph returns its execution
@@ -95,9 +100,16 @@ needs to reconnect with elicitation support, and leave the workflow paused.
 For the bundled `collaborative` workflow, follow `workflow.md` and these
 workflow-specific invariants:
 
+At start, pass the parent task record ID as `context.record_id` (or use the
+project's active record). `arguments.task` is natural-language research
+guidance, not the record ID. Include the user's objective there when useful.
+
 1. **Draft:** Read the task and earlier experiment results. Propose one focused
    experiment through an agent task interrupt, including an exact per-experiment
-   command argv. Hiraku stores the draft and then requests human review tied to
+   command argv. Submit the draft fields at the top level of `response` (for
+   example, `record_id`, `summary`, `hypothesis`, `change`, and `command`); use
+   the interrupt's `response_fields`. Submit those fields at the top level.
+   Hiraku stores the draft and then requests human review tied to
    its revision. Incorporate revision feedback into the same draft record. Do
    not implement before approval.
 2. **Implement:** Prepare an implementation plan through an agent task
