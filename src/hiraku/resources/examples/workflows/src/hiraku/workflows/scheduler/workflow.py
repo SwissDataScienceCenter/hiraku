@@ -17,7 +17,7 @@ from pydantic import ValidationError as PydanticValidationError
 from hiraku.errors import ValidationError
 from hiraku.markdown import Markdown, render
 from hiraku.project import Project
-from hiraku.record import Record, load_record
+from hiraku.record import Record
 
 
 class SchedulerState(BaseModel):
@@ -94,22 +94,18 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             raise ValidationError(str(exc)) from exc
         records, target = arguments.records, arguments.target
 
-        parent = Record.create(
+        parent = project.vault.create(
             f"scheduler-{secrets.token_hex(4)}",
             type="task",
             summary=f"Scheduler example: raise each count to {target}",
-            activate=False,
-            project=project,
         )
         for index in range(records):
-            Record.create(
+            project.vault.create(
                 f"{parent.id}-{index + 1}",
                 parent_id=parent.id,
                 type="experiment",
                 priority=random.randint(1, 9),
                 count=0,
-                activate=False,
-                project=project,
             )
         return {"parent": parent.id, "target": target}
 
@@ -177,7 +173,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             return {"error": f"Response does not match the expected schema: {exc}"}
         if response.record_id != state.current:
             return {"error": f"Report the assigned record {state.current!r}."}
-        record = load_record(str(state.current), project=project)
+        record = project.vault.get(str(state.current))
         count = _count(record)
         expected = state.baseline + 1
         if count != expected:
@@ -216,7 +212,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
 def _children(parent_id: str, project: Project) -> list[Record]:
     return sorted(
-        load_record(parent_id, project=project).children(project=project),
+        project.vault.children(parent_id),
         key=lambda item: item.id,
     )
 

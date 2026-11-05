@@ -1,5 +1,6 @@
 ---
-id: weak-l2
+id: 028bc8f3-64fb-4e89-8a37-d6017601fb36
+name: weak-l2
 parent_id: digits
 related_to: []
 type: hypothesis

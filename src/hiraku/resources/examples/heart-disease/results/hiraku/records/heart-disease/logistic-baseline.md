@@ -1,5 +1,6 @@
 ---
-id: logistic-baseline
+id: 62167646-3f50-4571-bad7-f5f6b16cacbc
+name: logistic-baseline
 parent_id: heart-disease
 related_to: []
 type: baseline

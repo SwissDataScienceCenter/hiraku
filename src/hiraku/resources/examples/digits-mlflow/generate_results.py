@@ -13,20 +13,20 @@ from tempfile import TemporaryDirectory
 
 from hiraku import Project
 from hiraku.execution import execute_command
-from hiraku.record import Record
 
 EXPERIMENTS = (("weak-l2", 0.0001), ("strong-l2", 1.0))
 EPOCHS = 20
 
 
-def validate_database(database: Path) -> None:
+def validate_database(database: Path, record_names: dict[str, str]) -> None:
     """Verify six completed, attributed runs and their validation measurements."""
     with sqlite3.connect(database) as connection:
         runs = connection.execute(
             "SELECT r.run_uuid, r.status, t.value FROM runs r JOIN tags t "
             "ON r.run_uuid=t.run_uuid WHERE t.key='hiraku.record_id'"
         ).fetchall()
-        if Counter(record for _, _, record in runs) != {"weak-l2": 3, "strong-l2": 3}:
+        expected = Counter({record_names[name]: 3 for name, _ in EXPERIMENTS})
+        if Counter(record for _, _, record in runs) != expected:
             raise ValueError("Expected three runs per regularization experiment")
         for run, status, record in runs:
             params = dict(
@@ -47,7 +47,10 @@ def validate_database(database: Path) -> None:
             if status != "FINISHED" or tags.get("hiraku.record_id") != record:
                 raise ValueError("Incomplete or unattributed training run")
             if (
-                float(params["alpha"]) != dict(EXPERIMENTS)[record]
+                float(params["alpha"])
+                != dict(EXPERIMENTS)[
+                    next(name for name, rid in record_names.items() if rid == record)
+                ]
                 or int(params["epochs"]) != EPOCHS
             ):
                 raise ValueError("Unexpected training parameters")
@@ -55,7 +58,8 @@ def validate_database(database: Path) -> None:
                 math.isfinite(metrics[m]) for m in ("val/log_loss", "val/accuracy")
             ):
                 raise ValueError("Missing or non-finite validation metric")
-        for record, _ in EXPERIMENTS:
+        for name, _ in EXPERIMENTS:
+            record = record_names[name]
             seeds = [
                 dict(
                     connection.execute(
@@ -69,7 +73,7 @@ def validate_database(database: Path) -> None:
                 raise ValueError("Unexpected experiment seeds")
 
 
-def generate(project: Project) -> None:
+def generate(project: Project) -> dict[str, str]:
     """Run a small local batch without contacting a remote tracking service."""
     database = project.root / "mlflow.db"
     if database.exists() or list(project.records_dir.rglob("*.md")):
@@ -80,12 +84,10 @@ def generate(project: Project) -> None:
         "experiment_name": "hiraku-digits",
     }
     project.save()
-    Record.create(
+    root = project.vault.create(
         "digits",
         type="task",
         status="concluded",
-        activate=False,
-        project=project,
         metrics=[
             {"name": "val/log_loss", "direction": "minimize"},
             {"name": "val/accuracy", "direction": "maximize"},
@@ -94,17 +96,17 @@ def generate(project: Project) -> None:
         "Compare weak and strong L2 regularization over three seeds.\n"
         "Measured CPU training results; no statistical significance is claimed.\n",
     )
+    record_names = {}
     for identifier, alpha in EXPERIMENTS:
-        Record.create(
+        record = project.vault.create(
             identifier,
-            parent_id="digits",
+            parent_id=root.id,
             type="hypothesis",
             status="concluded",
-            activate=False,
-            project=project,
             markdown=f"## {identifier}\n\nL2 alpha: {alpha}; seeds: 1, 2, 3; "
             f"epochs: {EPOCHS}; hidden units: 64; validation fraction: 0.25.\n",
         )
+        record_names[identifier] = record.id
         command = [
             "uv",
             "run",
@@ -122,7 +124,7 @@ def generate(project: Project) -> None:
         for seed in (1, 2, 3):
             result = execute_command(
                 [*command, "--seed", str(seed)],
-                record_id=identifier,
+                record_id=record.id,
                 project=project,
                 env={
                     "MLFLOW_TRACKING_URI": f"sqlite:///{database}",
@@ -134,9 +136,9 @@ def generate(project: Project) -> None:
                     f"Training command for {identifier} failed with "
                     f"exit code {result.returncode}"
                 )
-    validate_database(database)
-    project.active_record_id = "weak-l2"
-    project.save()
+    validate_database(database, record_names)
+    project.set_active_record(record_names["weak-l2"])
+    return record_names
 
 
 def generate_results(output: Path) -> None:
@@ -166,7 +168,7 @@ def generate_results(output: Path) -> None:
             ],
         ):
             subprocess.run(["git", *arguments], cwd=project.root, check=True)
-        generate(project)
+        record_ids = generate(project)
         output.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
             overlay = Path(staging) / "overlay"
@@ -186,7 +188,7 @@ def generate_results(output: Path) -> None:
                     "UPDATE runs SET artifact_uri='mlruns/' || "
                     "experiment_id || '/' || run_uuid || '/artifacts'"
                 )
-            validate_database(overlay / "mlflow.db")
+            validate_database(overlay / "mlflow.db", record_ids)
             overlay.rename(output)
 
 

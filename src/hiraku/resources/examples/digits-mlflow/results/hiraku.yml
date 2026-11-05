@@ -1,5 +1,6 @@
 hiraku_dir: hiraku
-active_record_id: weak-l2
+active_record: weak-l2
+active_record_id: 028bc8f3-64fb-4e89-8a37-d6017601fb36
 tracking_backend:
   type: mlflow
   database: mlflow.db

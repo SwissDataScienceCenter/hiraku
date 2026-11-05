@@ -1,3 +1,4 @@
 hiraku_dir: hiraku
-active_record_id: random-forest
+active_record: random-forest
+active_record_id: 2c0dc167-6d38-40b2-b3c3-8731928785dc
 tracking_backend: csv

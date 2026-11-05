@@ -1,5 +1,6 @@
 ---
-id: strong-l2
+id: e03f8f30-9324-46b9-9652-817530c15f10
+name: strong-l2
 parent_id: digits
 related_to: []
 type: hypothesis

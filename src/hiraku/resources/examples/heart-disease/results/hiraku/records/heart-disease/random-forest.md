@@ -1,5 +1,6 @@
 ---
-id: random-forest
+id: 2c0dc167-6d38-40b2-b3c3-8731928785dc
+name: random-forest
 parent_id: heart-disease
 related_to: []
 type: hypothesis

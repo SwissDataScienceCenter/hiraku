@@ -14,7 +14,6 @@ from tempfile import TemporaryDirectory
 
 from hiraku import Project
 from hiraku.execution import execute_command
-from hiraku.record import Record
 
 EXPERIMENTS = (
     ("logistic-baseline", "heart-disease", "logistic", 0.2),
@@ -24,22 +23,24 @@ EXPERIMENTS = (
 METRICS = ("val/log_loss", "val/accuracy")
 
 
-def validate_runs(project: Path) -> list[dict[str, str]]:
+def validate_runs(project: Project | Path) -> list[dict[str, str]]:
     """Check the writer schema, experiment attribution and finite measurements."""
-    tree = ast.parse((project / "train.py").read_text())
+    if isinstance(project, Path):
+        project = Project.discover(project)
+    tree = ast.parse((project.root / "train.py").read_text())
     fields = next(
         ast.literal_eval(node.value)
         for node in tree.body
         if isinstance(node, ast.Assign)
         and any(isinstance(t, ast.Name) and t.id == "RUN_FIELDS" for t in node.targets)
     )
-    with (project / "runs.csv").open(newline="") as stream:
+    with (project.root / "runs.csv").open(newline="") as stream:
         reader = csv.DictReader(stream)
         if reader.fieldnames != fields:
             raise ValueError("Unexpected runs CSV header")
         rows = list(reader)
     expected = Counter(
-        (identifier, model, str(seed), str(fraction))
+        (project.vault.find(identifier).id, model, str(seed), str(fraction))
         for identifier, _, model, fraction in EXPERIMENTS
         for seed in (1, 2, 3)
     )
@@ -65,11 +66,10 @@ def generate(project: Project) -> None:
     """Generate records and runs in an initialized, empty example project."""
     if list(project.records_dir.rglob("*.md")) or (project.root / "runs.csv").exists():
         raise FileExistsError("Generation requires an example without records or runs")
-    Record.create(
+    root = project.vault.create(
         "heart-disease",
         type="task",
         status="concluded",
-        activate=False,
         metrics=[
             {"name": m, "direction": d}
             for m, d in zip(METRICS, ("minimize", "maximize"), strict=True)
@@ -77,20 +77,18 @@ def generate(project: Project) -> None:
         markdown="# Heart disease classification\n\n"
         "Measured runs on the processed Cleveland dataset with seeds 1, 2 and 3.\n"
         "These small validation comparisons are not clinical evidence.\n",
-        project=project,
     )
+    record_ids = {root.name: root.id}
     for identifier, parent, model, fraction in EXPERIMENTS:
-        record = Record.create(
+        record = project.vault.create(
             identifier,
-            parent_id=parent,
+            parent_id=record_ids[parent],
             type="baseline"
             if model == "logistic"
             else "diagnostic"
             if identifier == "forest-tuning"
             else "hypothesis",
             status="concluded",
-            activate=False,
-            project=project,
             markdown=f"## {identifier}\n\n"
             f"Model: `{model}`; validation fraction: {fraction}; seeds: 1, 2, 3.\n"
             + (
@@ -100,6 +98,7 @@ def generate(project: Project) -> None:
                 else ""
             ),
         )
+        record_ids[identifier] = record.id
         command = [
             "uv",
             "run",
@@ -113,7 +112,7 @@ def generate(project: Project) -> None:
         for seed in (1, 2, 3):
             result = execute_command(
                 [*command, "--seed", str(seed)],
-                record_id=identifier,
+                record_id=record.id,
                 project=project,
             )
             if result.returncode:
@@ -121,10 +120,10 @@ def generate(project: Project) -> None:
                     f"Training command for {identifier} failed with "
                     f"exit code {result.returncode}"
                 )
-    rows = validate_runs(project.root)
+    rows = validate_runs(project)
     for identifier, _, _, _ in EXPERIMENTS:
-        values = [r for r in rows if r["record_id"] == identifier]
-        record = Record.load(project.records_dir / "heart-disease" / f"{identifier}.md")
+        record = project.vault.find(identifier)
+        values = [r for r in rows if r["record_id"] == record.id]
         record.markdown += (
             "\nMean across the three runs:\n\n"
             + "\n".join(
@@ -133,9 +132,8 @@ def generate(project: Project) -> None:
             )
             + "\n\nNo statistical significance is claimed.\n"
         )
-        record.save(overwrite=True)
-    project.active_record_id = "random-forest"
-    project.save()
+        project.vault.save(record)
+    project.set_active_record("random-forest")
 
 
 def generate_results(output: Path) -> None:

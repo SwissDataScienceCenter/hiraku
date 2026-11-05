@@ -1,6 +1,7 @@
 ---
-id: forest-tuning
-parent_id: random-forest
+id: 444dc74d-390b-4142-985a-04f328efcf72
+name: forest-tuning
+parent_id: 2c0dc167-6d38-40b2-b3c3-8731928785dc
 related_to: []
 type: diagnostic
 status: concluded
