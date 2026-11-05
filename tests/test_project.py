@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -16,7 +19,8 @@ from hiraku.errors import (
     ValidationError,
 )
 from hiraku.project import Project
-from hiraku.record import Record
+from hiraku.record import Record, list_records, load_record
+from hiraku.tracking import CSVBackend
 
 
 def test_project_create_can_skip_mcp_configuration(tmp_path: Path) -> None:
@@ -296,3 +300,291 @@ def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match=r"\[mcp_servers.hiraku\] table"):
         Project.create(tmp_path, install_skill=False)
     assert codex.read_text() == original
+
+
+def test_base_example_has_no_results(tmp_path: Path):
+    config = Project.create(tmp_path, example="heart-disease", install_skill=False)
+    assert (tmp_path / "train.py").is_file()
+    assert not (tmp_path / "runs.csv").exists()
+    assert not list(config.records_dir.rglob("*.md"))
+
+
+@pytest.mark.parametrize("example", [None, "minimal"])
+def test_unavailable_results_leave_no_project(tmp_path: Path, example):
+    with pytest.raises(ValidationError, match="requires|no results"):
+        Project.create(tmp_path, example=example, results=True)
+    assert not (tmp_path / "hiraku/hiraku.yml").exists()
+
+
+def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
+    config = Project.create(
+        tmp_path,
+        example="digits-mlflow",
+        results=True,
+        install_skill=False,
+    )
+    assert config.active_record_id == "weak-l2"
+    assert config.tracking_backend == {
+        "type": "mlflow",
+        "database": "mlflow.db",
+        "experiment_name": "hiraku-digits",
+    }
+    root = Record.load(config.records_dir / "digits" / "digits.md")
+    assert root.resolve_tracking_backend(project=config).backend_name == "mlflow"
+
+
+def test_results_override_base_files(tmp_path: Path, monkeypatch):
+    resources = tmp_path / "resources"
+    base = resources / "examples/layered/src"
+    results = resources / "examples/layered/results"
+    (resources / "workflows").mkdir(parents=True)
+    base.mkdir(parents=True)
+    results.mkdir()
+    (base / "train.py").write_text("base")
+    (base / "hiraku").mkdir()
+    (base / "hiraku/hiraku.yml").write_text("tracking_backend: csv\n")
+    (results / "train.py").write_text("results")
+    (results / "hiraku").mkdir()
+    (results / "hiraku/hiraku.yml").write_text("active_record_id: root\n")
+    monkeypatch.setattr(hiraku.project, "files", lambda name: resources)
+    target = tmp_path / "target"
+    config = Project.create(
+        target, example="layered", results=True, install_skill=False
+    )
+    assert (target / "train.py").read_text() == "results"
+    assert config.active_record_id == "root"
+    assert "active_record_id: root" in config.path.read_text()
+
+
+RUN_AGENT_TESTS = os.environ.get("HIRAKU_RUN_CODEX_SKILL_TESTS") == "1"
+
+MODEL = "gpt-5.6-luna"
+TIMEOUT_SECONDS = 300
+EXPECTED_LOSS = 0.32254890
+EXPECTED_ACCURACY = 0.85526316
+
+
+def _skill_git(project: Path, *arguments: str) -> str:
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=project,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _new_project(tmp_path: Path) -> tuple[Path, Project, str]:
+    project = tmp_path / "heart-disease"
+    project.mkdir()
+    _skill_git(project, "init", "-b", "main")
+    _skill_git(project, "config", "user.email", "test@example.invalid")
+    _skill_git(project, "config", "user.name", "Test")
+    config = Project.create(
+        project,
+        example="heart-disease",
+    )
+    _skill_git(project, "add", ".")
+    _skill_git(project, "commit", "-m", "initialize Heart Disease example")
+    commit = _skill_git(project, "rev-parse", "HEAD")
+    return project, config, commit
+
+
+def _run_codex(project: Path, prompt: str) -> str:
+    codex = shutil.which("codex")
+    hiraku = shutil.which("hiraku")
+    if codex is None:
+        pytest.fail("codex is not on PATH; install and authenticate the Codex CLI")
+    if hiraku is None:
+        pytest.fail("hiraku is not on PATH; run this test through `uv run pytest`")
+
+    environment = os.environ.copy()
+    environment["PATH"] = os.pathsep.join(
+        [str(Path(sys.executable).parent), environment.get("PATH", "")]
+    )
+    command = [
+        codex,
+        "exec",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--model",
+        MODEL,
+        "--config",
+        'model_reasoning_effort="low"',
+        "--approve-for-me",
+        "--color",
+        "never",
+        "--cd",
+        str(project),
+        prompt,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=project,
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(
+            f"Codex {MODEL} timed out after {TIMEOUT_SECONDS} seconds.\n"
+            f"stdout:\n{exc.stdout or ''}\n"
+            f"stderr:\n{exc.stderr or ''}"
+        )
+    if result.returncode != 0:
+        pytest.fail(
+            f"Codex {MODEL} exited with status {result.returncode}. "
+            "Check local authentication and model availability.\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
+    return result.stdout
+
+
+def _create_task(project: Project) -> Record:
+    return Record.create(
+        "heart-disease",
+        project=project,
+        branch="main",
+        goal=(
+            "Develop and evaluate predictive models for heart disease on a fixed "
+            "Cleveland cohort"
+        ),
+        question=(
+            "Which modeling approaches achieve the best validation log loss and "
+            "accuracy on this cohort?"
+        ),
+        metrics=[
+            {"name": "val/log_loss", "direction": "minimize"},
+            {"name": "val/accuracy", "direction": "maximize"},
+        ],
+    )
+
+
+def _create_logistic_experiment(
+    project: Project,
+    task: Record,
+    commit: str,
+) -> Record:
+    return Record.create(
+        "logistic-baseline",
+        parent_id=task.id,
+        project=project,
+        commit=commit,
+        summary="Logistic regression baseline",
+        hypothesis="Regularized logistic regression provides a calibrated baseline",
+    )
+
+
+@pytest.mark.skipif(
+    not RUN_AGENT_TESTS,
+    reason="set HIRAKU_RUN_CODEX_SKILL_TESTS=1 to run Codex skill tests",
+)
+def test_agent_creates_task_from_high_level_request(tmp_path: Path) -> None:
+    project, config, _ = _new_project(tmp_path)
+
+    agent_output = _run_codex(
+        project,
+        """Use the $hiraku skill to create a root record named heart-disease.
+Its goal is
+to develop and evaluate predictive models for heart disease on the fixed
+Cleveland cohort without restricting the task to particular model families. Ask
+which modeling approaches achieve the best validation log loss and accuracy.
+Track val/log_loss to minimize and val/accuracy to maximize. Only create and
+verify the record.""",
+    )
+
+    tasks = list_records(project=config)
+    assert len(tasks) == 1, agent_output
+    task = tasks[0]
+    assert task.id == "heart-disease"
+    assert task.goal is not None
+    goal = task.goal.lower()
+    assert "predictive" in goal
+    assert "heart disease" in goal
+    assert "cleveland" in goal
+    assert task.question is not None
+    question = task.question.lower()
+    assert "model" in question
+    assert "log loss" in question
+    assert "accuracy" in question
+    assert [metric.model_dump() for metric in task.metrics] == [
+        {"name": "val/log_loss", "direction": "minimize"},
+        {"name": "val/accuracy", "direction": "maximize"},
+    ]
+    assert task.children(project=config) == []
+    assert CSVBackend(config).list_runs(record_id=task.id) == []
+    assert _skill_git(project, "status", "--porcelain") == ""
+
+
+@pytest.mark.skipif(
+    not RUN_AGENT_TESTS,
+    reason="set HIRAKU_RUN_CODEX_SKILL_TESTS=1 to run Codex skill tests",
+)
+def test_agent_creates_experiment_from_high_level_request(tmp_path: Path) -> None:
+    project, config, commit = _new_project(tmp_path)
+    task = _create_task(config)
+
+    agent_output = _run_codex(
+        project,
+        """Use the $hiraku skill to create a child record named logistic-baseline
+under heart-disease. Use the summary 'Logistic regression baseline' and the
+hypothesis 'Regularized logistic regression provides a calibrated baseline'.
+Bind it to the current commit. Only create and verify the record; do not run it.""",
+    )
+
+    experiments = task.children(project=config)
+    assert len(experiments) == 1, agent_output
+    experiment = experiments[0]
+    assert experiment.id == "logistic-baseline"
+    assert experiment.summary == "Logistic regression baseline"
+    assert experiment.hypothesis == (
+        "Regularized logistic regression provides a calibrated baseline"
+    )
+    assert experiment.commit == commit
+    assert "command" not in experiment.model_dump()
+    assert CSVBackend(config).list_runs(record_id=task.id) == []
+    assert _skill_git(project, "status", "--porcelain") == ""
+
+
+@pytest.mark.skipif(
+    not RUN_AGENT_TESTS,
+    reason="set HIRAKU_RUN_CODEX_SKILL_TESTS=1 to run Codex skill tests",
+)
+def test_agent_runs_existing_experiment_without_other_changes(tmp_path: Path) -> None:
+    project, config, commit = _new_project(tmp_path)
+    task = _create_task(config)
+    experiment = _create_logistic_experiment(config, task, commit)
+    task_before = task.path.read_bytes()
+    experiment_before = experiment.path.read_bytes()
+
+    agent_output = _run_codex(
+        project,
+        """Use the $hiraku skill to run the logistic-baseline record and
+report its tracked validation metrics. Do not create or update other records.""",
+    )
+
+    assert task.path.read_bytes() == task_before, agent_output
+    current = load_record(experiment.id, project=config)
+    assert current.path.read_bytes() == experiment_before
+    assert [item.id for item in task.children(project=config)] == ["logistic-baseline"]
+    runs = CSVBackend(config).list_runs(
+        record_id=experiment.id,
+    )
+    assert len(runs) == 1
+    run = runs[0]
+    assert run.record_id == experiment.id
+    assert run.commit == commit
+    assert run.id
+    assert run.params == {
+        "model": "logistic",
+        "seed": "42",
+        "validation_fraction": "0.25",
+    }
+    assert float(run.metrics["val/log_loss"]) == pytest.approx(EXPECTED_LOSS)
+    assert float(run.metrics["val/accuracy"]) == pytest.approx(EXPECTED_ACCURACY)
+    assert _skill_git(project, "status", "--porcelain") == ""

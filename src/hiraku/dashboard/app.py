@@ -34,16 +34,16 @@ with app.setup:
 def data_setup():
     _root = os.environ.get("HIRAKU_PROJECT_ROOT")
     # Project copies opened directly in marimo discover their own project.
-    project = (
+    project_context = (
         Project.discover(Path(_root)) if _root else Project.discover(mo.notebook_dir())
     )
     requested_record = os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
-    return project, requested_record
+    return project_context, requested_record
 
 
 @app.cell
-def project_name(project):
-    mo.plain_text(project.root.name)
+def project_name(project_context):
+    mo.plain_text(project_context.root.name)
     return
 
 
@@ -55,23 +55,27 @@ def refresh_control():
 
 
 @app.cell
-def project_data(project, refresh):
+def project_data(project_context, refresh):
     _refreshes = refresh.value
-    project = hd.load(project)
-    runs_df = hd.arrow_frame(hd.run_rows(project), hd.RUN_COLUMNS)
-    records_df = hd.arrow_frame(hd.record_rows(project.records), hd.RECORD_COLUMNS)
-    return project, records_df, runs_df
+    dashboard_data = hd.load(project_context)
+    runs_df = hd.arrow_frame(hd.run_rows(dashboard_data), hd.RUN_COLUMNS)
+    records_df = hd.arrow_frame(
+        hd.record_rows(dashboard_data.records), hd.RECORD_COLUMNS
+    )
+    return project_context, dashboard_data, records_df, runs_df
 
 
 @app.cell
-def selection_state(project, records_df, requested_record, runs_df):
+def selection_state(
+    project_context, dashboard_data, records_df, requested_record, runs_df
+):
     paths = dict(zip(records_df["record"], records_df["record_path"], strict=True))
     metrics = hd.metric_names(runs_df)
     tree_metric = hd.default_metric(records_df, metrics)
     initial_record = next(
         (
             record_id
-            for record_id in (requested_record, project.active_record_id)
+            for record_id in (requested_record, project_context.active_record_id)
             if record_id in paths
         ),
         next(iter(paths), None),
@@ -92,7 +96,9 @@ def selection_state(project, records_df, requested_record, runs_df):
 
 
 @app.cell
-def run_table(get_selection, project, records_df, runs_df, select_key, tree_metric):
+def run_table(
+    get_selection, dashboard_data, records_df, runs_df, select_key, tree_metric
+):
     tree = hc.run_table(
         records_df,
         runs_df,
@@ -100,7 +106,9 @@ def run_table(get_selection, project, records_df, runs_df, select_key, tree_metr
         selected_key=get_selection()[0],
         on_select=select_key,
     )
-    _messages = [mo.callout(mo.md(error), kind="warn") for error in project.errors]
+    _messages = [
+        mo.callout(mo.md(error), kind="warn") for error in dashboard_data.errors
+    ]
     if records_df.empty:
         _messages.append(
             mo.md("No records yet. Create one with `hiraku record create`.")
@@ -110,22 +118,22 @@ def run_table(get_selection, project, records_df, runs_df, select_key, tree_metr
 
 
 @app.cell
-def selected_context(get_selection, project, runs_df):
+def selected_context(get_selection, dashboard_data, runs_df):
     _key, scope = get_selection()
     _key = _key or ""
     _kind, _, _identifier = _key.partition(":")
     selected_run = hd.find_run(runs_df, _identifier) if _kind == "run" else None
     _record_id = selected_run["record"] if selected_run is not None else scope
     selected_record = next(
-        (record for record in project.records if record.id == _record_id), None
+        (record for record in dashboard_data.records if record.id == _record_id), None
     )
     return scope, selected_record, selected_run
 
 
 @app.cell
-def record_navigation(project, select_key, selected_record):
+def record_navigation(dashboard_data, select_key, selected_record):
     _navigation, record_buttons = hc.record_tree(
-        project.records,
+        dashboard_data.records,
         selected_record.id if selected_record else None,
         on_select=lambda record_id: select_key(f"record:{record_id}"),
     )

@@ -90,6 +90,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-n auto --maxprocesses=4 --dist loadscope --tb=no"
+markers = ["integration: tests requiring external services or optional integrations"]
 
 [tool.bumpversion]
 current_version = "0.1.1"

@@ -9,9 +9,31 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.errors import ValidationError
-from hiraku.execution import execute_command
+from hiraku.execution import execute_command, validate_command
 from hiraku.project import Project
 from hiraku.record import Record
+
+
+def _git(path: Path, *arguments: str, check: bool = True) -> str:
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=path,
+        text=True,
+        capture_output=True,
+        check=check,
+    )
+    return result.stdout.strip()
+
+
+def _repository(path: Path) -> Project:
+    _git(path, "init", "-q")
+    _git(path, "config", "user.email", "test@example.invalid")
+    _git(path, "config", "user.name", "Test")
+    project = Project.create(path)
+    (path / "marker.txt").write_text("committed", encoding="utf-8")
+    _git(path, "add", ".")
+    _git(path, "commit", "-qm", "initial")
+    return project
 
 
 def test_run_executes_in_project_and_returns_output_and_exit_code(
@@ -104,3 +126,53 @@ def test_cli_propagates_nonzero_exit_code(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     assert result.exit_code == 4
+
+
+def test_validate_command_accepts_none_and_copies_argv_sequences() -> None:
+    assert validate_command(None) is None
+
+    command = ("python", "train.py")
+    validated = validate_command(command)
+
+    assert validated == ["python", "train.py"]
+    assert validated is not command
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("python train.py", "argv sequence"),
+        (b"python", "argv sequence"),
+        ({}, "argv sequence"),
+        ([], "non-empty string"),
+    ],
+)
+def test_validate_command_rejects_non_argv_values(value: object, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        validate_command(value)
+
+
+@pytest.mark.parametrize("value", [[""], [1], ["python", None], ["python", "x\x00y"]])
+def test_validate_command_rejects_invalid_arguments(value: list[object]) -> None:
+    with pytest.raises(ValidationError):
+        validate_command(value)
+
+
+def test_run_uses_dispatcher_in_current_working_tree(tmp_path: Path) -> None:
+    project = _repository(tmp_path)
+    Record.create("test", project=project)
+    project.dispatch_dir.mkdir()
+    (project.dispatch_dir / "test.sh").write_text(
+        '#!/bin/sh\n[ "$1" = "--" ] && shift\nexec "$@"\n', encoding="utf-8"
+    )
+    (project.dispatch_dir / "test.sh").chmod(0o755)
+    result = execute_command(
+        ["/bin/sh", "-c", "cat marker.txt; printf output > result.txt"],
+        record_id="test",
+        dispatch="test",
+        project=project,
+        capture_output=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "committed"
+    assert (tmp_path / "result.txt").read_text() == "output"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -10,15 +11,223 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.errors import ValidationError
+from hiraku.errors import ValidationError, WorkflowError
 from hiraku.mcp import create_server
 from hiraku.project import Project
-from hiraku.workflows.langgraph import resume_workflow, start_workflow
+from hiraku.record import Record, load_record
+from hiraku.workflows.langgraph import (
+    resume_workflow,
+    start_workflow,
+    workflow_status,
+)
+from hiraku.workflows.langgraph import (
+    resume_workflow as _resume_workflow,
+)
 from hiraku.workflows.session_history import (
     checkpoint_database,
     list_sessions,
     session_history,
 )
+
+
+def _write_workflow(project: Project, source: str) -> None:
+    directory = project.workflows_dir / "broken"
+    directory.mkdir()
+    (directory / "workflow.py").write_text(source, encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        ("def build_graph(checkpointer, *, project): pass\n", "input_schema()"),
+        (
+            "def input_schema(): return {'type': 'array'}\n"
+            "def build_graph(checkpointer, *, project): pass\n",
+            "JSON Schema object",
+        ),
+        (
+            "def input_schema(): raise RuntimeError('schema failed')\n"
+            "def build_graph(checkpointer, *, project): pass\n",
+            "schema failed",
+        ),
+    ],
+)
+def test_start_rejects_invalid_workflow_input_schema(
+    tmp_path: Path, source: str, message: str
+) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    _write_workflow(config, source)
+
+    with pytest.raises(WorkflowError, match=message):
+        start_workflow("broken", project=config)
+
+
+@pytest.mark.parametrize(
+    ("factory", "message"),
+    [
+        ("", "must export build_graph"),
+        (
+            "def build_graph(checkpointer, *, project):\n"
+            "    raise RuntimeError('graph failed')\n",
+            "Cannot build LangGraph workflow.*graph failed",
+        ),
+        (
+            "def build_graph(checkpointer, *, project):\n    return object()\n",
+            "must return a compiled graph",
+        ),
+    ],
+)
+def test_start_rejects_invalid_graph_factory(
+    tmp_path: Path, factory: str, message: str
+) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    _write_workflow(
+        config,
+        "def input_schema(): return {'type': 'object'}\n" + factory,
+    )
+
+    with pytest.raises(WorkflowError, match=message):
+        start_workflow("broken", project=config)
+
+
+def test_start_wraps_workflow_import_errors(tmp_path: Path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    _write_workflow(config, "def input_schema():\n    return [\n")
+
+    with pytest.raises(WorkflowError, match="Cannot import LangGraph workflow"):
+        start_workflow("broken", project=config)
+
+
+def test_workflow_status_rejects_unknown_session(tmp_path: Path) -> None:
+    config = Project.create(tmp_path, example="workflows", install_skill=False)
+
+    with pytest.raises(ValidationError, match="was not found"):
+        workflow_status(f"unknown:{'0' * 32}", project=config)
+
+
+def test_resume_rejects_stale_checkpoint(tmp_path: Path) -> None:
+    config = Project.create(tmp_path, example="workflows", install_skill=False)
+    started = start_workflow("count-steps", {"count": 1}, project=config)
+
+    with pytest.raises(ValidationError, match="checkpoint has changed"):
+        resume_workflow(
+            started["workflow_session_id"],
+            {"decision": "finish"},
+            project=config,
+            checkpoint_id="stale",
+        )
+
+
+def resume_current_workflow(session_id, response, *, project):
+    status = workflow_status(session_id, project=project)
+    return _resume_workflow(
+        session_id, response, project=project, checkpoint_id=status["checkpoint_id"]
+    )
+
+
+def _commit(path: Path) -> str:
+    subprocess.run(["git", "init", "-b", "main"], cwd=path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.org"], cwd=path, check=True
+    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=path, check=True)
+    (path / "train.py").write_text("# experiment\n", encoding="utf-8")
+    subprocess.run(["git", "add", "train.py"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-m", "experiment"], cwd=path, check=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _interrupt(result: dict) -> dict:
+    assert result["status"] == "waiting"
+    assert len(result["interrupts"]) == 1
+    return result["interrupts"][0]["value"]
+
+
+def _approved(response: dict) -> dict:
+    return {"approval": {"decision": "approve"}, "response": response}
+
+
+def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    Record.create(
+        "task",
+        type="task",
+        project=config,
+    )
+    commit = _commit(tmp_path)
+    command = ["python", "train.py"]
+    result = start_workflow(
+        "collaborative", {"rounds": 1, "command": command}, project=config
+    )
+    assert _interrupt(result)["step"] == "draft"
+
+    result = resume_current_workflow(
+        result["workflow_session_id"],
+        _approved(
+            {
+                "event": "drafted",
+                "arguments": {
+                    "record_id": "dropout",
+                    "summary": "Add dropout",
+                    "hypothesis": "Dropout improves validation accuracy",
+                    "change": "Add dropout before the head",
+                },
+            }
+        ),
+        project=config,
+    )
+    assert _interrupt(result)["step"] == "implement"
+
+    result = resume_current_workflow(
+        result["workflow_session_id"],
+        _approved({"event": "implemented", "arguments": {"commit": commit}}),
+        project=config,
+    )
+    launch = _interrupt(result)
+    assert launch["step"] == "launch"
+    assert "hiraku run --record dropout -- python train.py" in launch["data"]["command"]
+
+    with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
+        stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,\n")
+    result = resume_current_workflow(
+        result["workflow_session_id"], _approved({"event": "launched"}), project=config
+    )
+    pending = _interrupt(result)
+    assert pending["step"] == "analyze"
+    assert pending["data"]["metrics_pending"] is True
+    with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
+        stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,0.8\n")
+    result = resume_current_workflow(
+        result["workflow_session_id"],
+        _approved({"event": "revise_analysis", "arguments": {"feedback": "Retry"}}),
+        project=config,
+    )
+    assert _interrupt(result)["step"] == "analyze"
+
+    completed = resume_current_workflow(
+        result["workflow_session_id"],
+        _approved(
+            {
+                "event": "analyzed",
+                "arguments": {
+                    "verdict": "supports",
+                    "conclusion": "Accuracy improved.",
+                },
+            }
+        ),
+        project=config,
+    )
+    assert completed["status"] == "completed"
+    experiment = load_record("dropout", project=config)
+    assert experiment.status == "analyzed"
+    assert experiment.verdict == "supports"
+    assert "Summarize the run" in completed["result"]
 
 
 def _project(tmp_path: Path) -> Project:

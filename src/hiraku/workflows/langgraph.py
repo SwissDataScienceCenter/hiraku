@@ -134,7 +134,7 @@ def _resume_locked(
             raise ValidationError(
                 f"Workflow session {workflow_session_id!r} is not waiting for input"
             )
-        current_id = snapshot.project.get("configurable", {}).get("checkpoint_id")
+        current_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
         if not checkpoint_id or checkpoint_id != current_id:
             raise ValidationError("Workflow checkpoint has changed; inspect its status")
         record_event(
@@ -144,7 +144,7 @@ def _resume_locked(
             "running",
             project=project,
             context=context,
-            checkpoint_id=snapshot.project.get("configurable", {}).get("checkpoint_id"),
+            checkpoint_id=snapshot.config.get("configurable", {}).get("checkpoint_id"),
         )
         return _invoke_and_record(
             graph,
@@ -294,7 +294,7 @@ def _record_snapshot(
 ) -> dict[str, Any]:
     snapshot = graph.get_state(_thread_config(workflow_session_id))
     result = _snapshot_result(workflow_id, workflow_session_id, snapshot)
-    checkpoint_id = snapshot.project.get("configurable", {}).get("checkpoint_id")
+    checkpoint_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
     record_event(
         workflow_session_id,
         workflow_id,
@@ -320,7 +320,7 @@ def _snapshot_result(
         "workflow_id": workflow_id,
         "status": "completed" if completed else "waiting",
         "interrupts": interrupts,
-        "checkpoint_id": snapshot.project.get("configurable", {}).get("checkpoint_id"),
+        "checkpoint_id": snapshot.config.get("configurable", {}).get("checkpoint_id"),
     }
     if completed:
         result["result"] = snapshot.values.get("final")

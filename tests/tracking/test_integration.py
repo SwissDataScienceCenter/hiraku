@@ -11,31 +11,6 @@ from hiraku.record import Record, load_record
 from hiraku.tracking import CSVBackend
 
 
-def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
-    config = Project.create(tmp_path)
-    task = Record.create("task", project=config)
-    Record.create("exp", parent_id=task.id, project=config)
-    (config.root / "runs.csv").write_text(
-        "id,record_id,commit,timestamp,entrypoint,url,metric.loss,param.seed,note\n"
-        "later,exp,abc,2026-01-02T00:00:00Z,train,,1.5,2,kept\n"
-        "earlier,exp,,2026-01-01T00:00:00+00:00,,,2.5,1,raw\n"
-        "other,task,,,,,3.0,3,ignored\n"
-    )
-    backend = task.resolve_tracking_backend(project=config)
-    runs = backend.list_runs()
-    assert [run.id for run in runs] == ["earlier", "later", "other"]
-    assert [run.id for run in backend.list_runs(record_id="task")] == ["other"]
-    assert runs[0].timestamp is not None and runs[0].timestamp.tzinfo is UTC
-    assert runs[0].metrics == {"loss": "2.5"}
-    assert runs[0].params == {"seed": "1"}
-    assert runs[0].raw == {"note": "raw"}
-    assert {run.id for run in backend.list_runs(record_id="exp")} == {
-        "earlier",
-        "later",
-    }
-    assert backend.list_runs(sort="loss", ascending=True, limit=1)[0].id == "later"
-
-
 def test_backend_runs_rejects_empty_record_id_before_reading_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -126,4 +126,4 @@ def test_project_copy_finds_its_project_without_the_launcher(
 
     _, definitions = app.run()
 
-    assert definitions["config"].root == project.root
+    assert definitions["project_context"].root == project.root

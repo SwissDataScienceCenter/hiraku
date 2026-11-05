@@ -15,10 +15,10 @@ from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import start_workflow, workflow_status
 
 
-def resume_workflow(session_id, response, *, config):
-    status = workflow_status(session_id, project=config)
+def resume_workflow(session_id, response, *, project):
+    status = workflow_status(session_id, project=project)
     return _resume_workflow(
-        session_id, response, project=config, checkpoint_id=status["checkpoint_id"]
+        session_id, response, project=project, checkpoint_id=status["checkpoint_id"]
     )
 
 

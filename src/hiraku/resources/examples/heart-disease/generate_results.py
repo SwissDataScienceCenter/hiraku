@@ -144,8 +144,10 @@ def generate_results(output: Path) -> None:
     if output.exists():
         raise FileExistsError(f"Output already exists: {output}")
     with TemporaryDirectory(prefix="hiraku-heart-disease-") as temporary:
-        project = Path(temporary).resolve() / "project"
-        project = Project.create(project, example="heart-disease", install_skill=False)
+        project_dir = Path(temporary).resolve() / "project"
+        project = Project.create(
+            project_dir, example="heart-disease", install_skill=False
+        )
         for arguments in (
             ["init", "-q"],
             ["add", "."],
@@ -168,7 +170,7 @@ def generate_results(output: Path) -> None:
             overlay = Path(staging) / "overlay"
             shutil.copytree(project.records_dir, overlay / "hiraku/records")
             for name in ("hiraku/hiraku.yml", "runs.csv"):
-                shutil.copyfile(project / name, overlay / name)
+                shutil.copyfile(project.root / name, overlay / name)
             overlay.rename(output)
 
 

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import ValidationError
+from hiraku.project import Project
+from hiraku.record import Record
 from hiraku.run import Run
 
 
@@ -43,3 +47,12 @@ def test_run_mapping_fields_are_shallow_immutable_snapshots() -> None:
 def test_run_rejects_invalid_duration(value: float) -> None:
     with pytest.raises(ValidationError, match="duration"):
         Run(id="a", duration=value)
+
+
+def test_run_immutable_and_missing_csv_empty(tmp_path: Path) -> None:
+    config = Project.create(tmp_path)
+    record = Record.create("record", project=config)
+    assert record.runs(project=config) == []
+    run = Run(id="one", metrics={}, params={})
+    with pytest.raises(PydanticValidationError):
+        run.id = "two"  # type: ignore[misc]
