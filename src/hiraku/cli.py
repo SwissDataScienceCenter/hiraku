@@ -509,6 +509,8 @@ def record_update(
         if new_parent is not None:
             new_parent = state.project.vault.find(new_parent).id
         candidate.parent_id = new_parent
+    if make_root or parent_id is not None or "related_to" in changes:
+        state.project.vault.validate_relationships(candidate)
     state.project.vault.save(candidate)
     click.echo(f"Updated record {record_id}")
 

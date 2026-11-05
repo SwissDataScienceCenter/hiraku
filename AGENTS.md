@@ -51,6 +51,7 @@ Respect these boundaries:
 - Keep persistence and validation in their owning modules, not in CLI or MCP handlers.
 - Methods requiring project context accept `project: Project`. Use `config` only for settings data.
 - `Vault.resolve()` returns effective record values and their sources without modifying persisted records; only metric declarations inherit.
+- `Vault.save()` validates one record and its file without scanning the collection. Use vault-level validation for cross-record integrity.
 - Tracking adapters return normalized `Run` objects.
 - Tracking backend configuration and the active record are project-wide. Set the active record through `Project.set_active_record()` so its name and ID stay in sync.
 - Records use filesystem-friendly names for Markdown files in the records directory; reject filename collisions and preserve discovery of existing nested records.

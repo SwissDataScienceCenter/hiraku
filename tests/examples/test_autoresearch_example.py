@@ -196,7 +196,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
     assert (project / "task.md").read_text(encoding="utf-8") == task_template
     assert task.markdown == task_template
-    assert task.path == (project / "hiraku/records" / task.id / f"sep10--{task.id}.md")
+    assert task.path == project / "hiraku/records/sep10.md"
     assert task.branch == "autoresearch/sep10"
     assert task.goal == (
         "Find the best architecture, optimizer, and hyperparameters to minimize "

@@ -34,6 +34,8 @@ Records are stored as Markdown with YAML front matter in the records directory. 
 
 Metric declarations are resolved from the nearest ancestor when a record has no metrics of its own. They are resolved on demand, so later changes to an ancestor can affect the effective metrics of its descendants. An empty metrics list overrides ancestor metrics. Other fields remain local to the record; `related_to` links records without affecting inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
+Saving a record validates its own fields and file destination without scanning the vault. `Vault.validate()` checks the collection for duplicate IDs, missing references, and hierarchy cycles. CLI and MCP relationship updates also check the proposed relationships before saving.
+
 At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. Hiraku stores its name as `active_record` and its stable ID as `active_record_id` in `hiraku.yml`; the current status can be queried with `hiraku status`, whose `tracking_backend` field shows the project's backend.
 
 !!! note

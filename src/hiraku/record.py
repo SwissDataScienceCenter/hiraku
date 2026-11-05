@@ -329,40 +329,45 @@ class Vault(BaseModel):
         return {"values": values, "sources": sources}
 
     def save(self, record: Record) -> Path:
+        """Validate and save one record without checking the whole collection.
+
+        Use :meth:`validate` to check relationships and ID uniqueness across
+        the vault.
+        """
         try:
             candidate = Record.model_validate(
                 record.model_dump(mode="python", warnings=False)
             )
         except (TypeError, ValueError) as exc:
             raise ValidationError(f"Invalid record {record.id!r}: {exc}") from exc
-        records = self._index()
-        existing = records.get(candidate.id)
-        if existing is not None and record._persisted_id is None:
-            raise RecordExistsError(f"Record {candidate.id!r} already exists")
         if record._persisted_id is not None and candidate.id != record._persisted_id:
             raise ValidationError("Record ID is immutable after persistence")
-        if record.path is not None:
-            self._check_vault_path(record.path)
-            if existing is None or existing.path != record.path:
+        old_path = record.path
+        if (old_path is None) != (record._persisted_id is None):
+            raise ValidationError("Record path does not match its persisted file")
+        if old_path is not None:
+            self._check_vault_path(old_path)
+            if (
+                not old_path.is_file()
+                or self._load(old_path).id != record._persisted_id
+            ):
                 raise ValidationError("Record path does not match its persisted file")
-        candidate_records = {**records, candidate.id: candidate}
-        self._validate_records(candidate_records)
         target = (self.dir / _filename(candidate)).absolute()
-        if target.exists() and (existing is None or existing.path != target):
+        self._check_vault_path(target)
+        if target.exists() and old_path != target:
             raise RecordExistsError(f"Record already exists: {target}")
         content = f"---\n{dump_yaml(candidate.frontmatter())}---\n{candidate.markdown}"
         try:
             atomic_write(target, content)
         except OSError as exc:
             raise ValidationError(f"Cannot save record at {target}: {exc}") from exc
-        if existing is not None and existing.path != target:
-            assert existing.path is not None
+        if old_path is not None and old_path != target:
             try:
-                existing.path.unlink()
+                old_path.unlink()
             except OSError as exc:
                 target.unlink(missing_ok=True)
                 raise ValidationError(
-                    f"Cannot remove previous record file {existing.path}: {exc}"
+                    f"Cannot remove previous record file {old_path}: {exc}"
                 ) from exc
         record._path = target
         record._persisted_id = record.id
@@ -412,6 +417,11 @@ class Vault(BaseModel):
     def validate(self) -> None:
         records = self._index()
         self._validate_records(records)
+
+    def validate_relationships(self, record: Record) -> None:
+        """Check a proposed record's relationships against the collection."""
+        records = self._index()
+        self._validate_records({**records, record.id: record})
 
     def _validate_records(self, records: dict[str, Record]) -> None:
         for record in records.values():

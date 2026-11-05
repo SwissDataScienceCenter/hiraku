@@ -105,6 +105,8 @@ def _update(
     updated = type(record).model_validate(values)
     updated._path = record.path
     updated._persisted_id = record._persisted_id
+    if "related_to" in fields:
+        project.vault.validate_relationships(updated)
     project.vault.save(updated)
     return updated
 

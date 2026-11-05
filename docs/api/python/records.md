@@ -21,6 +21,11 @@ files on demand and supports ID-or-name lookup with `get()` and `find()`, as
 well as listing, saving, deleting, reparenting, and collection
 validation. Name lookup raises an error when multiple records share a name.
 
+`Vault.save(record)` validates and saves that record without scanning other
+records. It checks the existing file and prevents filename collisions, but it
+does not check whether IDs are unique across files or references exist. Call
+`Vault.validate()` for collection-wide ID, relationship, and cycle checks.
+
 ::: hiraku.record.Vault
 
 ## `Metric`

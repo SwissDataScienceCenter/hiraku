@@ -227,6 +227,21 @@ def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> Non
     assert ids("--record", "root", "--all") == {"a", "b"}
 
 
+def test_record_update_checks_relationships(tmp_path: Path, monkeypatch) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    parent = project.vault.create("parent")
+    child = project.vault.create("child", parent_id=parent.id)
+    monkeypatch.chdir(tmp_path)
+
+    cycle = invoke("record", "update", parent.id, "--parent", child.id)
+    missing = invoke("record", "update", child.id, "--related-to", "missing")
+
+    assert cycle.exit_code != 0
+    assert missing.exit_code != 0
+    assert project.vault.get(parent.id).parent_id is None
+    assert project.vault.get(child.id).related_to == []
+
+
 def test_results_flag_requires_example(tmp_path: Path):
     result = CliRunner().invoke(main, ["init", str(tmp_path), "--with-results"])
     assert result.exit_code == 2
