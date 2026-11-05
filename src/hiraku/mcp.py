@@ -24,7 +24,8 @@ from pydantic_core import to_jsonable_python
 from .errors import HirakuError, ValidationError
 from .execution import execute_command
 from .project import Project
-from .record import Record, list_records, load_record
+from .record import Record
+from .tracking import TrackingBackendFactory
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details
@@ -117,22 +118,22 @@ def create_server(project: Project | None = None) -> Any:
     @server.tool()
     def record_list() -> list[dict[str, Any]]:
         """List research records in the selected project."""
-        return [_data(item) for item in list_records(project=selected)]
+        return [_data(item) for item in selected.vault.list()]
 
     @server.tool()
     def record_show(record_id: str) -> dict[str, Any]:
         """Read a research record and its effective inherited fields."""
-        record = load_record(record_id, project=selected)
-        resolved = record.resolve(project=selected)
+        record = selected.vault.get(record_id)
+        resolved = selected.vault.resolve(record.id)
         return {
             **_data(record),
-            "resolved": resolved.values,
-            "sources": resolved.sources,
+            "resolved": resolved["values"],
+            "sources": resolved["sources"],
         }
 
     @server.tool()
     def record_create(
-        record_id: str,
+        name: str,
         parent_id: str | None = None,
         related_to: list[str] | None = None,
         markdown: str = "",
@@ -143,6 +144,7 @@ def create_server(project: Project | None = None) -> Any:
         extras = fields or {}
         reserved = {
             "id",
+            "name",
             "path",
             "parent_id",
             "related_to",
@@ -153,17 +155,16 @@ def create_server(project: Project | None = None) -> Any:
         }
         if reserved.intersection(extras):
             raise ValidationError("Use named arguments for identity and relationships")
-        return _data(
-            Record.create(
-                record_id,
-                parent_id=parent_id,
-                related_to=related_to,
-                markdown=markdown,
-                activate=activate,
-                project=selected,
-                **extras,
-            )
+        record = selected.vault.create(
+            name,
+            parent_id=parent_id,
+            markdown=markdown,
+            related_to=related_to or [],
+            **extras,
         )
+        if activate:
+            selected.set_active_record(record)
+        return _data(record)
 
     @server.tool()
     def record_update(
@@ -172,21 +173,19 @@ def create_server(project: Project | None = None) -> Any:
         markdown: str | None = None,
     ) -> dict[str, Any]:
         """Merge record fields and optionally replace Markdown; null clears a field."""
-        return _data(
-            _update(load_record(record_id, project=selected), fields, markdown)
-        )
+        return _data(_update(selected.vault.get(record_id), fields, markdown))
 
     @server.tool()
     def record_reparent(record_id: str, parent_id: str | None = None) -> dict[str, Any]:
         """Move a record subtree under a parent, or make it a root."""
-        record = load_record(record_id, project=selected)
-        record.reparent(parent_id, project=selected)
+        record = selected.vault.get(record_id)
+        record = selected.vault.reparent(record_id, parent_id)
         return _data(record)
 
     @server.tool()
     def record_delete(record_id: str) -> dict[str, str]:
         """Delete a record using Hiraku's relationship checks."""
-        load_record(record_id, project=selected).delete(project=selected)
+        selected.vault.delete(record_id)
         return {"deleted": record_id}
 
     @server.tool()
@@ -225,10 +224,12 @@ def create_server(project: Project | None = None) -> Any:
         """
         if ascending is not None and sort is None:
             raise ValidationError("A sort direction requires sort")
-        record = load_record(record_id, project=selected)
+        record = selected.vault.get(record_id)
         query: dict[str, Any] = {"limit": limit} if limit is not None else {}
         if sort is not None:
-            declarations = record.resolve(project=selected).values.get("metrics") or []
+            declarations = (
+                selected.vault.resolve(record.id)["values"].get("metrics") or []
+            )
             directions = {item.name: item.direction for item in declarations}
             query["sort"] = sort
             query["ascending"] = (
@@ -236,8 +237,10 @@ def create_server(project: Project | None = None) -> Any:
                 if ascending is not None
                 else directions.get(sort) != "maximize"
             )
-        found = record.resolve_tracking_backend(project=selected).list_runs(
-            record_id=None if all_records else record.id, **query
+        found = (
+            TrackingBackendFactory(selected)
+            .create(selected.tracking_backend)
+            .list_runs(record_id=None if all_records else record.id, **query)
         )
         # Runs keep their fields in read-only mappings.
         return to_jsonable_python(found, fallback=dict)
@@ -245,10 +248,14 @@ def create_server(project: Project | None = None) -> Any:
     @server.resource("hiraku://catalog", mime_type="application/json")
     def catalog() -> str:
         """Discover current records and attached source files."""
-        records = list_records(project=selected)
+        records = selected.vault.list()
         uris = [f"hiraku://records/{item.id}" for item in records]
         for record in records:
-            root = (selected.records_dir / record.path.parent.name).resolve()
+            root = (
+                record.path.parent
+                if record.path.parent != selected.records_dir
+                else selected.records_dir / record.path.stem
+            ).resolve()
             for path in sorted(root.rglob("*")):
                 if path.is_file() and path.resolve().is_relative_to(root):
                     relative = path.relative_to(root).as_posix()
@@ -263,8 +270,12 @@ def create_server(project: Project | None = None) -> Any:
 
     @server.resource("hiraku://sources/{record_id}/{source_path}")
     def source_resource(record_id: str, source_path: str) -> bytes:
-        record = load_record(record_id, project=selected)
-        root = (selected.records_dir / record.path.parent.name).resolve()
+        record = selected.vault.get(record_id)
+        root = (
+            record.path.parent
+            if record.path.parent != selected.records_dir
+            else selected.records_dir / record.path.stem
+        ).resolve()
         path = (root / unquote(source_path)).resolve()
         if not path.is_relative_to(root) or not path.is_file():
             raise ResourceError("Source must be a file inside its record directory")
@@ -273,9 +284,9 @@ def create_server(project: Project | None = None) -> Any:
     @server.prompt()
     def propose_implementation(record_id: str, related_record_ids: str = "") -> str:
         """Ground a proposal in a record and comma-separated related records."""
-        record = load_record(record_id, project=selected)
+        record = selected.vault.get(record_id)
         related = [
-            load_record(identifier.strip(), project=selected)
+            selected.vault.get(identifier.strip())
             for identifier in related_record_ids.split(",")
             if identifier.strip()
         ]
@@ -498,4 +509,4 @@ def add_workflow_tools(server: MCPServer, project: Project) -> None:
 
 def _research_content(identifier: str, project: Project) -> str:
     """Read the same live representation for resources and tool attachments."""
-    return json.dumps(_data(load_record(identifier, project=project)))
+    return json.dumps(_data(project.vault.get(identifier)))

@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
+from hiraku.project import Project
 
 REPOSITORY = Path(__file__).parents[2]
 EXAMPLE = REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "digits-mlflow"
@@ -75,6 +76,8 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
                 "HEAD",
             ],
         )
+    project_config = Project.discover(project)
+    ids_by_name = {record.name: record.id for record in project_config.vault.list()}
     for record_id, alpha in (("weak-l2", 0.0001), ("strong-l2", 1.0)):
         invoke(
             runner,
@@ -113,7 +116,10 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     )
     assert len(rows) == 2
     assert (project / "mlflow.db").is_file()
-    assert {row["record_id"] for row in rows} == {"weak-l2", "strong-l2"}
+    assert {row["record_id"] for row in rows} == {
+        ids_by_name["weak-l2"],
+        ids_by_name["strong-l2"],
+    }
     assert [row["metrics"]["val/log_loss"] for row in rows] == sorted(
         row["metrics"]["val/log_loss"] for row in rows
     )
@@ -125,7 +131,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         assert row["params"]["epochs"] == "8"
         assert row["params"]["seed"] == "42"
         assert float(row["params"]["alpha"]) == (
-            0.0001 if row["record_id"] == "weak-l2" else 1.0
+            0.0001 if row["record_id"] == ids_by_name["weak-l2"] else 1.0
         )
         for metric in (
             "train/log_loss",
@@ -156,7 +162,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             ],
         ).output
     )
-    assert {row["record_id"] for row in filtered} == {"strong-l2"}
+    assert {row["record_id"] for row in filtered} == {ids_by_name["strong-l2"]}
 
 
 def test_digits_requires_provenance_before_creating_runs(tmp_path):

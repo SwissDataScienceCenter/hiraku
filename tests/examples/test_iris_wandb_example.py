@@ -11,7 +11,6 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
-from hiraku.record import load_record
 
 EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "iris-wandb"
 
@@ -135,8 +134,8 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     config = Project.discover(project)
-    root = load_record("iris", project=config)
-    assert config.tracking_backend == "wandb"
+    root = config.vault.get("iris")
+    assert config.tracking_backend == {"type": "wandb", "project": "iris-wandb"}
     assert "tracking_backend" not in root.to_dict()
 
     invoke(
@@ -155,7 +154,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "HEAD",
         ],
     )
-    record = load_record("logistic", project=config)
+    record = config.vault.get("logistic")
     assert record.commit == source_commit
     invoke(
         runner,
@@ -179,11 +178,11 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     )
     assert len(rows) == 1
     row = rows[0]
-    assert row["record_id"] == "logistic"
+    assert row["record_id"] == record.id
     assert row["commit"] == source_commit
     run_id = row["id"]
     assert row["params"]["model"] == "logistic"
-    assert row["params"]["seed"] == 42
+    assert row["params"]["seed"] == "42"
     assert row["params"]["test_size"] == 0.25
     assert row["params"]["dataset.name"] == "scikit-learn iris"
     assert row["params"]["dataset.samples"] == 150
@@ -194,7 +193,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     stored = json.loads(store.read_text(encoding="utf-8"))[0]
     assert stored["id"] == run_id
     assert stored["project"] == "iris-wandb"
-    assert stored["config"]["hiraku.record_id"] == "logistic"
+    assert stored["config"]["hiraku.record_id"] == record.id
     assert stored["config"]["hiraku.commit"] == source_commit
 
     filtered = json.loads(

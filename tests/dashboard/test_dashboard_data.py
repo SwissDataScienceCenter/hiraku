@@ -29,7 +29,7 @@ from hiraku.dashboard.data import (
 from hiraku.errors import BackendError
 from hiraku.project import Project
 from hiraku.record import Record
-from hiraku.run import Run
+from hiraku.tracking import Run, TrackingBackendFactory
 
 
 def tables(project: Project) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -68,10 +68,10 @@ def test_load_reports_unavailable_source_without_failing(
 ) -> None:
     Record.create("broken", project=project)
 
-    def resolve(self: Record, **options):
+    def resolve(self: TrackingBackendFactory, raw_config):
         raise BackendError("source offline")
 
-    monkeypatch.setattr(Record, "resolve_tracking_backend", resolve)
+    monkeypatch.setattr(TrackingBackendFactory, "create", resolve)
 
     loaded = load(project)
 
@@ -268,17 +268,17 @@ def test_find_run_and_run_text(project: Project) -> None:
     run = find_run(runs_df, "r0")
 
     assert find_run(runs_df, "missing") is None
-    # Values appear as the backend reports them; the CSV backend reports text.
+    assert "entrypoint" not in runs_df.columns
+    # Dashboard rows use the normalized Run model's numeric metric values.
     assert run_text(run) == (
         "id: r0\n"
         "record: a\n"
-        "entrypoint: train\n"
         "commit: null\n"
         "started: '2026-10-14T10:00:00+00:00'\n"
         "duration: 4.5\n"
         "params: {}\n"
         "metrics:\n"
-        "  loss: '0.9'\n"
+        "  loss: 0.9\n"
     )
 
 

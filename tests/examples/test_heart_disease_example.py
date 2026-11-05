@@ -11,7 +11,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
-from hiraku.record import load_record
+from hiraku.tracking import TrackingBackendFactory
 
 EXPECTED_METRICS = {
     "logistic-baseline": (0.32254890, 0.85526316),
@@ -75,7 +75,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
                 "HEAD",
             ],
         )
-        assert load_record(record_id).commit == source_commit
+        assert Project.discover().vault.get(record_id).commit == source_commit
         invoke(
             runner,
             [
@@ -95,12 +95,18 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         )
 
     config = Project.discover(project)
-    root = load_record("heart-disease", project=config)
-    runs = root.resolve_tracking_backend(project=config).list_runs(sort="val/log_loss")
+    config.vault.get("heart-disease")
+    runs = (
+        TrackingBackendFactory(config)
+        .create(config.tracking_backend)
+        .list_runs(sort="val/log_loss")
+    )
     assert len(runs) == 2
-    assert {run.record_id for run in runs} == set(EXPECTED_METRICS)
+    records_by_id = {record.id: record.name for record in config.vault.list()}
+    assert {records_by_id[run.record_id] for run in runs} == set(EXPECTED_METRICS)
     for run in runs:
-        expected_loss, expected_accuracy = EXPECTED_METRICS[run.record_id]
+        record_name = records_by_id[run.record_id]
+        expected_loss, expected_accuracy = EXPECTED_METRICS[record_name]
         assert float(run.metrics["val/log_loss"]) == pytest.approx(
             expected_loss, rel=1e-3
         )

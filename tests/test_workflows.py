@@ -14,7 +14,7 @@ from hiraku.cli import main
 from hiraku.errors import ValidationError, WorkflowError
 from hiraku.mcp import create_server
 from hiraku.project import Project
-from hiraku.record import Record, load_record
+from hiraku.record import Record
 from hiraku.workflows.langgraph import (
     resume_workflow,
     start_workflow,
@@ -28,6 +28,10 @@ from hiraku.workflows.session_history import (
     list_sessions,
     session_history,
 )
+
+
+def load_record(record_id: str, *, project: Project) -> Record:
+    return project.vault.get(record_id)
 
 
 def _write_workflow(project: Project, source: str) -> None:

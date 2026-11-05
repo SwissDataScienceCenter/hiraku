@@ -9,7 +9,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
-from hiraku.record import load_record
+from hiraku.tracking import TrackingBackendFactory
 
 
 def git(path: Path, *arguments: str) -> str:
@@ -75,7 +75,12 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     )
 
     config = Project.discover(project)
-    runs = load_record("baseline", project=config).runs(project=config)
+    record = config.vault.get("baseline")
+    runs = (
+        TrackingBackendFactory(config)
+        .create(config.tracking_backend)
+        .list_runs(record_id=record.id)
+    )
     assert len(runs) == 1
     assert runs[0].commit == commit
     assert runs[0].raw["git_state"] == "clean"

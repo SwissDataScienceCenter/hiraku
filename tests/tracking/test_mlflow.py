@@ -8,7 +8,7 @@ import pytest
 
 from hiraku.errors import BackendError
 from hiraku.project import Project
-from hiraku.tracking.mlflow import MLflowBackend, MLflowBackendConfig
+from hiraku.tracking import MLflowBackend, MLflowBackendConfig
 
 
 def test_mlflow_backend_config_accepts_uri_or_database() -> None:

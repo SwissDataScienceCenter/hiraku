@@ -7,8 +7,8 @@ import pytest
 
 from hiraku.errors import BackendError
 from hiraku.project import Project
-from hiraku.record import Record, load_record
-from hiraku.tracking import CSVBackend
+from hiraku.record import Record
+from hiraku.tracking import CSVBackend, TrackingBackendFactory
 
 
 def test_backend_runs_rejects_empty_record_id_before_reading_source(
@@ -49,16 +49,16 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     with mlflow.start_run() as active:
         mlflow.set_tag("unrelated", "no-record-id")
         mlflow.log_metric("loss", 4.0)
-    backend = task.resolve_tracking_backend(project=config)
+    backend = TrackingBackendFactory(config).create(config.tracking_backend)
     run = backend.list_runs()[0]
     assert len(backend.list_runs()) == 1
     assert backend.list_runs(record_id="task") == []
     assert run.id == run_id
     assert run.record_id == "exp"
     assert run.commit == "a" * 40
-    assert run.entrypoint == "train"
+    assert run.raw["tags"]["hiraku.entrypoint"] == "train"
     assert run.params == {"seed": "7"}
     assert run.metrics["loss"] == 1.0
     assert run.timestamp is not None and run.timestamp.tzinfo is UTC
     assert run.raw["tags"]["unmapped"] == "kept"
-    assert load_record("exp", project=config).runs(project=config)[0].id == run_id
+    assert backend.list_runs(record_id="exp")[0].id == run_id

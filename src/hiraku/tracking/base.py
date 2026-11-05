@@ -2,18 +2,182 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+import math
+import os
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from types import MappingProxyType
+from typing import Annotated, Any, Literal, Protocol
 
-from ..errors import BackendError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
-if TYPE_CHECKING:
-    from ..run import Run
+from ..errors import (
+    AmbiguousReferenceError,
+    BackendError,
+    RecordNotFoundError,
+    ValidationError,
+)
 
 
-class TrackingBackend(ABC):
-    """Abstract tracking backend implemented by every run-tracking adapter."""
+class Run(BaseModel):
+    """
+    Immutable normalized run returned by tracking backends.
+
+    Attributes:
+        id: Unique run ID.
+        metrics: Mapping of metric names to float values.
+        params: Mapping of parameter names to string values.
+        record_id: Optional record ID associated with the run.
+        commit: Optional commit hash associated with the run.
+        timestamp: Optional run start time as a timezone-aware UTC datetime.
+        duration: Optional run duration in seconds; ``None`` while running.
+        url: Optional URL to the run in the backend's UI.
+        raw: Backend-specific public metadata for the run.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    id: str = Field(min_length=1)
+    metrics: Mapping[str, float] = Field(default_factory=dict)
+    params: Mapping[str, str] = Field(default_factory=dict)
+    record_id: str | None = None
+    commit: str | None = None
+    timestamp: datetime | None = None
+    duration: float | None = None
+    url: str | None = None
+    raw: Mapping[str, Any] = Field(default_factory=dict, repr=False)
+
+    @field_validator("duration")
+    @classmethod
+    def validate_duration(cls, value: float | None) -> float | None:
+        if value is not None and not (math.isfinite(value) and value >= 0):
+            raise ValidationError(
+                f"Run duration must be a non-negative number of seconds: {value!r}"
+            )
+        return value
+
+    @field_validator("metrics", "params", "raw", mode="after")
+    @classmethod
+    def snapshot_mapping(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return MappingProxyType(dict(value))
+
+    @field_validator("timestamp")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+
+class TrackingBackend(Protocol):
+    """Structural contract implemented by run tracking adapters."""
+
+    backend_name: str
+
+    def list_runs(
+        self,
+        *,
+        record_id: str | None = None,
+        sort: str | None = None,
+        ascending: bool | None = None,
+        limit: int | None = None,
+    ) -> list[Run]: ...
+
+
+class CSVBackendConfig(BaseModel):
+    """Settings for reading runs from a CSV file.
+
+    Attributes:
+        type: Discriminator identifying the CSV backend.
+        path: Optional path overriding the project's default runs file.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["csv"] = "csv"
+    path: Path | None = None
+
+
+class MLflowBackendConfig(BaseModel):
+    """Connection and experiment settings for MLflow tracking.
+
+    Attributes:
+        type: Discriminator identifying the MLflow backend.
+        tracking_uri: Optional MLflow tracking server URI.
+        experiment_name: Optional experiment name to query.
+        database: Optional local MLflow database path.
+        ui_url: Optional base URL used when constructing run links.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["mlflow"] = "mlflow"
+    tracking_uri: str | None = Field(default=None, min_length=1)
+    experiment_name: str | None = Field(default=None, min_length=1)
+    database: Path | None = None
+    ui_url: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_sources(self) -> MLflowBackendConfig:
+        from .mlflow import _is_web_base
+
+        if self.tracking_uri and self.database:
+            raise BackendError(
+                "mlflow backend cannot set both tracking_uri and database"
+            )
+        if self.ui_url is not None and not _is_web_base(self.ui_url):
+            raise BackendError(
+                "mlflow ui_url must be an absolute HTTP(S) URL without "
+                "credentials, query, or fragment"
+            )
+        return self
+
+
+class WandbBackendConfig(BaseModel):
+    """Settings for querying a Weights & Biases project.
+
+    Attributes:
+        type: Discriminator identifying the W&B backend.
+        entity: Optional W&B account or team name.
+        project: W&B project name.
+        id: Optional run ID to select.
+        experiment_name: Optional experiment name.
+        notes: Optional run notes filter.
+        tags: Optional run tags filter.
+        group: Optional run group filter.
+        job_type: Optional run job type filter.
+        mode: W&B connection mode.
+        api_key: Optional API key; defaults to ``WANDB_API_KEY``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["wandb"] = "wandb"
+    entity: str | None = None
+    project: str = Field(min_length=1)
+    id: str | None = None
+    experiment_name: str | None = Field(default=None, min_length=1)
+    notes: str | None = None
+    tags: list[str] | None = None
+    group: str | None = None
+    job_type: str | None = None
+    mode: Literal["online", "offline"] = "online"
+    api_key: str | None = Field(default_factory=lambda: os.environ.get("WANDB_API_KEY"))
+
+
+BackendConfig = Annotated[
+    CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig,
+    Field(discriminator="type"),
+]
+
+
+class BackendOperations:
+    """Shared query behavior for built-in tracking adapters."""
 
     @staticmethod
     def _validate_filters(record_id: str) -> None:
@@ -143,10 +307,25 @@ class TrackingBackend(ABC):
         """
         if record_id is not None:
             self._validate_filters(record_id)
+        record_ids = {record_id} if record_id is not None else set()
+        project = getattr(self, "hiraku_project", None) or getattr(
+            self, "project", None
+        )
+        if (
+            record_id is not None
+            and project is not None
+            and not isinstance(project, str)
+        ):
+            try:
+                record = project.vault.find(record_id)
+            except (AmbiguousReferenceError, RecordNotFoundError):
+                pass
+            else:
+                record_ids.update({record.id, record.name})
         self._validate_query(sort=sort, ascending=ascending, limit=limit)
         runs = [run for run in self._read_source_runs() if run.record_id]
         if record_id is not None:
-            runs = [run for run in runs if run.record_id == record_id]
+            runs = [run for run in runs if run.record_id in record_ids]
         return self._apply_query(
             runs,
             sort=sort,
@@ -154,7 +333,6 @@ class TrackingBackend(ABC):
             limit=limit,
         )
 
-    @abstractmethod
     def _read_source_runs(self) -> list[Run]:
         """Read all runs from the configured source once."""
         raise NotImplementedError

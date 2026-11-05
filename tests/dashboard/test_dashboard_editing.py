@@ -6,6 +6,15 @@ from hiraku.project import Project
 from hiraku.record import Record
 
 
+def _save_markdown(project: Project):
+    def save(record: Record, markdown: str) -> Record:
+        record.markdown = markdown
+        project.vault.save(record)
+        return record
+
+    return save
+
+
 def test_markdown_view_opts_into_editing_explicitly(tmp_path: Path) -> None:
     pytest.importorskip("marimo")
     pytest.importorskip("altair")
@@ -13,7 +22,7 @@ def test_markdown_view_opts_into_editing_explicitly(tmp_path: Path) -> None:
 
     config = Project.create(tmp_path, install_skill=False)
     record = Record.create("notes", project=config)
-    editor = MarkdownEditor(Record.save_markdown)
+    editor = MarkdownEditor(_save_markdown(config))
 
     plain = markdown_view(record, empty_message="No notes yet.").text
     editable = markdown_view(record, editor=editor, empty_message="No notes yet.").text
@@ -36,7 +45,7 @@ def test_editor_retains_drafts_across_selection_and_cancels(tmp_path: Path) -> N
     config = Project.create(tmp_path, install_skill=False)
     first = Record.create("first", markdown="Original", project=config)
     other = Record.create("other", project=config)
-    editor = MarkdownEditor(Record.save_markdown)
+    editor = MarkdownEditor(_save_markdown(config))
     editor.render(first)
     editor._widgets[0]._update(1)
     assert type(editor._drafts[first.path].markdown) is str
@@ -48,7 +57,7 @@ def test_editor_retains_drafts_across_selection_and_cancels(tmp_path: Path) -> N
     editor._widgets[1]._update(1)
 
     assert "marimo-code-editor" not in editor.render(first).text
-    assert Record.load(first.path).markdown == "Original"
+    assert config.vault.get(first.id).markdown == "Original"
 
 
 def test_editor_saves_and_retains_failed_draft(tmp_path: Path) -> None:
@@ -58,13 +67,13 @@ def test_editor_saves_and_retains_failed_draft(tmp_path: Path) -> None:
 
     config = Project.create(tmp_path, install_skill=False)
     record = Record.create("notes", markdown="Original", project=config)
-    editor = MarkdownEditor(Record.save_markdown)
+    editor = MarkdownEditor(_save_markdown(config))
     editor._start(record)
     editor.render(record)
     editor._widgets[0]._update("Saved body")
     editor._widgets[2]._update(1)
     assert record.markdown == "Saved body"
-    assert Record.load(record.path).markdown == "Saved body"
+    assert config.vault.get(record.id).markdown == "Saved body"
     assert "marimo-code-editor" not in editor.render(record).text
 
     editor._start(record)
@@ -74,5 +83,5 @@ def test_editor_saves_and_retains_failed_draft(tmp_path: Path) -> None:
     rendered = editor.render(record).text
     assert "Retained draft" in rendered
     assert editor._drafts[record.path].error
-    assert "notes.md" in rendered
+    assert "persisted file" in rendered
     assert record.markdown == "Saved body"

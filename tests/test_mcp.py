@@ -27,7 +27,17 @@ from hiraku.cli import main  # noqa: E402
 from hiraku.errors import ValidationError  # noqa: E402
 from hiraku.mcp import WorkflowApproval, create_server  # noqa: E402
 from hiraku.project import Project  # noqa: E402
-from hiraku.record import Record, load_record  # noqa: E402
+from hiraku.record import Record  # noqa: E402
+
+
+def load_record(record_id: str, *, project: Project) -> Record:
+    return project.vault.get(record_id)
+
+
+def list_records(*, project: Project) -> list[Record]:
+    return project.vault.list()
+
+
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow  # noqa: E402
 from hiraku.workflows.langgraph import (  # noqa: E402
     start_workflow,
@@ -41,24 +51,22 @@ def test_tools_and_validation(tmp_path: Path) -> None:
     server = create_server(config)
 
     async def exercise() -> None:
-        async def call(name: str, **args):
-            print(f"calling {name}", flush=True)
-            return await server.call_tool(name, args)
+        async def call(tool_name: str, **args):
+            return await server.call_tool(tool_name, args)
 
         await call(
             "record_create",
-            record_id="root",
+            name="root",
             fields={
                 "status": "new",
             },
         )
-        await call("record_create", record_id="child", parent_id="root")
+        await call("record_create", name="child", parent_id="root")
         await call("record_update", record_id="child", fields={"status": "done"})
         assert load_record("child", project=config).status == "done"
         for name, args in [
-            ("record_create", {"record_id": "bad", "parent_id": "missing"}),
-            ("record_create", {"record_id": "../escape"}),
-            ("record_create", {"record_id": "root"}),
+            ("record_create", {"name": "bad", "parent_id": "missing"}),
+            ("record_create", {"name": "../escape"}),
             ("record_update", {"record_id": "child", "fields": {"id": "renamed"}}),
             ("record_update", {"record_id": "child", "fields": {"related_to": ["no"]}}),
             ("record_delete", {"record_id": "root"}),
@@ -70,14 +78,12 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         await call("record_delete", record_id="child")
         await call(
             "record_create",
-            record_id="sources",
+            name="sources",
             fields={"type": "context"},
             markdown="Evidence",
         )
         with pytest.raises(ToolError):
-            await call("record_create", record_id="sources")
-        with pytest.raises(ToolError):
-            await call("record_create", record_id="../escape")
+            await call("record_create", name="../escape")
         await call("record_update", record_id="sources", fields={}, markdown="Updated")
         assert load_record("sources", project=config).markdown == "Updated"
         await call("record_show", record_id="sources")
@@ -85,7 +91,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         await call("record_show", record_id="root")
         await call("record_list")
         await call("record_delete", record_id="sources")
-        assert list(config.records_dir.glob("*/sources.md")) == []
+        assert "sources" not in {record.name for record in list_records(project=config)}
 
     asyncio.run(exercise())
 
@@ -95,16 +101,16 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     server = create_server(config)
 
     async def exercise() -> None:
-        await server.call_tool("record_create", {"record_id": "demo"})
+        await server.call_tool("record_create", {"name": "demo"})
         await server.call_tool(
             "record_create",
             {
-                "record_id": "literature",
+                "name": "literature",
                 "fields": {"type": "context"},
                 "markdown": "Curated evidence",
             },
         )
-        folder = config.records_dir / "literature"
+        folder = load_record("literature", project=config).path.parent
         (folder / "papers").mkdir()
         pdf = b"%PDF-1.4\nsource bytes"
         (folder / "papers" / "paper one.pdf").write_bytes(pdf)
@@ -152,7 +158,7 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
     server = create_server(config)
 
     async def exercise() -> None:
-        await server.call_tool("record_create", {"record_id": "demo"})
+        await server.call_tool("record_create", {"name": "demo"})
         result = await server.call_tool(
             "execute",
             {

@@ -10,7 +10,6 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
-from hiraku.record import load_record
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import start_workflow, workflow_status
 
@@ -116,7 +115,7 @@ def test_cli_uses_workflow_session_ids_for_resume_and_status(runner: CliRunner) 
 def children(parent: str) -> list[Any]:
     config = Project.discover()
     return sorted(
-        load_record(parent, project=config).children(project=config),
+        config.vault.children(parent),
         key=lambda item: item.id,
     )
 

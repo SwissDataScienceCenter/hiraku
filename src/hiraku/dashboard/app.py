@@ -27,7 +27,6 @@ with app.setup:
     from hiraku.dashboard import components as hc
     from hiraku.dashboard import data as hd
     from hiraku.project import Project
-    from hiraku.record import Record
 
 
 @app.cell
@@ -142,10 +141,16 @@ def record_navigation(dashboard_data, select_key, selected_record):
 
 
 @app.cell
-def record_editor():
+def record_editor(project_context):
     get_editor_revision, _set_editor_revision = mo.state(0, allow_self_loops=True)
+
+    def save_markdown(record, markdown):
+        record.markdown = markdown
+        project_context.vault.save(record)
+        return record
+
     markdown_editor = hc.MarkdownEditor(
-        on_save=Record.save_markdown,
+        on_save=save_markdown,
         on_change=lambda: _set_editor_revision(lambda revision: revision + 1),
     )
     return get_editor_revision, markdown_editor

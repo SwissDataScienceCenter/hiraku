@@ -10,7 +10,7 @@ import pytest
 
 from hiraku import Project
 from hiraku.execution import execute_command
-from hiraku.record import load_record
+from hiraku.tracking import TrackingBackendFactory
 
 
 @pytest.fixture
@@ -40,7 +40,11 @@ def test_digits_refuses_existing_output_and_partial_export(
 
 def test_bundled_digits_database_is_portable(generator, tmp_path):
     Project.create(tmp_path, example="digits-mlflow", results=True, install_skill=False)
-    generator["validate_database"](tmp_path / "mlflow.db")
+    project = Project.discover(tmp_path)
+    ids_by_name = {record.name: record.id for record in project.vault.list()}
+    assert project.active_record == "weak-l2"
+    assert project.active_record_id == ids_by_name["weak-l2"]
+    generator["validate_database"](tmp_path / "mlflow.db", ids_by_name)
     assert not (tmp_path / "generate_results.py").exists()
     with sqlite3.connect(tmp_path / "mlflow.db") as db:
         for (uri,) in db.execute("SELECT artifact_uri FROM runs"):
@@ -59,8 +63,8 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
     dashboard = load(Project.discover(tmp_path))
     assert dashboard.errors == []
     assert Counter(run.record_id for run in dashboard.runs) == {
-        "weak-l2": 3,
-        "strong-l2": 3,
+        ids_by_name["weak-l2"]: 3,
+        ids_by_name["strong-l2"]: 3,
     }
     assert set(dashboard.sources.values()) == {"mlflow"}
 
@@ -79,8 +83,8 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         "hiraku.yml",
         "mlflow.db",
         *(
-            f"hiraku/records/digits/{name}.md"
-            for name in ("digits", "weak-l2", "strong-l2")
+            record.path.relative_to(output).as_posix()
+            for record in Project.discover(output).vault.list()
         ),
     }
     config = Project.create(
@@ -90,10 +94,14 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
 
     shutil.copytree(output, config.root, dirs_exist_ok=True)
     config = Project.discover(config.root)
-    weak = load_record("weak-l2", project=config)
-    backend = weak.resolve_tracking_backend(project=config)
+    weak = config.vault.get("weak-l2")
+    backend = TrackingBackendFactory(config).create(config.tracking_backend)
     runs = backend.list_runs()
-    assert Counter(r.record_id for r in runs) == {"weak-l2": 3, "strong-l2": 3}
+    ids_by_name = {record.name: record.id for record in config.vault.list()}
+    assert Counter(r.record_id for r in runs) == {
+        ids_by_name["weak-l2"]: 3,
+        ids_by_name["strong-l2"]: 3,
+    }
     import subprocess
 
     for arguments in (

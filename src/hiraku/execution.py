@@ -11,7 +11,6 @@ from typing import Any
 from .errors import ExecutionError, GitError, NoActiveRecordError, ValidationError
 from .git import GitRepository
 from .project import Project
-from .record import load_record
 
 
 def validate_command(value: Any) -> list[str] | None:
@@ -42,7 +41,7 @@ def execute_command(
     selected_record = record_id or selected.active_record_id
     if selected_record is None:
         raise NoActiveRecordError("Select a record with --record or hiraku record set")
-    record = load_record(selected_record, project=selected)
+    record = selected.vault.find(selected_record)
     if isinstance(command, str | bytes):
         raise ValidationError("command must be an argv sequence, not a shell string")
     if command is None or isinstance(command, str | bytes):
@@ -70,16 +69,19 @@ def execute_command(
         "HIRAKU_COMMIT",
         "HIRAKU_GIT_STATE",
         "HIRAKU_SOURCE_DIGEST",
-        "HIRAKU_ENTRYPOINT",
     }
     if reserved.intersection(additions):
         raise ValidationError("Environment cannot override reserved run attribution")
 
-    tracking_spec = record.tracking_backend_spec(project=selected)
-    if tracking_spec.get("type") == "wandb":
+    raw_tracking_spec = selected.tracking_backend
+    tracking_spec = (
+        {"type": raw_tracking_spec}
+        if isinstance(raw_tracking_spec, str)
+        else raw_tracking_spec
+    )
+    tracking_type = tracking_spec.get("type", tracking_spec.get("name"))
+    if tracking_type == "wandb":
         wandb_project = tracking_spec.get("project")
-        if wandb_project is None:
-            wandb_project = selected.root.name
         if (
             isinstance(wandb_project, str)
             and wandb_project
@@ -87,10 +89,10 @@ def execute_command(
             and "WANDB_PROJECT" not in os.environ
         ):
             additions["WANDB_PROJECT"] = wandb_project
-    elif tracking_spec.get("type") == "mlflow":
-        from .tracking import create_backend
+    elif tracking_type == "mlflow":
+        from .tracking import TrackingBackendFactory
 
-        backend = create_backend(tracking_spec, selected)
+        backend = TrackingBackendFactory(selected).create(tracking_spec)
         if (
             "MLFLOW_TRACKING_URI" not in additions
             and "MLFLOW_TRACKING_URI" not in os.environ

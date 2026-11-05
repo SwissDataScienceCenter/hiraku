@@ -27,19 +27,33 @@ from .errors import (
 from .io import atomic_write, dump_yaml, load_yaml_mapping
 
 if TYPE_CHECKING:
-    from .record import Record
+    from .record import Record, Vault
 
 
 def _validate_tracking_backend(value: str | dict[str, Any]) -> str | dict[str, Any]:
     """Validate a backend setting and preserve its original representation."""
-    from .tracking.factory import validate_backend_config
+    from .tracking.factory import TrackingBackendFactory
 
-    validate_backend_config(value)
+    TrackingBackendFactory.validate(value)
     return value
 
 
 class Project(BaseModel):
-    """A project, its persisted settings, and its managed files."""
+    """
+    A project, its persisted settings, and its managed files.
+
+    Attributes:
+        root: Absolute project root directory.
+        hiraku_dir_name: Name of the managed directory for Hiraku data.
+        default_dispatch: Optional name of the default dispatcher.
+        tracking_backend: Name or configuration of the tracking backend.
+        active_record: Optional name of the active research record.
+        active_record_id: Optional stable ID of the active research record.
+
+    Args:
+        root: Project directory containing the settings file and managed data.
+        **data: Persisted project settings to validate and load.
+    """
 
     model_config = ConfigDict(
         extra="forbid",
@@ -48,11 +62,18 @@ class Project(BaseModel):
     )
 
     root: Path = Field(exclude=True)
-    hiraku_dir_name: str = Field(default="hiraku", alias="hiraku_dir", min_length=1)
-    default_dispatch: str | None = Field(default=None, min_length=1)
+    hiraku_dir_name: str = Field(
+        default="hiraku",
+        alias="hiraku_dir",
+        min_length=1,
+        exclude=True,
+        frozen=True,
+    )
+    default_dispatch: str | None = Field(default=None, min_length=1, exclude=True)
     tracking_backend: Annotated[
         str | dict[str, Any], AfterValidator(_validate_tracking_backend)
     ] = "csv"
+    active_record: str | None = None
     active_record_id: str | None = None
 
     def __init__(self, root: Path | str, **data: Any) -> None:
@@ -161,6 +182,13 @@ class Project(BaseModel):
         return self.hiraku_dir / "records"
 
     @property
+    def vault(self) -> Vault:
+        """Return this project's filesystem-backed record collection."""
+        from .record import Vault
+
+        return Vault(dir=self.records_dir)
+
+    @property
     def workflows_dir(self) -> Path:
         """Return the directory containing installed workflows."""
         return self.hiraku_dir / "workflows"
@@ -175,6 +203,7 @@ class Project(BaseModel):
         return {
             "hiraku_dir": self.hiraku_dir_name,
             "default_dispatch": self.default_dispatch,
+            "active_record": self.active_record,
             "active_record_id": self.active_record_id,
             "tracking_backend": self.tracking_backend,
         }
@@ -198,17 +227,17 @@ class Project(BaseModel):
         Args:
             record: A record object or its stable ID.
         """
-        from .record import Record, load_record
+        from .record import Record
 
-        selected = load_record(
-            record.id if isinstance(record, Record) else record, project=self
-        )
+        selected = self.vault.find(record.id if isinstance(record, Record) else record)
+        self.active_record = selected.name
         self.active_record_id = selected.id
         self.save()
 
     def clear_active_record(self) -> None:
         """Clear the active record and persist the project settings."""
         self.active_record_id = None
+        self.active_record = None
         self.save()
 
     @classmethod
@@ -323,11 +352,15 @@ class Project(BaseModel):
 
             with as_file(resources / "workflows") as source:
                 shutil.copytree(source, project.workflows_dir, dirs_exist_ok=True)
+
+            # Install the bundled Hiraku skills
             if install_skill:
                 with as_file(resources / "skills" / "hiraku") as source:
                     for destination in (
-                        root / ".agents/skills/hiraku",
-                        root / ".claude/skills/hiraku",
+                        root / ".agents/skills/hiraku",  # Generic agents
+                        root / ".claude/skills/hiraku",  # Claude Code
+                        root / ".pi/skills/hiraku",  # Pi Agent
+                        root / ".codex/skills/hiraku",  # Codex
                     ):
                         shutil.copytree(source, destination, dirs_exist_ok=True)
 
@@ -339,12 +372,16 @@ class Project(BaseModel):
                         dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("hiraku.yml"),
                     )
+
+            # Copy the example's result generator if requested
             if with_generator:
                 generator = resources / "examples" / example / "generate_results.py"
                 with as_file(generator) as source:
                     shutil.copy2(source, root / "generate_results.py")
 
             project.save()
+
+            # Install the MCP server configuration in supported project agent configs
             if install_mcp:
                 project._install_mcp_configs()
             return project

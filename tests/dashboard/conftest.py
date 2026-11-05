@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from hiraku.project import Project
-from hiraku.record import Record
 
 # (run ID, record, minute started or None, seconds taken or None, loss)
 RUNS = [
@@ -23,15 +22,15 @@ RUNS = [
 def project(tmp_path: Path) -> Project:
     """A CSV-tracked tree ``root -> {a -> a1, b}`` with attributed runs."""
     config = Project.create(tmp_path, install_skill=False)
-    Record.create(
+    root = config.vault.create(
         "root",
+        id="root",
         type="task",
         metrics=[{"name": "loss", "direction": "minimize"}],
-        project=config,
     )
-    Record.create("a", parent_id="root", project=config)
-    Record.create("b", parent_id="root", project=config)
-    Record.create("a1", parent_id="a", project=config)
+    a = config.vault.create("a", id="a", parent_id=root.id)
+    config.vault.create("b", id="b", parent_id=root.id)
+    config.vault.create("a1", id="a1", parent_id=a.id)
     with (tmp_path / "runs.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(

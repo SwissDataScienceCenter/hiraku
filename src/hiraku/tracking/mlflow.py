@@ -3,53 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any
 from urllib.parse import quote, urlsplit
-
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..errors import BackendError
 from ..project import Project
-from .base import TrackingBackend
-
-if TYPE_CHECKING:
-    from ..run import Run
+from .base import BackendOperations, MLflowBackendConfig, Run
 
 
-class MLflowBackendConfig(BaseModel):
-    """Validated options for the MLflow tracking backend.
-
-    Attributes:
-        type: Backend discriminator; must be "mlflow".
-        tracking_uri: Optional remote MLflow URI.
-        experiment_name: MLflow experiment; defaults to the project directory
-            name.
-        database: Optional project-relative SQLite database path.
-        ui_url: Optional absolute HTTP(S) base URL of the MLflow web UI.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    type: Literal["mlflow"] = "mlflow"
-    tracking_uri: str | None = Field(default=None, min_length=1)
-    experiment_name: str | None = Field(default=None, min_length=1)
-    database: Path | None = None
-    ui_url: str | None = Field(default=None, min_length=1)
-
-    @model_validator(mode="after")
-    def validate_sources(self) -> MLflowBackendConfig:
-        if self.tracking_uri and self.database:
-            raise BackendError(
-                "mlflow backend cannot set both tracking_uri and database"
-            )
-        if self.ui_url is not None and not _is_web_base(self.ui_url):
-            raise BackendError(
-                "mlflow ui_url must be an absolute HTTP(S) URL without "
-                "credentials, query, or fragment"
-            )
-        return self
-
-
-class MLflowBackend(TrackingBackend):
+class MLflowBackend(BackendOperations):
     """Normalize native MLflow runs without importing MLflow eagerly.
 
     Args:
@@ -117,8 +79,6 @@ class MLflowBackend(TrackingBackend):
         )
 
     def _read_source_runs(self) -> list[Run]:
-        from ..run import Run
-
         if self._database is not None and not self._database.is_file():
             raise BackendError(
                 f"mlflow backend database is not an existing file: {self._database}"
@@ -166,7 +126,6 @@ class MLflowBackend(TrackingBackend):
                 known_tags = {
                     "hiraku.record_id",
                     "hiraku.commit",
-                    "hiraku.entrypoint",
                 }
                 raw = {
                     "status": info.status,
@@ -183,7 +142,6 @@ class MLflowBackend(TrackingBackend):
                         id=info.run_id,
                         record_id=native_record,
                         commit=tags.get("hiraku.commit"),
-                        entrypoint=tags.get("hiraku.entrypoint"),
                         timestamp=self._timestamp(
                             info.start_time,
                             backend="mlflow",

@@ -8,7 +8,7 @@ import pytest
 from hiraku.errors import BackendError
 from hiraku.project import Project
 from hiraku.record import Record
-from hiraku.tracking.csv import CSVBackend, CSVBackendConfig
+from hiraku.tracking import CSVBackend, CSVBackendConfig, TrackingBackendFactory
 
 
 def test_csv_backend_config_is_validated() -> None:
@@ -23,7 +23,7 @@ def test_csv_tracking_run_and_historical_entrypoint_attribution(tmp_path: Path) 
     )
     runs = {run.id: run for run in CSVBackend(config).list_runs()}
     assert runs["new"].id == "new"
-    assert runs["old"].entrypoint == "train"
+    assert runs["old"].raw["entrypoint"] == "train"
 
 
 def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
@@ -42,7 +42,7 @@ def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
     )
     assert [run.id for run in runs] == ["b", "a"]
     assert runs[0].timestamp is not None and runs[0].timestamp.tzinfo is UTC
-    assert runs[0].metrics == {"accuracy": "0.9"}
+    assert runs[0].metrics == {"accuracy": 0.9}
     assert runs[0].params == {"seed": "2"}
     assert runs[0].raw == {"note": "raw"}
 
@@ -97,7 +97,11 @@ def test_csv_backend_resolves_record_path_from_project_root(tmp_path: Path) -> N
     path.parent.mkdir()
     path.write_text("id,record_id\na,iris\n", encoding="utf-8")
 
-    runs = record.runs(project=config)
+    runs = (
+        TrackingBackendFactory(config)
+        .create(config.tracking_backend)
+        .list_runs(record_id=record.id)
+    )
 
     assert [run.id for run in runs] == ["a"]
 

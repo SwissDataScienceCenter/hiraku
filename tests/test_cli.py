@@ -137,6 +137,20 @@ def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
     assert "4.25" in table
 
 
+def test_runs_json_keeps_legacy_fields_only_in_raw(tmp_path: Path, monkeypatch) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    project.vault.create("root", id="root")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "runs.csv").write_text("id,record_id,entrypoint\na,root,train\n")
+
+    result = invoke("runs", "--record", "root", "--json")
+
+    assert result.exit_code == 0
+    run = json.loads(result.output)[0]
+    assert "entrypoint" not in run
+    assert run["raw"]["entrypoint"] == "train"
+
+
 def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
     Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)

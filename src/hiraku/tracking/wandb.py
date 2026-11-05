@@ -2,58 +2,19 @@
 
 from __future__ import annotations
 
-import os
-from typing import TYPE_CHECKING, Any, Literal
-
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, Literal
 
 from ..errors import BackendError
-from ..project import Project
-from .base import TrackingBackend
-
-if TYPE_CHECKING:
-    from ..run import Run
+from .base import BackendOperations, Run, WandbBackendConfig
 
 
-class WandbBackendConfig(BaseModel):
-    """Validated options for the W&B tracking backend.
-
-    Attributes:
-        type: Backend discriminator; must be "wandb".
-        entity: Optional W&B entity.
-        project: W&B project; defaults to the Hiraku project directory name.
-        id: Optional W&B run ID.
-        experiment_name: Optional W&B experiment name.
-        notes: Optional W&B run notes.
-        tags: Optional W&B run tags.
-        group: Optional W&B run group.
-        job_type: Optional W&B run job type.
-        mode: W&B run mode; defaults to "online".
-        api_key: Optional W&B API key. Defaults to the WANDB_API_KEY env variable.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    type: Literal["wandb"] = "wandb"
-    entity: str | None = None
-    project: str | None = Field(default=None, min_length=1)
-    id: str | None = None
-    experiment_name: str | None = Field(default=None, min_length=1)
-    notes: str | None = None
-    tags: list[str] | None = None
-    group: str | None = None
-    job_type: str | None = None
-    mode: Literal["online", "offline"] = "online"
-    api_key: str | None = Field(default_factory=lambda: os.environ.get("WANDB_API_KEY"))
-
-
-class WandbBackend(TrackingBackend):
+class WandbBackend(BackendOperations):
     """Normalize native W&B runs without importing W&B eagerly.
 
     Args:
-        hiraku_project: The Hiraku project.
+        project: W&B project name.
         settings: Pre-validated W&B settings used by the factory.
         entity: Optional W&B entity.
-        project: W&B project; defaults to the Hiraku project directory name.
         id: Optional W&B run ID.
         experiment_name: Optional W&B experiment name.
         notes: Optional W&B run notes.
@@ -66,11 +27,10 @@ class WandbBackend(TrackingBackend):
 
     def __init__(
         self,
-        hiraku_project: Project,
+        project: str,
         *,
         settings: WandbBackendConfig | None = None,
         entity: str | None = None,
-        project: str | None = None,
         id: str | None = None,
         experiment_name: str | None = None,
         notes: str | None = None,
@@ -83,10 +43,9 @@ class WandbBackend(TrackingBackend):
         """Create an W&B adapter from validated settings.
 
         Args:
-            hiraku_project: The Hiraku project.
             settings: Pre-validated W&B settings used by the factory.
             entity: Optional W&B entity.
-            project: W&B project; defaults to the Hiraku project directory name.
+            project: Explicit W&B project name.
             id: Optional W&B run ID.
             experiment_name: Optional W&B experiment name.
             notes: Optional W&B run notes.
@@ -115,7 +74,6 @@ class WandbBackend(TrackingBackend):
         elif any(
             [
                 entity is not None,
-                project is not None,
                 id is not None,
                 experiment_name is not None,
                 notes is not None,
@@ -129,13 +87,12 @@ class WandbBackend(TrackingBackend):
             raise BackendError("Pass W&B backend settings or options, not both")
         if not isinstance(settings, WandbBackendConfig):
             raise BackendError("W&B backend settings must be WandbBackendConfig")
-        self.project = hiraku_project
+        if project != settings.project:
+            raise BackendError("W&B project must match backend settings")
         self.entity = settings.entity
-        self.project = settings.project or hiraku_project.root.name
+        self.project = settings.project
         if not self.project:
-            raise BackendError(
-                "W&B project is required when the Hiraku root has no directory name"
-            )
+            raise BackendError("W&B project must be explicitly configured")
         self.id = settings.id
         self.experiment_name = settings.experiment_name
         self.notes = settings.notes
@@ -209,23 +166,27 @@ class WandbBackend(TrackingBackend):
 
     def _normalize_run(self, run: Any) -> Run:
         """Convert one W&B public run object into Hiraku's normalized model."""
-        from ..run import Run
-
         config = self._run_config(run)
         record_id = config.get("hiraku.record_id")
         commit = config.get("hiraku.commit")
+        raw = self._run_raw(run)
+        summary = dict(run.summary or {})
+        metrics = {
+            key: value
+            for key, value in summary.items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
         return Run(
             id=run.id,
-            metrics=dict(run.summary or {}),
-            params=self._run_params(run),
+            metrics=metrics,
+            params={key: str(value) for key, value in self._run_params(run).items()},
             record_id=record_id,
             commit=commit,
             timestamp=run.created_at,
             # W&B keeps a run's wall-clock seconds in the ``_runtime`` summary key.
-            duration=(run.summary or {}).get("_runtime"),
-            entrypoint=config.get("hiraku.entrypoint"),
+            duration=summary.get("_runtime"),
             url=run.url,
-            raw=self._run_raw(run),
+            raw=raw,
         )
 
     def _read_source_runs(self) -> list[Run]:

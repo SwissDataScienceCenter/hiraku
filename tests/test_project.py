@@ -19,8 +19,16 @@ from hiraku.errors import (
     ValidationError,
 )
 from hiraku.project import Project
-from hiraku.record import Record, list_records, load_record
-from hiraku.tracking import CSVBackend
+from hiraku.record import Record
+from hiraku.tracking import CSVBackend, TrackingBackendFactory
+
+
+def load_record(record_id: str, *, project: Project) -> Record:
+    return project.vault.get(record_id)
+
+
+def list_records(*, project: Project) -> list[Record]:
+    return project.vault.list()
 
 
 def test_project_create_can_skip_mcp_configuration(tmp_path: Path) -> None:
@@ -249,7 +257,7 @@ def test_config_persists_active_record(tmp_path: Path) -> None:
 
     assert config.active_record_id == second.id
     config.set_active_record(child)
-    assert config.active_record_id == "trial"
+    assert config.active_record_id == child.id
     config.clear_active_record()
     assert config.active_record_id is None
     assert Project.load(config.path).active_record_id is None
@@ -261,8 +269,8 @@ def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
     config.set_active_record(first)
 
     assert config.path == tmp_path / "hiraku.yml"
-    assert "active_record_id: first" in config.path.read_text()
-    assert Project.load(config.path).active_record_id == "first"
+    assert f"active_record_id: {first.id}" in config.path.read_text()
+    assert Project.load(config.path).active_record_id == first.id
 
 
 def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None:
@@ -327,8 +335,11 @@ def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
         "database": "mlflow.db",
         "experiment_name": "hiraku-digits",
     }
-    root = Record.load(config.records_dir / "digits" / "digits.md")
-    assert root.resolve_tracking_backend(project=config).backend_name == "mlflow"
+    assert config.vault.get("digits").id == "digits"
+    assert (
+        TrackingBackendFactory(config).create(config.tracking_backend).backend_name
+        == "mlflow"
+    )
 
 
 def test_results_override_base_files(tmp_path: Path, monkeypatch):
@@ -497,7 +508,7 @@ verify the record.""",
     tasks = list_records(project=config)
     assert len(tasks) == 1, agent_output
     task = tasks[0]
-    assert task.id == "heart-disease"
+    assert task.name == "heart-disease"
     assert task.goal is not None
     goal = task.goal.lower()
     assert "predictive" in goal
@@ -536,7 +547,7 @@ Bind it to the current commit. Only create and verify the record; do not run it.
     experiments = task.children(project=config)
     assert len(experiments) == 1, agent_output
     experiment = experiments[0]
-    assert experiment.id == "logistic-baseline"
+    assert experiment.name == "logistic-baseline"
     assert experiment.summary == "Logistic regression baseline"
     assert experiment.hypothesis == (
         "Regularized logistic regression provides a calibrated baseline"
@@ -567,7 +578,9 @@ report its tracked validation metrics. Do not create or update other records."""
     assert task.path.read_bytes() == task_before, agent_output
     current = load_record(experiment.id, project=config)
     assert current.path.read_bytes() == experiment_before
-    assert [item.id for item in task.children(project=config)] == ["logistic-baseline"]
+    assert [item.name for item in task.children(project=config)] == [
+        "logistic-baseline"
+    ]
     runs = CSVBackend(config).list_runs(
         record_id=experiment.id,
     )

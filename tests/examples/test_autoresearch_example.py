@@ -13,7 +13,6 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
-from hiraku.record import load_record
 from hiraku.workflows.langgraph import start_workflow, workflow_ids
 
 REPOSITORY = Path(__file__).parents[2]
@@ -165,7 +164,7 @@ def test_autoresearch_is_an_overlay() -> None:
 
 def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     project, _ = create_overlay_project(tmp_path, monkeypatch)
-    task = load_record("sep10", project=Project.discover(project))
+    task = Project.discover(project).vault.get("sep10")
 
     assert (project / "README.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "README.md"
@@ -197,7 +196,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
     assert (project / "task.md").read_text(encoding="utf-8") == task_template
     assert task.markdown == task_template
-    assert task.path == project / "hiraku/records/sep10/sep10.md"
+    assert task.path == (project / "hiraku/records" / task.id / f"sep10--{task.id}.md")
     assert task.branch == "autoresearch/sep10"
     assert task.goal == (
         "Find the best architecture, optimizer, and hyperparameters to minimize "
@@ -259,7 +258,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     )
     assert len(rows) == 1
     row = rows[0]
-    assert row["record_id"] == "cpu-test"
+    assert row["record_id"] == Project.discover(project).vault.get("cpu-test").id
     assert row["commit"] == commit
     assert row["raw"]["git_state"] == "clean"
     assert row["raw"]["status"] == "finished"

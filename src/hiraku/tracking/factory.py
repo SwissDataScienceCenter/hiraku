@@ -3,58 +3,64 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Any
 
-from pydantic import Field, TypeAdapter
+from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 
 from ..errors import BackendError
 from ..project import Project
-from .base import TrackingBackend
-from .csv import CSVBackend, CSVBackendConfig
-from .mlflow import MLflowBackend, MLflowBackendConfig
-from .wandb import WandbBackend, WandbBackendConfig
+from .base import (
+    BackendConfig,
+    CSVBackendConfig,
+    MLflowBackendConfig,
+    WandbBackendConfig,
+)
+from .csv import CSVBackend
+from .mlflow import MLflowBackend
+from .wandb import WandbBackend
 
-BackendConfig = Annotated[
-    CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig,
-    Field(discriminator="type"),
-]
-_BACKEND_CONFIG = TypeAdapter(BackendConfig)
 
+class TrackingBackendFactory:
+    """Create adapters from validated project settings."""
 
-def validate_backend_config(
-    specification: str | Mapping[str, Any],
-) -> CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig:
-    """Parse and validate a built-in backend name or configuration mapping."""
-    if isinstance(specification, str):
-        raw: dict[str, Any] = {"type": specification}
-    elif isinstance(specification, Mapping):
-        raw = dict(specification)
-        if "type" not in raw and "name" in raw:
-            raw["type"] = raw.pop("name")
-    else:
-        raise BackendError("Tracking backend must be a name or mapping")
+    _config_adapter = TypeAdapter(BackendConfig)
 
-    try:
-        parsed = _BACKEND_CONFIG.validate_python(raw)
-    except (PydanticValidationError, TypeError, ValueError) as exc:
-        name = raw.get("type", raw.get("name"))
+    def __init__(self, project: Project) -> None:
+        self.project = project
+
+    @staticmethod
+    def validate(
+        specification: str | Mapping[str, Any],
+    ) -> CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig:
+        """Parse and validate a built-in backend name or configuration mapping."""
+        if isinstance(specification, str):
+            raw: dict[str, Any] = {"type": specification}
+        elif isinstance(specification, Mapping):
+            raw = dict(specification)
+            if "type" not in raw and "name" in raw:
+                raw["type"] = raw.pop("name")
+        else:
+            raise BackendError("Tracking backend must be a name or mapping")
+
+        try:
+            return TrackingBackendFactory._config_adapter.validate_python(raw)
+        except (PydanticValidationError, TypeError, ValueError) as exc:
+            name = raw.get("type", raw.get("name"))
+            raise BackendError(
+                f"Invalid tracking backend configuration {name!r}: {exc}"
+            ) from exc
+
+    def create(
+        self, raw_config: str | Mapping[str, Any]
+    ) -> CSVBackend | MLflowBackend | WandbBackend:
+        validated = self.validate(raw_config)
+        if isinstance(validated, CSVBackendConfig):
+            return CSVBackend(self.project, settings=validated)
+        if isinstance(validated, MLflowBackendConfig):
+            return MLflowBackend(self.project, settings=validated)
+        if isinstance(validated, WandbBackendConfig):
+            return WandbBackend(validated.project, settings=validated)
         raise BackendError(
-            f"Invalid tracking backend configuration {name!r}: {exc}"
-        ) from exc
-
-    return parsed
-
-
-def create_backend(
-    specification: str | Mapping[str, Any], project: Project
-) -> TrackingBackend:
-    """Create a built-in backend from a name or validated configuration mapping."""
-    parsed = validate_backend_config(specification)
-    if isinstance(parsed, CSVBackendConfig):
-        return CSVBackend(project, settings=parsed)
-    if isinstance(parsed, MLflowBackendConfig):
-        return MLflowBackend(project, settings=parsed)
-    if isinstance(parsed, WandbBackendConfig):
-        return WandbBackend(project, settings=parsed)
-    raise BackendError(f"Unsupported tracking backend configuration: {type(parsed)}")
+            f"Unsupported tracking backend configuration: {type(validated)}"
+        )

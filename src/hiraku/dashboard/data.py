@@ -21,8 +21,8 @@ import pyarrow as pa
 
 from ..io import dump_yaml
 from ..project import Project
-from ..record import Record, list_records
-from ..run import Run
+from ..record import Record
+from ..tracking import Run, TrackingBackendFactory
 
 _LAST = datetime.max.replace(tzinfo=UTC)
 
@@ -33,7 +33,6 @@ RUN_COLUMNS = (
     "source",
     "started",
     "duration",
-    "entrypoint",
     "commit",
     "url",
 )
@@ -62,10 +61,10 @@ class ProjectRuns:
 
 def load(project: Project) -> ProjectRuns:
     """Read all records and query each distinct tracking source once."""
-    records = list_records(project=project)
+    records = project.vault.list()
     by_source: dict[str, Record] = {}
     for record in records:
-        key = repr(record.tracking_backend_spec(project=project))
+        key = repr(project.tracking_backend)
         by_source.setdefault(key, record)
 
     known = {record.id for record in records}
@@ -74,7 +73,7 @@ def load(project: Project) -> ProjectRuns:
     errors: list[str] = []
     for record in by_source.values():
         try:
-            backend = record.resolve_tracking_backend(project=project)
+            backend = TrackingBackendFactory(project).create(project.tracking_backend)
             # Without a record ID, the source lists every attributed run.
             found = backend.list_runs()
         except Exception as exc:
@@ -133,7 +132,6 @@ def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
             "source": project.sources.get(run.id),
             "started": run.timestamp,
             "duration": run.duration,
-            "entrypoint": run.entrypoint,
             "commit": run.commit,
             "url": run.url,
             **{f"metric.{name}": value for name, value in run.metrics.items()},
@@ -270,7 +268,6 @@ def _row(key: str, depth: int, label: str, item: Mapping[str, Any]) -> dict[str,
         "depth": depth,
         "Record / run": label,
         "Type": item.get("type") or "",
-        "Entrypoint": item.get("entrypoint") or "",
         "Commit": (item.get("commit") or "")[:7],
         "Started": started.strftime("%Y-%m-%d %H:%M:%S") if started else "",
         "Duration": format_duration(item.get("duration")),
@@ -331,7 +328,6 @@ def run_text(run: Mapping[str, Any]) -> str:
         {
             "id": run["run"],
             "record": run.get("record"),
-            "entrypoint": run.get("entrypoint"),
             "commit": run.get("commit"),
             "started": started.isoformat() if started else None,
             "duration": run.get("duration"),

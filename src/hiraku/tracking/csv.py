@@ -4,32 +4,13 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
-
-from pydantic import BaseModel, ConfigDict
 
 from ..errors import BackendError, ValidationError
 from ..project import Project
-from .base import TrackingBackend
-
-if TYPE_CHECKING:
-    from ..run import Run
+from .base import BackendOperations, CSVBackendConfig, Run
 
 
-class CSVBackendConfig(BaseModel):
-    """Validated options for the CSV tracking backend.
-
-    Attributes:
-        type: Backend discriminator; must be "csv".
-        path: Optional CSV path override.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    type: Literal["csv"] = "csv"
-    path: Path | None = None
-
-
-class CSVBackend(TrackingBackend):
+class CSVBackend(BackendOperations):
     """Normalize runs from a project CSV file.
 
     Args:
@@ -43,7 +24,6 @@ class CSVBackend(TrackingBackend):
         "commit",
         "timestamp",
         "duration",
-        "entrypoint",
         "url",
     }
 
@@ -79,12 +59,18 @@ class CSVBackend(TrackingBackend):
             )
 
     def _read_source_runs(self) -> list[Run]:
-        from ..run import Run
-
         path = self.path or self.project.root / "runs.csv"
         if not path.exists():
             return []
         runs: list[Run] = []
+        records = self.project.vault.list()
+        record_references = {record.id: record.id for record in records}
+        names: dict[str, list[str]] = {}
+        for record in records:
+            names.setdefault(record.name, []).append(record.id)
+        record_references.update(
+            {name: ids[0] for name, ids in names.items() if len(ids) == 1}
+        )
         try:
             with path.open(newline="", encoding="utf-8") as stream:
                 reader = csv.DictReader(stream)
@@ -128,9 +114,12 @@ class CSVBackend(TrackingBackend):
                             key: (value if value != "" else None)
                             for key, value in row.items()
                         }
+                        record_reference = normalized.get("record_id")
                         run = Run(
                             id=run_id,
-                            record_id=normalized.get("record_id"),
+                            record_id=record_references.get(
+                                record_reference, record_reference
+                            ),
                             commit=normalized.get("commit"),
                             timestamp=self._timestamp(
                                 normalized.get("timestamp"),
@@ -138,7 +127,6 @@ class CSVBackend(TrackingBackend):
                                 context=f"{path} row {row_number}",
                             ),
                             duration=normalized.get("duration"),
-                            entrypoint=normalized.get("entrypoint"),
                             url=normalized.get("url"),
                             metrics=metrics,
                             params=params,

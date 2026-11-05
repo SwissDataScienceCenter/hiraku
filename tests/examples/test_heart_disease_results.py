@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
-from hiraku.record import list_records, load_record
+from hiraku.tracking import TrackingBackendFactory
 
 
 def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypatch):
@@ -30,19 +30,21 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     assert not project.joinpath("generate_results.py").exists()
     assert not project.joinpath("README.md").exists()
     config = Project.discover(project)
-    assert config.active_record_id == "random-forest"
-    records = list_records(project=config)
+    forest = config.vault.get("random-forest")
+    assert config.active_record_id == forest.id
+    assert config.active_record == forest.name
+    records = config.vault.list()
     assert len(records) == 4
-    forest = load_record("random-forest", project=config)
-    assert forest.parent_id == "heart-disease"
-    assert load_record("forest-tuning", project=config).parent_id == forest.id
+    assert forest.parent_id == config.vault.get("heart-disease").id
+    assert config.vault.get("forest-tuning").parent_id == forest.id
     assert [
-        metric.direction for metric in forest.resolve(project=config).values["metrics"]
+        metric["direction"]
+        for metric in config.vault.resolve(forest.id)["values"]["metrics"]
     ] == ["minimize", "maximize"]
-    runs = forest.resolve_tracking_backend(project=config).list_runs()
-    assert len(runs) == 9
-    assert [run.record_id for run in runs][:3] == ["logistic-baseline"] * 3
-    assert len(forest.runs(project=config)) == 3
+    backend = TrackingBackendFactory(config).create(config.tracking_backend)
+    runs = backend.list_runs(record_id=forest.id)
+    assert len(runs) == 3
+    assert len(backend.list_runs(record_id=forest.id)) == 3
     monkeypatch.chdir(project)
     result = runner.invoke(main, ["runs", "--record", forest.id, "--all", "--json"])
     assert result.exit_code == 0, result.output
@@ -64,6 +66,6 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
             "git_state": "",
         },
     )
-    runs = forest.resolve_tracking_backend(project=config).list_runs()
+    runs = TrackingBackendFactory(config).create(config.tracking_backend).list_runs()
     assert len(runs) == 10
     assert next(run for run in runs if run.id == "new-training-run").duration == 1.5
