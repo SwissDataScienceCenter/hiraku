@@ -368,9 +368,9 @@ def _invoke_and_record(
     try:
         invocation_config = _thread_config(session_id)
         if runtime_context is None:
-            graph.invoke(invocation, project=invocation_config)
+            graph.invoke(invocation, config=invocation_config)
         else:
-            graph.invoke(invocation, project=invocation_config, context=runtime_context)
+            graph.invoke(invocation, config=invocation_config, context=runtime_context)
     except Exception as exc:
         record_event(
             session_id,
@@ -402,7 +402,7 @@ def _record_snapshot(
 
 
 def _checkpoint_id(snapshot: Any) -> str | None:
-    return (snapshot.project or {}).get("configurable", {}).get("checkpoint_id")
+    return (snapshot.config or {}).get("configurable", {}).get("checkpoint_id")
 
 
 def _interrupts(snapshot: Any) -> list[dict[str, Any]]:
