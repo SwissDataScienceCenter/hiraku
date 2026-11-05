@@ -1,6 +1,5 @@
 ---
 id: digits
-parent_id: null
 related_to: []
 type: task
 status: concluded

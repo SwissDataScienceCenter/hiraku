@@ -1,6 +1,5 @@
 ---
 id: heart-disease
-parent_id: null
 related_to: []
 type: task
 status: concluded

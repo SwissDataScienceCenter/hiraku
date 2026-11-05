@@ -88,12 +88,18 @@ class Record(BaseModel):
 
     model_config = ConfigDict(extra="allow", validate_assignment=True)
 
+    # OKF fields
+    type: str | None = None
+    title: str | None = None
+    description: str | None = None
+    resource: str | None = None
+    tags: list[str] | None = None
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str = Field(min_length=1)
     markdown: Markdown = Markdown("")
     parent_id: str | None = None
     related_to: list[str] = Field(default_factory=list)
-    type: str | None = None
     commit: str | None = None
     status: str | None = None
     decision: str | None = None

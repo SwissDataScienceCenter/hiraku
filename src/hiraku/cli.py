@@ -496,6 +496,7 @@ def record_update(
     candidate = Record.model_validate({**fields, "markdown": body})
     candidate._path = record.path
     candidate._persisted_id = record._persisted_id
+    candidate._parent_path = record._parent_path
     if "related_to" in changes:
         state.project.vault.validate_relationships(candidate)
     state.project.vault.save(candidate)
