@@ -45,6 +45,7 @@ dashboard = [
 test = [
   "tqdm>=4.70.0",
   "pytest>=8",
+  "pytest-xdist>=3.8.0",
   "numpy==2.4.6",
   "pandas==2.3.3",
   "scikit-learn==1.9.0",
@@ -88,7 +89,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--tb=no"
+addopts = "-x -n auto --tb=no"
 markers = ["integration: tests requiring external services or optional integrations"]
 
 [tool.bumpversion]
