@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
+import frontmatter
 import yaml
+from frontmatter.default_handlers import YAMLHandler
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -24,11 +26,11 @@ from .errors import (
     RecordNotFoundError,
     ValidationError,
 )
-from .io import atomic_write, dump_yaml
+from .io import atomic_write
 from .markdown import Markdown
 
-_FRONT_MATTER = re.compile(r"\A---\r?\n(.*?)^---[ \t]*(?:\r?\n|\Z)", re.M | re.S)
 _SAFE_ID = re.compile(r'^[^<>:"/\\|?*\x00-\x1f\x7f]+$')
+_YAML_HANDLER = YAMLHandler()
 
 
 def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
@@ -185,7 +187,9 @@ class Record(BaseModel):
             project.set_active_record(record)
         return record
 
-    def frontmatter(self) -> dict[str, Any]:
+    @property
+    def metadata(self) -> dict[str, Any]:
+        """Return the record's serialized metadata, excluding its Markdown body."""
         try:
             return self.model_dump(
                 mode="json",
@@ -197,31 +201,37 @@ class Record(BaseModel):
         except PydanticSerializationError as exc:
             raise ValidationError(f"Unsupported YAML value: {exc}") from exc
 
-    def to_dict(self) -> dict[str, Any]:
-        return self.frontmatter()
+    @classmethod
+    def load(cls, path: Path) -> Record:
+        """Load a validated record from a Markdown file.
+
+        The record retains its source path and ID for subsequent vault saves.
+        """
+        data, markdown = cls._parse_markdown(path)
+        record = cls.model_validate({**data, "markdown": markdown})
+        record._path = path.absolute()
+        record._persisted_id = record.id
+        return record
 
     @staticmethod
     def _parse_markdown(path: Path) -> tuple[dict[str, Any], str]:
         """Parse a Markdown document's YAML front matter and body."""
         try:
-            text = path.read_text(encoding="utf-8")
+            metadata, content = frontmatter.parse(
+                path.read_text(encoding="utf-8"), handler=_YAML_HANDLER
+            )
         except (OSError, UnicodeError) as exc:
             raise ValidationError(f"Cannot read record {path}: {exc}") from exc
-        match = _FRONT_MATTER.match(text)
-        if match is None:
-            raise ValidationError(f"Unterminated YAML front matter in {path}")
-        try:
-            value = yaml.safe_load(match.group(1))
         except yaml.YAMLError as exc:
             raise ValidationError(
                 f"Malformed YAML front matter in {path}: {exc}"
             ) from exc
-        if not isinstance(value, dict):
-            raise ValidationError(f"YAML front matter must be a mapping in {path}")
-        return value, text[match.end() :]
+        if not metadata:
+            raise ValidationError(f"Expected YAML front matter mapping in {path}")
+        return metadata, content
 
 
-class Vault(BaseModel):
+class Vault:
     """Filesystem-backed collection that owns record persistence and hierarchy.
 
     Attributes:
@@ -233,8 +243,8 @@ class Vault(BaseModel):
         not retain stale collection indexes.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    dir: Path
+    def __init__(self, *, dir: Path) -> None:
+        self.dir = Path(dir)
 
     @staticmethod
     def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
@@ -273,7 +283,7 @@ class Vault(BaseModel):
         paths = [*self.dir.glob("*.md"), *self.dir.glob("*/*.md")]
         for path in sorted(paths, key=lambda item: str(item)):
             self._check_vault_path(path)
-            record = self._load(path)
+            record = Record.load(path)
             if record.id in records:
                 raise ValidationError(f"Duplicate record ID: {record.id}")
             records[record.id] = record
@@ -310,7 +320,7 @@ class Vault(BaseModel):
         if record is None:
             raise RecordNotFoundError(f"Record {record_id!r} not found")
         self._validate_records(records)
-        values = record.frontmatter()
+        values = record.metadata
         sources = {key: record.id for key in values}
         current = record
         seen = {record.id}
@@ -349,7 +359,7 @@ class Vault(BaseModel):
             self._check_vault_path(old_path)
             if not old_path.is_file():
                 raise ValidationError("Record path does not match its persisted file")
-            existing = self._load(old_path)
+            existing = Record.load(old_path)
             if existing.id != record._persisted_id:
                 raise ValidationError("Record path does not match its persisted file")
             if existing.parent_id != candidate.parent_id:
@@ -358,7 +368,12 @@ class Vault(BaseModel):
         self._check_vault_path(target)
         if target.exists() and old_path != target:
             raise RecordExistsError(f"Record already exists: {target}")
-        content = f"---\n{dump_yaml(candidate.frontmatter())}---\n{candidate.markdown}"
+        try:
+            post = frontmatter.Post(str(candidate.markdown))
+            post.metadata = candidate.metadata
+            content = frontmatter.dumps(post, handler=_YAML_HANDLER, sort_keys=False)
+        except yaml.YAMLError as exc:
+            raise ValidationError(f"Unsupported YAML value: {exc}") from exc
         try:
             atomic_write(target, content)
         except OSError as exc:
@@ -433,25 +448,3 @@ class Vault(BaseModel):
             path.resolve().relative_to(self.dir.resolve())
         except ValueError as exc:
             raise ValidationError(f"Record path is outside vault: {path}") from exc
-
-    @staticmethod
-    def _load(path: Path) -> Record:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
-            raise ValidationError(f"Cannot read record {path}: {exc}") from exc
-        match = _FRONT_MATTER.match(text)
-        if match is None:
-            raise ValidationError(f"Unterminated YAML front matter in {path}")
-        try:
-            data = yaml.safe_load(match.group(1))
-        except yaml.YAMLError as exc:
-            raise ValidationError(
-                f"Malformed YAML front matter in {path}: {exc}"
-            ) from exc
-        if not isinstance(data, dict):
-            raise ValidationError(f"YAML front matter must be a mapping in {path}")
-        record = Record.model_validate({**data, "markdown": text[match.end() :]})
-        record._path = path.absolute()
-        record._persisted_id = record.id
-        return record

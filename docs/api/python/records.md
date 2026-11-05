@@ -7,6 +7,12 @@
 `Record` is Hiraku's only research entity. Tasks, experiments, contexts, and
 literature share the same model and use `type` to describe their role. A record
 stores validated YAML front matter and a Markdown body.
+Use `record.metadata` to inspect a serialized snapshot of its metadata and
+`record.markdown` to access its body. Update metadata through the record's fields;
+changing the returned dictionary does not change the record.
+Use `Record.load(path)` to load a record directly from a Markdown file. The
+loaded record retains its source path; saving it through a vault requires that
+the path is inside that vault and preserves the usual identity checks.
 
 Records receive a UUID when created. Existing readable IDs remain supported.
 Their Markdown body and validated front matter are stored together in the

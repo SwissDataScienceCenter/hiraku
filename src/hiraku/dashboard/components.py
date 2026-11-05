@@ -40,7 +40,7 @@ def markdown_view(
     if record is None:
         return mo.md("No record selected.")
     body = mo.md(record.markdown if record.markdown.strip() else empty_message)
-    metadata = mo.Html(f"<pre>{html.escape(dump_yaml(record.to_dict()))}</pre>")
+    metadata = mo.Html(f"<pre>{html.escape(dump_yaml(record.metadata))}</pre>")
     return mo.vstack([mo.accordion({record.id: metadata}), body])
 
 
@@ -136,7 +136,7 @@ class MarkdownEditor:
         self._widgets = [editor, cancel, save]
         controls = mo.hstack([cancel, save], justify="end")
         metadata = mo.Html(
-            f"<pre>{html.escape(dump_yaml(draft.record.to_dict()))}</pre>"
+            f"<pre>{html.escape(dump_yaml(draft.record.metadata))}</pre>"
         )
         message = (
             mo.callout(mo.plain_text(draft.error), kind="danger")

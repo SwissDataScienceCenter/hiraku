@@ -195,7 +195,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert not (project / "hiraku/programs").exists()
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
     assert (project / "task.md").read_text(encoding="utf-8") == task_template
-    assert task.markdown == task_template
+    assert task.markdown == task_template.strip()
     assert task.path == project / "hiraku/records/sep10.md"
     assert task.branch == "autoresearch/sep10"
     assert task.goal == (

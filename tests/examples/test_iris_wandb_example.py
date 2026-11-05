@@ -136,7 +136,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     config = Project.discover(project)
     root = config.vault.get("iris")
     assert config.tracking_backend == {"type": "wandb", "project": "iris-wandb"}
-    assert "tracking_backend" not in root.to_dict()
+    assert "tracking_backend" not in root.metadata
 
     invoke(
         runner,

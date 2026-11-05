@@ -59,7 +59,7 @@ class HirakuGroup(click.Group):
 
 def _json_value(value: Any) -> Any:
     if isinstance(value, Record):
-        return {**_json_value(value.to_dict()), "markdown": value.markdown}
+        return {**_json_value(value.metadata), "markdown": value.markdown}
     if isinstance(value, Run):
         return {
             "id": value.id,
@@ -438,7 +438,7 @@ def record_show(
     _validate_json_options(json_output, pretty)
     record = _active(state.project, record_id)
     if raw:
-        values = record.to_dict()
+        values = record.metadata
         sources = {}
     else:
         resolved = state.project.vault.resolve(record.id)
@@ -484,7 +484,7 @@ def record_update(
         changes["related_to"] = list(related_to)
     if commit is not None:
         changes["commit"] = GitRepository(state.project.root).resolve(commit)
-    fields = record.to_dict()
+    fields = record.metadata
     fields.update(changes)
     for key in unset_values:
         if key in {"id", "parent_id"}:

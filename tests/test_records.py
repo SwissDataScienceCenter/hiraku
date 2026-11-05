@@ -45,11 +45,11 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
     path = vault.save(task)
     loaded = vault.get("sample")
 
-    assert list(loaded.to_dict()) == ["id", "name", "zeta", "alpha"]
-    assert loaded.markdown == "# Body\n\nVerbatim.\n"
+    assert list(loaded.metadata) == ["id", "name", "zeta", "alpha"]
+    assert loaded.markdown == "# Body\n\nVerbatim."
     loaded.new = [1, 2]
     path = vault.save(loaded)
-    assert vault.get("sample").to_dict()["new"] == [1, 2]
+    assert vault.get("sample").metadata["new"] == [1, 2]
     assert load_record("sample", project=config).id == loaded.id
     assert [record.id for record in list_records(project=config)] == [loaded.id]
     assert [record.id for record in vault.list()] == [loaded.id]
@@ -60,6 +60,49 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
     with pytest.raises(RecordExistsError):
         vault.save(detached)
     assert path.exists()
+
+
+@pytest.mark.parametrize("body", ["", "\n  leading\n\ntrailing  \n\n"])
+def test_record_trims_boundary_whitespace(tmp_path: Path, body: str) -> None:
+    vault = Vault(dir=tmp_path)
+    record = vault.create("whitespace", markdown=body)
+
+    assert vault.get(record.id).markdown == body.strip()
+
+
+def test_frontmatter_accepts_post_constructor_field_names(tmp_path: Path) -> None:
+    vault = Vault(dir=tmp_path)
+    record = vault.create("metadata", content="value", handler="other")
+
+    loaded = vault.get(record.id)
+    assert loaded.content == "value"
+    assert loaded.handler == "other"
+
+
+def test_record_metadata_is_a_snapshot() -> None:
+    record = Record(id="sample", markdown="Body", extra={"value": 1})
+
+    metadata = record.metadata
+    assert "markdown" not in metadata
+    metadata["extra"]["value"] = 2
+    assert record.metadata["extra"]["value"] == 1
+    record.name = "updated"
+    assert record.metadata["name"] == "updated"
+
+
+def test_record_load_supports_vault_save_and_identity_checks(tmp_path: Path) -> None:
+    vault = Vault(dir=tmp_path)
+    original = vault.create("example", markdown="Body")
+    loaded = Record.load(original.path)
+
+    assert loaded.metadata == original.metadata
+    assert loaded.markdown == "Body"
+    assert loaded.path == original.path
+    loaded.name = "renamed"
+    assert vault.save(loaded) == tmp_path / "renamed.md"
+    loaded.id = "other"
+    with pytest.raises(ValidationError, match="immutable"):
+        vault.save(loaded)
 
 
 def test_context_material_uses_the_record_registry(tmp_path: Path) -> None:
@@ -377,7 +420,7 @@ def test_vault_generates_uuid_and_gets_by_id_or_name(tmp_path: Path) -> None:
     record = vault.create("baseline", markdown="# Notes\n")
 
     assert str(UUID(record.id)) == record.id
-    assert vault.get(record.id).markdown == "# Notes\n"
+    assert vault.get(record.id).markdown == "# Notes"
     assert vault.find("baseline").id == record.id
     assert vault.list()[0].id == record.id
 

@@ -32,6 +32,9 @@ A root *record* defines a working scope and goal, and documents the research pro
 
 Records are stored as Markdown with YAML front matter in the records directory. Hiraku derives a filesystem-friendly filename from the name, so for example `digits` is stored as `hiraku/records/digits.md`. Names that produce the same filename cannot be saved as separate records. Existing records in one-level subdirectories are also discovered. `parent_id` defines the logical tree: each record has at most one parent, selected at creation and immutable after saving. IDs are unique across the project.
 
+Record Markdown bodies are trimmed of leading and trailing whitespace when read
+or saved. Whitespace within the body is preserved.
+
 Metric declarations are resolved from the nearest ancestor when a record has no metrics of its own. They are resolved on demand, so later changes to an ancestor can affect the effective metrics of its descendants. An empty metrics list overrides ancestor metrics. Other fields remain local to the record; `related_to` links records without affecting inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
 Saving a record validates its own fields and file destination without scanning the vault. `Vault.validate()` checks the collection for duplicate IDs, missing references, and hierarchy cycles. CLI and MCP relationship updates also check the proposed relationships before saving.
