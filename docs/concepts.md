@@ -34,7 +34,7 @@ Records are stored as Markdown with YAML front matter. This allows users and age
 
 Fields inherit through `parent_id` by default: the nearest definition wins and an explicit `null` clears an inherited field. When a child is created, its effective `metrics` are copied into its YAML front matter unless explicitly set on the child. These values are snapshots: later parent edits do not rewrite existing children. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
-At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. Hiraku stores the active record in the project config at `hiraku/hiraku.yml`; the current status can be queried with `hiraku status`, whose `tracking_backend` field shows the project's backend.
+At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. Hiraku stores the active record in the project config at `hiraku.yml`; the current status can be queried with `hiraku status`, whose `tracking_backend` field shows the project's backend.
 
 !!! note
     Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
@@ -47,7 +47,7 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 - List runs from the tracking source selected by a record.
 - Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, historical entrypoint, and URL attribution may be absent.
 
-Set `tracking_backend` in `hiraku/hiraku.yml` to select the tracking source for every
+Set `tracking_backend` in `hiraku.yml` to select the tracking source for every
 record in the project. Records cannot override the project setting. Backend
 configuration can use a shorthand name or a mapping with `type` identifying the
 adapter:

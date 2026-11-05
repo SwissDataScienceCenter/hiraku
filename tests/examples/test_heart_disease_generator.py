@@ -77,7 +77,7 @@ def test_init_generates_once(tmp_path, monkeypatch, copy_generator):
 def test_invalid_generation_options_leave_no_project(tmp_path, arguments):
     result = CliRunner().invoke(main, [*arguments, str(tmp_path)])
     assert result.exit_code != 0
-    assert not (tmp_path / "hiraku/hiraku.yml").exists()
+    assert not (tmp_path / "hiraku.yml").exists()
 
 
 def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch):
@@ -100,7 +100,7 @@ def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch)
     )
     assert result.exit_code == 1
     assert "completed runs kept" in result.output
-    assert (tmp_path / "hiraku/hiraku.yml").is_file()
+    assert (tmp_path / "hiraku.yml").is_file()
     assert (tmp_path / "completed.txt").is_file()
     assert not (tmp_path / "generate_results.py").exists()
 
@@ -155,7 +155,7 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
     assert {
         p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()
     } == {
-        "hiraku/hiraku.yml",
+        "hiraku.yml",
         "runs.csv",
         *(
             f"hiraku/records/heart-disease/{name}.md"

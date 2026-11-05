@@ -87,7 +87,7 @@ class Project(BaseModel):
 
     @classmethod
     def load(cls, path: Path | str) -> Project:
-        """Load a project from its ``hiraku/hiraku.yml`` file.
+        """Load a project from its root-level ``hiraku.yml`` file.
 
         Args:
             path: Path to the project configuration file.
@@ -101,7 +101,7 @@ class Project(BaseModel):
         marker = Path(path).expanduser().absolute()
         data = load_yaml_mapping(marker)
         try:
-            project = cls(marker.parent.parent, **data)
+            project = cls(marker.parent, **data)
         except (TypeError, ValueError) as exc:
             raise ValidationError(
                 f"Invalid project configuration {marker}: {exc}"
@@ -132,10 +132,10 @@ class Project(BaseModel):
                 return cls.load(candidate)
             candidate = candidate.parent
         for directory in (candidate, *candidate.parents):
-            default_marker = directory / "hiraku" / "hiraku.yml"
+            default_marker = directory / "hiraku.yml"
             if default_marker.is_file():
                 return cls.load(default_marker)
-        raise ProjectNotFoundError(f"No hiraku/hiraku.yml found from {candidate}")
+        raise ProjectNotFoundError(f"No hiraku.yml found from {candidate}")
 
     @property
     def hiraku_dir(self) -> Path:
@@ -152,8 +152,8 @@ class Project(BaseModel):
 
     @property
     def path(self) -> Path:
-        """Return the path to the project's ``hiraku/hiraku.yml`` file."""
-        return self.hiraku_dir / "hiraku.yml"
+        """Return the path to the project's root-level ``hiraku.yml`` file."""
+        return self.root / "hiraku.yml"
 
     @property
     def records_dir(self) -> Path:
@@ -180,7 +180,7 @@ class Project(BaseModel):
         }
 
     def save(self) -> None:
-        """Atomically save the project's settings to ``hiraku/hiraku.yml``.
+        """Atomically save the project's settings to its root-level ``hiraku.yml``.
 
         Raises:
             hiraku.errors.ValidationError: If the configuration cannot be written.
@@ -242,7 +242,7 @@ class Project(BaseModel):
             hiraku.errors.ValidationError: If settings or resources are invalid.
         """
         root = Path(root).expanduser().resolve()
-        if (root / "hiraku" / "hiraku.yml").is_file():
+        if (root / "hiraku.yml").is_file():
             raise ProjectExistsError(f"Hiraku project already exists at {root}")
         if template and example:
             raise ValidationError("template and example are mutually exclusive")
@@ -290,7 +290,9 @@ class Project(BaseModel):
                 if source is not None:
                     if not source.is_dir():
                         raise FileNotFoundError(source)
-                    config_file = source / "hiraku" / "hiraku.yml"
+                    config_file = source / "hiraku.yml"
+                    if not config_file.is_file():
+                        config_file = source / "hiraku" / "hiraku.yml"
                     if not config_file.is_file():
                         config_file = next(
                             (

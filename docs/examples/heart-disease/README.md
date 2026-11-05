@@ -19,7 +19,7 @@ dataset, and dependencies for this example.
 hiraku example create heart-disease --git
 cd heart-disease
 ```
-Initialization creates `hiraku/hiraku.yml`, metadata directories, and the agent
+Initialization creates `hiraku.yml`, metadata directories, and the agent
 skill. The `heart-disease` example also copies `train.py`, `pyproject.toml`, and
 `data/processed.cleveland.data` into the project.
 Logistic regression and a random forest are included as initial baselines.
@@ -41,9 +41,9 @@ The commit records the exact
 training code and dataset that the initial baseline experiments will evaluate.
 
 ??? note "Tracking Hiraku metadata in Git"
-    The project config `hiraku/hiraku.yml` is committed with the project, including its
+    The project config `hiraku.yml` is committed with the project, including its
     CSV tracking backend. `.gitignore` excludes generated Hiraku files while
-    keeping `hiraku/hiraku.yml` and research records trackable, plus `runs.csv`.
+    keeping `hiraku.yml` and research records trackable, plus `runs.csv`.
 
     Hiraku runs commands directly in the working tree, including local changes.
     Merging research records is a user (or agent) responsibility.
@@ -67,7 +67,7 @@ hiraku status
 ```
 
 `hiraku status` should report `heart-disease` as the active record and CSV as
-the tracking backend. Both values are stored in `hiraku/hiraku.yml`.
+the tracking backend. Both values are stored in `hiraku.yml`.
 
 ??? tip "Defining a working branch"
     Store a branch name with `--set 'branch=main'` if the record should point to
@@ -254,19 +254,3 @@ seed and validation split, and differ only in the model argument. The logistic
 baseline should have lower validation log loss, while the random forest should
 have slightly higher validation accuracy. The extension experiment should bind
 the new implementation commit and use the same evaluation settings.
-
-??? note "Codex integration tests"
-
-    The first three stepwise prompts are covered by the opt-in Codex integration
-    tests. The remaining prompts provide additional user testing for the full
-    example.
-
-    Hiraku developers can run the three fresh-repository agent checks explicitly:
-
-    ```bash
-    HIRAKU_RUN_CODEX_SKILL_TESTS=1 \
-    uv run pytest -n 0 tests/integrations/test_hiraku_skill.py
-    ```
-
-    These tests invoke `codex exec` with GPT-5.6 Luna and require local Codex
-    authentication. They are skipped during the normal test suite and CI.

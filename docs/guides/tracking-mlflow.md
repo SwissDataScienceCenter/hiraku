@@ -48,7 +48,7 @@ are never turned into links.
 
 ## Log from your script
 
-`hiraku run` sets the tracking URI and experiment name from `hiraku/hiraku.yml`. For
+`hiraku run` sets the tracking URI and experiment name from `hiraku.yml`. For
 commands run outside Hiraku, set the URI yourself:
 
 ```bash

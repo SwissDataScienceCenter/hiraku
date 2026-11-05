@@ -171,7 +171,7 @@ def generate_results(output: Path) -> None:
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
             overlay = Path(staging) / "overlay"
             shutil.copytree(project.records_dir, overlay / "hiraku/records")
-            shutil.copyfile(project.path, overlay / "hiraku/hiraku.yml")
+            shutil.copyfile(project.path, overlay / "hiraku.yml")
             with (
                 sqlite3.connect(project.root / "mlflow.db") as source,
                 sqlite3.connect(overlay / "mlflow.db") as snapshot,

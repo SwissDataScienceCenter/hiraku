@@ -84,10 +84,10 @@ def test_init_and_example_create_accept_destination(
 
     assert plain.exit_code == 0, plain.output
     assert example.exit_code == 0, example.output
-    assert Project.load(tmp_path / "research/hiraku/hiraku.yml").root == (
+    assert Project.load(tmp_path / "research/hiraku.yml").root == (
         tmp_path / "research"
     )
-    assert Project.load(tmp_path / "demo/hiraku/hiraku.yml").root == tmp_path / "demo"
+    assert Project.load(tmp_path / "demo/hiraku.yml").root == tmp_path / "demo"
     assert (tmp_path / "demo/evaluate.py").is_file()
 
 

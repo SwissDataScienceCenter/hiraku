@@ -76,7 +76,7 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
     assert {
         p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()
     } == {
-        "hiraku/hiraku.yml",
+        "hiraku.yml",
         "mlflow.db",
         *(
             f"hiraku/records/digits/{name}.md"

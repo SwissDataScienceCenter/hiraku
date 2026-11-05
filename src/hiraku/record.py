@@ -160,7 +160,7 @@ class Record(BaseModel):
     def reject_record_tracking_backend(cls, values: Any) -> Any:
         if isinstance(values, Mapping) and "tracking_backend" in values:
             raise ValidationError(
-                "tracking_backend must be configured in hiraku/hiraku.yml, "
+                "tracking_backend must be configured in hiraku.yml, "
                 "not record front matter"
             )
         return values
@@ -173,8 +173,7 @@ class Record(BaseModel):
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "tracking_backend":
             raise ValidationError(
-                "tracking_backend must be configured in hiraku/hiraku.yml, "
-                "not on a record"
+                "tracking_backend must be configured in hiraku.yml, not on a record"
             )
         if name == "id":
             persisted_id = getattr(self, "_persisted_id", None)

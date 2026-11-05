@@ -260,7 +260,7 @@ def test_cli_project_error(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["mcp"])
     assert result.exit_code == 1
-    assert "No hiraku/hiraku.yml" in result.output
+    assert "No hiraku.yml" in result.output
 
 
 def test_cli_serves_project(tmp_path, monkeypatch):

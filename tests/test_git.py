@@ -93,7 +93,7 @@ def test_project_creation_does_not_invoke_git(
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, command)
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "minimal/hiraku/hiraku.yml").is_file()
+    assert (tmp_path / "minimal/hiraku.yml").is_file()
     assert (tmp_path / "minimal/evaluate.py").is_file() == (command[0] == "example")
     assert not (tmp_path / "minimal/.git").exists()
 

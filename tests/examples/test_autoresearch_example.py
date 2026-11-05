@@ -68,7 +68,7 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
         gitignore.read_text(encoding="utf-8")
         + "\n# Hiraku local files and run artifacts\n"
         + "/.agents/\n/.claude/\n/.codex/\n/.pi/\n/.mcp.json\n/hiraku/*\n"
-        + "!/hiraku/hiraku.yml\n"
+        + "/hiraku.yml\n"
         + "!/hiraku/records/\n"
         + "/task.md\n"
         + "/runs.csv\n/run.log\n",
@@ -109,7 +109,7 @@ def test_autoresearch_is_an_overlay() -> None:
     expected = {
         "README.md",
         "example.yml",
-        "src/hiraku/hiraku.yml",
+        "src/hiraku.yml",
         "src/task.md",
         "src/cpu_mock.py",
         "src/hiraku/dispatch/autoresearch.sh",

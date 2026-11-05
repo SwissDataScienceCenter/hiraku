@@ -24,7 +24,7 @@ through an existing record lifecycle.
   creation, inherited `metrics` values are copied into the child record unless
   explicitly set there; later parent edits do not update those snapshots.
   Tracking backend selection and the active record are project-wide settings in
-  `hiraku/hiraku.yml`. `id`,
+  `hiraku.yml`. `id`,
   `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and invocation attribution together with

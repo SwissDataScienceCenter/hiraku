@@ -239,7 +239,7 @@ def init_command(
     if init_git:
         require_git()
     absolute_root = root.expanduser().absolute()
-    markers = [absolute_root / "hiraku" / "hiraku.yml"]
+    markers = [absolute_root / "hiraku.yml"]
     if absolute_root.is_dir():
         markers.extend(
             child / "hiraku.yml"
@@ -336,7 +336,7 @@ def example_create_command(
                     with TemporaryDirectory(prefix="hiraku-generated-") as staging:
                         overlay = Path(staging) / "results"
                         namespace["generate_results"](overlay)
-                        generated = Project.load(overlay / "hiraku" / "hiraku.yml")
+                        generated = Project.load(overlay / "hiraku.yml")
                         shutil.copytree(
                             generated.records_dir,
                             project.records_dir,

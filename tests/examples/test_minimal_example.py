@@ -65,7 +65,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
             "HEAD",
         ],
     )
-    git(project, "add", "hiraku")
+    git(project, "add", "hiraku", "hiraku.yml")
     git(project, "commit", "-m", "add example records")
     commit = git(project, "rev-parse", "HEAD")
 

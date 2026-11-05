@@ -38,8 +38,7 @@ def test_project_uses_pydantic_validation_and_forbids_unknown_settings(
     tmp_path: Path,
 ) -> None:
     project = Project(tmp_path)
-    marker = tmp_path / "hiraku/hiraku.yml"
-    marker.parent.mkdir()
+    marker = tmp_path / "hiraku.yml"
     marker.write_text("unknown_setting: true\n")
 
     assert isinstance(project, BaseModel)
@@ -97,7 +96,7 @@ def test_init_preserves_hook_configuration_without_inspecting_it(tmp_path, conte
     path.write_text(content)
     Project.create(tmp_path, install_skill=False)
     assert path.read_text() == content
-    assert (tmp_path / "hiraku/hiraku.yml").is_file()
+    assert (tmp_path / "hiraku.yml").is_file()
     assert (tmp_path / ".mcp.json").is_file()
 
 
@@ -187,7 +186,7 @@ def test_init_from_template_applies_overlay(tmp_path: Path) -> None:
     (template / "custom/dispatch").mkdir(parents=True)
     (template / "empty").mkdir()
     (template / "hiraku").mkdir()
-    (template / "hiraku/hiraku.yml").write_text("hiraku_dir: custom\n")
+    (template / "hiraku.yml").write_text("hiraku_dir: custom\n")
     launcher = template / "custom/dispatch/launch.sh"
     launcher.write_text("#!/bin/sh\necho template\n")
     launcher.chmod(0o744)
@@ -261,14 +260,13 @@ def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
     first = Record.create("first", project=config)
     config.set_active_record(first)
 
-    assert config.path == tmp_path / "hiraku/hiraku.yml"
+    assert config.path == tmp_path / "hiraku.yml"
     assert "active_record_id: first" in config.path.read_text()
     assert Project.load(config.path).active_record_id == "first"
 
 
 def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None:
-    marker = tmp_path / "hiraku/hiraku.yml"
-    marker.parent.mkdir()
+    marker = tmp_path / "hiraku.yml"
     marker.write_text("hiraku_dir: ../outside\n")
     with pytest.raises(ValidationError):
         Project.load(marker)
@@ -313,7 +311,7 @@ def test_base_example_has_no_results(tmp_path: Path):
 def test_unavailable_results_leave_no_project(tmp_path: Path, example):
     with pytest.raises(ValidationError, match="requires|no results"):
         Project.create(tmp_path, example=example, results=True)
-    assert not (tmp_path / "hiraku/hiraku.yml").exists()
+    assert not (tmp_path / "hiraku.yml").exists()
 
 
 def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
@@ -341,11 +339,9 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
     base.mkdir(parents=True)
     results.mkdir()
     (base / "train.py").write_text("base")
-    (base / "hiraku").mkdir()
-    (base / "hiraku/hiraku.yml").write_text("tracking_backend: csv\n")
+    (base / "hiraku.yml").write_text("tracking_backend: csv\n")
     (results / "train.py").write_text("results")
-    (results / "hiraku").mkdir()
-    (results / "hiraku/hiraku.yml").write_text("active_record_id: root\n")
+    (results / "hiraku.yml").write_text("active_record_id: root\n")
     monkeypatch.setattr(hiraku.project, "files", lambda name: resources)
     target = tmp_path / "target"
     config = Project.create(
@@ -395,9 +391,9 @@ def _run_codex(project: Path, prompt: str) -> str:
     codex = shutil.which("codex")
     hiraku = shutil.which("hiraku")
     if codex is None:
-        pytest.fail("codex is not on PATH; install and authenticate the Codex CLI")
+        pytest.fail("codex is not on PATH")
     if hiraku is None:
-        pytest.fail("hiraku is not on PATH; run this test through `uv run pytest`")
+        pytest.fail("hiraku is not on PATH")
 
     environment = os.environ.copy()
     environment["PATH"] = os.pathsep.join(

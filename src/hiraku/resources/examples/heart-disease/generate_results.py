@@ -169,7 +169,7 @@ def generate_results(output: Path) -> None:
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
             overlay = Path(staging) / "overlay"
             shutil.copytree(project.records_dir, overlay / "hiraku/records")
-            for name in ("hiraku/hiraku.yml", "runs.csv"):
+            for name in ("hiraku.yml", "runs.csv"):
                 shutil.copyfile(project.root / name, overlay / name)
             overlay.rename(output)
 
