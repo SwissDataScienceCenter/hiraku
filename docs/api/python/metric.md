@@ -1,3 +1,0 @@
-# Metric
-
-::: hiraku.record.Metric
