@@ -6,11 +6,15 @@ Typical workflow:
 
 ```bash
 hiraku init
-hiraku record create <root-id>
-hiraku record create <child-id> --parent <root-id>
+hiraku record create "Research question"
+hiraku record create "Baseline experiment" --parent <root-id>
 hiraku run --record <child-id> -- python train.py
 hiraku runs --record <record-id>
 ```
+
+`record create` takes a human-readable name and generates a stable record ID.
+Use the returned ID for parent references, run attribution, and later commands.
+Names may repeat; IDs are unique.
 
 `hiraku record list` includes each record's local `status` in its table.
 Commands with an optional `--json` output accept `--pretty` alongside it to

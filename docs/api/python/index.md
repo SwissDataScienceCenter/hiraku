@@ -1,15 +1,10 @@
 # Python API
 
-Hiraku exposes validated Pydantic models and small service APIs. Constructors
-validate their input immediately; persistence is handled through explicit paths.
+Hiraku exposes validated project, record, and run models. Records are persisted
+through the project-scoped `Vault`; tracking adapters return normalized `Run`
+objects.
 
-- [Configuration](config.md) — discover and persist project configuration.
-- [Project initialization](project.md) — create a project and install its resources.
-- [Records](records.md) — work with validated Markdown-backed records.
-- Data models:
-    - [Record](records.md)
-    - [Run](run.md)
-    - [Metric](metric.md)
+- [Project](project.md) — create a project and install its resources.
+- [Records and Vault](records.md) — work with validated Markdown-backed records and their collection.
 - [Tracking](tracking.md) — configure and query tracking backends.
-- [Command execution](../../guides/execution.md) — run commands in the foreground.
 - [Workflows](workflows.md) — define LangGraph workflows and manage their sessions.

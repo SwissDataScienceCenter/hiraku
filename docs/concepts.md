@@ -25,12 +25,12 @@ A root *record* defines a working scope and goal, and documents the research pro
 
 | Term | Data | Summary |
 | --- | ---  | --- |
-| **Root record** | `hiraku/records/{root_id}/{root_id}.md` | Defines the scope of a research effort and may provide shared research defaults. |
-| **Child record** | `hiraku/records/{root_id}/{record_id}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
+| **Root record** | `hiraku/records/{name}.md` | Defines the scope of a research effort and may provide shared research defaults. |
+| **Child record** | `hiraku/records/{name}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
 | **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
-Records are stored as Markdown with YAML front matter. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent, and all descendants are stored flat in their root's folder. IDs are unique across the project.
+Records are stored as Markdown with YAML front matter in the records directory. This allows users and agents to directly read and modify them. `parent_id` defines the logical tree: each record has at most one parent. IDs are unique across the project, and names must produce distinct filenames.
 
 Fields inherit through `parent_id` by default: the nearest definition wins and an explicit `null` clears an inherited field. When a child is created, its effective `metrics` are copied into its YAML front matter unless explicitly set on the child. These values are snapshots: later parent edits do not rewrite existing children. `id`, `parent_id`, `related_to`, `type`, `commit`, `status`, and `decision` stay local. `related_to` is a list of cross references; it does not affect inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
 
@@ -56,7 +56,7 @@ adapter:
 tracking_backend: csv
 ```
 
-`hiraku runs` lists runs attributed to the active record, or to the record given with `--record ID`. Add `--all` to list every attributed run from the project tracking source. In Python, `record.runs(project=config)` returns the record's own runs, and `record.resolve_tracking_backend(project=config).list_runs()` lists the whole source. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
+`hiraku runs` lists runs attributed to the active record, or to the record given with `--record ID`. Add `--all` to list every attributed run from the project tracking source. In Python, create an adapter with `TrackingBackendFactory(config).create(config.tracking_backend)` and call `list_runs(record_id=record.id)` for one record or `list_runs()` for the whole source. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
 
 ## Command execution
 
@@ -64,8 +64,7 @@ Commands are not record metadata. Pass the complete argv directly to
 `hiraku run`; a dispatcher can prepare repeatable project-specific runtime
 behavior around that invocation. Command execution runs synchronously in the
 project working tree; tracked runs own measurements and can be inspected after
-the command exits. See
-[Command execution](guides/execution.md) for details.
+the command exits. See the [CLI reference](api/cli.md) for command options.
 
 ## Agent Skill
 
@@ -88,7 +87,7 @@ records.
 | Term | Data | Summary |
 | --- | --- | --- |
 | **Workflow** | `hiraku/workflows/{workflow_id}/{workflow.py,workflow.md}` | A LangGraph graph with optional editable instructions and input defaults. |
-| **Record** | `hiraku/records/{root_id}/{record_id}.md` | Research content of any kind, including tasks, experiments, literature, datasets, and context. |
+| **Record** | `hiraku/records/{name}.md` | Research content of any kind, including tasks, experiments, literature, datasets, and context. |
 | **Workflow session** | `.hiraku/langgraph-checkpoints.sqlite` | One graph execution, identified by a workflow session ID that is also its LangGraph thread ID. |
 
 Hiraku ships the `collaborative` workflow as an editable copy in your

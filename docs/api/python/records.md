@@ -8,13 +8,19 @@
 literature share the same model and use `type` to describe their role. A record
 stores validated YAML front matter and a Markdown body.
 
-Use `record.save_markdown(body)` to save a replacement body while preserving
-metadata. It returns a saved copy and leaves the supplied object unchanged. The
-record must already have a path; changes on disk since loading are rejected.
-This check does not lock the file against concurrent writers.
+Records receive a UUID when created. Existing readable IDs remain supported.
+Their Markdown body and validated frontmatter are stored together in the
+project's records directory.
 
-## Registry helpers
+## `Vault`
 
-::: hiraku.record.load_record
+`Project.vault` provides the project-scoped record collection. The vault reads
+files on demand and supports exact ID lookup with `get()` and ID-or-name lookup
+with `find()`, as well as listing, saving, deleting, reparenting, and collection
+validation. Name lookup raises an error when multiple records share a name.
 
-::: hiraku.record.list_records
+::: hiraku.record.Vault
+
+## `Metric`
+
+::: hiraku.record.Metric

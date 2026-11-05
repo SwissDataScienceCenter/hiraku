@@ -2,20 +2,10 @@
 
 For authoring and execution examples, see the [Workflows guide](../../guides/workflows.md).
 
-## LangGraph workflow runner
+# LangGraph workflow
 
-::: hiraku.workflows.langgraph.workflow_ids
+::: hiraku.workflows.langgraph
 
-::: hiraku.workflows.langgraph.workflow_details
+# Workflow session history
 
-::: hiraku.workflows.langgraph.start_workflow
-
-::: hiraku.workflows.langgraph.workflow_status
-
-::: hiraku.workflows.langgraph.resume_workflow
-
-## Workflow session history
-
-::: hiraku.workflows.session_history.list_sessions
-
-::: hiraku.workflows.session_history.session_history
+::: hiraku.workflows.session_history
