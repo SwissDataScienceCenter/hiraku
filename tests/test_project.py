@@ -92,6 +92,10 @@ def test_init_uses_uv_when_the_project_has_a_lockfile(tmp_path, locked):
     assert [server["command"], *server["args"]] == [*launcher, "mcp"]
     codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
     assert codex["mcp_servers"]["hiraku"] == server
+    okf = {"command": "uvx", "args": ["okf-parser", "serve"]}
+    for config in (tmp_path / ".mcp.json", tmp_path / ".pi/mcp.json"):
+        assert json.loads(config.read_text())["mcpServers"]["okf"] == okf
+    assert codex["mcp_servers"]["okf"] == okf
     assert not (tmp_path / ".claude/settings.json").exists()
 
 
@@ -298,6 +302,24 @@ def test_init_adds_hiraku_to_existing_codex_configuration(tmp_path: Path) -> Non
     assert parsed["model"] == "x"
     assert parsed["mcp_servers"]["other"] == {"command": "other"}
     assert parsed["mcp_servers"]["hiraku"] == {"command": "hiraku", "args": ["mcp"]}
+
+
+def test_init_preserves_existing_okf_server(tmp_path: Path) -> None:
+    existing = {"command": "custom-okf", "args": ["serve"]}
+    for relative in (".mcp.json", ".pi/mcp.json"):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"mcpServers": {"okf": existing}}))
+    codex = tmp_path / ".codex/config.toml"
+    codex.parent.mkdir()
+    codex.write_text('[mcp_servers.okf]\ncommand = "custom-okf"\nargs = ["serve"]\n')
+
+    Project.create(tmp_path, install_skill=False)
+
+    for relative in (".mcp.json", ".pi/mcp.json"):
+        config = json.loads((tmp_path / relative).read_text())
+        assert config["mcpServers"]["okf"] == existing
+    assert tomllib.loads(codex.read_text())["mcp_servers"]["okf"] == existing
 
 
 def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
