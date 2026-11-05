@@ -7,6 +7,9 @@
 `Record` is Hiraku's only research entity. Tasks, experiments, contexts, and
 literature share the same model and use `type` to describe their role. A record
 stores validated YAML front matter and a Markdown body.
+Creating a child record appends a relative Markdown link to its parent. This
+link is navigational; the directory structure determines the hierarchy, and
+links are not automatically updated when directories are moved.
 Use `record.metadata` to inspect a serialized snapshot of its metadata and
 `record.markdown` to access its body. Update metadata through the record's fields;
 changing the returned dictionary does not change the record.
@@ -24,17 +27,9 @@ the record is saved.
 
 ## `Vault`
 
-`Project.vault` provides the project-scoped record collection. The vault reads
-files on demand and supports ID-or-name lookup with `get()` and `find()`, as
-well as listing, saving, deleting, and collection
-validation. Name lookup raises an error when multiple records share a name.
-
-`Vault.save(record)` validates and saves that record without scanning other
-records. It checks the existing file and prevents filename collisions, but it
-does not check whether IDs are unique across files or references exist. Call
-`Vault.validate()` for collection-wide ID, relationship, and cycle checks.
-
 ::: hiraku.record.Vault
+
+`Vault` is a filesystem-backed collection that manages records.
 
 ## `Metric`
 

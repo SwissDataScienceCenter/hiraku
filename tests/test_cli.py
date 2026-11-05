@@ -23,6 +23,32 @@ def test_root_help_lists_primary_commands() -> None:
         assert command in result.output
 
 
+def test_record_create_adds_link_to_parent(tmp_path: Path, monkeypatch) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    body = tmp_path / "body.md"
+    body.write_text("## Hypothesis\n\nTest it.\n", encoding="utf-8")
+    assert invoke("record", "create", "Parent [A]").exit_code == 0
+
+    result = invoke(
+        "record",
+        "create",
+        "child",
+        "--parent",
+        "Parent [A]",
+        "--markdown-file",
+        str(body),
+    )
+
+    assert result.exit_code == 0, result.output
+    child = project.vault.get("child")
+    assert child.markdown == (
+        "## Hypothesis\n\nTest it.\n\nParent: [Parent \\[A\\]](../Parent%20-A.md)"
+    )
+    assert invoke("record", "create", "empty", "--parent", "child").exit_code == 0
+    assert project.vault.get("empty").markdown == "Parent: [child](../child.md)"
+
+
 def test_unknown_command_uses_click_error() -> None:
     result = invoke("not-a-command")
 

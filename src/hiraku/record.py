@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 from uuid import uuid4
 
 import frontmatter
@@ -99,6 +101,7 @@ class Record(BaseModel):
     metrics: list[Metric] | None = None
     _path: Path | None = PrivateAttr(default=None)
     _persisted_id: str | None = PrivateAttr(default=None)
+    _parent_path: Path | None = PrivateAttr(default=None)
 
     @model_validator(mode="before")
     @classmethod
@@ -251,11 +254,21 @@ class Vault:
         validate_identifier(identifier, label=label)
 
     def create(self, name: str, **fields: Any) -> Record:
+        parent = None
         if fields.get("parent_id") is not None:
-            fields["parent_id"] = self.get(fields["parent_id"]).id
+            parent = self.get(fields["parent_id"])
+            fields["parent_id"] = parent.id
         if fields.get("related_to"):
             fields["related_to"] = [self.get(item).id for item in fields["related_to"]]
         record = Record(name=name, **fields)
+        if parent is not None:
+            record._parent_path = parent.path
+            assert parent.path is not None
+            label = " ".join(parent.name.split())
+            label = label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+            link = f"Parent: [{label}](../{quote(parent.path.name)})"
+            body = record.markdown.rstrip()
+            record.markdown = f"{body}\n\n{link}" if body else link
         self.save(record)
         return record
 
@@ -280,13 +293,29 @@ class Vault:
 
     def _index(self) -> dict[str, Record]:
         records: dict[str, Record] = {}
-        paths = [*self.dir.glob("*.md"), *self.dir.glob("*/*.md")]
-        for path in sorted(paths, key=lambda item: str(item)):
+        paths: dict[Path, Record] = {}
+        paths_on_disk = sorted(
+            self.dir.rglob("*.md"), key=lambda p: (len(p.parts), str(p))
+        )
+        for path in paths_on_disk:
             self._check_vault_path(path)
+            if path.parent == self.dir or path.stem != path.parent.name:
+                raise ValidationError(f"Expected a same-named record directory: {path}")
             record = Record.load(path)
+            if record.parent_id is not None:
+                raise ValidationError(f"Unexpected persisted parent_id in {path}")
             if record.id in records:
                 raise ValidationError(f"Duplicate record ID: {record.id}")
+            parent_dir = path.parent.parent
+            if parent_dir != self.dir:
+                parent_path = parent_dir / f"{parent_dir.name}.md"
+                parent = paths.get(parent_path)
+                if parent is None:
+                    raise ValidationError(f"Missing parent record for {path}")
+                record.parent_id = parent.id
+                record._parent_path = parent.path
             records[record.id] = record
+            paths[path] = record
         return records
 
     def list(self) -> list[Record]:
@@ -339,53 +368,50 @@ class Vault:
         return {"values": values, "sources": sources}
 
     def save(self, record: Record) -> Path:
-        """Validate and save one record without checking the whole collection.
-
-        Use :meth:`validate` to check relationships and ID uniqueness across
-        the vault.
-        """
+        """Save a record using directory placement as its parent relationship."""
         try:
-            candidate = Record.model_validate(
-                record.model_dump(mode="python", warnings=False)
-            )
+            candidate = Record.model_validate(record.model_dump(mode="python"))
         except (TypeError, ValueError) as exc:
             raise ValidationError(f"Invalid record {record.id!r}: {exc}") from exc
-        if record._persisted_id is not None and candidate.id != record._persisted_id:
-            raise ValidationError("Record ID is immutable after persistence")
         old_path = record.path
         if (old_path is None) != (record._persisted_id is None):
             raise ValidationError("Record path does not match its persisted file")
+        if record._persisted_id is not None and candidate.id != record._persisted_id:
+            raise ValidationError("Record ID is immutable after persistence")
+        parent_path = record._parent_path
+        if candidate.parent_id is not None:
+            if parent_path is None or not parent_path.is_file():
+                raise ValidationError("Parent record path is required")
+            self._check_vault_path(parent_path)
+            if Record.load(parent_path).id != candidate.parent_id:
+                raise ValidationError("Record parent is immutable after persistence")
+        elif parent_path is not None:
+            raise ValidationError("Record parent is immutable after persistence")
+        filename = _filename(candidate)
+        parent_dir = parent_path.parent if parent_path else self.dir
+        target_dir = parent_dir / Path(filename).stem
+        target = (target_dir / filename).absolute()
+        self._check_vault_path(target)
         if old_path is not None:
             self._check_vault_path(old_path)
-            if not old_path.is_file():
+            if (
+                not old_path.is_file()
+                or Record.load(old_path).id != record._persisted_id
+            ):
                 raise ValidationError("Record path does not match its persisted file")
-            existing = Record.load(old_path)
-            if existing.id != record._persisted_id:
-                raise ValidationError("Record path does not match its persisted file")
-            if existing.parent_id != candidate.parent_id:
-                raise ValidationError("Record parent is immutable after persistence")
-        target = (self.dir / _filename(candidate)).absolute()
-        self._check_vault_path(target)
-        if target.exists() and old_path != target:
-            raise RecordExistsError(f"Record already exists: {target}")
+            if old_path != target:
+                raise ValidationError("Renaming records is not supported in this PoC")
+        elif target_dir.exists():
+            raise RecordExistsError(f"Record already exists: {target_dir}")
+        metadata = candidate.metadata
+        metadata.pop("parent_id", None)
         try:
             post = frontmatter.Post(str(candidate.markdown))
-            post.metadata = candidate.metadata
+            post.metadata = metadata
             content = frontmatter.dumps(post, handler=_YAML_HANDLER, sort_keys=False)
-        except yaml.YAMLError as exc:
-            raise ValidationError(f"Unsupported YAML value: {exc}") from exc
-        try:
             atomic_write(target, content)
-        except OSError as exc:
+        except (OSError, yaml.YAMLError) as exc:
             raise ValidationError(f"Cannot save record at {target}: {exc}") from exc
-        if old_path is not None and old_path != target:
-            try:
-                old_path.unlink()
-            except OSError as exc:
-                target.unlink(missing_ok=True)
-                raise ValidationError(
-                    f"Cannot remove previous record file {old_path}: {exc}"
-                ) from exc
         record._path = target
         record._persisted_id = record.id
         return target
@@ -406,6 +432,8 @@ class Vault:
             raise ValidationError(f"Cannot delete referenced record {record.id!r}")
         try:
             record.path.unlink()
+            with suppress(OSError):
+                record.path.parent.rmdir()
         except OSError as exc:
             raise ValidationError(
                 f"Cannot delete record at {record.path}: {exc}"
