@@ -583,11 +583,6 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
         return workflow_mermaid(workflow_id, project=project())
 
 
-def add_workflow_tools(server: MCPServer, project: Project) -> None:
-    """Register workflow tools using the existing public helper name."""
-    register_workflow_tools(server, project)
-
-
 def _research_content(identifier: str, project: Project) -> str:
     """Read the same live representation for resources and tool attachments."""
     return json.dumps(_data(project.vault.get(identifier)))
