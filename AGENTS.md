@@ -17,17 +17,17 @@ uv sync --all-extras
 Run focused tests during development:
 
 ```bash
-uv run pytest tests/test_records.py
-uv run pytest tests/test_cli.py::test_name
-uv run ruff check src tests
+pytest tests/test_records.py
+pytest tests/test_cli.py::test_name
+ruff check src tests
 ```
 
 Before finishing a code change, run:
 
 ```bash
-uv run pytest
-uv run ruff check .
-uv run zensical build --clean --strict
+pytest
+ruff check .
+zensical build --clean --strict
 ```
 
 Report any checks that fail or cannot be run. Do not claim validation that was not performed.
@@ -86,7 +86,7 @@ Add or update regression tests for behavior changes and bug fixes.
 - Keep tracking adapter tests under `tests/tracking/`.
 - Put end-to-end example coverage under `tests/examples/`.
 - Mark tests requiring external services or optional integrations with `pytest.mark.integration`.
-- Do not weaken or remove existing tests to make a change pass.
+- Do not weaken or remove existing tests to make a change pass. Verify first if a test is still valid, then update it to reflect the new behavior.
 
 Prefer focused tests while iterating, then run the full validation commands before finishing.
 
