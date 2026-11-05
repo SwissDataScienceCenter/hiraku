@@ -61,9 +61,9 @@ def validate_runs(project: Path) -> list[dict[str, str]]:
     return rows
 
 
-def generate(config: Project) -> None:
+def generate(project: Project) -> None:
     """Generate records and runs in an initialized, empty example project."""
-    if list(config.records_dir.rglob("*.md")) or (config.root / "runs.csv").exists():
+    if list(project.records_dir.rglob("*.md")) or (project.root / "runs.csv").exists():
         raise FileExistsError("Generation requires an example without records or runs")
     Record.create(
         "heart-disease",
@@ -77,7 +77,7 @@ def generate(config: Project) -> None:
         markdown="# Heart disease classification\n\n"
         "Measured runs on the processed Cleveland dataset with seeds 1, 2 and 3.\n"
         "These small validation comparisons are not clinical evidence.\n",
-        config=config,
+        project=project,
     )
     for identifier, parent, model, fraction in EXPERIMENTS:
         record = Record.create(
@@ -90,7 +90,7 @@ def generate(config: Project) -> None:
             else "hypothesis",
             status="concluded",
             activate=False,
-            config=config,
+            project=project,
             markdown=f"## {identifier}\n\n"
             f"Model: `{model}`; validation fraction: {fraction}; seeds: 1, 2, 3.\n"
             + (
@@ -114,17 +114,17 @@ def generate(config: Project) -> None:
             result = execute_command(
                 [*command, "--seed", str(seed)],
                 record_id=identifier,
-                config=config,
+                project=project,
             )
             if result.returncode:
                 raise RuntimeError(
                     f"Training command for {identifier} failed with "
                     f"exit code {result.returncode}"
                 )
-    rows = validate_runs(config.root)
+    rows = validate_runs(project.root)
     for identifier, _, _, _ in EXPERIMENTS:
         values = [r for r in rows if r["record_id"] == identifier]
-        record = Record.load(config.records_dir / "heart-disease" / f"{identifier}.md")
+        record = Record.load(project.records_dir / "heart-disease" / f"{identifier}.md")
         record.markdown += (
             "\nMean across the three runs:\n\n"
             + "\n".join(
@@ -134,8 +134,8 @@ def generate(config: Project) -> None:
             + "\n\nNo statistical significance is claimed.\n"
         )
         record.save(overwrite=True)
-    config.active_record_id = "random-forest"
-    config.save()
+    project.active_record_id = "random-forest"
+    project.save()
 
 
 def generate_results(output: Path) -> None:
@@ -145,7 +145,7 @@ def generate_results(output: Path) -> None:
         raise FileExistsError(f"Output already exists: {output}")
     with TemporaryDirectory(prefix="hiraku-heart-disease-") as temporary:
         project = Path(temporary).resolve() / "project"
-        config = Project.create(project, example="heart-disease", install_skill=False)
+        project = Project.create(project, example="heart-disease", install_skill=False)
         for arguments in (
             ["init", "-q"],
             ["add", "."],
@@ -161,12 +161,12 @@ def generate_results(output: Path) -> None:
                 "Initialize isolated example source",
             ],
         ):
-            subprocess.run(["git", *arguments], cwd=config.root, check=True)
-        generate(config)
+            subprocess.run(["git", *arguments], cwd=project.root, check=True)
+        generate(project)
         output.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
             overlay = Path(staging) / "overlay"
-            shutil.copytree(config.records_dir, overlay / "hiraku/records")
+            shutil.copytree(project.records_dir, overlay / "hiraku/records")
             for name in ("hiraku/hiraku.yml", "runs.csv"):
                 shutil.copyfile(project / name, overlay / name)
             overlay.rename(output)

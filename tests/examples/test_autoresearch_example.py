@@ -165,7 +165,7 @@ def test_autoresearch_is_an_overlay() -> None:
 
 def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     project, _ = create_overlay_project(tmp_path, monkeypatch)
-    task = load_record("sep10", config=Project.discover(project))
+    task = load_record("sep10", project=Project.discover(project))
 
     assert (project / "README.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "README.md"
@@ -207,9 +207,9 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert not hasattr(task, "command")
     config = Project.discover(project)
     assert config.default_dispatch == "autoresearch.sh"
-    assert "autoresearch" in workflow_ids(config=config)
-    assert "collaborative" in workflow_ids(config=config)
-    response = start_workflow("autoresearch", config=config)
+    assert "autoresearch" in workflow_ids(project=config)
+    assert "collaborative" in workflow_ids(project=config)
+    response = start_workflow("autoresearch", project=config)
     assert response["status"] == "completed"
     workflow_md = (project / "hiraku/workflows/autoresearch/workflow.md").read_text()
     assert response["result"] == workflow_md.split("---", 2)[-1].strip()

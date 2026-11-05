@@ -201,7 +201,7 @@ class Project(BaseModel):
         from .record import Record, load_record
 
         selected = load_record(
-            record.id if isinstance(record, Record) else record, config=self
+            record.id if isinstance(record, Record) else record, project=self
         )
         self.active_record_id = selected.id
         self.save()

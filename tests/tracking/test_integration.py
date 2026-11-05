@@ -13,15 +13,15 @@ from hiraku.tracking import CSVBackend
 
 def test_csv_normalization_filtering_and_sorting(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
-    task = Record.create("task", config=config)
-    Record.create("exp", parent_id=task.id, config=config)
+    task = Record.create("task", project=config)
+    Record.create("exp", parent_id=task.id, project=config)
     (config.root / "runs.csv").write_text(
         "id,record_id,commit,timestamp,entrypoint,url,metric.loss,param.seed,note\n"
         "later,exp,abc,2026-01-02T00:00:00Z,train,,1.5,2,kept\n"
         "earlier,exp,,2026-01-01T00:00:00+00:00,,,2.5,1,raw\n"
         "other,task,,,,,3.0,3,ignored\n"
     )
-    backend = task.resolve_tracking_backend(config=config)
+    backend = task.resolve_tracking_backend(project=config)
     runs = backend.list_runs()
     assert [run.id for run in runs] == ["earlier", "later", "other"]
     assert [run.id for run in backend.list_runs(record_id="task")] == ["other"]
@@ -54,8 +54,8 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     mlflow = pytest.importorskip("mlflow")
     config = Project.create(tmp_path)
     config.tracking_backend = {"type": "mlflow", "experiment_name": "hiraku-test"}
-    task = Record.create("task", config=config)
-    Record.create("exp", parent_id=task.id, config=config)
+    task = Record.create("task", project=config)
+    Record.create("exp", parent_id=task.id, project=config)
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
     mlflow.set_experiment("hiraku-test")
     with mlflow.start_run() as active:
@@ -74,7 +74,7 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     with mlflow.start_run() as active:
         mlflow.set_tag("unrelated", "no-record-id")
         mlflow.log_metric("loss", 4.0)
-    backend = task.resolve_tracking_backend(config=config)
+    backend = task.resolve_tracking_backend(project=config)
     run = backend.list_runs()[0]
     assert len(backend.list_runs()) == 1
     assert backend.list_runs(record_id="task") == []
@@ -86,4 +86,4 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     assert run.metrics["loss"] == 1.0
     assert run.timestamp is not None and run.timestamp.tzinfo is UTC
     assert run.raw["tags"]["unmapped"] == "kept"
-    assert load_record("exp", config=config).runs(config=config)[0].id == run_id
+    assert load_record("exp", project=config).runs(project=config)[0].id == run_id

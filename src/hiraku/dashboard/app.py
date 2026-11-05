@@ -34,16 +34,16 @@ with app.setup:
 def data_setup():
     _root = os.environ.get("HIRAKU_PROJECT_ROOT")
     # Project copies opened directly in marimo discover their own project.
-    config = (
+    project = (
         Project.discover(Path(_root)) if _root else Project.discover(mo.notebook_dir())
     )
     requested_record = os.environ.get("HIRAKU_DASHBOARD_RECORD") or None
-    return config, requested_record
+    return project, requested_record
 
 
 @app.cell
-def project_name(config):
-    mo.plain_text(config.root.name)
+def project_name(project):
+    mo.plain_text(project.root.name)
     return
 
 
@@ -55,23 +55,23 @@ def refresh_control():
 
 
 @app.cell
-def project_data(config, refresh):
+def project_data(project, refresh):
     _refreshes = refresh.value
-    project = hd.load(config)
+    project = hd.load(project)
     runs_df = hd.arrow_frame(hd.run_rows(project), hd.RUN_COLUMNS)
     records_df = hd.arrow_frame(hd.record_rows(project.records), hd.RECORD_COLUMNS)
     return project, records_df, runs_df
 
 
 @app.cell
-def selection_state(config, records_df, requested_record, runs_df):
+def selection_state(project, records_df, requested_record, runs_df):
     paths = dict(zip(records_df["record"], records_df["record_path"], strict=True))
     metrics = hd.metric_names(runs_df)
     tree_metric = hd.default_metric(records_df, metrics)
     initial_record = next(
         (
             record_id
-            for record_id in (requested_record, config.active_record_id)
+            for record_id in (requested_record, project.active_record_id)
             if record_id in paths
         ),
         next(iter(paths), None),

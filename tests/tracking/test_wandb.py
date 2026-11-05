@@ -68,6 +68,6 @@ def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) 
 
 def test_wandb_backend_reads_runtime_as_duration(tmp_path: Path) -> None:
     backend = object.__new__(WandbBackend)
-    backend.config = Project.create(tmp_path)
+    backend.project = Project.create(tmp_path)
     assert backend._normalize_run(FakeTimedRun()).duration == 12.5
     assert backend._normalize_run(FakeRun()).duration is None

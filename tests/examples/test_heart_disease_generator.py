@@ -111,7 +111,7 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
 
     def export(output):
         generated = Project.create(output, install_skill=False)
-        Record.create("generated", config=generated)
+        Record.create("generated", project=generated)
         (output / "runs.csv").write_text("id,record_id\nrun,generated\n")
 
     monkeypatch.setattr(
@@ -130,7 +130,7 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     config = Project.discover(tmp_path)
     assert config.active_record_id == "generated"
-    assert load_record("generated", config=config).runs(config=config)[0].id == "run"
+    assert load_record("generated", project=config).runs(project=config)[0].id == "run"
     assert not (tmp_path / ".git").exists()
 
 
@@ -168,16 +168,16 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
         ),
     }
     config = Project.create(tmp_path / "project", template=output, install_skill=False)
-    assert len(list_records(config=config)) == 4
-    record = load_record("random-forest", config=config)
-    runs = record.resolve_tracking_backend(config=config).list_runs()
+    assert len(list_records(project=config)) == 4
+    record = load_record("random-forest", project=config)
+    runs = record.resolve_tracking_backend(project=config).list_runs()
     assert Counter(r.record_id for r in runs) == {
         "logistic-baseline": 3,
         "random-forest": 3,
         "forest-tuning": 3,
     }
     assert all(r.id and r.timestamp for r in runs)
-    assert all(r.decision is None for r in list_records(config=config))
+    assert all(r.decision is None for r in list_records(project=config))
 
 
 def test_validation_rejects_incomplete_results(generator, tmp_path):

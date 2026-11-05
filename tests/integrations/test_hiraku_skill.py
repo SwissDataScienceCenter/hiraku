@@ -105,10 +105,10 @@ def _run_codex(project: Path, prompt: str) -> str:
     return result.stdout
 
 
-def _create_task(config: Project) -> Record:
+def _create_task(project: Project) -> Record:
     return Record.create(
         "heart-disease",
-        config=config,
+        project=project,
         branch="main",
         goal=(
             "Develop and evaluate predictive models for heart disease on a fixed "
@@ -126,14 +126,14 @@ def _create_task(config: Project) -> Record:
 
 
 def _create_logistic_experiment(
-    config: Project,
+    project: Project,
     task: Record,
     commit: str,
 ) -> Record:
     return Record.create(
         "logistic-baseline",
         parent_id=task.id,
-        config=config,
+        project=project,
         commit=commit,
         summary="Logistic regression baseline",
         hypothesis="Regularized logistic regression provides a calibrated baseline",
@@ -154,7 +154,7 @@ Track val/log_loss to minimize and val/accuracy to maximize. Only create and
 verify the record.""",
     )
 
-    tasks = list_records(config=config)
+    tasks = list_records(project=config)
     assert len(tasks) == 1, agent_output
     task = tasks[0]
     assert task.id == "heart-disease"
@@ -172,7 +172,7 @@ verify the record.""",
         {"name": "val/log_loss", "direction": "minimize"},
         {"name": "val/accuracy", "direction": "maximize"},
     ]
-    assert task.children(config=config) == []
+    assert task.children(project=config) == []
     assert CSVBackend(config).list_runs(record_id=task.id) == []
     assert _git(project, "status", "--porcelain") == ""
 
@@ -189,7 +189,7 @@ hypothesis 'Regularized logistic regression provides a calibrated baseline'.
 Bind it to the current commit. Only create and verify the record; do not run it.""",
     )
 
-    experiments = task.children(config=config)
+    experiments = task.children(project=config)
     assert len(experiments) == 1, agent_output
     experiment = experiments[0]
     assert experiment.id == "logistic-baseline"
@@ -217,9 +217,9 @@ report its tracked validation metrics. Do not create or update other records."""
     )
 
     assert task.path.read_bytes() == task_before, agent_output
-    current = load_record(experiment.id, config=config)
+    current = load_record(experiment.id, project=config)
     assert current.path.read_bytes() == experiment_before
-    assert [item.id for item in task.children(config=config)] == ["logistic-baseline"]
+    assert [item.id for item in task.children(project=config)] == ["logistic-baseline"]
     runs = CSVBackend(config).list_runs(
         record_id=experiment.id,
     )

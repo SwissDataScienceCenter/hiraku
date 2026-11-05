@@ -71,16 +71,16 @@ def require_git() -> str:
     return executable
 
 
-def init_code_repository(config: Project) -> None:
+def init_code_repository(project: Project) -> None:
     """Initialize the code repository, preserving existing repositories/worktrees."""
     require_git()
-    if (config.root / ".git").exists():
-        GitRepository(config.root)
+    if (project.root / ".git").exists():
+        GitRepository(project.root)
         return
     git = require_git()
     try:
         result = subprocess.run(
-            [git, "init", "--", str(config.root)],
+            [git, "init", "--", str(project.root)],
             text=True,
             capture_output=True,
             check=False,

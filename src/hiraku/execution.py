@@ -35,14 +35,14 @@ def execute_command(
     dispatch: str | None = None,
     env: Mapping[str, str] | None = None,
     capture_output: bool = False,
-    config: Project | None = None,
+    project: Project | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command in the current project and return when it exits."""
-    selected = config or Project.discover()
+    selected = project or Project.discover()
     selected_record = record_id or selected.active_record_id
     if selected_record is None:
         raise NoActiveRecordError("Select a record with --record or hiraku record set")
-    record = load_record(selected_record, config=selected)
+    record = load_record(selected_record, project=selected)
     if isinstance(command, str | bytes):
         raise ValidationError("command must be an argv sequence, not a shell string")
     if command is None or isinstance(command, str | bytes):
@@ -75,7 +75,7 @@ def execute_command(
     if reserved.intersection(additions):
         raise ValidationError("Environment cannot override reserved run attribution")
 
-    tracking_spec = record.tracking_backend_spec(config=selected)
+    tracking_spec = record.tracking_backend_spec(project=selected)
     if tracking_spec.get("type") == "wandb":
         wandb_project = tracking_spec.get("project")
         if wandb_project is None:

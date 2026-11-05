@@ -39,7 +39,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         )
         await call("record_create", record_id="child", parent_id="root")
         await call("record_update", record_id="child", fields={"status": "done"})
-        assert load_record("child", config=config).status == "done"
+        assert load_record("child", project=config).status == "done"
         for name, args in [
             ("record_create", {"record_id": "bad", "parent_id": "missing"}),
             ("record_create", {"record_id": "../escape"}),
@@ -50,7 +50,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         ]:
             with pytest.raises(ToolError):
                 await server.call_tool(name, args)
-        assert load_record("child", config=config).related_to == []
+        assert load_record("child", project=config).related_to == []
         await call("record_reparent", record_id="child", parent_id=None)
         await call("record_delete", record_id="child")
         await call(
@@ -64,7 +64,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         with pytest.raises(ToolError):
             await call("record_create", record_id="../escape")
         await call("record_update", record_id="sources", fields={}, markdown="Updated")
-        assert load_record("sources", config=config).markdown == "Updated"
+        assert load_record("sources", project=config).markdown == "Updated"
         await call("record_show", record_id="sources")
         await call("record_list")
         await call("record_show", record_id="root")

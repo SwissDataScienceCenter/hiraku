@@ -85,7 +85,7 @@ def input_schema() -> dict[str, Any]:
     return CollaborativeInput.model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the collaborative research graph from its Markdown instructions."""
     path = Path(__file__).with_name("workflow.md")
     fields, body = Record._parse_markdown(path)
@@ -99,7 +99,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
             arguments = CollaborativeInput.model_validate(state.get("arguments", {}))
         except PydanticValidationError as exc:
             raise ValidationError(str(exc)) from exc
-        task = arguments.task or config.active_record_id
+        task = arguments.task or project.active_record_id
         command = arguments.command
         rounds = arguments.rounds
         if not isinstance(task, str) or not task:
@@ -110,7 +110,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
         if type(rounds) is not int or rounds < 1:
             raise ValidationError("rounds must be a positive integer")
         try:
-            load_record(task, config=config)
+            load_record(task, project=project)
         except HirakuError as exc:
             raise ValidationError(str(exc)) from exc
         return Command(
@@ -261,7 +261,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
                 hypothesis=arguments["hypothesis"],
                 markdown=f"## Change\n\n{arguments['change'].strip()}\n",
                 activate=False,
-                config=config,
+                project=project,
             )
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="draft")
@@ -274,7 +274,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
         identifier = state.get("experiment")
         if not identifier:
             raise ValidationError("No experiment has been drafted")
-        return load_record(identifier, config=config)
+        return load_record(identifier, project=project)
 
     def experiment_context(state: ResearchState) -> dict[str, Any]:
         record = experiment(state)
@@ -313,7 +313,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
                 goto="implement",
             )
         try:
-            sha = GitRepository(config.root).resolve(commit)
+            sha = GitRepository(project.root).resolve(commit)
             record = experiment(state)
             record.commit = sha
             record.status = "implemented"
@@ -342,7 +342,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
                 },
                 goto="launch",
             )
-        runs = _runs(record, config)
+        runs = _runs(record, project)
         if not runs:
             return Command(
                 update={"feedback": f"No run is attributed to {record.id!r} yet."},
@@ -361,7 +361,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
 
     def analyze(state: ResearchState) -> Command[Literal["analyze", "draft", "done"]]:
         record = experiment(state)
-        runs = _runs(record, config)
+        runs = _runs(record, project)
         data = {
             **experiment_context(state),
             "runs": [{"run_id": run.id, "metrics": dict(run.metrics)} for run in runs],
@@ -437,8 +437,8 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
     return builder.compile(checkpointer=checkpointer)
 
 
-def _runs(record: Record, config: Project) -> list[Run]:
-    return record.runs(config=config)
+def _runs(record: Record, project: Project) -> list[Run]:
+    return record.runs(project=project)
 
 
 class WorkflowApproval(BaseModel):

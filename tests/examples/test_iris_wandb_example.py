@@ -135,7 +135,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     config = Project.discover(project)
-    root = load_record("iris", config=config)
+    root = load_record("iris", project=config)
     assert config.tracking_backend == "wandb"
     assert "tracking_backend" not in root.to_dict()
 
@@ -155,7 +155,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "HEAD",
         ],
     )
-    record = load_record("logistic", config=config)
+    record = load_record("logistic", project=config)
     assert record.commit == source_commit
     invoke(
         runner,

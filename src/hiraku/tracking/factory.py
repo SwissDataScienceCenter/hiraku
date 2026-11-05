@@ -47,14 +47,14 @@ def validate_backend_config(
 
 
 def create_backend(
-    specification: str | Mapping[str, Any], config: Project
+    specification: str | Mapping[str, Any], project: Project
 ) -> TrackingBackend:
     """Create a built-in backend from a name or validated configuration mapping."""
     parsed = validate_backend_config(specification)
     if isinstance(parsed, CSVBackendConfig):
-        return CSVBackend(config, settings=parsed)
+        return CSVBackend(project, settings=parsed)
     if isinstance(parsed, MLflowBackendConfig):
-        return MLflowBackend(config, settings=parsed)
+        return MLflowBackend(project, settings=parsed)
     if isinstance(parsed, WandbBackendConfig):
-        return WandbBackend(config, settings=parsed)
+        return WandbBackend(project, settings=parsed)
     raise BackendError(f"Unsupported tracking backend configuration: {type(parsed)}")

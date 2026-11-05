@@ -296,9 +296,9 @@ class Record(BaseModel):
             ```python
             from hiraku.project import Project
 
-            config = Project.discover()
+            project = Project.discover()
             record = Record(id="demo")
-            record.save(config.records_dir / "demo" / "demo.md")
+            record.save(project.records_dir / "demo" / "demo.md")
             ```
         """
         if self.path is None and path is None:
@@ -365,9 +365,9 @@ class Record(BaseModel):
         current.save()
         return current
 
-    def resolve(self, *, config: Any = None) -> ResolvedRecord:
+    def resolve(self, *, project: Any = None) -> ResolvedRecord:
         """Return inherited values and their defining record IDs."""
-        selected = _config(config)
+        selected = _project(project)
         index = _record_index(selected)
         _validate_tree(index, selected.records_dir)
         return _resolve(self, index, set())
@@ -381,11 +381,11 @@ class Record(BaseModel):
         related_to: list[str] | None = None,
         markdown: str = "",
         activate: bool = True,
-        config: Any = None,
+        project: Any = None,
         **fields: Any,
     ) -> Record:
         """Create a record, materializing inherited metrics."""
-        selected = _config(config)
+        selected = _project(project)
         index = _record_index(selected)
         if record_id in index:
             raise RecordExistsError(f"Record {record_id!r} already exists")
@@ -397,7 +397,7 @@ class Record(BaseModel):
                 raise RecordNotFoundError(f"Related record {link!r} not found")
         values = dict(fields)
         if parent_id is not None:
-            inherited = index[parent_id].resolve(config=selected).values
+            inherited = index[parent_id].resolve(project=selected).values
             for name in _MATERIALIZED_INHERITED_FIELDS:
                 if name not in values and name in inherited:
                     values[name] = inherited[name]
@@ -414,14 +414,14 @@ class Record(BaseModel):
             selected.set_active_record(record)
         return record
 
-    def children(self, *, config: Any = None) -> list[Record]:
+    def children(self, *, project: Any = None) -> list[Record]:
         return [
-            item for item in list_records(config=config) if item.parent_id == self.id
+            item for item in list_records(project=project) if item.parent_id == self.id
         ]
 
-    def reparent(self, parent_id: str | None, *, config: Any = None) -> None:
+    def reparent(self, parent_id: str | None, *, project: Any = None) -> None:
         """Change parent and relocate this subtree when its root changes."""
-        selected = _config(config)
+        selected = _project(project)
         index = _record_index(selected)
         _validate_tree(index, selected.records_dir)
         if self.id not in index:
@@ -554,27 +554,27 @@ class Record(BaseModel):
         with suppress(OSError):
             old_folder.rmdir()
 
-    def descendants(self, *, config: Any = None) -> list[Record]:
-        index = {item.id: item for item in list_records(config=config)}
+    def descendants(self, *, project: Any = None) -> list[Record]:
+        index = {item.id: item for item in list_records(project=project)}
         return [item for item in index.values() if _is_descendant(item, self.id, index)]
 
-    def tracking_backend_spec(self, *, config: Any = None) -> dict[str, Any]:
+    def tracking_backend_spec(self, *, project: Any = None) -> dict[str, Any]:
         """Return the project-wide tracking backend configuration."""
-        selected = _config(config)
+        selected = _project(project)
         specification = selected.tracking_backend
         if isinstance(specification, str):
             return {"type": specification}
         return dict(specification)
 
-    def resolve_tracking_backend(self, *, config: Any = None) -> TrackingBackend:
+    def resolve_tracking_backend(self, *, project: Any = None) -> TrackingBackend:
         """Create the tracking backend configured for this project."""
-        selected = _config(config)
-        return create_backend(self.tracking_backend_spec(config=selected), selected)
+        selected = _project(project)
+        return create_backend(self.tracking_backend_spec(project=selected), selected)
 
     def runs(
         self,
         *,
-        config: Any = None,
+        project: Any = None,
         sort: str | None = None,
         ascending: bool | None = None,
         limit: int | None = None,
@@ -583,16 +583,16 @@ class Record(BaseModel):
 
         Sorting and limiting use the same options as `TrackingBackend.list_runs`.
         """
-        return self.resolve_tracking_backend(config=config).list_runs(
+        return self.resolve_tracking_backend(project=project).list_runs(
             record_id=self.id,
             sort=sort,
             ascending=ascending,
             limit=limit,
         )
 
-    def delete(self, *, config: Any = None) -> None:
-        records = list_records(config=config)
-        selected = _config(config)
+    def delete(self, *, project: Any = None) -> None:
+        records = list_records(project=project)
+        selected = _project(project)
         if _reparent_journal_path(selected).exists():
             raise ValidationError(
                 "Cannot delete records until pending reparent recovery is complete"
@@ -616,21 +616,21 @@ class Record(BaseModel):
         self.path = None
 
 
-def _config(config: Any) -> Any:
-    if config is not None:
-        return config
+def _project(project: Any) -> Any:
+    if project is not None:
+        return project
     from .project import Project
 
     return Project.discover()
 
 
-def _reparent_journal_path(config: Any) -> Path:
-    return config.hiraku_dir / ".reparent-transaction.json"
+def _reparent_journal_path(project: Any) -> Path:
+    return project.hiraku_dir / ".reparent-transaction.json"
 
 
-def _recover_reparenting(config: Any) -> tuple[set[Path], list[Exception], bool]:
+def _recover_reparenting(project: Any) -> tuple[set[Path], list[Exception], bool]:
     """Retry an interrupted reparent and hide stale copies while cleanup is pending."""
-    journal_path = _reparent_journal_path(config)
+    journal_path = _reparent_journal_path(project)
     if not journal_path.exists():
         return set(), [], True
     try:
@@ -668,7 +668,7 @@ def _recover_reparenting(config: Any) -> tuple[set[Path], list[Exception], bool]
                 or new.name != f"{record_id}.md"
             ):
                 raise ValueError("journal paths do not match the affected records")
-            moves.append((config.records_dir / old, config.records_dir / new))
+            moves.append((project.records_dir / old, project.records_dir / new))
     except (OSError, KeyError, TypeError, ValueError) as exc:
         raise ValidationError(
             f"Cannot read reparent recovery journal {journal_path}: {exc}"
@@ -726,10 +726,10 @@ def _recover_reparenting(config: Any) -> tuple[set[Path], list[Exception], bool]
     return ignored_paths, cleanup_errors, complete
 
 
-def _record_index(config: Any) -> dict[str, Record]:
-    ignored_paths, _, _ = _recover_reparenting(config)
+def _record_index(project: Any) -> dict[str, Record]:
+    ignored_paths, _, _ = _recover_reparenting(project)
     index: dict[str, Record] = {}
-    for path in sorted(config.records_dir.glob("*/*.md")):
+    for path in sorted(project.records_dir.glob("*/*.md")):
         if path in ignored_paths:
             continue
         record = Record.load(path)
@@ -813,9 +813,9 @@ def _is_descendant(
     return False
 
 
-def load_record(record_id: str, *, config: Any = None) -> Record:
+def load_record(record_id: str, *, project: Any = None) -> Record:
     validate_identifier(record_id, label="record ID")
-    selected = _config(config)
+    selected = _project(project)
     index = _record_index(selected)
     _validate_tree(index, selected.records_dir)
     try:
@@ -824,8 +824,8 @@ def load_record(record_id: str, *, config: Any = None) -> Record:
         raise RecordNotFoundError(f"Record {record_id!r} not found") from exc
 
 
-def list_records(*, config: Any = None) -> list[Record]:
-    selected = _config(config)
+def list_records(*, project: Any = None) -> list[Record]:
+    selected = _project(project)
     index = _record_index(selected)
     _validate_tree(index, selected.records_dir)
     return [index[key] for key in sorted(index)]

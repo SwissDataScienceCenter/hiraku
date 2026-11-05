@@ -22,9 +22,9 @@ from hiraku.workflows.langgraph import (
 
 
 def resume_workflow(session_id, response, *, config):
-    status = workflow_status(session_id, config=config)
+    status = workflow_status(session_id, project=config)
     return _resume_workflow(
-        session_id, response, config=config, checkpoint_id=status["checkpoint_id"]
+        session_id, response, project=config, checkpoint_id=status["checkpoint_id"]
     )
 
 
@@ -64,7 +64,7 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     )
     assert "workflow_approval" in _tool_names(server)
 
-    started = start_workflow("count-steps", {"count": 2}, config=config)
+    started = start_workflow("count-steps", {"count": 2}, project=config)
     first = _interrupt(started)
     assert "Step 1/2: token" in first["instruction"]
     assert first["data"]["step"] == 1
@@ -78,7 +78,7 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     wrong = resume_workflow(
         started["workflow_session_id"],
         {"token": "wrong", "decision": "continue"},
-        config=config,
+        project=config,
     )
     retry = _interrupt(wrong)
     assert retry["data"] == first["data"]
@@ -87,7 +87,7 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     invalid_decision = resume_workflow(
         started["workflow_session_id"],
         {"token": first["data"]["token"], "decision": "skip"},
-        config=config,
+        project=config,
     )
     retry = _interrupt(invalid_decision)
     assert retry["data"] == first["data"]
@@ -96,7 +96,7 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     next_step = resume_workflow(
         started["workflow_session_id"],
         {"token": first["data"]["token"], "decision": "continue"},
-        config=config,
+        project=config,
     )
     second = _interrupt(next_step)
     assert "Step 2/2: token" in second["instruction"]
@@ -105,11 +105,11 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     done = resume_workflow(
         started["workflow_session_id"],
         {"token": second["data"]["token"], "decision": "continue"},
-        config=config,
+        project=config,
     )
     assert done["status"] == "completed"
     assert "Finished after 2 of 2 steps." in done["result"]
-    assert workflow_status(started["workflow_session_id"], config=config) == done
+    assert workflow_status(started["workflow_session_id"], project=config) == done
 
 
 def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) -> None:
@@ -117,7 +117,7 @@ def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) 
     server = create_server(config)
     assert "workflow_resume" in _tool_names(server)
 
-    started = start_workflow("count-steps", {}, config=config)
+    started = start_workflow("count-steps", {}, project=config)
     first = _interrupt(started)
     assert first["data"]["count"] == 5
 
@@ -127,7 +127,7 @@ def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) 
     completed = resume_workflow(
         started["workflow_session_id"],
         {"token": first["data"]["token"], "decision": "finish"},
-        config=config,
+        project=config,
     )
     assert completed["status"] == "completed"
     assert "Finished after 1 of 5 steps." in completed["result"]
@@ -136,7 +136,7 @@ def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) 
 def test_count_steps_rejects_invalid_arguments(tmp_path) -> None:
     config = _project(tmp_path)
     with pytest.raises(ValidationError, match="positive integer"):
-        start_workflow("count-steps", {"count": 0}, config=config)
+        start_workflow("count-steps", {"count": 0}, project=config)
 
 
 def test_mcp_exposes_only_the_langgraph_workflow_interface(tmp_path) -> None:
@@ -177,7 +177,7 @@ def test_workflow_graph_is_available_from_cli_and_mcp(tmp_path, monkeypatch) -> 
     assert "hiraku://workflows/{workflow_id}/graph" in {
         template.uri_template for template in templates
     }
-    mermaid = workflow_mermaid("count-steps", config=config)
+    mermaid = workflow_mermaid("count-steps", project=config)
     assert "graph TD" in mermaid
     assert "harness_step" in mermaid
 
@@ -187,12 +187,12 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     Record.create(
         "task",
         type="task",
-        config=config,
+        project=config,
     )
     started = start_workflow(
         "collaborative",
         {"rounds": 1, "command": ["python", "train.py"]},
-        config=config,
+        project=config,
     )
     assert started["status"] == "waiting"
     interrupt = _interrupt(started)
@@ -200,24 +200,24 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     assert interrupt["data"]["task"] == "task"
 
     bypass = resume_workflow(
-        started["workflow_session_id"], {"event": "finish"}, config=config
+        started["workflow_session_id"], {"event": "finish"}, project=config
     )
     assert bypass["status"] == "waiting"
     assert "approval decision is required" in _interrupt(bypass)["error"]
     invalid = resume_workflow(
-        started["workflow_session_id"], {"approval": {"decision": []}}, config=config
+        started["workflow_session_id"], {"approval": {"decision": []}}, project=config
     )
     assert "approval decision is required" in _interrupt(invalid)["error"]
     revised = resume_workflow(
         started["workflow_session_id"],
         {"approval": {"decision": "revise", "feedback": "Use a smaller model."}},
-        config=config,
+        project=config,
     )
     assert _interrupt(revised)["feedback"] == "Use a smaller model."
     completed = resume_workflow(
         started["workflow_session_id"],
         {"approval": {"decision": "stop"}},
-        config=config,
+        project=config,
     )
     assert completed["status"] == "completed"
     assert "results" in completed["result"]
@@ -228,12 +228,12 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
     Record.create(
         "task",
         type="task",
-        config=config,
+        project=config,
     )
     started = start_workflow(
         "collaborative",
         {"rounds": 1, "command": ["python", "train.py"]},
-        config=config,
+        project=config,
     )
     requested = []
 
@@ -292,12 +292,12 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
     Record.create(
         "task",
         type="task",
-        config=config,
+        project=config,
     )
     started = start_workflow(
         "collaborative",
         {"rounds": 1, "command": ["python", "train.py"]},
-        config=config,
+        project=config,
     )
 
     async def elicit(_context, _params):
@@ -345,7 +345,7 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
         "        'properties': {},\n"
         "        'additionalProperties': False,\n"
         "    }\n"
-        "def build_graph(checkpointer, *, config):\n"
+        "def build_graph(checkpointer, *, project):\n"
         "    def review(state):\n"
         "        answer = interrupt({'approval': {'message': 'Review this'}})\n"
         "        return {'final': answer['response']['value']}\n"
@@ -356,7 +356,7 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
         "    return graph.compile(checkpointer=checkpointer)\n",
         encoding="utf-8",
     )
-    started = start_workflow("review", config=config)
+    started = start_workflow("review", project=config)
 
     async def elicit(_context, _params):
         return types.ElicitResult(action="accept", content={"decision": "approve"})
@@ -390,12 +390,12 @@ def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
     Record.create(
         "task",
         type="task",
-        config=config,
+        project=config,
     )
     first = start_workflow(
         "collaborative",
         {"rounds": 1, "command": ["python", "train.py"]},
-        config=config,
+        project=config,
     )
 
     async def elicit(_context, _params):

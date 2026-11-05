@@ -90,8 +90,8 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
 
     shutil.copytree(output, config.root, dirs_exist_ok=True)
     config = Project.discover(config.root)
-    weak = load_record("weak-l2", config=config)
-    backend = weak.resolve_tracking_backend(config=config)
+    weak = load_record("weak-l2", project=config)
+    backend = weak.resolve_tracking_backend(project=config)
     runs = backend.list_runs()
     assert Counter(r.record_id for r in runs) == {"weak-l2": 3, "strong-l2": 3}
     import subprocess
@@ -127,7 +127,7 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
     result = execute_command(
         command,
         record_id=weak.id,
-        config=config,
+        project=config,
         env={
             "MLFLOW_TRACKING_URI": f"sqlite:///{config.root / 'mlflow.db'}",
             "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",

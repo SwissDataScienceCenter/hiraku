@@ -13,8 +13,8 @@ from hiraku.workflows.langgraph import (
 )
 
 
-def _write_workflow(config: Project, source: str) -> None:
-    directory = config.workflows_dir / "broken"
+def _write_workflow(project: Project, source: str) -> None:
+    directory = project.workflows_dir / "broken"
     directory.mkdir()
     (directory / "workflow.py").write_text(source, encoding="utf-8")
 
@@ -22,15 +22,15 @@ def _write_workflow(config: Project, source: str) -> None:
 @pytest.mark.parametrize(
     ("source", "message"),
     [
-        ("def build_graph(checkpointer, *, config): pass\n", "input_schema()"),
+        ("def build_graph(checkpointer, *, project): pass\n", "input_schema()"),
         (
             "def input_schema(): return {'type': 'array'}\n"
-            "def build_graph(checkpointer, *, config): pass\n",
+            "def build_graph(checkpointer, *, project): pass\n",
             "JSON Schema object",
         ),
         (
             "def input_schema(): raise RuntimeError('schema failed')\n"
-            "def build_graph(checkpointer, *, config): pass\n",
+            "def build_graph(checkpointer, *, project): pass\n",
             "schema failed",
         ),
     ],
@@ -42,7 +42,7 @@ def test_start_rejects_invalid_workflow_input_schema(
     _write_workflow(config, source)
 
     with pytest.raises(WorkflowError, match=message):
-        start_workflow("broken", config=config)
+        start_workflow("broken", project=config)
 
 
 @pytest.mark.parametrize(
@@ -50,12 +50,12 @@ def test_start_rejects_invalid_workflow_input_schema(
     [
         ("", "must export build_graph"),
         (
-            "def build_graph(checkpointer, *, config):\n"
+            "def build_graph(checkpointer, *, project):\n"
             "    raise RuntimeError('graph failed')\n",
             "Cannot build LangGraph workflow.*graph failed",
         ),
         (
-            "def build_graph(checkpointer, *, config):\n    return object()\n",
+            "def build_graph(checkpointer, *, project):\n    return object()\n",
             "must return a compiled graph",
         ),
     ],
@@ -70,7 +70,7 @@ def test_start_rejects_invalid_graph_factory(
     )
 
     with pytest.raises(WorkflowError, match=message):
-        start_workflow("broken", config=config)
+        start_workflow("broken", project=config)
 
 
 def test_start_wraps_workflow_import_errors(tmp_path: Path) -> None:
@@ -78,24 +78,24 @@ def test_start_wraps_workflow_import_errors(tmp_path: Path) -> None:
     _write_workflow(config, "def input_schema():\n    return [\n")
 
     with pytest.raises(WorkflowError, match="Cannot import LangGraph workflow"):
-        start_workflow("broken", config=config)
+        start_workflow("broken", project=config)
 
 
 def test_workflow_status_rejects_unknown_session(tmp_path: Path) -> None:
     config = Project.create(tmp_path, example="workflows", install_skill=False)
 
     with pytest.raises(ValidationError, match="was not found"):
-        workflow_status(f"unknown:{'0' * 32}", config=config)
+        workflow_status(f"unknown:{'0' * 32}", project=config)
 
 
 def test_resume_rejects_stale_checkpoint(tmp_path: Path) -> None:
     config = Project.create(tmp_path, example="workflows", install_skill=False)
-    started = start_workflow("count-steps", {"count": 1}, config=config)
+    started = start_workflow("count-steps", {"count": 1}, project=config)
 
     with pytest.raises(ValidationError, match="checkpoint has changed"):
         resume_workflow(
             started["workflow_session_id"],
             {"decision": "finish"},
-            config=config,
+            project=config,
             checkpoint_id="stale",
         )

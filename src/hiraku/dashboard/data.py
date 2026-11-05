@@ -60,12 +60,12 @@ class ProjectRuns:
     errors: list[str] = field(default_factory=list)
 
 
-def load(config: Project) -> ProjectRuns:
+def load(project: Project) -> ProjectRuns:
     """Read all records and query each distinct tracking source once."""
-    records = list_records(config=config)
+    records = list_records(project=project)
     by_source: dict[str, Record] = {}
     for record in records:
-        key = repr(record.tracking_backend_spec(config=config))
+        key = repr(record.tracking_backend_spec(project=project))
         by_source.setdefault(key, record)
 
     known = {record.id for record in records}
@@ -74,7 +74,7 @@ def load(config: Project) -> ProjectRuns:
     errors: list[str] = []
     for record in by_source.values():
         try:
-            backend = record.resolve_tracking_backend(config=config)
+            backend = record.resolve_tracking_backend(project=project)
             # Without a record ID, the source lists every attributed run.
             found = backend.list_runs()
         except Exception as exc:

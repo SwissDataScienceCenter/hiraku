@@ -10,9 +10,9 @@ from hiraku.workflows.langgraph import start_workflow, workflow_status
 
 
 def resume_workflow(session_id, response, *, config):
-    status = workflow_status(session_id, config=config)
+    status = workflow_status(session_id, project=config)
     return _resume_workflow(
-        session_id, response, config=config, checkpoint_id=status["checkpoint_id"]
+        session_id, response, project=config, checkpoint_id=status["checkpoint_id"]
     )
 
 
@@ -50,12 +50,12 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     Record.create(
         "task",
         type="task",
-        config=config,
+        project=config,
     )
     commit = _commit(tmp_path)
     command = ["python", "train.py"]
     result = start_workflow(
-        "collaborative", {"rounds": 1, "command": command}, config=config
+        "collaborative", {"rounds": 1, "command": command}, project=config
     )
     assert _interrupt(result)["step"] == "draft"
 
@@ -72,14 +72,14 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
                 },
             }
         ),
-        config=config,
+        project=config,
     )
     assert _interrupt(result)["step"] == "implement"
 
     result = resume_workflow(
         result["workflow_session_id"],
         _approved({"event": "implemented", "arguments": {"commit": commit}}),
-        config=config,
+        project=config,
     )
     launch = _interrupt(result)
     assert launch["step"] == "launch"
@@ -88,7 +88,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
         stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,\n")
     result = resume_workflow(
-        result["workflow_session_id"], _approved({"event": "launched"}), config=config
+        result["workflow_session_id"], _approved({"event": "launched"}), project=config
     )
     pending = _interrupt(result)
     assert pending["step"] == "analyze"
@@ -98,7 +98,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     result = resume_workflow(
         result["workflow_session_id"],
         _approved({"event": "revise_analysis", "arguments": {"feedback": "Retry"}}),
-        config=config,
+        project=config,
     )
     assert _interrupt(result)["step"] == "analyze"
 
@@ -113,10 +113,10 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
                 },
             }
         ),
-        config=config,
+        project=config,
     )
     assert completed["status"] == "completed"
-    experiment = load_record("dropout", config=config)
+    experiment = load_record("dropout", project=config)
     assert experiment.status == "analyzed"
     assert experiment.verdict == "supports"
     assert "Summarize the run" in completed["result"]

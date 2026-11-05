@@ -106,7 +106,7 @@ Project workflows are listed with `workflow_list`, started with
 `workflow_start(workflow_id, arguments)`, inspected with
 `workflow_status(workflow_session_id)`, and resumed with
 `workflow_resume(workflow_session_id, response, checkpoint_id)`. Every workflow is a LangGraph graph defined
-by `build_graph(checkpointer, *, config)` in `workflow.py`; there is no
+by `build_graph(checkpointer, *, project)` in `workflow.py`; there is no
 Hiraku-specific event protocol or per-workflow MCP tool. The workflow session ID is the
 LangGraph thread ID, and resumable graph state is checkpointed in
 `.hiraku/langgraph-checkpoints.sqlite` by default. See the [Workflows guide](workflows.md).
@@ -130,6 +130,6 @@ instructions only; it does not run an agent or modify the project.
 
 ## Python
 
-`hiraku.mcp.create_server(config=None)` returns the SDK server. Pass an existing
+`hiraku.mcp.create_server(project=None)` returns the SDK server. Pass an existing
 `Project` to select a project explicitly; otherwise it discovers the
 current project. Call `server.run(transport="stdio")` to serve it.

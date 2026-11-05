@@ -27,11 +27,11 @@ def project(tmp_path: Path) -> Project:
         "root",
         type="task",
         metrics=[{"name": "loss", "direction": "minimize"}],
-        config=config,
+        project=config,
     )
-    Record.create("a", parent_id="root", config=config)
-    Record.create("b", parent_id="root", config=config)
-    Record.create("a1", parent_id="a", config=config)
+    Record.create("a", parent_id="root", project=config)
+    Record.create("b", parent_id="root", project=config)
+    Record.create("a1", parent_id="a", project=config)
     with (tmp_path / "runs.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(

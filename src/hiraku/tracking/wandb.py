@@ -50,7 +50,7 @@ class WandbBackend(TrackingBackend):
     """Normalize native W&B runs without importing W&B eagerly.
 
     Args:
-        config: Project configuration.
+        hiraku_project: The Hiraku project.
         settings: Pre-validated W&B settings used by the factory.
         entity: Optional W&B entity.
         project: W&B project; defaults to the Hiraku project directory name.
@@ -66,7 +66,7 @@ class WandbBackend(TrackingBackend):
 
     def __init__(
         self,
-        config: Project,
+        hiraku_project: Project,
         *,
         settings: WandbBackendConfig | None = None,
         entity: str | None = None,
@@ -83,7 +83,7 @@ class WandbBackend(TrackingBackend):
         """Create an W&B adapter from validated settings.
 
         Args:
-            config: Project configuration.
+            hiraku_project: The Hiraku project.
             settings: Pre-validated W&B settings used by the factory.
             entity: Optional W&B entity.
             project: W&B project; defaults to the Hiraku project directory name.
@@ -129,9 +129,9 @@ class WandbBackend(TrackingBackend):
             raise BackendError("Pass W&B backend settings or options, not both")
         if not isinstance(settings, WandbBackendConfig):
             raise BackendError("W&B backend settings must be WandbBackendConfig")
-        self.config = config
+        self.project = hiraku_project
         self.entity = settings.entity
-        self.project = settings.project or config.root.name
+        self.project = settings.project or hiraku_project.root.name
         if not self.project:
             raise BackendError(
                 "W&B project is required when the Hiraku root has no directory name"

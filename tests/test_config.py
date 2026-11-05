@@ -240,9 +240,9 @@ def test_init_rejects_conflicting_template_sources(tmp_path: Path) -> None:
 def test_config_persists_active_record(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     config = Project.discover(tmp_path)
-    first = Record.create("first", config=config)
-    child = Record.create("trial", parent_id=first.id, config=config)
-    second = Record.create("second", config=config)
+    first = Record.create("first", project=config)
+    child = Record.create("trial", parent_id=first.id, project=config)
+    second = Record.create("second", project=config)
 
     assert config.active_record_id == second.id
     config.set_active_record(child)
@@ -254,7 +254,7 @@ def test_config_persists_active_record(tmp_path: Path) -> None:
 
 def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False, install_mcp=False)
-    first = Record.create("first", config=config)
+    first = Record.create("first", project=config)
     config.set_active_record(first)
 
     assert config.path == tmp_path / "hiraku/hiraku.yml"

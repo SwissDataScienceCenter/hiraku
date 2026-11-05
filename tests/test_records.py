@@ -23,8 +23,8 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
     loaded.new = [1, 2]
     loaded.save()
     assert Record.load(path).to_dict()["new"] == [1, 2]
-    assert load_record("sample", config=config).id == "sample"
-    assert [record.id for record in list_records(config=config)] == ["sample"]
+    assert load_record("sample", project=config).id == "sample"
+    assert [record.id for record in list_records(project=config)] == ["sample"]
     assert [record.id for record in Record.list(config.records_dir.glob("*/*.md"))] == [
         "sample"
     ]
@@ -42,20 +42,20 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
 def test_context_material_uses_the_record_registry(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     context = Record.create(
-        "protocol", type="context", markdown="Guidance", config=config
+        "protocol", type="context", markdown="Guidance", project=config
     )
 
     assert context.path == config.records_dir / "protocol/protocol.md"
-    assert load_record("protocol", config=config).type == "context"
+    assert load_record("protocol", project=config).type == "context"
     assert not (config.hiraku_dir / "contexts").exists()
 
 
 def test_record_commit_is_local_not_inherited(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    root = Record.create("root", commit="a" * 40, config=config)
-    child = Record.create("child", parent_id=root.id, config=config)
+    root = Record.create("root", commit="a" * 40, project=config)
+    child = Record.create("child", parent_id=root.id, project=config)
     assert child.commit is None
-    assert "commit" not in child.resolve(config=config).values
+    assert "commit" not in child.resolve(project=config).values
 
 
 @pytest.mark.parametrize(
@@ -74,7 +74,7 @@ def test_malformed_records_are_rejected(tmp_path: Path, content: str) -> None:
 def test_save_markdown_preserves_metadata(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
     record = Record.create(
-        "notes", markdown="Original", config=config, custom=["value"]
+        "notes", markdown="Original", project=config, custom=["value"]
     )
     metadata = record.to_dict()
 
@@ -91,7 +91,7 @@ def test_save_markdown_preserves_metadata(tmp_path: Path) -> None:
 @pytest.mark.parametrize("field", ["markdown", "title"])
 def test_save_markdown_rejects_external_changes(tmp_path: Path, field: str) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    record = Record.create("notes", markdown="Original", config=config)
+    record = Record.create("notes", markdown="Original", project=config)
     external = Record.load(record.path)
     setattr(external, field, "External change")
     external.save()
@@ -111,7 +111,7 @@ def test_save_markdown_rejects_detached_records() -> None:
 
 def test_save_markdown_validates_body_before_writing(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    record = Record.create("notes", markdown="Original", config=config)
+    record = Record.create("notes", markdown="Original", project=config)
     contents = record.path.read_bytes()
 
     with pytest.raises(ModelValidationError, match="valid string"):
@@ -125,7 +125,7 @@ def test_save_markdown_leaves_original_unchanged_on_save_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    record = Record.create("notes", markdown="Original", config=config)
+    record = Record.create("notes", markdown="Original", project=config)
     contents = record.path.read_bytes()
 
     def fail_save(self) -> None:

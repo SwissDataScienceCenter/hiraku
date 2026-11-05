@@ -20,18 +20,18 @@ BUNDLED_NOTEBOOK = Path(__file__).with_name("app.py")
 BUNDLED_VIEWS = Path(__file__).with_name("studio")
 
 
-def project_notebook(config: Project) -> Path:
+def project_notebook(project: Project) -> Path:
     """Return where ``hiraku dashboard --init`` places the project's notebook."""
-    return config.hiraku_dir / "dashboard" / "app.py"
+    return project.hiraku_dir / "dashboard" / "app.py"
 
 
-def init_dashboard(config: Project) -> Path:
+def init_dashboard(project: Project) -> Path:
     """Copy the bundled notebook into the project so it can be edited.
 
     Raises:
         hiraku.errors.ValidationError: If the project already has a dashboard.
     """
-    notebook = project_notebook(config)
+    notebook = project_notebook(project)
     if notebook.parent.exists():
         raise ValidationError(f"Dashboard already exists: {notebook.parent}")
     notebook.parent.mkdir(parents=True)
@@ -83,7 +83,7 @@ def build_command(
 
 
 def serve_dashboard(
-    config: Project,
+    project: Project,
     *,
     record_id: str | None = None,
     port: int | None = None,
@@ -101,7 +101,7 @@ def serve_dashboard(
             ``edit`` is requested for a project without its own notebook.
         hiraku.errors.RecordNotFoundError: If ``record_id`` does not exist.
     """
-    local = project_notebook(config)
+    local = project_notebook(project)
     if edit and not local.is_file():
         # The bundled notebook is installed package data; edits would be lost.
         raise ValidationError(
@@ -109,7 +109,7 @@ def serve_dashboard(
             "Create one with: hiraku dashboard --init"
         )
     if record_id is not None:
-        load_record(record_id, config=config)
+        load_record(record_id, project=project)
     if any(find_spec(name) is None for name in ("marimo", "marimo_studio", "altair")):
         raise ValidationError(
             "The dashboard requires the optional 'dashboard' dependencies. "
@@ -117,7 +117,7 @@ def serve_dashboard(
         )
     environment = {
         **os.environ,
-        "HIRAKU_PROJECT_ROOT": str(config.root),
+        "HIRAKU_PROJECT_ROOT": str(project.root),
         "HIRAKU_DASHBOARD_RECORD": record_id or "",
     }
 

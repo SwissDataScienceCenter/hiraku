@@ -61,7 +61,7 @@ def input_schema() -> dict[str, Any]:
     return _input_model(defaults["count"]).model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the example graph using the project's workflow.md instructions."""
     path = Path(__file__).with_name("workflow.md")
     fields, body = Record._parse_markdown(path)

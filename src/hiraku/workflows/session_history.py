@@ -16,20 +16,20 @@ from ..project import Project
 CHECKPOINTS = "langgraph-checkpoints.sqlite"
 
 
-def checkpoint_database(config: Project) -> Path:
+def checkpoint_database(project: Project) -> Path:
     """Return the checkpoint database path without changing the filesystem."""
-    legacy = config.hiraku_dir / CHECKPOINTS
-    return legacy if legacy.exists() else config.hiraku_dir / ".hiraku" / CHECKPOINTS
+    legacy = project.hiraku_dir / CHECKPOINTS
+    return legacy if legacy.exists() else project.hiraku_dir / ".hiraku" / CHECKPOINTS
 
 
-def prepare_checkpoint_storage(config: Project) -> Path:
+def prepare_checkpoint_storage(project: Project) -> Path:
     """Create the local-only checkpoint directory and return its database path."""
-    directory = config.hiraku_dir / ".hiraku"
+    directory = project.hiraku_dir / ".hiraku"
     directory.mkdir(parents=True, exist_ok=True)
     ignore = directory / ".gitignore"
     if not ignore.exists():
         ignore.write_text("*\n", encoding="utf-8")
-    return checkpoint_database(config)
+    return checkpoint_database(project)
 
 
 def _context_json(context: Mapping[str, Any] | None) -> str:
@@ -83,7 +83,7 @@ def record_event(
     event: str,
     status: str,
     *,
-    config: Project,
+    project: Project,
     context: Mapping[str, Any] | None = None,
     checkpoint_id: str | None = None,
     error_type: str | None = None,
@@ -91,7 +91,7 @@ def record_event(
     """Atomically append an event and update Hiraku's session index."""
     encoded = _context_json(context)
     timestamp = datetime.now(UTC).isoformat()
-    database = prepare_checkpoint_storage(config)
+    database = prepare_checkpoint_storage(project)
     with closing(sqlite3.connect(database, timeout=30)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         _initialize(connection)
@@ -135,9 +135,9 @@ def _decode(row: sqlite3.Row) -> dict[str, Any]:
     return result
 
 
-def list_sessions(*, config: Project) -> list[dict[str, Any]]:
+def list_sessions(*, project: Project) -> list[dict[str, Any]]:
     """List indexed sessions without loading workflow code."""
-    database = checkpoint_database(config)
+    database = checkpoint_database(project)
     if not database.is_file():
         return []
     with closing(sqlite3.connect(database)) as connection:
@@ -153,9 +153,9 @@ def list_sessions(*, config: Project) -> list[dict[str, Any]]:
         ]
 
 
-def session_history(workflow_session_id: str, *, config: Project) -> dict[str, Any]:
+def session_history(workflow_session_id: str, *, project: Project) -> dict[str, Any]:
     """Read stored session metadata and events without executing the graph."""
-    database = checkpoint_database(config)
+    database = checkpoint_database(project)
     if database.is_file():
         with closing(sqlite3.connect(database)) as connection:
             connection.row_factory = sqlite3.Row

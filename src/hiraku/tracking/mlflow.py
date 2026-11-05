@@ -53,7 +53,7 @@ class MLflowBackend(TrackingBackend):
     """Normalize native MLflow runs without importing MLflow eagerly.
 
     Args:
-        config: Project configuration.
+        project: Hiraku project.
         settings: Pre-validated MLflow settings used by the factory.
         tracking_uri: Optional MLflow tracking URI.
         experiment_name: Optional MLflow experiment name.
@@ -63,7 +63,7 @@ class MLflowBackend(TrackingBackend):
 
     def __init__(
         self,
-        config: Project,
+        project: Project,
         *,
         settings: MLflowBackendConfig | None = None,
         tracking_uri: str | None = None,
@@ -74,7 +74,7 @@ class MLflowBackend(TrackingBackend):
         """Create an MLflow adapter from validated settings.
 
         Args:
-            config: Project configuration.
+            project: Hiraku project.
             settings: Pre-validated MLflow settings used by the factory.
             tracking_uri: Optional remote tracking URI.
             experiment_name: Experiment name; defaults to the project directory
@@ -101,16 +101,16 @@ class MLflowBackend(TrackingBackend):
             raise BackendError("Pass MLflow backend settings or options, not both")
         if not isinstance(settings, MLflowBackendConfig):
             raise BackendError("MLflow backend settings must be MLflowBackendConfig")
-        self.config = config
+        self.project = project
         self.tracking_uri = settings.tracking_uri or _mlflow_uri(
-            config, settings.database
+            project, settings.database
         )
         self._database = (
-            (config.root / (settings.database or "mlflow.db")).resolve()
+            (project.root / (settings.database or "mlflow.db")).resolve()
             if settings.tracking_uri is None
             else None
         )
-        self.experiment_name = settings.experiment_name or config.root.name
+        self.experiment_name = settings.experiment_name or project.root.name
         # Credential-bearing tracking URIs stay usable but never become links.
         self.ui_url = settings.ui_url or (
             self.tracking_uri if _is_web_base(self.tracking_uri) else None
@@ -232,15 +232,15 @@ def _is_web_base(value: str) -> bool:
     )
 
 
-def _mlflow_uri(config: Project, database: Path | None = None) -> str:
+def _mlflow_uri(project: Project, database: Path | None = None) -> str:
     relative = Path(database or "mlflow.db")
     if relative.is_absolute() or ".." in relative.parts:
         raise BackendError(
             "mlflow backend database must be a safe project-relative path"
         )
-    resolved = (config.root / relative).resolve(strict=False)
+    resolved = (project.root / relative).resolve(strict=False)
     try:
-        resolved.relative_to(config.root.resolve())
+        resolved.relative_to(project.root.resolve())
     except ValueError as exc:
         raise BackendError(
             "mlflow backend database resolves outside project root"

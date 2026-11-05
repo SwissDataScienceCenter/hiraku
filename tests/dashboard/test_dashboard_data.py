@@ -66,7 +66,7 @@ def test_load_reads_records_and_attributed_runs(project: Project) -> None:
 def test_load_reports_unavailable_source_without_failing(
     project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    Record.create("broken", config=project)
+    Record.create("broken", project=project)
 
     def resolve(self: Record, **options):
         raise BackendError("source offline")

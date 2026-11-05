@@ -18,11 +18,11 @@ def test_run_executes_in_project_and_returns_output_and_exit_code(
     tmp_path: Path,
 ) -> None:
     config = Project.create(tmp_path)
-    Record.create("root", config=config)
+    Record.create("root", project=config)
     result = execute_command(
         [sys.executable, "-c", "import os; print(os.getcwd()); raise SystemExit(7)"],
         record_id="root",
-        config=config,
+        project=config,
         capture_output=True,
     )
     assert result.returncode == 7
@@ -36,7 +36,7 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
 ) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     config = Project.create(tmp_path)
-    Record.create("root", config=config)
+    Record.create("root", project=config)
     (tmp_path / "uncommitted.txt").write_text("dirty")
     command = [
         sys.executable,
@@ -45,7 +45,7 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
         "('HIRAKU_RECORD_ID','HIRAKU_COMMIT','HIRAKU_GIT_STATE'))) ",
     ]
     result = execute_command(
-        command, record_id="root", config=config, capture_output=True
+        command, record_id="root", project=config, capture_output=True
     )
     record_id, commit, git_state = result.stdout.strip().split("|")
     assert record_id == "root"
@@ -58,7 +58,7 @@ def test_run_requires_explicit_command_and_streams_output(
 ) -> None:
     config = Project.create(tmp_path)
     monkeypatch.chdir(tmp_path)
-    Record.create("root", config=config)
+    Record.create("root", project=config)
 
     seen: list[tuple[str, ...] | None] = []
 
@@ -80,16 +80,16 @@ def test_run_requires_explicit_command_and_streams_output(
 
 def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
-    Record.create("root", config=config)
+    Record.create("root", project=config)
     with pytest.raises(ValidationError, match="reserved run attribution"):
         execute_command(
-            ["echo", "hello"], env={"HIRAKU_RECORD_ID": "other"}, config=config
+            ["echo", "hello"], env={"HIRAKU_RECORD_ID": "other"}, project=config
         )
 
 
 def test_cli_propagates_nonzero_exit_code(tmp_path: Path, monkeypatch) -> None:
     config = Project.create(tmp_path)
-    Record.create("root", config=config)
+    Record.create("root", project=config)
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         main,

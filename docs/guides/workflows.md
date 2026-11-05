@@ -139,7 +139,7 @@ def input_schema() -> dict[str, Any]:
     return GreetingInput.model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project):
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project):
     _, body = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
     prompt = Markdown(body)
 
@@ -154,7 +154,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project):
     return builder.compile(checkpointer=checkpointer)
 ```
 
-The factory receives the configured checkpoint saver and Hiraku project config.
+The factory receives the configured checkpoint saver and Hiraku project.
 LangGraph owns the state schema, nodes, routing, interrupts, and resume behavior.
 Use `interrupt(payload)` for a handoff and `Command(resume=response)` to continue
 the same checkpointed thread. Return the final user-facing result in the `final`

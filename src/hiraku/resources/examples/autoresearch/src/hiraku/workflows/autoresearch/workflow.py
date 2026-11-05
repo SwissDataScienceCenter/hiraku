@@ -32,7 +32,7 @@ def input_schema() -> dict[str, Any]:
     return AutoresearchInput.model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the prompt-only workflow graph."""
     _, body = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
     prompt = str(Markdown(body)).strip()

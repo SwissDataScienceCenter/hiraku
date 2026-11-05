@@ -40,13 +40,13 @@ from .run import Run
 
 class CLIContext:
     def __init__(self) -> None:
-        self._config: Project | None = None
+        self._project: Project | None = None
 
     @property
-    def config(self) -> Project:
-        if self._config is None:
-            self._config = Project.discover()
-        return self._config
+    def project(self) -> Project:
+        if self._project is None:
+            self._project = Project.discover()
+        return self._project
 
 
 class HirakuGroup(click.Group):
@@ -142,11 +142,11 @@ def _markdown(path: Path | None) -> str:
         raise ValidationError(f"Cannot read {path}: {exc}") from exc
 
 
-def _active(config: Project, record_id: str | None = None) -> Record:
-    identifier = record_id or config.active_record_id
+def _active(project: Project, record_id: str | None = None) -> Record:
+    identifier = record_id or project.active_record_id
     if identifier is None:
         raise NoActiveRecordError("No active record; supply --record or set one")
-    return load_record(identifier, config=config)
+    return load_record(identifier, project=project)
 
 
 def _edit(path: Path) -> None:
@@ -248,14 +248,14 @@ def init_command(
         )
     existing_marker = next((marker for marker in markers if marker.is_file()), None)
     if existing_marker is not None and template is None:
-        config = Project.load(existing_marker)
+        project = Project.load(existing_marker)
         message = "Hiraku project already initialized"
     else:
-        config = Project.create(root, template=template)
+        project = Project.create(root, template=template)
         message = "Initialized Hiraku project"
     if init_git:
-        init_code_repository(config)
-    click.echo(f"{message} at {config.path}")
+        init_code_repository(project)
+    click.echo(f"{message} at {project.path}")
 
 
 @main.group("example")
@@ -317,21 +317,21 @@ def example_create_command(
         )
         if not generator.is_file():
             raise click.UsageError(f"Example {example!r} has no generator")
-    config = Project.create(
+    project = Project.create(
         root,
         example=example,
         results=results,
         with_generator=with_generator,
     )
     if init_git:
-        init_code_repository(config)
-    click.echo(f"Initialized Hiraku project at {config.path}")
+        init_code_repository(project)
+    click.echo(f"Initialized Hiraku project at {project.path}")
     if generator is not None:
         with as_file(generator) as source:
             try:
                 namespace = runpy.run_path(str(source))
                 if "generate_results" not in namespace:
-                    namespace["generate"](config)
+                    namespace["generate"](project)
                 else:
                     with TemporaryDirectory(prefix="hiraku-generated-") as staging:
                         overlay = Path(staging) / "results"
@@ -339,14 +339,14 @@ def example_create_command(
                         generated = Project.load(overlay / "hiraku" / "hiraku.yml")
                         shutil.copytree(
                             generated.records_dir,
-                            config.records_dir,
+                            project.records_dir,
                             dirs_exist_ok=True,
                         )
                         for result in overlay.iterdir():
                             if result.is_file() and result.name != "hiraku.yml":
-                                shutil.copyfile(result, config.root / result.name)
-                        config.active_record_id = generated.active_record_id
-                        config.save()
+                                shutil.copyfile(result, project.root / result.name)
+                        project.active_record_id = generated.active_record_id
+                        project.save()
             except Exception as exc:
                 raise click.ClickException(
                     "Generation failed; initialized project and completed runs kept: "
@@ -361,17 +361,17 @@ def example_create_command(
 def status_command(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """Show project and active record."""
     _validate_json_options(json_output, pretty)
-    config = state.config
+    project = state.project
     try:
-        branch = GitRepository(config.root).current_branch
+        branch = GitRepository(project.root).current_branch
     except GitError:
         branch = None
-    tracking_backend = config.tracking_backend
+    tracking_backend = project.tracking_backend
     if isinstance(tracking_backend, Mapping):
         tracking_backend = tracking_backend.get("type", tracking_backend.get("name"))
     result = {
-        "project_root": config.root,
-        "active_record_id": config.active_record_id,
+        "project_root": project.root,
+        "active_record_id": project.active_record_id,
         "tracking_backend": tracking_backend,
         "git_branch": branch,
     }
@@ -414,14 +414,14 @@ def record_create(
     if type is not None:
         fields["type"] = type
     if commit is not None:
-        fields["commit"] = GitRepository(state.config.root).resolve(commit)
+        fields["commit"] = GitRepository(state.project.root).resolve(commit)
     record = Record.create(
         record_id,
         parent_id=parent_id,
         related_to=list(related_to),
         markdown=_markdown(markdown_file),
         activate=not no_activate,
-        config=state.config,
+        project=state.project,
         **fields,
     )
     click.echo(f"Created record {record.id} at {record.path}")
@@ -434,7 +434,7 @@ def record_create(
 def record_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """List all research records."""
     _validate_json_options(json_output, pretty)
-    records = list_records(config=state.config)
+    records = list_records(project=state.project)
     if json_output:
         _emit_json(records, pretty=pretty)
     else:
@@ -459,12 +459,12 @@ def record_show(
 ) -> None:
     """Show stored or effective fields with their sources."""
     _validate_json_options(json_output, pretty)
-    record = _active(state.config, record_id)
+    record = _active(state.project, record_id)
     if raw:
         values = record.to_dict()
         sources = {}
     else:
-        resolved = record.resolve(config=state.config)
+        resolved = record.resolve(project=state.project)
         values, sources = resolved.values, resolved.sources
     if json_output:
         _emit_json(
@@ -501,7 +501,7 @@ def record_update(
     markdown_file: Path | None,
 ) -> None:
     """Update stored fields; --unset removes an override."""
-    record = load_record(record_id, config=state.config)
+    record = load_record(record_id, project=state.project)
     if parent_id is not None and make_root:
         raise ValidationError("--parent and --root are mutually exclusive")
     changes = _fields(set_values)
@@ -512,7 +512,7 @@ def record_update(
     if related_to:
         changes["related_to"] = list(related_to)
     if commit is not None:
-        changes["commit"] = GitRepository(state.config.root).resolve(commit)
+        changes["commit"] = GitRepository(state.project.root).resolve(commit)
     fields = record.to_dict()
     fields.update(changes)
     for key in unset_values:
@@ -529,7 +529,7 @@ def record_update(
     candidate.path = record.path
     candidate._persisted_id = record.id
     if make_root or parent_id is not None:
-        candidate.reparent(new_parent, config=state.config)
+        candidate.reparent(new_parent, project=state.project)
     else:
         candidate.save()
     click.echo(f"Updated record {record_id}")
@@ -541,12 +541,12 @@ def record_update(
 def record_edit(state: CLIContext, record_id: str) -> None:
     """Edit a record's stored Markdown file."""
     validate_identifier(record_id)
-    paths = list(state.config.records_dir.glob(f"*/{record_id}.md"))
+    paths = list(state.project.records_dir.glob(f"*/{record_id}.md"))
     if len(paths) != 1:
         raise ValidationError(f"Expected one record path for {record_id!r}")
     _edit_recoverable(
         paths[0],
-        lambda: load_record(record_id, config=state.config),
+        lambda: load_record(record_id, project=state.project),
         f"Record {record_id!r}",
     )
     click.echo(f"Validated record {record_id}")
@@ -557,11 +557,11 @@ def record_edit(state: CLIContext, record_id: str) -> None:
 @click.pass_obj
 def record_delete(state: CLIContext, record_id: str) -> None:
     """Delete a leaf record."""
-    record = load_record(record_id, config=state.config)
+    record = load_record(record_id, project=state.project)
     parent = record.path.parent
-    record.delete(config=state.config)
-    if state.config.active_record_id == record_id:
-        state.config.clear_active_record()
+    record.delete(project=state.project)
+    if state.project.active_record_id == record_id:
+        state.project.clear_active_record()
     with suppress(OSError):
         parent.rmdir()
     click.echo(f"Deleted record {record_id}")
@@ -572,7 +572,7 @@ def record_delete(state: CLIContext, record_id: str) -> None:
 @click.pass_obj
 def record_set(state: CLIContext, record_id: str) -> None:
     """Set the active record."""
-    state.config.set_active_record(record_id)
+    state.project.set_active_record(record_id)
     click.echo(f"Active record: {record_id}")
 
 
@@ -583,7 +583,7 @@ def record_set(state: CLIContext, record_id: str) -> None:
 def record_tree(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """Show the logical parent tree."""
     _validate_json_options(json_output, pretty)
-    records = list_records(config=state.config)
+    records = list_records(project=state.project)
     if json_output:
         _emit_json(
             [{"id": r.id, "parent_id": r.parent_id} for r in records],
@@ -616,7 +616,7 @@ def workflow_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
     _validate_json_options(json_output, pretty)
     from .workflows.langgraph import workflow_details
 
-    workflows = workflow_details(config=state.config)
+    workflows = workflow_details(project=state.project)
     if json_output:
         _emit_json(workflows, pretty=pretty)
         return
@@ -636,7 +636,7 @@ def workflow_graph_command(state: CLIContext, workflow_id: str) -> None:
     """Print a workflow's LangGraph topology as a Mermaid diagram."""
     from .workflows.langgraph import workflow_mermaid
 
-    click.echo(workflow_mermaid(workflow_id, config=state.config), nl=False)
+    click.echo(workflow_mermaid(workflow_id, project=state.project), nl=False)
 
 
 _ARGUMENTS_FILE = click.option(
@@ -683,7 +683,7 @@ def workflow_start(
         start_workflow(
             workflow_id,
             _arguments(arguments_file),
-            config=state.config,
+            project=state.project,
             context=_arguments(context_file, name="context"),
         ),
         pretty=pretty,
@@ -697,7 +697,7 @@ def workflow_sessions(state: CLIContext, pretty: bool) -> None:
     """List recorded workflow sessions as JSON."""
     from .workflows.session_history import list_sessions
 
-    _emit_json(list_sessions(config=state.config), pretty=pretty)
+    _emit_json(list_sessions(project=state.project), pretty=pretty)
 
 
 @workflow_group.command("history")
@@ -708,7 +708,9 @@ def workflow_history(state: CLIContext, workflow_session_id: str, pretty: bool) 
     """Show a workflow session's recorded metadata and history."""
     from .workflows.session_history import session_history
 
-    _emit_json(session_history(workflow_session_id, config=state.config), pretty=pretty)
+    _emit_json(
+        session_history(workflow_session_id, project=state.project), pretty=pretty
+    )
 
 
 @workflow_group.command("status")
@@ -721,7 +723,9 @@ def workflow_status_command(
     """Inspect a checkpointed LangGraph workflow run."""
     from .workflows.langgraph import workflow_status
 
-    _emit_json(workflow_status(workflow_session_id, config=state.config), pretty=pretty)
+    _emit_json(
+        workflow_status(workflow_session_id, project=state.project), pretty=pretty
+    )
 
 
 @workflow_group.command("resume")
@@ -746,7 +750,7 @@ def workflow_resume_command(
         resume_workflow(
             workflow_session_id,
             _arguments(arguments_file),
-            config=state.config,
+            project=state.project,
             checkpoint_id=checkpoint_id,
             context=_arguments(context_file, name="context"),
         ),
@@ -773,7 +777,7 @@ def run_command(
         command,
         record_id=record_id,
         dispatch=dispatch,
-        config=state.config,
+        project=state.project,
     )
     code = result.returncode
     raise click.exceptions.Exit(128 - code if code < 0 else code)
@@ -818,8 +822,8 @@ def run_list(
         raise ValidationError("--ascending and --descending are mutually exclusive")
     if (ascending or descending) and sort is None:
         raise ValidationError("A sort direction requires --sort")
-    record = _active(state.config, record_id)
-    declarations = record.resolve(config=state.config).values.get("metrics") or []
+    record = _active(state.project, record_id)
+    declarations = record.resolve(project=state.project).values.get("metrics") or []
     metric_names = (
         _names(metrics, "metric")
         if metrics is not None
@@ -836,7 +840,7 @@ def run_list(
         query["ascending"] = (
             ascending if ascending or descending else directions.get(sort) != "maximize"
         )
-    runs = record.resolve_tracking_backend(config=state.config).list_runs(
+    runs = record.resolve_tracking_backend(project=state.project).list_runs(
         record_id=None if all_records else record.id,
         **query,
     )
@@ -897,11 +901,11 @@ def dashboard_command(
     from .dashboard.launcher import init_dashboard, serve_dashboard
 
     if initialize:
-        click.echo(f"Created dashboard: {init_dashboard(state.config)}")
+        click.echo(f"Created dashboard: {init_dashboard(state.project)}")
         if not edit:
             return
     exit_code = serve_dashboard(
-        state.config,
+        state.project,
         record_id=record_id,
         port=port,
         no_browser=no_browser,

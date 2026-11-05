@@ -36,7 +36,7 @@ def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
         "experiment_name": "hiraku-digits",
     }
     root = Record.load(config.records_dir / "digits" / "digits.md")
-    assert root.resolve_tracking_backend(config=config).backend_name == "mlflow"
+    assert root.resolve_tracking_backend(project=config).backend_name == "mlflow"
 
 
 def test_results_override_base_files(tmp_path: Path, monkeypatch):

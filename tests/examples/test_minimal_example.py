@@ -75,7 +75,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     )
 
     config = Project.discover(project)
-    runs = load_record("baseline", config=config).runs(config=config)
+    runs = load_record("baseline", project=config).runs(project=config)
     assert len(runs) == 1
     assert runs[0].commit == commit
     assert runs[0].raw["git_state"] == "clean"

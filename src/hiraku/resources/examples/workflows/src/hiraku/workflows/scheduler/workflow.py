@@ -68,7 +68,7 @@ def input_schema() -> dict[str, Any]:
     return _input_model(defaults).model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the graph that creates and schedules experiment records."""
     path = Path(__file__).with_name("workflow.md")
     fields, body = Record._parse_markdown(path)
@@ -99,7 +99,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
             type="task",
             summary=f"Scheduler example: raise each count to {target}",
             activate=False,
-            config=config,
+            project=project,
         )
         for index in range(records):
             Record.create(
@@ -109,12 +109,12 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
                 priority=random.randint(1, 9),
                 count=0,
                 activate=False,
-                config=config,
+                project=project,
             )
         return {"parent": parent.id, "target": target}
 
     def assign(state: SchedulerState) -> dict[str, Any]:
-        children = _children(state.parent, config)
+        children = _children(state.parent, project)
         open_records = [item for item in children if _count(item) < state.target]
         selected = max(
             open_records,
@@ -177,7 +177,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
             return {"error": f"Response does not match the expected schema: {exc}"}
         if response.record_id != state.current:
             return {"error": f"Report the assigned record {state.current!r}."}
-        record = load_record(str(state.current), config=config)
+        record = load_record(str(state.current), project=project)
         count = _count(record)
         expected = state.baseline + 1
         if count != expected:
@@ -214,9 +214,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> A
     return builder.compile(checkpointer=checkpointer)
 
 
-def _children(parent_id: str, config: Project) -> list[Record]:
+def _children(parent_id: str, project: Project) -> list[Record]:
     return sorted(
-        load_record(parent_id, config=config).children(config=config),
+        load_record(parent_id, project=project).children(project=project),
         key=lambda item: item.id,
     )
 

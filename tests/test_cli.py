@@ -137,7 +137,7 @@ def test_status_reports_project_tracking_backend(tmp_path: Path, monkeypatch) ->
     assert invoke("record", "set", "mlp").exit_code == 0
     status = json.loads(invoke("status", "--json").output)
     assert status["tracking_backend"] == "wandb"
-    assert "tracking_backend" not in load_record("mlp", config=config).to_dict()
+    assert "tracking_backend" not in load_record("mlp", project=config).to_dict()
 
 
 def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:

@@ -33,7 +33,7 @@ def test_run_uses_dispatcher_in_current_working_tree(tmp_path: Path) -> None:
     from hiraku.record import Record
 
     config = _repository(tmp_path)
-    Record.create("test", config=config)
+    Record.create("test", project=config)
     config.dispatch_dir.mkdir()
     (config.dispatch_dir / "test.sh").write_text(
         '#!/bin/sh\n[ "$1" = "--" ] && shift\nexec "$@"\n', encoding="utf-8"
@@ -43,7 +43,7 @@ def test_run_uses_dispatcher_in_current_working_tree(tmp_path: Path) -> None:
         ["/bin/sh", "-c", "cat marker.txt; printf output > result.txt"],
         record_id="test",
         dispatch="test",
-        config=config,
+        project=config,
         capture_output=True,
     )
     assert result.returncode == 0

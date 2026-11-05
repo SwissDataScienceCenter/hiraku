@@ -95,8 +95,8 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         )
 
     config = Project.discover(project)
-    root = load_record("heart-disease", config=config)
-    runs = root.resolve_tracking_backend(config=config).list_runs(sort="val/log_loss")
+    root = load_record("heart-disease", project=config)
+    runs = root.resolve_tracking_backend(project=config).list_runs(sort="val/log_loss")
     assert len(runs) == 2
     assert {run.record_id for run in runs} == set(EXPECTED_METRICS)
     for run in runs:

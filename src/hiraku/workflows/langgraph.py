@@ -29,13 +29,13 @@ from .session_history import (
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 
-def workflow_ids(*, config: Project) -> list[str]:
+def workflow_ids(*, project: Project) -> list[str]:
     """List project workflow folders that define a LangGraph workflow.py."""
-    if not config.workflows_dir.is_dir():
+    if not project.workflows_dir.is_dir():
         return []
     return sorted(
         path.name
-        for path in config.workflows_dir.iterdir()
+        for path in project.workflows_dir.iterdir()
         if path.is_dir()
         and not path.name.startswith((".", "_"))
         and _WORKFLOW_ID.fullmatch(path.name)
@@ -43,11 +43,11 @@ def workflow_ids(*, config: Project) -> list[str]:
     )
 
 
-def workflow_details(*, config: Project) -> list[dict[str, Any]]:
+def workflow_details(*, project: Project) -> list[dict[str, Any]]:
     """Return lightweight listing data for LangGraph workflows."""
     details = []
-    for workflow_id in workflow_ids(config=config):
-        path = config.workflows_dir / workflow_id / "workflow.md"
+    for workflow_id in workflow_ids(project=project):
+        path = project.workflows_dir / workflow_id / "workflow.md"
         fields, _ = Record._parse_markdown(path)
         detail: dict[str, Any] = {
             "id": workflow_id,
@@ -58,7 +58,7 @@ def workflow_details(*, config: Project) -> list[dict[str, Any]]:
             isinstance(item, str) for item in capabilities
         ):
             detail["required_capabilities"] = capabilities
-        module = _import_graph(config.workflows_dir / workflow_id / "workflow.py")
+        module = _import_graph(project.workflows_dir / workflow_id / "workflow.py")
         detail["input_schema"] = _workflow_input_schema(module, workflow_id)
         details.append(detail)
     return details
@@ -68,19 +68,19 @@ def start_workflow(
     workflow_id: str,
     arguments: Mapping[str, Any] | None = None,
     *,
-    config: Project,
+    project: Project,
     context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Start a LangGraph workflow and run until it completes or interrupts."""
     validate_context(context)
     workflow_session_id = f"{workflow_id}:{uuid4().hex}"
-    with _compiled_graph(workflow_id, config) as graph:
+    with _compiled_graph(workflow_id, project) as graph:
         record_event(
             workflow_session_id,
             workflow_id,
             "started",
             "running",
-            config=config,
+            project=project,
             context=context,
         )
         return _invoke_and_record(
@@ -91,7 +91,7 @@ def start_workflow(
                 "arguments": dict(arguments or {}),
                 "run_id": workflow_session_id,
             },
-            config,
+            project,
             context,
         )
 
@@ -100,31 +100,31 @@ def resume_workflow(
     workflow_session_id: str,
     response: Mapping[str, Any],
     *,
-    config: Project,
+    project: Project,
     checkpoint_id: str,
     context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resume a paused graph with the harness's structured response."""
     validate_context(context)
-    lock_dir = config.hiraku_dir / ".hiraku" / "locks"
-    prepare_checkpoint_storage(config)
+    lock_dir = project.hiraku_dir / ".hiraku" / "locks"
+    prepare_checkpoint_storage(project)
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_name = hashlib.sha256(workflow_session_id.encode()).hexdigest()
     with FileLock(str(lock_dir / f"{lock_name}.lock")):
         return _resume_locked(
-            workflow_session_id, response, config, checkpoint_id, context
+            workflow_session_id, response, project, checkpoint_id, context
         )
 
 
 def _resume_locked(
     workflow_session_id: str,
     response: Mapping[str, Any],
-    config: Project,
+    project: Project,
     checkpoint_id: str,
     context: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    graph_workflow = _session_workflow_id(workflow_session_id, config)
-    with _compiled_graph(graph_workflow, config) as graph:
+    graph_workflow = _session_workflow_id(workflow_session_id, project)
+    with _compiled_graph(graph_workflow, project) as graph:
         snapshot = graph.get_state(_thread_config(workflow_session_id))
         if not snapshot.values:
             raise ValidationError(
@@ -134,7 +134,7 @@ def _resume_locked(
             raise ValidationError(
                 f"Workflow session {workflow_session_id!r} is not waiting for input"
             )
-        current_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
+        current_id = snapshot.project.get("configurable", {}).get("checkpoint_id")
         if not checkpoint_id or checkpoint_id != current_id:
             raise ValidationError("Workflow checkpoint has changed; inspect its status")
         record_event(
@@ -142,24 +142,24 @@ def _resume_locked(
             graph_workflow,
             "resume_requested",
             "running",
-            config=config,
+            project=project,
             context=context,
-            checkpoint_id=snapshot.config.get("configurable", {}).get("checkpoint_id"),
+            checkpoint_id=snapshot.project.get("configurable", {}).get("checkpoint_id"),
         )
         return _invoke_and_record(
             graph,
             graph_workflow,
             workflow_session_id,
             Command(resume=dict(response)),
-            config,
+            project,
             context,
         )
 
 
-def workflow_status(workflow_session_id: str, *, config: Project) -> dict[str, Any]:
+def workflow_status(workflow_session_id: str, *, project: Project) -> dict[str, Any]:
     """Inspect a checkpointed graph run without advancing it."""
-    graph_workflow = _session_workflow_id(workflow_session_id, config)
-    with _compiled_graph(graph_workflow, config) as graph:
+    graph_workflow = _session_workflow_id(workflow_session_id, project)
+    with _compiled_graph(graph_workflow, project) as graph:
         snapshot = graph.get_state(_thread_config(workflow_session_id))
         if not snapshot.values:
             raise ValidationError(
@@ -168,20 +168,20 @@ def workflow_status(workflow_session_id: str, *, config: Project) -> dict[str, A
         return _snapshot_result(graph_workflow, workflow_session_id, snapshot)
 
 
-def workflow_mermaid(workflow_id: str, *, config: Project) -> str:
+def workflow_mermaid(workflow_id: str, *, project: Project) -> str:
     """Render a workflow's compiled LangGraph topology as Mermaid text."""
-    with _compiled_graph(workflow_id, config) as graph:
+    with _compiled_graph(workflow_id, project) as graph:
         return graph.get_graph().draw_mermaid()
 
 
-def _session_workflow_id(workflow_session_id: str, config: Project) -> str:
+def _session_workflow_id(workflow_session_id: str, project: Project) -> str:
     """Resolve the workflow encoded in a current-format session ID."""
     workflow_id, separator, checkpoint_id = workflow_session_id.partition(":")
     if (
         not separator
         or not _WORKFLOW_ID.fullmatch(workflow_id)
         or not re.fullmatch(r"[0-9a-f]{32}", checkpoint_id)
-        or workflow_id not in workflow_ids(config=config)
+        or workflow_id not in workflow_ids(project=project)
     ):
         raise ValidationError(
             f"LangGraph workflow session {workflow_session_id!r} was not found"
@@ -190,23 +190,23 @@ def _session_workflow_id(workflow_session_id: str, config: Project) -> str:
 
 
 @contextmanager
-def _compiled_graph(workflow_id: str, config: Project) -> Iterator[Any]:
-    available_workflows = workflow_ids(config=config)
+def _compiled_graph(workflow_id: str, project: Project) -> Iterator[Any]:
+    available_workflows = workflow_ids(project=project)
     if workflow_id not in available_workflows:
         available = ", ".join(available_workflows) or "none"
         raise WorkflowError(
             f"Unknown LangGraph workflow {workflow_id!r}; available: {available}"
         )
-    directory = config.workflows_dir / workflow_id
+    directory = project.workflows_dir / workflow_id
     module = _import_graph(directory / "workflow.py")
     _workflow_input_schema(module, workflow_id)
     factory = getattr(module, "build_graph", None)
     if not callable(factory):
         raise WorkflowError(f"{directory / 'workflow.py'} must export build_graph")
-    database = prepare_checkpoint_storage(config)
+    database = prepare_checkpoint_storage(project)
     with SqliteSaver.from_conn_string(str(database)) as checkpointer:
         try:
-            graph = factory(checkpointer, config=config)
+            graph = factory(checkpointer, project=project)
         except Exception as exc:
             raise WorkflowError(
                 f"Cannot build LangGraph workflow {workflow_id!r}: {exc}"
@@ -270,7 +270,7 @@ def _invoke_and_record(
     workflow_id: str,
     workflow_session_id: str,
     invocation: Any,
-    config: Project,
+    project: Project,
     context: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     try:
@@ -281,26 +281,26 @@ def _invoke_and_record(
             workflow_id,
             "failed",
             "failed",
-            config=config,
+            project=project,
             context=context,
             error_type=type(exc).__name__,
         )
         raise
-    return _record_snapshot(graph, workflow_id, workflow_session_id, config)
+    return _record_snapshot(graph, workflow_id, workflow_session_id, project)
 
 
 def _record_snapshot(
-    graph: Any, workflow_id: str, workflow_session_id: str, config: Project
+    graph: Any, workflow_id: str, workflow_session_id: str, project: Project
 ) -> dict[str, Any]:
     snapshot = graph.get_state(_thread_config(workflow_session_id))
     result = _snapshot_result(workflow_id, workflow_session_id, snapshot)
-    checkpoint_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
+    checkpoint_id = snapshot.project.get("configurable", {}).get("checkpoint_id")
     record_event(
         workflow_session_id,
         workflow_id,
         result["status"],
         result["status"],
-        config=config,
+        project=project,
         checkpoint_id=checkpoint_id,
     )
     return result
@@ -320,7 +320,7 @@ def _snapshot_result(
         "workflow_id": workflow_id,
         "status": "completed" if completed else "waiting",
         "interrupts": interrupts,
-        "checkpoint_id": snapshot.config.get("configurable", {}).get("checkpoint_id"),
+        "checkpoint_id": snapshot.project.get("configurable", {}).get("checkpoint_id"),
     }
     if completed:
         result["result"] = snapshot.values.get("final")

@@ -27,7 +27,7 @@ def _project(tmp_path: Path) -> Project:
 
 def test_concurrent_resumes_reject_stale_checkpoint(tmp_path: Path) -> None:
     config = _project(tmp_path)
-    started = start_workflow("count-steps", {"count": 2}, config=config)
+    started = start_workflow("count-steps", {"count": 2}, project=config)
     session_id = started["workflow_session_id"]
     token = started["interrupts"][0]["value"]["data"]["token"]
 
@@ -37,7 +37,7 @@ def test_concurrent_resumes_reject_stale_checkpoint(tmp_path: Path) -> None:
                 session_id,
                 {"token": token, "decision": "continue"},
                 checkpoint_id=started["checkpoint_id"],
-                config=config,
+                project=config,
             )
         except ValidationError as exc:
             return exc
@@ -55,7 +55,7 @@ def test_checkpoint_storage_is_ignored(tmp_path: Path) -> None:
 
     config = _project(tmp_path)
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    start_workflow("count-steps", config=config)
+    start_workflow("count-steps", project=config)
     database = checkpoint_database(config)
     assert database.is_file()
     assert (
@@ -68,11 +68,11 @@ def test_checkpoint_storage_is_ignored(tmp_path: Path) -> None:
 
 def test_session_history_survives_restart_and_missing_workflow(tmp_path: Path) -> None:
     config = _project(tmp_path)
-    assert list_sessions(config=config) == []
+    assert list_sessions(project=config) == []
     started = start_workflow(
         "count-steps",
         {"count": 1},
-        config=config,
+        project=config,
         context={"client": "codex", "session_id": "client-123"},
     )
     session_id = started["workflow_session_id"]
@@ -80,12 +80,12 @@ def test_session_history_survives_restart_and_missing_workflow(tmp_path: Path) -
     completed = resume_workflow(
         session_id,
         {"token": token, "decision": "continue"},
-        config=Project.load(config.path),
+        project=Project.load(config.path),
         checkpoint_id=started["checkpoint_id"],
         context={"client": "claude"},
     )
     assert completed["status"] == "completed"
-    history = session_history(session_id, config=config)
+    history = session_history(session_id, project=config)
     assert history["session"]["context"] == {
         "client": "codex",
         "session_id": "client-123",
@@ -99,7 +99,7 @@ def test_session_history_survives_restart_and_missing_workflow(tmp_path: Path) -
     ]
     assert history["events"][2]["context"] == {"client": "claude"}
     assert all("response" not in event for event in history["events"])
-    assert list_sessions(config=config) == [history["session"]]
+    assert list_sessions(project=config) == [history["session"]]
 
     with sqlite3.connect(checkpoint_database(config)) as connection:
         checkpoint = connection.execute(
@@ -108,43 +108,43 @@ def test_session_history_survives_restart_and_missing_workflow(tmp_path: Path) -
         ).fetchone()
     assert checkpoint is not None
     (config.workflows_dir / "count-steps" / "workflow.py").unlink()
-    assert session_history(session_id, config=config) == history
-    assert list_sessions(config=config) == [history["session"]]
+    assert session_history(session_id, project=config) == history
+    assert list_sessions(project=config) == [history["session"]]
 
 
 def test_invalid_context_and_failed_start_are_recorded_safely(tmp_path: Path) -> None:
     config = _project(tmp_path)
     with pytest.raises(ValidationError, match="JSON values"):
-        start_workflow("count-steps", config=config, context={"bad": object()})
-    assert list_sessions(config=config) == []
+        start_workflow("count-steps", project=config, context={"bad": object()})
+    assert list_sessions(project=config) == []
     with pytest.raises(ValidationError, match="positive integer"):
-        start_workflow("count-steps", {"count": 0}, config=config)
-    session = list_sessions(config=config)[0]
+        start_workflow("count-steps", {"count": 0}, project=config)
+    session = list_sessions(project=config)[0]
     assert session["status"] == "failed"
-    history = session_history(session["workflow_session_id"], config=config)
+    history = session_history(session["workflow_session_id"], project=config)
     assert [event["event"] for event in history["events"]] == ["started", "failed"]
     assert history["events"][-1]["error_type"] == "ValidationError"
     with pytest.raises(ValidationError, match="not found"):
-        session_history("missing", config=config)
+        session_history("missing", project=config)
 
 
 def test_legacy_checkpoint_is_indexed_when_resumed(tmp_path: Path) -> None:
     config = _project(tmp_path)
-    started = start_workflow("count-steps", {"count": 1}, config=config)
+    started = start_workflow("count-steps", {"count": 1}, project=config)
     session_id = started["workflow_session_id"]
     token = started["interrupts"][0]["value"]["data"]["token"]
     with sqlite3.connect(checkpoint_database(config)) as connection:
         connection.execute("DROP TABLE hiraku_workflow_session_events")
         connection.execute("DROP TABLE hiraku_workflow_sessions")
-    assert list_sessions(config=config) == []
+    assert list_sessions(project=config) == []
     resume_workflow(
         session_id,
         {"token": token, "decision": "continue"},
-        config=config,
+        project=config,
         checkpoint_id=started["checkpoint_id"],
         context={"client": "resuming-client"},
     )
-    history = session_history(session_id, config=config)
+    history = session_history(session_id, project=config)
     assert history["session"]["context"] == {}
     assert [event["event"] for event in history["events"]] == [
         "resume_requested",

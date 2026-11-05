@@ -13,81 +13,82 @@ from hiraku.record import Record, list_records, load_record
 
 def test_paths_and_cross_root_reparenting(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    first = Record.create("first", config=config)
-    other = Record.create("other", config=config)
-    middle = Record.create("middle", parent_id=first.id, config=config)
-    leaf = Record.create("leaf", parent_id=middle.id, config=config)
+    first = Record.create("first", project=config)
+    other = Record.create("other", project=config)
+    middle = Record.create("middle", parent_id=first.id, project=config)
+    leaf = Record.create("leaf", parent_id=middle.id, project=config)
     assert first.path == config.records_dir / "first/first.md"
     assert middle.path == config.records_dir / "first/middle.md"
     assert leaf.path == config.records_dir / "first/leaf.md"
-    middle.reparent(other.id, config=config)
+    middle.reparent(other.id, project=config)
     assert (
-        load_record("middle", config=config).path
+        load_record("middle", project=config).path
         == config.records_dir / "other/middle.md"
     )
     assert (
-        load_record("leaf", config=config).path == config.records_dir / "other/leaf.md"
+        load_record("leaf", project=config).path == config.records_dir / "other/leaf.md"
     )
-    assert [item.id for item in other.descendants(config=config)] == ["leaf", "middle"]
-    middle.reparent(None, config=config)
+    assert [item.id for item in other.descendants(project=config)] == ["leaf", "middle"]
+    middle.reparent(None, project=config)
     assert (
-        load_record("middle", config=config).path
+        load_record("middle", project=config).path
         == config.records_dir / "middle/middle.md"
     )
     assert (
-        load_record("leaf", config=config).path == config.records_dir / "middle/leaf.md"
+        load_record("leaf", project=config).path
+        == config.records_dir / "middle/leaf.md"
     )
 
 
 def test_invalid_links_cycles_collisions_and_delete(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    first = Record.create("first", config=config)
-    second = Record.create("second", parent_id=first.id, config=config)
-    third = Record.create("third", related_to=[second.id], config=config)
+    first = Record.create("first", project=config)
+    second = Record.create("second", parent_id=first.id, project=config)
+    third = Record.create("third", related_to=[second.id], project=config)
     with pytest.raises(ValidationError, match="ancestor"):
-        first.reparent(second.id, config=config)
+        first.reparent(second.id, project=config)
     with pytest.raises(RecordExistsError):
-        Record.create("second", config=config)
+        Record.create("second", project=config)
     with pytest.raises(RecordNotFoundError):
-        Record.create("fourth", parent_id="missing", config=config)
+        Record.create("fourth", parent_id="missing", project=config)
     second.related_to = ["missing"]
     with pytest.raises(RecordNotFoundError):
         second.save()
     second.related_to = []
     with pytest.raises(ValidationError, match="referenced"):
-        second.delete(config=config)
-    third.delete(config=config)
-    second.delete(config=config)
-    assert [item.id for item in list_records(config=config)] == ["first"]
+        second.delete(project=config)
+    third.delete(project=config)
+    second.delete(project=config)
+    assert [item.id for item in list_records(project=config)] == ["first"]
 
 
 def test_duplicate_record_id_without_reparent_journal_is_an_error(
     tmp_path: Path,
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    record = Record.create("duplicate", config=config)
+    record = Record.create("duplicate", project=config)
     atomic_write(
         config.records_dir / "other" / "duplicate.md",
         record.path.read_text(encoding="utf-8"),
     )
 
     with pytest.raises(ValidationError, match="Duplicate record ID"):
-        list_records(config=config)
+        list_records(project=config)
 
 
 def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
     root = Record.create(
         "root",
-        config=config,
+        project=config,
         goal="Improve",
         branch="work",
         status="accepted",
         decision="keep",
         type="task",
     )
-    child = Record.create("child", parent_id=root.id, config=config, goal=None)
-    resolved = child.resolve(config=config)
+    child = Record.create("child", parent_id=root.id, project=config, goal=None)
+    resolved = child.resolve(project=config)
     assert resolved.values["goal"] is None
     assert resolved.sources["goal"] == "child"
     assert resolved.values["branch"] == "work"
@@ -100,21 +101,21 @@ def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
 
 def test_reparenting_root_with_other_files_requires_manual_move(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    source = Record.create("source", config=config)
-    target = Record.create("target", config=config)
+    source = Record.create("source", project=config)
+    target = Record.create("target", project=config)
     (source.path.parent / "artifact.bin").write_bytes(b"research output")
     with pytest.raises(ValidationError, match="Move files"):
-        source.reparent(target.id, config=config)
-    assert load_record("source", config=config).parent_id is None
+        source.reparent(target.id, project=config)
+    assert load_record("source", project=config).parent_id is None
 
 
 def test_reparenting_retries_transient_old_file_unlink_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    source = Record.create("source", config=config)
-    child = Record.create("child", parent_id=source.id, config=config)
-    target = Record.create("target", config=config)
+    source = Record.create("source", project=config)
+    child = Record.create("child", parent_id=source.id, project=config)
+    target = Record.create("target", project=config)
     old_paths = {source.id: source.path, child.id: child.path}
     original_unlink = Path.unlink
     failed = False
@@ -127,20 +128,20 @@ def test_reparenting_retries_transient_old_file_unlink_failure(
         original_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", fail_on_child)
-    source.reparent(target.id, config=config)
+    source.reparent(target.id, project=config)
 
     assert all(not path.exists() for path in old_paths.values())
-    assert load_record("source", config=config).parent_id == target.id
-    assert load_record("child", config=config).parent_id == source.id
+    assert load_record("source", project=config).parent_id == target.id
+    assert load_record("child", project=config).parent_id == source.id
 
 
 def test_reparenting_journal_keeps_records_listable_during_persistent_unlink_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    source = Record.create("source", config=config)
-    child = Record.create("child", parent_id=source.id, config=config)
-    target = Record.create("target", config=config)
+    source = Record.create("source", project=config)
+    child = Record.create("child", parent_id=source.id, project=config)
+    target = Record.create("target", project=config)
     old_paths = {source.id: source.path, child.id: child.path}
     original_unlink = Path.unlink
 
@@ -150,7 +151,7 @@ def test_reparenting_journal_keeps_records_listable_during_persistent_unlink_fai
         original_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", fail_on_child)
-    source.reparent(target.id, config=config)
+    source.reparent(target.id, project=config)
 
     target_paths = {
         source.id: config.records_dir / "target" / "source.md",
@@ -165,19 +166,19 @@ def test_reparenting_journal_keeps_records_listable_during_persistent_unlink_fai
     assert journal["old_root"] == "source"
     assert journal["new_root"] == "target"
     assert set(journal["affected_ids"]) == {"source", "child"}
-    assert {record.id for record in list_records(config=config)} == {
+    assert {record.id for record in list_records(project=config)} == {
         "source",
         "child",
         "target",
     }
-    assert load_record("source", config=config).path == target_paths[source.id]
-    assert load_record("child", config=config).path == target_paths[child.id]
+    assert load_record("source", project=config).path == target_paths[source.id]
+    assert load_record("child", project=config).path == target_paths[child.id]
     assert old_paths[child.id].exists()
     with pytest.raises(ValidationError, match="pending reparent recovery"):
-        load_record("child", config=config).delete(config=config)
+        load_record("child", project=config).delete(project=config)
 
     monkeypatch.setattr(Path, "unlink", original_unlink)
-    assert {record.id for record in list_records(config=config)} == {
+    assert {record.id for record in list_records(project=config)} == {
         "source",
         "child",
         "target",
@@ -190,9 +191,9 @@ def test_reparenting_cleans_incomplete_destination_copies_after_write_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    source = Record.create("source", config=config)
-    child = Record.create("child", parent_id=source.id, config=config)
-    target = Record.create("target", config=config)
+    source = Record.create("source", project=config)
+    child = Record.create("child", parent_id=source.id, project=config)
+    target = Record.create("target", project=config)
     old_paths = {source.id: source.path, child.id: child.path}
     destination_child = config.records_dir / "target" / "child.md"
     original_atomic_write = atomic_write
@@ -207,7 +208,7 @@ def test_reparenting_cleans_incomplete_destination_copies_after_write_failure(
 
     monkeypatch.setattr("hiraku.record.atomic_write", fail_after_copy)
     with pytest.raises(OSError, match="simulated write failure"):
-        source.reparent(target.id, config=config)
+        source.reparent(target.id, project=config)
 
     assert all(path.exists() for path in old_paths.values())
     assert not (config.records_dir / "target" / "source.md").exists()
@@ -223,9 +224,9 @@ def test_reparenting_resolves_commit_journal_write_failure(
     failure_after_replace: bool,
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    source = Record.create("source", config=config)
-    child = Record.create("child", parent_id=source.id, config=config)
-    target = Record.create("target", config=config)
+    source = Record.create("source", project=config)
+    child = Record.create("child", parent_id=source.id, project=config)
+    target = Record.create("target", project=config)
     original_atomic_write = atomic_write
     journal_path = config.hiraku_dir / ".reparent-transaction.json"
 
@@ -239,15 +240,15 @@ def test_reparenting_resolves_commit_journal_write_failure(
 
     monkeypatch.setattr("hiraku.record.atomic_write", fail_during_commit)
     if failure_after_replace:
-        source.reparent(target.id, config=config)
-        assert load_record("source", config=config).parent_id == target.id
-        assert load_record("child", config=config).parent_id == source.id
+        source.reparent(target.id, project=config)
+        assert load_record("source", project=config).parent_id == target.id
+        assert load_record("child", project=config).parent_id == source.id
         assert not journal_path.exists()
     else:
         with pytest.raises(OSError, match="before journal commit"):
-            source.reparent(target.id, config=config)
-        assert load_record("source", config=config).parent_id is None
-        assert load_record("child", config=config).path == child.path
+            source.reparent(target.id, project=config)
+        assert load_record("source", project=config).parent_id is None
+        assert load_record("child", project=config).path == child.path
         assert not (config.records_dir / "target" / "source.md").exists()
         assert not (config.records_dir / "target" / "child.md").exists()
         assert not journal_path.exists()
@@ -257,9 +258,9 @@ def test_preparing_journal_keeps_old_copies_authoritative(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    source = Record.create("source", config=config, goal="old value")
-    child = Record.create("child", parent_id=source.id, config=config)
-    target = Record.create("target", config=config)
+    source = Record.create("source", project=config, goal="old value")
+    child = Record.create("child", parent_id=source.id, project=config)
+    target = Record.create("target", project=config)
     old_child = child.path
     destination_child = config.records_dir / "target" / "child.md"
     original_unlink = Path.unlink
@@ -281,20 +282,20 @@ def test_preparing_journal_keeps_old_copies_authoritative(
     monkeypatch.setattr("hiraku.record.atomic_write", fail_after_destination_copy)
     monkeypatch.setattr(Path, "unlink", fail_destination_cleanup)
     with pytest.raises(ExceptionGroup, match="recovery is pending"):
-        source.reparent(target.id, config=config)
+        source.reparent(target.id, project=config)
 
     journal = json.loads(
         (config.hiraku_dir / ".reparent-transaction.json").read_text(encoding="utf-8")
     )
     assert journal["phase"] == "preparing"
     assert destination_child.exists()
-    assert load_record("source", config=config).path == source.path
-    assert load_record("child", config=config).path == old_child
-    resolved = load_record("source", config=config).resolve(config=config)
+    assert load_record("source", project=config).path == source.path
+    assert load_record("child", project=config).path == old_child
+    resolved = load_record("source", project=config).resolve(project=config)
     assert resolved.values["goal"] == "old value"
 
     monkeypatch.setattr(Path, "unlink", original_unlink)
-    assert {record.id for record in list_records(config=config)} == {
+    assert {record.id for record in list_records(project=config)} == {
         "source",
         "child",
         "target",
@@ -307,9 +308,9 @@ def test_preparing_journal_errors_when_old_authoritative_copy_is_missing(
     tmp_path: Path,
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    source = Record.create("source", config=config)
-    child = Record.create("child", parent_id=source.id, config=config)
-    Record.create("target", config=config)
+    source = Record.create("source", project=config)
+    child = Record.create("child", parent_id=source.id, project=config)
+    Record.create("target", project=config)
     ids = [source.id, child.id]
     moves = [
         {
@@ -341,7 +342,7 @@ def test_preparing_journal_errors_when_old_authoritative_copy_is_missing(
     with pytest.raises(
         ValidationError, match="Authoritative pre-commit copy is missing"
     ):
-        list_records(config=config)
+        list_records(project=config)
 
     assert all((config.records_dir / move["new"]).exists() for move in moves)
     assert journal_path.exists()
@@ -351,9 +352,9 @@ def test_committed_journal_errors_when_new_authoritative_copy_is_missing(
     tmp_path: Path,
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    source = Record.create("source", config=config)
-    child = Record.create("child", parent_id=source.id, config=config)
-    Record.create("target", config=config)
+    source = Record.create("source", project=config)
+    child = Record.create("child", parent_id=source.id, project=config)
+    Record.create("target", project=config)
     ids = [source.id, child.id]
     moves = [
         {
@@ -383,7 +384,7 @@ def test_committed_journal_errors_when_new_authoritative_copy_is_missing(
     with pytest.raises(
         ValidationError, match="Authoritative committed copy is missing"
     ):
-        list_records(config=config)
+        list_records(project=config)
 
     assert source.path.exists()
     assert child.path.exists()

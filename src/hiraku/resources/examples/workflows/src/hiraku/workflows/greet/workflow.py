@@ -23,7 +23,7 @@ class GreetState(BaseModel):
     final: str = ""
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: Project) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the one-step graph from the example's Markdown prompt."""
     path = Path(__file__).with_name("workflow.md")
     fields, body = Record._parse_markdown(path)

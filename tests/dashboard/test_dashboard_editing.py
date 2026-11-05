@@ -12,7 +12,7 @@ def test_markdown_view_opts_into_editing_explicitly(tmp_path: Path) -> None:
     from hiraku.dashboard.components import MarkdownEditor, markdown_view
 
     config = Project.create(tmp_path, install_skill=False)
-    record = Record.create("notes", config=config)
+    record = Record.create("notes", project=config)
     editor = MarkdownEditor(Record.save_markdown)
 
     plain = markdown_view(record, empty_message="No notes yet.").text
@@ -34,8 +34,8 @@ def test_editor_retains_drafts_across_selection_and_cancels(tmp_path: Path) -> N
     from hiraku.dashboard.components import MarkdownEditor
 
     config = Project.create(tmp_path, install_skill=False)
-    first = Record.create("first", markdown="Original", config=config)
-    other = Record.create("other", config=config)
+    first = Record.create("first", markdown="Original", project=config)
+    other = Record.create("other", project=config)
     editor = MarkdownEditor(Record.save_markdown)
     editor.render(first)
     editor._widgets[0]._update(1)
@@ -57,7 +57,7 @@ def test_editor_saves_and_retains_failed_draft(tmp_path: Path) -> None:
     from hiraku.dashboard.components import MarkdownEditor
 
     config = Project.create(tmp_path, install_skill=False)
-    record = Record.create("notes", markdown="Original", config=config)
+    record = Record.create("notes", markdown="Original", project=config)
     editor = MarkdownEditor(Record.save_markdown)
     editor._start(record)
     editor.render(record)

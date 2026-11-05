@@ -69,23 +69,23 @@ def validate_database(database: Path) -> None:
                 raise ValueError("Unexpected experiment seeds")
 
 
-def generate(config: Project) -> None:
+def generate(project: Project) -> None:
     """Run a small local batch without contacting a remote tracking service."""
-    database = config.root / "mlflow.db"
-    if database.exists() or list(config.records_dir.rglob("*.md")):
+    database = project.root / "mlflow.db"
+    if database.exists() or list(project.records_dir.rglob("*.md")):
         raise FileExistsError("Generation requires an example without records or runs")
-    config.tracking_backend = {
+    project.tracking_backend = {
         "type": "mlflow",
         "database": "mlflow.db",
         "experiment_name": "hiraku-digits",
     }
-    config.save()
+    project.save()
     Record.create(
         "digits",
         type="task",
         status="concluded",
         activate=False,
-        config=config,
+        project=project,
         metrics=[
             {"name": "val/log_loss", "direction": "minimize"},
             {"name": "val/accuracy", "direction": "maximize"},
@@ -101,7 +101,7 @@ def generate(config: Project) -> None:
             type="hypothesis",
             status="concluded",
             activate=False,
-            config=config,
+            project=project,
             markdown=f"## {identifier}\n\nL2 alpha: {alpha}; seeds: 1, 2, 3; "
             f"epochs: {EPOCHS}; hidden units: 64; validation fraction: 0.25.\n",
         )
@@ -123,7 +123,7 @@ def generate(config: Project) -> None:
             result = execute_command(
                 [*command, "--seed", str(seed)],
                 record_id=identifier,
-                config=config,
+                project=project,
                 env={
                     "MLFLOW_TRACKING_URI": f"sqlite:///{database}",
                     "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
@@ -135,8 +135,8 @@ def generate(config: Project) -> None:
                     f"exit code {result.returncode}"
                 )
     validate_database(database)
-    config.active_record_id = "weak-l2"
-    config.save()
+    project.active_record_id = "weak-l2"
+    project.save()
 
 
 def generate_results(output: Path) -> None:
@@ -145,7 +145,7 @@ def generate_results(output: Path) -> None:
     if output.exists():
         raise FileExistsError(f"Output already exists: {output}")
     with TemporaryDirectory(prefix="hiraku-digits-") as temporary:
-        config = Project.create(
+        project = Project.create(
             Path(temporary).resolve() / "project",
             example="digits-mlflow",
             install_skill=False,
@@ -165,15 +165,15 @@ def generate_results(output: Path) -> None:
                 "Initialize isolated example source",
             ],
         ):
-            subprocess.run(["git", *arguments], cwd=config.root, check=True)
-        generate(config)
+            subprocess.run(["git", *arguments], cwd=project.root, check=True)
+        generate(project)
         output.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
             overlay = Path(staging) / "overlay"
-            shutil.copytree(config.records_dir, overlay / "hiraku/records")
-            shutil.copyfile(config.path, overlay / "hiraku/hiraku.yml")
+            shutil.copytree(project.records_dir, overlay / "hiraku/records")
+            shutil.copyfile(project.path, overlay / "hiraku/hiraku.yml")
             with (
-                sqlite3.connect(config.root / "mlflow.db") as source,
+                sqlite3.connect(project.root / "mlflow.db") as source,
                 sqlite3.connect(overlay / "mlflow.db") as snapshot,
             ):
                 source.backup(snapshot)

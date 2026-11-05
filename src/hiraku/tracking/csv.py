@@ -33,7 +33,7 @@ class CSVBackend(TrackingBackend):
     """Normalize runs from a project CSV file.
 
     Args:
-        config: Project configuration used to resolve the default CSV path.
+        project: Hiraku project used to resolve the default CSV path.
         path: Optional explicit CSV path.
     """
 
@@ -49,7 +49,7 @@ class CSVBackend(TrackingBackend):
 
     def __init__(
         self,
-        config: Project,
+        project: Project,
         path: Path | str | None = None,
         *,
         settings: CSVBackendConfig | None = None,
@@ -57,7 +57,7 @@ class CSVBackend(TrackingBackend):
         """Create a CSV adapter.
 
         Args:
-            config: Project configuration.
+            project: Hiraku project.
             path: Optional CSV path override.
             settings: Pre-validated CSV backend settings used by the factory.
         """
@@ -67,7 +67,7 @@ class CSVBackend(TrackingBackend):
             settings = CSVBackendConfig(path=path)
         if not isinstance(settings, CSVBackendConfig):
             raise BackendError("CSV backend settings must be CSVBackendConfig")
-        self.config = config
+        self.project = project
         if settings.path is None:
             self.path = None
         else:
@@ -75,13 +75,13 @@ class CSVBackend(TrackingBackend):
             self.path = (
                 candidate.resolve()
                 if candidate.is_absolute()
-                else (config.root / candidate).resolve()
+                else (project.root / candidate).resolve()
             )
 
     def _read_source_runs(self) -> list[Run]:
         from ..run import Run
 
-        path = self.path or self.config.root / "runs.csv"
+        path = self.path or self.project.root / "runs.csv"
         if not path.exists():
             return []
         runs: list[Run] = []
