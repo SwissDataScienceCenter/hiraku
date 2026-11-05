@@ -89,7 +89,9 @@ def _data(record: Record) -> dict[str, Any]:
     return record.model_dump(mode="json", exclude={"path"})
 
 
-def _update(record: Record, fields: dict[str, Any], markdown: str | None) -> Record:
+def _update(
+    project: Project, record: Record, fields: dict[str, Any], markdown: str | None
+) -> Record:
     protected = {"id", "path", "markdown", "parent_id"}
     invalid = protected.intersection(fields)
     if invalid:
@@ -101,7 +103,9 @@ def _update(record: Record, fields: dict[str, Any], markdown: str | None) -> Rec
     if markdown is not None:
         values["markdown"] = markdown
     updated = type(record).model_validate(values)
-    updated.save(record.path, overwrite=True)
+    updated._path = record.path
+    updated._persisted_id = record._persisted_id
+    project.vault.save(updated)
     return updated
 
 
@@ -173,7 +177,7 @@ def create_server(project: Project | None = None) -> Any:
         markdown: str | None = None,
     ) -> dict[str, Any]:
         """Merge record fields and optionally replace Markdown; null clears a field."""
-        return _data(_update(selected.vault.get(record_id), fields, markdown))
+        return _data(_update(selected, selected.vault.get(record_id), fields, markdown))
 
     @server.tool()
     def record_reparent(record_id: str, parent_id: str | None = None) -> dict[str, Any]:

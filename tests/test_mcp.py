@@ -96,6 +96,48 @@ def test_tools_and_validation(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
+def test_record_update_uses_vault_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    record = project.vault.create("original", status="new", markdown="Before")
+    other = project.vault.create("other")
+    server = create_server(project)
+
+    # Exercise MCP routing without relying on the SDK's worker-thread scheduler.
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
+
+    async def exercise() -> None:
+        result = await server.call_tool(
+            "record_update",
+            {
+                "record_id": record.id,
+                "fields": {"name": "renamed", "related_to": [other.id]},
+                "markdown": "After",
+            },
+        )
+        assert result.structured_content["name"] == "renamed"
+        updated = project.vault.get(record.id)
+        assert updated.path == project.records_dir / "renamed.md"
+        assert not (project.records_dir / "original.md").exists()
+        assert updated.status == "new"
+        assert updated.markdown == "After"
+        assert updated.related_to == [other.id]
+
+        for fields in ({"related_to": ["missing"]}, {"name": "other"}):
+            with pytest.raises(ToolError):
+                await server.call_tool(
+                    "record_update", {"record_id": record.id, "fields": fields}
+                )
+        assert project.vault.get(record.id).name == "renamed"
+        assert project.vault.get(record.id).related_to == [other.id]
+
+    asyncio.run(exercise())
+
+
 def test_resources_and_prompt(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     server = create_server(config)
