@@ -54,6 +54,9 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         async def call(tool_name: str, **args):
             return await server.call_tool(tool_name, args)
 
+        assert "record_reparent" not in {
+            tool.name for tool in await server.list_tools()
+        }
         await call(
             "record_create",
             name="root",
@@ -66,7 +69,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         assert load_record("child", project=config).status == "done"
         for name, args in [
             ("record_create", {"name": "bad", "parent_id": "missing"}),
-            ("record_create", {"name": "../escape"}),
+            ("record_create", {"name": "  "}),
             ("record_update", {"record_id": "child", "fields": {"id": "renamed"}}),
             ("record_update", {"record_id": "child", "fields": {"related_to": ["no"]}}),
             ("record_delete", {"record_id": "root"}),
@@ -74,7 +77,6 @@ def test_tools_and_validation(tmp_path: Path) -> None:
             with pytest.raises(ToolError):
                 await server.call_tool(name, args)
         assert load_record("child", project=config).related_to == []
-        await call("record_reparent", record_id="child", parent_id=None)
         await call("record_delete", record_id="child")
         await call(
             "record_create",
@@ -83,7 +85,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
             markdown="Evidence",
         )
         with pytest.raises(ToolError):
-            await call("record_create", name="../escape")
+            await call("record_create", name="  ")
         await call("record_update", record_id="sources", fields={}, markdown="Updated")
         assert load_record("sources", project=config).markdown == "Updated"
         await call("record_show", record_id="sources")
@@ -152,7 +154,9 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
                 "markdown": "Curated evidence",
             },
         )
-        folder = load_record("literature", project=config).path.parent
+        literature = load_record("literature", project=config)
+        folder = config.records_dir / literature.path.stem
+        folder.mkdir()
         (folder / "papers").mkdir()
         pdf = b"%PDF-1.4\nsource bytes"
         (folder / "papers" / "paper one.pdf").write_bytes(pdf)
@@ -161,7 +165,7 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
         (folder / "outside.txt").symlink_to(outside)
         catalog = list(await server.read_resource("hiraku://catalog"))[0]
         uris = json.loads(catalog.content)
-        assert "hiraku://sources/literature/papers%2Fpaper%20one.pdf" in uris
+        assert f"hiraku://sources/{literature.id}/papers%2Fpaper%20one.pdf" in uris
         assert "hiraku://sources/literature/outside.txt" not in uris
         content = list(
             await server.read_resource(
@@ -233,7 +237,7 @@ def test_runs(tmp_path: Path) -> None:
         await server.call_tool(
             "record_create",
             {
-                "record_id": "task",
+                "name": "task",
                 "fields": {"metrics": [{"name": "acc", "direction": "maximize"}]},
             },
         )
@@ -286,7 +290,7 @@ def test_stdio_session(tmp_path: Path) -> None:
                     await client.call_tool(
                         "record_create",
                         {
-                            "record_id": "papers",
+                            "name": "papers",
                             "fields": {"type": "context"},
                             "markdown": "Literature",
                         },
@@ -528,7 +532,7 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     assert started["status"] == "waiting"
     interrupt = _interrupt(started)
     assert interrupt["step"] == "draft"
-    assert interrupt["data"]["task"] == "task"
+    assert interrupt["data"]["task"] == config.vault.get("task").id
 
     bypass = resume_workflow(
         started["workflow_session_id"], {"event": "finish"}, project=config

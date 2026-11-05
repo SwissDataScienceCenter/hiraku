@@ -148,8 +148,10 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
     assert codex_skill.is_file()
     assert claude_skill.is_file()
-    assert not (root / ".codex/skills").exists()
-    assert not (root / ".pi/skills").exists()
+    assert (root / ".codex/skills/hiraku/SKILL.md").read_text() == (
+        codex_skill.read_text()
+    )
+    assert (root / ".pi/skills/hiraku/SKILL.md").read_text() == codex_skill.read_text()
     assert not (root / ".gemini/skills").exists()
     assert codex_skill.read_text() == claude_skill.read_text()
     assert config.active_record_id is None
@@ -329,7 +331,8 @@ def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
         results=True,
         install_skill=False,
     )
-    assert config.active_record_id == "weak-l2"
+    assert config.active_record_id == config.vault.get("weak-l2").id
+    assert config.active_record == "weak-l2"
     assert config.tracking_backend == {
         "type": "mlflow",
         "database": "mlflow.db",

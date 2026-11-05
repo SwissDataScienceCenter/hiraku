@@ -233,10 +233,12 @@ def test_record_update_checks_relationships(tmp_path: Path, monkeypatch) -> None
     child = project.vault.create("child", parent_id=parent.id)
     monkeypatch.chdir(tmp_path)
 
-    cycle = invoke("record", "update", parent.id, "--parent", child.id)
+    cycle = invoke("record", "update", parent.id, "--set", f"parent_id={child.id}")
+    removed_option = invoke("record", "update", child.id, "--root")
     missing = invoke("record", "update", child.id, "--related-to", "missing")
 
     assert cycle.exit_code != 0
+    assert removed_option.exit_code != 0
     assert missing.exit_code != 0
     assert project.vault.get(parent.id).parent_id is None
     assert project.vault.get(child.id).related_to == []

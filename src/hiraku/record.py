@@ -347,11 +347,13 @@ class Vault(BaseModel):
             raise ValidationError("Record path does not match its persisted file")
         if old_path is not None:
             self._check_vault_path(old_path)
-            if (
-                not old_path.is_file()
-                or self._load(old_path).id != record._persisted_id
-            ):
+            if not old_path.is_file():
                 raise ValidationError("Record path does not match its persisted file")
+            existing = self._load(old_path)
+            if existing.id != record._persisted_id:
+                raise ValidationError("Record path does not match its persisted file")
+            if existing.parent_id != candidate.parent_id:
+                raise ValidationError("Record parent is immutable after persistence")
         target = (self.dir / _filename(candidate)).absolute()
         self._check_vault_path(target)
         if target.exists() and old_path != target:
@@ -394,26 +396,6 @@ class Vault(BaseModel):
                 f"Cannot delete record at {record.path}: {exc}"
             ) from exc
 
-    def reparent(self, record_id: str, parent_id: str | None) -> Record:
-        records = self._index()
-        record = records.get(record_id)
-        if record is None:
-            raise RecordNotFoundError(f"Record {record_id!r} not found")
-        if parent_id is not None:
-            parent = records.get(parent_id)
-            if parent is None:
-                raise RecordNotFoundError(f"Parent record {parent_id!r} not found")
-            parent_id = parent.id
-            if parent.id == record.id or record.id in self._ancestor_ids(
-                parent, records
-            ):
-                raise ValidationError("A record cannot become its own ancestor")
-        updated = record.model_copy(update={"parent_id": parent_id})
-        candidate_records = {**records, record.id: updated}
-        self._validate_records(candidate_records)
-        self.save(updated)
-        return updated
-
     def validate(self) -> None:
         records = self._index()
         self._validate_records(records)
@@ -432,19 +414,6 @@ class Vault(BaseModel):
                     f"Record {record.id!r} has a missing related record"
                 )
             self._ancestor_ids(record, records)
-
-    def _root_id(self, record_id: str, records: dict[str, Record]) -> str:
-        current = records[record_id]
-        visited: set[str] = set()
-        while current.parent_id is not None:
-            if current.id in visited:
-                raise ValidationError("Record hierarchy contains a cycle")
-            visited.add(current.id)
-            parent = records.get(current.parent_id)
-            if parent is None:
-                raise ValidationError(f"Missing parent record {current.parent_id!r}")
-            current = parent
-        return current.id
 
     def _ancestor_ids(self, record: Record, records: dict[str, Record]) -> set[str]:
         ancestors: set[str] = set()

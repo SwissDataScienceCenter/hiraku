@@ -58,7 +58,7 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
 ) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     config = Project.create(tmp_path)
-    Record.create("root", project=config)
+    record = Record.create("root", project=config)
     (tmp_path / "uncommitted.txt").write_text("dirty")
     command = [
         sys.executable,
@@ -70,7 +70,7 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
         command, record_id="root", project=config, capture_output=True
     )
     record_id, commit, git_state = result.stdout.strip().split("|")
-    assert record_id == "root"
+    assert record_id == record.id
     assert commit == ""
     assert git_state == "unavailable"
 

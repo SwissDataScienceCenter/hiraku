@@ -66,7 +66,6 @@ and fall back to the CLI when the host has not connected the server.
 | --- | --- |
 | `record_list`, `record_show` | Read records; show includes inherited values and their sources. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
-| `record_reparent` | Move a record subtree under a parent, or make it a root. |
 | `execute` | Run a command in the foreground and return its exit code, stdout, and stderr. |
 | `runs` | List tracked runs attributed to a record, like `hiraku runs`; `all_records` lists every attributed run in its tracking source. |
 
@@ -74,7 +73,7 @@ Create tools accept a Markdown body and a `fields` object for additional metadat
 Record creation activates the record by default; pass `activate: false` to leave
 the active record unchanged. Update tools merge `fields` and optionally replace
 the Markdown body. Set a field to `null` to clear its value. IDs and persistence
-paths cannot be changed; use `record_reparent` to change the organizational parent.
+paths and the organizational parent cannot be changed through the update tool.
 Expected failures are returned as MCP tool errors.
 
 `execute` requires explicit command arguments. Commands are not stored in

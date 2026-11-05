@@ -66,7 +66,7 @@ def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) 
     run = runs[0]
     assert run.id == "run-1"
     assert "entrypoint" not in run.raw
-    assert run.params == {"seed": 42}
+    assert run.params == {"seed": "42"}
     assert run.metrics == {"test/accuracy": 0.95}
     assert run.raw["tags"] == ["baseline", "iris"]
     assert [item.id for item in backend.list_runs()] == ["run-1"]

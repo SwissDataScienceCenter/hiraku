@@ -458,8 +458,6 @@ def record_show(
 
 @record_group.command("update")
 @click.argument("record_id")
-@click.option("--parent", "parent_id")
-@click.option("--root", "make_root", is_flag=True)
 @click.option("--related-to", multiple=True)
 @click.option("--commit")
 @click.option("--set", "set_values", multiple=True, metavar="KEY=VALUE")
@@ -469,8 +467,6 @@ def record_show(
 def record_update(
     state: CLIContext,
     record_id: str,
-    parent_id: str | None,
-    make_root: bool,
     related_to: tuple[str, ...],
     commit: str | None,
     set_values: tuple[str, ...],
@@ -479,13 +475,11 @@ def record_update(
 ) -> None:
     """Update stored fields; --unset removes an override."""
     record = state.project.vault.find(record_id)
-    if parent_id is not None and make_root:
-        raise ValidationError("--parent and --root are mutually exclusive")
     changes = _fields(set_values)
     if "markdown" in changes:
         raise ValidationError("Use --markdown-file to update record Markdown")
     if any(key in changes for key in ("id", "parent_id")):
-        raise ValidationError("id and parent_id require dedicated operations")
+        raise ValidationError("id and parent_id cannot be updated")
     if related_to:
         changes["related_to"] = list(related_to)
     if commit is not None:
@@ -498,18 +492,11 @@ def record_update(
         if key in changes:
             raise ValidationError(f"Cannot set and unset {key!r} together")
         fields.pop(key, None)
-    new_parent = None if make_root else parent_id
-    if make_root or parent_id is not None:
-        fields["parent_id"] = new_parent
     body = _markdown(markdown_file) if markdown_file is not None else record.markdown
     candidate = Record.model_validate({**fields, "markdown": body})
     candidate._path = record.path
     candidate._persisted_id = record._persisted_id
-    if make_root or parent_id is not None:
-        if new_parent is not None:
-            new_parent = state.project.vault.find(new_parent).id
-        candidate.parent_id = new_parent
-    if make_root or parent_id is not None or "related_to" in changes:
+    if "related_to" in changes:
         state.project.vault.validate_relationships(candidate)
     state.project.vault.save(candidate)
     click.echo(f"Updated record {record_id}")

@@ -182,16 +182,9 @@ def create_server(project: Project | None = None) -> Any:
         return _data(_update(selected, selected.vault.get(record_id), fields, markdown))
 
     @server.tool()
-    def record_reparent(record_id: str, parent_id: str | None = None) -> dict[str, Any]:
-        """Move a record subtree under a parent, or make it a root."""
-        record = selected.vault.get(record_id)
-        record = selected.vault.reparent(record_id, parent_id)
-        return _data(record)
-
-    @server.tool()
     def record_delete(record_id: str) -> dict[str, str]:
         """Delete a record using Hiraku's relationship checks."""
-        selected.vault.delete(record_id)
+        selected.vault.delete(selected.vault.get(record_id).id)
         return {"deleted": record_id}
 
     @server.tool()
@@ -236,7 +229,7 @@ def create_server(project: Project | None = None) -> Any:
             declarations = (
                 selected.vault.resolve(record.id)["values"].get("metrics") or []
             )
-            directions = {item.name: item.direction for item in declarations}
+            directions = {item["name"]: item["direction"] for item in declarations}
             query["sort"] = sort
             query["ascending"] = (
                 ascending

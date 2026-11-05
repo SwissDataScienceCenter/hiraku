@@ -6,13 +6,12 @@ from hiraku.errors import RecordExistsError, ValidationError
 from hiraku.record import Record, Vault
 
 
-def test_flat_paths_rename_and_reparent(tmp_path: Path) -> None:
+def test_flat_paths_and_rename(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path)
     parent = vault.create("parent")
     child = vault.create("child", parent_id=parent.id)
     assert parent.path == tmp_path / "parent.md"
     assert child.path == tmp_path / "child.md"
-    vault.reparent(child.id, None)
     assert vault.get(child.id).path == child.path
     child.name = "renamed"
     vault.save(child)

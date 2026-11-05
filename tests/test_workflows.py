@@ -177,7 +177,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
             {
                 "event": "drafted",
                 "arguments": {
-                    "record_id": "dropout",
+                    "name": "dropout",
                     "summary": "Add dropout",
                     "hypothesis": "Dropout improves validation accuracy",
                     "change": "Add dropout before the head",
@@ -195,7 +195,11 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     )
     launch = _interrupt(result)
     assert launch["step"] == "launch"
-    assert "hiraku run --record dropout -- python train.py" in launch["data"]["command"]
+    experiment_id = config.vault.get("dropout").id
+    assert (
+        f"hiraku run --record {experiment_id} -- python train.py"
+        == (launch["data"]["command"])
+    )
 
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
         stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,\n")

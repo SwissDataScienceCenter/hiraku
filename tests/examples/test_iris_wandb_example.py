@@ -183,10 +183,10 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     run_id = row["id"]
     assert row["params"]["model"] == "logistic"
     assert row["params"]["seed"] == "42"
-    assert row["params"]["test_size"] == 0.25
+    assert row["params"]["test_size"] == "0.25"
     assert row["params"]["dataset.name"] == "scikit-learn iris"
-    assert row["params"]["dataset.samples"] == 150
-    assert row["params"]["dataset.features"] == 4
+    assert row["params"]["dataset.samples"] == "150"
+    assert row["params"]["dataset.features"] == "4"
     assert row["params"]["python.version"]
     assert row["metrics"]["test/accuracy"] == pytest.approx(0.9473684210526316)
     assert row["raw"]["tags"] == ["hiraku", "iris", "logistic"]
