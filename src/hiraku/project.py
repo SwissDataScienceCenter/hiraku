@@ -312,6 +312,13 @@ class Project(BaseModel):
             with as_file(resources / "workflows") as source:
                 shutil.copytree(source, project.workflows_dir, dirs_exist_ok=True)
 
+            with as_file(resources / "dispatch") as source:
+                shutil.copytree(source, project.dispatch_dir, dirs_exist_ok=True)
+            for name in ("launch.sh", "worktree.sh", "slurm.sh", "srun.sh"):
+                dispatcher = project.dispatch_dir / name
+                if dispatcher.is_file():
+                    dispatcher.chmod(dispatcher.stat().st_mode | 0o111)
+
             # Install the bundled Hiraku skills
             if install_skill:
                 with as_file(resources / "skills" / "hiraku") as source:

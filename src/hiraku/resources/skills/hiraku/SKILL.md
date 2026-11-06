@@ -358,6 +358,14 @@ Commands are not record metadata. Pass the complete invocation directly after
 train.py --seed 42`. A dispatcher can prepare repeatable project-specific
 runtime behavior around that invocation.
 
+On a Slurm cluster, `--dispatch slurm` submits the command as a batch job and
+returns at once with `slurm_job_id` and `slurm_log`; results appear in
+`hiraku runs` after the job logs them. Check the job with `squeue -j ID` or
+`sacct -j ID` and read the log for errors. `--dispatch srun` runs the command
+on a compute node and waits. Slurm settings come from `SBATCH_*` (batch) and
+`SLURM_*` (srun) variables. Options without a variable go in
+`HIRAKU_SBATCH_ARGS` (batch) or `HIRAKU_SRUN_ARGS` (srun), separated by spaces.
+
 `hiraku run` streams output and waits; `hiraku job submit` and MCP `job_submit`
 return after submission, defaulting to `local-detached`. Local jobs inherit the
 submitter's working directory unless `directory` is specified. Commands have

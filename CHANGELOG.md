@@ -43,6 +43,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Add the `slurm` and `srun` dispatchers for Slurm clusters: `hiraku run
+  --dispatch slurm` submits the command as a batch job with the project's
+  `hiraku/dispatch/slurm.sbatch`, and `--dispatch srun` runs it on a compute
+  node. Slurm's `SBATCH_*` and `SLURM_*` variables set job options, while
+  `HIRAKU_SBATCH_ARGS` and `HIRAKU_SRUN_ARGS` pass options without a variable
+  ([issue #135](https://github.com/SwissDataScienceCenter/hiraku/issues/135)).
 - Add native PSI/J execution with `prepare_job()` for research attribution,
   `run_local()` for foreground output, CLI `hiraku job submit/list/show/sync`, and
   MCP `job_submit` / `job_list` / `job_show` / `job_sync`. Project history stores
