@@ -11,7 +11,7 @@ branches:
 
 ```bash
 git switch -c hiraku/records/baseline
-hiraku record create baseline --parent research-root \
+hiraku record create baseline --parent research-root --type experiment \
   --set 'branch=hiraku/records/baseline' --commit HEAD
 ```
 

@@ -49,6 +49,8 @@ def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
 
 def _filename(record: Record) -> str:
     slug = re.sub(r"[^\w .-]+", "-", record.name).strip(" .-")
+    if slug.casefold() in {"index", "log"}:
+        raise ValidationError(f"Reserved OKF filename: {slug}.md")
     return f"{slug or 'record'}.md"
 
 
@@ -95,6 +97,7 @@ class Record(BaseModel):
     resource: str | None = None
     tags: list[str] | None = None
 
+    # Hiraku fields
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str = Field(min_length=1)
     markdown: Markdown = Markdown("")
@@ -200,13 +203,16 @@ class Record(BaseModel):
     def metadata(self) -> dict[str, Any]:
         """Return the record's serialized metadata, excluding its Markdown body."""
         try:
-            return self.model_dump(
+            metadata = self.model_dump(
                 mode="json",
                 exclude={"markdown"},
-                exclude_none=True,
                 exclude_defaults=True,
                 warnings=False,
             )
+            for field in self.model_fields_set & type(self).model_fields.keys():
+                if field != "markdown" and getattr(self, field) is None:
+                    metadata[field] = None
+            return metadata
         except PydanticSerializationError as exc:
             raise ValidationError(f"Unsupported YAML value: {exc}") from exc
 
@@ -260,6 +266,9 @@ class Vault:
         validate_identifier(identifier, label=label)
 
     def create(self, name: str, **fields: Any) -> Record:
+        record_type = fields.get("type")
+        if not isinstance(record_type, str) or not record_type.strip():
+            raise ValidationError("Record type must be a non-empty string")
         parent = None
         if fields.get("parent_id") is not None:
             parent = self.get(fields["parent_id"])
@@ -304,6 +313,8 @@ class Vault:
             self.dir.rglob("*.md"), key=lambda p: (len(p.parts), str(p))
         )
         for path in paths_on_disk:
+            if path.name in {"index.md", "log.md"}:
+                continue
             self._check_vault_path(path)
             if path.parent == self.dir or path.stem != path.parent.name:
                 raise ValidationError(f"Expected a same-named record directory: {path}")
@@ -379,7 +390,11 @@ class Vault:
             candidate = Record.model_validate(record.model_dump(mode="python"))
         except (TypeError, ValueError) as exc:
             raise ValidationError(f"Invalid record {record.id!r}: {exc}") from exc
+        candidate.model_fields_set.clear()
+        candidate.model_fields_set.update(record.model_fields_set)
         old_path = record.path
+        if old_path is None and (candidate.type is None or not candidate.type.strip()):
+            raise ValidationError("Record type must be a non-empty string")
         if (old_path is None) != (record._persisted_id is None):
             raise ValidationError("Record path does not match its persisted file")
         if record._persisted_id is not None and candidate.id != record._persisted_id:

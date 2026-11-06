@@ -6,8 +6,8 @@ Typical workflow:
 
 ```bash
 hiraku init
-hiraku record create "Research question"
-hiraku record create "Baseline experiment" --parent <root-id>
+hiraku record create "Research question" --type task
+hiraku record create "Baseline experiment" --parent <root-id> --type experiment
 hiraku run --record <child-id> -- python train.py
 hiraku runs --record <record-id>
 ```
