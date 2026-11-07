@@ -64,6 +64,7 @@ and fall back to the CLI when the host has not connected the server.
 
 | Tools | Behavior |
 | --- | --- |
+| `project_info` | Read the current project configuration and metadata. |
 | `record_list`, `record_show` | Read records; show includes inherited values and their sources. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
 | `execute` | Run a command in the foreground and return its exit code, stdout, and stderr. |

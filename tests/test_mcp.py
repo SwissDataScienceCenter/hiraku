@@ -25,7 +25,12 @@ from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E4
 
 from hiraku.cli import main  # noqa: E402
 from hiraku.errors import ValidationError  # noqa: E402
-from hiraku.mcp import WorkflowApproval, create_server  # noqa: E402
+from hiraku.mcp import (  # noqa: E402
+    WorkflowApproval,
+    create_server,
+    register_tools,
+    register_workflow_tools,
+)
 from hiraku.project import Project  # noqa: E402
 from hiraku.record import Record  # noqa: E402
 
@@ -36,6 +41,32 @@ def load_record(record_id: str, *, project: Project) -> Record:
 
 def list_records(*, project: Project) -> list[Record]:
     return project.vault.list()
+
+
+def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> None:
+    from mcp.server.mcpserver import MCPServer
+
+    project = Project.create(tmp_path, install_skill=False)
+    server = MCPServer("test")
+    register_tools(server, project)
+    register_workflow_tools(server, project)
+
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
+
+    async def exercise() -> None:
+        tools = {tool.name: tool for tool in await server.list_tools()}
+        assert {"project_info", "record_list", "runs", "workflow_start"} <= tools.keys()
+        assert tools["project_info"].title == "Project information"
+        assert tools["record_list"].annotations.read_only_hint is True
+        assert tools["workflow_start"].title == "Start workflow"
+        assert tools["workflow_start"].description
+        result = await server.call_tool("project_info", {})
+        assert result.structured_content["tracking_backend"] == "csv"
+
+    asyncio.run(exercise())
 
 
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow  # noqa: E402
