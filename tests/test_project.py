@@ -155,10 +155,13 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert Project.discover(root).root == root
     assert Project.discover(nested).root == root
     assert sorted(path.name for path in config.workflows_dir.iterdir()) == [
-        "collaborative"
+        "collaborative",
+        "research",
     ]
     assert (config.workflows_dir / "collaborative" / "workflow.py").is_file()
     assert (config.workflows_dir / "collaborative" / "workflow.md").is_file()
+    assert (config.workflows_dir / "research" / "workflow.py").is_file()
+    assert (config.workflows_dir / "research" / "workflow.md").is_file()
     assert not (config.hiraku_dir / "programs").exists()
     assert not (config.hiraku_dir / "actions").exists()
     assert not hasattr(config, "default_dispatch")
