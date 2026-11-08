@@ -156,24 +156,23 @@ def test_record_update_uses_vault_validation(
             "record_update",
             {
                 "record_id": record.id,
-                "fields": {"name": "renamed", "related_to": [other.id]},
+                "fields": {"related_to": [other.id]},
                 "markdown": "After",
             },
         )
-        assert result.structured_content["name"] == "renamed"
+        assert result.structured_content["name"] == "original"
         updated = project.vault.get(record.id)
-        assert updated.path == project.records_dir / "renamed.md"
-        assert not (project.records_dir / "original.md").exists()
+        assert updated.path == project.records_dir / "original/original.md"
         assert updated.status == "new"
         assert updated.markdown == "After"
         assert updated.related_to == [other.id]
 
-        for fields in ({"related_to": ["missing"]}, {"name": "other"}):
+        for fields in ({"related_to": ["missing"]}, {"name": "renamed"}):
             with pytest.raises(ToolError):
                 await server.call_tool(
                     "record_update", {"record_id": record.id, "fields": fields}
                 )
-        assert project.vault.get(record.id).name == "renamed"
+        assert project.vault.get(record.id).name == "original"
         assert project.vault.get(record.id).related_to == [other.id]
 
     asyncio.run(exercise())
@@ -196,8 +195,7 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
             },
         )
         literature = load_record("literature", project=config)
-        folder = config.records_dir / literature.path.stem
-        folder.mkdir()
+        folder = literature.path.parent
         (folder / "papers").mkdir()
         pdf = b"%PDF-1.4\nsource bytes"
         (folder / "papers" / "paper one.pdf").write_bytes(pdf)
@@ -304,7 +302,6 @@ def test_runs(tmp_path: Path) -> None:
 def test_stdio_session(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     source = config.records_dir / "papers"
-    source.mkdir()
 
     async def exercise() -> None:
         params = StdioServerParameters(
@@ -342,6 +339,7 @@ def test_stdio_session(tmp_path: Path) -> None:
                         },
                     )
                 ).is_error
+                source.mkdir(exist_ok=True)
                 pdf = b"%PDF-test"
                 (source / "paper.pdf").write_bytes(pdf)
                 result = await client.read_resource("hiraku://sources/papers/paper.pdf")

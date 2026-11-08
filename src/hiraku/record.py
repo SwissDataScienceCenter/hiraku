@@ -211,6 +211,7 @@ class Record(BaseModel):
                 exclude_defaults=True,
                 warnings=False,
             )
+            metadata["type"] = self.type
             for field in self.model_fields_set & type(self).model_fields.keys():
                 if field != "markdown" and getattr(self, field) is None:
                     metadata[field] = None
