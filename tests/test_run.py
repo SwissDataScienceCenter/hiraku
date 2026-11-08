@@ -53,7 +53,7 @@ def test_run_rejects_invalid_duration(value: float) -> None:
 
 def test_run_immutable_and_missing_csv_empty(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
-    record = Record.create("record", project=config)
+    record = Record.create("record", type="task", project=config)
     assert (
         TrackingBackendFactory(config)
         .create(config.tracking_backend)

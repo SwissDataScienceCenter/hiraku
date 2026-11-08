@@ -86,7 +86,7 @@ def test_wandb_runs_cli_uses_active_record(tmp_path: Path, monkeypatch) -> None:
     project = Project.create(tmp_path, install_skill=False)
     project.tracking_backend = {"type": "wandb", "entity": "team", "project": "iris"}
     project.save()
-    record = Record.create("logistic", project=project)
+    record = Record.create("logistic", type="task", project=project)
     monkeypatch.setattr(FakeRun, "config", {"hiraku.record_id": record.id})
 
     result = CliRunner().invoke(main, ["runs", "--json"])

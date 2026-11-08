@@ -92,15 +92,21 @@ def test_tools_and_validation(tmp_path: Path) -> None:
             "record_create",
             name="root",
             fields={
+                "type": "task",
                 "status": "new",
             },
         )
-        await call("record_create", name="child", parent_id="root")
+        await call(
+            "record_create", name="child", parent_id="root", fields={"type": "task"}
+        )
         await call("record_update", record_id="child", fields={"status": "done"})
         assert load_record("child", project=config).status == "done"
         for name, args in [
-            ("record_create", {"name": "bad", "parent_id": "missing"}),
-            ("record_create", {"name": "  "}),
+            (
+                "record_create",
+                {"name": "bad", "parent_id": "missing", "fields": {"type": "task"}},
+            ),
+            ("record_create", {"name": "  ", "fields": {"type": "task"}}),
             ("record_update", {"record_id": "child", "fields": {"id": "renamed"}}),
             ("record_update", {"record_id": "child", "fields": {"related_to": ["no"]}}),
             ("record_delete", {"record_id": "root"}),
@@ -116,7 +122,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
             markdown="Evidence",
         )
         with pytest.raises(ToolError):
-            await call("record_create", name="  ")
+            await call("record_create", name="  ", fields={"type": "task"})
         await call("record_update", record_id="sources", fields={}, markdown="Updated")
         assert load_record("sources", project=config).markdown == "Updated"
         await call("record_show", record_id="sources")
@@ -133,8 +139,10 @@ def test_record_update_uses_vault_validation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project = Project.create(tmp_path, install_skill=False)
-    record = project.vault.create("original", status="new", markdown="Before")
-    other = project.vault.create("other")
+    record = project.vault.create(
+        "original", type="task", status="new", markdown="Before"
+    )
+    other = project.vault.create("other", type="task")
     server = create_server(project)
 
     # Exercise MCP routing without relying on the SDK's worker-thread scheduler.
@@ -176,7 +184,9 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     server = create_server(config)
 
     async def exercise() -> None:
-        await server.call_tool("record_create", {"name": "demo"})
+        await server.call_tool(
+            "record_create", {"name": "demo", "fields": {"type": "task"}}
+        )
         await server.call_tool(
             "record_create",
             {
@@ -235,7 +245,9 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
     server = create_server(config)
 
     async def exercise() -> None:
-        await server.call_tool("record_create", {"name": "demo"})
+        await server.call_tool(
+            "record_create", {"name": "demo", "fields": {"type": "task"}}
+        )
         result = await server.call_tool(
             "execute",
             {
@@ -269,7 +281,10 @@ def test_runs(tmp_path: Path) -> None:
             "record_create",
             {
                 "name": "task",
-                "fields": {"metrics": [{"name": "acc", "direction": "maximize"}]},
+                "fields": {
+                    "type": "task",
+                    "metrics": [{"name": "acc", "direction": "maximize"}],
+                },
             },
         )
 

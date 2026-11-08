@@ -28,12 +28,14 @@ def test_record_create_adds_link_to_parent(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     body = tmp_path / "body.md"
     body.write_text("## Hypothesis\n\nTest it.\n", encoding="utf-8")
-    assert invoke("record", "create", "Parent [A]").exit_code == 0
+    assert invoke("record", "create", "Parent [A]", "--type", "task").exit_code == 0
 
     result = invoke(
         "record",
         "create",
         "child",
+        "--type",
+        "task",
         "--parent",
         "Parent [A]",
         "--markdown-file",
@@ -45,7 +47,12 @@ def test_record_create_adds_link_to_parent(tmp_path: Path, monkeypatch) -> None:
     assert child.markdown == (
         "## Hypothesis\n\nTest it.\n\nParent: [Parent \\[A\\]](../Parent%20-A.md)"
     )
-    assert invoke("record", "create", "empty", "--parent", "child").exit_code == 0
+    assert (
+        invoke(
+            "record", "create", "empty", "--type", "task", "--parent", "child"
+        ).exit_code
+        == 0
+    )
     assert project.vault.get("empty").markdown == "Parent: [child](../child.md)"
 
 
@@ -147,7 +154,7 @@ def test_init_rejects_example_options_and_example_create_requires_example(
 def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
     Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    assert invoke("record", "create", "root").exit_code == 0
+    assert invoke("record", "create", "root", "--type", "task").exit_code == 0
     (tmp_path / "runs.csv").write_text("id,record_id,duration\na,root,4.25\nb,root,\n")
 
     rows = json.loads(invoke("runs", "--record", "root", "--json").output)
@@ -165,7 +172,7 @@ def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
 
 def test_runs_json_keeps_legacy_fields_only_in_raw(tmp_path: Path, monkeypatch) -> None:
     project = Project.create(tmp_path, install_skill=False)
-    project.vault.create("root", id="root")
+    project.vault.create("root", id="root", type="task")
     monkeypatch.chdir(tmp_path)
     (tmp_path / "runs.csv").write_text("id,record_id,entrypoint\na,root,train\n")
 
@@ -187,8 +194,13 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
         cwd=tmp_path,
         check=True,
     )
-    assert invoke("record", "create", "root").exit_code == 0
-    assert invoke("record", "create", "child", "--parent", "root").exit_code == 0
+    assert invoke("record", "create", "root", "--type", "task").exit_code == 0
+    assert (
+        invoke(
+            "record", "create", "child", "--type", "task", "--parent", "root"
+        ).exit_code
+        == 0
+    )
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-qm", "records"], cwd=tmp_path, check=True)
     result = invoke(
@@ -239,8 +251,16 @@ def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> Non
     no_active = invoke("runs", "--json")
     assert no_active.exit_code != 0
     assert "No active record" in no_active.output
-    assert invoke("record", "create", "root", "--no-activate").exit_code == 0
-    assert invoke("record", "create", "child", "--parent", "root").exit_code == 0
+    assert (
+        invoke("record", "create", "root", "--type", "task", "--no-activate").exit_code
+        == 0
+    )
+    assert (
+        invoke(
+            "record", "create", "child", "--type", "task", "--parent", "root"
+        ).exit_code
+        == 0
+    )
 
     def ids(*args: str) -> set[str]:
         result = invoke("runs", *args, "--json")
@@ -255,8 +275,8 @@ def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> Non
 
 def test_record_update_checks_relationships(tmp_path: Path, monkeypatch) -> None:
     project = Project.create(tmp_path, install_skill=False)
-    parent = project.vault.create("parent")
-    child = project.vault.create("child", parent_id=parent.id)
+    parent = project.vault.create("parent", type="task")
+    child = project.vault.create("child", type="task", parent_id=parent.id)
     monkeypatch.chdir(tmp_path)
 
     cycle = invoke("record", "update", parent.id, "--set", f"parent_id={child.id}")

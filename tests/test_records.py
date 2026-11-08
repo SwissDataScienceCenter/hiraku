@@ -40,6 +40,7 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
     task = Record(
         id="sample",
         name="sample",
+        type="task",
         markdown="# Body\n\nVerbatim.\n",
         zeta=1,
         alpha={"x": True},
@@ -47,7 +48,7 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
     path = vault.save(task)
     loaded = vault.get("sample")
 
-    assert list(loaded.metadata) == ["id", "name", "zeta", "alpha"]
+    assert list(loaded.metadata) == ["type", "id", "name", "zeta", "alpha"]
     assert loaded.markdown == "# Body\n\nVerbatim."
     loaded.new = [1, 2]
     path = vault.save(loaded)
@@ -58,7 +59,7 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
     loaded.id = "renamed"
     with pytest.raises(ValidationError, match="immutable"):
         vault.save(loaded)
-    detached = Record(id="sample")
+    detached = Record(id="sample", type="task")
     with pytest.raises(RecordExistsError):
         vault.save(detached)
     assert path.exists()
@@ -67,14 +68,14 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
 @pytest.mark.parametrize("body", ["", "\n  leading\n\ntrailing  \n\n"])
 def test_record_trims_boundary_whitespace(tmp_path: Path, body: str) -> None:
     vault = Vault(dir=tmp_path)
-    record = vault.create("whitespace", markdown=body)
+    record = vault.create("whitespace", type="task", markdown=body)
 
     assert vault.get(record.id).markdown == body.strip()
 
 
 def test_frontmatter_accepts_post_constructor_field_names(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path)
-    record = vault.create("metadata", content="value", handler="other")
+    record = vault.create("metadata", type="task", content="value", handler="other")
 
     loaded = vault.get(record.id)
     assert loaded.content == "value"
@@ -94,7 +95,7 @@ def test_record_metadata_is_a_snapshot() -> None:
 
 def test_record_load_supports_vault_save_and_identity_checks(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path)
-    original = vault.create("example", markdown="Body")
+    original = vault.create("example", type="task", markdown="Body")
     loaded = Record.load(original.path)
 
     assert loaded.metadata == original.metadata
@@ -120,7 +121,7 @@ def test_context_material_uses_the_record_registry(tmp_path: Path) -> None:
 
 def test_renaming_record_renames_its_markdown_file(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    record = Record.create("initial name", project=config)
+    record = Record.create("initial name", type="task", project=config)
     old_path = record.path
 
     record.name = "new/name"
@@ -133,8 +134,8 @@ def test_renaming_record_renames_its_markdown_file(tmp_path: Path) -> None:
 
 def test_record_commit_is_local_not_inherited(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    root = Record.create("root", commit="a" * 40, project=config)
-    child = Record.create("child", parent_id=root.id, project=config)
+    root = Record.create("root", type="task", commit="a" * 40, project=config)
+    child = Record.create("child", type="task", parent_id=root.id, project=config)
     assert child.commit is None
     assert "commit" not in config.vault.resolve(child.id)["values"]
 
@@ -154,9 +155,9 @@ def test_malformed_records_are_rejected(tmp_path: Path, content: str) -> None:
 
 def test_flat_paths_preserve_hierarchy(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    first = Record.create("first", project=config)
-    middle = Record.create("middle", parent_id=first.id, project=config)
-    leaf = Record.create("leaf", parent_id=middle.id, project=config)
+    first = Record.create("first", type="task", project=config)
+    middle = Record.create("middle", type="task", parent_id=first.id, project=config)
+    leaf = Record.create("leaf", type="task", parent_id=middle.id, project=config)
     assert first.path == config.records_dir / "first.md"
     assert middle.path == config.records_dir / "middle.md"
     assert leaf.path == config.records_dir / "leaf.md"
@@ -170,16 +171,18 @@ def test_flat_paths_preserve_hierarchy(tmp_path: Path) -> None:
 
 def test_invalid_links_cycles_collisions_and_delete(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    first = Record.create("first", project=config)
-    second = Record.create("second", parent_id=first.id, project=config)
-    third = Record.create("third", related_to=[second.id], project=config)
+    first = Record.create("first", type="task", project=config)
+    second = Record.create("second", type="task", parent_id=first.id, project=config)
+    third = Record.create("third", type="task", related_to=[second.id], project=config)
     first.parent_id = second.id
     with pytest.raises(ValidationError, match="parent is immutable"):
         config.vault.save(first)
     with pytest.raises(RecordExistsError):
-        Record.create("second", parent_id=first.id, project=config, activate=False)
+        Record.create(
+            "second", type="task", parent_id=first.id, project=config, activate=False
+        )
     with pytest.raises(RecordNotFoundError):
-        Record.create("fourth", parent_id="missing", project=config)
+        Record.create("fourth", type="task", parent_id="missing", project=config)
     second.related_to = ["missing"]
     with pytest.raises(ValidationError):
         config.vault.validate_relationships(second)
@@ -195,6 +198,7 @@ def test_save_revalidates_in_place_metric_mutations(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
     record = Record.create(
         "task",
+        type="task",
         project=config,
         metrics=[{"name": "loss", "direction": "minimize"}],
     )
@@ -209,7 +213,7 @@ def test_save_revalidates_in_place_metric_mutations(tmp_path: Path) -> None:
 
 def test_save_revalidates_nested_custom_field_mutations(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    record = Record.create("task", project=config, custom={"values": []})
+    record = Record.create("task", type="task", project=config, custom={"values": []})
     original = record.path.read_bytes()
     record.custom["values"].append(object())
 
@@ -223,7 +227,7 @@ def test_duplicate_record_id_is_an_error(
     tmp_path: Path,
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    record = Record.create("duplicate", project=config)
+    record = Record.create("duplicate", type="task", project=config)
     atomic_write(
         config.records_dir / "other" / f"{record.id}.md",
         record.path.read_text(encoding="utf-8"),
@@ -244,18 +248,22 @@ def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
         decision="keep",
         type="task",
     )
-    child = Record.create("child", parent_id=root.id, project=config, goal=None)
+    child = Record.create(
+        "child", type="task", parent_id=root.id, project=config, goal=None
+    )
     resolved = config.vault.resolve(child.id)
     assert all(
         key not in resolved["values"]
-        for key in ("goal", "branch", "status", "decision", "type", "command")
+        for key in ("branch", "status", "decision", "command")
     )
+    assert resolved["values"]["goal"] is None
+    assert resolved["values"]["type"] == "task"
 
 
 def test_record_parent_is_immutable_after_save(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path / "records")
-    parent = vault.create("parent")
-    child = vault.create("child", parent_id=parent.id)
+    parent = vault.create("parent", type="task")
+    child = vault.create("child", type="task", parent_id=parent.id)
     child.parent_id = None
 
     with pytest.raises(ValidationError, match="parent is immutable"):
@@ -266,8 +274,8 @@ def test_record_parent_is_immutable_after_save(tmp_path: Path) -> None:
 
 def test_runs_list_attributed_runs_from_current_backend(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    root = Record.create("root", project=config)
-    child = Record.create("child", parent_id=root.id, project=config)
+    root = Record.create("root", type="task", project=config)
+    child = Record.create("child", type="task", parent_id=root.id, project=config)
     with (tmp_path / "runs.csv").open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=["id", "record_id", "metric.loss"])
         writer.writeheader()
@@ -283,8 +291,8 @@ def test_default_run_list_returns_attributed_runs_from_selected_source(
     tmp_path: Path,
 ) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    root = Record.create("root", project=config)
-    Record.create("child", parent_id=root.id, project=config)
+    root = Record.create("root", type="task", project=config)
+    Record.create("child", type="task", parent_id=root.id, project=config)
     (config.root / "runs.csv").write_text(
         "id,record_id\none,root\ntwo,child\nthree,outside\nfour,\n",
         encoding="utf-8",
@@ -296,9 +304,9 @@ def test_default_run_list_returns_attributed_runs_from_selected_source(
 
 def test_run_query_scans_selected_csv_once(tmp_path: Path, monkeypatch) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    root = Record.create("root", project=config)
-    child = Record.create("child", parent_id=root.id, project=config)
-    Record.create("leaf", parent_id=child.id, project=config)
+    root = Record.create("root", type="task", project=config)
+    child = Record.create("child", type="task", parent_id=root.id, project=config)
+    Record.create("leaf", type="task", parent_id=child.id, project=config)
     original = CSVBackend._read_source_runs
     calls = 0
 
@@ -328,9 +336,9 @@ def test_run_query_scans_selected_csv_once(tmp_path: Path, monkeypatch) -> None:
 def test_tracking_factory_uses_project_setting(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
     config.tracking_backend = {"type": "csv", "path": "results/root.csv"}
-    root = Record.create("root", project=config)
-    child = Record.create("child", parent_id=root.id, project=config)
-    other = Record.create("other", project=config)
+    root = Record.create("root", type="task", project=config)
+    child = Record.create("child", type="task", parent_id=root.id, project=config)
+    other = Record.create("other", type="task", project=config)
 
     for _record in (root, child, other):
         backend = TrackingBackendFactory(config).create(config.tracking_backend)
@@ -342,11 +350,13 @@ def test_inheritance_and_guarded_delete(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     parent = Record.create(
         "task",
+        type="task",
         project=config,
         metrics=[{"name": "loss", "direction": "minimize"}],
     )
     child = Record.create(
         "exp",
+        type="task",
         parent_id=parent.id,
         project=config,
     )
@@ -382,8 +392,8 @@ def test_removed_launch_fields_are_not_record_schema_fields(name, value) -> None
 
 def test_commit_local_and_validated(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
-    parent = Record.create("parent", commit="a" * 40, project=config)
-    child = Record.create("child", parent_id=parent.id, project=config)
+    parent = Record.create("parent", type="task", commit="a" * 40, project=config)
+    child = Record.create("child", type="task", parent_id=parent.id, project=config)
     assert "commit" not in config.vault.resolve(child.id)["values"]
     child.commit = "b" * 64
     config.vault.save(child)
@@ -419,7 +429,7 @@ def test_project_vault_is_lazy_and_uses_project_records_directory(
 
 def test_vault_generates_uuid_and_gets_by_id_or_name(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path / "records")
-    record = vault.create("baseline", markdown="# Notes\n")
+    record = vault.create("baseline", type="task", markdown="# Notes\n")
 
     assert str(UUID(record.id)) == record.id
     assert vault.get(record.id).markdown == "# Notes"
@@ -429,7 +439,7 @@ def test_vault_generates_uuid_and_gets_by_id_or_name(tmp_path: Path) -> None:
 
 def test_vault_keeps_existing_readable_ids(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path / "records")
-    record = Record(id="legacy-record", name="Legacy record")
+    record = Record(id="legacy-record", name="Legacy record", type="task")
     vault.save(record)
 
     assert vault.get("legacy-record").name == "Legacy record"
@@ -438,7 +448,7 @@ def test_vault_keeps_existing_readable_ids(tmp_path: Path) -> None:
 
 def test_vault_name_lookup_rejects_ambiguous_names(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path / "records")
-    first = vault.create("experiment")
+    first = vault.create("experiment", type="task")
     legacy = vault.dir / "legacy" / "experiment.md"
     atomic_write(legacy, first.path.read_text().replace(first.id, str(uuid4())))
     with pytest.raises(AmbiguousReferenceError):
@@ -449,9 +459,9 @@ def test_vault_checks_parent_and_cycle_on_collection_operations(
     tmp_path: Path,
 ) -> None:
     vault = Vault(dir=tmp_path / "records")
-    parent = vault.create("parent")
-    child = vault.create("child", parent_id=parent.id)
-    leaf = vault.create("leaf", parent_id=child.id)
+    parent = vault.create("parent", type="task")
+    child = vault.create("child", type="task", parent_id=parent.id)
+    leaf = vault.create("leaf", type="task", parent_id=child.id)
 
     parent.parent_id = leaf.id
     with pytest.raises(ValidationError, match="cycle"):
@@ -462,7 +472,7 @@ def test_vault_checks_parent_and_cycle_on_collection_operations(
 
 def test_vault_rejects_duplicate_ids_and_external_paths(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path / "records")
-    record = vault.create("one")
+    record = vault.create("one", type="task")
     assert record.path is not None
     duplicate_path = vault.dir / str(uuid4()) / "duplicate.md"
     duplicate_path.parent.mkdir(parents=True)
@@ -480,7 +490,7 @@ def test_vault_rejects_duplicate_ids_and_external_paths(tmp_path: Path) -> None:
 
 def test_vault_rejects_mutated_persisted_identity(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path / "records")
-    record = vault.create("one")
+    record = vault.create("one", type="task")
     record.id = str(uuid4())
 
     with pytest.raises(ValidationError, match="immutable"):
@@ -489,7 +499,7 @@ def test_vault_rejects_mutated_persisted_identity(tmp_path: Path) -> None:
 
 def test_vault_revalidates_in_place_relationship_mutations(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path / "records")
-    record = vault.create("one")
+    record = vault.create("one", type="task")
     record.related_to.append("bad/path")
 
     with pytest.raises(ValidationError):
@@ -543,8 +553,8 @@ def test_cli_requires_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_flat_paths_and_rename(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path)
-    parent = vault.create("parent")
-    child = vault.create("child", parent_id=parent.id)
+    parent = vault.create("parent", type="task")
+    child = vault.create("child", type="task", parent_id=parent.id)
     assert parent.path == tmp_path / "parent.md"
     assert child.path == tmp_path / "child.md"
     assert vault.get(child.id).path == child.path
@@ -553,12 +563,12 @@ def test_flat_paths_and_rename(tmp_path: Path) -> None:
     assert child.path == tmp_path / "renamed.md"
     assert not (tmp_path / "child.md").exists()
     with pytest.raises(RecordExistsError):
-        vault.create("parent")
+        vault.create("parent", type="task")
 
 
 def test_existing_nested_records_are_discoverable(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path)
-    record = vault.create("legacy")
+    record = vault.create("legacy", type="task")
     legacy = tmp_path / record.id / f"legacy--{record.id}.md"
     legacy.parent.mkdir()
     record.path.rename(legacy)
@@ -568,7 +578,7 @@ def test_existing_nested_records_are_discoverable(tmp_path: Path) -> None:
 
 def test_save_is_independent_of_other_records(tmp_path: Path, monkeypatch) -> None:
     vault = Vault(dir=tmp_path)
-    record = vault.create("valid")
+    record = vault.create("valid", type="task")
     (tmp_path / "broken.md").write_text("not a record", encoding="utf-8")
     record.markdown = "Updated"
 
@@ -578,7 +588,7 @@ def test_save_is_independent_of_other_records(tmp_path: Path, monkeypatch) -> No
     with monkeypatch.context() as patch:
         patch.setattr(Vault, "_index", lambda self: no_index())
         vault.save(record)
-        vault.save(Record(name="another", parent_id="missing"))
+        vault.save(Record(name="another", type="task", parent_id="missing"))
 
     assert "Updated" in record.path.read_text(encoding="utf-8")
     with pytest.raises(ValidationError):
@@ -587,19 +597,19 @@ def test_save_is_independent_of_other_records(tmp_path: Path, monkeypatch) -> No
 
 def test_vault_validation_checks_ids_and_links(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path)
-    vault.save(Record(id="same", name="first"))
-    vault.save(Record(id="same", name="second"))
+    vault.save(Record(id="same", name="first", type="task"))
+    vault.save(Record(id="same", name="second", type="task"))
     with pytest.raises(ValidationError, match="Duplicate record ID"):
         vault.validate()
     (tmp_path / "second.md").unlink()
-    vault.save(Record(name="orphan", parent_id="missing"))
+    vault.save(Record(name="orphan", type="task", parent_id="missing"))
     with pytest.raises(ValidationError, match="Missing parent"):
         vault.validate()
 
 
 def test_save_rejects_replaced_persisted_file(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path)
-    record = vault.create("original")
+    record = vault.create("original", type="task")
     record.path.write_text("---\nid: replacement\nname: original\n---\n")
     with pytest.raises(ValidationError, match="does not match"):
         vault.save(record)

@@ -110,7 +110,7 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
 
     def export(output):
         generated = Project.create(output, install_skill=False)
-        record = generated.vault.create("generated")
+        record = generated.vault.create("generated", type="task")
         generated.set_active_record(record)
         (output / "runs.csv").write_text(f"id,record_id\nrun,{record.id}\n")
 

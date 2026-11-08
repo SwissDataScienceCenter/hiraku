@@ -40,7 +40,7 @@ def test_run_executes_in_project_and_returns_output_and_exit_code(
     tmp_path: Path,
 ) -> None:
     config = Project.create(tmp_path)
-    Record.create("root", project=config)
+    Record.create("root", type="task", project=config)
     result = execute_command(
         [sys.executable, "-c", "import os; print(os.getcwd()); raise SystemExit(7)"],
         record_id="root",
@@ -58,7 +58,7 @@ def test_run_allows_dirty_tree_and_supplies_provenance(
 ) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     config = Project.create(tmp_path)
-    record = Record.create("root", project=config)
+    record = Record.create("root", type="task", project=config)
     (tmp_path / "uncommitted.txt").write_text("dirty")
     command = [
         sys.executable,
@@ -80,7 +80,7 @@ def test_run_requires_explicit_command_and_streams_output(
 ) -> None:
     config = Project.create(tmp_path)
     monkeypatch.chdir(tmp_path)
-    Record.create("root", project=config)
+    Record.create("root", type="task", project=config)
 
     seen: list[tuple[str, ...] | None] = []
 
@@ -102,7 +102,7 @@ def test_run_requires_explicit_command_and_streams_output(
 
 def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
-    Record.create("root", project=config)
+    Record.create("root", type="task", project=config)
     with pytest.raises(ValidationError, match="reserved run attribution"):
         execute_command(
             ["echo", "hello"], env={"HIRAKU_RECORD_ID": "other"}, project=config
@@ -111,7 +111,7 @@ def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:
 
 def test_run_does_not_reserve_legacy_entrypoint_environment(tmp_path: Path) -> None:
     project = Project.create(tmp_path, install_skill=False)
-    Record.create("root", project=project)
+    Record.create("root", type="task", project=project)
     result = execute_command(
         [sys.executable, "-c", "import os; print(os.environ['HIRAKU_ENTRYPOINT'])"],
         env={"HIRAKU_ENTRYPOINT": "custom"},
@@ -124,7 +124,7 @@ def test_run_does_not_reserve_legacy_entrypoint_environment(tmp_path: Path) -> N
 
 def test_cli_propagates_nonzero_exit_code(tmp_path: Path, monkeypatch) -> None:
     config = Project.create(tmp_path)
-    Record.create("root", project=config)
+    Record.create("root", type="task", project=config)
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         main,
@@ -173,7 +173,7 @@ def test_validate_command_rejects_invalid_arguments(value: list[object]) -> None
 
 def test_run_uses_dispatcher_in_current_working_tree(tmp_path: Path) -> None:
     project = _repository(tmp_path)
-    Record.create("test", project=project)
+    Record.create("test", type="task", project=project)
     project.dispatch_dir.mkdir()
     (project.dispatch_dir / "test.sh").write_text(
         '#!/bin/sh\n[ "$1" = "--" ] && shift\nexec "$@"\n', encoding="utf-8"

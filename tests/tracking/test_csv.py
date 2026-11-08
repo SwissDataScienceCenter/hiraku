@@ -28,7 +28,7 @@ def test_csv_tracking_run_and_historical_entrypoint_attribution(tmp_path: Path) 
 
 def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
-    Record.create("iris", project=config)
+    Record.create("iris", type="task", project=config)
     path = config.root / "runs.csv"
     path.write_text(
         "id,record_id,timestamp,metric.accuracy,param.seed,note\n"
@@ -49,7 +49,7 @@ def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
 
 def test_csv_backend_reads_duration_in_seconds(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
-    Record.create("iris", project=config)
+    Record.create("iris", type="task", project=config)
     (config.root / "runs.csv").write_text(
         "id,record_id,timestamp,duration\n"
         "a,iris,2026-01-01T00:00:00Z,4.25\n"
@@ -66,7 +66,7 @@ def test_csv_backend_reads_duration_in_seconds(tmp_path: Path) -> None:
 @pytest.mark.parametrize("value", ["-1", "nan", "soon"])
 def test_csv_backend_rejects_invalid_duration(tmp_path: Path, value: str) -> None:
     config = Project.create(tmp_path)
-    Record.create("iris", project=config)
+    Record.create("iris", type="task", project=config)
     (config.root / "runs.csv").write_text(
         f"id,record_id,duration\na,iris,{value}\n", encoding="utf-8"
     )
@@ -92,7 +92,7 @@ def test_csv_source_listing_returns_all_attributed_runs(tmp_path: Path) -> None:
 def test_csv_backend_resolves_record_path_from_project_root(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     config.tracking_backend = {"type": "csv", "path": "results/iris.csv"}
-    record = Record.create("iris", project=config)
+    record = Record.create("iris", type="task", project=config)
     path = tmp_path / "results" / "iris.csv"
     path.parent.mkdir()
     path.write_text("id,record_id\na,iris\n", encoding="utf-8")

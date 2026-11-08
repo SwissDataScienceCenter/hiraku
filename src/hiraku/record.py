@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import builtins
 import re
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -91,7 +92,7 @@ class Record(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
 
     # OKF fields
-    type: str | None = None
+    type: str = Field("task", min_length=1)
     title: str | None = None
     description: str | None = None
     resource: str | None = None
@@ -144,7 +145,8 @@ class Record(BaseModel):
     @classmethod
     def validate_related_to(cls, values: list[str]) -> list[str]:
         result = [
-            cls._validate_reference_id(value, "related record ID") for value in values
+            cast(str, cls._validate_reference_id(value, "related record ID"))
+            for value in values
         ]
         if len(result) != len(set(result)):
             raise ValueError("related_to contains duplicate IDs")
@@ -283,7 +285,7 @@ class Vault:
             label = label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
             link = f"Parent: [{label}](../{quote(parent.path.name)})"
             body = record.markdown.rstrip()
-            record.markdown = f"{body}\n\n{link}" if body else link
+            record.markdown = Markdown(f"{body}\n\n{link}" if body else link)
         self.save(record)
         return record
 
@@ -335,17 +337,17 @@ class Vault:
             paths[path] = record
         return records
 
-    def list(self) -> list[Record]:
+    def list(self) -> builtins.list[Record]:
         return sorted(self._index().values(), key=lambda record: record.id)
 
-    def children(self, parent_id: str) -> list[Record]:
+    def children(self, parent_id: str) -> builtins.list[Record]:
         records = self._index()
         parent = records.get(parent_id)
         if parent is None:
             raise RecordNotFoundError(f"Record {parent_id!r} not found")
         return [record for record in records.values() if record.parent_id == parent.id]
 
-    def descendants(self, record_id: str) -> list[Record]:
+    def descendants(self, record_id: str) -> builtins.list[Record]:
         records = self._index()
         if record_id not in records:
             raise RecordNotFoundError(f"Record {record_id!r} not found")

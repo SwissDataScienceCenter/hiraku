@@ -29,8 +29,8 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     mlflow = pytest.importorskip("mlflow")
     config = Project.create(tmp_path)
     config.tracking_backend = {"type": "mlflow", "experiment_name": "hiraku-test"}
-    task = Record.create("task", project=config)
-    Record.create("exp", parent_id=task.id, project=config)
+    task = Record.create("task", type="task", project=config)
+    Record.create("exp", type="task", parent_id=task.id, project=config)
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
     mlflow.set_experiment("hiraku-test")
     with mlflow.start_run() as active:

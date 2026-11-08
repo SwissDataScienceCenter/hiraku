@@ -222,7 +222,17 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     project, runner = create_overlay_project(tmp_path, monkeypatch)
     invoke(
         runner,
-        ["record", "create", "cpu-test", "--parent", "sep10", "--commit", "HEAD"],
+        [
+            "record",
+            "create",
+            "cpu-test",
+            "--type",
+            "experiment",
+            "--parent",
+            "sep10",
+            "--commit",
+            "HEAD",
+        ],
     )
     git(project, "add", "hiraku")
     git(project, "commit", "-m", "add cpu test record")
@@ -271,7 +281,18 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
 def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
     _, runner = create_overlay_project(tmp_path, monkeypatch)
     invoke(
-        runner, ["record", "create", "failure", "--parent", "sep10", "--commit", "HEAD"]
+        runner,
+        [
+            "record",
+            "create",
+            "failure",
+            "--type",
+            "experiment",
+            "--parent",
+            "sep10",
+            "--commit",
+            "HEAD",
+        ],
     )
 
     failed = runner.invoke(
