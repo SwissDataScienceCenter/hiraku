@@ -10,8 +10,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
-from hiraku.config import HirakuConfig
-from hiraku.run import Run
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
@@ -22,7 +20,9 @@ from hiraku.errors import HirakuError, ValidationError
 from hiraku.execution import validate_command
 from hiraku.git import GitRepository
 from hiraku.markdown import Markdown
-from hiraku.record import Record, list_records, load_record
+from hiraku.project import Project
+from hiraku.record import Record
+from hiraku.tracking import Run, TrackingBackendFactory
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
 TriageDecision = Literal["follow-up", "stop"]
@@ -128,7 +128,7 @@ def input_schema() -> dict[str, Any]:
     return ResearchInput.model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the graph that guides setup, design, execution, and analysis."""
     path = Path(__file__).with_name("workflow.md")
     fields, body = Record._parse_markdown(path)
@@ -143,21 +143,22 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             raise ValidationError(str(exc)) from exc
         task = arguments.task
         if task is None:
-            active = config.active_record_id
+            active = project.active_record_id
             if active:
                 try:
-                    active_record = load_record(active, config=config)
+                    active_record = project.vault.get(active)
                 except HirakuError:
                     active_record = None
                 if active_record is not None and active_record.type == "task":
                     task = active
         if task:
             try:
-                record = load_record(task, config=config)
+                record = project.vault.get(task)
             except HirakuError as exc:
                 raise ValidationError(str(exc)) from exc
             if record.type != "task":
                 raise ValidationError(f"Research root {task!r} must be a task record")
+            task = record.id
         return Command(
             update={
                 "task": task or "",
@@ -185,24 +186,24 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             "done",
         ]
     ]:
-        problems = _setup_problems(config)
+        problems = _setup_problems(project)
         if problems:
             return Command(update={"step": "setup"}, goto="setup")
         task_id = state.get("task") or ""
         task_update: dict[str, Any] = {}
         if not task_id:
-            active = config.active_record_id
+            active = project.active_record_id
             if active:
                 with _ignore_hiraku_errors():
-                    record = load_record(active, config=config)
+                    record = project.vault.get(active)
                     if record.type == "task":
                         task_id = active
             if not task_id:
                 return Command(update={"task": "", "step": "draft"}, goto="draft")
             task_update["task"] = task_id
 
-        _task(task_id, config)
-        tree = _tree(task_id, config, state["max_depth"])
+        _task(task_id, project)
+        tree = _tree(task_id, project, state["max_depth"])
         if len(tree) > state["max_experiments"]:
             # Existing studies are never hidden or truncated by a new session.
             remaining = 0
@@ -211,9 +212,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
 
         candidates: list[tuple[str, str]] = []
         waiting = False
-        children = _children(config)
+        children = _children(project)
         for experiment, depth in _ordered(task_id, children):
-            step = _step_of(experiment, depth, state, children, config)
+            step = _step_of(experiment, depth, state, children, project)
             if step == "waiting":
                 waiting = True
             elif step in WORK_PRIORITIES and (step != "design" or remaining > 0):
@@ -243,14 +244,14 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
 
     def setup(state: ResearchState) -> Command[Literal["setup", "select", "done"]]:
         data = {
-            "problems": _setup_problems(config),
+            "problems": _setup_problems(project),
             "slurm": shutil.which("sbatch") is not None,
-            "default_dispatch": config.default_dispatch,
+            "default_dispatch": project.default_dispatch,
             "dispatchers": sorted(
-                path.name for path in config.dispatch_dir.glob("*") if path.is_file()
+                path.name for path in project.dispatch_dir.glob("*") if path.is_file()
             ),
-            "job_scripts": _job_scripts(config.root),
-            "tracking_backend": config.tracking_backend,
+            "job_scripts": _job_scripts(project.root),
+            "tracking_backend": project.tracking_backend,
         }
         _ask(
             markdown,
@@ -260,7 +261,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             state.get("feedback", ""),
             ["filesystem.read", "filesystem.write", "workflow.user_input"],
         )
-        problems = _setup_problems(config)
+        problems = _setup_problems(project)
         if problems:
             return Command(
                 update={"feedback": "Still to fix: " + "; ".join(problems)},
@@ -279,16 +280,16 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             ["record.read", "record.create", "workflow.user_input"],
         )
         try:
-            task = _task(response.record_id, config)
+            task = _task(response.record_id, project)
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="draft")
         return Command(update={"task": task.id, "feedback": ""}, goto="select")
 
     def design(state: ResearchState) -> Command[Literal["design", "select"]]:
-        parent = load_record(state["current"], config=config)
-        tree = _tree(state["task"], config, state["max_depth"])
+        parent = project.vault.get(state["current"])
+        tree = _tree(state["task"], project, state["max_depth"])
         remaining = max(state["max_experiments"] - len(tree), 0)
-        depth = _record_depth(parent, state["task"], config)
+        depth = _record_depth(parent, state["task"], project)
         data = {
             "task": state["task"],
             "parent": _describe(parent),
@@ -314,19 +315,20 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 update={"feedback": f"The maximum depth is {state['max_depth']}."},
                 goto="design",
             )
-        known = {record.id for record in list_records(config=config)}
+        known = {record.id for record in project.vault.list()}
         identifiers = [plan.record_id for plan in response.experiments]
         if len(set(identifiers)) != len(identifiers) or known.intersection(identifiers):
             return Command(
                 update={"feedback": "Experiment record IDs must be new and distinct."},
                 goto="design",
             )
-        existing_tree = _tree(state["task"], config, state["max_depth"])
+        existing_tree = _tree(state["task"], project, state["max_depth"])
         sequence = max((int(item["sequence"]) for item in existing_tree), default=0)
         try:
             for index, plan in enumerate(response.experiments, start=1):
                 Record.create(
                     plan.record_id,
+                    id=plan.record_id,
                     parent_id=parent.id,
                     type="experiment",
                     status="designed",
@@ -336,15 +338,15 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                     sequence=sequence + index,
                     markdown=f"## Change\n\n{plan.change.strip()}\n",
                     activate=False,
-                    config=config,
+                    project=project,
                 )
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="design")
         return Command(update={"feedback": ""}, goto="select")
 
     def implement(state: ResearchState) -> Command[Literal["implement", "select"]]:
-        experiment = load_record(state["current"], config=config)
-        parent = load_record(str(experiment.parent_id), config=config)
+        experiment = project.vault.get(state["current"])
+        parent = project.vault.get(str(experiment.parent_id))
         data = {
             "task": state["task"],
             "experiment": _describe(experiment),
@@ -362,17 +364,17 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             ["filesystem.read", "filesystem.write", "shell.execute", "git.commit"],
         )
         try:
-            sha = GitRepository(config.root).resolve(response.commit)
+            sha = GitRepository(project.root).resolve(response.commit)
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="implement")
         experiment.commit = sha
         experiment.status = "implemented"
         experiment.failure = None
-        experiment.save()
+        project.vault.save(experiment)
         return Command(update={"feedback": ""}, goto="select")
 
     def launch(state: ResearchState) -> Command[Literal["launch", "select"]]:
-        experiment = load_record(state["current"], config=config)
+        experiment = project.vault.get(state["current"])
         command = state["command"]
         rendered = shlex.join(
             ["hiraku", "run", "--record", experiment.id, "--", *command]
@@ -393,16 +395,16 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                     },
                     goto="launch",
                 )
-            _failed(experiment.id, response.reason, state, config)
+            _failed(experiment.id, response.reason, state, project)
             return Command(update={"feedback": ""}, goto="select")
         experiment.status = "launched"
-        experiment.save()
+        project.vault.save(experiment)
         return Command(update={"feedback": ""}, goto="select")
 
     def wait(state: ResearchState) -> Command[Literal["wait", "select"]]:
         waiting = [
             item
-            for item in _tree(state["task"], config, state["max_depth"])
+            for item in _tree(state["task"], project, state["max_depth"])
             if item["step"] == "waiting"
         ]
         response = _ask(
@@ -424,9 +426,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                     },
                     goto="wait",
                 )
-            _failed(response.record_id, response.reason, state, config)
+            _failed(response.record_id, response.reason, state, project)
             return Command(update={"feedback": ""}, goto="select")
-        fresh = _tree(state["task"], config, state["max_depth"])
+        fresh = _tree(state["task"], project, state["max_depth"])
         if any(item["step"] == "waiting" for item in fresh) and not any(
             item["step"] in WORK_PRIORITIES for item in fresh
         ):
@@ -442,10 +444,10 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         return Command(update={"feedback": ""}, goto="select")
 
     def analyze(state: ResearchState) -> Command[Literal["analyze", "select"]]:
-        experiment = load_record(state["current"], config=config)
-        parent = load_record(str(experiment.parent_id), config=config)
-        task = _task(state["task"], config)
-        runs = _matching_runs(experiment, config)
+        experiment = project.vault.get(state["current"])
+        parent = project.vault.get(str(experiment.parent_id))
+        task = _task(state["task"], project)
+        runs = _matching_runs(experiment, project)
         usable = [run for run in runs if run.metrics]
         data = {
             "experiment": _describe(experiment),
@@ -476,13 +478,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         experiment.status = "analyzed"
         experiment.verdict = response.verdict
         experiment.conclusion = response.conclusion
-        experiment.save()
+        project.vault.save(experiment)
         return Command(update={"feedback": ""}, goto="select")
 
     def triage(state: ResearchState) -> Command[Literal["triage", "select"]]:
-        experiment = load_record(state["current"], config=config)
-        tree = _tree(state["task"], config, state["max_depth"])
-        depth = _record_depth(experiment, state["task"], config)
+        experiment = project.vault.get(state["current"])
+        tree = _tree(state["task"], project, state["max_depth"])
+        depth = _record_depth(experiment, state["task"], project)
         remaining = max(state["max_experiments"] - len(tree), 0)
         can_follow_up = depth < state["max_depth"] and remaining > 0
         data = {
@@ -508,16 +510,16 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             return Command(update={"feedback": reason}, goto="triage")
         experiment.triage = response.decision
         experiment.triage_reason = response.reason
-        experiment.save()
+        project.vault.save(experiment)
         return Command(update={"feedback": ""}, goto="select")
 
     def done(state: ResearchState) -> dict[str, str]:
         tree = (
-            _tree(state["task"], config, state["max_depth"])
+            _tree(state["task"], project, state["max_depth"])
             if state.get("task")
             else []
         )
-        best = _best_results(state["task"], config) if state.get("task") else []
+        best = _best_results(state["task"], project) if state.get("task") else []
         return {
             "final": markdown.section("## Done").replace(
                 "{{task}}", state.get("task", "")
@@ -571,17 +573,17 @@ def _ask(
             payload = {**payload, "error": f"Response does not match the schema: {exc}"}
 
 
-def _setup_problems(config: HirakuConfig) -> list[str]:
+def _setup_problems(project: Project) -> list[str]:
     problems = []
-    contexts = list_records(config=config)
+    contexts = project.vault.list()
     if not any(
-        item.id == "project-setup" and item.type == "context" for item in contexts
+        item.name == "project-setup" and item.type == "context" for item in contexts
     ):
         problems.append(
             "no `project-setup` context says how experiments run in this project"
         )
-    dispatch = config.default_dispatch
-    path = config.dispatch_dir / str(dispatch)
+    dispatch = project.default_dispatch
+    path = project.dispatch_dir / str(dispatch)
     if dispatch and not path.is_file():
         problems.append(f"the default dispatcher {dispatch} is not in hiraku/dispatch")
     elif dispatch and not os.access(path, os.X_OK):
@@ -593,7 +595,7 @@ def _setup_problems(config: HirakuConfig) -> list[str]:
             "set default_dispatch: slurm.sh in hiraku.yml"
         )
     if dispatch == "slurm.sh":
-        header = config.dispatch_dir / "slurm.header"
+        header = project.dispatch_dir / "slurm.header"
         text = header.read_text(encoding="utf-8") if header.is_file() else ""
         if not any(line.startswith("#SBATCH") for line in text.splitlines()):
             problems.append(
@@ -602,8 +604,8 @@ def _setup_problems(config: HirakuConfig) -> list[str]:
     return problems
 
 
-def _task(record_id: str, config: HirakuConfig) -> Record:
-    record = load_record(record_id, config=config)
+def _task(record_id: str, project: Project) -> Record:
+    record = project.vault.get(record_id)
     if record.type != "task":
         raise ValidationError(f"Record {record_id!r} must have type: task")
     if not record.metrics:
@@ -615,9 +617,9 @@ def _metrics(task: Record) -> list[dict[str, Any]]:
     return [item.model_dump() for item in task.metrics or []]
 
 
-def _children(config: HirakuConfig) -> dict[str, list[Record]]:
+def _children(project: Project) -> dict[str, list[Record]]:
     result: dict[str, list[Record]] = {}
-    for record in list_records(config=config):
+    for record in project.vault.list():
         if record.type == "experiment" and record.parent_id:
             result.setdefault(record.parent_id, []).append(record)
     for records in result.values():
@@ -643,7 +645,7 @@ def _step_of(
     depth: int,
     state: ResearchState,
     children: dict[str, list[Record]],
-    config: HirakuConfig,
+    project: Project,
 ) -> str:
     if getattr(experiment, "verdict", None):
         if getattr(experiment, "triage", None) is None:
@@ -657,7 +659,7 @@ def _step_of(
         return "done"
     if not experiment.commit:
         return "implement"
-    runs = _matching_runs(experiment, config)
+    runs = _matching_runs(experiment, project)
     if any(run.metrics for run in runs):
         return "analyze"
     if runs or experiment.status == "launched":
@@ -665,20 +667,24 @@ def _step_of(
     return "launch"
 
 
-def _matching_runs(experiment: Record, config: HirakuConfig) -> list[Run]:
+def _matching_runs(experiment: Record, project: Project) -> list[Run]:
     if not experiment.commit:
         return []
     return [
-        run for run in experiment.runs(config=config) if run.commit == experiment.commit
+        run
+        for run in TrackingBackendFactory(project)
+        .create(project.tracking_backend)
+        .list_runs(record_id=experiment.id)
+        if run.commit == experiment.commit
     ]
 
 
 def _tree(
     task_id: str,
-    config: HirakuConfig,
+    project: Project,
     max_depth: int = 10,
 ) -> list[dict[str, Any]]:
-    children = _children(config)
+    children = _children(project)
     state: ResearchState = {
         "task": task_id,
         "max_depth": max_depth,
@@ -691,7 +697,7 @@ def _tree(
                 "parent": record.parent_id,
                 "depth": depth,
                 "sequence": int(getattr(record, "sequence", 0) or 0),
-                "step": _step_of(record, depth, state, children, config),
+                "step": _step_of(record, depth, state, children, project),
                 "summary": getattr(record, "summary", None),
                 "commit": record.commit,
                 "verdict": getattr(record, "verdict", None),
@@ -709,12 +715,12 @@ def _tree_order(record_id: str, task_id: str, children: dict[str, list[Record]])
     return -1
 
 
-def _record_depth(record: Record, task_id: str, config: HirakuConfig) -> int:
+def _record_depth(record: Record, task_id: str, project: Project) -> int:
     depth = 0
     while record.id != task_id:
         if not record.parent_id:
             raise ValidationError(f"{record.id!r} is not under task {task_id!r}")
-        record = load_record(record.parent_id, config=config)
+        record = project.vault.get(record.parent_id)
         depth += 1
     return depth
 
@@ -727,11 +733,11 @@ def _describe(record: Record) -> dict[str, Any]:
 
 
 def _failed(
-    record_id: str, reason: str, state: ResearchState, config: HirakuConfig
+    record_id: str, reason: str, state: ResearchState, project: Project
 ) -> None:
     if not record_id:
         raise ValidationError("A failed event requires the experiment record ID")
-    experiment = load_record(record_id, config=config)
+    experiment = project.vault.get(record_id)
     repairs = int(getattr(experiment, "repairs", 0) or 0) + 1
     experiment.repairs = repairs
     experiment.failure = reason
@@ -745,17 +751,17 @@ def _failed(
     else:
         experiment.commit = None
         experiment.status = "designed"
-    experiment.save()
+    project.vault.save(experiment)
 
 
-def _best_results(task_id: str, config: HirakuConfig) -> list[dict[str, Any]]:
-    task = _task(task_id, config)
+def _best_results(task_id: str, project: Project) -> list[dict[str, Any]]:
+    task = _task(task_id, project)
     results = []
     for metric in _metrics(task):
         candidates = []
-        for item in _tree(task_id, config):
-            record = load_record(item["id"], config=config)
-            for run in _matching_runs(record, config):
+        for item in _tree(task_id, project):
+            record = project.vault.get(item["id"])
+            for run in _matching_runs(record, project):
                 value = run.metrics.get(metric["name"])
                 try:
                     numeric = float(value)

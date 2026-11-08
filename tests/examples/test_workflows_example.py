@@ -60,6 +60,93 @@ def test_all_examples_use_the_langgraph_cli(
     assert "count-steps" in listed
     assert "greet" in listed
     assert "scheduler" in listed
+    assert "research" in listed
+
+
+def test_research_setup_accepts_project_context(runner: CliRunner) -> None:
+    project = Project.discover()
+    started = start_workflow(
+        "research", {"command": ["python", "train.py"]}, project=project
+    )
+    assert started["status"] == "waiting"
+    assert started["interrupts"][0]["value"]["step"] == "setup"
+
+    project.vault.create("project-setup", type="context")
+    resumed = resume_workflow(
+        started["workflow_session_id"], {"event": "set_up"}, project=project
+    )
+    assert resumed["status"] == "waiting"
+    assert resumed["interrupts"][0]["value"]["step"] == "draft"
+
+    task = project.vault.create(
+        "task", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
+    )
+    session = started["workflow_session_id"]
+    designed = resume_workflow(session, {"record_id": task.id}, project=project)
+    assert designed["interrupts"][0]["value"]["step"] == "design"
+
+    implementation = resume_workflow(
+        session,
+        {
+            "experiments": [
+                {
+                    "record_id": "baseline",
+                    "summary": "Baseline",
+                    "hypothesis": "Loss falls",
+                    "expected": "Lower loss",
+                    "change": "Train a model",
+                }
+            ]
+        },
+        project=project,
+    )
+    assert implementation["interrupts"][0]["value"]["step"] == "implement"
+    experiment = project.vault.find("baseline")
+    assert experiment.parent_id == task.id
+    assert experiment.type == "experiment"
+    assert experiment.id == "baseline"
+
+    subprocess.run(["git", "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], check=True)
+    subprocess.run(["git", "commit", "--allow-empty", "-m", "baseline"], check=True)
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    launch = resume_workflow(session, {"commit": commit}, project=project)
+    assert launch["interrupts"][0]["value"]["step"] == "launch"
+
+    waiting = resume_workflow(session, {"event": "launched"}, project=project)
+    assert waiting["interrupts"][0]["value"]["step"] == "wait"
+    (project.root / "runs.csv").write_text(
+        f"id,record_id,commit,metric.loss\nrun-1,{experiment.id},{commit},0.5\n"
+    )
+    analysis = resume_workflow(session, {"event": "checked"}, project=project)
+    assert analysis["interrupts"][0]["value"]["step"] == "analyze"
+    triage = resume_workflow(
+        session,
+        {"verdict": "supports", "conclusion": "run-1: loss 0.5"},
+        project=project,
+    )
+    assert triage["interrupts"][0]["value"]["step"] == "triage"
+    completed = resume_workflow(
+        session, {"decision": "stop", "reason": "Done"}, project=project
+    )
+    assert completed["status"] == "completed"
+    assert "run-1" in completed["result"]
+
+
+def test_research_accepts_task_name(runner: CliRunner) -> None:
+    project = Project.discover()
+    project.vault.create("project-setup", type="context")
+    task = project.vault.create(
+        "task", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
+    )
+    started = start_workflow(
+        "research",
+        {"task": "task", "command": ["python", "train.py"]},
+        project=project,
+    )
+    interrupt = started["interrupts"][0]["value"]
+    assert interrupt["step"] == "design"
+    assert interrupt["data"]["task"] == task.id
 
 
 def test_greet_is_one_final_prompt_filled_from_its_arguments(
