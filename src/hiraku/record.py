@@ -101,18 +101,18 @@ class Record(BaseModel):
     # tags: [sales, orders, revenue]
     # generated: { by: reference_agent/gemini-2.5-pro, at: 2026-05-28T14:30:00Z }
     # ---
-    type: str = Field("task", min_length=1)
+    type: Literal["task", "record", "context"] | str
     title: str | None = None
     description: str | None = None
-    status: str | None = None
+    status: Literal["draft", "stable", "deprecated"] | str = "stable"
     resource: str | None = None
-    tags: list[str] | None = None
-    generated: dict[str, Any] | None = None
+    tags: list[str] = Field(default_factory=list)
+    generated: dict[str, Any] = Field(default_factory=dict)
 
     # Hiraku fields
     id: str = Field(default_factory=lambda: str(uuid4()))
-    name: str = Field(min_length=1)
-    markdown: Markdown = Markdown("")
+    name: str = Field(..., min_length=1)
+    markdown: Markdown = Field(default_factory=lambda: Markdown(""))
     parent_id: str | None = None
     related_to: list[str] = Field(default_factory=list)
     commit: str | None = None
@@ -217,8 +217,7 @@ class Record(BaseModel):
         try:
             metadata = self.model_dump(
                 mode="json",
-                exclude={"markdown"},
-                exclude_defaults=True,
+                exclude={"markdown", "parent_id"},
                 warnings=False,
             )
             metadata["type"] = self.type

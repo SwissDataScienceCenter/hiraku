@@ -493,7 +493,9 @@ def record_update(
             raise ValidationError(f"Cannot set and unset {key!r} together")
         fields.pop(key, None)
     body = _markdown(markdown_file) if markdown_file is not None else record.markdown
-    candidate = Record.model_validate({**fields, "markdown": body})
+    candidate = Record.model_validate(
+        {**fields, "parent_id": record.parent_id, "markdown": body}
+    )
     candidate._path = record.path
     candidate._persisted_id = record._persisted_id
     candidate._parent_path = record._parent_path

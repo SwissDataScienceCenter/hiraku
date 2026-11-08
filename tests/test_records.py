@@ -49,7 +49,11 @@ def test_markdown_round_trip_order_conflicts_and_identity(tmp_path: Path) -> Non
     loaded = vault.get("sample")
 
     assert "type: task" in path.read_text(encoding="utf-8")
-    assert list(loaded.metadata) == ["id", "name", "zeta", "alpha", "type"]
+    assert list(loaded.metadata) == [
+        *[key for key in Record.model_fields if key not in {"markdown", "parent_id"}],
+        "zeta",
+        "alpha",
+    ]
     assert loaded.markdown == "# Body\n\nVerbatim."
     loaded.new = [1, 2]
     path = vault.save(loaded)
@@ -84,7 +88,7 @@ def test_frontmatter_accepts_post_constructor_field_names(tmp_path: Path) -> Non
 
 
 def test_record_metadata_is_a_snapshot() -> None:
-    record = Record(id="sample", markdown="Body", extra={"value": 1})
+    record = Record(id="sample", type="record", markdown="Body", extra={"value": 1})
 
     metadata = record.metadata
     assert "markdown" not in metadata
@@ -136,7 +140,9 @@ def test_record_commit_is_local_not_inherited(tmp_path: Path) -> None:
     root = Record.create("root", type="task", commit="a" * 40, project=config)
     child = Record.create("child", type="task", parent_id=root.id, project=config)
     assert child.commit is None
-    assert "commit" not in config.vault.resolve(child.id)["values"]
+    resolved = config.vault.resolve(child.id)
+    assert resolved["values"]["commit"] is None
+    assert resolved["sources"]["commit"] == child.id
 
 
 @pytest.mark.parametrize(
@@ -251,9 +257,12 @@ def test_nearest_definition_null_and_local_exceptions(tmp_path: Path) -> None:
         "child", type="task", parent_id=root.id, project=config, goal=None
     )
     resolved = config.vault.resolve(child.id)
+    assert resolved["values"]["branch"] is None
+    assert resolved["values"]["decision"] is None
+    assert resolved["values"]["status"] == "stable"
+    assert "command" not in resolved["values"]
     assert all(
-        key not in resolved["values"]
-        for key in ("branch", "status", "decision", "command")
+        resolved["sources"][key] == child.id for key in ("branch", "status", "decision")
     )
     assert resolved["values"]["goal"] is None
     assert resolved["values"]["type"] == "task"
@@ -368,10 +377,15 @@ def test_inheritance_and_guarded_delete(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         config.vault.delete(parent.id)
     with pytest.raises(PydanticValidationError):
-        Record(id="invalid", metrics=[{"name": "loss", "direction": "sideways"}])
+        Record(
+            id="invalid",
+            type="task",
+            metrics=[{"name": "loss", "direction": "sideways"}],
+        )
     with pytest.raises(PydanticValidationError):
         Record(
             id="invalid",
+            type="task",
             metrics=[{"name": "loss", "direction": "minimize", "unit": "s"}],
         )
 
@@ -385,7 +399,7 @@ def test_inheritance_and_guarded_delete(tmp_path: Path) -> None:
 )
 def test_removed_launch_fields_are_not_record_schema_fields(name, value) -> None:
     assert name not in Record.model_fields
-    record = Record(id="root", **{name: value})
+    record = Record(id="root", type="task", **{name: value})
     assert record.model_extra[name] == value
 
 
@@ -393,13 +407,15 @@ def test_commit_local_and_validated(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     parent = Record.create("parent", type="task", commit="a" * 40, project=config)
     child = Record.create("child", type="task", parent_id=parent.id, project=config)
-    assert "commit" not in config.vault.resolve(child.id)["values"]
+    resolved = config.vault.resolve(child.id)
+    assert resolved["values"]["commit"] is None
+    assert resolved["sources"]["commit"] == child.id
     child.commit = "b" * 64
     config.vault.save(child)
     assert load_record("child", project=config).commit == "b" * 64
     for bad in ("HEAD", "abcdef0", "A" * 40, "g" * 40):
         with pytest.raises((ValidationError, PydanticValidationError)):
-            Record(id="bad", commit=bad)
+            Record(id="bad", type="task", commit=bad)
 
 
 @pytest.mark.parametrize(
@@ -527,7 +543,7 @@ def test_explicit_null_metadata_round_trips(tmp_path: Path) -> None:
 
     assert loaded.metadata["description"] is None
     assert loaded.metadata["custom"] is None
-    assert "title" not in loaded.metadata
+    assert loaded.metadata["title"] is None
 
 
 def test_reserved_documents_are_not_records(tmp_path: Path) -> None:
@@ -613,6 +629,6 @@ def test_vault_validation_checks_ids_and_links(tmp_path: Path) -> None:
 def test_save_rejects_replaced_persisted_file(tmp_path: Path) -> None:
     vault = Vault(dir=tmp_path)
     record = vault.create("original", type="task")
-    record.path.write_text("---\nid: replacement\nname: original\n---\n")
+    record.path.write_text("---\nid: replacement\nname: original\ntype: task\n---\n")
     with pytest.raises(ValidationError, match="does not match"):
         vault.save(record)

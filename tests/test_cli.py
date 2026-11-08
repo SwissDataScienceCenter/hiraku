@@ -287,6 +287,20 @@ def test_record_update_checks_relationships(tmp_path: Path, monkeypatch) -> None
     assert removed_option.exit_code != 0
     assert missing.exit_code != 0
     assert project.vault.get(parent.id).parent_id is None
+
+
+def test_record_update_preserves_child_parent(tmp_path: Path, monkeypatch) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    parent = project.vault.create("parent", type="task")
+    child = project.vault.create("child", type="record", parent_id=parent.id)
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("record", "update", child.id, "--set", "count=1")
+
+    assert result.exit_code == 0, result.output
+    updated = project.vault.get(child.id)
+    assert updated.parent_id == parent.id
+    assert updated.count == 1
     assert project.vault.get(child.id).related_to == []
 
 

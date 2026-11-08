@@ -148,10 +148,12 @@ def test_tradeoff_frame_accepts_arrow_metrics_with_missing_values() -> None:
 
 def test_record_rows_list_records_in_tree_order() -> None:
     records = [
-        Record(id="root", metrics=[{"name": "loss", "direction": "minimize"}]),
-        Record(id="a-b", parent_id="root"),
-        Record(id="a", parent_id="root"),
-        Record(id="x", parent_id="a"),
+        Record(
+            id="root", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
+        ),
+        Record(id="a-b", type="record", parent_id="root"),
+        Record(id="a", type="record", parent_id="root"),
+        Record(id="x", type="record", parent_id="a"),
     ]
 
     rows = record_rows(records)
@@ -240,7 +242,9 @@ def test_format_duration(seconds: float | None, expected: str) -> None:
 def test_deep_trees_do_not_hit_the_recursion_limit() -> None:
     depth = 5000
     records = [
-        Record(id=f"r{index}", parent_id=f"r{index - 1}" if index else None)
+        Record(
+            id=f"r{index}", type="record", parent_id=f"r{index - 1}" if index else None
+        )
         for index in range(depth)
     ]
     records_df = arrow_frame(record_rows(records), RECORD_COLUMNS)
