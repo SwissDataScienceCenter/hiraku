@@ -28,9 +28,9 @@ def project(tmp_path: Path) -> Project:
         type="task",
         metrics=[{"name": "loss", "direction": "minimize"}],
     )
-    a = config.vault.create("a", id="a", parent_id=root.id)
-    config.vault.create("b", id="b", parent_id=root.id)
-    config.vault.create("a1", id="a1", parent_id=a.id)
+    a = config.vault.create("a", id="a", type="task", parent_id=root.id)
+    config.vault.create("b", id="b", type="task", parent_id=root.id)
+    config.vault.create("a1", id="a1", type="task", parent_id=a.id)
     with (tmp_path / "runs.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(
