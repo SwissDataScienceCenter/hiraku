@@ -387,7 +387,7 @@ class Project(BaseModel):
             return project
 
     def _install_mcp_configs(self) -> None:
-        """Register the stdio servers in supported project agent configs.
+        """Register the stdio server in supported project agent configs.
 
         Claude, Pi, and Codex configuration files are merged while preserving
         other configured MCP servers.
@@ -395,15 +395,11 @@ class Project(BaseModel):
         root = self.root
         command = "uv" if (root / "uv.lock").is_file() else "hiraku"
         args = ["run", "hiraku", "mcp"] if command == "uv" else ["mcp"]
-        servers = {
-            "hiraku": {"command": command, "args": args},
-            "okf": {"command": "uvx", "args": ["okf-parser", "serve"]},
-        }
+        server = {"command": command, "args": args}
 
         for path in (root / ".mcp.json", root / ".pi" / "mcp.json"):
             data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-            for name, server in servers.items():
-                data.setdefault("mcpServers", {}).setdefault(name, server)
+            data.setdefault("mcpServers", {}).setdefault("hiraku", server)
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(path, json.dumps(data, indent=2) + "\n")
 
@@ -424,23 +420,16 @@ class Project(BaseModel):
                 f"Cannot merge MCP settings in {path}: [mcp_servers.hiraku] table "
                 "cannot be added when mcp_servers is an inline value"
             )
-        missing = {
-            name: server for name, server in servers.items() if name not in mcp_servers
-        }
-        if missing:
-            entry = "\n".join(
-                f"[mcp_servers.{name}]\n"
-                f"command = {json.dumps(server['command'])}\n"
-                f"args = {json.dumps(server['args'])}\n"
-                for name, server in missing.items()
+        if "hiraku" not in mcp_servers:
+            entry = (
+                "[mcp_servers.hiraku]\n"
+                f"command = {json.dumps(command)}\n"
+                f"args = {json.dumps(args)}\n"
             )
             new_content = (
                 content.rstrip() + "\n\n" + entry if content.strip() else entry
             )
-            parsed_servers = tomllib.loads(new_content)["mcp_servers"]
-            if any(
-                parsed_servers.get(name) != server for name, server in missing.items()
-            ):
+            if tomllib.loads(new_content)["mcp_servers"]["hiraku"] != server:
                 raise ValidationError(f"Cannot merge MCP settings in {path}")
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(path, new_content)

@@ -3,9 +3,6 @@
 Hiraku includes an MCP server that works with any initialized Hiraku project.
 `hiraku init` and `hiraku example create` add project-scoped MCP configuration
 for Claude Code, Codex, and Pi.
-They also register the read-only OKF MCP server as `okf`, launched with
-`uvx okf-parser serve`. This runs the server without adding
-`okf-parser` to the project's dependencies; `uvx` must be available on PATH.
 The server process discovers the nearest `hiraku.yml` from its working directory,
 so each client starts it in the project it is working on:
 
@@ -27,10 +24,6 @@ Claude Code's `.mcp.json`:
     "hiraku": {
       "command": "hiraku",
       "args": ["mcp"]
-    },
-    "okf": {
-      "command": "uvx",
-      "args": ["okf-parser", "serve"]
     }
   }
 }
@@ -42,10 +35,6 @@ Codex's `.codex/config.toml`:
 [mcp_servers.hiraku]
 command = "hiraku"
 args = ["mcp"]
-
-[mcp_servers.okf]
-command = "uvx"
-args = ["okf-parser", "serve"]
 ```
 
 Pi's `.pi/mcp.json`:
@@ -56,16 +45,12 @@ Pi's `.pi/mcp.json`:
     "hiraku": {
       "command": "hiraku",
       "args": ["mcp"]
-    },
-    "okf": {
-      "command": "uvx",
-      "args": ["okf-parser", "serve"]
     }
   }
 }
 ```
 
-Existing `hiraku` and `okf` server entries are left as they are. If an existing file cannot
+An existing `hiraku` server entry is left as it is. If an existing file cannot
 be extended, initialization fails without changing it; add the entry manually.
 
 The host must be able to find the installed `hiraku` command. Claude Code asks

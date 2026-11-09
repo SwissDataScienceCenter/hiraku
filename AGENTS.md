@@ -8,7 +8,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor workflows.
 
 ## Development
 
-Use Python 3.12+ and `uv` for environments, dependencies, and commands.
+Use Python 3.11+ and `uv` for environments, dependencies, and commands.
 
 ```bash
 uv sync --all-extras
@@ -65,7 +65,7 @@ See [docs/guides/workflows.md](docs/guides/workflows.md) for workflow contracts.
 
 ## Coding conventions
 
-- Follow the existing Ruff configuration: 88-character lines and Python 3.12 syntax.
+- Follow the existing Ruff configuration: 88-character lines and Python 3.11 syntax.
 - Prefer small, typed functions and explicit validation.
 - Use domain-specific exceptions from `errors.py` where appropriate.
 - Preserve public imports, CLI behavior, and persisted formats unless explicitly changing them.
