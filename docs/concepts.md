@@ -40,7 +40,7 @@ or `deprecated`. The optional `state` field describes research progress using
 workflow-defined values such as `drafted`, `launched`, or `concluded`.
 Workflow session statuses are separate from these record fields.
 
-All record fields are local. Consumers needing ancestor information must traverse the declared graph themselves. CLI and MCP run queries explicitly walk parent links when selecting metric directions, stopping at an explicit metrics list. `hiraku record show PATH` displays only that document's fields and body.
+All record fields are local. Consumers needing ancestor information must traverse the declared graph themselves. Leaderboards supply metric directions independently of records. `hiraku record show PATH` displays only that document's fields and body.
 
 Saving validates one record and its destination without scanning the vault. Replacing a file requires `overwrite=True`. Loading, saving, updating, and deleting do not enforce collection integrity. `Vault.validate()` explicitly checks missing relationship targets; cycles are permitted.
 
@@ -52,21 +52,18 @@ At any time, a single record can be set as "active". By default, creation activa
 
 ## Tracking Backend
 
-A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters. Project configuration selects the backend. The backend needs to:
+A **tracking backend** is an interface that provides a uniform API for querying and listing runs. Hiraku ships with CSV, Weights and Biases, and MLflow adapters. Each leaderboard configures its source adapter. The backend needs to:
 
 - List runs from the project tracking source, optionally filtered by record ID.
 - Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, and URL attribution may be absent.
 
-Set `tracking_backend` in `hiraku.yml` to select the tracking source for every
-record in the project. Records cannot override the project setting. Backend
-configuration can use a shorthand name or a mapping with `type` identifying the
-adapter:
+Define named [leaderboards](tracking.md) in `hiraku/leaderboards/<name>.yml`.
+Each contains a `source` mapping and optional ordered `metrics` declarations.
+Records do not configure tracking. `hiraku runs --leaderboard NAME` queries all source
+runs; `--record ID` applies an exact attribution filter. Parameters are discovered
+automatically. Training code owns logging destinations and metric logging.
 
-```yaml
-tracking_backend: csv
-```
-
-`hiraku runs` lists runs attributed to the active record, or to the record given with `--record ID`. Add `--all` to list every attributed run from the project tracking source. In Python, create an adapter with `TrackingBackendFactory(config).create(config.tracking_backend)` and call `list_runs(record_id=record.id)` for one record or `list_runs()` for the whole source. Training code calculates and logs results directly; Hiraku does not own metric logging. A launch that never logs a row will not appear as a run.
+A launch that never logs a row will not appear as a run.
 
 ## Command execution
 
@@ -172,7 +169,7 @@ hiraku workflow list
 hiraku workflow start collaborative --arguments-file arguments.json
 hiraku record tree
 hiraku workflow status <workflow-session-id>
-hiraku runs --record heart-disease --all --json
+hiraku runs --json
 ```
 
 The [Autoresearch example](examples/autoresearch/README.md) shows how to use

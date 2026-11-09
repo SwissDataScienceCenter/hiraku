@@ -61,7 +61,7 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
         assert tools["workflow_start"].title == "Start workflow"
         assert tools["workflow_start"].description
         result = await server.call_tool("project_info", {})
-        assert result.structured_content["tracking_backend"] == "csv"
+        assert result.structured_content["leaderboards"] == []
 
     asyncio.run(exercise())
 
@@ -290,6 +290,9 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
 
 def test_runs(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
+    (config.leaderboards_dir / "default.yml").write_text(
+        "source: {type: csv}\nmetrics: [{name: acc, direction: maximize}]\n"
+    )
     (tmp_path / "runs.csv").write_text(
         "id,record_id,metric.acc\na,task/task,0.5\nb,task/task,0.9\nc,other,0.7\n"
     )
@@ -303,7 +306,6 @@ def test_runs(tmp_path: Path) -> None:
                 "title": "task",
                 "fields": {
                     "type": "task",
-                    "metrics": [{"name": "acc", "direction": "maximize"}],
                 },
             },
         )
@@ -314,8 +316,8 @@ def test_runs(tmp_path: Path) -> None:
 
         assert await ids(sort="acc") == ["b", "a"]
         assert await ids(sort="acc", ascending=True, limit=1) == ["a"]
-        assert sorted(await ids(all_records=True)) == ["a", "b", "c"]
-        with pytest.raises(ToolError, match="requires sort"):
+        assert sorted(await ids(record_id=None)) == ["a", "b", "c"]
+        with pytest.raises(ToolError, match="requires a sort"):
             await server.call_tool(
                 "runs", {"record_id": "task/task", "ascending": True}
             )

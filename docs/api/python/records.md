@@ -6,7 +6,7 @@
 
 `Record` is document data with a required OKF `id`: its bundle-relative path without the
 `.md` suffix. Field validation is local: required nonblank `type`,
-metadata shapes, reference syntax, commit hashes, and metric declarations.
+metadata shapes, reference syntax, and commit hashes.
 Unknown metadata is preserved. `title` is the optional OKF display title.
 
 `status` is restricted to the OKF lifecycle values `draft`, `stable` (the
@@ -18,7 +18,7 @@ and the Markdown body. Loading derives the ID from the filename; it is never
 persisted in front matter. Moving a document changes its ID.
 `parent_id` and `related_to` are ordinary persisted
 relationships to other concept paths. Placement does not determine parentage.
-All fields, including metrics, are local.
+All fields are local.
 
 ```python
 from pathlib import Path
@@ -40,7 +40,3 @@ vault.save(record, overwrite=True)
 
 Saving persists explicitly supplied fields and values changed from their defaults,
 including in-place collection edits. Unchanged implicit defaults are omitted.
-
-## `Metric`
-
-::: hiraku.record.Metric

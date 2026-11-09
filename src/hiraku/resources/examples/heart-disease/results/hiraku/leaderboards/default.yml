@@ -1,0 +1,7 @@
+source:
+  type: csv
+metrics:
+- name: val/log_loss
+  direction: minimize
+- name: val/accuracy
+  direction: maximize

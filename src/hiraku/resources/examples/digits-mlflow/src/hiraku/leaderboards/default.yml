@@ -1,0 +1,9 @@
+source:
+  type: mlflow
+  database: mlflow.db
+  experiment_name: hiraku-digits
+metrics:
+- name: val/log_loss
+  direction: minimize
+- name: val/accuracy
+  direction: maximize

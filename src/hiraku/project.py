@@ -8,10 +8,9 @@ import tomllib
 from contextlib import ExitStack
 from importlib.resources import as_file, files
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import (
-    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -30,14 +29,6 @@ if TYPE_CHECKING:
     from .record import Record, Vault
 
 
-def _validate_tracking_backend(value: str | dict[str, Any]) -> str | dict[str, Any]:
-    """Validate a backend setting and preserve its original representation."""
-    from .tracking.factory import TrackingBackendFactory
-
-    TrackingBackendFactory.validate(value)
-    return value
-
-
 class Project(BaseModel):
     """
     A project, its persisted settings, and its managed files.
@@ -46,7 +37,6 @@ class Project(BaseModel):
         root: Absolute project root directory.
         hiraku_dir_name: Name of the managed directory for Hiraku data.
         default_dispatch: Optional name of the default dispatcher.
-        tracking_backend: Name or configuration of the tracking backend.
         active_record_id: Optional bundle-relative path of the active record.
 
     Args:
@@ -69,9 +59,6 @@ class Project(BaseModel):
         frozen=True,
     )
     default_dispatch: str | None = Field(default=None, min_length=1, exclude=True)
-    tracking_backend: Annotated[
-        str | dict[str, Any], AfterValidator(_validate_tracking_backend)
-    ] = "csv"
     active_record_id: str | None = None
 
     def __init__(self, root: Path | str, **data: Any) -> None:
@@ -185,6 +172,11 @@ class Project(BaseModel):
         return Vault(root=self.records_dir)
 
     @property
+    def leaderboards_dir(self) -> Path:
+        """Return the directory containing named leaderboards."""
+        return self.hiraku_dir / "leaderboards"
+
+    @property
     def workflows_dir(self) -> Path:
         """Return the directory containing installed workflows."""
         return self.hiraku_dir / "workflows"
@@ -200,7 +192,6 @@ class Project(BaseModel):
             "hiraku_dir": self.hiraku_dir_name,
             "default_dispatch": self.default_dispatch,
             "active_record_id": self.active_record_id,
-            "tracking_backend": self.tracking_backend,
         }
 
     def save(self) -> None:
@@ -323,6 +314,7 @@ class Project(BaseModel):
             root.mkdir(parents=True, exist_ok=True)
             project.records_dir.mkdir(parents=True, exist_ok=True)
             project.workflows_dir.mkdir(parents=True, exist_ok=True)
+            project.leaderboards_dir.mkdir(parents=True, exist_ok=True)
             (root / ".hiraku").mkdir(parents=True, exist_ok=True)
 
             with as_file(resources / "workflows") as source:

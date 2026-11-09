@@ -1,3 +1,0 @@
-tracking_backend:
-  type: wandb
-  project: iris-wandb

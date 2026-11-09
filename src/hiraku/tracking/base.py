@@ -165,7 +165,9 @@ class WandbBackendConfig(BaseModel):
     group: str | None = None
     job_type: str | None = None
     mode: Literal["online", "offline"] = "online"
-    api_key: str | None = Field(default_factory=lambda: os.environ.get("WANDB_API_KEY"))
+    api_key: str | None = Field(
+        default_factory=lambda: os.environ.get("WANDB_API_KEY"), exclude=True
+    )
 
 
 BackendConfig = Annotated[
@@ -215,6 +217,8 @@ class BackendOperations:
         if sort is not None:
 
             def value(run: Run) -> Any:
+                if sort.startswith("metric."):
+                    return run.metrics.get(sort.removeprefix("metric."))
                 value = getattr(run, sort, None)
                 if value is None:
                     value = run.metrics.get(sort, run.params.get(sort))
@@ -289,10 +293,10 @@ class BackendOperations:
         ascending: bool | None = None,
         limit: int | None = None,
     ) -> list[Run]:
-        """Return normalized runs with record attribution.
+        """Return normalized runs with optional record attribution.
 
         Args:
-            record_id: Optional record ID to filter runs by; all attributed runs
+            record_id: Optional record ID to filter runs by; all source runs
                 are returned when omitted.
             sort: Run field, metric, or parameter. Numeric values sort first;
                 runs without a numeric value follow, ordered by ID.
@@ -306,7 +310,7 @@ class BackendOperations:
         if record_id is not None:
             self._validate_filters(record_id)
         self._validate_query(sort=sort, ascending=ascending, limit=limit)
-        runs = [run for run in self._read_source_runs() if run.record_id]
+        runs = self._read_source_runs()
         if record_id is not None:
             runs = [run for run in runs if run.record_id == record_id]
         return self._apply_query(

@@ -1,6 +1,2 @@
 hiraku_dir: hiraku
 active_record_id: digit-classification/weak-l2
-tracking_backend:
-  type: mlflow
-  database: mlflow.db
-  experiment_name: hiraku-digits

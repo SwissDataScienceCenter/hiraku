@@ -1,0 +1,5 @@
+source:
+  type: csv
+metrics:
+- name: val/accuracy
+  direction: maximize

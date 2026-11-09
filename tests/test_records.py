@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import RecordExistsError, RecordNotFoundError, ValidationError
-from hiraku.record import Record, Vault, resolve_metrics, validate_identifier
+from hiraku.record import Record, Vault, validate_identifier
 
 
 def test_record_is_plain_local_document_data():
@@ -112,7 +112,6 @@ def test_record_fields_are_local(tmp_path):
     parent = vault.create(
         "parent/parent",
         type="task",
-        metrics=[{"name": "loss", "direction": "minimize"}],
         commit="a" * 40,
         title="parent",
     )
@@ -123,7 +122,6 @@ def test_record_fields_are_local(tmp_path):
         title="child",
     )
     loaded = vault.load(child.id)
-    assert loaded.metrics is None
     assert loaded.commit is None
 
 
@@ -165,12 +163,10 @@ def test_delete_does_not_enforce_graph_integrity(tmp_path):
 
 def test_save_revalidates_nested_mutations_without_changing_file(tmp_path):
     vault = Vault(root=tmp_path)
-    record = Record(
-        id="a", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
-    )
+    record = Record(id="a", type="task", tags=["valid"])
     path = vault.save(record)
     before = path.read_bytes()
-    record.metrics.append({"name": "accuracy", "direction": "sideways"})
+    record.tags.append(123)
     with pytest.raises(ValidationError):
         vault.save(record, overwrite=True)
     assert path.read_bytes() == before
@@ -190,18 +186,6 @@ def test_commit_validation_is_local(commit):
 def test_commit_accepts_full_git_hashes():
     for commit in ("a" * 40, "b" * 64):
         assert Record(id="a", type="task", commit=commit).commit == commit
-
-
-@pytest.mark.parametrize(
-    "metadata",
-    [
-        {"name": "loss", "direction": "sideways"},
-        {"name": "loss", "direction": "minimize", "unit": "s"},
-    ],
-)
-def test_metric_validation(metadata):
-    with pytest.raises(PydanticValidationError):
-        Record(id="a", type="task", metrics=[metadata])
 
 
 @pytest.mark.parametrize(
@@ -451,31 +435,3 @@ def test_reserved_filenames_cannot_be_saved_as_records(tmp_path, path):
     with pytest.raises(ValidationError, match="Reserved OKF filename"):
         vault.save(Record(id=path, type="Reference"))
     assert vault.list() == []
-
-
-def test_resolves_nearest_metrics_without_changing_records(tmp_path):
-    vault = Vault(root=tmp_path)
-    parent = vault.create(
-        "parent", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
-    )
-    child = vault.create("child", type="task", parent_id=parent.id)
-    before = child.model_dump()
-    assert resolve_metrics(child, vault) == parent.metrics
-    assert child.model_dump() == before
-    child.metrics = []
-    assert resolve_metrics(child, vault) == []
-
-
-@pytest.mark.parametrize("parent", [None, "missing", "child", "cycle"])
-def test_unresolved_graph_returns_empty_metrics(tmp_path, parent):
-    vault = Vault(root=tmp_path)
-    vault.create("cycle", type="task", parent_id="child")
-    record = Record(id="child", type="task", parent_id=parent)
-    assert resolve_metrics(record, vault) == []
-
-
-def test_malformed_parent_errors_are_not_hidden(tmp_path):
-    vault = Vault(root=tmp_path)
-    (tmp_path / "parent.md").write_text("---\ntitle: Missing type\n---\n")
-    with pytest.raises(PydanticValidationError):
-        resolve_metrics(Record(id="child", type="task", parent_id="parent"), vault)

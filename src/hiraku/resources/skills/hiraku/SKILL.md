@@ -15,15 +15,15 @@ through an existing record lifecycle.
 ## Core concepts
 
 - **Record:** A research scope or focused investigation. A root may record the
-  goal, question, metrics, branch, and evolving findings.
+  goal, question, branch, and evolving findings.
   A child has one `parent_id`, may begin as an unbound proposal, and may bind
   the source commit being evaluated. Its
   `type` describes its role, such as experiment, diagnostic, or
   ablation. `parent_id` and `related_to` are persisted relationships, independent
   of filesystem placement. All fields are local; there is no record inheritance.
   Consumers needing ancestor information explicitly traverse the graph.
-  Tracking backend selection and the active record are project-wide settings in
-  `hiraku.yml`.
+  The active record is stored in `hiraku.yml`. Named leaderboards live in
+  `hiraku/leaderboards/<name>.yml` and contain source and metric configuration.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and invocation attribution together with
   parameters, metrics, timestamps, and an external URL.
@@ -54,13 +54,16 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
 | Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
-| Inspect tracked evidence | `hiraku runs [--record ID] [--all]` |
+| Manage leaderboards | `hiraku leaderboard list`, `show NAME`, `create NAME --source TYPE`, `edit NAME`, `delete NAME` |
+| Inspect tracked evidence | `hiraku runs [--leaderboard NAME] [--record ID]` |
 | Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; collaborative approvals use `workflow_approval`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
 | Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
 Use `record show` to inspect canonical records and effective research fields.
-Use `hiraku status --json` to inspect the project tracking backend.
+Use `hiraku status --json` to discover leaderboard names. Select one with
+`--leaderboard NAME` when several exist. Leaderboards only query results; configure logging
+destinations in training code or its environment.
 
 ## Operating scope
 
@@ -154,9 +157,9 @@ Supply the optional display label with `--title`. Use `id`
 without `.md` for lookups, parent references, run attribution, and later commands.
 IDs are derived from file placement and are not persisted in front matter.
 Inspect `record list --json` for concept IDs.
-Use `record show` to inspect local fields and Markdown. Run queries explicitly
-traverse parent links when selecting metric directions; an empty metrics list
-stops that traversal. Cycles and unfinished links do not prevent normal record I/O.
+Use `record show` to inspect local fields and Markdown. Run queries use named leaderboards in `hiraku/leaderboards/<name>.yml`, containing a
+`source` mapping and optional ordered `metrics` with optimization directions.
+Parameters are discovered automatically. No record filter means all source runs. Cycles and unfinished links do not prevent normal record I/O.
 
 ## Protect user work and use the intended branches
 
@@ -198,8 +201,8 @@ For a high-level root-creation request:
 
 1. Check for an existing root that already represents the request.
 2. Choose a concise human-readable title when the user did not supply one.
-3. Translate the request into a concrete goal, research question, and declared
-   metrics with their optimization directions when these are known. Preserve
+3. Translate the request into a concrete goal and research question. Configure comparison metrics and their
+   optimization directions in a leaderboard when known. Preserve
    the user's actual research objective; do not narrow the root to the methods
    chosen for initial examples or baselines unless the user requests that scope.
 4. Create the root and verify the canonical record.
@@ -207,8 +210,7 @@ For a high-level root-creation request:
 ```bash
 hiraku record create tasks/question --title "Research question" --type task \
   --set 'goal=...' \
-  --set 'question=...' \
-  --set 'metrics=[{name: val/loss, direction: minimize}]'
+  --set 'question=...'
 hiraku record show tasks/question --json
 ```
 
@@ -302,12 +304,12 @@ metrics, and source commits.
 
 ## Compare runs and carry out research workflows
 
-Use root metrics and compatible runs when comparing child records. Keep data
+Use leaderboard metric declarations and compatible runs when comparing child records. Keep data
 splits, budgets, and evaluation definitions comparable, and do not infer
 record attribution when it is absent.
 
 ```bash
-hiraku runs --record <root-id> --all \
+hiraku runs \
   --params seed,epochs \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending --json
@@ -372,7 +374,9 @@ commit, run ID, and key metrics when applicable. Mention failures or missing
 attribution explicitly. Stop when the user's requested scope is complete.
 
 The Python API exposes `Project` in `hiraku.project`; `Record`,
-`Metric`, loaders, and listing functions in `hiraku.record`;
+record loaders and listing functions in `hiraku.record`;
+`Leaderboard` and `Metric` in `hiraku.tracking`; use `Leaderboard.create()`,
+`load()`, `discover()`, and `delete()` for definitions;
 `Run` in `hiraku.tracking`; and `execute_command` in `hiraku.execution` for scripted
 execution.
 Records with `type: context` store supporting material. Workflows run in the

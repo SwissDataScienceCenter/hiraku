@@ -2,6 +2,10 @@
 
 The CLI manages research records, foreground command execution, and tracked runs.
 
+[Leaderboards](../tracking.md) define run sources and comparison metrics.
+Use `hiraku leaderboard list|show|create|edit|delete` to manage definitions.
+Select one with `--leaderboard NAME` when querying runs or opening the dashboard.
+
 Typical workflow:
 
 ```bash

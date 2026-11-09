@@ -78,20 +78,10 @@ def generate(project: Project) -> dict[str, str]:
     database = project.root / "mlflow.db"
     if database.exists() or list(project.records_dir.rglob("*.md")):
         raise FileExistsError("Generation requires an example without records or runs")
-    project.tracking_backend = {
-        "type": "mlflow",
-        "database": "mlflow.db",
-        "experiment_name": "hiraku-digits",
-    }
-    project.save()
     root = project.vault.create(
         "digit-classification",
         type="task",
         state="concluded",
-        metrics=[
-            {"name": "val/log_loss", "direction": "minimize"},
-            {"name": "val/accuracy", "direction": "maximize"},
-        ],
         markdown="# Digits regularization\n\n"
         "Compare weak and strong L2 regularization over three seeds.\n"
         "Measured CPU training results; no statistical significance is claimed.\n",
@@ -175,6 +165,7 @@ def generate_results(output: Path) -> None:
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
             overlay = Path(staging) / "overlay"
             shutil.copytree(project.records_dir, overlay / "hiraku/records")
+            shutil.copytree(project.leaderboards_dir, overlay / "hiraku/leaderboards")
             shutil.copyfile(project.path, overlay / "hiraku.yml")
             with (
                 sqlite3.connect(project.root / "mlflow.db") as source,

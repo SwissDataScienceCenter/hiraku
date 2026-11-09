@@ -8,7 +8,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import ValidationError
 from hiraku.project import Project
-from hiraku.tracking import Run, TrackingBackendFactory
+from hiraku.tracking import CSVBackend, Run
 
 
 def test_run_duration_is_parsed_as_seconds() -> None:
@@ -54,12 +54,7 @@ def test_run_immutable_and_missing_csv_empty(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     record = config.vault.create("record/record", type="task", title="record")
     config.set_active_record(record)
-    assert (
-        TrackingBackendFactory(config)
-        .create(config.tracking_backend)
-        .list_runs(record_id=record.id)
-        == []
-    )
+    assert CSVBackend(config).list_runs(record_id=record.id) == []
     run = Run(id="one", metrics={}, params={})
     with pytest.raises(PydanticValidationError):
         run.id = "two"  # type: ignore[misc]

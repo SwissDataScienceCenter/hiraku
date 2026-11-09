@@ -25,12 +25,20 @@ def test_app_runs_every_cell_against_a_project(
     assert definitions["scope"] == "root/a/a"
     assert definitions["selected_record"].id == "root/a/a"
     assert definitions["selected_run"] is None
+    assert definitions["leaderboard_error"] is None
+    assert definitions["leaderboard"].source.type == "csv"
+    assert [record.id for record in definitions["records"]] == [
+        "root/a/a",
+        "root/a/a1/a1",
+        "root/b/b",
+        "root/root",
+    ]
     assert definitions["tree"].value[0]["key"] == "record:root/a/a"
     assert definitions["metric"].value == "loss"
     assert "plot_mode" not in definitions
     assert "Choose two different metrics." in rendered
     runs_df = definitions["runs_df"]
-    assert list(runs_df["run"]) == ["r0", "r1", "r2", "r3", "r4"]
+    assert list(runs_df["run"]) == ["r0", "r1", "r2", "r3", "r5", "r4"]
     assert {"record_path", "metric.loss"} <= set(runs_df.columns)
     assert all(str(dtype).endswith("[pyarrow]") for dtype in runs_df.dtypes)
     assert list(definitions["records_df"]["record_path"]) == [
@@ -131,3 +139,86 @@ def test_project_copy_finds_its_project_without_the_launcher(
     _, definitions = app.run()
 
     assert definitions["project_context"].root == project.root
+
+
+def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    (project.leaderboards_dir / "local.yml").write_text(
+        "source: {type: csv}\nmetrics: [{name: missing}, {name: score}]\n"
+    )
+    (tmp_path / "runs.csv").write_text("id,metric.score\nr,0.9\n")
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.delenv("HIRAKU_DASHBOARD_RECORD", raising=False)
+    monkeypatch.delenv("HIRAKU_DASHBOARD_LEADERBOARD", raising=False)
+    from hiraku.dashboard.app import app
+
+    outputs, definitions = app.run()
+
+    assert definitions["scope"] is None
+    assert definitions["selected_record"] is None
+    assert definitions["leaderboard_selector"].value == "local"
+    assert definitions["metrics"] == ["missing", "score"]
+    assert definitions["metric"].value == "missing"
+    assert definitions["runs_df"]["run"].tolist() == ["r"]
+    rows = tree_rows(definitions["records_df"], definitions["runs_df"], "score")
+    assert [row["key"] for row in rows] == ["run:r"]
+    rendered = "\n".join(getattr(output, "text", "") for output in outputs)
+    assert "1 without a numeric" in rendered
+
+
+def test_dashboard_selects_between_leaderboards(project, monkeypatch):
+    (project.leaderboards_dir / "other.yml").write_text(
+        "source: {type: csv, path: other.csv}\n"
+    )
+    (project.root / "other.csv").write_text("id,metric.score\nother,1\n")
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_LEADERBOARD", "other")
+    from hiraku.dashboard.app import app
+
+    _, definitions = app.run()
+    assert definitions["leaderboard_selector"].value == "other"
+    assert definitions["runs_df"]["run"].tolist() == ["other"]
+    definitions["leaderboard_selector"]._update(["default"])
+    _, updated = app.run(
+        defs={
+            "leaderboard_selector": definitions["leaderboard_selector"],
+            "refresh": definitions["refresh"],
+        }
+    )
+    assert len(updated["runs_df"]) == 6
+
+
+@pytest.mark.parametrize("failure", ["offline", "invalid", "missing"])
+def test_tracking_errors_preserve_record_navigation(project, monkeypatch, failure):
+    from hiraku.errors import BackendError
+    from hiraku.tracking import Leaderboard
+
+    if failure == "offline":
+
+        def unavailable(self, project):
+            raise BackendError("source offline")
+
+        monkeypatch.setattr(Leaderboard, "list_runs", unavailable)
+    elif failure == "invalid":
+        (project.leaderboards_dir / "default.yml").write_text("source: [invalid]\n")
+    else:
+        (project.leaderboards_dir / "default.yml").unlink()
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
+    monkeypatch.delenv("HIRAKU_DASHBOARD_LEADERBOARD", raising=False)
+    from hiraku.dashboard.app import app
+
+    outputs, definitions = app.run()
+
+    assert len(definitions["records"]) == 4
+    assert len(definitions["records_df"]) == 4
+    assert definitions["runs_df"].empty
+    assert definitions["selected_record"].id == "root/a/a"
+    assert definitions["leaderboard_error"].startswith("Leaderboard unavailable:")
+    if failure == "offline":
+        assert definitions["leaderboard"].metrics[0].name == "loss"
+        assert definitions["leaderboard_error"].endswith("source offline")
+    else:
+        assert definitions["leaderboard"] is None
+    rendered = "\n".join(getattr(output, "text", "") for output in outputs)
+    assert "Leaderboard unavailable" in rendered

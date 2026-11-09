@@ -6,3 +6,4 @@
 !/hiraku/records/
 /mlflow.db
 /mlruns/
+!/hiraku/leaderboards/

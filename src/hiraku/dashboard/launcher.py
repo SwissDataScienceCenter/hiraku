@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..errors import ValidationError
 from ..project import Project
+from ..tracking import Leaderboard
 
 DEFAULT_HOST = "127.0.0.1"
 BUNDLED_NOTEBOOK = Path(__file__).with_name("app.py")
@@ -85,6 +86,7 @@ def serve_dashboard(
     project: Project,
     *,
     record_id: str | None = None,
+    leaderboard_name: str | None = None,
     port: int | None = None,
     no_browser: bool = False,
     edit: bool = False,
@@ -109,6 +111,8 @@ def serve_dashboard(
         )
     if record_id is not None:
         project.vault.load(record_id)
+    if leaderboard_name is not None:
+        Leaderboard.load(project, leaderboard_name)
     if any(find_spec(name) is None for name in ("marimo", "marimo_studio", "altair")):
         raise ValidationError(
             "The dashboard requires the optional 'dashboard' dependencies. "
@@ -118,6 +122,7 @@ def serve_dashboard(
         **os.environ,
         "HIRAKU_PROJECT_ROOT": str(project.root),
         "HIRAKU_DASHBOARD_RECORD": record_id or "",
+        "HIRAKU_DASHBOARD_LEADERBOARD": leaderboard_name or "",
     }
 
     def serve(notebook: Path) -> int:

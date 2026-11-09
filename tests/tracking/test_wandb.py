@@ -8,9 +8,9 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.errors import BackendError
+from hiraku.errors import ValidationError
 from hiraku.project import Project
-from hiraku.tracking import TrackingBackendFactory, WandbBackend, WandbBackendConfig
+from hiraku.tracking import Leaderboard, WandbBackend, WandbBackendConfig
 
 
 class FakeRun:
@@ -68,22 +68,25 @@ def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) 
     assert run.params == {"seed": "42"}
     assert run.metrics == {"test/accuracy": 0.95}
     assert run.raw["tags"] == ["baseline", "iris"]
-    assert [item.id for item in backend.list_runs()] == ["run-1"]
-    assert [item.id for item in backend.list_runs()] == ["run-1"]
+    assert [item.id for item in backend.list_runs()] == ["run-1", "run-unattributed"]
+    assert [item.id for item in backend.list_runs()] == ["run-1", "run-unattributed"]
 
 
-def test_wandb_factory_requires_explicit_project(tmp_path: Path) -> None:
-    factory = TrackingBackendFactory(Project.create(tmp_path, install_skill=False))
-    for settings in ("wandb", {"type": "wandb", "project": ""}):
-        with pytest.raises(BackendError, match="Invalid tracking backend"):
-            factory.create(settings)
+def test_wandb_leaderboard_requires_explicit_project(tmp_path: Path) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    for source in ({"type": "wandb"}, {"type": "wandb", "project": ""}):
+        with pytest.raises(ValidationError, match="Invalid leaderboard"):
+            Leaderboard.create(project, "invalid", source)
+    assert list(project.leaderboards_dir.iterdir()) == []
 
 
 def test_wandb_runs_cli_uses_active_record(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "wandb", types.SimpleNamespace(Api=FakeApi))
     monkeypatch.chdir(tmp_path)
     project = Project.create(tmp_path, install_skill=False)
-    project.tracking_backend = {"type": "wandb", "entity": "team", "project": "iris"}
+    (project.leaderboards_dir / "wandb.yml").write_text(
+        "source: {type: wandb, entity: team, project: iris}\n"
+    )
     project.save()
     record = project.vault.create("logistic/logistic", type="task", title="logistic")
     project.set_active_record(record)

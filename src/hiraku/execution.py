@@ -71,39 +71,6 @@ def execute_command(
     if reserved.intersection(additions):
         raise ValidationError("Environment cannot override reserved run attribution")
 
-    raw_tracking_spec = selected.tracking_backend
-    tracking_spec = (
-        {"type": raw_tracking_spec}
-        if isinstance(raw_tracking_spec, str)
-        else raw_tracking_spec
-    )
-    tracking_type = tracking_spec.get("type", tracking_spec.get("name"))
-    if tracking_type == "wandb":
-        wandb_project = tracking_spec.get("project")
-        if (
-            isinstance(wandb_project, str)
-            and wandb_project
-            and "WANDB_PROJECT" not in additions
-            and "WANDB_PROJECT" not in os.environ
-        ):
-            additions["WANDB_PROJECT"] = wandb_project
-    elif tracking_type == "mlflow":
-        from .tracking import TrackingBackendFactory
-
-        backend = TrackingBackendFactory(selected).create(tracking_spec)
-        if (
-            "MLFLOW_TRACKING_URI" not in additions
-            and "MLFLOW_TRACKING_URI" not in os.environ
-        ):
-            additions["MLFLOW_TRACKING_URI"] = backend.tracking_uri
-        if (
-            "MLFLOW_EXPERIMENT_NAME" not in additions
-            and "MLFLOW_EXPERIMENT_NAME" not in os.environ
-        ):
-            additions["MLFLOW_EXPERIMENT_NAME"] = (
-                backend.experiment_name or selected.root.name
-            )
-
     commit = ""
     git_state = "unavailable"
     try:

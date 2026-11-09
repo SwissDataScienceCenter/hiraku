@@ -42,7 +42,7 @@ Core responsibilities:
 - **`Record` and `Vault`** (`record.py`) — Local document models and filesystem-backed bundle operations.
 - **`Run`** (`tracking/base.py`) — Normalized representation of a tracked execution.
 - **Execution** (`execution.py`) — Record resolution, command launching, and tracking attribution.
-- **Tracking** (`tracking/`) — Backend adapters implementing `TrackingBackend`; the factory validates settings and creates adapters.
+- **Tracking** (`tracking/`) — Backend adapters implementing `TrackingBackend`; `Leaderboard` validates source settings and creates adapters.
 - **Workflows** (`workflows/`) — LangGraph workflow discovery, execution, session history, and checkpoints.
 - **CLI and MCP** (`cli.py`, `mcp.py`) — User-facing interfaces to the underlying APIs.
 
@@ -54,7 +54,7 @@ Respect these boundaries:
 - Record fields are local. Consumers needing ancestor information must explicitly traverse declared relationships.
 - `Vault.save()` validates one record and its destination without scanning the collection. Replacing a file requires `overwrite=True`. Use explicit vault validation for cross-record integrity; ordinary I/O tolerates incomplete or cyclic graphs.
 - Tracking adapters return normalized `Run` objects.
-- Tracking backend configuration and the active record are project-wide. Set the active record through `Project.set_active_record()` to validate and persist `active_record_id`.
+- Leaderboards live in `hiraku/leaderboards/<name>.yml`; records do not configure metrics or sources. The active record is project-wide. Set the active record through `Project.set_active_record()` to validate and persist `active_record_id`.
 - Records use filesystem-friendly names for Markdown files in the records directory; reject filename collisions and preserve discovery of existing nested records.
 - Import workflow APIs from their defining modules. Do not add eager imports or re-exports to `workflows/__init__.py`.
 - Keep MCP SDK imports in `mcp.py`.

@@ -40,15 +40,15 @@ Set `WANDB_ENTITY` only if you want to log under a specific team or account.
 
 ## Create the research root and child records
 
-The example ships with W&B configured as the project-wide tracking backend.
+The example ships with W&B configured in `hiraku/leaderboards/default.yml`.
+The leaderboard reads results; the training script configures its logging destination.
 
 ```bash
 hiraku record create land-cover-classification \
   --title "Land cover classification" \
   --type task \
   --set "goal=Maximize EuroSAT RGB validation accuracy" \
-  --set "question=How accurately can MLP and CNN architectures classify EuroSAT RGB land-cover images?" \
-  --set 'metrics=[{name: val/accuracy, direction: maximize}, {name: val/loss, direction: minimize}]'
+  --set "question=How accurately can MLP and CNN architectures classify EuroSAT RGB land-cover images?"
 
 hiraku record create land-cover-classification/mlp-baseline \
   --title "MLP baseline" \
@@ -78,5 +78,5 @@ hiraku run --record land-cover-classification/cnn -- uv run python train.py --mo
 Inspect all runs associated with the research root:
 
 ```bash
-hiraku runs --record land-cover-classification --all --sort val/accuracy
+hiraku runs --sort val/accuracy
 ```

@@ -39,7 +39,7 @@ class CSVBackend(BackendOperations):
         Args:
             project: Hiraku project.
             path: Optional CSV path override.
-            settings: Pre-validated CSV backend settings used by the factory.
+            settings: Pre-validated CSV backend settings supplied by a leaderboard.
         """
         if settings is not None and path is not None:
             raise BackendError("Pass CSV backend settings or path, not both")
@@ -68,10 +68,6 @@ class CSVBackend(BackendOperations):
                 reader = csv.DictReader(stream)
                 if reader.fieldnames is None or "id" not in reader.fieldnames:
                     raise BackendError(f"csv backend file {path} has no id column")
-                if "record_id" not in reader.fieldnames:
-                    raise BackendError(
-                        f"csv backend file {path} has no record_id column"
-                    )
                 if any(not name for name in reader.fieldnames) or len(
                     set(reader.fieldnames)
                 ) != len(reader.fieldnames):

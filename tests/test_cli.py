@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
@@ -217,7 +218,7 @@ def test_init_rejects_example_options_and_example_create_requires_example(
 
 
 def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
-    Project.create(tmp_path, install_skill=False)
+    create_tracked_project(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     assert (
         invoke(
@@ -243,7 +244,7 @@ def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_runs_json_keeps_extra_fields_in_raw(tmp_path: Path, monkeypatch) -> None:
-    project = Project.create(tmp_path, install_skill=False)
+    project = create_tracked_project(tmp_path, install_skill=False)
     project.vault.create("root/root", type="task", title="root")
     monkeypatch.chdir(tmp_path)
     (tmp_path / "runs.csv").write_text("id,record_id,entrypoint\na,root/root,train\n")
@@ -257,7 +258,7 @@ def test_runs_json_keeps_extra_fields_in_raw(tmp_path: Path, monkeypatch) -> Non
 
 
 def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
-    Project.create(tmp_path, install_skill=False)
+    create_tracked_project(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
@@ -303,16 +304,11 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
         "id,record_id,metric.loss\na,root/root,0.5\nb,root/child/child,0.2\nc,,0.1\n"
     )
     direct = json.loads(invoke("runs", "--record", "root/root", "--json").output)
-    all_runs = json.loads(
-        invoke("runs", "--record", "root/root", "--all", "--json").output
-    )
+    all_runs = json.loads(invoke("runs", "--json").output)
     assert {run["id"] for run in direct} == {"a"}
-    assert {run["id"] for run in all_runs} == {"a", "b"}
+    assert {run["id"] for run in all_runs} == {"a", "b", "c"}
     sorted_table = invoke(
         "runs",
-        "--record",
-        "root/root",
-        "--all",
         "--metrics",
         "loss",
         "--sort",
@@ -327,19 +323,19 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
         if (cells := [cell.strip() for cell in line.split("│")[1:-1]])
         and cells[0] != "id"
     ]
-    assert [row[0] for row in data_rows] == ["b", "a"]
+    assert [row[0] for row in data_rows] == ["c", "b", "a"]
     assert invoke("runs", "list", "--record", "root/root").exit_code != 0
 
 
-def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> None:
-    Project.create(tmp_path, install_skill=False)
+def test_runs_default_scope_is_entire_view(tmp_path: Path, monkeypatch) -> None:
+    create_tracked_project(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "runs.csv").write_text(
         "id,record_id\na,root/root\nb,root/child/child\nc,\n"
     )
     no_active = invoke("runs", "--json")
-    assert no_active.exit_code != 0
-    assert "No active record" in no_active.output
+    assert no_active.exit_code == 0
+    assert {run["id"] for run in json.loads(no_active.output)} == {"a", "b", "c"}
     assert (
         invoke(
             "record",
@@ -373,10 +369,9 @@ def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> Non
         assert result.exit_code == 0
         return {run["id"] for run in json.loads(result.output)}
 
-    assert ids() == {"b"}
-    assert ids("--all") == {"a", "b"}
+    assert ids() == {"a", "b", "c"}
     assert ids("--record", "root/root") == {"a"}
-    assert ids("--record", "root/root", "--all") == {"a", "b"}
+    assert ids("--record", "missing") == set()
 
 
 def test_record_update_allows_unfinished_graph_relationships(
@@ -426,3 +421,162 @@ def test_results_flag_requires_example(tmp_path: Path):
     result = CliRunner().invoke(main, ["init", str(tmp_path), "--with-results"])
     assert result.exit_code == 2
     assert "No such option" in result.output
+
+
+def create_tracked_project(*args, **kwargs):
+    project = Project.create(*args, **kwargs)
+    (project.leaderboards_dir / "default.yml").write_text("source: {type: csv}\n")
+    return project
+
+
+def test_runs_require_view_selection_and_discover_parameters(tmp_path, monkeypatch):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    monkeypatch.chdir(tmp_path)
+    missing = invoke("runs")
+    assert missing.exit_code != 0
+    assert "No leaderboards" in missing.output
+    for name in ("a", "b"):
+        (project.leaderboards_dir / f"{name}.yml").write_text("source: {type: csv}\n")
+    ambiguous = invoke("runs")
+    assert ambiguous.exit_code != 0
+    assert "Select a leaderboard" in ambiguous.output
+    (tmp_path / "runs.csv").write_text("id,metric.score,param.seed\nr,0.9,42\n")
+    result = invoke("runs", "--leaderboard", "b")
+    assert result.exit_code == 0, result.output
+    assert "score" in result.output
+    assert "seed" in result.output
+    assert "42" in result.output
+    unknown = invoke("runs", "--leaderboard", "missing")
+    assert unknown.exit_code != 0
+    assert "Cannot read YAML" in unknown.output
+
+
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    monkeypatch.chdir(tmp_path)
+    return project
+
+
+def test_leaderboard_lifecycle(project):
+    result = invoke("leaderboard", "create", "local", "--source", "csv")
+    assert result.exit_code == 0, result.output
+    path = project.leaderboards_dir / "local.yml"
+    assert path.is_file()
+    assert json.loads(invoke("leaderboard", "list", "--json").output) == [
+        {"name": "local", "source": "csv", "error": None}
+    ]
+    shown = invoke("leaderboard", "show", "local", "--json")
+    assert shown.exit_code == 0, shown.output
+    assert json.loads(shown.output) == {"source": {"type": "csv"}}
+    source = project.root / "runs.csv"
+    source.write_text("id,metric.score\nr,1\n")
+    runs = invoke("runs", "--leaderboard", "local", "--json")
+    assert runs.exit_code == 0, runs.output
+    assert json.loads(runs.output)[0]["metrics"] == {"score": 1}
+    before = path.read_bytes()
+    duplicate = invoke("leaderboard", "create", "local", "--source", "csv")
+    assert duplicate.exit_code != 0
+    assert "already exists" in duplicate.output
+    assert path.read_bytes() == before
+    deleted = invoke("leaderboard", "delete", "local")
+    assert deleted.exit_code == 0, deleted.output
+    assert not path.exists()
+    assert source.read_text() == "id,metric.score\nr,1\n"
+
+
+@pytest.mark.parametrize(
+    "options, expected",
+    [
+        (
+            ["--source", "csv", "--path", "results.csv"],
+            {"type": "csv", "path": "results.csv"},
+        ),
+        (
+            [
+                "--source",
+                "mlflow",
+                "--database",
+                "mlflow.db",
+                "--experiment-name",
+                "test",
+            ],
+            {"type": "mlflow", "database": "mlflow.db", "experiment_name": "test"},
+        ),
+        (
+            ["--source", "wandb", "--entity", "team", "--project", "training"],
+            {
+                "type": "wandb",
+                "entity": "team",
+                "project": "training",
+                "mode": "online",
+            },
+        ),
+    ],
+)
+def test_leaderboard_source_options(project, options, expected, monkeypatch):
+    monkeypatch.setenv("WANDB_API_KEY", "test-secret")
+    result = invoke("leaderboard", "create", "test", *options)
+    assert result.exit_code == 0, result.output
+    shown = invoke("leaderboard", "show", "test", "--json")
+    assert json.loads(shown.output)["source"] == expected
+    assert "test-secret" not in shown.output
+    assert "test-secret" not in (project.leaderboards_dir / "test.yml").read_text()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["../escape", "--source", "csv"],
+        ["bad", "--source", "csv", "--database", "mlflow.db"],
+        ["bad", "--source", "wandb"],
+        [
+            "bad",
+            "--source",
+            "mlflow",
+            "--database",
+            "db",
+            "--tracking-uri",
+            "http://localhost",
+        ],
+    ],
+)
+def test_invalid_leaderboard_creation_does_not_write_files(project, arguments):
+    result = invoke("leaderboard", "create", *arguments)
+    assert result.exit_code != 0
+    assert list(project.leaderboards_dir.iterdir()) == []
+
+
+def test_list_and_delete_invalid_leaderboard(project):
+    path = project.leaderboards_dir / "broken.yml"
+    path.write_text("source: [invalid]\n")
+    result = invoke("leaderboard", "list", "--json")
+    assert result.exit_code == 0, result.output
+    assert "Invalid leaderboard" in json.loads(result.output)[0]["error"]
+    assert invoke("leaderboard", "delete", "broken").exit_code == 0
+    assert not path.exists()
+    assert invoke("leaderboard", "delete", "missing").exit_code != 0
+
+
+def test_edit_leaderboard_validates_changes(project, monkeypatch):
+    path = project.leaderboards_dir / "local.yml"
+    path.write_text("source: [invalid]\n")
+
+    def edit_file(filename, **kwargs):
+        assert filename == path
+        path.write_text(
+            "source: {type: csv}\nmetrics: [{name: score, direction: maximize}]\n"
+        )
+
+    monkeypatch.setattr("hiraku.cli._edit", edit_file)
+    result = invoke("leaderboard", "edit", "local")
+    assert result.exit_code == 0, result.output
+    assert "Validated leaderboard" in result.output
+
+    def invalid_edit(filename, **kwargs):
+        path.write_text("metrics: invalid\n")
+
+    monkeypatch.setattr("hiraku.cli._edit", invalid_edit)
+    result = invoke("leaderboard", "edit", "local")
+    assert result.exit_code != 0
+    assert "Invalid leaderboard" in result.output

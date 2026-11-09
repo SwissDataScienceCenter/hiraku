@@ -10,7 +10,7 @@ Hiraku provides a command-line interface and a Python API:
 The Python API reference is organized by responsibility:
 
 - [Project](python/project.md) — project discovery, settings, and managed paths.
-- [Records and Vault](python/records.md) — validated Markdown records, metrics,
+- [Records and Vault](python/records.md) — validated Markdown records,
   and collection-wide persistence and hierarchy operations.
-- [Tracking](python/tracking.md) — backend configuration and the normalized
+- [Tracking](python/tracking.md) — leaderboards, adapters, and normalized runs.
 - [Workflows](python/workflows.md) — workflow discovery and session history.

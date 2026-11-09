@@ -43,34 +43,6 @@ def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
         raise ValidationError(f"Invalid {label}: {identifier!r}")
 
 
-class Metric(BaseModel):
-    """
-    A metric declared by a research record.
-
-    Attributes:
-        name: Metric name; used to identify the metric in runs.
-        direction: Metric optimization direction; either "minimize" or "maximize".
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    name: str = Field(min_length=1)
-    direction: Literal["minimize", "maximize"]
-
-
-def resolve_metrics(record: Record, vault: Vault) -> list[Metric]:
-    """Find the nearest declared metrics, stopping at empty lists or broken edges."""
-    seen = {record.id}
-    while record.metrics is None and record.parent_id is not None:
-        if record.parent_id in seen:
-            return []
-        seen.add(record.parent_id)
-        try:
-            record = vault.load(record.parent_id)
-        except RecordNotFoundError:
-            return []
-    return list(record.metrics or [])
-
-
 class Record(BaseModel):
     """
     A lightweight, validated research document.
@@ -87,7 +59,6 @@ class Record(BaseModel):
         state: Optional workflow-defined research progress.
         decision: Optional record decision.
         branch: Optional record branch.
-        metrics: Optional list of metric declarations.
     """
 
     model_config = ConfigDict(extra="allow", validate_assignment=True)
@@ -111,7 +82,6 @@ class Record(BaseModel):
     decision: str | None = None
     branch: str | None = None
     state: str | None = None
-    metrics: list[Metric] | None = None
 
     @field_validator("id")
     @classmethod

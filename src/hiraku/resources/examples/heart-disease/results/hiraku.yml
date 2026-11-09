@@ -1,3 +1,2 @@
 hiraku_dir: hiraku
 active_record_id: heart-disease-prediction/random-forest
-tracking_backend: csv

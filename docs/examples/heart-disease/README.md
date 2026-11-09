@@ -61,8 +61,7 @@ hiraku record create heart-disease-prediction \
   --title "Heart disease prediction" \
   --type task \
   --set "goal=Develop and evaluate predictive models for heart disease on a fixed Cleveland cohort" \
-  --set "question=Which modeling approaches achieve the best validation log loss and accuracy on this cohort?" \
-  --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]'
+  --set "question=Which modeling approaches achieve the best validation log loss and accuracy on this cohort?"
 
 hiraku record show heart-disease-prediction
 hiraku status
@@ -92,7 +91,7 @@ hiraku run --record heart-disease-prediction/logistic-regression -- uv run pytho
   --model logistic --seed 42 --validation-fraction 0.25
 
 # query all runs under the root's tracking source
-hiraku runs --record heart-disease-prediction --all
+hiraku runs
 # or only the runs attributed to one child record
 hiraku runs --record heart-disease-prediction/logistic-regression
 ```
@@ -125,7 +124,7 @@ hiraku record create heart-disease-prediction/random-forest \
 
 hiraku run --record heart-disease-prediction/random-forest -- uv run python train.py \
   --model random_forest --seed 42 --validation-fraction 0.25
-hiraku runs --record heart-disease-prediction --all --sort val/log_loss
+hiraku runs --sort val/log_loss
 ```
 
 Expect two runs, with lower log loss first. Both use the same committed
@@ -254,7 +253,7 @@ additional child record and attributed run:
 ```bash
 hiraku record show heart-disease-prediction
 hiraku record tree
-hiraku runs --record heart-disease-prediction --all \
+hiraku runs \
   --params model,seed,validation_fraction \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending

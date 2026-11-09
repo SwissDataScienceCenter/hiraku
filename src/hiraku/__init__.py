@@ -3,12 +3,11 @@
 from .git import GitRepository
 from .markdown import Markdown
 from .project import Project
-from .record import Metric, Record
+from .record import Record
 from .tracking import Run
 
 __all__ = [
     "Project",
-    "Metric",
     "Record",
     "Run",
     "GitRepository",

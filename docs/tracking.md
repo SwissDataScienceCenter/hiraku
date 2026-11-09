@@ -1,34 +1,61 @@
-# Tracking backends
+# Leaderboards
 
-Hiraku uses a small adapter interface to query normalized `Run` objects while
-your training code logs through the selected backend's native API.
+A leaderboard selects one CSV, MLflow, or W&B source and optional comparison
+metrics. Definitions live in `hiraku/leaderboards/<name>.yml`; relative source
+paths resolve from the project root.
 
-Choose the backend that matches the stage of your project:
-
-- [CSV](guides/tracking-csv.md) for local and offline work;
-- [W&B](guides/tracking-wandb.md) for hosted run tracking and collaboration;
-- [MLflow](guides/tracking-mlflow.md) for local SQLite or a remote MLflow server.
-
-Set `tracking_backend` in `hiraku.yml` to choose one backend for the whole
-project. Records cannot override it, and it is not stored in record front
-matter. Remove any existing `tracking_backend` field from record front matter
-and move its value into `hiraku.yml`. If omitted there, Hiraku uses CSV. The
-[tracking API reference](api/python/tracking.md) documents the shared backend
-contract and normalized run model.
-
-For a custom project, configure the backend once in `hiraku.yml`:
-
-```yaml
-tracking_backend:
-  type: wandb
-  project: my-wandb-project
+```bash
+hiraku leaderboard create validation --source mlflow --database mlflow.db \
+  --experiment-name classification
+hiraku leaderboard edit validation
 ```
 
-Use a mapping instead of a shorthand when the backend needs options. The
-backend guides below show each adapter's supported settings.
+Edit the YAML to select metric order and optional optimization directions:
 
-Normalized runs accept only the documented fields: `id`, `metrics`, `params`,
-`record_id`, `commit`, `timestamp`, `duration`, `url`, and `raw`.
-Put backend-specific metadata in `raw`. Its mapping, along with `metrics` and
-`params`, is copied and made shallowly immutable; nested values retain their
-original types and mutability.
+```yaml
+source:
+  type: mlflow
+  database: mlflow.db
+  experiment_name: classification
+metrics:
+  - name: accuracy
+    direction: maximize
+  - name: loss
+    direction: minimize
+```
+
+Omit `metrics` to discover them from runs; `metrics: []` displays none by default.
+Parameters are discovered automatically. Missing metrics appear as empty values;
+additional metrics remain available in returned runs. Metric and parameter names
+are separate, so the same name can occur in both. Sorting uses plain metric
+names and their declared direction, defaulting to ascending. Missing values sort
+last; plots skip runs without the required finite values and report the count.
+
+```bash
+hiraku leaderboard list
+hiraku leaderboard show validation --json
+hiraku runs --leaderboard validation --sort accuracy
+hiraku runs --leaderboard validation --record baseline
+hiraku dashboard --leaderboard validation
+hiraku leaderboard delete validation
+```
+
+A sole leaderboard is selected automatically; select a name when several exist.
+Queries include all source runs, including those without a record file or record
+attribution. `--record` matches an exact record ID, independently of the active
+record. The dashboard can filter by record subtree; **All runs** clears that filter.
+The collaborative workflow accepts a `leaderboard` argument for result queries.
+
+Creation refuses to overwrite definitions. `edit` uses `$EDITOR` (default `vim`)
+and validates after editing; invalid edits remain on disk for correction.
+Listing reports invalid definitions alongside valid ones. Deletion removes only
+the definition. API keys are excluded from serialization; configure credentials
+through the backend environment.
+
+Records describe research objectives and conclusions. Training code configures
+logging destinations and records measurements; `hiraku run` supplies record and
+commit attribution. Leaderboards query the results.
+
+See [CSV](guides/tracking-csv.md), [MLflow](guides/tracking-mlflow.md),
+[W&B](guides/tracking-wandb.md), and the [Python API](api/python/tracking.md).
+CSV headers use `metric.` and `param.` prefixes; leaderboard metric names are plain.

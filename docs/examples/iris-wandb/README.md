@@ -38,15 +38,15 @@ Set `WANDB_ENTITY` only if you want to log under a specific team or account.
 
 ## Create the research root and child records
 
-The example ships with W&B configured as the project-wide tracking backend.
+The example ships with W&B configured in `hiraku/leaderboards/default.yml`.
+The leaderboard reads results; the training script configures its logging destination.
 
 ```bash
 hiraku record create iris-classification \
   --title "Iris classification" \
   --type task \
   --set "goal=Maximize Iris test accuracy" \
-  --set "question=How accurately can model families classify Iris?" \
-  --set 'metrics=[{name: test/accuracy, direction: maximize}, {name: test/f1_macro, direction: maximize}, {name: test/log_loss, direction: minimize}]'
+  --set "question=How accurately can model families classify Iris?"
 
 hiraku record create iris-classification/logistic-regression \
   --title "Logistic regression" \
@@ -76,7 +76,7 @@ hiraku run --record iris-classification/random-forest -- \
 Inspect all runs associated with the research root:
 
 ```bash
-hiraku runs --record iris-classification --all
+hiraku runs
 ```
 
 ??? info "Example run results"

@@ -152,6 +152,7 @@ def _approved(response: dict) -> dict:
 @pytest.mark.parametrize("task_id", ["task", "research/task"])
 def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path, task_id):
     config = Project.create(tmp_path, install_skill=False)
+    (config.leaderboards_dir / "default.yml").write_text("source: {type: csv}\n")
     config.set_active_record(config.vault.create(task_id, type="task", title="task"))
     commit = _commit(tmp_path)
     command = ["python", "train.py"]

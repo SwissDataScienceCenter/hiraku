@@ -16,7 +16,7 @@ class MLflowBackend(BackendOperations):
 
     Args:
         project: Hiraku project.
-        settings: Pre-validated MLflow settings used by the factory.
+        settings: Pre-validated MLflow settings supplied by a leaderboard.
         tracking_uri: Optional MLflow tracking URI.
         experiment_name: Optional MLflow experiment name.
         database: Optional project-relative SQLite database path.
@@ -37,7 +37,7 @@ class MLflowBackend(BackendOperations):
 
         Args:
             project: Hiraku project.
-            settings: Pre-validated MLflow settings used by the factory.
+            settings: Pre-validated MLflow settings supplied by a leaderboard.
             tracking_uri: Optional remote tracking URI.
             experiment_name: Experiment name; defaults to the project directory
                 name.

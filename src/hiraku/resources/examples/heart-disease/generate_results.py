@@ -76,10 +76,6 @@ def generate(project: Project) -> None:
         "heart-disease-prediction",
         type="task",
         state="concluded",
-        metrics=[
-            {"name": m, "direction": d}
-            for m, d in zip(METRICS, ("minimize", "maximize"), strict=True)
-        ],
         markdown="# Heart disease classification\n\n"
         "Measured runs on the processed Cleveland dataset with seeds 1, 2 and 3.\n"
         "These small validation comparisons are not clinical evidence.\n",
@@ -179,6 +175,7 @@ def generate_results(output: Path) -> None:
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
             overlay = Path(staging) / "overlay"
             shutil.copytree(project.records_dir, overlay / "hiraku/records")
+            shutil.copytree(project.leaderboards_dir, overlay / "hiraku/leaderboards")
             for name in ("hiraku.yml", "runs.csv"):
                 shutil.copyfile(project.root / name, overlay / name)
             overlay.rename(output)

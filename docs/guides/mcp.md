@@ -68,7 +68,7 @@ and fall back to the CLI when the host has not connected the server.
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
 | `execute` | Run a command in the foreground and return its exit code, stdout, and stderr. |
-| `runs` | List tracked runs attributed to a record, like `hiraku runs`; `all_records` lists every attributed run in its tracking source. |
+| `runs` | List runs from a named `leaderboard`, optionally filtered by `record_id`; metric sorting follows view declarations. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
 For `record_create`, `fields` must include a nonblank `type`.

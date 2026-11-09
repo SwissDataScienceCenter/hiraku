@@ -38,7 +38,7 @@ approval, then resume with the result once the run is tracked; check with
 
 ## Analyze
 
-Compare the runs in the data with the task's metrics, earlier results, and
+Compare the runs in the selected leaderboard with the task's objectives, earlier results, and
 the experiment's hypothesis. Present your verdict and conclusion to the user,
 then call `workflow_approval` with the proposed analysis response and wait.
 Pass the returned result to `workflow_resume`.

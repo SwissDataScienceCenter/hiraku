@@ -11,6 +11,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
+from hiraku.tracking import Leaderboard
 
 EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "iris-wandb"
 
@@ -131,16 +132,12 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "goal=Maximize Iris test accuracy",
             "--set",
             "question=How accurately can a classifier predict Iris species?",
-            "--set",
-            "metrics=[{name: test/accuracy, direction: maximize}, "
-            "{name: test/f1_macro, direction: maximize}, "
-            "{name: test/log_loss, direction: minimize}]",
         ],
     )
     config = Project.discover(project)
-    root = config.vault.load("iris-classification")
-    assert config.tracking_backend == {"type": "wandb", "project": "iris-wandb"}
-    assert "tracking_backend" not in root.metadata
+    assert Leaderboard.load(config).source.model_dump(exclude_defaults=True) == {
+        "project": "iris-wandb"
+    }
 
     invoke(
         runner,
@@ -181,11 +178,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "0.25",
         ],
     )
-    rows = json.loads(
-        invoke(
-            runner, ["runs", "--record", "iris-classification", "--all", "--json"]
-        ).output
-    )
+    rows = json.loads(invoke(runner, ["runs", "--json"]).output)
     assert len(rows) == 1
     row = rows[0]
     assert row["record_id"] == record.id

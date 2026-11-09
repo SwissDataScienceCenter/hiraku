@@ -10,7 +10,7 @@ import pytest
 
 from hiraku import Project
 from hiraku.execution import execute_command
-from hiraku.tracking import TrackingBackendFactory
+from hiraku.tracking import Leaderboard
 
 
 @pytest.fixture
@@ -64,15 +64,19 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
             == 120
         )
 
-    from hiraku.dashboard.data import load
+    from hiraku.dashboard.data import run_rows
 
-    dashboard = load(Project.discover(tmp_path))
-    assert dashboard.errors == []
-    assert Counter(run.record_id for run in dashboard.runs) == {
+    leaderboard = Leaderboard.load(project)
+    rows = run_rows(
+        leaderboard.list_runs(project),
+        records=project.vault.list(),
+        source=leaderboard.source.type,
+    )
+    assert Counter(row["record"] for row in rows) == {
         ids_by_name["weak-l2"]: 3,
         ids_by_name["strong-l2"]: 3,
     }
-    assert set(dashboard.sources.values()) == {"mlflow"}
+    assert {row["source"] for row in rows} == {"mlflow"}
 
 
 def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
@@ -87,6 +91,7 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()
     } == {
         "hiraku.yml",
+        "hiraku/leaderboards/default.yml",
         "mlflow.db",
         *(
             Project.discover(output)
@@ -104,8 +109,8 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
     shutil.copytree(output, config.root, dirs_exist_ok=True)
     config = Project.discover(config.root)
     weak = config.vault.load("digit-classification/weak-l2")
-    backend = TrackingBackendFactory(config).create(config.tracking_backend)
-    runs = backend.list_runs()
+    leaderboard = Leaderboard.load(config)
+    runs = leaderboard.list_runs(config)
     ids_by_name = {
         record.id.rsplit("/", 1)[-1]: record.id for record in config.vault.list()
     }
@@ -153,4 +158,4 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         },
     )
     assert result.returncode == 0
-    assert len(backend.list_runs()) == 7
+    assert len(leaderboard.list_runs(config)) == 7

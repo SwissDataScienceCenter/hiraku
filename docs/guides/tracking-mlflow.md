@@ -16,16 +16,16 @@ In the training project:
 uv add mlflow
 ```
 
-For a local project, this shorthand is enough:
+For a local project, create `hiraku/leaderboards/local.yml`:
 
 ```yaml
-tracking_backend: mlflow
+source:
+  type: mlflow
 ```
 
 Hiraku uses `mlflow.db` in the project root and an experiment named after the
-project directory. `hiraku run` supplies `MLFLOW_TRACKING_URI` and
-`MLFLOW_EXPERIMENT_NAME` to the training process, so standard MLflow logging
-uses the same store Hiraku queries. Existing environment values are preserved.
+project directory. Configure the training script to log to that same database
+and experiment; leaderboard configuration only controls reading results.
 
 For a remote server or a different local database, use a mapping. The database
 path is relative to the Hiraku project root. Specify `tracking_uri` instead of
@@ -35,7 +35,7 @@ Runs read from an HTTP(S) `tracking_uri` link to that server's web UI. For a
 local `database`, set `ui_url` to the address where you serve `mlflow ui`:
 
 ```yaml
-tracking_backend:
+source:
   type: mlflow
   database: mlflow.db
   experiment_name: my-task
@@ -48,8 +48,7 @@ are never turned into links.
 
 ## Log from your script
 
-`hiraku run` sets the tracking URI and experiment name from `hiraku.yml`. For
-commands run outside Hiraku, set the URI yourself:
+Set the logging URI in your script or environment, including for `hiraku run`:
 
 ```bash
 export MLFLOW_TRACKING_URI="sqlite:///$PWD/mlflow.db"
@@ -71,14 +70,10 @@ with mlflow.start_run():
     mlflow.log_metric("val/accuracy", accuracy)  # calculated by your code
 ```
 
-Hiraku resolves `database` from the project root and supplies the resulting
-absolute tracking URI to commands it runs. For commands run outside Hiraku, set
-the URI yourself as shown above.
-
 ## Inspect
 
 ```bash
-hiraku runs --record my-task --all --json
+hiraku runs --json
 ```
 
 Hiraku reads native run IDs, parameters, metrics, and attribution tags.

@@ -94,6 +94,15 @@ also open the copy without Hiraku's CLI, with
 `marimo edit hiraku/dashboard/app.py`; it then finds its project from its own
 location.
 
+## Leaderboards
+
+Choose a leaderboard using the selector, or open one with
+`hiraku dashboard --leaderboard NAME`. A sole leaderboard is selected automatically.
+Without an initial `--record`, plots show all runs from that leaderboard, including
+unattributed runs and runs whose record files are missing. Select **All runs**
+to clear a record filter. Metric names and directions come from the leaderboard;
+parameters are discovered automatically.
+
 ## Sections
 
 **Record navigation**
@@ -107,7 +116,7 @@ location.
 **Runs**
 :   Records and their runs in one indented table. Runs appear under the record
     they are attributed to, in execution order, with their start time, duration,
-    and the value of the first metric the records declare. Select a record to
+    and the value of the first metric the leaderboard declares or discovers. Select a record to
     compare its subtree, or a run to inspect it.
 
 **Run**
@@ -149,7 +158,7 @@ two metrics and lists non-dominated runs. Both accept an already scoped run tabl
 and create no controls or selection state.
 
 Use `hc.performance_controls(metrics, default_metric)` for the first plot's
-metric selector and `hc.tradeoff_controls(records_df, metrics)` for the second
+metric selector and `hc.tradeoff_controls(directions, metrics)` for the second
 plot's four selectors. Keep the returned widgets in notebook variables and pass
 their values to the corresponding plot.
 
@@ -216,6 +225,9 @@ The notebook reads your project once and builds two pandas DataFrames backed
 by Apache Arrow for the run table, run details, and metric analysis. Record
 details use the already loaded record objects to retain complete front matter.
 
+`hd.run_rows(runs, records=records, source=leaderboard.source.type)` converts
+queried runs to rows. Tracking errors leave record navigation available.
+
 `runs_df`
 :   One row per run in execution order: `run`, `record`, `record_path`,
     `source`, `started`, `commit`, `url`, plus a
@@ -223,8 +235,7 @@ details use the already loaded record objects to retain complete front matter.
 
 `records_df`
 :   One row per record in tree order: `record`, `parent`, `record_path`,
-    `type`, `state`, `decision`, `commit`, `metrics` (a list of declared
-    `name` and `direction` pairs), and `description` (the record's Markdown).
+    `type`, `state`, `decision`, `commit`, and `description` (the record's Markdown).
 
 | View | Reads |
 | --- | --- |
@@ -258,10 +269,8 @@ def _(alt, runs_df):
 
 ## Tracking backends
 
-Runs, metrics, parameters, and links come from the built-in tracking backend
-that each record resolves: CSV, MLflow, or W&B. The dashboard has no
-backend-specific query code. Records that share a backend configuration are
-queried once.
+Runs, metrics, parameters, and links come from the selected leaderboard's
+CSV, MLflow, or W&B source, queried once per refresh.
 
 A run's link label names its backend, for example **Open in mlflow**. Links
 appear when the backend provides an HTTP(S) URL for the run. For MLflow, set
@@ -291,11 +300,11 @@ hiraku dashboard --init --edit --record digits
 ```
 
 The project backend has no `ui_url`, so run details initially have no
-**Open in mlflow** link. To enable it, add `ui_url` to `tracking_backend` in
-`hiraku.yml`:
+**Open in mlflow** link. To enable it, add `ui_url` to `source` in
+`hiraku/leaderboards/<name>.yml`:
 
 ```yaml
-tracking_backend:
+source:
   type: mlflow
   database: mlflow.db
   experiment_name: hiraku-digits

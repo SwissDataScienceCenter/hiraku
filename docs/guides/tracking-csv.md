@@ -1,10 +1,10 @@
 # Track with CSV
 
-CSV is the default backend. It reads `runs.csv` from the Hiraku project root.
-To choose another CSV path, set the project-wide backend in `hiraku.yml`:
+The CSV source reads `runs.csv` from the Hiraku project root by default.
+Create `hiraku/leaderboards/local.yml` to configure a leaderboard:
 
 ```yaml
-tracking_backend:
+source:
   type: csv
   path: results/runs.csv
 ```
@@ -40,14 +40,14 @@ Use `HIRAKU_RECORD_ID`, `HIRAKU_COMMIT`, and
 Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 `hiraku example create heart-disease` to get a complete writer in `train.py`.
 
-The `id` column is the tracking backend's run ID.
+The `id` column is required and is the source run ID. The `record_id`
+column is optional; runs without it remain visible in unfiltered queries.
 
 ## Inspect
 
 ```bash
-hiraku runs --record my-task --all --sort val/accuracy
+hiraku runs --sort val/accuracy
 ```
 
-Metric values read from CSV remain strings in normalized runs; sorting
-converts numeric values where possible. A script that fails before writing
+Metric values read from CSV are normalized to floats. A script that fails before writing
 a row has no recorded execution in this backend.
