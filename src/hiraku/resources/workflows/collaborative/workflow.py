@@ -89,10 +89,11 @@ def input_schema() -> dict[str, Any]:
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the collaborative research graph from its Markdown instructions."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = frontmatter.parse(path.read_text(encoding="utf-8"))
+    post = frontmatter.load(path)
+    fields = post.metadata
     if fields.get("id") != "collaborative":
         raise ValueError("workflow.md must declare id: collaborative")
-    markdown = Markdown(body)
+    markdown = Markdown(post.content)
     rules = str(fields.get("rules", "")).strip()
 
     def initialize(state: ResearchState) -> Command[Literal["draft"]]:

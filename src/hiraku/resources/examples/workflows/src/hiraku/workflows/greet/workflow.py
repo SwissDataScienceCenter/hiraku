@@ -26,7 +26,8 @@ class GreetState(BaseModel):
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the one-step graph from the example's Markdown prompt."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = frontmatter.parse(path.read_text(encoding="utf-8"))
+    post = frontmatter.load(path)
+    fields = post.metadata
     if fields.get("id") != "greet":
         raise ValueError("workflow.md must declare id: greet")
     defaults = fields.get("arguments", {})
@@ -34,7 +35,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         raise ValueError("workflow.md must define arguments")
 
     argument_model = _argument_model(defaults)
-    markdown = Markdown(body)
+    markdown = Markdown(post.content)
 
     def greet(state: GreetState) -> dict[str, str]:
         try:
@@ -60,9 +61,7 @@ def _argument_model(defaults: dict[str, Any]) -> type[BaseModel]:
 
 def input_schema() -> dict[str, Any]:
     """Return the JSON Schema for starting greet."""
-    fields, _ = frontmatter.parse(
-        Path(__file__).with_name("workflow.md").read_text(encoding="utf-8")
-    )
+    fields = frontmatter.load(Path(__file__).with_name("workflow.md")).metadata
     defaults = fields.get("arguments", {})
     if not isinstance(defaults, dict) or not defaults:
         raise ValueError("workflow.md must define arguments")

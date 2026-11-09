@@ -48,7 +48,7 @@ def workflow_details(*, project: Project) -> list[dict[str, Any]]:
     details = []
     for workflow_id in workflow_ids(project=project):
         path = project.workflows_dir / workflow_id / "workflow.md"
-        fields, _ = frontmatter.parse(path.read_text(encoding="utf-8"))
+        fields = frontmatter.load(path).metadata
         detail: dict[str, Any] = {
             "id": workflow_id,
             "description": fields.get("description"),

@@ -55,9 +55,7 @@ def _input_model(defaults: dict[str, Any]) -> type[BaseModel]:
 
 def input_schema() -> dict[str, Any]:
     """Return the JSON Schema for starting scheduler."""
-    fields, _ = frontmatter.parse(
-        Path(__file__).with_name("workflow.md").read_text(encoding="utf-8")
-    )
+    fields = frontmatter.load(Path(__file__).with_name("workflow.md")).metadata
     defaults = fields.get("arguments", {})
     if not isinstance(defaults, dict):
         raise ValueError("workflow.md must define scheduler argument defaults")
@@ -74,7 +72,8 @@ def input_schema() -> dict[str, Any]:
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the graph that creates and schedules experiment records."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = frontmatter.parse(path.read_text(encoding="utf-8"))
+    post = frontmatter.load(path)
+    fields = post.metadata
     if fields.get("id") != "scheduler":
         raise ValueError("workflow.md must declare id: scheduler")
     defaults = fields.get("arguments", {})
@@ -88,7 +87,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 f"{lower} to {upper}"
             )
     input_model = _input_model(defaults)
-    markdown = Markdown(body)
+    markdown = Markdown(post.content)
 
     def initialize(state: SchedulerState) -> dict[str, Any]:
         try:

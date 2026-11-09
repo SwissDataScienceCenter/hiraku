@@ -34,10 +34,8 @@ def input_schema() -> dict[str, Any]:
 
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the prompt-only workflow graph."""
-    _, body = frontmatter.parse(
-        Path(__file__).with_name("workflow.md").read_text(encoding="utf-8")
-    )
-    prompt = str(Markdown(body)).strip()
+    post = frontmatter.load(Path(__file__).with_name("workflow.md"))
+    prompt = str(Markdown(post.content)).strip()
 
     def validate_input(state: AutoresearchState) -> dict[str, Any]:
         try:
