@@ -42,6 +42,9 @@ vault.save(record, overwrite=True)
 
 `Vault` owns bundle operations, validation and filesystem access and persistence.
 
+Saving persists explicitly supplied fields and values changed from their defaults,
+including in-place collection edits. Unchanged implicit defaults are omitted.
+
 ## `Metric`
 
 ::: hiraku.record.Metric

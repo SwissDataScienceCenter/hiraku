@@ -97,7 +97,7 @@ location.
 ## Sections
 
 **Record navigation**
-:   An optional, initially collapsed tree of records with type and research state
+:   An optional, initially collapsed tree of records with type and state
     badges. Expand it to navigate the hierarchy. Choosing a record
     selects the same row in the runs table, clears any selected run, and compares
     that record's subtree. Table selections highlight the corresponding record

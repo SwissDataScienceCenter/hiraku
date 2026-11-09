@@ -2,10 +2,49 @@
 
 import frontmatter
 import pytest
+from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import RecordNotFoundError, ValidationError
 from hiraku.record import Record, Vault
+
+
+def test_save_preserves_explicit_defaults_and_omits_implicit_defaults(tmp_path):
+    vault = Vault(root=tmp_path)
+    vault.create("minimal", type="task")
+    assert frontmatter.load(tmp_path / "minimal.md").metadata == {"type": "task"}
+    vault.create("explicit", type="task", status="stable", state=None, tags=[])
+    assert frontmatter.load(tmp_path / "explicit.md").metadata == {
+        "type": "task",
+        "status": "stable",
+        "state": None,
+        "tags": [],
+    }
+
+
+def test_save_preserves_mutated_implicit_defaults(tmp_path):
+    record = Record(id="example", type="task")
+    record.tags.append("research")
+    record.generated["by"] = "agent"
+    record.related_to.append("other")
+    vault = Vault(root=tmp_path)
+    vault.save(record)
+    loaded = vault.load(record.id)
+    assert loaded.tags == ["research"]
+    assert loaded.generated == {"by": "agent"}
+    assert loaded.related_to == ["other"]
+
+
+def test_save_preserves_complete_nested_custom_models(tmp_path):
+    class Custom(BaseModel):
+        label: str = "default"
+        values: list[int] = Field(default_factory=list)
+
+    custom = Custom(label="default")
+    custom.values.append(1)
+    vault = Vault(root=tmp_path)
+    vault.create("example", type="task", custom=custom)
+    assert vault.load("example").custom == {"label": "default", "values": [1]}
 
 
 @pytest.mark.parametrize("status", ["draft", "stable", "deprecated"])

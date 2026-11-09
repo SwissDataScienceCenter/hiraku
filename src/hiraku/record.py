@@ -93,15 +93,6 @@ class Record(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
 
     # OKF fields
-    # Example: a concept bound to a resource (https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md)
-    # ---
-    # type: BigQuery Table
-    # title: Customer Orders
-    # description: One row per completed customer order across all channels.
-    # resource: https://console.cloud.google.com/bigquery?p=acme&d=sales&t=orders
-    # tags: [sales, orders, revenue]
-    # generated: { by: reference_agent/gemini-2.5-pro, at: 2026-05-28T14:30:00Z }
-    # ---
     type: str
     title: str | None = None
     description: str | None = None
@@ -257,26 +248,19 @@ class Vault:
     def save(self, record: Record, *, overwrite: bool = False) -> Path:
         """Validate and atomically write one record, without collection checks."""
         try:
-            candidate = Record.model_validate(record.model_dump(mode="python"))
+            keys = (
+                record.model_fields_set
+                | record.model_dump(exclude_defaults=True).keys()
+            )
+            candidate = Record.model_validate(record.model_dump(include=keys))
         except (TypeError, ValueError) as exc:
             raise ValidationError(f"Invalid record {record.id!r}: {exc}") from exc
-        candidate.model_fields_set.clear()
-        candidate.model_fields_set.update(record.model_fields_set)
         target = self.file_path(candidate.id)
         if target.exists() and not overwrite:
             raise RecordExistsError(f"Record already exists: {target}")
-        metadata = candidate.metadata
-        for key in (
-            "title",
-            "description",
-            "status",
-            "resource",
-            "tags",
-            "generated",
-            "verified",
-        ):
-            if key not in candidate.model_fields_set:
-                metadata.pop(key, None)
+        metadata = {
+            key: value for key, value in candidate.metadata.items() if key in keys
+        }
         try:
             post = frontmatter.Post(str(candidate.markdown))
             post.metadata = metadata
