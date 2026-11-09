@@ -102,9 +102,9 @@ def create_server(project: Project | None = None) -> ProjectMCP:
 def register_tools(server: MCPServer, selected: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
-    Tools: project_info, record_list, record_show, record_create, record_update,
-    record_delete, execute, and runs. Also registers the record catalog and
-    record resources, and the propose_implementation prompt.
+    Tools: project_info, leaderboard_list, record_list, record_show, record_create,
+    record_update, record_delete, execute, and runs. Also registers the record
+    catalog and record resources, and the propose_implementation prompt.
     """
 
     @server.tool(
@@ -112,14 +112,16 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     def project_info() -> dict[str, Any]:
-        """Read the current project configuration and metadata."""
-        return to_jsonable_python(
-            {
-                **Project.load(selected.path).to_dict(),
-                "leaderboards": Leaderboard.discover(selected),
-            },
-            fallback=dict,
-        )
+        """Read the current project settings."""
+        return to_jsonable_python(Project.load(selected.path).to_dict(), fallback=dict)
+
+    @server.tool(
+        title="List leaderboards",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
+    def leaderboard_list() -> list[str]:
+        """List leaderboard names, like `hiraku leaderboard list --json`."""
+        return Leaderboard.list(selected)
 
     @server.tool(
         title="List research records",
@@ -252,16 +254,24 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     def runs(
         leaderboard: str | None = None,
         record_id: str | None = None,
+        include_unattributed: bool = False,
         sort: str | None = None,
         ascending: bool | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """List all runs in a leaderboard, optionally filtered by exact record ID.
+        """List attributed runs in a leaderboard, optionally filtered by record ID.
+
+        Set include_unattributed to include runs without a record ID.
 
         Sorting uses plain metric names and their declared direction.
         """
         found = Leaderboard.load(selected, leaderboard).list_runs(
-            selected, record_id=record_id, sort=sort, ascending=ascending, limit=limit
+            selected,
+            record_id=record_id,
+            include_unattributed=include_unattributed,
+            sort=sort,
+            ascending=ascending,
+            limit=limit,
         )
         return to_jsonable_python(found, fallback=dict)
 

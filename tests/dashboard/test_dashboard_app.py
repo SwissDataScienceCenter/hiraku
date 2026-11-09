@@ -159,6 +159,15 @@ def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
     assert definitions["leaderboard_selector"].value == "local"
     assert definitions["metrics"] == ["missing", "score"]
     assert definitions["metric"].value == "missing"
+    assert definitions["runs_df"].empty
+    assert definitions["include_unattributed"].value is False
+    definitions["include_unattributed"]._update(True)
+    outputs, definitions = app.run(
+        defs={
+            name: definitions[name]
+            for name in ("refresh", "leaderboard_selector", "include_unattributed")
+        }
+    )
     assert definitions["runs_df"]["run"].tolist() == ["r"]
     rows = tree_rows(definitions["records_df"], definitions["runs_df"], "score")
     assert [row["key"] for row in rows] == ["run:r"]
@@ -170,7 +179,9 @@ def test_dashboard_selects_between_leaderboards(project, monkeypatch):
     (project.leaderboards_dir / "other.yml").write_text(
         "source: {type: csv, path: other.csv}\n"
     )
-    (project.root / "other.csv").write_text("id,metric.score\nother,1\n")
+    (project.root / "other.csv").write_text(
+        "id,record_id,metric.score\nother,unknown,1\n"
+    )
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     monkeypatch.setenv("HIRAKU_DASHBOARD_LEADERBOARD", "other")
     from hiraku.dashboard.app import app
@@ -183,6 +194,7 @@ def test_dashboard_selects_between_leaderboards(project, monkeypatch):
         defs={
             "leaderboard_selector": definitions["leaderboard_selector"],
             "refresh": definitions["refresh"],
+            "include_unattributed": definitions["include_unattributed"],
         }
     )
     assert len(updated["runs_df"]) == 6
@@ -195,7 +207,7 @@ def test_tracking_errors_preserve_record_navigation(project, monkeypatch, failur
 
     if failure == "offline":
 
-        def unavailable(self, project):
+        def unavailable(self, project, **filters):
             raise BackendError("source offline")
 
         monkeypatch.setattr(Leaderboard, "list_runs", unavailable)

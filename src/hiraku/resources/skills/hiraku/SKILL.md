@@ -20,8 +20,7 @@ through an existing record lifecycle.
   the source commit being evaluated. Its
   `type` describes its role, such as experiment, diagnostic, or
   ablation. `parent_id` and `related_to` are persisted relationships, independent
-  of filesystem placement. All fields are local; there is no record inheritance.
-  Consumers needing ancestor information explicitly traverse the graph.
+  of filesystem placement.
   The active record is stored in `hiraku.yml`. Named leaderboards live in
   `hiraku/leaderboards/<name>.yml` and contain source and metric configuration.
 - **Run:** An execution trace returned by the configured tracking backend. A run
@@ -60,8 +59,9 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
 
-Use `record show` to inspect canonical records and effective research fields.
-Use `hiraku status --json` to discover leaderboard names. Select one with
+Use `record show` to inspect a record's fields and Markdown.
+Use MCP `leaderboard_list` or `hiraku leaderboard list --json` to discover
+leaderboards. Select one with
 `--leaderboard NAME` when several exist. Leaderboards only query results; configure logging
 destinations in training code or its environment.
 
@@ -159,7 +159,10 @@ IDs are derived from file placement and are not persisted in front matter.
 Inspect `record list --json` for concept IDs.
 Use `record show` to inspect local fields and Markdown. Run queries use named leaderboards in `hiraku/leaderboards/<name>.yml`, containing a
 `source` mapping and optional ordered `metrics` with optimization directions.
-Parameters are discovered automatically. No record filter means all source runs. Cycles and unfinished links do not prevent normal record I/O.
+Parameters are discovered automatically. Queries list runs with a record ID,
+even if its file is missing. Use `--include-unattributed` (MCP:
+`include_unattributed: true`) to include all source runs. `--record` remains an
+exact attribution filter. Cycles and unfinished links do not prevent normal record I/O.
 
 ## Protect user work and use the intended branches
 
@@ -376,7 +379,7 @@ attribution explicitly. Stop when the user's requested scope is complete.
 The Python API exposes `Project` in `hiraku.project`; `Record`,
 record loaders and listing functions in `hiraku.record`;
 `Leaderboard` and `Metric` in `hiraku.tracking`; use `Leaderboard.create()`,
-`load()`, `discover()`, and `delete()` for definitions;
+`load()`, `list()`, and `delete()` for definitions;
 `Run` in `hiraku.tracking`; and `execute_command` in `hiraku.execution` for scripted
 execution.
 Records with `type: context` store supporting material. Workflows run in the

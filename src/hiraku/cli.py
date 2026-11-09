@@ -346,7 +346,6 @@ def status_command(state: CLIContext, json_output: bool, pretty: bool) -> None:
     result = {
         "project_root": project.root,
         "active_record_id": project.active_record_id,
-        "leaderboards": Leaderboard.discover(project),
         "git_branch": branch,
     }
     if json_output:
@@ -747,21 +746,13 @@ def leaderboard_group() -> None:
 @click.option("--pretty", is_flag=True)
 @click.pass_obj
 def leaderboard_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
-    """List leaderboards, including errors in invalid definitions."""
+    """List leaderboard names without loading their definitions."""
     _validate_json_options(json_output, pretty)
-    rows = []
-    for name in Leaderboard.discover(state.project):
-        try:
-            leaderboard = Leaderboard.load(state.project, name)
-            rows.append(
-                {"name": name, "source": leaderboard.source.type, "error": None}
-            )
-        except HirakuError as exc:
-            rows.append({"name": name, "source": None, "error": str(exc)})
+    names = Leaderboard.list(state.project)
     if json_output:
-        _emit_json(rows, pretty=pretty)
+        _emit_json(names, pretty=pretty)
     else:
-        _print_table(("name", "source", "error"), [list(row.values()) for row in rows])
+        _print_table(("name",), [(name,) for name in names])
 
 
 @leaderboard_group.command("show")
@@ -839,6 +830,9 @@ def leaderboard_delete(state: CLIContext, name: str) -> None:
 
 
 @main.command("runs")
+@click.option(
+    "--include-unattributed", is_flag=True, help="Include runs without a record ID."
+)
 @click.option("--record", "record_id")
 @click.option("--leaderboard", "leaderboard_name")
 @click.option("--metrics")
@@ -854,6 +848,7 @@ def run_list(
     state: CLIContext,
     record_id: str | None,
     leaderboard_name: str | None,
+    include_unattributed: bool,
     metrics: str | None,
     params: str | None,
     sort: str | None,
@@ -863,7 +858,7 @@ def run_list(
     json_output: bool,
     pretty: bool,
 ) -> None:
-    """List all runs in a leaderboard, optionally filtered by record ID."""
+    """List attributed runs in a leaderboard, optionally filtered by record ID."""
     _validate_json_options(json_output, pretty)
     if ascending and descending:
         raise ValidationError("--ascending and --descending are mutually exclusive")
@@ -873,6 +868,7 @@ def run_list(
     runs = leaderboard.list_runs(
         state.project,
         record_id=record_id,
+        include_unattributed=include_unattributed,
         sort=sort,
         ascending=(ascending if ascending or descending else None),
         limit=limit,

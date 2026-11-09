@@ -41,7 +41,8 @@ Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 `hiraku example create heart-disease` to get a complete writer in `train.py`.
 
 The `id` column is required and is the source run ID. The `record_id`
-column is optional; runs without it remain visible in unfiltered queries.
+column is optional; use `hiraku runs --include-unattributed` to include runs
+without a record ID.
 
 ## Inspect
 

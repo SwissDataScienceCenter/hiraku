@@ -51,7 +51,7 @@ def project_name(project_context):
 @app.cell
 def refresh_control(project_context, requested_leaderboard):
     refresh = mo.ui.button(label="Refresh", value=0, on_click=lambda count: count + 1)
-    _names = Leaderboard.discover(project_context)
+    _names = Leaderboard.list(project_context)
     leaderboard_selector = mo.ui.dropdown(
         _names,
         value=requested_leaderboard
@@ -59,12 +59,15 @@ def refresh_control(project_context, requested_leaderboard):
         else (_names[0] if len(_names) == 1 else None),
         label="Leaderboard",
     )
-    mo.hstack([leaderboard_selector, refresh], justify="end")
-    return refresh, leaderboard_selector
+    include_unattributed = mo.ui.checkbox(
+        label="Include unattributed runs", value=False
+    )
+    mo.hstack([leaderboard_selector, include_unattributed, refresh], justify="end")
+    return refresh, leaderboard_selector, include_unattributed
 
 
 @app.cell
-def project_data(project_context, refresh, leaderboard_selector):
+def project_data(project_context, refresh, leaderboard_selector, include_unattributed):
     _refreshes = refresh.value
     records = project_context.vault.list()
     leaderboard = None
@@ -72,7 +75,9 @@ def project_data(project_context, refresh, leaderboard_selector):
     _runs = []
     try:
         leaderboard = Leaderboard.load(project_context, leaderboard_selector.value)
-        _runs = leaderboard.list_runs(project_context)
+        _runs = leaderboard.list_runs(
+            project_context, include_unattributed=include_unattributed.value
+        )
     except Exception as exc:
         leaderboard_error = f"Leaderboard unavailable: {exc}"
     runs_df = hd.arrow_frame(
@@ -152,7 +157,9 @@ def record_navigation(records, select_key, selected_record):
         selected_record.id if selected_record else None,
         on_select=lambda record_id: select_key(f"record:{record_id}"),
     )
-    _all_runs = mo.ui.button(label="All runs", on_click=lambda _: select_key(None))
+    _all_runs = mo.ui.button(
+        label="Clear record filter", on_click=lambda _: select_key(None)
+    )
     mo.vstack([_all_runs, _navigation])
     return (record_buttons,)
 

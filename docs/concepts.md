@@ -40,7 +40,7 @@ or `deprecated`. The optional `state` field describes research progress using
 workflow-defined values such as `drafted`, `launched`, or `concluded`.
 Workflow session statuses are separate from these record fields.
 
-All record fields are local. Consumers needing ancestor information must traverse the declared graph themselves. Leaderboards supply metric directions independently of records. `hiraku record show PATH` displays only that document's fields and body.
+Leaderboards supply metric directions. `hiraku record show PATH` displays the document's fields and body.
 
 Saving validates one record and its destination without scanning the vault. Replacing a file requires `overwrite=True`. Loading, saving, updating, and deleting do not enforce collection integrity. `Vault.validate()` explicitly checks missing relationship targets; cycles are permitted.
 
@@ -59,8 +59,8 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 
 Define named [leaderboards](tracking.md) in `hiraku/leaderboards/<name>.yml`.
 Each contains a `source` mapping and optional ordered `metrics` declarations.
-Records do not configure tracking. `hiraku runs --leaderboard NAME` queries all source
-runs; `--record ID` applies an exact attribution filter. Parameters are discovered
+Records do not configure tracking. `hiraku runs --leaderboard NAME` queries attributed
+runs (`--include-unattributed` includes all source runs); `--record ID` applies an exact attribution filter. Parameters are discovered
 automatically. Training code owns logging destinations and metric logging.
 
 A launch that never logs a row will not appear as a run.

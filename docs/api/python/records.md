@@ -18,7 +18,6 @@ and the Markdown body. Loading derives the ID from the filename; it is never
 persisted in front matter. Moving a document changes its ID.
 `parent_id` and `related_to` are ordinary persisted
 relationships to other concept paths. Placement does not determine parentage.
-All fields are local.
 
 ```python
 from pathlib import Path

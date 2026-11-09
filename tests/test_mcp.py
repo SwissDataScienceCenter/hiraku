@@ -55,13 +55,19 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
 
     async def exercise() -> None:
         tools = {tool.name: tool for tool in await server.list_tools()}
-        assert {"project_info", "record_list", "runs", "workflow_start"} <= tools.keys()
+        assert {
+            "project_info",
+            "leaderboard_list",
+            "record_list",
+            "runs",
+            "workflow_start",
+        } <= tools.keys()
         assert tools["project_info"].title == "Project information"
         assert tools["record_list"].annotations.read_only_hint is True
         assert tools["workflow_start"].title == "Start workflow"
         assert tools["workflow_start"].description
         result = await server.call_tool("project_info", {})
-        assert result.structured_content["leaderboards"] == []
+        assert result.structured_content == project.to_dict()
 
     asyncio.run(exercise())
 
@@ -288,13 +294,37 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
+def test_leaderboard_list_matches_cli_and_reads_current_definitions(
+    tmp_path, monkeypatch
+):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    monkeypatch.chdir(tmp_path)
+    server = create_server(project)
+
+    async def exercise():
+        empty = await server.call_tool("leaderboard_list", {})
+        assert empty.structured_content["result"] == []
+        (project.leaderboards_dir / "local.yml").write_text("source: {type: csv}\n")
+        (project.leaderboards_dir / "broken.yml").write_text("source: [invalid]\n")
+        result = await server.call_tool("leaderboard_list", {})
+        cli = CliRunner().invoke(main, ["leaderboard", "list", "--json"])
+        assert cli.exit_code == 0, cli.output
+        rows = result.structured_content["result"]
+        assert rows == json.loads(cli.output)
+        assert rows == ["broken", "local"]
+        info = await server.call_tool("project_info", {})
+        assert info.structured_content == project.to_dict()
+
+    asyncio.run(exercise())
+
+
 def test_runs(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     (config.leaderboards_dir / "default.yml").write_text(
         "source: {type: csv}\nmetrics: [{name: acc, direction: maximize}]\n"
     )
     (tmp_path / "runs.csv").write_text(
-        "id,record_id,metric.acc\na,task/task,0.5\nb,task/task,0.9\nc,other,0.7\n"
+        "id,record_id,metric.acc\na,task/task,0.5\nb,task/task,0.9\nc,other,0.7\nd,,1\n"
     )
     server = create_server(config)
 
@@ -317,6 +347,11 @@ def test_runs(tmp_path: Path) -> None:
         assert await ids(sort="acc") == ["b", "a"]
         assert await ids(sort="acc", ascending=True, limit=1) == ["a"]
         assert sorted(await ids(record_id=None)) == ["a", "b", "c"]
+        assert await ids(
+            record_id=None, include_unattributed=True, sort="acc", limit=1
+        ) == ["d"]
+        assert await ids(record_id=None, sort="acc", limit=1) == ["b"]
+        assert await ids(include_unattributed=True, sort="acc", limit=1) == ["b"]
         with pytest.raises(ToolError, match="requires a sort"):
             await server.call_tool(
                 "runs", {"record_id": "task/task", "ascending": True}

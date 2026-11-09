@@ -173,8 +173,6 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
         Project.discover(tmp_path / "missing")
 
 
-
-
 def test_init_from_template_applies_overlay(tmp_path: Path) -> None:
     template = tmp_path / "template"
     (template / "custom/dispatch").mkdir(parents=True)

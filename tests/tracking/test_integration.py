@@ -58,7 +58,8 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
         mlflow.log_metric("loss", 4.0)
     backend = MLflowBackend(config, settings=source)
     run = backend.list_runs()[0]
-    assert len(backend.list_runs()) == 2
+    assert len(backend.list_runs()) == 1
+    assert len(backend.list_runs(include_unattributed=True)) == 2
     assert backend.list_runs(record_id="task/task") == []
     assert run.id == run_id
     assert run.record_id == "task/exp/exp"

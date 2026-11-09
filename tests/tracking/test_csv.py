@@ -70,14 +70,21 @@ def test_csv_backend_rejects_invalid_duration(tmp_path: Path, value: str) -> Non
         CSVBackend(config).list_runs(record_id="iris/iris")
 
 
-def test_csv_source_listing_includes_unattributed_runs(tmp_path: Path) -> None:
+def test_csv_source_listing_can_include_unattributed_runs(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     path = config.root / "runs.csv"
     path.write_text("id,record_id\none,first\ntwo,second\nthree,\n", encoding="utf-8")
 
     runs = CSVBackend(config).list_runs()
 
-    assert {run.id for run in runs} == {"one", "two", "three"}
+    assert {run.id for run in runs} == {"one", "two"}
+    assert {
+        run.id for run in CSVBackend(config).list_runs(include_unattributed=True)
+    } == {
+        "one",
+        "two",
+        "three",
+    }
 
 
 def test_csv_backend_resolves_record_id_from_project_root(tmp_path: Path) -> None:
@@ -122,7 +129,8 @@ def test_csv_backend_preserves_absolute_path_override(tmp_path: Path) -> None:
 def test_csv_backend_accepts_missing_record_id_column(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     (tmp_path / "runs.csv").write_text("id,note\na,missing\n")
-    assert CSVBackend(config).list_runs()[0].record_id is None
+    assert CSVBackend(config).list_runs() == []
+    assert CSVBackend(config).list_runs(include_unattributed=True)[0].record_id is None
     assert CSVBackend(config).list_runs(record_id="child/child") == []
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 from typing import Any, Literal
 
@@ -39,7 +40,8 @@ class Leaderboard(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     source: BackendConfig
-    metrics: list[Metric] | None = None
+    # The list() method shadows the builtin during model annotation evaluation.
+    metrics: builtins.list[Metric] | None = None
 
     @classmethod
     def create(cls, project: Project, name: str, source: dict[str, Any]) -> Leaderboard:
@@ -64,7 +66,7 @@ class Leaderboard(BaseModel):
     def load(cls, project: Project, name: str | None = None) -> Leaderboard:
         """Load a named leaderboard, or automatically select the sole definition."""
         if name is None:
-            names = cls.discover(project)
+            names = cls.list(project)
             if not names:
                 raise ValidationError(
                     f"No leaderboards. Create {project.leaderboards_dir / '<name>.yml'}"
@@ -82,7 +84,7 @@ class Leaderboard(BaseModel):
             raise ValidationError(f"Invalid leaderboard {path}: {exc}") from exc
 
     @staticmethod
-    def discover(project: Project) -> list[str]:
+    def list(project: Project) -> builtins.list[str]:
         """List flat ``*.yml`` names without loading their configurations."""
         return sorted(
             path.stem
@@ -101,12 +103,14 @@ class Leaderboard(BaseModel):
 
     @field_validator("metrics")
     @classmethod
-    def unique_metrics(cls, value: list[Metric] | None) -> list[Metric] | None:
+    def unique_metrics(
+        cls, value: builtins.list[Metric] | None
+    ) -> builtins.list[Metric] | None:
         if value is not None and len({item.name for item in value}) != len(value):
             raise ValueError("Metric names must be unique")
         return value
 
-    def metric_names(self, runs: list[Run]) -> list[str]:
+    def metric_names(self, runs: builtins.list[Run]) -> builtins.list[str]:
         """Return declared names, or discover metrics in source order."""
         if self.metrics is not None:
             return [item.name for item in self.metrics]
@@ -117,26 +121,28 @@ class Leaderboard(BaseModel):
         project: Project,
         *,
         record_id: str | None = None,
+        include_unattributed: bool = False,
         sort: str | None = None,
         ascending: bool | None = None,
         limit: int | None = None,
-    ) -> list[Run]:
-        """Query runs, optionally filtering by record and sorting by metric.
+    ) -> builtins.list[Run]:
+        """Query attributed runs, optionally filtering by record and sorting by metric.
+
+        Set ``include_unattributed`` to include runs without a record ID.
+        A record file need not exist for a run to count as attributed.
 
         Metric names are plain names, even when they collide with run metadata
         or parameters. Direction defaults to the metric declaration, then ascending.
         """
-        if sort is not None and (not isinstance(sort, str) or not sort):
-            raise BackendError("Sort must be a non-empty metric name")
         if ascending is None and sort is not None:
             ascending = not any(
                 metric.name == sort and metric.direction == "maximize"
                 for metric in self.metrics or ()
             )
-        # Qualify internal sorting so metrics cannot collide with run metadata.
         return self._create_backend(project).list_runs(
             record_id=record_id,
-            sort=f"metric.{sort}" if sort is not None else None,
+            include_unattributed=include_unattributed,
+            sort=sort,
             ascending=ascending,
             limit=limit,
         )

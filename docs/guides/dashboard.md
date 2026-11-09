@@ -98,10 +98,11 @@ location.
 
 Choose a leaderboard using the selector, or open one with
 `hiraku dashboard --leaderboard NAME`. A sole leaderboard is selected automatically.
-Without an initial `--record`, plots show all runs from that leaderboard, including
-unattributed runs and runs whose record files are missing. Select **All runs**
-to clear a record filter. Metric names and directions come from the leaderboard;
-parameters are discovered automatically.
+Plots show attributed runs by default, including runs whose record files are
+missing. Enable **Include unattributed runs** to show the entire source.
+Without an initial `--record`, plots span the selected leaderboard; select
+**Clear record filter** to clear a subtree filter. Metric names and directions
+come from the leaderboard; parameters are discovered automatically.
 
 ## Sections
 

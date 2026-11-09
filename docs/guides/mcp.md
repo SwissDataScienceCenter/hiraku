@@ -64,11 +64,12 @@ and fall back to the CLI when the host has not connected the server.
 
 | Tools | Behavior |
 | --- | --- |
-| `project_info` | Read the current project configuration and metadata. |
+| `project_info` | Read the current project settings. |
+| `leaderboard_list` | List leaderboard names without loading definitions, like `hiraku leaderboard list --json`. |
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
 | `execute` | Run a command in the foreground and return its exit code, stdout, and stderr. |
-| `runs` | List runs from a named `leaderboard`, optionally filtered by `record_id`; metric sorting follows view declarations. |
+| `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
 For `record_create`, `fields` must include a nonblank `type`.

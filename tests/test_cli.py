@@ -304,9 +304,9 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
         "id,record_id,metric.loss\na,root/root,0.5\nb,root/child/child,0.2\nc,,0.1\n"
     )
     direct = json.loads(invoke("runs", "--record", "root/root", "--json").output)
-    all_runs = json.loads(invoke("runs", "--json").output)
+    attributed_runs = json.loads(invoke("runs", "--json").output)
     assert {run["id"] for run in direct} == {"a"}
-    assert {run["id"] for run in all_runs} == {"a", "b", "c"}
+    assert {run["id"] for run in attributed_runs} == {"a", "b"}
     sorted_table = invoke(
         "runs",
         "--metrics",
@@ -323,11 +323,11 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
         if (cells := [cell.strip() for cell in line.split("│")[1:-1]])
         and cells[0] != "id"
     ]
-    assert [row[0] for row in data_rows] == ["c", "b", "a"]
+    assert [row[0] for row in data_rows] == ["b", "a"]
     assert invoke("runs", "list", "--record", "root/root").exit_code != 0
 
 
-def test_runs_default_scope_is_entire_view(tmp_path: Path, monkeypatch) -> None:
+def test_runs_default_scope_is_all_attributed_runs(tmp_path: Path, monkeypatch) -> None:
     create_tracked_project(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "runs.csv").write_text(
@@ -335,7 +335,7 @@ def test_runs_default_scope_is_entire_view(tmp_path: Path, monkeypatch) -> None:
     )
     no_active = invoke("runs", "--json")
     assert no_active.exit_code == 0
-    assert {run["id"] for run in json.loads(no_active.output)} == {"a", "b", "c"}
+    assert {run["id"] for run in json.loads(no_active.output)} == {"a", "b"}
     assert (
         invoke(
             "record",
@@ -369,7 +369,9 @@ def test_runs_default_scope_is_entire_view(tmp_path: Path, monkeypatch) -> None:
         assert result.exit_code == 0
         return {run["id"] for run in json.loads(result.output)}
 
-    assert ids() == {"a", "b", "c"}
+    assert ids() == {"a", "b"}
+    assert ids("--include-unattributed") == {"a", "b", "c"}
+    assert ids("--record", "root/root", "--include-unattributed") == {"a"}
     assert ids("--record", "root/root") == {"a"}
     assert ids("--record", "missing") == set()
 
@@ -440,7 +442,9 @@ def test_runs_require_view_selection_and_discover_parameters(tmp_path, monkeypat
     ambiguous = invoke("runs")
     assert ambiguous.exit_code != 0
     assert "Select a leaderboard" in ambiguous.output
-    (tmp_path / "runs.csv").write_text("id,metric.score,param.seed\nr,0.9,42\n")
+    (tmp_path / "runs.csv").write_text(
+        "id,record_id,metric.score,param.seed\nr,unknown,0.9,42\n"
+    )
     result = invoke("runs", "--leaderboard", "b")
     assert result.exit_code == 0, result.output
     assert "score" in result.output
@@ -458,20 +462,28 @@ def project(tmp_path, monkeypatch):
     return project
 
 
+def test_status_reports_project_context_only(project):
+    (project.leaderboards_dir / "invalid.yml").write_text("source: [invalid]\n")
+    result = invoke("status", "--json")
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert set(data) == {"project_root", "active_record_id", "git_branch"}
+    assert data["project_root"] == str(project.root)
+    assert data["active_record_id"] is None
+
+
 def test_leaderboard_lifecycle(project):
     result = invoke("leaderboard", "create", "local", "--source", "csv")
     assert result.exit_code == 0, result.output
     path = project.leaderboards_dir / "local.yml"
     assert path.is_file()
-    assert json.loads(invoke("leaderboard", "list", "--json").output) == [
-        {"name": "local", "source": "csv", "error": None}
-    ]
+    assert json.loads(invoke("leaderboard", "list", "--json").output) == ["local"]
     shown = invoke("leaderboard", "show", "local", "--json")
     assert shown.exit_code == 0, shown.output
     assert json.loads(shown.output) == {"source": {"type": "csv"}}
     source = project.root / "runs.csv"
     source.write_text("id,metric.score\nr,1\n")
-    runs = invoke("runs", "--leaderboard", "local", "--json")
+    runs = invoke("runs", "--leaderboard", "local", "--include-unattributed", "--json")
     assert runs.exit_code == 0, runs.output
     assert json.loads(runs.output)[0]["metrics"] == {"score": 1}
     before = path.read_bytes()
@@ -552,7 +564,10 @@ def test_list_and_delete_invalid_leaderboard(project):
     path.write_text("source: [invalid]\n")
     result = invoke("leaderboard", "list", "--json")
     assert result.exit_code == 0, result.output
-    assert "Invalid leaderboard" in json.loads(result.output)[0]["error"]
+    assert json.loads(result.output) == ["broken"]
+    shown = invoke("leaderboard", "show", "broken")
+    assert shown.exit_code != 0
+    assert "Invalid leaderboard" in shown.output
     assert invoke("leaderboard", "delete", "broken").exit_code == 0
     assert not path.exists()
     assert invoke("leaderboard", "delete", "missing").exit_code != 0

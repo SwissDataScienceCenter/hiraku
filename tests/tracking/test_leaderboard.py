@@ -12,10 +12,10 @@ def test_discovery_and_selection_are_independent_of_records(tmp_path: Path):
     with pytest.raises(ValidationError, match="No leaderboards"):
         Leaderboard.load(project)
     (project.leaderboards_dir / "first.yml").write_text("source: {type: csv}\n")
-    assert Leaderboard.discover(project) == ["first"]
+    assert Leaderboard.list(project) == ["first"]
     assert Leaderboard.load(project).source.type == "csv"
     (project.leaderboards_dir / "broken.yml").write_text("source: [invalid]\n")
-    assert Leaderboard.discover(project) == ["broken", "first"]
+    assert Leaderboard.list(project) == ["broken", "first"]
     with pytest.raises(ValidationError, match="Select a leaderboard"):
         Leaderboard.load(project)
     assert Leaderboard.load(project, "first").source.type == "csv"
@@ -96,7 +96,10 @@ def test_leaderboard_tolerates_schema_changes_and_keeps_full_runs(tmp_path: Path
             ],
         }
     )
-    runs = leaderboard.list_runs(project, sort="accuracy")
+    assert [
+        run.id for run in leaderboard.list_runs(project, sort="accuracy", limit=1)
+    ] == ["a"]
+    runs = leaderboard.list_runs(project, sort="accuracy", include_unattributed=True)
     assert [run.id for run in runs] == ["b", "a"]
     assert runs[0].record_id is None
     assert runs[0].params == {"accuracy": "low"}
@@ -106,7 +109,8 @@ def test_leaderboard_tolerates_schema_changes_and_keeps_full_runs(tmp_path: Path
     ]
     assert leaderboard.list_runs(project, record_id="absent") == []
     path.write_text("id,metric.new,param.seed\nc,1,42\n")
-    runs = leaderboard.list_runs(project)
+    assert leaderboard.list_runs(project) == []
+    runs = leaderboard.list_runs(project, include_unattributed=True)
     assert runs[0].metrics == {"new": 1}
     assert leaderboard.metric_names(runs) == ["missing", "accuracy"]
     discovered = Leaderboard(source={"type": "csv", "path": "results.csv"})
@@ -117,7 +121,8 @@ def test_leaderboard_tolerates_schema_changes_and_keeps_full_runs(tmp_path: Path
 def test_metric_sort_does_not_collide_with_metadata_or_parameters(tmp_path: Path):
     project = Project(tmp_path)
     (tmp_path / "runs.csv").write_text(
-        "id,duration,metric.duration,param.duration\na,1,9,1\nb,9,1,9\nc,2,,0\n"
+        "id,record_id,duration,metric.duration,param.duration,param.seed,metric.metric.score\n"
+        "a,unknown,1,9,1,2,0\nb,unknown,9,1,9,1,1\nc,unknown,2,,0,3,0.5\n"
     )
     leaderboard = Leaderboard(source={"type": "csv"})
     assert [run.id for run in leaderboard.list_runs(project, sort="duration")] == [
@@ -128,8 +133,20 @@ def test_metric_sort_does_not_collide_with_metadata_or_parameters(tmp_path: Path
     assert [
         run.id for run in leaderboard.list_runs(project, sort="duration", limit=1)
     ] == ["b"]
+    assert [run.id for run in CSVBackend(project).list_runs(sort="seed")] == [
+        "a",
+        "b",
+        "c",
+    ]
+    assert [run.id for run in leaderboard.list_runs(project, sort="metric.score")] == [
+        "a",
+        "c",
+        "b",
+    ]
     with pytest.raises(BackendError, match="requires a sort"):
         leaderboard.list_runs(project, ascending=True)
+    with pytest.raises(BackendError, match="boolean"):
+        leaderboard.list_runs(project, include_unattributed="yes")
     with pytest.raises(BackendError, match="metric name"):
         leaderboard.list_runs(project, sort="")
     with pytest.raises(BackendError, match="non-negative"):

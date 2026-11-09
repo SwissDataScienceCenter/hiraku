@@ -10,8 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Named leaderboards in `hiraku/leaderboards/<name>.yml` define sources and
   optional metrics, with `hiraku leaderboard` commands for managing definitions.
-- Run queries include all source runs; `--leaderboard` selects a definition and
-  `--record` filters attribution. Parameters are discovered automatically.
+- Run queries list attributed runs by default; `--include-unattributed` includes
+  all source runs. `--leaderboard` selects a definition and `--record` filters
+  attribution. Parameters are discovered automatically.
 - Training code or its environment configures logging destinations.
 
 - **Breaking:** Replace named record entrypoints and `hiraku launch` with `hiraku run --record ID -- COMMAND [ARGS...]`, which runs the supplied argv in the foreground with record and Git attribution. Existing `entrypoints` fields are no longer accepted ([issue #90](https://github.com/SwissDataScienceCenter/hiraku/issues/90), [PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).

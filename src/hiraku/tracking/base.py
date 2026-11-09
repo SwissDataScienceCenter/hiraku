@@ -84,6 +84,7 @@ class TrackingBackend(Protocol):
         self,
         *,
         record_id: str | None = None,
+        include_unattributed: bool = False,
         sort: str | None = None,
         ascending: bool | None = None,
         limit: int | None = None,
@@ -215,37 +216,10 @@ class BackendOperations:
     ) -> list[Run]:
         result = list(runs)
         if sort is not None:
-
-            def value(run: Run) -> Any:
-                if sort.startswith("metric."):
-                    return run.metrics.get(sort.removeprefix("metric."))
-                value = getattr(run, sort, None)
-                if value is None:
-                    value = run.metrics.get(sort, run.params.get(sort))
-                return value
-
-            def numeric(run: Run) -> float | None:
-                candidate = value(run)
-                if isinstance(candidate, bool) or candidate is None:
-                    return None
-                try:
-                    return float(candidate)
-                except (TypeError, ValueError):
-                    return None
-
-            ranked = [run for run in result if numeric(run) is not None]
-            unranked = [run for run in result if numeric(run) is None]
+            ranked = [run for run in result if sort in run.metrics]
+            unranked = [run for run in result if sort not in run.metrics]
             ranked.sort(key=lambda run: run.id)
-
-            def numeric_key(run: Run) -> float:
-                number = numeric(run)
-                assert number is not None
-                return number
-
-            ranked.sort(
-                key=numeric_key,
-                reverse=ascending is False,
-            )
+            ranked.sort(key=lambda run: run.metrics[sort], reverse=ascending is False)
             result = [*ranked, *sorted(unranked, key=lambda run: run.id)]
         else:
             result.sort(
@@ -268,7 +242,7 @@ class BackendOperations:
     ) -> None:
         if sort is not None and (not isinstance(sort, str) or not sort):
             raise BackendError(
-                f"{self.backend_name} backend sort must be a non-empty string"
+                f"{self.backend_name} backend sort must be a non-empty metric name"
             )
         if ascending is not None and not isinstance(ascending, bool):
             raise BackendError(
@@ -289,17 +263,17 @@ class BackendOperations:
         self,
         *,
         record_id: str | None = None,
+        include_unattributed: bool = False,
         sort: str | None = None,
         ascending: bool | None = None,
         limit: int | None = None,
     ) -> list[Run]:
-        """Return normalized runs with optional record attribution.
+        """Return normalized attributed runs by default.
 
         Args:
-            record_id: Optional record ID to filter runs by; all source runs
-                are returned when omitted.
-            sort: Run field, metric, or parameter. Numeric values sort first;
-                runs without a numeric value follow, ordered by ID.
+            record_id: Optional record ID to match exactly.
+            include_unattributed: Include runs without a record ID. Defaults to false.
+            sort: Plain metric name. Runs missing that metric follow, ordered by ID.
             ascending: Sort order; requires ``sort``. Defaults to ascending.
             limit: Maximum number of returned runs. Without ``sort``, runs are
                 ordered by timestamp, with missing timestamps last.
@@ -309,8 +283,12 @@ class BackendOperations:
         """
         if record_id is not None:
             self._validate_filters(record_id)
+        if not isinstance(include_unattributed, bool):
+            raise BackendError("include_unattributed must be a boolean")
         self._validate_query(sort=sort, ascending=ascending, limit=limit)
         runs = self._read_source_runs()
+        if not include_unattributed:
+            runs = [run for run in runs if run.record_id]
         if record_id is not None:
             runs = [run for run in runs if run.record_id == record_id]
         return self._apply_query(
