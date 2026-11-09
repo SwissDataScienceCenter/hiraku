@@ -7,8 +7,6 @@ import re
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, cast
-from urllib.parse import quote
-from uuid import uuid4
 
 import frontmatter
 import yaml
@@ -17,14 +15,11 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    PrivateAttr,
     field_validator,
-    model_validator,
 )
 from pydantic_core import PydanticSerializationError
 
 from .errors import (
-    AmbiguousReferenceError,
     RecordExistsError,
     RecordNotFoundError,
     ValidationError,
@@ -48,13 +43,6 @@ def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
         raise ValidationError(f"Invalid {label}: {identifier!r}")
 
 
-def _filename(record: Record) -> str:
-    slug = re.sub(r"[^\w .-]+", "-", record.name).strip(" .-")
-    if slug.casefold() in {"index", "log"}:
-        raise ValidationError(f"Reserved OKF filename: {slug}.md")
-    return f"{slug or 'record'}.md"
-
-
 class Metric(BaseModel):
     """
     A metric declared by a research record.
@@ -69,24 +57,37 @@ class Metric(BaseModel):
     direction: Literal["minimize", "maximize"]
 
 
+def resolve_metrics(record: Record, vault: Vault) -> list[Metric]:
+    """Find the nearest declared metrics, stopping at empty lists or broken edges."""
+    seen = {record.id}
+    while record.metrics is None and record.parent_id is not None:
+        if record.parent_id in seen:
+            return []
+        seen.add(record.parent_id)
+        try:
+            record = vault.load(record.parent_id)
+        except RecordNotFoundError:
+            return []
+    return list(record.metrics or [])
+
+
 class Record(BaseModel):
     """
     A lightweight, validated research document.
 
     Attributes:
-        id: Unique record ID.
-        name: Record name; used to generate a filesystem-friendly slug.
+        id: Bundle-relative concept path, without the .md suffix.
+        title: Optional OKF display title.
         markdown: Markdown content of the record.
-        parent_id: Optional ID of the parent record.
-        related_to: Optional list of IDs of related records.
-        type: Optional record type.
+        parent_id: Optional relative path of a parent record.
+        related_to: Optional relative paths of related records.
+        type: Nonblank, producer-defined OKF concept type.
         commit: Optional commit hash associated with the record.
-        status: Optional record status.
+        status: OKF concept lifecycle: draft, stable, or deprecated.
+        state: Optional workflow-defined research progress.
         decision: Optional record decision.
         branch: Optional record branch.
         metrics: Optional list of metric declarations.
-        _path: Private attribute storing the record's filesystem path.
-        _persisted_id: Private attribute storing the record's persisted ID.
     """
 
     model_config = ConfigDict(extra="allow", validate_assignment=True)
@@ -101,50 +102,42 @@ class Record(BaseModel):
     # tags: [sales, orders, revenue]
     # generated: { by: reference_agent/gemini-2.5-pro, at: 2026-05-28T14:30:00Z }
     # ---
-    type: Literal["task", "record", "context"] | str
+    type: str
     title: str | None = None
     description: str | None = None
-    status: Literal["draft", "stable", "deprecated"] | str = "stable"
+    status: Literal["draft", "stable", "deprecated"] = "stable"
     resource: str | None = None
     tags: list[str] = Field(default_factory=list)
     generated: dict[str, Any] = Field(default_factory=dict)
+    verified: list[dict[str, Any]] | None = None
 
     # Hiraku fields
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    name: str = Field(..., min_length=1)
+    id: str
     markdown: Markdown = Field(default_factory=lambda: Markdown(""))
     parent_id: str | None = None
     related_to: list[str] = Field(default_factory=list)
     commit: str | None = None
     decision: str | None = None
     branch: str | None = None
+    state: str | None = None
     metrics: list[Metric] | None = None
-    _path: Path | None = PrivateAttr(default=None)
-    _persisted_id: str | None = PrivateAttr(default=None)
-    _parent_path: Path | None = PrivateAttr(default=None)
-
-    @model_validator(mode="before")
-    @classmethod
-    def default_name_from_id(cls, values: Any) -> Any:
-        if isinstance(values, dict) and "name" not in values and values.get("id"):
-            return {**values, "name": values["id"]}
-        return values
 
     @field_validator("id")
     @classmethod
     def validate_id(cls, value: str) -> str:
-        try:
-            validate_identifier(value)
-        except ValidationError as exc:
-            raise ValueError(str(exc)) from exc
+        return cast(str, cls._validate_reference_id(value, "record ID"))
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Record type must be a non-empty string")
         return value
 
-    @field_validator("name")
+    @field_validator("verified", mode="before")
     @classmethod
-    def validate_name(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("record name cannot be blank")
-        return value
+    def normalize_verified(cls, value: Any) -> Any:
+        return [value] if isinstance(value, dict) else value
 
     @field_validator("parent_id")
     @classmethod
@@ -172,44 +165,16 @@ class Record(BaseModel):
             raise ValueError("commit must be a full lowercase Git hash")
         return value
 
-    @model_validator(mode="after")
-    def validate_references(self) -> Record:
-        if self.parent_id == self.id or self.id in self.related_to:
-            raise ValueError("A record cannot refer to itself")
-        return self
-
     @staticmethod
     def _validate_reference_id(value: str | None, label: str) -> str | None:
         if value is None:
             return None
         try:
-            validate_identifier(value, label=label)
+            for part in value.split("/"):
+                validate_identifier(part, label=label)
         except ValidationError as exc:
             raise ValueError(str(exc)) from exc
         return value
-
-    @property
-    def path(self) -> Path | None:
-        return self._path
-
-    @classmethod
-    def create(
-        cls,
-        name: str,
-        *,
-        vault: Vault | None = None,
-        project: Any = None,
-        activate: bool = True,
-        **fields: Any,
-    ) -> Record:
-        """Compatibility convenience that delegates creation to a vault."""
-        selected_vault = vault or (project.vault if project is not None else None)
-        if selected_vault is None:
-            raise ValueError("Record.create requires a vault or project")
-        record = selected_vault.create(name, **fields)
-        if project is not None and activate:
-            project.set_active_record(record)
-        return record
 
     @property
     def metadata(self) -> dict[str, Any]:
@@ -217,227 +182,101 @@ class Record(BaseModel):
         try:
             metadata = self.model_dump(
                 mode="json",
-                exclude={"markdown", "parent_id"},
+                exclude={"markdown", "id"},
                 warnings=False,
             )
             metadata["type"] = self.type
             for field in self.model_fields_set & type(self).model_fields.keys():
-                if field != "markdown" and getattr(self, field) is None:
+                if field not in {"markdown", "id"} and getattr(self, field) is None:
                     metadata[field] = None
             return metadata
         except PydanticSerializationError as exc:
             raise ValidationError(f"Unsupported YAML value: {exc}") from exc
 
-    @classmethod
-    def load(cls, path: Path) -> Record:
-        """Load a validated record from a Markdown file.
-
-        The record retains its source path and ID for subsequent vault saves.
-        """
-        data, markdown = cls._parse_markdown(path)
-        record = cls.model_validate({**data, "markdown": markdown})
-        record._path = path.absolute()
-        record._persisted_id = record.id
-        return record
-
-    @staticmethod
-    def _parse_markdown(path: Path) -> tuple[dict[str, Any], str]:
-        """Parse a Markdown document's YAML front matter and body."""
-        try:
-            metadata, content = frontmatter.parse(
-                path.read_text(encoding="utf-8"), handler=_YAML_HANDLER
-            )
-        except (OSError, UnicodeError) as exc:
-            raise ValidationError(f"Cannot read record {path}: {exc}") from exc
-        except yaml.YAMLError as exc:
-            raise ValidationError(
-                f"Malformed YAML front matter in {path}: {exc}"
-            ) from exc
-        if not metadata:
-            raise ValidationError(f"Expected YAML front matter mapping in {path}")
-        return metadata, content
-
 
 class Vault:
-    """Filesystem-backed collection that owns record persistence and hierarchy.
+    """A Markdown bundle that owns filesystem access and workspace operations."""
 
-    Attributes:
-        dir: Directory containing record Markdown files.
+    def __init__(self, *, root: Path) -> None:
+        self.root = Path(root).absolute()
 
-    Notes:
-        A vault is ready for use as soon as it is constructed. It scans its directory
-        when an operation needs the current records, so separate Vault instances do
-        not retain stale collection indexes.
-    """
+    def file_path(self, record_id: str) -> Path:
+        """Return the contained absolute filename for a concept ID."""
+        if not isinstance(record_id, str):
+            raise ValidationError("Record ID must be a string")
+        try:
+            Record._validate_reference_id(record_id, "record ID")
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        target = self.root / f"{record_id}.md"
+        if target.name.casefold() in {"index.md", "log.md"}:
+            raise ValidationError(f"Reserved OKF filename: {target.name}")
+        self._check_vault_path(target)
+        return target
 
-    def __init__(self, *, dir: Path) -> None:
-        self.dir = Path(dir)
+    def load(self, record_id: str) -> Record:
+        """Read one document by its bundle-relative ID, without indexing the vault."""
+        target = self.file_path(record_id)
+        if not target.is_file():
+            raise RecordNotFoundError(f"Record {record_id!r} not found")
+        data, markdown = self._parse_markdown(target)
+        return Record.model_validate({**data, "id": record_id, "markdown": markdown})
 
-    @staticmethod
-    def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
-        validate_identifier(identifier, label=label)
-
-    def create(self, name: str, **fields: Any) -> Record:
-        record_type = fields.get("type")
-        if not isinstance(record_type, str) or not record_type.strip():
-            raise ValidationError("Record type must be a non-empty string")
-        parent = None
-        if fields.get("parent_id") is not None:
-            parent = self.get(fields["parent_id"])
-            fields["parent_id"] = parent.id
-        if fields.get("related_to"):
-            fields["related_to"] = [self.get(item).id for item in fields["related_to"]]
-        record = Record(name=name, **fields)
-        if parent is not None:
-            record._parent_path = parent.path
-            assert parent.path is not None
-            label = " ".join(parent.name.split())
-            label = label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
-            link = f"Parent: [{label}](../{quote(parent.path.name)})"
-            body = record.markdown.rstrip()
-            record.markdown = Markdown(f"{body}\n\n{link}" if body else link)
+    def create(self, record_id: str, **fields: Any) -> Record:
+        """Construct and save a document at an explicit concept ID."""
+        record = Record(id=record_id, **fields)
         self.save(record)
         return record
 
-    def get(self, record_id: str) -> Record:
-        """Return a record by ID or its exact, unambiguous name."""
-        return self.find(record_id)
-
-    def find(self, reference: str) -> Record:
-        """Find by ID or exact name, rejecting ambiguous names."""
-        records = self._index()
-        record = records.get(reference)
-        if record is not None:
-            return record
-        matches = [item for item in records.values() if item.name == reference]
-        if len(matches) > 1:
-            raise AmbiguousReferenceError(
-                f"Record name {reference!r} matches multiple records"
-            )
-        if matches:
-            return matches[0]
-        raise RecordNotFoundError(f"Record {reference!r} not found")
-
-    def _index(self) -> dict[str, Record]:
-        records: dict[str, Record] = {}
-        paths: dict[Path, Record] = {}
-        paths_on_disk = sorted(
-            self.dir.rglob("*.md"), key=lambda p: (len(p.parts), str(p))
-        )
-        for path in paths_on_disk:
-            if path.name in {"index.md", "log.md"}:
-                continue
-            self._check_vault_path(path)
-            if path.parent == self.dir or path.stem != path.parent.name:
-                raise ValidationError(f"Expected a same-named record directory: {path}")
-            record = Record.load(path)
-            if record.parent_id is not None:
-                raise ValidationError(f"Unexpected persisted parent_id in {path}")
-            if record.id in records:
-                raise ValidationError(f"Duplicate record ID: {record.id}")
-            parent_dir = path.parent.parent
-            if parent_dir != self.dir:
-                parent_path = parent_dir / f"{parent_dir.name}.md"
-                parent = paths.get(parent_path)
-                if parent is None:
-                    raise ValidationError(f"Missing parent record for {path}")
-                record.parent_id = parent.id
-                record._parent_path = parent.path
-            records[record.id] = record
-            paths[path] = record
-        return records
-
     def list(self) -> builtins.list[Record]:
-        return sorted(self._index().values(), key=lambda record: record.id)
+        return [
+            self.load(path.relative_to(self.root).with_suffix("").as_posix())
+            for path in sorted(self.root.rglob("*.md"))
+            if path.name not in {"index.md", "log.md"}
+        ]
 
-    def children(self, parent_id: str) -> builtins.list[Record]:
-        records = self._index()
-        parent = records.get(parent_id)
-        if parent is None:
-            raise RecordNotFoundError(f"Record {parent_id!r} not found")
-        return [record for record in records.values() if record.parent_id == parent.id]
+    def children(self, record_id: str) -> builtins.list[Record]:
+        """Return records that explicitly declare this parent ID."""
+        return [record for record in self.list() if record.parent_id == record_id]
 
     def descendants(self, record_id: str) -> builtins.list[Record]:
-        records = self._index()
-        if record_id not in records:
-            raise RecordNotFoundError(f"Record {record_id!r} not found")
-        return sorted(
-            (
-                record
-                for record in records.values()
-                if record.id != record_id
-                and record_id in self._ancestor_ids(record, records)
-            ),
-            key=lambda record: record.id,
-        )
+        """Traverse declared parent edges, tolerating cycles and missing nodes."""
+        records = self.list()
+        seen = {record_id}
+        pending = [record_id]
+        result = []
+        while pending:
+            parent = pending.pop()
+            for record in records:
+                if record.parent_id == parent and record.id not in seen:
+                    seen.add(record.id)
+                    pending.append(record.id)
+                    result.append(record)
+        return sorted(result, key=lambda record: record.id)
 
-    def resolve(self, record_id: str) -> dict[str, Any]:
-        """Return record fields with inherited metric declarations applied."""
-        records = self._index()
-        record = records.get(record_id)
-        if record is None:
-            raise RecordNotFoundError(f"Record {record_id!r} not found")
-        self._validate_records(records)
-        values = record.metadata
-        sources = {key: record.id for key in values}
-        current = record
-        seen = {record.id}
-        while values.get("metrics") is None and current.parent_id is not None:
-            if current.parent_id in seen:
-                raise ValidationError("Record hierarchy contains a cycle")
-            seen.add(current.parent_id)
-            current = records.get(current.parent_id)
-            if current is None:
-                raise ValidationError(f"Missing parent record {record.parent_id!r}")
-            if current.metrics is not None:
-                values["metrics"] = [
-                    item.model_dump(mode="json") for item in current.metrics
-                ]
-                sources["metrics"] = current.id
-        return {"values": values, "sources": sources}
-
-    def save(self, record: Record) -> Path:
-        """Save a record using directory placement as its parent relationship."""
+    def save(self, record: Record, *, overwrite: bool = False) -> Path:
+        """Validate and atomically write one record, without collection checks."""
         try:
             candidate = Record.model_validate(record.model_dump(mode="python"))
         except (TypeError, ValueError) as exc:
             raise ValidationError(f"Invalid record {record.id!r}: {exc}") from exc
         candidate.model_fields_set.clear()
         candidate.model_fields_set.update(record.model_fields_set)
-        old_path = record.path
-        if old_path is None and (candidate.type is None or not candidate.type.strip()):
-            raise ValidationError("Record type must be a non-empty string")
-        if (old_path is None) != (record._persisted_id is None):
-            raise ValidationError("Record path does not match its persisted file")
-        if record._persisted_id is not None and candidate.id != record._persisted_id:
-            raise ValidationError("Record ID is immutable after persistence")
-        parent_path = record._parent_path
-        if candidate.parent_id is not None:
-            if parent_path is None or not parent_path.is_file():
-                raise ValidationError("Parent record path is required")
-            self._check_vault_path(parent_path)
-            if Record.load(parent_path).id != candidate.parent_id:
-                raise ValidationError("Record parent is immutable after persistence")
-        elif parent_path is not None:
-            raise ValidationError("Record parent is immutable after persistence")
-        filename = _filename(candidate)
-        parent_dir = parent_path.parent if parent_path else self.dir
-        target_dir = parent_dir / Path(filename).stem
-        target = (target_dir / filename).absolute()
-        self._check_vault_path(target)
-        if old_path is not None:
-            self._check_vault_path(old_path)
-            if (
-                not old_path.is_file()
-                or Record.load(old_path).id != record._persisted_id
-            ):
-                raise ValidationError("Record path does not match its persisted file")
-            if old_path != target:
-                raise ValidationError("Renaming records is not supported in this PoC")
-        elif target_dir.exists():
-            raise RecordExistsError(f"Record already exists: {target_dir}")
+        target = self.file_path(candidate.id)
+        if target.exists() and not overwrite:
+            raise RecordExistsError(f"Record already exists: {target}")
         metadata = candidate.metadata
-        metadata.pop("parent_id", None)
+        for key in (
+            "title",
+            "description",
+            "status",
+            "resource",
+            "tags",
+            "generated",
+            "verified",
+        ):
+            if key not in candidate.model_fields_set:
+                metadata.pop(key, None)
         try:
             post = frontmatter.Post(str(candidate.markdown))
             post.metadata = metadata
@@ -445,67 +284,77 @@ class Vault:
             atomic_write(target, content)
         except (OSError, yaml.YAMLError) as exc:
             raise ValidationError(f"Cannot save record at {target}: {exc}") from exc
-        record._path = target
-        record._persisted_id = record.id
         return target
 
+    def update(
+        self,
+        record: Record,
+        fields: dict[str, Any],
+        *,
+        markdown: str | None = None,
+        unset: tuple[str, ...] = (),
+    ) -> Record:
+        """Apply local field changes and explicitly overwrite the document."""
+        if {"id", "markdown"}.intersection(fields) or "id" in unset:
+            raise ValidationError("Cannot update ID or set Markdown through metadata")
+        values = record.model_dump(exclude_unset=True)
+        values.update(fields)
+        for key in unset:
+            if key in fields:
+                raise ValidationError(f"Cannot set and unset {key!r} together")
+            values.pop(key, None)
+        if markdown is not None:
+            values["markdown"] = markdown
+        updated = Record.model_validate(values)
+        self.save(updated, overwrite=True)
+        return updated
+
     def delete(self, record_id: str) -> None:
-        records = self._index()
-        record = records.get(record_id)
-        if record is None:
+        """Delete one document; dangling relationships are checked explicitly."""
+        target = self.file_path(record_id)
+        if not target.is_file():
             raise RecordNotFoundError(f"Record {record_id!r} not found")
-        assert record.path is not None
-        if any(item.parent_id == record.id for item in records.values()):
-            raise ValidationError(f"Cannot delete record {record.id!r} with children")
-        if any(
-            record.id in item.related_to
-            for item in records.values()
-            if item.id != record.id
-        ):
-            raise ValidationError(f"Cannot delete referenced record {record.id!r}")
         try:
-            record.path.unlink()
+            target.unlink()
             with suppress(OSError):
-                record.path.parent.rmdir()
+                target.parent.rmdir()
         except OSError as exc:
-            raise ValidationError(
-                f"Cannot delete record at {record.path}: {exc}"
-            ) from exc
+            raise ValidationError(f"Cannot delete record at {target}: {exc}") from exc
 
     def validate(self) -> None:
-        records = self._index()
-        self._validate_records(records)
-
-    def validate_relationships(self, record: Record) -> None:
-        """Check a proposed record's relationships against the collection."""
-        records = self._index()
-        self._validate_records({**records, record.id: record})
-
-    def _validate_records(self, records: dict[str, Record]) -> None:
-        for record in records.values():
-            if record.parent_id is not None and record.parent_id not in records:
+        """Explicitly check the bundle and declared relationships, allowing cycles."""
+        records = self.list()
+        paths = {record.id for record in records}
+        for record in records:
+            if record.parent_id is not None and record.parent_id not in paths:
                 raise ValidationError(f"Missing parent record {record.parent_id!r}")
-            if any(link not in records for link in record.related_to):
+            if any(path not in paths for path in record.related_to):
                 raise ValidationError(
                     f"Record {record.id!r} has a missing related record"
                 )
-            self._ancestor_ids(record, records)
 
-    def _ancestor_ids(self, record: Record, records: dict[str, Record]) -> set[str]:
-        ancestors: set[str] = set()
-        current = record.parent_id
-        while current is not None:
-            if current in ancestors or current == record.id:
-                raise ValidationError("Record hierarchy contains a cycle")
-            ancestors.add(current)
-            parent = records.get(current)
-            if parent is None:
-                break
-            current = parent.parent_id
-        return ancestors
+    @staticmethod
+    def _parse_markdown(path: Path) -> tuple[dict[str, Any], str]:
+        """Parse a Markdown document's YAML front matter and body."""
+        try:
+            text = path.read_text(encoding="utf-8")
+            if not text.startswith(("---\n", "---\r\n")) or not re.search(
+                r"^---[ \t]*$", text[4:], re.M
+            ):
+                raise ValidationError(f"Expected YAML front matter block in {path}")
+            metadata, content = frontmatter.parse(text, handler=_YAML_HANDLER)
+        except (OSError, UnicodeError) as exc:
+            raise ValidationError(f"Cannot read record {path}: {exc}") from exc
+        except (yaml.YAMLError, TypeError, ValueError) as exc:
+            raise ValidationError(
+                f"Malformed YAML front matter in {path}: {exc}"
+            ) from exc
+        if not metadata:
+            raise ValidationError(f"Expected YAML front matter mapping in {path}")
+        return metadata, content
 
     def _check_vault_path(self, path: Path) -> None:
         try:
-            path.resolve().relative_to(self.dir.resolve())
+            path.resolve().relative_to(self.root.resolve())
         except ValueError as exc:
             raise ValidationError(f"Record path is outside vault: {path}") from exc

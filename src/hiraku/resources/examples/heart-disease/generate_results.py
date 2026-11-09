@@ -16,9 +16,9 @@ from hiraku import Project
 from hiraku.execution import execute_command
 
 EXPERIMENTS = (
-    ("logistic-baseline", "heart-disease", "logistic", 0.2),
-    ("random-forest", "heart-disease", "random_forest", 0.2),
-    ("forest-tuning", "random-forest", "random_forest", 0.3),
+    ("logistic-regression", "heart-disease-prediction", "logistic", 0.2),
+    ("random-forest", "heart-disease-prediction", "random_forest", 0.2),
+    ("validation-split", "random-forest", "random_forest", 0.3),
 )
 METRICS = ("val/log_loss", "val/accuracy")
 
@@ -39,8 +39,14 @@ def validate_runs(project: Project | Path) -> list[dict[str, str]]:
         if reader.fieldnames != fields:
             raise ValueError("Unexpected runs CSV header")
         rows = list(reader)
+    paths = {record.id.rsplit("/", 1)[-1]: record.id for record in project.vault.list()}
     expected = Counter(
-        (project.vault.find(identifier).id, model, str(seed), str(fraction))
+        (
+            paths[identifier],
+            model,
+            str(seed),
+            str(fraction),
+        )
         for identifier, _, model, fraction in EXPERIMENTS
         for seed in (1, 2, 3)
     )
@@ -67,9 +73,9 @@ def generate(project: Project) -> None:
     if list(project.records_dir.rglob("*.md")) or (project.root / "runs.csv").exists():
         raise FileExistsError("Generation requires an example without records or runs")
     root = project.vault.create(
-        "heart-disease",
+        "heart-disease-prediction",
         type="task",
-        status="concluded",
+        state="concluded",
         metrics=[
             {"name": m, "direction": d}
             for m, d in zip(METRICS, ("minimize", "maximize"), strict=True)
@@ -77,24 +83,30 @@ def generate(project: Project) -> None:
         markdown="# Heart disease classification\n\n"
         "Measured runs on the processed Cleveland dataset with seeds 1, 2 and 3.\n"
         "These small validation comparisons are not clinical evidence.\n",
+        title="Heart disease prediction",
     )
-    record_ids = {root.name: root.id}
+    record_ids = {root.id: root.id}
     for identifier, parent, model, fraction in EXPERIMENTS:
         record = project.vault.create(
-            identifier,
+            f"{record_ids[parent]}/{identifier}",
+            title={
+                "logistic-regression": "Logistic regression",
+                "random-forest": "Random forest",
+                "validation-split": "Validation split sensitivity",
+            }[identifier],
             parent_id=record_ids[parent],
             type="baseline"
             if model == "logistic"
             else "diagnostic"
-            if identifier == "forest-tuning"
+            if identifier == "validation-split"
             else "hypothesis",
-            status="concluded",
+            state="concluded",
             markdown=f"## {identifier}\n\n"
             f"Model: `{model}`; validation fraction: {fraction}; seeds: 1, 2, 3.\n"
             + (
                 "This is a validation-split sensitivity check; its metrics are "
                 "not a directly comparable improvement.\n"
-                if identifier == "forest-tuning"
+                if identifier == "validation-split"
                 else ""
             ),
         )
@@ -122,7 +134,7 @@ def generate(project: Project) -> None:
                 )
     rows = validate_runs(project)
     for identifier, _, _, _ in EXPERIMENTS:
-        record = project.vault.find(identifier)
+        record = project.vault.load(record_ids[identifier])
         values = [r for r in rows if r["record_id"] == record.id]
         record.markdown += (
             "\nMean across the three runs:\n\n"
@@ -132,8 +144,8 @@ def generate(project: Project) -> None:
             )
             + "\n\nNo statistical significance is claimed.\n"
         )
-        project.vault.save(record)
-    project.set_active_record("random-forest")
+        project.vault.save(record, overwrite=True)
+    project.set_active_record(record_ids["random-forest"])
 
 
 def generate_results(output: Path) -> None:

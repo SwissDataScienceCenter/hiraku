@@ -1,8 +1,8 @@
 ---
-id: heart-disease
+title: Heart disease prediction
 related_to: []
 type: task
-status: concluded
+state: concluded
 metrics:
 - name: val/log_loss
   direction: minimize

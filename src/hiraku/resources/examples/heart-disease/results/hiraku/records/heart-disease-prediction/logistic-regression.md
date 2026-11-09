@@ -1,13 +1,13 @@
 ---
-id: 62167646-3f50-4571-bad7-f5f6b16cacbc
-name: logistic-baseline
+parent_id: heart-disease-prediction
+title: Logistic regression
 related_to: []
 type: baseline
-status: concluded
+state: concluded
 ---
-## logistic-baseline
+## Logistic regression
 
-Parent: [heart-disease](../heart-disease.md)
+Parent: [Heart disease prediction](../heart-disease-prediction.md)
 
 Model: `logistic`; validation fraction: 0.2; seeds: 1, 2, 3.
 

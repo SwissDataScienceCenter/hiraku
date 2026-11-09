@@ -31,7 +31,7 @@ from hiraku.workflows.session_history import (
 
 
 def load_record(record_id: str, *, project: Project) -> Record:
-    return project.vault.get(record_id)
+    return project.vault.load(record_id)
 
 
 def _write_workflow(project: Project, source: str) -> None:
@@ -159,10 +159,8 @@ def _approved(response: dict) -> dict:
 
 def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    Record.create(
-        "task",
-        type="task",
-        project=config,
+    config.set_active_record(
+        config.vault.create("task/task", type="task", title="task")
     )
     commit = _commit(tmp_path)
     command = ["python", "train.py"]
@@ -195,14 +193,16 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     )
     launch = _interrupt(result)
     assert launch["step"] == "launch"
-    experiment_id = config.vault.get("dropout").id
+    experiment_id = config.vault.load("task/dropout/dropout").id
     assert (
         f"hiraku run --record {experiment_id} -- python train.py"
         == (launch["data"]["command"])
     )
 
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
-        stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,\n")
+        stream.write(
+            "id,record_id,entrypoint,metric.val\nrun-1,task/dropout/dropout,train,\n"
+        )
     result = resume_current_workflow(
         result["workflow_session_id"], _approved({"event": "launched"}), project=config
     )
@@ -210,7 +210,9 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     assert pending["step"] == "analyze"
     assert pending["data"]["metrics_pending"] is True
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
-        stream.write("id,record_id,entrypoint,metric.val\nrun-1,dropout,train,0.8\n")
+        stream.write(
+            "id,record_id,entrypoint,metric.val\nrun-1,task/dropout/dropout,train,0.8\n"
+        )
     result = resume_current_workflow(
         result["workflow_session_id"],
         _approved({"event": "revise_analysis", "arguments": {"feedback": "Retry"}}),
@@ -232,8 +234,8 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
         project=config,
     )
     assert completed["status"] == "completed"
-    experiment = load_record("dropout", project=config)
-    assert experiment.status == "analyzed"
+    experiment = load_record("task/dropout/dropout", project=config)
+    assert experiment.state == "analyzed"
     assert experiment.verdict == "supports"
     assert "Summarize the run" in completed["result"]
 

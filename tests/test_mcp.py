@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import anyio
 import pytest
@@ -36,7 +36,7 @@ from hiraku.record import Record  # noqa: E402
 
 
 def load_record(record_id: str, *, project: Project) -> Record:
-    return project.vault.get(record_id)
+    return project.vault.load(record_id)
 
 
 def list_records(*, project: Project) -> list[Record]:
@@ -90,47 +90,81 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         }
         await call(
             "record_create",
-            name="root",
+            title="root",
             fields={
                 "type": "task",
-                "status": "new",
+                "state": "new",
             },
+            record_id="root/root",
         )
         await call(
-            "record_create", name="child", parent_id="root", fields={"type": "task"}
+            "record_create",
+            title="child",
+            parent_id="root/root",
+            fields={"type": "task"},
+            record_id="root/child/child",
         )
-        await call("record_update", record_id="child", fields={"status": "done"})
-        assert load_record("child", project=config).status == "done"
+        await call(
+            "record_update", record_id="root/child/child", fields={"state": "done"}
+        )
+        assert load_record("root/child/child", project=config).state == "done"
         for name, args in [
             (
                 "record_create",
-                {"name": "bad", "parent_id": "missing", "fields": {"type": "task"}},
+                {
+                    "record_id": "../bad/bad",
+                    "title": "bad",
+                    "parent_id": "../missing",
+                    "fields": {"type": "task"},
+                },
             ),
-            ("record_create", {"name": "  ", "fields": {"type": "task"}}),
-            ("record_update", {"record_id": "child", "fields": {"id": "renamed"}}),
-            ("record_update", {"record_id": "child", "fields": {"related_to": ["no"]}}),
-            ("record_delete", {"record_id": "root"}),
+            (
+                "record_create",
+                {"record_id": "  ", "title": "  ", "fields": {"type": "task"}},
+            ),
+            (
+                "record_update",
+                {"record_id": "root/child/child", "fields": {"id": "renamed"}},
+            ),
+            (
+                "record_update",
+                {
+                    "record_id": "root/child/child",
+                    "fields": {"related_to": ["../no"]},
+                },
+            ),
+            ("record_delete", {"record_id": "missing"}),
         ]:
             with pytest.raises(ToolError):
                 await server.call_tool(name, args)
-        assert load_record("child", project=config).related_to == []
-        await call("record_delete", record_id="child")
+        assert load_record("root/child/child", project=config).related_to == []
+        await call("record_delete", record_id="root/child/child")
         await call(
             "record_create",
-            name="sources",
+            title="sources",
             fields={"type": "context"},
             markdown="Evidence",
+            record_id="sources/sources",
         )
         with pytest.raises(ToolError):
-            await call("record_create", name="  ", fields={"type": "task"})
-        await call("record_update", record_id="sources", fields={}, markdown="Updated")
-        assert load_record("sources", project=config).markdown == "Updated"
-        await call("record_show", record_id="sources")
+            await call(
+                "record_create", title="  ", fields={"type": "task"}, record_id="  "
+            )
+        await call(
+            "record_update",
+            record_id="sources/sources",
+            fields={},
+            markdown="Updated",
+        )
+        assert load_record("sources/sources", project=config).markdown == "Updated"
+        await call("record_show", record_id="sources/sources")
         await call("record_list")
-        await call("record_show", record_id="root")
+        await call("record_show", record_id="root/root")
         await call("record_list")
-        await call("record_delete", record_id="sources")
-        assert "sources" not in {record.name for record in list_records(project=config)}
+        await call("record_delete", record_id="sources/sources")
+        assert "sources" not in {
+            record.title for record in list_records(project=config)
+        }
 
     asyncio.run(exercise())
 
@@ -140,9 +174,13 @@ def test_record_update_uses_vault_validation(
 ) -> None:
     project = Project.create(tmp_path, install_skill=False)
     record = project.vault.create(
-        "original", type="task", status="new", markdown="Before"
+        "original/original",
+        type="task",
+        state="new",
+        markdown="Before",
+        title="original",
     )
-    other = project.vault.create("other", type="task")
+    other = project.vault.create("other/other", type="task", title="other")
     server = create_server(project)
 
     # Exercise MCP routing without relying on the SDK's worker-thread scheduler.
@@ -160,20 +198,20 @@ def test_record_update_uses_vault_validation(
                 "markdown": "After",
             },
         )
-        assert result.structured_content["name"] == "original"
-        updated = project.vault.get(record.id)
-        assert updated.path == project.records_dir / "original/original.md"
-        assert updated.status == "new"
+        assert result.structured_content["title"] == "original"
+        updated = project.vault.load(record.id)
+        assert updated.id == "original/original"
+        assert updated.state == "new"
         assert updated.markdown == "After"
         assert updated.related_to == [other.id]
 
-        for fields in ({"related_to": ["missing"]}, {"name": "renamed"}):
+        for fields in ({"related_to": ["../missing"]}, {"title": []}):
             with pytest.raises(ToolError):
                 await server.call_tool(
                     "record_update", {"record_id": record.id, "fields": fields}
                 )
-        assert project.vault.get(record.id).name == "original"
-        assert project.vault.get(record.id).related_to == [other.id]
+        assert project.vault.load(record.id).title == "original"
+        assert project.vault.load(record.id).related_to == [other.id]
 
     asyncio.run(exercise())
 
@@ -184,44 +222,26 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
 
     async def exercise() -> None:
         await server.call_tool(
-            "record_create", {"name": "demo", "fields": {"type": "task"}}
+            "record_create",
+            {"record_id": "demo/demo", "title": "demo", "fields": {"type": "task"}},
         )
         await server.call_tool(
             "record_create",
             {
-                "name": "literature",
+                "record_id": "literature/literature",
+                "title": "literature",
                 "fields": {"type": "context"},
                 "markdown": "Curated evidence",
             },
         )
-        literature = load_record("literature", project=config)
-        folder = literature.path.parent
-        (folder / "papers").mkdir()
-        pdf = b"%PDF-1.4\nsource bytes"
-        (folder / "papers" / "paper one.pdf").write_bytes(pdf)
-        outside = tmp_path / "private.txt"
-        outside.write_text("secret")
-        (folder / "outside.txt").symlink_to(outside)
+        literature = load_record("literature/literature", project=config)
         catalog = list(await server.read_resource("hiraku://catalog"))[0]
-        uris = json.loads(catalog.content)
-        assert f"hiraku://sources/{literature.id}/papers%2Fpaper%20one.pdf" in uris
-        assert "hiraku://sources/literature/outside.txt" not in uris
-        content = list(
-            await server.read_resource(
-                "hiraku://sources/literature/papers%2Fpaper%20one.pdf"
-            )
-        )[0]
-        assert content.content == pdf
-        assert content.mime_type == "application/pdf"
-        for path in ["outside.txt", "%2E%2E%2F%2E%2E%2Fprivate.txt", "%2Fetc%2Fpasswd"]:
-            # Encoded traversal may already fail to match the URI template.
-            with pytest.raises(
-                ResourceError, match="Source must be a file|Unknown resource"
-            ):
-                await server.read_resource(f"hiraku://sources/literature/{path}")
+        assert json.loads(catalog.content) == ["demo/demo", "literature/literature"]
+        record_uri = f"hiraku://records/{quote(literature.id, safe='')}"
+        assert list(await server.read_resource(record_uri))[0].content
         for uri in [
-            "hiraku://records/demo",
-            "hiraku://records/literature",
+            "hiraku://records/demo%2Fdemo",
+            "hiraku://records/literature%2Fliterature",
         ]:
             assert list(await server.read_resource(uri))[0].content
         with pytest.raises(ResourceError, match="'missing' not found"):
@@ -229,8 +249,8 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
         prompt = await server.get_prompt(
             "propose_implementation",
             {
-                "record_id": "demo",
-                "related_record_ids": "literature",
+                "record_id": "demo/demo",
+                "related_record_ids": "literature/literature",
             },
         )
         assert "Curated evidence" in prompt.messages[0].content.text
@@ -244,12 +264,13 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
 
     async def exercise() -> None:
         await server.call_tool(
-            "record_create", {"name": "demo", "fields": {"type": "task"}}
+            "record_create",
+            {"record_id": "demo/demo", "title": "demo", "fields": {"type": "task"}},
         )
         result = await server.call_tool(
             "execute",
             {
-                "record_id": "demo",
+                "record_id": "demo/demo",
                 "command": [
                     sys.executable,
                     "-c",
@@ -270,7 +291,7 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
 def test_runs(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     (tmp_path / "runs.csv").write_text(
-        "id,record_id,metric.acc\na,task,0.5\nb,task,0.9\nc,other,0.7\n"
+        "id,record_id,metric.acc\na,task/task,0.5\nb,task/task,0.9\nc,other,0.7\n"
     )
     server = create_server(config)
 
@@ -278,7 +299,8 @@ def test_runs(tmp_path: Path) -> None:
         await server.call_tool(
             "record_create",
             {
-                "name": "task",
+                "record_id": "task/task",
+                "title": "task",
                 "fields": {
                     "type": "task",
                     "metrics": [{"name": "acc", "direction": "maximize"}],
@@ -287,21 +309,22 @@ def test_runs(tmp_path: Path) -> None:
         )
 
         async def ids(**args) -> list[str]:
-            result = await server.call_tool("runs", {"record_id": "task", **args})
+            result = await server.call_tool("runs", {"record_id": "task/task", **args})
             return [run["id"] for run in result.structured_content["result"]]
 
         assert await ids(sort="acc") == ["b", "a"]
         assert await ids(sort="acc", ascending=True, limit=1) == ["a"]
         assert sorted(await ids(all_records=True)) == ["a", "b", "c"]
         with pytest.raises(ToolError, match="requires sort"):
-            await server.call_tool("runs", {"record_id": "task", "ascending": True})
+            await server.call_tool(
+                "runs", {"record_id": "task/task", "ascending": True}
+            )
 
     asyncio.run(exercise())
 
 
 def test_stdio_session(tmp_path: Path) -> None:
-    config = Project.create(tmp_path)
-    source = config.records_dir / "papers"
+    Project.create(tmp_path)
 
     async def exercise() -> None:
         params = StdioServerParameters(
@@ -324,7 +347,7 @@ def test_stdio_session(tmp_path: Path) -> None:
                 )
                 assert (
                     len((await client.list_resource_templates()).resource_templates)
-                    == 4
+                    == 3
                 )
                 assert (await client.list_prompts()).prompts[
                     0
@@ -333,18 +356,17 @@ def test_stdio_session(tmp_path: Path) -> None:
                     await client.call_tool(
                         "record_create",
                         {
-                            "name": "papers",
+                            "record_id": "papers/papers",
+                            "title": "papers",
                             "fields": {"type": "context"},
                             "markdown": "Literature",
                         },
                     )
                 ).is_error
-                source.mkdir(exist_ok=True)
-                pdf = b"%PDF-test"
-                (source / "paper.pdf").write_bytes(pdf)
-                result = await client.read_resource("hiraku://sources/papers/paper.pdf")
-                assert result.contents[0].mime_type == "application/pdf"
-                assert base64.b64decode(result.contents[0].blob) == pdf
+                result = await client.read_resource("hiraku://catalog")
+                assert json.loads(result.contents[0].text) == ["papers/papers"]
+                result = await client.read_resource("hiraku://records/papers%2Fpapers")
+                assert json.loads(result.contents[0].text)["id"] == "papers/papers"
                 error = await client.call_tool("record_show", {"record_id": "missing"})
                 assert error.is_error
                 assert "missing" in error.content[0].text
@@ -563,10 +585,8 @@ def test_workflow_graph_is_available_from_cli_and_mcp(tmp_path, monkeypatch) -> 
 
 def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    Record.create(
-        "task",
-        type="task",
-        project=config,
+    config.set_active_record(
+        config.vault.create("task/task", type="task", title="task")
     )
     started = start_workflow(
         "collaborative",
@@ -576,7 +596,7 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     assert started["status"] == "waiting"
     interrupt = _interrupt(started)
     assert interrupt["step"] == "draft"
-    assert interrupt["data"]["task"] == config.vault.get("task").id
+    assert interrupt["data"]["task"] == config.vault.load("task/task").id
 
     bypass = resume_workflow(
         started["workflow_session_id"], {"event": "finish"}, project=config
@@ -604,10 +624,8 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
 
 def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    Record.create(
-        "task",
-        type="task",
-        project=config,
+    config.set_active_record(
+        config.vault.create("task/task", type="task", title="task")
     )
     started = start_workflow(
         "collaborative",
@@ -668,10 +686,8 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
 
 def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    Record.create(
-        "task",
-        type="task",
-        project=config,
+    config.set_active_record(
+        config.vault.create("task/task", type="task", title="task")
     )
     started = start_workflow(
         "collaborative",
@@ -766,10 +782,8 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
 
 def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    Record.create(
-        "task",
-        type="task",
-        project=config,
+    config.set_active_record(
+        config.vault.create("task/task", type="task", title="task")
     )
     first = start_workflow(
         "collaborative",

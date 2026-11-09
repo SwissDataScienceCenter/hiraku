@@ -85,9 +85,9 @@ def generate(project: Project) -> dict[str, str]:
     }
     project.save()
     root = project.vault.create(
-        "digits",
+        "digit-classification",
         type="task",
-        status="concluded",
+        state="concluded",
         metrics=[
             {"name": "val/log_loss", "direction": "minimize"},
             {"name": "val/accuracy", "direction": "maximize"},
@@ -95,14 +95,16 @@ def generate(project: Project) -> dict[str, str]:
         markdown="# Digits regularization\n\n"
         "Compare weak and strong L2 regularization over three seeds.\n"
         "Measured CPU training results; no statistical significance is claimed.\n",
+        title="Digit classification",
     )
     record_names = {}
     for identifier, alpha in EXPERIMENTS:
         record = project.vault.create(
-            identifier,
+            f"digit-classification/{identifier}",
+            title=f"{identifier.split('-')[0].capitalize()} L2 regularization",
             parent_id=root.id,
             type="hypothesis",
-            status="concluded",
+            state="concluded",
             markdown=f"## {identifier}\n\nL2 alpha: {alpha}; seeds: 1, 2, 3; "
             f"epochs: {EPOCHS}; hidden units: 64; validation fraction: 0.25.\n",
         )

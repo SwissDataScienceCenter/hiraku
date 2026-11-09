@@ -23,37 +23,76 @@ def test_root_help_lists_primary_commands() -> None:
         assert command in result.output
 
 
-def test_record_create_adds_link_to_parent(tmp_path: Path, monkeypatch) -> None:
+def test_record_list_shows_research_state(tmp_path: Path, monkeypatch) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    project.vault.create(
+        "experiment", type="experiment", status="draft", state="implemented"
+    )
+    monkeypatch.chdir(tmp_path)
+    result = invoke("record", "list")
+    assert result.exit_code == 0
+    assert "state" in result.output
+    assert "implemented" in result.output
+    data = json.loads(invoke("record", "list", "--json").output)
+    assert data[0]["status"] == "draft"
+    assert data[0]["state"] == "implemented"
+
+
+def test_record_create_persists_parent_without_changing_body(
+    tmp_path: Path, monkeypatch
+) -> None:
     project = Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     body = tmp_path / "body.md"
     body.write_text("## Hypothesis\n\nTest it.\n", encoding="utf-8")
-    assert invoke("record", "create", "Parent [A]", "--type", "task").exit_code == 0
+    assert (
+        invoke(
+            "record",
+            "create",
+            "Parent -A/Parent -A",
+            "--title",
+            "Parent [A]",
+            "--type",
+            "task",
+        ).exit_code
+        == 0
+    )
 
     result = invoke(
         "record",
         "create",
+        "Parent -A/child/child",
+        "--title",
         "child",
         "--type",
         "task",
         "--parent",
-        "Parent [A]",
+        "Parent -A/Parent -A",
         "--markdown-file",
         str(body),
     )
 
     assert result.exit_code == 0, result.output
-    child = project.vault.get("child")
-    assert child.markdown == (
-        "## Hypothesis\n\nTest it.\n\nParent: [Parent \\[A\\]](../Parent%20-A.md)"
-    )
+    child = project.vault.load("Parent -A/child/child")
+    assert child.markdown == "## Hypothesis\n\nTest it."
+    assert child.parent_id == "Parent -A/Parent -A"
     assert (
         invoke(
-            "record", "create", "empty", "--type", "task", "--parent", "child"
+            "record",
+            "create",
+            "Parent -A/child/empty/empty",
+            "--title",
+            "empty",
+            "--type",
+            "task",
+            "--parent",
+            "Parent -A/child/child",
         ).exit_code
         == 0
     )
-    assert project.vault.get("empty").markdown == "Parent: [child](../child.md)"
+    empty = project.vault.load("Parent -A/child/empty/empty")
+    assert empty.markdown == ""
+    assert empty.parent_id == child.id
 
 
 def test_unknown_command_uses_click_error() -> None:
@@ -154,11 +193,18 @@ def test_init_rejects_example_options_and_example_create_requires_example(
 def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
     Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    assert invoke("record", "create", "root", "--type", "task").exit_code == 0
-    (tmp_path / "runs.csv").write_text("id,record_id,duration\na,root,4.25\nb,root,\n")
+    assert (
+        invoke(
+            "record", "create", "root/root", "--title", "root", "--type", "task"
+        ).exit_code
+        == 0
+    )
+    (tmp_path / "runs.csv").write_text(
+        "id,record_id,duration\na,root/root,4.25\nb,root/root,\n"
+    )
 
-    rows = json.loads(invoke("runs", "--record", "root", "--json").output)
-    table = invoke("runs", "--record", "root").output
+    rows = json.loads(invoke("runs", "--record", "root/root", "--json").output)
+    table = invoke("runs", "--record", "root/root").output
 
     assert [row["duration"] for row in rows] == [4.25, None]
     assert all(
@@ -170,13 +216,13 @@ def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
     assert "4.25" in table
 
 
-def test_runs_json_keeps_legacy_fields_only_in_raw(tmp_path: Path, monkeypatch) -> None:
+def test_runs_json_keeps_extra_fields_in_raw(tmp_path: Path, monkeypatch) -> None:
     project = Project.create(tmp_path, install_skill=False)
-    project.vault.create("root", id="root", type="task")
+    project.vault.create("root/root", type="task", title="root")
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "runs.csv").write_text("id,record_id,entrypoint\na,root,train\n")
+    (tmp_path / "runs.csv").write_text("id,record_id,entrypoint\na,root/root,train\n")
 
-    result = invoke("runs", "--record", "root", "--json")
+    result = invoke("runs", "--record", "root/root", "--json")
 
     assert result.exit_code == 0
     run = json.loads(result.output)[0]
@@ -194,10 +240,23 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
         cwd=tmp_path,
         check=True,
     )
-    assert invoke("record", "create", "root", "--type", "task").exit_code == 0
     assert (
         invoke(
-            "record", "create", "child", "--type", "task", "--parent", "root"
+            "record", "create", "root/root", "--title", "root", "--type", "task"
+        ).exit_code
+        == 0
+    )
+    assert (
+        invoke(
+            "record",
+            "create",
+            "root/child/child",
+            "--title",
+            "child",
+            "--type",
+            "task",
+            "--parent",
+            "root/root",
         ).exit_code
         == 0
     )
@@ -206,7 +265,7 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
     result = invoke(
         "run",
         "--record",
-        "child",
+        "root/child/child",
         "--",
         sys.executable,
         "-c",
@@ -215,16 +274,18 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert (tmp_path / "ran.txt").read_text() == "7"
     (tmp_path / "runs.csv").write_text(
-        "id,record_id,metric.loss\na,root,0.5\nb,child,0.2\nc,,0.1\n"
+        "id,record_id,metric.loss\na,root/root,0.5\nb,root/child/child,0.2\nc,,0.1\n"
     )
-    direct = json.loads(invoke("runs", "--record", "root", "--json").output)
-    all_runs = json.loads(invoke("runs", "--record", "root", "--all", "--json").output)
+    direct = json.loads(invoke("runs", "--record", "root/root", "--json").output)
+    all_runs = json.loads(
+        invoke("runs", "--record", "root/root", "--all", "--json").output
+    )
     assert {run["id"] for run in direct} == {"a"}
     assert {run["id"] for run in all_runs} == {"a", "b"}
     sorted_table = invoke(
         "runs",
         "--record",
-        "root",
+        "root/root",
         "--all",
         "--metrics",
         "loss",
@@ -241,23 +302,42 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
         and cells[0] != "id"
     ]
     assert [row[0] for row in data_rows] == ["b", "a"]
-    assert invoke("runs", "list", "--record", "root").exit_code != 0
+    assert invoke("runs", "list", "--record", "root/root").exit_code != 0
 
 
 def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> None:
     Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "runs.csv").write_text("id,record_id\na,root\nb,child\nc,\n")
+    (tmp_path / "runs.csv").write_text(
+        "id,record_id\na,root/root\nb,root/child/child\nc,\n"
+    )
     no_active = invoke("runs", "--json")
     assert no_active.exit_code != 0
     assert "No active record" in no_active.output
     assert (
-        invoke("record", "create", "root", "--type", "task", "--no-activate").exit_code
+        invoke(
+            "record",
+            "create",
+            "root/root",
+            "--title",
+            "root",
+            "--type",
+            "task",
+            "--no-activate",
+        ).exit_code
         == 0
     )
     assert (
         invoke(
-            "record", "create", "child", "--type", "task", "--parent", "root"
+            "record",
+            "create",
+            "root/child/child",
+            "--title",
+            "child",
+            "--type",
+            "task",
+            "--parent",
+            "root/root",
         ).exit_code
         == 0
     )
@@ -269,39 +349,51 @@ def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> Non
 
     assert ids() == {"b"}
     assert ids("--all") == {"a", "b"}
-    assert ids("--record", "root") == {"a"}
-    assert ids("--record", "root", "--all") == {"a", "b"}
+    assert ids("--record", "root/root") == {"a"}
+    assert ids("--record", "root/root", "--all") == {"a", "b"}
 
 
-def test_record_update_checks_relationships(tmp_path: Path, monkeypatch) -> None:
+def test_record_update_allows_unfinished_graph_relationships(
+    tmp_path: Path, monkeypatch
+) -> None:
     project = Project.create(tmp_path, install_skill=False)
-    parent = project.vault.create("parent", type="task")
-    child = project.vault.create("child", type="task", parent_id=parent.id)
+    parent = project.vault.create("parent/parent", type="task", title="parent")
+    child = project.vault.create(
+        f"{parent.id.rpartition('/')[0]}/child/child",
+        type="task",
+        parent_id=parent.id,
+        title="child",
+    )
     monkeypatch.chdir(tmp_path)
 
     cycle = invoke("record", "update", parent.id, "--set", f"parent_id={child.id}")
     removed_option = invoke("record", "update", child.id, "--root")
     missing = invoke("record", "update", child.id, "--related-to", "missing")
 
-    assert cycle.exit_code != 0
+    assert cycle.exit_code == 0
     assert removed_option.exit_code != 0
-    assert missing.exit_code != 0
-    assert project.vault.get(parent.id).parent_id is None
+    assert missing.exit_code == 0
+    assert project.vault.load(parent.id).parent_id == child.id
 
 
 def test_record_update_preserves_child_parent(tmp_path: Path, monkeypatch) -> None:
     project = Project.create(tmp_path, install_skill=False)
-    parent = project.vault.create("parent", type="task")
-    child = project.vault.create("child", type="record", parent_id=parent.id)
+    parent = project.vault.create("parent/parent", type="task", title="parent")
+    child = project.vault.create(
+        f"{parent.id.rpartition('/')[0]}/child/child",
+        type="record",
+        parent_id=parent.id,
+        title="child",
+    )
     monkeypatch.chdir(tmp_path)
 
     result = invoke("record", "update", child.id, "--set", "count=1")
 
     assert result.exit_code == 0, result.output
-    updated = project.vault.get(child.id)
+    updated = project.vault.load(child.id)
     assert updated.parent_id == parent.id
     assert updated.count == 1
-    assert project.vault.get(child.id).related_to == []
+    assert project.vault.load(child.id).related_to == []
 
 
 def test_results_flag_requires_example(tmp_path: Path):

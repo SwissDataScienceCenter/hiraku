@@ -48,7 +48,9 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
         [
             "record",
             "create",
-            "my-task",
+            "binary-classification",
+            "--title",
+            "Binary classification",
             "--type",
             "task",
             "--set",
@@ -60,11 +62,13 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
         [
             "record",
             "create",
-            "baseline",
+            "binary-classification/threshold-baseline",
+            "--title",
+            "Threshold baseline",
             "--type",
             "experiment",
             "--parent",
-            "my-task",
+            "binary-classification",
             "--commit",
             "HEAD",
         ],
@@ -75,11 +79,18 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
 
     invoke(
         runner,
-        ["run", "--record", "baseline", "--", sys.executable, "evaluate.py"],
+        [
+            "run",
+            "--record",
+            "binary-classification/threshold-baseline",
+            "--",
+            sys.executable,
+            "evaluate.py",
+        ],
     )
 
     config = Project.discover(project)
-    record = config.vault.get("baseline")
+    record = config.vault.load("binary-classification/threshold-baseline")
     runs = (
         TrackingBackendFactory(config)
         .create(config.tracking_backend)
@@ -111,7 +122,9 @@ def test_minimal_documented_sequence(tmp_path: Path, monkeypatch) -> None:
         [
             "record",
             "create",
-            "my-task",
+            "binary-classification",
+            "--title",
+            "Binary classification",
             "--type",
             "task",
             "--set",
@@ -125,9 +138,11 @@ def test_minimal_documented_sequence(tmp_path: Path, monkeypatch) -> None:
         [
             "record",
             "create",
-            "baseline",
+            "binary-classification/threshold-baseline",
+            "--title",
+            "Threshold baseline",
             "--parent",
-            "my-task",
+            "binary-classification",
             "--type",
             "experiment",
             "--set",
@@ -142,7 +157,7 @@ def test_minimal_documented_sequence(tmp_path: Path, monkeypatch) -> None:
             [
                 "run",
                 "--record",
-                "baseline",
+                "binary-classification/threshold-baseline",
                 "--",
                 sys.executable,
                 "evaluate.py",
@@ -151,7 +166,12 @@ def test_minimal_documented_sequence(tmp_path: Path, monkeypatch) -> None:
             ],
         )
     assert "baseline" in invoke(runner, ["record", "list"]).output
-    runs = json.loads(invoke(runner, ["runs", "--record", "baseline", "--json"]).output)
+    runs = json.loads(
+        invoke(
+            runner,
+            ["runs", "--record", "binary-classification/threshold-baseline", "--json"],
+        ).output
+    )
     assert len(runs) == 2
     assert {str(run["params"]["seed"]) for run in runs} == {"0", "1"}
     assert {run["commit"] for run in runs} == {commit}

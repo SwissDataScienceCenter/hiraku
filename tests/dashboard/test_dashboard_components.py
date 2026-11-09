@@ -38,18 +38,21 @@ def test_markdown_view_handles_empty_bodies_without_hiding_metadata(body: str) -
 
     assert "No notes yet." in content
     assert "Front matter" not in content
-    assert "id: context" in content
-    assert content.index("id: context") < content.index("No notes yet.")
+    assert "type: context" in content
+    assert content.index("type: context") < content.index("No notes yet.")
 
 
 def test_markdown_front_matter_is_displayed_as_text() -> None:
     content = hc.markdown_view(
         Record(
-            id="notes", type="record", markdown="Notes", title="<script>bad()</script>"
+            id="notes",
+            type="record",
+            markdown="Notes",
+            title="<script>bad()</script>",
         )
     ).text
 
-    assert "id: notes" in content
+    assert "type: record" in content
     assert "bad()" in content
     assert "<script>bad()</script>" not in content
 
@@ -69,9 +72,9 @@ def test_markdown_view_accepts_record() -> None:
     assert "Findings" in content
     assert "<strong>Useful</strong>" in content
     assert "Front matter" not in content
-    assert "id: notes" in content
+    assert "type: record" in content
     assert "custom: metadata" in content
-    assert content.index("id: notes") < content.index("Findings")
+    assert content.index("type: record") < content.index("Findings")
     assert record.model_dump() == original
 
 
@@ -79,7 +82,7 @@ def test_markdown_view_handles_missing_or_empty_records() -> None:
     assert "No record selected." in hc.markdown_view(None).text
     empty = hc.markdown_view(Record(id="empty", type="record")).text
     assert "This record has no Markdown." in empty
-    assert "id: empty" in empty
+    assert "type: record" in empty
 
 
 def test_run_table_retains_initial_record_and_selection_keys() -> None:
@@ -111,7 +114,7 @@ def test_record_tree_hierarchy_selection_and_callbacks() -> None:
             id="child",
             parent_id="root",
             type="hypothesis",
-            status="draft",
+            state="drafted",
             decision="deferred",
         ),
         Record(id="root", type="task"),
@@ -122,7 +125,7 @@ def test_record_tree_hierarchy_selection_and_callbacks() -> None:
     assert tree.text.count("<ul>") == 2
     assert tree.text.count('aria-current="true"') == 1
     assert "hypothesis" in tree.text
-    assert "draft" in tree.text
+    assert "drafted" in tree.text
     assert "deferred" not in tree.text
     assert "<style>" not in tree.text
     assert "justify-content" not in tree.text
@@ -138,7 +141,9 @@ def test_record_tree_handles_empty_and_deep_hierarchies() -> None:
     assert buttons == {}
     records = [
         Record(
-            id=f"r{index}", type="record", parent_id=f"r{index - 1}" if index else None
+            id=f"r{index}",
+            type="record",
+            parent_id=f"r{index - 1}" if index else None,
         )
         for index in range(1050)
     ]
@@ -149,7 +154,9 @@ def test_record_tree_handles_empty_and_deep_hierarchies() -> None:
 
 def test_record_tree_escapes_badges() -> None:
     tree, _buttons = hc.record_tree(
-        [Record(id="notes", type="<script>bad()</script>")], None, lambda _: None
+        [Record(id="notes", type="<script>bad()</script>")],
+        None,
+        lambda _: None,
     )
     assert "<script>bad()</script>" not in tree.text
     assert "bad()" in tree.text

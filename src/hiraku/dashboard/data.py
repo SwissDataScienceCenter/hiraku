@@ -41,7 +41,7 @@ RECORD_COLUMNS = (
     "parent",
     "record_path",
     "type",
-    "status",
+    "state",
     "decision",
     "commit",
     "metrics",
@@ -107,7 +107,8 @@ def record_paths(records: Iterable[Record]) -> dict[str, str]:
             current = by_id[current].parent_id
         prefix = paths.get(current)
         for identifier in reversed(chain):
-            prefix = identifier if prefix is None else f"{prefix}/{identifier}"
+            name = by_id[identifier].title or identifier.rsplit("/", 1)[-1]
+            prefix = name if prefix is None else f"{prefix}/{name}"
             paths[identifier] = prefix
     return paths
 
@@ -153,7 +154,7 @@ def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
             "parent": record.parent_id,
             "record_path": paths[record.id],
             "type": record.type,
-            "status": record.status,
+            "state": record.state,
             "decision": record.decision,
             "commit": record.commit,
             "metrics": [

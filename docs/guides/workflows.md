@@ -114,11 +114,11 @@ Then define a normal LangGraph graph in the sibling `workflow.py`:
 from pathlib import Path
 from typing import Any, TypedDict
 
+import frontmatter
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict
 
-from hiraku.record import Record
 from hiraku.project import Project
 from hiraku.markdown import Markdown, render
 
@@ -140,7 +140,8 @@ def input_schema() -> dict[str, Any]:
 
 
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project):
-    _, body = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
+    path = Path(__file__).with_name("workflow.md")
+    _, body = frontmatter.parse(path.read_text(encoding="utf-8"))
     prompt = Markdown(body)
 
     def greet(state: State) -> dict[str, str]:

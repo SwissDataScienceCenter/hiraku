@@ -39,7 +39,7 @@ Hiraku is a single Python package under `src/hiraku/`.
 Core responsibilities:
 
 - **`Project`** (`project.py`) — Project discovery, settings, active-record state, and managed paths.
-- **`Record` and `Vault`** (`record.py`) — Research records, hierarchy, Markdown/YAML persistence, and metric inheritance.
+- **`Record` and `Vault`** (`record.py`) — Local document models and filesystem-backed bundle operations.
 - **`Run`** (`tracking/base.py`) — Normalized representation of a tracked execution.
 - **Execution** (`execution.py`) — Record resolution, command launching, and tracking attribution.
 - **Tracking** (`tracking/`) — Backend adapters implementing `TrackingBackend`; the factory validates settings and creates adapters.
@@ -50,10 +50,11 @@ Respect these boundaries:
 
 - Keep persistence and validation in their owning modules, not in CLI or MCP handlers.
 - Methods requiring project context accept `project: Project`. Use `config` only for settings data.
-- `Vault.resolve()` returns effective record values and their sources without modifying persisted records; only metric declarations inherit.
-- `Vault.save()` validates one record and its file without scanning the collection. Use vault-level validation for cross-record integrity.
+- `Record.id` is its OKF bundle-relative path without `.md`, never persisted in front matter. `Record` retains only document data; `Vault` owns the root and all filesystem access.
+- Record fields are local. Consumers needing ancestor information must explicitly traverse declared relationships.
+- `Vault.save()` validates one record and its destination without scanning the collection. Replacing a file requires `overwrite=True`. Use explicit vault validation for cross-record integrity; ordinary I/O tolerates incomplete or cyclic graphs.
 - Tracking adapters return normalized `Run` objects.
-- Tracking backend configuration and the active record are project-wide. Set the active record through `Project.set_active_record()` so its name and ID stay in sync.
+- Tracking backend configuration and the active record are project-wide. Set the active record through `Project.set_active_record()` to validate and persist `active_record_id`.
 - Records use filesystem-friendly names for Markdown files in the records directory; reject filename collisions and preserve discovery of existing nested records.
 - Import workflow APIs from their defining modules. Do not add eager imports or re-exports to `workflows/__init__.py`.
 - Keep MCP SDK imports in `mcp.py`.

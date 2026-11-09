@@ -155,14 +155,14 @@ def popen(monkeypatch: pytest.MonkeyPatch) -> dict:
 def test_serve_dashboard_runs_a_copy_outside_the_project(
     project: Project, popen: dict
 ) -> None:
-    assert launcher.serve_dashboard(project, record_id="a", port=9000) == 0
+    assert launcher.serve_dashboard(project, record_id="root/a/a", port=9000) == 0
 
     assert popen["notebook"].parent == popen["cwd"]
     assert not popen["cwd"].is_relative_to(project.root)
     assert popen["copied"].startswith("# /// script")
     assert popen["view"]
     assert popen["env"]["HIRAKU_PROJECT_ROOT"] == str(project.root)
-    assert popen["env"]["HIRAKU_DASHBOARD_RECORD"] == "a"
+    assert popen["env"]["HIRAKU_DASHBOARD_RECORD"] == "root/a/a"
     assert "9000" in popen["command"]
     assert "run" in popen["command"]
 

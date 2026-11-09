@@ -71,12 +71,13 @@ cites the run ID, commit, val_bpb, and peak VRAM. If a successful baseline is
 already recorded, do not run it again.
 
 ```bash
-hiraku record create baseline --parent <root-id> --type experiment \
+hiraku record create <root-id>/baseline \
+  --title "Training baseline" --parent <root-id> --type experiment \
   --set 'summary=Unmodified upstream baseline' \
   --set 'hypothesis=The upstream implementation establishes the reference val_bpb' \
   --commit HEAD
-hiraku run --record baseline -- uv run python train.py
-hiraku runs --record baseline --json
+hiraku run --record <root-id>/baseline -- uv run python train.py
+hiraku runs --record <root-id>/baseline --json
 ```
 
 ## Logging results

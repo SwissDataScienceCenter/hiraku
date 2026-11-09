@@ -58,7 +58,9 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         [
             "record",
             "create",
-            "digits",
+            "digit-classification",
+            "--title",
+            "Digit classification",
             "--type",
             "task",
             "--set",
@@ -71,24 +73,29 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             [
                 "record",
                 "create",
-                record_id,
+                f"digit-classification/{record_id}",
+                "--title",
+                f"{record_id.split('-')[0].capitalize()} L2 regularization",
                 "--type",
                 "experiment",
                 "--parent",
-                "digits",
+                "digit-classification",
                 "--commit",
                 "HEAD",
             ],
         )
     project_config = Project.discover(project)
-    ids_by_name = {record.name: record.id for record in project_config.vault.list()}
+    ids_by_name = {
+        record.id.rsplit("/", 1)[-1]: record.id
+        for record in project_config.vault.list()
+    }
     for record_id, alpha in (("weak-l2", 0.0001), ("strong-l2", 1.0)):
         invoke(
             runner,
             [
                 "run",
                 "--record",
-                record_id,
+                ids_by_name[record_id],
                 "--",
                 sys.executable,
                 "train.py",
@@ -110,7 +117,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             [
                 "runs",
                 "--record",
-                "digits",
+                "digit-classification",
                 "--all",
                 "--sort",
                 "val/log_loss",
@@ -161,7 +168,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
             [
                 "runs",
                 "--record",
-                "strong-l2",
+                "digit-classification/strong-l2",
                 "--json",
             ],
         ).output

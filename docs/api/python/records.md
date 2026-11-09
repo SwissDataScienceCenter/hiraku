@@ -4,34 +4,43 @@
 
 ::: hiraku.record.Record
 
-`Record` is Hiraku's only research entity. Tasks, experiments, contexts, and
-literature share the same model and use `type` to describe their role. A record
-stores validated YAML front matter and a Markdown body.
-New records require a nonblank `type`. The names `index` and `log` are
-reserved for OKF documents and cannot be used as record filenames.
-Creating a child record appends a relative Markdown link to its parent. This
-link is navigational; the directory structure determines the hierarchy, and
-links are not automatically updated when directories are moved.
-Use `record.metadata` to inspect a serialized snapshot of its metadata and
-`record.markdown` to access its body. Update metadata through the record's fields;
-changing the returned dictionary does not change the record.
-Use `Record.load(path)` to load a record directly from a Markdown file. The
-loaded record retains its source path; saving it through a vault requires that
-the path is inside that vault and preserves the usual identity checks.
+`Record` is document data with a required OKF `id`: its bundle-relative path without the
+`.md` suffix. It has no vault root, absolute filename, loading methods, or
+persistence history. Field validation is local: required nonblank `type`,
+metadata shapes, reference syntax, commit hashes, and metric declarations.
+Unknown metadata is preserved. `title` is the optional OKF display title.
 
-Records receive a UUID when created. Existing readable IDs remain supported.
-Their Markdown body and validated front matter are stored together in the
-project's records directory, using a filesystem-friendly name such as
-`hiraku/records/digits.md`. Names that resolve to the same filename collide.
-Records already stored in one-level subdirectories remain discoverable.
-Choose a record's parent when creating it; its parent cannot be changed after
-the record is saved.
+`status` is restricted to the OKF lifecycle values `draft`, `stable` (the
+default), and `deprecated`. `state` is an optional string for workflow-defined
+research progress, such as `drafted`, `implemented`, or `analyzed`. Neither is
+inherited. Existing research progress values such as `status: concluded` must
+be moved to `state: concluded` before loading the document.
+
+`record.metadata` is a serialized snapshot of front matter. It excludes `id`
+and the Markdown body. Loading derives the ID from the filename; it is never
+persisted in front matter. Moving a document changes its ID.
+`parent_id` and `related_to` are ordinary persisted
+relationships to other concept paths. Placement does not determine parentage.
+All fields, including metrics, are local. There is no inheritance or effective
+value resolution in `Record` or `Vault`.
+
+```python
+from pathlib import Path
+from hiraku.record import Record, Vault
+
+vault = Vault(root=Path("hiraku/records"))
+record = Record(id="experiments/baseline", type="experiment", title="Baseline")
+vault.save(record)
+record = vault.load("experiments/baseline")
+record.markdown = "Results from this experiment."
+vault.save(record, overwrite=True)
+```
 
 ## `Vault`
 
 ::: hiraku.record.Vault
 
-`Vault` is a filesystem-backed collection that manages records.
+`Vault` owns bundle operations, validation and filesystem access and persistence.
 
 ## `Metric`
 

@@ -122,7 +122,9 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         [
             "record",
             "create",
-            "iris",
+            "iris-classification",
+            "--title",
+            "Iris classification",
             "--type",
             "task",
             "--set",
@@ -136,7 +138,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     config = Project.discover(project)
-    root = config.vault.get("iris")
+    root = config.vault.load("iris-classification")
     assert config.tracking_backend == {"type": "wandb", "project": "iris-wandb"}
     assert "tracking_backend" not in root.metadata
 
@@ -145,11 +147,13 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         [
             "record",
             "create",
-            "logistic",
+            "iris-classification/logistic-regression",
+            "--title",
+            "Logistic regression",
             "--type",
             "experiment",
             "--parent",
-            "iris",
+            "iris-classification",
             "--set",
             "summary=Logistic regression baseline",
             "--set",
@@ -158,14 +162,14 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "HEAD",
         ],
     )
-    record = config.vault.get("logistic")
+    record = config.vault.load("iris-classification/logistic-regression")
     assert record.commit == source_commit
     invoke(
         runner,
         [
             "run",
             "--record",
-            "logistic",
+            "iris-classification/logistic-regression",
             "--",
             sys.executable,
             "train.py",
@@ -178,7 +182,9 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     rows = json.loads(
-        invoke(runner, ["runs", "--record", "iris", "--all", "--json"]).output
+        invoke(
+            runner, ["runs", "--record", "iris-classification", "--all", "--json"]
+        ).output
     )
     assert len(rows) == 1
     row = rows[0]
@@ -203,7 +209,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     filtered = json.loads(
         invoke(
             runner,
-            ["runs", "--record", "logistic", "--json"],
+            ["runs", "--record", "iris-classification/logistic-regression", "--json"],
         ).output
     )
     assert filtered == rows

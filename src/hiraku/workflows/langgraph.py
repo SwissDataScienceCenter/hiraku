@@ -13,13 +13,13 @@ from types import ModuleType
 from typing import Any
 from uuid import uuid4
 
+import frontmatter
 from filelock import FileLock
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
 from ..errors import ValidationError, WorkflowError
 from ..project import Project
-from ..record import Record
 from .session_history import (
     prepare_checkpoint_storage,
     record_event,
@@ -48,7 +48,7 @@ def workflow_details(*, project: Project) -> list[dict[str, Any]]:
     details = []
     for workflow_id in workflow_ids(project=project):
         path = project.workflows_dir / workflow_id / "workflow.md"
-        fields, _ = Record._parse_markdown(path)
+        fields, _ = frontmatter.parse(path.read_text(encoding="utf-8"))
         detail: dict[str, Any] = {
             "id": workflow_id,
             "description": fields.get("description"),

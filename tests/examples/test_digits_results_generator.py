@@ -41,8 +41,14 @@ def test_digits_refuses_existing_output_and_partial_export(
 def test_bundled_digits_database_is_portable(generator, tmp_path):
     Project.create(tmp_path, example="digits-mlflow", results=True, install_skill=False)
     project = Project.discover(tmp_path)
-    ids_by_name = {record.name: record.id for record in project.vault.list()}
-    assert project.active_record == "weak-l2"
+    assert {record.id: record.title for record in project.vault.list()} == {
+        "digit-classification": "Digit classification",
+        "digit-classification/weak-l2": "Weak L2 regularization",
+        "digit-classification/strong-l2": "Strong L2 regularization",
+    }
+    ids_by_name = {
+        record.id.rsplit("/", 1)[-1]: record.id for record in project.vault.list()
+    }
     assert project.active_record_id == ids_by_name["weak-l2"]
     generator["validate_database"](tmp_path / "mlflow.db", ids_by_name)
     assert not (tmp_path / "generate_results.py").exists()
@@ -83,7 +89,10 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         "hiraku.yml",
         "mlflow.db",
         *(
-            record.path.relative_to(output).as_posix()
+            Project.discover(output)
+            .vault.file_path(record.id)
+            .relative_to(output)
+            .as_posix()
             for record in Project.discover(output).vault.list()
         ),
     }
@@ -94,10 +103,12 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
 
     shutil.copytree(output, config.root, dirs_exist_ok=True)
     config = Project.discover(config.root)
-    weak = config.vault.get("weak-l2")
+    weak = config.vault.load("digit-classification/weak-l2")
     backend = TrackingBackendFactory(config).create(config.tracking_backend)
     runs = backend.list_runs()
-    ids_by_name = {record.name: record.id for record in config.vault.list()}
+    ids_by_name = {
+        record.id.rsplit("/", 1)[-1]: record.id for record in config.vault.list()
+    }
     assert Counter(r.record_id for r in runs) == {
         ids_by_name["weak-l2"]: 3,
         ids_by_name["strong-l2"]: 3,

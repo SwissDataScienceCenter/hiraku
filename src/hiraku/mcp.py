@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
-import mimetypes
 from typing import Annotated, Any, Literal
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 from mcp.server.mcpserver import Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import (
@@ -25,7 +24,7 @@ from pydantic_core import to_jsonable_python
 from .errors import HirakuError, ValidationError
 from .execution import execute_command
 from .project import Project
-from .record import Record
+from .record import resolve_metrics
 from .tracking import TrackingBackendFactory
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
@@ -78,39 +77,7 @@ class ProjectMCP(MCPServer):
             if isinstance(exc.__cause__, HirakuError):
                 raise ResourceError(str(exc.__cause__)) from exc.__cause__
             raise
-        # Source templates contain many file types; MIME depends on the URI.
-        if str(uri).startswith("hiraku://sources/"):
-            mime = mimetypes.guess_type(unquote(str(uri)))[0]
-            for item in contents:
-                item.mime_type = mime or "application/octet-stream"
         return contents
-
-
-def _data(record: Record) -> dict[str, Any]:
-    return record.model_dump(mode="json", exclude={"path"})
-
-
-def _update(
-    project: Project, record: Record, fields: dict[str, Any], markdown: str | None
-) -> Record:
-    protected = {"id", "path", "markdown", "parent_id"}
-    invalid = protected.intersection(fields)
-    if invalid:
-        raise ValidationError(f"Cannot update fields: {sorted(invalid)}")
-    values = {
-        **record.model_dump(exclude_unset=True, exclude={"path"}),
-        **fields,
-    }
-    if markdown is not None:
-        values["markdown"] = markdown
-    updated = type(record).model_validate(values)
-    updated._path = record.path
-    updated._persisted_id = record._persisted_id
-    updated._parent_path = record._parent_path
-    if "related_to" in fields:
-        project.vault.validate_relationships(updated)
-    project.vault.save(updated)
-    return updated
 
 
 def create_server(project: Project | None = None) -> ProjectMCP:
@@ -138,7 +105,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
 
     Tools: project_info, record_list, record_show, record_create, record_update,
     record_delete, execute, and runs. Also registers the record catalog and
-    source resources, and the propose_implementation prompt.
+    record resources, and the propose_implementation prompt.
     """
 
     @server.tool(
@@ -155,21 +122,15 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     )
     def record_list() -> list[dict[str, Any]]:
         """List research records in the selected project."""
-        return [_data(item) for item in selected.vault.list()]
+        return [item.model_dump(mode="json") for item in selected.vault.list()]
 
     @server.tool(
         title="Show research record",
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     def record_show(record_id: str) -> dict[str, Any]:
-        """Read a research record and its effective inherited fields."""
-        record = selected.vault.get(record_id)
-        resolved = selected.vault.resolve(record.id)
-        return {
-            **_data(record),
-            "resolved": resolved["values"],
-            "sources": resolved["sources"],
-        }
+        """Read the document's local fields and Markdown."""
+        return selected.vault.load(record_id).model_dump(mode="json")
 
     @server.tool(
         title="Create research record",
@@ -181,7 +142,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         ),
     )
     def record_create(
-        name: str,
+        record_id: str,
+        title: str | None = None,
         parent_id: str | None = None,
         related_to: list[str] | None = None,
         markdown: str = "",
@@ -191,9 +153,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         """Create a research record, optionally activating it like the CLI."""
         extras = fields or {}
         reserved = {
+            "title",
             "id",
-            "name",
-            "path",
             "parent_id",
             "related_to",
             "markdown",
@@ -203,8 +164,10 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         }
         if reserved.intersection(extras):
             raise ValidationError("Use named arguments for identity and relationships")
+        if title is not None:
+            extras = {**extras, "title": title}
         record = selected.vault.create(
-            name,
+            record_id,
             parent_id=parent_id,
             markdown=markdown,
             related_to=related_to or [],
@@ -212,7 +175,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         )
         if activate:
             selected.set_active_record(record)
-        return _data(record)
+        return record.model_dump(mode="json")
 
     @server.tool(
         title="Update research record",
@@ -229,7 +192,9 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         markdown: str | None = None,
     ) -> dict[str, Any]:
         """Merge record fields and optionally replace Markdown; null clears a field."""
-        return _data(_update(selected, selected.vault.get(record_id), fields, markdown))
+        return selected.vault.update(
+            selected.vault.load(record_id), fields, markdown=markdown
+        ).model_dump(mode="json")
 
     @server.tool(
         title="Delete research record",
@@ -241,8 +206,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         ),
     )
     def record_delete(record_id: str) -> dict[str, str]:
-        """Delete a record using Hiraku's relationship checks."""
-        selected.vault.delete(selected.vault.get(record_id).id)
+        """Delete the document at the given OKF ID."""
+        selected.vault.delete(record_id)
         return {"deleted": record_id}
 
     @server.tool(
@@ -292,12 +257,12 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         """
         if ascending is not None and sort is None:
             raise ValidationError("A sort direction requires sort")
-        record = selected.vault.get(record_id)
+        record = selected.vault.load(record_id)
         query: dict[str, Any] = {"limit": limit} if limit is not None else {}
         if sort is not None:
-            declarations = (
-                selected.vault.resolve(record.id)["values"].get("metrics") or []
-            )
+            declarations = [
+                item.model_dump() for item in resolve_metrics(record, selected.vault)
+            ]
             directions = {item["name"]: item["direction"] for item in declarations}
             query["sort"] = sort
             query["ascending"] = (
@@ -315,46 +280,19 @@ def register_tools(server: MCPServer, selected: Project) -> None:
 
     @server.resource("hiraku://catalog", mime_type="application/json")
     def catalog() -> str:
-        """Discover current records and attached source files."""
-        records = selected.vault.list()
-        uris = [f"hiraku://records/{item.id}" for item in records]
-        for record in records:
-            root = (
-                record.path.parent
-                if record.path.parent != selected.records_dir
-                else selected.records_dir / record.path.stem
-            ).resolve()
-            for path in sorted(root.rglob("*")):
-                if path.is_file() and path.resolve().is_relative_to(root):
-                    relative = path.relative_to(root).as_posix()
-                    uris.append(
-                        f"hiraku://sources/{record.id}/{quote(relative, safe='')}"
-                    )
-        return json.dumps(uris)
+        """List current OKF record IDs."""
+        return json.dumps([record.id for record in selected.vault.list()])
 
     @server.resource("hiraku://records/{record_id}", mime_type="application/json")
     def record_resource(record_id: str) -> str:
-        return _research_content(record_id, selected)
-
-    @server.resource("hiraku://sources/{record_id}/{source_path}")
-    def source_resource(record_id: str, source_path: str) -> bytes:
-        record = selected.vault.get(record_id)
-        root = (
-            record.path.parent
-            if record.path.parent != selected.records_dir
-            else selected.records_dir / record.path.stem
-        ).resolve()
-        path = (root / unquote(source_path)).resolve()
-        if not path.is_relative_to(root) or not path.is_file():
-            raise ResourceError("Source must be a file inside its record directory")
-        return path.read_bytes()
+        return _research_content(unquote(record_id), selected)
 
     @server.prompt(title="Propose implementation")
     def propose_implementation(record_id: str, related_record_ids: str = "") -> str:
         """Ground a proposal in a record and comma-separated related records."""
-        record = selected.vault.get(record_id)
+        record = selected.vault.load(record_id)
         related = [
-            selected.vault.get(identifier.strip())
+            selected.vault.load(identifier.strip())
             for identifier in related_record_ids.split(",")
             if identifier.strip()
         ]
@@ -362,9 +300,10 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         return (
             "Propose the next implementation for this research record. Cite the "
             "curated evidence, distinguish observations from assumptions, and "
-            "describe validation before making changes. Inspect attached sources "
+            "describe validation before making changes. Discover other records "
             "through hiraku://catalog when needed.\n\n"
-            f"Record: {json.dumps(_data(record))}\n\nRelated records:\n{evidence}"
+            f"Record: {json.dumps(record.model_dump(mode='json'))}\n\n"
+            f"Related records:\n{evidence}"
         )
 
 
@@ -586,4 +525,4 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
 
 def _research_content(identifier: str, project: Project) -> str:
     """Read the same live representation for resources and tool attachments."""
-    return json.dumps(_data(project.vault.get(identifier)))
+    return json.dumps(project.vault.load(identifier).model_dump(mode="json"))
