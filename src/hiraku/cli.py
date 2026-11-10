@@ -1044,7 +1044,7 @@ def run_list(
         _print_table(columns, rows)
 
 
-@main.command("dashboard")
+@main.group("dashboard", invoke_without_command=True)
 @click.option(
     "--leaderboard", "leaderboard_name", help="Leaderboard selected when opening."
 )
@@ -1060,10 +1060,7 @@ def run_list(
     "--init",
     "initialize",
     is_flag=True,
-    help="Copy the dashboard notebook into the project; exit unless --edit is given.",
-)
-@click.option(
-    "--edit", is_flag=True, help="Open the project's notebook in marimo-studio."
+    help="Copy the dashboard notebook into the project and exit.",
 )
 @click.option(
     "--include-code",
@@ -1079,26 +1076,93 @@ def dashboard_command(
     no_browser: bool,
     watch: bool,
     initialize: bool,
-    edit: bool,
     include_code: bool,
 ) -> None:
     """Browse records and tracked runs in a local, read-only dashboard."""
     from .dashboard.launcher import init_dashboard, serve_dashboard
 
+    if click.get_current_context().invoked_subcommand is not None:
+        return
     if initialize:
         click.echo(f"Created dashboard: {init_dashboard(state.project)}")
-        if not edit:
-            return
+        return
     exit_code = serve_dashboard(
         state.project,
+        name=None,
         leaderboard_name=leaderboard_name,
         record_id=record_id,
         port=port,
         no_browser=no_browser,
-        edit=edit,
+        edit=False,
         include_code=include_code,
         watch=watch,
     )
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
+
+
+@dashboard_command.command("create")
+@click.argument("name")
+@click.option(
+    "--template",
+    type=click.Choice(["dashboard", "notebook"]),
+    default="dashboard",
+    show_default=True,
+    help="Bundled starter to copy.",
+)
+@click.pass_obj
+def dashboard_create(state: CLIContext, name: str, template: str) -> None:
+    """Create a named copy of the bundled dashboard."""
+    from .dashboard.launcher import init_dashboard
+
+    click.echo(
+        f"Created dashboard: {init_dashboard(state.project, name, template=template)}"
+    )
+
+
+@dashboard_command.command("list")
+@click.pass_obj
+def dashboard_list(state: CLIContext) -> None:
+    """List project dashboards."""
+    from .dashboard.launcher import list_dashboards
+
+    dashboards = list_dashboards(state.project)
+    if not dashboards:
+        click.echo("No project dashboards. Use: hiraku dashboard create NAME")
+    for name in sorted(dashboards):
+        click.echo(name)
+
+
+@dashboard_command.command("serve")
+@click.argument("name", required=False)
+@click.option("--leaderboard", "leaderboard_name", help="Initial leaderboard.")
+@click.option("--record", "record_id", help="Initial record.")
+@click.option("--port", type=click.IntRange(1, 65535), help="Server port.")
+@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
+@click.option("--watch", is_flag=True, help="Reload when the notebook changes.")
+@click.option("--include-code", is_flag=True, help="Include read-only notebook code.")
+@click.pass_obj
+def dashboard_serve(state: CLIContext, name: str | None, **options: Any) -> None:
+    """Serve a named dashboard, or the sole project dashboard."""
+    from .dashboard.launcher import serve_dashboard
+
+    exit_code = serve_dashboard(state.project, name=name, **options)
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
+
+
+@dashboard_command.command("edit")
+@click.argument("name", required=False)
+@click.option("--leaderboard", "leaderboard_name", help="Initial leaderboard.")
+@click.option("--record", "record_id", help="Initial record.")
+@click.option("--port", type=click.IntRange(1, 65535), help="Server port.")
+@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
+@click.pass_obj
+def dashboard_edit(state: CLIContext, name: str | None, **options: Any) -> None:
+    """Edit a named dashboard, or the sole project dashboard, in marimo-studio."""
+    from .dashboard.launcher import serve_dashboard
+
+    exit_code = serve_dashboard(state.project, name=name, edit=True, **options)
     if exit_code:
         raise click.exceptions.Exit(exit_code)
 

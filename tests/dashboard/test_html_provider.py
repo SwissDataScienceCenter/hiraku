@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import replace
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -12,8 +12,10 @@ pytest.importorskip("marimo_studio")
 from marimo_studio.view_providers import ProviderError
 from marimo_studio.view_providers.testing import check_provider
 
-from hiraku.dashboard.launcher import BUNDLED_VIEWS
+from hiraku.dashboard.launcher import TEMPLATES
 from hiraku.dashboard.provider import HtmlProvider
+
+BUNDLED_VIEWS = Path(str(TEMPLATES / "dashboard" / "studio"))
 
 
 class BundledProvider(HtmlProvider):

@@ -13,6 +13,9 @@ from hiraku.dashboard import launcher
 from hiraku.errors import RecordNotFoundError, ValidationError
 from hiraku.project import Project
 
+BUNDLED_NOTEBOOK = Path(str(launcher.TEMPLATES / "dashboard" / "app.py"))
+BUNDLED_VIEWS = BUNDLED_NOTEBOOK.parent / "studio"
+
 
 def test_launcher_rejects_unknown_leaderboard_before_starting_server(tmp_path):
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
@@ -61,15 +64,13 @@ def test_build_command_leaves_automatic_port_selection_to_marimo(edit: bool) -> 
     assert command[command.index("--host") + 1] == "127.0.0.1"
 
 
-def test_default_views_place_all_interactive_cells() -> None:
+def test_bundled_views_place_all_interactive_cells() -> None:
     from marimo._ast.load import load_app
 
-    app = load_app(str(launcher.DEFAULT_NOTEBOOK))
+    app = load_app(str(BUNDLED_NOTEBOOK))
     assert app._config.css_file
-    assert (launcher.DEFAULT_NOTEBOOK.parent / app._config.css_file).is_file()
-    view = (launcher.DEFAULT_VIEWS / "dashboard" / "index.html").read_text(
-        encoding="utf-8"
-    )
+    assert (BUNDLED_NOTEBOOK.parent / app._config.css_file).is_file()
+    view = (BUNDLED_VIEWS / "dashboard" / "index.html").read_text(encoding="utf-8")
     placed = set(re.findall(r'<marimo-cell name="([^"]+)">', view))
     named = {cell.name for cell in app._cell_manager.cells()}
 
@@ -95,26 +96,26 @@ def test_default_views_place_all_interactive_cells() -> None:
 def test_init_dashboard_copies_the_notebook(project: Project) -> None:
     notebook = launcher.init_dashboard(project)
 
-    assert notebook == project.hiraku_dir / "dashboard" / "app.py"
+    assert notebook == project.hiraku_dir / "dashboards" / "overview.py"
     assert notebook.read_text(encoding="utf-8") == (
-        launcher.DEFAULT_NOTEBOOK.read_text(encoding="utf-8")
+        BUNDLED_NOTEBOOK.read_text(encoding="utf-8")
+        .replace('view_root = "studio"', 'view_root = "studio/overview"')
+        .replace('css_file="studio/', 'css_file="studio/overview/')
     )
-    assert (notebook.parent / "studio/dashboard/components.css").read_bytes() == (
-        launcher.DEFAULT_VIEWS / "dashboard/components.css"
-    ).read_bytes()
-    view = notebook.parent / "studio" / "dashboard" / "index.html"
+    assert (
+        notebook.parent / "studio/overview/dashboard/components.css"
+    ).read_bytes() == (BUNDLED_VIEWS / "dashboard/components.css").read_bytes()
+    view = notebook.parent / "studio" / "overview" / "dashboard" / "index.html"
     assert view.read_text(encoding="utf-8") == (
-        (launcher.DEFAULT_VIEWS / "dashboard" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        (BUNDLED_VIEWS / "dashboard" / "index.html").read_text(encoding="utf-8")
     )
     for logo in ("sdsc-logo.svg", "sdsc-logo-white.svg"):
         relative = Path("dashboard") / "assets" / logo
-        assert (notebook.parent / "studio" / relative).read_bytes() == (
-            launcher.DEFAULT_VIEWS / relative
+        assert (notebook.parent / "studio" / "overview" / relative).read_bytes() == (
+            BUNDLED_VIEWS / relative
         ).read_bytes()
     assert (notebook.parent / ".gitignore").read_text() == (
-        "__marimo__/\nstudio/.locks/\nstudio/*/.artifacts/\n"
+        "__marimo__/\n.locks/\n.artifacts/\n"
     )
     with pytest.raises(ValidationError, match="already exists"):
         launcher.init_dashboard(project)
@@ -147,7 +148,9 @@ def popen(monkeypatch: pytest.MonkeyPatch) -> dict:
                 env=env,
                 copied=notebook.read_text(encoding="utf-8"),
                 notebook=notebook,
-                view=(notebook.parent / "studio" / "dashboard" / "view.toml").is_file(),
+                view=(
+                    notebook.parent / "studio" / notebook.stem / "dashboard/view.toml"
+                ).is_file(),
             )
 
         def wait(self, timeout=None):
@@ -235,6 +238,7 @@ def test_dashboard_cli_forwards_options(
 
     assert result.exit_code == 0, result.output
     assert received == {
+        "name": None,
         "leaderboard_name": None,
         "record_id": "a",
         "port": 9000,
@@ -246,9 +250,8 @@ def test_dashboard_cli_forwards_options(
     }
 
 
-@pytest.mark.parametrize("edit", [False, True])
-def test_dashboard_cli_init_serves_only_with_edit(
-    project: Project, monkeypatch: pytest.MonkeyPatch, edit: bool
+def test_dashboard_cli_init_only_creates_notebook(
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     served = []
     monkeypatch.setattr(
@@ -257,11 +260,11 @@ def test_dashboard_cli_init_serves_only_with_edit(
     monkeypatch.chdir(project.root)
     runner = CliRunner()
 
-    result = runner.invoke(main, ["dashboard", "--init", *(["--edit"] if edit else [])])
+    result = runner.invoke(main, ["dashboard", "--init"])
 
     assert result.exit_code == 0, result.output
     assert "Created dashboard:" in result.output
-    assert [options["edit"] for options in served] == ([True] if edit else [])
+    assert not served
     again = runner.invoke(main, ["dashboard", "--init"])
     assert again.exit_code != 0
     assert "Dashboard already exists" in again.output
@@ -292,3 +295,133 @@ def test_dashboard_cli_defaults_to_automatic_port_selection(
 
     assert result.exit_code == 0, result.output
     assert received["port"] is None
+
+
+def test_named_dashboards_have_independent_views(project, popen):
+    first = launcher.init_dashboard(project, "exploration")
+    second = launcher.init_dashboard(project, "results")
+    assert launcher.list_dashboards(project) == {
+        "exploration": first,
+        "results": second,
+    }
+    assert (first.parent / "studio/exploration/dashboard/index.html").is_file()
+    assert (second.parent / "studio/results/dashboard/index.html").is_file()
+    with pytest.raises(ValidationError, match="Choose a dashboard"):
+        launcher.serve_dashboard(project)
+    launcher.serve_dashboard(project, name="results", edit=True)
+    assert popen["notebook"] == second
+    assert "edit" in popen["command"]
+
+
+@pytest.mark.parametrize("name", ["../escape", "nested/name", "", ".", ".."])
+def test_dashboard_creation_rejects_invalid_names(project, name):
+    with pytest.raises(ValidationError, match="Invalid dashboard name"):
+        launcher.init_dashboard(project, name)
+    assert not (project.hiraku_dir / "dashboards").exists()
+
+
+def test_named_dashboard_missing_does_not_start_bundled_fallback(project, popen):
+    with pytest.raises(ValidationError, match="Dashboard not found"):
+        launcher.serve_dashboard(project, name="missing")
+    assert not popen
+
+
+def test_legacy_dashboard_is_discovered_and_served(project, popen):
+    legacy = project.hiraku_dir / "dashboard/app.py"
+    legacy.parent.mkdir()
+    legacy.write_text("import marimo\napp = marimo.App()\n")
+    assert launcher.list_dashboards(project) == {"overview": legacy}
+    launcher.serve_dashboard(project)
+    assert popen["notebook"] == legacy
+    with pytest.raises(ValidationError, match="already exists"):
+        launcher.init_dashboard(project)
+
+
+def test_dashboard_subcommands_create_list_and_serve(project, popen, monkeypatch):
+    monkeypatch.chdir(project.root)
+    runner = CliRunner()
+    empty = runner.invoke(main, ["dashboard", "list"])
+    assert empty.exit_code == 0
+    assert "No project dashboards" in empty.output
+    created = runner.invoke(main, ["dashboard", "create", "exploration"])
+    assert created.exit_code == 0, created.output
+    listed = runner.invoke(main, ["dashboard", "list"])
+    assert listed.exit_code == 0
+    assert listed.output == "exploration\n"
+    served = runner.invoke(main, ["dashboard", "serve", "--port", "9001", "--watch"])
+    assert served.exit_code == 0, served.output
+    assert popen["notebook"].name == "exploration.py"
+    assert "9001" in popen["command"]
+    assert "--watch" in popen["command"]
+
+
+def test_notebook_template_runs_without_studio(project, popen):
+    import runpy
+
+    notebook = launcher.init_dashboard(project, "exploration", template="notebook")
+    assert not (notebook.parent / "studio").exists()
+    outputs, _ = runpy.run_path(str(notebook))["app"].run()
+    assert any(
+        "Describe your question" in getattr(output, "text", "") for output in outputs
+    )
+    launcher.serve_dashboard(project, name="exploration", edit=True)
+    assert popen["notebook"] == notebook
+    with pytest.raises(ValidationError, match="already exists"):
+        launcher.init_dashboard(project, "exploration", template="notebook")
+
+
+def test_unknown_template_does_not_create_files(project):
+    with pytest.raises(ValidationError, match="Unknown dashboard template"):
+        launcher.init_dashboard(project, "exploration", template="missing")
+    assert not (project.hiraku_dir / "dashboards").exists()
+
+
+def test_create_cli_selects_notebook_template(project, monkeypatch):
+    monkeypatch.chdir(project.root)
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["dashboard", "create", "exploration", "--template", "notebook"]
+    )
+    assert result.exit_code == 0, result.output
+    notebook = project.hiraku_dir / "dashboards/exploration.py"
+    assert notebook.is_file()
+    assert not (notebook.parent / "studio").exists()
+    invalid = runner.invoke(
+        main, ["dashboard", "create", "other", "--template", "missing"]
+    )
+    assert invalid.exit_code == 2
+    assert not (notebook.parent / "other.py").exists()
+
+
+@pytest.mark.parametrize("name", [None, "minimal"])
+def test_dashboard_edit_selects_notebook(project, popen, monkeypatch, name):
+    launcher.init_dashboard(project, "minimal", template="notebook")
+    monkeypatch.chdir(project.root)
+    result = CliRunner().invoke(
+        main,
+        [
+            "dashboard",
+            "edit",
+            *([name] if name else []),
+            "--port",
+            "9002",
+            "--no-browser",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert popen["notebook"].name == "minimal.py"
+    assert "edit" in popen["command"]
+    assert "--watch" in popen["command"]
+    assert "9002" in popen["command"]
+    assert "--headless" in popen["command"]
+
+
+@pytest.mark.parametrize(
+    "arguments", [["dashboard", "--edit"], ["dashboard", "serve", "--edit"]]
+)
+def test_dashboard_rejects_removed_edit_flag(project, monkeypatch, arguments):
+    monkeypatch.chdir(project.root)
+    result = CliRunner().invoke(main, arguments)
+    assert result.exit_code == 2
+    assert "No such option" in result.output
+    assert "--edit" in result.output

@@ -23,9 +23,18 @@ Run every command from inside a Hiraku project.
 | `hiraku dashboard` | View | Serves the dashboard with record Markdown editing. |
 | `hiraku dashboard --watch` | Watch | Reloads the notebook when it changes on disk. |
 | `hiraku dashboard --include-code` | View with code | Same page; marimo's menu can also show each cell's code. |
-| `hiraku dashboard --init` | Customize | Copies the notebook to `hiraku/dashboard/app.py` and exits. |
-| `hiraku dashboard --edit` | Edit | Opens that copy in marimo-studio. |
-| `hiraku dashboard --init --edit` | Customize and edit | Both in one step. |
+| `hiraku dashboard create NAME` | Customize | Creates `hiraku/dashboards/NAME.py` and its Studio view. |
+| `hiraku dashboard list` | Discover | Lists project dashboard names. |
+| `hiraku dashboard serve NAME` | View | Serves the named notebook. |
+| `hiraku dashboard edit NAME` | Edit | Opens the notebook in marimo-studio. |
+
+Without a name, `hiraku dashboard serve` serves the sole project dashboard.
+With several dashboards, it asks you to select a name. With none, it serves the
+bundled dashboard without writing project files. `hiraku dashboard` is shorthand
+for this default behavior. Existing `hiraku/dashboard/app.py` copies remain
+available as `overview`; a new `hiraku/dashboards/overview.py` takes precedence.
+The older `--init` flag creates `overview`. Editing uses `hiraku dashboard edit`;
+the `--edit` flag is no longer supported. Omit the name to edit the sole dashboard.
 
 ### View
 
@@ -46,15 +55,33 @@ above its output. The code is read-only here; use the edit mode to change it.
 ### Customize
 
 ```bash
-hiraku dashboard --init
+hiraku dashboard create overview
 ```
 
-Copies the bundled notebook to `hiraku/dashboard/app.py` and the Studio view,
-including its HTML, CSS, and logos, to `hiraku/dashboard/studio/`. It also adds
-a `.gitignore` for marimo's `__marimo__/` caches and Studio's build state. From
-then on, `hiraku dashboard` serves this copy, so commit it with the project.
-`--init` refuses to overwrite an existing copy. Delete `hiraku/dashboard/` to
-start over from the bundled version.
+Choose between two bundled templates:
+
+| Template | Contents |
+| --- | --- |
+| `dashboard` (default) | Record/run notebook with an HTML Studio view. |
+| `notebook` | Minimal Marimo notebook with Markdown and an analysis cell; no Studio view. |
+
+```bash
+hiraku dashboard create exploration --template notebook
+hiraku dashboard edit exploration
+```
+
+The notebook template needs the dashboard Python dependencies but no Quarto or
+frontend build tools. Add Markdown cells, data loading, widgets, and plots directly
+to `hiraku/dashboards/exploration.py`.
+
+The default template copies the notebook to `hiraku/dashboards/overview.py` and the Studio view,
+including its HTML, CSS, and logos, to `hiraku/dashboards/studio/overview/`, with a
+`.gitignore` for marimo's `__marimo__/` caches and Studio's build state. From then on,
+`hiraku dashboard` serves this copy instead of the bundled notebook, so commit
+it with the project. Creation refuses to overwrite an existing notebook or view
+directory. Each notebook has independent views under `studio/<name>/`.
+You can also add your own top-level `.py` Marimo notebooks to `hiraku/dashboards/`;
+Studio views are optional for notebooks that display their content directly.
 
 The notebook imports data helpers from `hiraku.dashboard.data` and reusable
 widgets and renderers from `hiraku.dashboard.components`. Components build the
@@ -68,7 +95,7 @@ Imports live in `app.setup`. Named cells separate project discovery
 and rendering. The Studio view references the output cells by name; data and
 state cells do not need HTML hosts.
 
-Branding and page layout live in `studio/dashboard/index.html` and its CSS and
+Branding and page layout live in `studio/overview/dashboard/index.html` and its CSS and
 assets; edit those files to customize the presentation. To customize a widget
 or plot, replace its component call in the notebook cell. Project copies pick
 up component fixes from the installed Hiraku package.
@@ -77,20 +104,20 @@ up component fixes from the installed Hiraku package.
 ### Edit
 
 ```bash
-hiraku dashboard --edit
+hiraku dashboard edit overview
 ```
 
 Opens the project's copy in marimo-studio, with the notebook beside a live
 preview of the dashboard. It reloads when the file changes on disk, for
 example when an agent edits it. The view's `index.html` places the notebook's
-named cells on the page; add a named cell there to show it on the dashboard. `--edit` requires a copy;
-run `--init` first, or both at once with `hiraku dashboard --init --edit`.
+named cells on the page; add a named cell there to show it on the dashboard. Editing requires a copy;
+run `hiraku dashboard create overview` first.
 Saved changes appear the next time you run `hiraku dashboard`.
 
-The notebook editor runs arbitrary code and is protected by marimo's access
-token, included in the URL it prints and opens. You can also open the copy
-without Hiraku's CLI:
-`marimo edit hiraku/dashboard/app.py`; it then finds its project from its own
+The notebook editor runs arbitrary code, so, unlike the dashboard, it is protected
+by marimo's access token, which is part of the URL it prints and opens. You can
+also open the copy without Hiraku's CLI, with
+`marimo edit hiraku/dashboards/overview.py`; it then finds its project from its own
 location.
 
 ## Leaderboards
@@ -183,9 +210,9 @@ The Studio entry document places the `record_navigation` cell inside a collapsed
 `<details>` element. Remove that element from a project copy to omit navigation;
 table selection and the remaining components continue to work independently.
 
-Reusable component styling lives in `studio/dashboard/components.css` beside the
+Reusable component styling lives in `studio/overview/dashboard/components.css` beside the
 Studio view's other stylesheets. The notebook loads it through
-`marimo.App(css_file="studio/dashboard/components.css")` for notebook mode.
+`marimo.App(css_file="studio/overview/dashboard/components.css")` for notebook mode.
 The Studio HTML links the same file with `crossorigin="anonymous"`, allowing
 Marimo to read and adopt its rules into widget shadow roots in the isolated
 presentation. No styles are injected into button labels. `--init` copies the
@@ -305,7 +332,8 @@ You can also try the other modes in that project:
 
 ```bash
 hiraku dashboard --include-code --record digit-classification
-hiraku dashboard --init --edit --record digit-classification
+hiraku dashboard create overview
+hiraku dashboard edit overview --record digit-classification
 ```
 
 Run details include an **Open in mlflow** link to the server UI. To persist the

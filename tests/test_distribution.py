@@ -9,6 +9,7 @@ PACKAGE = REPOSITORY / "src" / "hiraku"
 EXAMPLES = REPOSITORY / "examples"
 SKILLS = PACKAGE / "resources" / "skills"
 WORKFLOWS = PACKAGE / "resources" / "workflows"
+DASHBOARDS = PACKAGE / "resources" / "dashboards"
 
 
 def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
@@ -31,7 +32,7 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
 
     expected = {
         f"hiraku/{path.relative_to(PACKAGE).as_posix()}"
-        for resource_root in (SKILLS, WORKFLOWS)
+        for resource_root in (SKILLS, WORKFLOWS, DASHBOARDS)
         for path in resource_root.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts
     }
@@ -60,17 +61,10 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
     dashboard = {
         f"hiraku/dashboard/{name}"
         for name in (
-            "app.py",
             "components.py",
             "data.py",
             "launcher.py",
-            "studio/dashboard/assets/sdsc-logo.svg",
-            "studio/dashboard/assets/sdsc-logo-white.svg",
-            "studio/dashboard/view.toml",
-            "studio/dashboard/index.html",
-            "studio/dashboard/style.css",
-            "studio/dashboard/tokens.css",
-            "studio/dashboard/ui.css",
+            "provider.py",
         )
     }
     assert dashboard <= packaged, f"Missing dashboard files: {dashboard - packaged}"

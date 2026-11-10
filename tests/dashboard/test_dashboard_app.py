@@ -14,7 +14,7 @@ def test_app_runs_every_cell_against_a_project(
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     outputs, definitions = app.run()
 
@@ -66,7 +66,7 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     _, initial = app.run()
     rows = tree_rows(initial["records_df"], initial["runs_df"], initial["tree_metric"])
@@ -98,7 +98,7 @@ def test_navigation_selection_updates_table_and_clears_run(
     project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     _, initial = app.run()
     initial["select_key"]("run:r1")
@@ -151,7 +151,7 @@ def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(tmp_path))
     monkeypatch.delenv("HIRAKU_DASHBOARD_RECORD", raising=False)
     monkeypatch.delenv("HIRAKU_DASHBOARD_LEADERBOARD", raising=False)
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     outputs, definitions = app.run()
 
@@ -185,7 +185,7 @@ def test_dashboard_selects_between_leaderboards(project, monkeypatch):
     )
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     monkeypatch.setenv("HIRAKU_DASHBOARD_LEADERBOARD", "other")
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     _, definitions = app.run()
     assert definitions["leaderboard_selector"].value == "other"
@@ -219,7 +219,7 @@ def test_tracking_errors_preserve_record_navigation(project, monkeypatch, failur
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
     monkeypatch.delenv("HIRAKU_DASHBOARD_LEADERBOARD", raising=False)
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     outputs, definitions = app.run()
 
