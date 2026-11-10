@@ -30,17 +30,27 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     assert not project.joinpath("generate_results.py").exists()
     assert not project.joinpath("README.md").exists()
     config = Project.discover(project)
-    forest = config.vault.get("random-forest")
+    forest = config.vault.load("heart-disease-prediction/random-forest")
     assert config.active_record_id == forest.id
-    assert config.active_record == forest.name
     records = config.vault.list()
-    assert len(records) == 4
-    assert forest.parent_id == config.vault.get("heart-disease").id
-    assert config.vault.get("forest-tuning").parent_id == forest.id
-    assert [
-        metric["direction"]
-        for metric in config.vault.resolve(forest.id)["values"]["metrics"]
-    ] == ["minimize", "maximize"]
+    assert {record.id: record.title for record in records} == {
+        "heart-disease-prediction": "Heart disease prediction",
+        "heart-disease-prediction/logistic-regression": "Logistic regression",
+        "heart-disease-prediction/random-forest": "Random forest",
+        "heart-disease-prediction/random-forest/validation-split": (
+            "Validation split sensitivity"
+        ),
+    }
+    assert forest.parent_id == config.vault.load("heart-disease-prediction").id
+    assert (
+        config.vault.load(
+            "heart-disease-prediction/random-forest/validation-split"
+        ).parent_id
+        == forest.id
+    )
+    assert forest.metrics is None
+    parent = config.vault.load(forest.parent_id)
+    assert [metric.direction for metric in parent.metrics] == ["minimize", "maximize"]
     backend = TrackingBackendFactory(config).create(config.tracking_backend)
     runs = backend.list_runs(record_id=forest.id)
     assert len(runs) == 3

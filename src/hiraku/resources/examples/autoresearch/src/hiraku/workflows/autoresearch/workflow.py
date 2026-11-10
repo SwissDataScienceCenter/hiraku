@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import frontmatter
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,7 +14,6 @@ from pydantic import ValidationError as PydanticValidationError
 from hiraku.errors import ValidationError
 from hiraku.markdown import Markdown
 from hiraku.project import Project
-from hiraku.record import Record
 
 
 class AutoresearchState(BaseModel):
@@ -34,8 +34,8 @@ def input_schema() -> dict[str, Any]:
 
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the prompt-only workflow graph."""
-    _, body = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
-    prompt = str(Markdown(body)).strip()
+    post = frontmatter.load(Path(__file__).with_name("workflow.md"))
+    prompt = str(Markdown(post.content)).strip()
 
     def validate_input(state: AutoresearchState) -> dict[str, Any]:
         try:

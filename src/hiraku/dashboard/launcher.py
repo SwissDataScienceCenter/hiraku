@@ -98,7 +98,7 @@ def serve_dashboard(
     Raises:
         hiraku.errors.ValidationError: If the dashboard extra is missing, or if
             ``edit`` is requested for a project without its own notebook.
-        hiraku.errors.RecordNotFoundError: If ``record_id`` does not exist.
+        hiraku.errors.RecordNotFoundError: If ``record_path`` does not exist.
     """
     local = project_notebook(project)
     if edit and not local.is_file():
@@ -108,7 +108,7 @@ def serve_dashboard(
             "Create one with: hiraku dashboard --init"
         )
     if record_id is not None:
-        project.vault.get(record_id)
+        project.vault.load(record_id)
     if any(find_spec(name) is None for name in ("marimo", "marimo_studio", "altair")):
         raise ValidationError(
             "The dashboard requires the optional 'dashboard' dependencies. "

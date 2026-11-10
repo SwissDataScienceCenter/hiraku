@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import frontmatter
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -13,7 +14,6 @@ from pydantic import ValidationError as PydanticValidationError
 from hiraku.errors import ValidationError
 from hiraku.markdown import Markdown, render
 from hiraku.project import Project
-from hiraku.record import Record
 
 
 class GreetState(BaseModel):
@@ -26,7 +26,8 @@ class GreetState(BaseModel):
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the one-step graph from the example's Markdown prompt."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = Record._parse_markdown(path)
+    post = frontmatter.load(path)
+    fields = post.metadata
     if fields.get("id") != "greet":
         raise ValueError("workflow.md must declare id: greet")
     defaults = fields.get("arguments", {})
@@ -34,7 +35,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         raise ValueError("workflow.md must define arguments")
 
     argument_model = _argument_model(defaults)
-    markdown = Markdown(body)
+    markdown = Markdown(post.content)
 
     def greet(state: GreetState) -> dict[str, str]:
         try:
@@ -60,7 +61,7 @@ def _argument_model(defaults: dict[str, Any]) -> type[BaseModel]:
 
 def input_schema() -> dict[str, Any]:
     """Return the JSON Schema for starting greet."""
-    fields, _ = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
+    fields = frontmatter.load(Path(__file__).with_name("workflow.md")).metadata
     defaults = fields.get("arguments", {})
     if not isinstance(defaults, dict) or not defaults:
         raise ValueError("workflow.md must define arguments")

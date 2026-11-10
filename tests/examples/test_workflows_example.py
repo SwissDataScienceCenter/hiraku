@@ -133,6 +133,10 @@ def test_scheduler_langgraph_works_by_priority_until_every_record_reaches_target
     parent = interruption["data"]["parent"]
     records = children(parent)
     assert len(records) == 3
+    assert {item.id: item.title for item in records} == {
+        f"{parent}/counter-{index}": f"Counter {index}" for index in range(1, 4)
+    }
+    assert config.vault.load(parent).title == "Counter scheduling"
     assert all(1 <= item.priority <= 9 and item.count == 0 for item in records)
     # The highest priority runs to the target first; ties go to the larger ID.
     order = sorted(records, key=lambda item: (item.priority, item.id), reverse=True)
@@ -154,14 +158,18 @@ def test_scheduler_langgraph_works_by_priority_until_every_record_reaches_target
         assert "assigned record" in retry["error"]
 
         unchanged = resume_workflow(
-            response["workflow_session_id"], {"record_id": record_id}, project=config
+            response["workflow_session_id"],
+            {"record_id": record_id},
+            project=config,
         )
         retry = unchanged["interrupts"][0]["value"]
         assert f"set it to {count + 1}" in retry["error"]
 
         set_count(runner, record_id, count + 1)
         response = resume_workflow(
-            response["workflow_session_id"], {"record_id": record_id}, project=config
+            response["workflow_session_id"],
+            {"record_id": record_id},
+            project=config,
         )
 
     assert response["status"] == "completed"

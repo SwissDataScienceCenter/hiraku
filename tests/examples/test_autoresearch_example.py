@@ -86,6 +86,8 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
             "record",
             "create",
             "sep10",
+            "--title",
+            "Language model optimization",
             "--type",
             "task",
             "--set",
@@ -137,7 +139,7 @@ def test_autoresearch_is_an_overlay() -> None:
     assert "hiraku record create sep10" in readme
     assert "branch=autoresearch/sep10" in readme
     assert "hiraku workflow status" in readme
-    assert "hiraku record update cpu-test" in readme
+    assert "hiraku record update sep10/cpu-test" in readme
     assert "--set decision=discard" in readme
 
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
@@ -164,7 +166,7 @@ def test_autoresearch_is_an_overlay() -> None:
 
 def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     project, _ = create_overlay_project(tmp_path, monkeypatch)
-    task = Project.discover(project).vault.get("sep10")
+    task = Project.discover(project).vault.load("sep10")
 
     assert (project / "README.md").read_text(encoding="utf-8") == UPSTREAM_FILES[
         "README.md"
@@ -195,8 +197,11 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert not (project / "hiraku/programs").exists()
     task_template = (OVERLAY / "task.md").read_text(encoding="utf-8")
     assert (project / "task.md").read_text(encoding="utf-8") == task_template
-    assert task.markdown == task_template
-    assert task.path == project / "hiraku/records/sep10.md"
+    assert task.markdown == task_template.strip()
+    assert (
+        Project.discover(project).vault.file_path(task.id)
+        == project / "hiraku/records/sep10.md"
+    )
     assert task.branch == "autoresearch/sep10"
     assert task.goal == (
         "Find the best architecture, optimizer, and hyperparameters to minimize "
@@ -222,7 +227,19 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     project, runner = create_overlay_project(tmp_path, monkeypatch)
     invoke(
         runner,
-        ["record", "create", "cpu-test", "--parent", "sep10", "--commit", "HEAD"],
+        [
+            "record",
+            "create",
+            "sep10/cpu-test",
+            "--title",
+            "CPU smoke test",
+            "--type",
+            "experiment",
+            "--parent",
+            "sep10",
+            "--commit",
+            "HEAD",
+        ],
     )
     git(project, "add", "hiraku")
     git(project, "commit", "-m", "add cpu test record")
@@ -233,7 +250,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
         [
             "run",
             "--record",
-            "cpu-test",
+            "sep10/cpu-test",
             "--dispatch",
             "autoresearch",
             "--",
@@ -251,14 +268,14 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
             [
                 "runs",
                 "--record",
-                "cpu-test",
+                "sep10/cpu-test",
                 "--json",
             ],
         ).output
     )
     assert len(rows) == 1
     row = rows[0]
-    assert row["record_id"] == Project.discover(project).vault.get("cpu-test").id
+    assert row["record_id"] == Project.discover(project).vault.load("sep10/cpu-test").id
     assert row["commit"] == commit
     assert row["raw"]["git_state"] == "clean"
     assert row["raw"]["status"] == "finished"
@@ -271,7 +288,20 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
 def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
     _, runner = create_overlay_project(tmp_path, monkeypatch)
     invoke(
-        runner, ["record", "create", "failure", "--parent", "sep10", "--commit", "HEAD"]
+        runner,
+        [
+            "record",
+            "create",
+            "sep10/failure",
+            "--title",
+            "Failure handling",
+            "--type",
+            "experiment",
+            "--parent",
+            "sep10",
+            "--commit",
+            "HEAD",
+        ],
     )
 
     failed = runner.invoke(
@@ -279,7 +309,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
         [
             "run",
             "--record",
-            "failure",
+            "sep10/failure",
             "--dispatch",
             "autoresearch",
             "--",
@@ -297,7 +327,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
             [
                 "runs",
                 "--record",
-                "failure",
+                "sep10/failure",
                 "--json",
             ],
         ).output

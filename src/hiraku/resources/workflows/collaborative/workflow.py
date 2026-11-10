@@ -8,6 +8,7 @@ from operator import or_
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict
 
+import frontmatter
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
@@ -88,10 +89,11 @@ def input_schema() -> dict[str, Any]:
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the collaborative research graph from its Markdown instructions."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = Record._parse_markdown(path)
+    post = frontmatter.load(path)
+    fields = post.metadata
     if fields.get("id") != "collaborative":
         raise ValueError("workflow.md must declare id: collaborative")
-    markdown = Markdown(body)
+    markdown = Markdown(post.content)
     rules = str(fields.get("rules", "")).strip()
 
     def initialize(state: ResearchState) -> Command[Literal["draft"]]:
@@ -110,7 +112,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         if type(rounds) is not int or rounds < 1:
             raise ValidationError("rounds must be a positive integer")
         try:
-            project.vault.find(task)
+            project.vault.load(task)
         except HirakuError as exc:
             raise ValidationError(str(exc)) from exc
         return Command(
@@ -253,10 +255,11 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             )
         try:
             record = project.vault.create(
-                arguments["name"],
-                parent_id=project.vault.find(state["task"]).id,
+                f"{state['task'].rpartition('/')[0]}/{arguments['name']}/{arguments['name']}",
+                title=arguments["name"],
+                parent_id=state["task"],
                 type="experiment",
-                status="drafted",
+                state="drafted",
                 summary=arguments["summary"],
                 hypothesis=arguments["hypothesis"],
                 markdown=f"## Change\n\n{arguments['change'].strip()}\n",
@@ -264,7 +267,11 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="draft")
         return Command(
-            update={"experiment": record.id, "feedback": "", "step": "implement"},
+            update={
+                "experiment": record.id,
+                "feedback": "",
+                "step": "implement",
+            },
             goto="implement",
         )
 
@@ -272,7 +279,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         identifier = state.get("experiment")
         if not identifier:
             raise ValidationError("No experiment has been drafted")
-        return project.vault.find(identifier)
+        return project.vault.load(identifier)
 
     def experiment_context(state: ResearchState) -> dict[str, Any]:
         record = experiment(state)
@@ -314,8 +321,8 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             sha = GitRepository(project.root).resolve(commit)
             record = experiment(state)
             record.commit = sha
-            record.status = "implemented"
-            project.vault.save(record)
+            record.state = "implemented"
+            project.vault.save(record, overwrite=True)
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="implement")
         return Command(update={"feedback": "", "step": "launch"}, goto="launch")
@@ -353,8 +360,8 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 },
                 goto="launch",
             )
-        record.status = "launched"
-        project.vault.save(record)
+        record.state = "launched"
+        project.vault.save(record, overwrite=True)
         return Command(update={"feedback": "", "step": "analyze"}, goto="analyze")
 
     def analyze(state: ResearchState) -> Command[Literal["analyze", "draft", "done"]]:
@@ -397,10 +404,10 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 update={"feedback": "Provide a verdict and non-empty conclusion."},
                 goto="analyze",
             )
-        record.status = "analyzed"
+        record.state = "analyzed"
         record.verdict = verdict
         record.conclusion = conclusion
-        project.vault.save(record)
+        project.vault.save(record, overwrite=True)
         results = [
             *state.get("results", []),
             {"record_id": record.id, "verdict": verdict},

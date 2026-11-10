@@ -97,7 +97,7 @@ location.
 ## Sections
 
 **Record navigation**
-:   An optional, initially collapsed tree of records with type and status
+:   An optional, initially collapsed tree of records with type and state
     badges. Expand it to navigate the hierarchy. Choosing a record
     selects the same row in the runs table, clears any selected run, and compares
     that record's subtree. Table selections highlight the corresponding record
@@ -223,7 +223,7 @@ details use the already loaded record objects to retain complete front matter.
 
 `records_df`
 :   One row per record in tree order: `record`, `parent`, `record_path`,
-    `type`, `status`, `decision`, `commit`, `metrics` (a list of declared
+    `type`, `state`, `decision`, `commit`, `metrics` (a list of declared
     `name` and `direction` pairs), and `description` (the record's Markdown).
 
 | View | Reads |

@@ -9,7 +9,6 @@ import shlex
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import suppress
 from datetime import UTC, datetime
 from importlib.resources import as_file, files
 from pathlib import Path
@@ -34,7 +33,7 @@ from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
 from .project import Project
-from .record import Record, validate_identifier
+from .record import Record, resolve_metrics, validate_identifier
 from .tracking import Run, TrackingBackendFactory
 
 
@@ -59,7 +58,11 @@ class HirakuGroup(click.Group):
 
 def _json_value(value: Any) -> Any:
     if isinstance(value, Record):
-        return {**_json_value(value.to_dict()), "markdown": value.markdown}
+        return {
+            **_json_value(value.metadata),
+            "id": value.id,
+            "markdown": value.markdown,
+        }
     if isinstance(value, Run):
         return {
             "id": value.id,
@@ -145,7 +148,7 @@ def _active(project: Project, record_id: str | None = None) -> Record:
     identifier = record_id or project.active_record_id
     if identifier is None:
         raise NoActiveRecordError("No active record; supply --record or set one")
-    return project.vault.find(identifier)
+    return project.vault.load(identifier)
 
 
 def _edit(path: Path) -> None:
@@ -360,7 +363,8 @@ def record_group() -> None:
 
 
 @record_group.command("create")
-@click.argument("name")
+@click.argument("record_id")
+@click.option("--title")
 @click.option("--parent", "parent_id")
 @click.option("--related-to", multiple=True)
 @click.option("--type")
@@ -371,7 +375,8 @@ def record_group() -> None:
 @click.pass_obj
 def record_create(
     state: CLIContext,
-    name: str,
+    record_id: str,
+    title: str | None,
     parent_id: str | None,
     related_to: tuple[str, ...],
     type: str | None,
@@ -382,18 +387,18 @@ def record_create(
 ) -> None:
     """Create a root or child record."""
     fields = _fields(set_values)
-    if any(key in fields for key in ("id", "name", "parent_id", "related_to")):
+    if any(key in fields for key in ("id", "title", "parent_id", "related_to")):
         raise ValidationError(
-            "Use the record name argument and dedicated relationship options"
+            "Use the record_id argument and dedicated metadata options"
         )
     if type is not None:
         fields["type"] = type
-    if parent_id is not None:
-        parent_id = state.project.vault.find(parent_id).id
+    if title is not None:
+        fields["title"] = title
     if commit is not None:
         fields["commit"] = GitRepository(state.project.root).resolve(commit)
     record = state.project.vault.create(
-        name,
+        record_id,
         parent_id=parent_id,
         related_to=list(related_to),
         markdown=_markdown(markdown_file),
@@ -401,7 +406,8 @@ def record_create(
     )
     if not no_activate:
         state.project.set_active_record(record)
-    click.echo(f"Created a new record {record.name!r} at {record.path}")
+    target = state.project.vault.file_path(record.id)
+    click.echo(f"Created a new record {record.id!r} at {target}")
 
 
 @record_group.command("list")
@@ -416,44 +422,29 @@ def record_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
         _emit_json(records, pretty=pretty)
     else:
         _print_table(
-            ("id", "name", "parent", "type", "status"),
-            [(r.id, r.name, r.parent_id, r.type, r.status) for r in records],
+            ("id", "title", "parent", "type", "state"),
+            [(r.id, r.title, r.parent_id, r.type, r.state) for r in records],
         )
 
 
 @record_group.command("show")
 @click.argument("record_id", required=False)
-@click.option("--raw", is_flag=True)
 @click.option("--json", "json_output", is_flag=True)
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
 def record_show(
     state: CLIContext,
     record_id: str | None,
-    raw: bool,
     json_output: bool,
     pretty: bool,
 ) -> None:
-    """Show stored or effective fields with their sources."""
+    """Show the document's local fields and Markdown."""
     _validate_json_options(json_output, pretty)
     record = _active(state.project, record_id)
-    if raw:
-        values = record.to_dict()
-        sources = {}
-    else:
-        resolved = state.project.vault.resolve(record.id)
-        values, sources = resolved["values"], resolved["sources"]
     if json_output:
-        _emit_json(
-            {"values": values, "sources": sources, "markdown": record.markdown},
-            pretty=pretty,
-        )
+        _emit_json(record, pretty=pretty)
     else:
-        click.echo(
-            f"---\n{dump_yaml(_json_value(values))}---\n{record.markdown}", nl=False
-        )
-        if sources:
-            click.echo("\nSources:\n" + dump_yaml(sources), nl=False)
+        click.echo(f"---\n{dump_yaml(record.metadata)}---\n{record.markdown}", nl=False)
 
 
 @record_group.command("update")
@@ -474,31 +465,27 @@ def record_update(
     markdown_file: Path | None,
 ) -> None:
     """Update stored fields; --unset removes an override."""
-    record = state.project.vault.find(record_id)
+    record = state.project.vault.load(record_id)
     changes = _fields(set_values)
     if "markdown" in changes:
         raise ValidationError("Use --markdown-file to update record Markdown")
-    if any(key in changes for key in ("id", "parent_id")):
-        raise ValidationError("id and parent_id cannot be updated")
+    if "id" in changes:
+        raise ValidationError("id cannot be updated")
     if related_to:
         changes["related_to"] = list(related_to)
     if commit is not None:
         changes["commit"] = GitRepository(state.project.root).resolve(commit)
-    fields = record.to_dict()
-    fields.update(changes)
     for key in unset_values:
-        if key in {"id", "parent_id"}:
+        if key == "id":
             raise ValidationError(f"Cannot unset {key}")
         if key in changes:
             raise ValidationError(f"Cannot set and unset {key!r} together")
-        fields.pop(key, None)
-    body = _markdown(markdown_file) if markdown_file is not None else record.markdown
-    candidate = Record.model_validate({**fields, "markdown": body})
-    candidate._path = record.path
-    candidate._persisted_id = record._persisted_id
-    if "related_to" in changes:
-        state.project.vault.validate_relationships(candidate)
-    state.project.vault.save(candidate)
+    state.project.vault.update(
+        record,
+        changes,
+        markdown=_markdown(markdown_file) if markdown_file is not None else None,
+        unset=unset_values,
+    )
     click.echo(f"Updated record {record_id}")
 
 
@@ -507,12 +494,10 @@ def record_update(
 @click.pass_obj
 def record_edit(state: CLIContext, record_id: str) -> None:
     """Edit a record's stored Markdown file."""
-    record = state.project.vault.find(record_id)
-    if record.path is None:
-        raise ValidationError(f"Record {record_id!r} has no file path")
+    record = state.project.vault.load(record_id)
     _edit_recoverable(
-        record.path,
-        lambda: state.project.vault.find(record_id),
+        state.project.vault.file_path(record.id),
+        lambda: state.project.vault.load(record_id),
         f"Record {record_id!r}",
     )
     click.echo(f"Validated record {record_id}")
@@ -522,14 +507,11 @@ def record_edit(state: CLIContext, record_id: str) -> None:
 @click.argument("record_id")
 @click.pass_obj
 def record_delete(state: CLIContext, record_id: str) -> None:
-    """Delete a leaf record."""
-    record = state.project.vault.find(record_id)
-    parent = record.path.parent
+    """Delete the document at the given OKF ID."""
+    record = state.project.vault.load(record_id)
     state.project.vault.delete(record_id)
     if state.project.active_record_id == record.id:
         state.project.clear_active_record()
-    with suppress(OSError):
-        parent.rmdir()
     click.echo(f"Deleted record {record_id}")
 
 
@@ -789,7 +771,9 @@ def run_list(
     if (ascending or descending) and sort is None:
         raise ValidationError("A sort direction requires --sort")
     record = _active(state.project, record_id)
-    declarations = state.project.vault.resolve(record.id)["values"].get("metrics") or []
+    declarations = [
+        item.model_dump() for item in resolve_metrics(record, state.project.vault)
+    ]
     metric_names = (
         _names(metrics, "metric")
         if metrics is not None
@@ -817,7 +801,9 @@ def run_list(
     if json_output:
         _emit_json(runs, pretty=pretty)
     else:
-        record_names = {item.id: item.name for item in state.project.vault.list()}
+        record_names = {
+            item.id: item.title or item.id for item in state.project.vault.list()
+        }
         columns = ["id", "record", "timestamp", "duration", "commit"]
         columns.extend(f"param:{name}" for name in param_names)
         columns.extend(metric_names)

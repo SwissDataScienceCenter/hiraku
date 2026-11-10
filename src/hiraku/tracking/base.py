@@ -19,9 +19,7 @@ from pydantic import (
 )
 
 from ..errors import (
-    AmbiguousReferenceError,
     BackendError,
-    RecordNotFoundError,
     ValidationError,
 )
 
@@ -34,7 +32,7 @@ class Run(BaseModel):
         id: Unique run ID.
         metrics: Mapping of metric names to float values.
         params: Mapping of parameter names to string values.
-        record_id: Optional record ID associated with the run.
+        record_id: Optional bundle-relative concept path associated with the run.
         commit: Optional commit hash associated with the run.
         timestamp: Optional run start time as a timezone-aware UTC datetime.
         duration: Optional run duration in seconds; ``None`` while running.
@@ -307,25 +305,10 @@ class BackendOperations:
         """
         if record_id is not None:
             self._validate_filters(record_id)
-        record_ids = {record_id} if record_id is not None else set()
-        project = getattr(self, "hiraku_project", None) or getattr(
-            self, "project", None
-        )
-        if (
-            record_id is not None
-            and project is not None
-            and not isinstance(project, str)
-        ):
-            try:
-                record = project.vault.find(record_id)
-            except (AmbiguousReferenceError, RecordNotFoundError):
-                pass
-            else:
-                record_ids.update({record.id, record.name})
         self._validate_query(sort=sort, ascending=ascending, limit=limit)
         runs = [run for run in self._read_source_runs() if run.record_id]
         if record_id is not None:
-            runs = [run for run in runs if run.record_id in record_ids]
+            runs = [run for run in runs if run.record_id == record_id]
         return self._apply_query(
             runs,
             sort=sort,

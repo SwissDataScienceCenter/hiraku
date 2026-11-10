@@ -8,6 +8,7 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+import frontmatter
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -54,7 +55,7 @@ def _input_model(defaults: dict[str, Any]) -> type[BaseModel]:
 
 def input_schema() -> dict[str, Any]:
     """Return the JSON Schema for starting scheduler."""
-    fields, _ = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
+    fields = frontmatter.load(Path(__file__).with_name("workflow.md")).metadata
     defaults = fields.get("arguments", {})
     if not isinstance(defaults, dict):
         raise ValueError("workflow.md must define scheduler argument defaults")
@@ -71,7 +72,8 @@ def input_schema() -> dict[str, Any]:
 def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the graph that creates and schedules experiment records."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = Record._parse_markdown(path)
+    post = frontmatter.load(path)
+    fields = post.metadata
     if fields.get("id") != "scheduler":
         raise ValueError("workflow.md must declare id: scheduler")
     defaults = fields.get("arguments", {})
@@ -85,7 +87,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 f"{lower} to {upper}"
             )
     input_model = _input_model(defaults)
-    markdown = Markdown(body)
+    markdown = Markdown(post.content)
 
     def initialize(state: SchedulerState) -> dict[str, Any]:
         try:
@@ -96,12 +98,14 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
         parent = project.vault.create(
             f"scheduler-{secrets.token_hex(4)}",
+            title="Counter scheduling",
             type="task",
             summary=f"Scheduler example: raise each count to {target}",
         )
         for index in range(records):
             project.vault.create(
-                f"{parent.id}-{index + 1}",
+                f"{parent.id}/counter-{index + 1}",
+                title=f"Counter {index + 1}",
                 parent_id=parent.id,
                 type="experiment",
                 priority=random.randint(1, 9),
@@ -173,7 +177,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             return {"error": f"Response does not match the expected schema: {exc}"}
         if response.record_id != state.current:
             return {"error": f"Report the assigned record {state.current!r}."}
-        record = project.vault.get(str(state.current))
+        record = project.vault.load(str(state.current))
         count = _count(record)
         expected = state.baseline + 1
         if count != expected:

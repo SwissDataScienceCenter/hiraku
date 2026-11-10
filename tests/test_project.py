@@ -24,7 +24,7 @@ from hiraku.tracking import CSVBackend, TrackingBackendFactory
 
 
 def load_record(record_id: str, *, project: Project) -> Record:
-    return project.vault.get(record_id)
+    return project.vault.load(record_id)
 
 
 def list_records(*, project: Project) -> list[Record]:
@@ -92,6 +92,9 @@ def test_init_uses_uv_when_the_project_has_a_lockfile(tmp_path, locked):
     assert [server["command"], *server["args"]] == [*launcher, "mcp"]
     codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
     assert codex["mcp_servers"]["hiraku"] == server
+    for config in (tmp_path / ".mcp.json", tmp_path / ".pi/mcp.json"):
+        assert json.loads(config.read_text())["mcpServers"] == {"hiraku": server}
+    assert codex["mcp_servers"] == {"hiraku": server}
     assert not (tmp_path / ".claude/settings.json").exists()
 
 
@@ -253,9 +256,17 @@ def test_init_rejects_conflicting_template_sources(tmp_path: Path) -> None:
 def test_config_persists_active_record(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     config = Project.discover(tmp_path)
-    first = Record.create("first", project=config)
-    child = Record.create("trial", parent_id=first.id, project=config)
-    second = Record.create("second", project=config)
+    first = config.vault.create("first/first", type="task", title="first")
+    config.set_active_record(first)
+    child = config.vault.create(
+        f"{first.id.rpartition('/')[0]}/trial/trial",
+        type="task",
+        parent_id=first.id,
+        title="trial",
+    )
+    config.set_active_record(child)
+    second = config.vault.create("second/second", type="task", title="second")
+    config.set_active_record(second)
 
     assert config.active_record_id == second.id
     config.set_active_record(child)
@@ -267,12 +278,19 @@ def test_config_persists_active_record(tmp_path: Path) -> None:
 
 def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False, install_mcp=False)
-    first = Record.create("first", project=config)
+    first = config.vault.create("first/first", type="task", title="first")
+    config.set_active_record(first)
     config.set_active_record(first)
 
     assert config.path == tmp_path / "hiraku.yml"
     assert f"active_record_id: {first.id}" in config.path.read_text()
     assert Project.load(config.path).active_record_id == first.id
+    assert set(config.to_dict()) == {
+        "hiraku_dir",
+        "default_dispatch",
+        "active_record_id",
+        "tracking_backend",
+    }
 
 
 def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None:
@@ -298,6 +316,26 @@ def test_init_adds_hiraku_to_existing_codex_configuration(tmp_path: Path) -> Non
     assert parsed["model"] == "x"
     assert parsed["mcp_servers"]["other"] == {"command": "other"}
     assert parsed["mcp_servers"]["hiraku"] == {"command": "hiraku", "args": ["mcp"]}
+
+
+def test_init_preserves_existing_mcp_servers(tmp_path: Path) -> None:
+    existing = {"command": "custom-server", "args": ["serve"]}
+    for relative in (".mcp.json", ".pi/mcp.json"):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"mcpServers": {"other": existing}}))
+    codex = tmp_path / ".codex/config.toml"
+    codex.parent.mkdir()
+    codex.write_text(
+        '[mcp_servers.other]\ncommand = "custom-server"\nargs = ["serve"]\n'
+    )
+
+    Project.create(tmp_path, install_skill=False)
+
+    for relative in (".mcp.json", ".pi/mcp.json"):
+        config = json.loads((tmp_path / relative).read_text())
+        assert config["mcpServers"]["other"] == existing
+    assert tomllib.loads(codex.read_text())["mcp_servers"]["other"] == existing
 
 
 def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
@@ -331,14 +369,15 @@ def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
         results=True,
         install_skill=False,
     )
-    assert config.active_record_id == config.vault.get("weak-l2").id
-    assert config.active_record == "weak-l2"
+    assert (
+        config.active_record_id == config.vault.load("digit-classification/weak-l2").id
+    )
     assert config.tracking_backend == {
         "type": "mlflow",
         "database": "mlflow.db",
         "experiment_name": "hiraku-digits",
     }
-    assert config.vault.get("digits").id == "digits"
+    assert config.vault.load("digit-classification").id == "digit-classification"
     assert (
         TrackingBackendFactory(config).create(config.tracking_backend).backend_name
         == "mlflow"
@@ -456,23 +495,22 @@ def _run_codex(project: Path, prompt: str) -> str:
 
 
 def _create_task(project: Project) -> Record:
-    return Record.create(
-        "heart-disease",
-        project=project,
+    record = project.vault.create(
+        "heart-disease-prediction",
+        type="task",
         branch="main",
-        goal=(
-            "Develop and evaluate predictive models for heart disease on a fixed "
-            "Cleveland cohort"
-        ),
-        question=(
-            "Which modeling approaches achieve the best validation log loss and "
-            "accuracy on this cohort?"
-        ),
+        goal="Develop and evaluate predictive models for heart disease "
+        "on a fixed Cleveland cohort",
+        question="Which modeling approaches achieve the best validation log loss "
+        "and accuracy on this cohort?",
         metrics=[
             {"name": "val/log_loss", "direction": "minimize"},
             {"name": "val/accuracy", "direction": "maximize"},
         ],
+        title="Heart disease prediction",
     )
+    project.set_active_record(record)
+    return record
 
 
 def _create_logistic_experiment(
@@ -480,14 +518,17 @@ def _create_logistic_experiment(
     task: Record,
     commit: str,
 ) -> Record:
-    return Record.create(
-        "logistic-baseline",
+    record = project.vault.create(
+        f"{task.id}/logistic-regression",
+        type="task",
         parent_id=task.id,
-        project=project,
         commit=commit,
         summary="Logistic regression baseline",
         hypothesis="Regularized logistic regression provides a calibrated baseline",
+        title="Logistic regression",
     )
+    project.set_active_record(record)
+    return record
 
 
 @pytest.mark.skipif(
@@ -511,7 +552,7 @@ verify the record.""",
     tasks = list_records(project=config)
     assert len(tasks) == 1, agent_output
     task = tasks[0]
-    assert task.name == "heart-disease"
+    assert task.title == "heart-disease"
     assert task.goal is not None
     goal = task.goal.lower()
     assert "predictive" in goal
@@ -526,7 +567,7 @@ verify the record.""",
         {"name": "val/log_loss", "direction": "minimize"},
         {"name": "val/accuracy", "direction": "maximize"},
     ]
-    assert task.children(project=config) == []
+    assert config.vault.children(task.id) == []
     assert CSVBackend(config).list_runs(record_id=task.id) == []
     assert _skill_git(project, "status", "--porcelain") == ""
 
@@ -541,16 +582,17 @@ def test_agent_creates_experiment_from_high_level_request(tmp_path: Path) -> Non
 
     agent_output = _run_codex(
         project,
-        """Use the $hiraku skill to create a child record named logistic-baseline
-under heart-disease. Use the summary 'Logistic regression baseline' and the
+        """Use the $hiraku skill to create the record
+heart-disease-prediction/logistic-regression with title 'Logistic regression'
+under heart-disease-prediction. Use the summary 'Logistic regression baseline' and the
 hypothesis 'Regularized logistic regression provides a calibrated baseline'.
 Bind it to the current commit. Only create and verify the record; do not run it.""",
     )
 
-    experiments = task.children(project=config)
+    experiments = config.vault.children(task.id)
     assert len(experiments) == 1, agent_output
     experiment = experiments[0]
-    assert experiment.name == "logistic-baseline"
+    assert experiment.title == "Logistic regression"
     assert experiment.summary == "Logistic regression baseline"
     assert experiment.hypothesis == (
         "Regularized logistic regression provides a calibrated baseline"
@@ -569,20 +611,20 @@ def test_agent_runs_existing_experiment_without_other_changes(tmp_path: Path) ->
     project, config, commit = _new_project(tmp_path)
     task = _create_task(config)
     experiment = _create_logistic_experiment(config, task, commit)
-    task_before = task.path.read_bytes()
-    experiment_before = experiment.path.read_bytes()
+    task_before = config.vault.file_path(task.id).read_bytes()
+    experiment_before = config.vault.file_path(experiment.id).read_bytes()
 
     agent_output = _run_codex(
         project,
-        """Use the $hiraku skill to run the logistic-baseline record and
+        """Use the $hiraku skill to run the Logistic regression record and
 report its tracked validation metrics. Do not create or update other records.""",
     )
 
-    assert task.path.read_bytes() == task_before, agent_output
+    assert config.vault.file_path(task.id).read_bytes() == task_before, agent_output
     current = load_record(experiment.id, project=config)
-    assert current.path.read_bytes() == experiment_before
-    assert [item.name for item in task.children(project=config)] == [
-        "logistic-baseline"
+    assert config.vault.file_path(current.id).read_bytes() == experiment_before
+    assert [item.title for item in config.vault.children(task.id)] == [
+        "Logistic regression"
     ]
     runs = CSVBackend(config).list_runs(
         record_id=experiment.id,

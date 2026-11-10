@@ -39,18 +39,22 @@ you are ready.
 
 Create a research root and a child record.
 ```bash
-hiraku record create my-task --type task \
+hiraku record create binary-classification \
+  --title "Binary classification" \
+  --type task \
   --set "goal=Improve validation accuracy on my dataset" \
   --set 'metrics=[{name: val/accuracy, direction: maximize}]'
 
-hiraku record create baseline --parent my-task --type experiment \
+hiraku record create binary-classification/threshold-baseline \
+  --title "Threshold baseline" \
+  --parent binary-classification --type experiment \
   --set "hypothesis=The existing representation establishes a reference." \
   --commit HEAD
 
-hiraku run --record baseline -- uv run python evaluate.py --seed 0
-hiraku run --record baseline -- uv run python evaluate.py --seed 1
+hiraku run --record binary-classification/threshold-baseline -- uv run python evaluate.py --seed 0
+hiraku run --record binary-classification/threshold-baseline -- uv run python evaluate.py --seed 1
 hiraku record list
-hiraku runs --record baseline
+hiraku runs --record binary-classification/threshold-baseline
 ```
 
 The command runs `uv run python evaluate.py --seed 0`. The script writes its

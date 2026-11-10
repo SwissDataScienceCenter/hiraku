@@ -30,13 +30,23 @@ A root *record* defines a working scope and goal, and documents the research pro
 | **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
 
-Records are stored as Markdown with YAML front matter in the records directory. Hiraku derives a filesystem-friendly filename from the name, so for example `digits` is stored as `hiraku/records/digits.md`. Names that produce the same filename cannot be saved as separate records. Existing records in one-level subdirectories are also discovered. `parent_id` defines the logical tree: each record has at most one parent, selected at creation and immutable after saving. IDs are unique across the project.
+Records are stored as Markdown with YAML front matter. `Record.id` is the OKF ID: its bundle-relative path without `.md`. It is derived from placement and never persisted in front matter. `Vault` owns the bundle root, loading, saving, and discovery. `parent_id` and `related_to` declare relationships to concept IDs, independently of directory structure. Moving a document changes its ID.
 
-Metric declarations are resolved from the nearest ancestor when a record has no metrics of its own. They are resolved on demand, so later changes to an ancestor can affect the effective metrics of its descendants. An empty metrics list overrides ancestor metrics. Other fields remain local to the record; `related_to` links records without affecting inheritance. `hiraku record show ID` displays effective fields and their sources, while `--raw` shows stored fields.
+Record Markdown bodies are trimmed of leading and trailing whitespace when read
+or saved. Whitespace within the body is preserved.
 
-Saving a record validates its own fields and file destination without scanning the vault. `Vault.validate()` checks the collection for duplicate IDs, missing references, and hierarchy cycles. CLI and MCP relationship updates also check the proposed relationships before saving.
+`status` describes the OKF concept lifecycle: `draft`, `stable` (the default),
+or `deprecated`. The optional `state` field describes research progress using
+workflow-defined values such as `drafted`, `launched`, or `concluded`.
+For existing records, move research progress values from `status` to `state`;
+other values in `status` are rejected. Workflow session statuses are separate
+from these record fields.
 
-At any time, a single record can be set as "active". By default, creation activates the new record. The user can switch explicitly with `hiraku record set <record-id>`. Hiraku stores its name as `active_record` and its stable ID as `active_record_id` in `hiraku.yml`; the current status can be queried with `hiraku status`, whose `tracking_backend` field shows the project's backend.
+All record fields are local. There is no inheritance or effective-value resolution. Consumers needing ancestor information must traverse the declared graph themselves. CLI and MCP run queries explicitly walk parent links when selecting metric directions, stopping at an explicit metrics list. `hiraku record show PATH` displays only that document's fields and body.
+
+Saving validates one record and its destination without scanning the vault. Replacing a file requires `overwrite=True`. Loading, saving, updating, and deleting do not enforce collection integrity. `Vault.validate()` explicitly checks missing relationship targets; cycles are permitted.
+
+At any time, a single record can be set as "active". By default, creation activates the new record. Switch with `hiraku record set <record-path>`. Hiraku stores its bundle-relative path as `active_record_id` in `hiraku.yml`. Inspect it with `hiraku status`.
 
 !!! note
     Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
@@ -115,37 +125,38 @@ hiraku record create literature --type context
 # Ask your coding agent to create a curated literature review.
 
 # 2. create the research root; creation makes it active
-hiraku record create heart-disease --type task \
+hiraku record create heart-disease-prediction \
+  --title 'Heart disease prediction' --type task \
   --set 'goal=Develop models for heart disease prediction'
 
 # alternatively, create it with the agent skill inside a coding harness
 # /hiraku "create a new root record for heart-disease prediction"
 
 # query the record and Hiraku status
-hiraku record show heart-disease --json
+hiraku record show heart-disease-prediction --json
 hiraku status
 
 # 3. create a child proposal and implement it
-hiraku record create logistic-baseline --parent heart-disease \
-  --type experiment \
+hiraku record create heart-disease-prediction/logistic-regression \
+  --title 'Logistic regression' --parent heart-disease-prediction --type experiment \
   --set 'summary=Logistic regression baseline' \
   --set 'hypothesis=Regularized logistic regression provides a calibrated baseline'
 # alternatively, use the agent skill to implement the proposal
 # /hiraku "implement the logistic baseline record"
 # implement and commit the code change, then bind the resulting commit
 git commit -m "implement logistic baseline"
-hiraku record update logistic-baseline --commit HEAD
+hiraku record update heart-disease-prediction/logistic-regression --commit HEAD
 
 # 4. run an arbitrary command and list attributed runs
-hiraku run --record logistic-baseline -- uv run python train.py
-hiraku runs --record logistic-baseline --sort val/log_loss --ascending
+hiraku run --record heart-disease-prediction/logistic-regression -- uv run python train.py
+hiraku runs --record heart-disease-prediction/logistic-regression --sort val/log_loss --ascending
 
 # 5. review the runs and document the conclusion on the child record
-hiraku record update logistic-baseline --set decision=keep
-hiraku record edit logistic-baseline
+hiraku record update heart-disease-prediction/logistic-regression --set decision=keep
+hiraku record edit heart-disease-prediction/logistic-regression
 
 # 6. summarize reviewed findings in the root record
-hiraku record edit heart-disease
+hiraku record edit heart-disease-prediction
 # or, with the skill: /hiraku "summarize the reviewed child records"
 ```
 

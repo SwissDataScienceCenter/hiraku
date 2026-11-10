@@ -11,10 +11,10 @@ branches:
 
 ```bash
 git switch -c hiraku/records/baseline
-hiraku record create baseline --parent research-root \
+hiraku record create baseline --parent research-root --type experiment \
   --set 'branch=hiraku/records/baseline' --commit HEAD
 ```
 
 The logical record tree, `related_to` links, and Git commit history capture
-different relationships. Use `parent_id` for hierarchy and metric inheritance,
+different relationships. Use `parent_id` to declare research relationships,
 `related_to` for cross references, and commit ancestry for code provenance.

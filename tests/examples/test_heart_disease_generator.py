@@ -110,7 +110,9 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
 
     def export(output):
         generated = Project.create(output, install_skill=False)
-        record = generated.vault.create("generated")
+        record = generated.vault.create(
+            "generated/generated", type="task", title="generated"
+        )
         generated.set_active_record(record)
         (output / "runs.csv").write_text(f"id,record_id\nrun,{record.id}\n")
 
@@ -130,9 +132,8 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     config = Project.discover(tmp_path)
     assert config.active_record_id
-    record = config.vault.get("generated")
+    record = config.vault.load("generated/generated")
     assert record.id == config.active_record_id
-    assert config.active_record == record.name
     runs = (
         TrackingBackendFactory(config)
         .create(config.tracking_backend)
@@ -168,16 +169,24 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
     assert exported_files == {
         "hiraku.yml",
         "runs.csv",
-        *(record.path.relative_to(output).as_posix() for record in output_records),
+        *(
+            Project.discover(output)
+            .vault.file_path(record.id)
+            .relative_to(output)
+            .as_posix()
+            for record in output_records
+        ),
     }
     assert len(config.vault.list()) == 4
-    config.vault.get("random-forest")
+    config.vault.load("heart-disease-prediction/random-forest")
     runs = TrackingBackendFactory(config).create(config.tracking_backend).list_runs()
-    ids_by_name = {record.name: record.id for record in config.vault.list()}
+    ids_by_name = {
+        record.id.rsplit("/", 1)[-1]: record.id for record in config.vault.list()
+    }
     assert Counter(r.record_id for r in runs) == {
-        ids_by_name["logistic-baseline"]: 3,
+        ids_by_name["logistic-regression"]: 3,
         ids_by_name["random-forest"]: 3,
-        ids_by_name["forest-tuning"]: 3,
+        ids_by_name["validation-split"]: 3,
     }
     assert all(r.id and r.timestamp for r in runs)
     assert all(r.decision is None for r in config.vault.list())

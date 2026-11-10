@@ -47,8 +47,7 @@ class Project(BaseModel):
         hiraku_dir_name: Name of the managed directory for Hiraku data.
         default_dispatch: Optional name of the default dispatcher.
         tracking_backend: Name or configuration of the tracking backend.
-        active_record: Optional name of the active research record.
-        active_record_id: Optional stable ID of the active research record.
+        active_record_id: Optional bundle-relative path of the active record.
 
     Args:
         root: Project directory containing the settings file and managed data.
@@ -73,7 +72,6 @@ class Project(BaseModel):
     tracking_backend: Annotated[
         str | dict[str, Any], AfterValidator(_validate_tracking_backend)
     ] = "csv"
-    active_record: str | None = None
     active_record_id: str | None = None
 
     def __init__(self, root: Path | str, **data: Any) -> None:
@@ -186,7 +184,7 @@ class Project(BaseModel):
         """Return this project's filesystem-backed record collection."""
         from .record import Vault
 
-        return Vault(dir=self.records_dir)
+        return Vault(root=self.records_dir)
 
     @property
     def workflows_dir(self) -> Path:
@@ -203,7 +201,6 @@ class Project(BaseModel):
         return {
             "hiraku_dir": self.hiraku_dir_name,
             "default_dispatch": self.default_dispatch,
-            "active_record": self.active_record,
             "active_record_id": self.active_record_id,
             "tracking_backend": self.tracking_backend,
         }
@@ -225,19 +222,17 @@ class Project(BaseModel):
         """Validate and persist the active research record.
 
         Args:
-            record: A record object or its stable ID.
+            record: A record object or its bundle-relative path.
         """
         from .record import Record
 
-        selected = self.vault.find(record.id if isinstance(record, Record) else record)
-        self.active_record = selected.name
+        selected = self.vault.load(record.id if isinstance(record, Record) else record)
         self.active_record_id = selected.id
         self.save()
 
     def clear_active_record(self) -> None:
         """Clear the active record and persist the project settings."""
         self.active_record_id = None
-        self.active_record = None
         self.save()
 
     @classmethod

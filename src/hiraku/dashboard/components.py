@@ -11,7 +11,6 @@ from __future__ import annotations
 import html
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import altair as alt
@@ -40,7 +39,7 @@ def markdown_view(
     if record is None:
         return mo.md("No record selected.")
     body = mo.md(record.markdown if record.markdown.strip() else empty_message)
-    metadata = mo.Html(f"<pre>{html.escape(dump_yaml(record.to_dict()))}</pre>")
+    metadata = mo.Html(f"<pre>{html.escape(dump_yaml(record.metadata))}</pre>")
     return mo.vstack([mo.accordion({record.id: metadata}), body])
 
 
@@ -66,7 +65,7 @@ class MarkdownEditor:
     ) -> None:
         self._on_save = on_save
         self._on_change = on_change
-        self._drafts: dict[Path, _MarkdownDraft] = {}
+        self._drafts: dict[str, _MarkdownDraft] = {}
         # Marimo's widget registry holds weak references.
         self._widgets: list[Any] = []
 
@@ -74,18 +73,17 @@ class MarkdownEditor:
         self._on_change()
 
     def _start(self, record: Record) -> None:
-        assert record.path is not None
-        self._drafts[record.path] = _MarkdownDraft(
+        self._drafts[record.id] = _MarkdownDraft(
             record.model_copy(deep=True), str(record.markdown)
         )
         self._refresh()
 
-    def _cancel(self, path: Path) -> None:
+    def _cancel(self, path: str) -> None:
         self._drafts.pop(path, None)
         self._refresh()
 
     def _save(self, record: Record) -> None:
-        draft = self._drafts[record.path]
+        draft = self._drafts[record.id]
         try:
             saved = self._on_save(draft.record, draft.markdown)
         except (HirakuError, OSError, ValueError) as exc:
@@ -93,7 +91,7 @@ class MarkdownEditor:
             self._refresh()
             return
         record.markdown = saved.markdown
-        self._cancel(record.path)
+        self._cancel(record.id)
 
     def render(
         self,
@@ -105,12 +103,11 @@ class MarkdownEditor:
         if record is None:
             self._widgets = []
             return markdown_view(None)
-        draft = self._drafts.get(record.path)
+        draft = self._drafts.get(record.id)
         if draft is None:
             edit = mo.ui.button(
                 label="✎",
                 tooltip="Edit Markdown",
-                disabled=record.path is None,
                 on_click=lambda _: self._start(record),
             )
             self._widgets = [edit]
@@ -128,7 +125,7 @@ class MarkdownEditor:
             on_change=lambda value: setattr(draft, "markdown", value),
         )
         cancel = mo.ui.button(
-            label="Cancel", on_click=lambda _: self._cancel(record.path)
+            label="Cancel", on_click=lambda _: self._cancel(record.id)
         )
         save = mo.ui.button(
             label="Save", kind="success", on_click=lambda _: self._save(record)
@@ -136,7 +133,7 @@ class MarkdownEditor:
         self._widgets = [editor, cancel, save]
         controls = mo.hstack([cancel, save], justify="end")
         metadata = mo.Html(
-            f"<pre>{html.escape(dump_yaml(draft.record.to_dict()))}</pre>"
+            f"<pre>{html.escape(dump_yaml(draft.record.metadata))}</pre>"
         )
         message = (
             mo.callout(mo.plain_text(draft.error), kind="danger")
@@ -176,7 +173,7 @@ def record_tree(
             continue
         badges = " ".join(
             f'<span class="badge">{html.escape(value)}</span>'
-            for value in (record.type, record.status)
+            for value in (record.type, record.state)
             if value
         )
         button = mo.ui.button(

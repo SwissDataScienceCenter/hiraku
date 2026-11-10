@@ -4,31 +4,46 @@
 
 ::: hiraku.record.Record
 
-`Record` is Hiraku's only research entity. Tasks, experiments, contexts, and
-literature share the same model and use `type` to describe their role. A record
-stores validated YAML front matter and a Markdown body.
+`Record` is document data with a required OKF `id`: its bundle-relative path without the
+`.md` suffix. It has no vault root, absolute filename, loading methods, or
+persistence history. Field validation is local: required nonblank `type`,
+metadata shapes, reference syntax, commit hashes, and metric declarations.
+Unknown metadata is preserved. `title` is the optional OKF display title.
 
-Records receive a UUID when created. Existing readable IDs remain supported.
-Their Markdown body and validated front matter are stored together in the
-project's records directory, using a filesystem-friendly name such as
-`hiraku/records/digits.md`. Names that resolve to the same filename collide.
-Records already stored in one-level subdirectories remain discoverable.
-Choose a record's parent when creating it; its parent cannot be changed after
-the record is saved.
+`status` is restricted to the OKF lifecycle values `draft`, `stable` (the
+default), and `deprecated`. `state` is an optional string for workflow-defined
+research progress, such as `drafted`, `implemented`, or `analyzed`. Neither is
+inherited. Existing research progress values such as `status: concluded` must
+be moved to `state: concluded` before loading the document.
+
+`record.metadata` is a serialized snapshot of front matter. It excludes `id`
+and the Markdown body. Loading derives the ID from the filename; it is never
+persisted in front matter. Moving a document changes its ID.
+`parent_id` and `related_to` are ordinary persisted
+relationships to other concept paths. Placement does not determine parentage.
+All fields, including metrics, are local. There is no inheritance or effective
+value resolution in `Record` or `Vault`.
+
+```python
+from pathlib import Path
+from hiraku.record import Record, Vault
+
+vault = Vault(root=Path("hiraku/records"))
+record = Record(id="experiments/baseline", type="experiment", title="Baseline")
+vault.save(record)
+record = vault.load("experiments/baseline")
+record.markdown = "Results from this experiment."
+vault.save(record, overwrite=True)
+```
 
 ## `Vault`
 
-`Project.vault` provides the project-scoped record collection. The vault reads
-files on demand and supports ID-or-name lookup with `get()` and `find()`, as
-well as listing, saving, deleting, and collection
-validation. Name lookup raises an error when multiple records share a name.
-
-`Vault.save(record)` validates and saves that record without scanning other
-records. It checks the existing file and prevents filename collisions, but it
-does not check whether IDs are unique across files or references exist. Call
-`Vault.validate()` for collection-wide ID, relationship, and cycle checks.
-
 ::: hiraku.record.Vault
+
+`Vault` owns bundle operations, validation and filesystem access and persistence.
+
+Saving persists explicitly supplied fields and values changed from their defaults,
+including in-place collection edits. Unchanged implicit defaults are omitted.
 
 ## `Metric`
 

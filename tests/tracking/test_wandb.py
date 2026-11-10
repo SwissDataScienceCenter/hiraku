@@ -10,7 +10,6 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.errors import BackendError
 from hiraku.project import Project
-from hiraku.record import Record
 from hiraku.tracking import TrackingBackendFactory, WandbBackend, WandbBackendConfig
 
 
@@ -86,7 +85,8 @@ def test_wandb_runs_cli_uses_active_record(tmp_path: Path, monkeypatch) -> None:
     project = Project.create(tmp_path, install_skill=False)
     project.tracking_backend = {"type": "wandb", "entity": "team", "project": "iris"}
     project.save()
-    record = Record.create("logistic", project=project)
+    record = project.vault.create("logistic/logistic", type="task", title="logistic")
+    project.set_active_record(record)
     monkeypatch.setattr(FakeRun, "config", {"hiraku.record_id": record.id})
 
     result = CliRunner().invoke(main, ["runs", "--json"])

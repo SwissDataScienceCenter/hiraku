@@ -1,9 +1,8 @@
 ---
-id: digits
-parent_id: null
+title: Digit classification
 related_to: []
 type: task
-status: concluded
+state: concluded
 metrics:
 - name: val/log_loss
   direction: minimize

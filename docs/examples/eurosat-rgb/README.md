@@ -43,27 +43,33 @@ Set `WANDB_ENTITY` only if you want to log under a specific team or account.
 The example ships with W&B configured as the project-wide tracking backend.
 
 ```bash
-hiraku record create eurosat --type task \
+hiraku record create land-cover-classification \
+  --title "Land cover classification" \
+  --type task \
   --set "goal=Maximize EuroSAT RGB validation accuracy" \
   --set "question=How accurately can MLP and CNN architectures classify EuroSAT RGB land-cover images?" \
   --set 'metrics=[{name: val/accuracy, direction: maximize}, {name: val/loss, direction: minimize}]'
 
-hiraku record create mlp --parent eurosat --type experiment \
+hiraku record create land-cover-classification/mlp-baseline \
+  --title "MLP baseline" \
+  --parent land-cover-classification --type experiment \
   --set "summary=MLP baseline for EuroSAT RGB classification" \
   --set "hypothesis=A fully connected neural network can learn a useful baseline from flattened RGB image pixels." \
   --commit HEAD
 
-hiraku record create cnn --parent eurosat --type experiment \
+hiraku record create land-cover-classification/cnn \
+  --title "Convolutional network" \
+  --parent land-cover-classification --type experiment \
   --set "summary=CNN baseline for EuroSAT RGB classification" \
   --set "hypothesis=A convolutional neural network improves classification accuracy over the MLP by learning spatial features from satellite imagery." \
   --commit HEAD
 
 hiraku record list
 
-hiraku run --record mlp -- uv run python train.py --model mlp --seed 42 \
+hiraku run --record land-cover-classification/mlp-baseline -- uv run python train.py --model mlp --seed 42 \
   --epochs 5 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
 
-hiraku run --record cnn -- uv run python train.py --model cnn --seed 42 \
+hiraku run --record land-cover-classification/cnn -- uv run python train.py --model cnn --seed 42 \
   --epochs 5 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
 ```
 
@@ -72,5 +78,5 @@ hiraku run --record cnn -- uv run python train.py --model cnn --seed 42 \
 Inspect all runs associated with the research root:
 
 ```bash
-hiraku runs --record eurosat --all --sort val/accuracy
+hiraku runs --record land-cover-classification --all --sort val/accuracy
 ```

@@ -8,7 +8,6 @@ from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import ValidationError
 from hiraku.project import Project
-from hiraku.record import Record
 from hiraku.tracking import Run, TrackingBackendFactory
 
 
@@ -53,7 +52,8 @@ def test_run_rejects_invalid_duration(value: float) -> None:
 
 def test_run_immutable_and_missing_csv_empty(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
-    record = Record.create("record", project=config)
+    record = config.vault.create("record/record", type="task", title="record")
+    config.set_active_record(record)
     assert (
         TrackingBackendFactory(config)
         .create(config.tracking_backend)

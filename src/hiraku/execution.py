@@ -41,7 +41,7 @@ def execute_command(
     selected_record = record_id or selected.active_record_id
     if selected_record is None:
         raise NoActiveRecordError("Select a record with --record or hiraku record set")
-    record = selected.vault.find(selected_record)
+    record = selected.vault.load(selected_record)
     if isinstance(command, str | bytes):
         raise ValidationError("command must be an argv sequence, not a shell string")
     if command is None or isinstance(command, str | bytes):
@@ -122,7 +122,7 @@ def execute_command(
     environment.update(
         {
             "HIRAKU_RECORD_ID": record.id,
-            "HIRAKU_RECORD_FILE": str(record.path),
+            "HIRAKU_RECORD_FILE": str(selected.vault.file_path(record.id)),
             "HIRAKU_ROOT": str(selected.root),
             "HIRAKU_TRACKING_ROOT": str(selected.root),
             "HIRAKU_COMMIT": commit,

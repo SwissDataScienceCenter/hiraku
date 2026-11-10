@@ -7,7 +7,6 @@ import pytest
 
 from hiraku.errors import BackendError
 from hiraku.project import Project
-from hiraku.record import Record
 from hiraku.tracking import CSVBackend, TrackingBackendFactory
 
 
@@ -29,14 +28,22 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     mlflow = pytest.importorskip("mlflow")
     config = Project.create(tmp_path)
     config.tracking_backend = {"type": "mlflow", "experiment_name": "hiraku-test"}
-    task = Record.create("task", project=config)
-    Record.create("exp", parent_id=task.id, project=config)
+    task = config.vault.create("task/task", type="task", title="task")
+    config.set_active_record(task)
+    config.set_active_record(
+        config.vault.create(
+            f"{task.id.rpartition('/')[0]}/exp/exp",
+            type="task",
+            parent_id=task.id,
+            title="exp",
+        )
+    )
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
     mlflow.set_experiment("hiraku-test")
     with mlflow.start_run() as active:
         mlflow.set_tags(
             {
-                "hiraku.record_id": "exp",
+                "hiraku.record_id": "task/exp/exp",
                 "hiraku.commit": "a" * 40,
                 "hiraku.entrypoint": "train",
                 "unmapped": "kept",
@@ -52,13 +59,13 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     backend = TrackingBackendFactory(config).create(config.tracking_backend)
     run = backend.list_runs()[0]
     assert len(backend.list_runs()) == 1
-    assert backend.list_runs(record_id="task") == []
+    assert backend.list_runs(record_id="task/task") == []
     assert run.id == run_id
-    assert run.record_id == "exp"
+    assert run.record_id == "task/exp/exp"
     assert run.commit == "a" * 40
     assert run.raw["tags"]["hiraku.entrypoint"] == "train"
     assert run.params == {"seed": "7"}
     assert run.metrics["loss"] == 1.0
     assert run.timestamp is not None and run.timestamp.tzinfo is UTC
     assert run.raw["tags"]["unmapped"] == "kept"
-    assert backend.list_runs(record_id="exp")[0].id == run_id
+    assert backend.list_runs(record_id="task/exp/exp")[0].id == run_id

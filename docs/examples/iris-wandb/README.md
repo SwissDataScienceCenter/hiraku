@@ -41,27 +41,33 @@ Set `WANDB_ENTITY` only if you want to log under a specific team or account.
 The example ships with W&B configured as the project-wide tracking backend.
 
 ```bash
-hiraku record create iris --type task \
+hiraku record create iris-classification \
+  --title "Iris classification" \
+  --type task \
   --set "goal=Maximize Iris test accuracy" \
   --set "question=How accurately can model families classify Iris?" \
   --set 'metrics=[{name: test/accuracy, direction: maximize}, {name: test/f1_macro, direction: maximize}, {name: test/log_loss, direction: minimize}]'
 
-hiraku record create logistic --parent iris --type experiment \
+hiraku record create iris-classification/logistic-regression \
+  --title "Logistic regression" \
+  --parent iris-classification --type experiment \
   --set "summary=Logistic regression baseline" \
   --set "hypothesis=A regularized linear classifier provides a strong Iris baseline." \
   --commit HEAD
 
-hiraku record create random-forest --parent iris --type experiment \
+hiraku record create iris-classification/random-forest \
+  --title "Random forest" \
+  --parent iris-classification --type experiment \
   --set "summary=Random forest comparison" \
   --set "hypothesis=A random forest improves Iris classification accuracy." \
   --commit HEAD
 
 hiraku record list
 
-hiraku run --record logistic -- \
+hiraku run --record iris-classification/logistic-regression -- \
   uv run python train.py --model logistic --seed 42 --test-size 0.25
 
-hiraku run --record random-forest -- \
+hiraku run --record iris-classification/random-forest -- \
   uv run python train.py --model random_forest --seed 42 --test-size 0.25
 ```
 
@@ -70,7 +76,7 @@ hiraku run --record random-forest -- \
 Inspect all runs associated with the research root:
 
 ```bash
-hiraku runs --record iris --all
+hiraku runs --record iris-classification --all
 ```
 
 ??? info "Example run results"

@@ -146,7 +146,7 @@ def record_editor(project_context):
 
     def save_markdown(record, markdown):
         record.markdown = markdown
-        project_context.vault.save(record)
+        project_context.vault.save(record, overwrite=True)
         return record
 
     markdown_editor = hc.MarkdownEditor(

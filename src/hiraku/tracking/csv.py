@@ -63,14 +63,6 @@ class CSVBackend(BackendOperations):
         if not path.exists():
             return []
         runs: list[Run] = []
-        records = self.project.vault.list()
-        record_references = {record.id: record.id for record in records}
-        names: dict[str, list[str]] = {}
-        for record in records:
-            names.setdefault(record.name, []).append(record.id)
-        record_references.update(
-            {name: ids[0] for name, ids in names.items() if len(ids) == 1}
-        )
         try:
             with path.open(newline="", encoding="utf-8") as stream:
                 reader = csv.DictReader(stream)
@@ -117,9 +109,7 @@ class CSVBackend(BackendOperations):
                         record_reference = normalized.get("record_id")
                         run = Run(
                             id=run_id,
-                            record_id=record_references.get(
-                                record_reference, record_reference
-                            ),
+                            record_id=record_reference,
                             commit=normalized.get("commit"),
                             timestamp=self._timestamp(
                                 normalized.get("timestamp"),
