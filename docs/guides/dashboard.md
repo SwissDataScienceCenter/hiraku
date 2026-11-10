@@ -127,14 +127,31 @@ Choose a leaderboard using the selector, or open one with
 Plots show attributed runs by default, including runs whose record files are
 missing. Enable **Include unattributed runs** to show the entire source.
 Without an initial `--record`, plots span the selected leaderboard; select
-**Clear record filter** to clear a subtree filter. Metric names and directions
+**Clear selection** in the runs table to clear a subtree filter. Metric names and directions
 come from the leaderboard; parameters are discovered automatically.
 
 ## Sections
 
 **Record navigation**
-:   An optional, initially collapsed tree of records with type and state
-    badges. Expand it to navigate the hierarchy. Choosing a record
+:   Choose the **Files** (default) or **Lineage** tab in the left sidebar.
+    Records show their title above a smaller bundle-relative ID, with type and
+    state badges. Untitled records use the filename stem as their title.
+    The view tabs sit beside the Records heading, aligned right. Files and Lineage share
+    row styling and indentation; folder names use disclosure chevrons without
+    icons or trailing slashes.
+    Drag the divider to adjust sidebar width. With the divider focused, use
+    Left/Right arrow keys to resize, Home/End for the limits, or double-click
+    to reset. Width lasts for the current page; narrow screens remain stacked.
+    Files shows filesystem paths; Lineage follows declared `parent_id` links.
+    Switching views preserves record selection and run scope. Both share the
+    Type/State filter chips; lineage retains ancestors of matches, dimming
+    ancestors that do not themselves match. Missing parents and cycles are tolerated.
+    The filesystem tree has type and state badges.
+    Directories follow bundle-relative record paths, independently of lineage.
+    Expand or collapse directories, and toggle type and state filter chips. Values within
+    one filter are combined with OR; the two filters are combined with AND.
+    Filtering navigation does not change the selected record or run scope.
+    Choosing a record
     selects the same row in the runs table, clears any selected run, and compares
     that record's subtree. Table selections highlight the corresponding record
     in the tree; selecting a run highlights its owning record while preserving
@@ -199,15 +216,47 @@ own named cell and can be placed, moved, or omitted independently in Studio:
 
 ### Reusing record navigation
 
-`hc.record_tree(records, selected_id, on_select)` renders record navigation and
-returns `(tree, buttons)`. Keep `buttons` in a notebook variable so their callbacks
-remain live. The component loads no data and owns no selection state. Wire
+Use `hc.RecordNavigation` to compose the heading, Files/Lineage tabs, filter
+chips, and active tree. Create it once in a setup cell, connecting its change
+callback to Marimo state:
+
+```python
+get_revision, set_revision = mo.state(0, allow_self_loops=True)
+navigation = hc.RecordNavigation(
+    on_change=lambda: set_revision(lambda revision: revision + 1)
+)
+```
+
+In a separate display cell, read the revision and render:
+
+```python
+get_revision()
+navigation.render(records, selected_id=selected_id, on_select=on_select)
+```
+
+The component retains view/filter state and widget references across selection
+changes. The caller owns record selection and loading. The independent filter
+and tree renderers remain available for custom layouts.
+
+`hc.filesystem_tree(records, selected_id, on_select, types=(), states=())`
+renders filesystem navigation, retaining directories containing matching records.
+Directory nodes only expand and collapse. The bundled notebook supplies type
+and state toggle chips using `hc.record_filters(records, on_toggle, types=(),
+states=())`, which returns `(filters, buttons)` with caller-owned filter state.
+Keep the returned buttons alive. Navigation shares record selection with the run
+table. On narrow screens the sidebar stacks above the main content.
+
+`hc.record_tree(records, selected_id, on_select)` remains available for lineage
+navigation using `parent_id`. Both components return `(tree, buttons)` and
+load no data or own selection state.
+
+Keep `buttons` in a notebook variable so their callbacks remain live. Wire
 `on_select` into the same selection callback used by the run table; the bundled
 notebook uses `select_key("record:" + record_id)` and passes the resulting key to
 `hc.run_table(..., selected_key=key, on_select=select_key)`.
 
-The Studio entry document places the `record_navigation` cell inside a collapsed
-`<details>` element. Remove that element from a project copy to omit navigation;
+The Studio entry document places the `record_navigation` cell in the sidebar's
+`<aside>` element. Remove that element from a project copy to omit navigation;
 table selection and the remaining components continue to work independently.
 
 Reusable component styling lives in `studio/overview/dashboard/components.css` beside the
@@ -216,9 +265,9 @@ Studio view's other stylesheets. The notebook loads it through
 The Studio HTML links the same file with `crossorigin="anonymous"`, allowing
 Marimo to read and adopt its rules into widget shadow roots in the isolated
 presentation. No styles are injected into button labels. `--init` copies the
-stylesheet with the view for customization. Its rules target only record
-navigation buttons; other controls retain their normal styling. The outer
-hierarchy and selection styling remain in the Studio view's `style.css`.
+stylesheet with the view for customization. Shared tree hierarchy, row selection,
+filter chips, and navigation-tab styles live in this stylesheet. The split-page
+layout remains in the Studio view's `style.css`.
 
 ### Reusing Markdown rendering
 

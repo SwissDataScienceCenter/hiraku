@@ -1,4 +1,4 @@
-#app-shell { max-width: 1280px; margin: auto; padding: 0 2.5rem 3rem; }
+#app-shell { max-width: 1600px; margin: auto; padding: 0 2.5rem 3rem; }
 .topbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -18,26 +18,35 @@
 h1 { margin: 0 0 1rem; }
 .intro { margin-bottom: 2rem; }
 .run-details { margin-top: 1.5rem; }
-.record-navigation { margin-bottom: 1.5rem; }
-.record-navigation > summary { cursor: pointer; color: var(--secondary-color); }
-.record-navigation[open] > summary { margin-bottom: 1rem; }
-.record-tree {
+.dashboard-layout {
+  display: grid;
+  grid-template-columns: var(--record-sidebar-width, clamp(280px, 27vw, 380px)) 6px minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+}
+.dashboard-content { min-width: 0; }
+.dashboard-divider {
+  position: sticky;
+  top: 1rem;
+  height: calc(100vh - 2rem);
+  cursor: col-resize;
+  touch-action: none;
+  border-radius: 3px;
+  outline: none;
+}
+.dashboard-divider::after {
+  content: "";
   display: block;
-  --hiraku-record-badge-background: #f1f3f2;
-  --hiraku-record-badge-foreground: #61716d;
+  width: 2px;
+  height: 100%;
+  margin: auto;
+  background: transparent;
 }
-body.dark-theme .record-tree {
-  --hiraku-record-badge-background: #383838;
-  --hiraku-record-badge-foreground: #d4d4d4;
-}
-.record-tree ul { list-style: none; margin: 0; padding: 0; }
-.record-tree ul ul { margin-left: 18px; padding-left: 10px; border-left: 1px solid var(--border); }
-.record-tree .record-row { margin: 1px 0; border: 1px solid transparent; border-radius: 7px; }
-.record-tree .record-row:hover { background: color-mix(in srgb, var(--primary-color) 5%, transparent); }
-.record-tree .record-row[aria-current="true"] {
-  border-color: var(--primary-color);
-  background: color-mix(in srgb, var(--primary-color) 10%, transparent);
-}
+.dashboard-divider:hover::after,
+.dashboard-divider:focus-visible::after,
+.dashboard-layout.resizing .dashboard-divider::after { background: var(--primary-color, #5561a6); }
+.dashboard-layout.resizing { user-select: none; cursor: col-resize; }
+.record-navigation { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
 .record-details { position: relative; margin-top: 1.5rem; }
 .record-details > h2 { min-height: 2rem; padding-right: 10rem; }
 .record-details marimo-cell[name="record_details"] .output { position: static; }
@@ -47,6 +56,9 @@ body.dark-theme .record-tree {
   right: 1.5rem;
 }
 @media (max-width: 900px) {
+  .dashboard-layout { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-divider { display: none; }
+  .record-navigation { position: static; max-height: 45vh; }
   #app-shell { padding: 0 1.5rem 2.5rem; }
   .topbar { margin: 0 -1.5rem 2rem; padding: 0.5rem 1.5rem; }
   .workspace { grid-template-columns: 1fr; }

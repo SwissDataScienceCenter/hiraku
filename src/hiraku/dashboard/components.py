@@ -20,7 +20,14 @@ import pandas as pd
 from ..errors import HirakuError
 from ..io import dump_yaml
 from ..record import Record
-from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
+from .data import (
+    lineage_records,
+    plot_frame,
+    run_text,
+    safe_url,
+    tradeoff_frame,
+    tree_rows,
+)
 
 
 def markdown_view(
@@ -150,10 +157,28 @@ class MarkdownEditor:
         )
 
 
+def _record_label(record: Record) -> str:
+    title = html.escape(record.title or record.id.rsplit("/", 1)[-1])
+    badges = " ".join(
+        f'<span class="badge">{html.escape(value)}</span>'
+        for value in (record.type, record.state)
+        if value
+    )
+    return (
+        '<span class="hiraku-record-node">'
+        '<span class="record-title">'
+        f'<span class="record-symbol" aria-hidden="true"></span>{title}</span>'
+        f'<span class="record-id">{html.escape(record.id)}</span>'
+        f'<span class="record-badges">{badges}</span></span>'
+    )
+
+
 def record_tree(
     records: Sequence[Record],
     selected_id: str | None,
     on_select: Callable[[str], Any],
+    *,
+    matching_ids: set[str] | None = None,
 ) -> tuple[mo.Html, dict[str, mo.ui.button]]:
     """Render optional record navigation and return its live button references.
 
@@ -176,24 +201,21 @@ def record_tree(
             continue
         if record.id in buttons:
             continue
-        badges = " ".join(
-            f'<span class="badge">{html.escape(value)}</span>'
-            for value in (record.type, record.state)
-            if value
-        )
         button = mo.ui.button(
-            label=(
-                '<span class="hiraku-record-node">'
-                '<span class="dot" aria-hidden="true"></span>'
-                f'<span class="record-id">{html.escape(record.id)}</span> {badges}'
-                "</span>"
-            ),
+            label=_record_label(record),
             full_width=True,
             on_click=lambda _, identifier=record.id: on_select(identifier),
         )
         buttons[record.id] = button
         selected = ' aria-current="true"' if record.id == selected_id else ""
-        fragments.append(f'<li><div class="record-row"{selected}>{button.text}</div>')
+        muted = (
+            " record-context"
+            if matching_ids is not None and record.id not in matching_ids
+            else ""
+        )
+        fragments.append(
+            f'<li><div class="record-row{muted}"{selected}>{button.text}</div>'
+        )
         nested = [
             child for child in children.get(record.id, []) if child.id not in buttons
         ]
@@ -209,6 +231,187 @@ def record_tree(
         mo.Html(f'<nav class="record-tree" aria-label="Records">{content}</nav>'),
         buttons,
     )
+
+
+def record_filters(
+    records: Sequence[Record],
+    on_toggle: Callable[[str, str], Any],
+    *,
+    types: Sequence[str] = (),
+    states: Sequence[str] = (),
+) -> tuple[mo.Html, dict[tuple[str, str], mo.ui.button]]:
+    """Render type/state toggle chips with caller-owned filter state.
+
+    Return live button references. Each callback identifies the field and value
+    to toggle; available values always come from the unfiltered record list.
+    """
+    buttons = {}
+    groups = []
+    for field, selected in (("type", types), ("state", states)):
+        chips = []
+        for value in sorted(
+            {getattr(record, field) for record in records if getattr(record, field)}
+        ):
+            active = value in selected
+            label = html.escape(value)
+            button = mo.ui.button(
+                label=(
+                    f'<span class="record-filter-chip{" active" if active else ""}">'
+                    f"{'✓ ' if active else ''}{label}</span>"
+                ),
+                tooltip=f"{'Remove' if active else 'Add'} {field} filter: {value}",
+                on_click=lambda _, field=field, value=value: on_toggle(field, value),
+            )
+            buttons[field, value] = button
+            chips.append(button.text)
+        if chips:
+            groups.append(
+                f'<div class="record-filter-group" role="group" '
+                f'aria-label="{field.title()} filters">'
+                f'<span class="record-filter-label">{field.title()}</span>'
+                f"{''.join(chips)}</div>"
+            )
+    return mo.Html(f'<div class="record-filters">{"".join(groups)}</div>'), buttons
+
+
+def filesystem_tree(
+    records: Sequence[Record],
+    selected_id: str | None,
+    on_select: Callable[[str], Any],
+    *,
+    types: Sequence[str] = (),
+    states: Sequence[str] = (),
+) -> tuple[mo.Html, dict[str, mo.ui.button]]:
+    """Navigate bundle-relative Markdown paths, independently of record lineage.
+
+    Filters match local type and state fields; empty filters include all values.
+    Directories retain matching descendants and do not select records. Keep the
+    returned buttons alive and supply selection state from the caller.
+    """
+    children: dict[str, set[tuple[str, bool]]] = {"": set()}
+    by_id = {}
+    for record in records:
+        if (types and record.type not in types) or (
+            states and record.state not in states
+        ):
+            continue
+        by_id[record.id] = record
+        parts = record.id.split("/")
+        parent = ""
+        for part in parts[:-1]:
+            directory = f"{parent}/{part}" if parent else part
+            children.setdefault(parent, set()).add((directory, True))
+            children.setdefault(directory, set())
+            parent = directory
+        children[parent].add((record.id, False))
+
+    buttons: dict[str, mo.ui.button] = {}
+    fragments = ["<ul>"]
+    stack: list[tuple[str, bool] | str] = list(
+        reversed(sorted(children[""], key=lambda item: (not item[1], item[0])))
+    )
+    while stack:
+        node = stack.pop()
+        if isinstance(node, str):
+            fragments.append(node)
+            continue
+        path, directory = node
+        label = html.escape(path.rsplit("/", 1)[-1])
+        if directory:
+            fragments.append(
+                "<li><details open><summary>"
+                f'<span class="record-folder-name">{label}</span></summary><ul>'
+            )
+            stack.append("</ul></details></li>")
+            stack.extend(
+                reversed(
+                    sorted(children[path], key=lambda item: (not item[1], item[0]))
+                )
+            )
+            continue
+        record = by_id[path]
+        button = mo.ui.button(
+            label=_record_label(record),
+            full_width=True,
+            on_click=lambda _, identifier=path: on_select(identifier),
+        )
+        buttons[path] = button
+        selected = ' aria-current="true"' if path == selected_id else ""
+        fragments.append(
+            f'<li><div class="record-row"{selected}>{button.text}</div></li>'
+        )
+    fragments.append("</ul>")
+    content = "".join(fragments) if buttons else "No matching records."
+    return (
+        mo.Html(
+            '<nav class="record-tree filesystem-tree" aria-label="Record files">'
+            f"{content}</nav>"
+        ),
+        buttons,
+    )
+
+
+class RecordNavigation:
+    """Session-local navigation controls delegating to the independent renderers.
+
+    Create once, then render in a separate cell. Connect ``on_change`` to a
+    Marimo state setter and read its getter in the display cell, as with
+    ``MarkdownEditor``. Selection and data loading remain with the caller.
+    """
+
+    def __init__(self, on_change: Callable[[], None] = lambda: None) -> None:
+        self.mode = "Files"
+        self.filters: dict[str, set[str]] = {"type": set(), "state": set()}
+        self._on_change = on_change
+        self.mode_control: mo.ui.tabs | None = None
+        self.record_buttons: dict[str, mo.ui.button] = {}
+        self.filter_buttons: dict[tuple[str, str], mo.ui.button] = {}
+
+    def _set_mode(self, value: str) -> None:
+        self.mode = value
+        self._on_change()
+
+    def _toggle_filter(self, field: str, value: str) -> None:
+        self.filters[field] ^= {value}
+        self._on_change()
+
+    def render(
+        self,
+        records: Sequence[Record],
+        *,
+        selected_id: str | None,
+        on_select: Callable[[str], Any],
+    ) -> mo.Html:
+        """Render the header, filters, and active tree, retaining live widgets."""
+        types = sorted(self.filters["type"])
+        states = sorted(self.filters["state"])
+        self.mode_control = mo.ui.tabs(
+            {"Files": "", "Lineage": ""}, value=self.mode, on_change=self._set_mode
+        )
+        filters, self.filter_buttons = record_filters(
+            records, self._toggle_filter, types=types, states=states
+        )
+        if self.mode == "Lineage":
+            navigation, self.record_buttons = record_tree(
+                lineage_records(records, types=types, states=states),
+                selected_id,
+                on_select,
+                matching_ids={
+                    record.id
+                    for record in records
+                    if (not types or record.type in types)
+                    and (not states or record.state in states)
+                },
+            )
+        else:
+            navigation, self.record_buttons = filesystem_tree(
+                records, selected_id, on_select, types=types, states=states
+            )
+        header = mo.Html(
+            '<div class="record-navigation-header"><h2>Records</h2>'
+            f'<div class="record-navigation-mode">{self.mode_control.text}</div></div>'
+        )
+        return mo.vstack([header, filters, navigation])
 
 
 def run_table(

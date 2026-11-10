@@ -151,17 +151,27 @@ def selected_context(get_selection, records, runs_df):
 
 
 @app.cell
-def record_navigation(records, select_key, selected_record):
-    _navigation, record_buttons = hc.record_tree(
+def navigation_setup():
+    get_navigation_revision, _set_navigation_revision = mo.state(
+        0, allow_self_loops=True
+    )
+    navigation = hc.RecordNavigation(
+        on_change=lambda: _set_navigation_revision(lambda revision: revision + 1)
+    )
+    return get_navigation_revision, navigation
+
+
+@app.cell
+def record_navigation(
+    records, select_key, selected_record, get_navigation_revision, navigation
+):
+    get_navigation_revision()
+    navigation.render(
         records,
-        selected_record.id if selected_record else None,
+        selected_id=selected_record.id if selected_record else None,
         on_select=lambda record_id: select_key(f"record:{record_id}"),
     )
-    _all_runs = mo.ui.button(
-        label="Clear record filter", on_click=lambda _: select_key(None)
-    )
-    mo.vstack([_all_runs, _navigation])
-    return (record_buttons,)
+    return
 
 
 @app.cell

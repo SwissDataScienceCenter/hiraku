@@ -107,6 +107,92 @@ def test_run_table_accepts_an_empty_project() -> None:
     assert table.value == []
 
 
+@pytest.mark.parametrize("renderer", [hc.filesystem_tree, hc.record_tree])
+def test_record_navigation_displays_title_and_secondary_id(renderer):
+    tree, buttons = renderer(
+        [Record(id="folder/record", title="Friendly title", type="note")],
+        "folder/record",
+        lambda _: None,
+    )
+    assert "Friendly title" in tree.text
+    assert "folder/record" in tree.text
+    assert "record-title" in tree.text
+    assert "record-id" in tree.text
+    assert set(buttons) == {"folder/record"}
+
+
+def test_record_filter_chips_keep_options_and_report_toggle_callbacks():
+    records = [
+        Record(id="a", type="note", state="draft"),
+        Record(id="b", type="task", state="stable"),
+    ]
+    toggles = []
+    filters, buttons = hc.record_filters(
+        records, lambda field, value: toggles.append((field, value)), types=["note"]
+    )
+    assert set(buttons) == {
+        ("type", "note"),
+        ("type", "task"),
+        ("state", "draft"),
+        ("state", "stable"),
+    }
+    assert "record-filter-chip active" in filters.text
+    buttons["type", "note"]._update(1)
+    buttons["state", "stable"]._update(1)
+    assert toggles == [("type", "note"), ("state", "stable")]
+    empty, buttons = hc.record_filters([], lambda *_: None)
+    assert not buttons
+    assert "record-filter-group" not in empty.text
+
+
+def test_filesystem_tree_ignores_lineage_and_preserves_path_selection():
+    records = [
+        Record(id="notes/child", type="note", parent_id="other"),
+        Record(id="other", type="task", parent_id="notes/child"),
+        Record(id="notes", type="task"),
+    ]
+    selections = []
+    tree, buttons = hc.filesystem_tree(records, "notes/child", selections.append)
+    assert set(buttons) == {"notes/child", "other", "notes"}
+    assert 'record-folder-name">notes</span>' in tree.text
+    assert "notes/child" in tree.text
+    assert 'aria-current="true"' in tree.text
+    buttons["notes/child"]._update(1)
+    assert selections == ["notes/child"]
+
+
+def test_filesystem_tree_filters_local_fields_and_retains_directories():
+    records = [
+        Record(id="group/a", type="note", state="draft"),
+        Record(id="group/nested/b", type="task", state="stable"),
+        Record(id="outside", type="note", state="stable"),
+    ]
+    tree, buttons = hc.filesystem_tree(
+        records, "outside", lambda _: None, types=["task"], states=["stable"]
+    )
+    assert set(buttons) == {"group/nested/b"}
+    assert 'record-folder-name">group</span>' in tree.text
+    assert 'record-folder-name">nested</span>' in tree.text
+    assert "aria-current" not in tree.text
+    empty, buttons = hc.filesystem_tree(
+        records, None, lambda _: None, types=["task"], states=["draft"]
+    )
+    assert not buttons
+    assert "No matching records" in empty.text
+
+
+def test_filesystem_tree_escapes_paths_and_handles_empty_records():
+    tree, _ = hc.filesystem_tree(
+        [Record(id="folder&/file&", type="<type>")], None, lambda _: None
+    )
+    assert "folder&amp;" in tree.text
+    assert "file" in tree.text
+    assert "<type>" not in tree.text
+    empty, buttons = hc.filesystem_tree([], None, lambda _: None)
+    assert "No matching records" in empty.text
+    assert not buttons
+
+
 def test_record_tree_hierarchy_selection_and_callbacks() -> None:
     records = [
         Record(
@@ -132,6 +218,36 @@ def test_record_tree_hierarchy_selection_and_callbacks() -> None:
     buttons["child"]._update(1)
     buttons["root"]._update(1)
     assert selections == ["child", "root"]
+
+
+def test_lineage_filters_retain_ancestors_and_dim_context():
+    from hiraku.dashboard.data import lineage_records
+
+    records = [
+        Record(id="root", type="task"),
+        Record(id="elsewhere/child", parent_id="root", type="note", state="done"),
+        Record(id="other", type="note", state="draft"),
+        Record(id="cycle-a", parent_id="cycle-b", type="task"),
+        Record(id="cycle-b", parent_id="cycle-a", type="note", state="done"),
+        Record(id="orphan", parent_id="missing", type="note", state="done"),
+    ]
+    filtered = lineage_records(records, types=["note"], states=["done"])
+    assert {record.id for record in filtered} == {
+        "root",
+        "elsewhere/child",
+        "cycle-a",
+        "cycle-b",
+        "orphan",
+    }
+    tree, buttons = hc.record_tree(
+        filtered,
+        "elsewhere/child",
+        lambda _: None,
+        matching_ids={"elsewhere/child", "cycle-b", "orphan"},
+    )
+    assert set(buttons) == {record.id for record in filtered}
+    assert tree.text.count("record-context") == 2
+    assert tree.text.count('aria-current="true"') == 1
 
 
 def test_record_tree_handles_empty_and_deep_hierarchies() -> None:

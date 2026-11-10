@@ -25,7 +25,7 @@ class BundledProvider(HtmlProvider):
         files = {
             PurePosixPath(path.relative_to(root).as_posix()): path.read_bytes()
             for path in root.rglob("*")
-            if path.is_file() and path.suffix in {".html", ".css", ".svg"}
+            if path.is_file() and path.suffix in {".html", ".css", ".svg", ".js"}
         }
         # Keep the bundled layout, using the test notebook's output cell hosts.
         page = files[PurePosixPath("index.html")].decode()

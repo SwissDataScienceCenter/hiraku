@@ -94,6 +94,62 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
     assert f"type: {definitions['selected_record'].type}" in rendered
 
 
+def test_navigation_filter_toggles_preserve_selection(project, monkeypatch):
+    record = project.vault.load("root/a/a")
+    record.type = "note"
+    project.vault.save(record, overwrite=True)
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", record.id)
+    from hiraku.resources.dashboards.dashboard.app import app
+
+    _, initial = app.run()
+    initial["navigation"].filter_buttons["type", "task"]._update(1)
+    names = (
+        "get_selection",
+        "initial_record",
+        "metrics",
+        "paths",
+        "select_key",
+        "tree_metric",
+        "get_navigation_revision",
+        "navigation",
+    )
+    _, filtered = app.run(defs={name: initial[name] for name in names})
+    assert record.id not in filtered["navigation"].record_buttons
+    assert filtered["selected_record"].id == record.id
+    assert filtered["navigation"].filters["type"] == {"task"}
+    filtered["navigation"].filter_buttons["type", "task"]._update(1)
+    _, cleared = app.run(defs={name: filtered[name] for name in names})
+    assert record.id in cleared["navigation"].record_buttons
+    assert cleared["navigation"].filters["type"] == set()
+
+
+def test_navigation_mode_preserves_record_and_scope(project, monkeypatch):
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
+    from hiraku.resources.dashboards.dashboard.app import app
+
+    _, initial = app.run()
+    initial["navigation"].mode_control._update("1")
+    names = (
+        "get_selection",
+        "initial_record",
+        "metrics",
+        "paths",
+        "select_key",
+        "tree_metric",
+        "get_navigation_revision",
+        "navigation",
+    )
+    _, lineage = app.run(defs={name: initial[name] for name in names})
+    assert lineage["scope"] == initial["scope"]
+    assert lineage["selected_record"].id == initial["selected_record"].id
+    assert lineage["navigation"].mode == "Lineage"
+    assert set(lineage["navigation"].record_buttons) == {
+        record.id for record in initial["records"]
+    }
+
+
 def test_navigation_selection_updates_table_and_clears_run(
     project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -102,7 +158,7 @@ def test_navigation_selection_updates_table_and_clears_run(
 
     _, initial = app.run()
     initial["select_key"]("run:r1")
-    initial["record_buttons"]["root/a/a"]._update(1)
+    initial["navigation"].record_buttons["root/a/a"]._update(1)
     assert initial["get_selection"]() == ("record:root/a/a", "root/a/a")
     _, definitions = app.run(
         defs={

@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="./ui.css">
     <link rel="stylesheet" href="./style.css">
     <link rel="stylesheet" href="./components.css" crossorigin="anonymous">
+    <script src="./layout.js" defer></script>
   </head>
   <body>
     <main id="app-shell">
@@ -29,10 +30,14 @@
       <p class="eyebrow">Experiment workspace</p>
       <h1>Inspect runs</h1>
       <p class="intro">Explore records, select a run, and review its provenance and metric history.</p>
-      <details class="card record-navigation">
-        <summary>Record navigation</summary>
+      <div class="dashboard-layout">
+      <aside id="record-sidebar" class="card record-navigation" aria-label="Record navigation">
         <marimo-cell name="record_navigation"></marimo-cell>
-      </details>
+      </aside>
+      <div class="dashboard-divider" role="separator" tabindex="0"
+        aria-label="Resize record sidebar" aria-orientation="vertical"
+        aria-controls="record-sidebar" title="Drag to resize; arrow keys adjust; double-click resets"></div>
+      <div class="dashboard-content">
       <section class="card">
         <h2>Records and runs</h2>
         <marimo-cell name="run_table"></marimo-cell>
@@ -54,6 +59,8 @@
           <h2>Metric trade-offs</h2>
           <marimo-cell name="tradeoff_plot"></marimo-cell>
         </section>
+      </div>
+      </div>
       </div>
       <footer class="hk-footer">
         <img src="assets/sdsc-logo-white.svg" alt="Swiss Data Science Center">

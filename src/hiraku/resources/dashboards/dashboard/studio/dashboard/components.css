@@ -1,9 +1,107 @@
 /* Reusable component styles shared by the notebook and Studio view. */
+.record-navigation-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.record-navigation-header h2 { margin: 0; font: 600 18px/1.4 system-ui, sans-serif; }
+.record-navigation-mode { display: flex; justify-content: flex-end; margin-left: auto; }
+:host(marimo-tabs) [role="tablist"] {
+  gap: 1px;
+  padding: 2px;
+  height: auto;
+  min-height: 0;
+  border: 1px solid var(--border, #e2e4e8);
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+}
+:host(marimo-tabs) [role="tab"] {
+  padding: 3px 8px;
+  height: auto;
+  min-height: 0;
+  border-radius: 4px;
+  font: 11px/1.3 system-ui, sans-serif;
+  color: inherit;
+  opacity: 0.65;
+  box-shadow: none;
+}
+:host(marimo-tabs) [role="tab"][aria-selected="true"] {
+  background: var(--background, #fff);
+  opacity: 1;
+  box-shadow: 0 1px 3px #00000012;
+}
+:host(marimo-tabs) [role="tab"] .markdown,
+:host(marimo-tabs) [role="tab"] .paragraph { font: inherit; margin: 0; }
+
+.record-tree { display: block; }
+.record-tree ul { list-style: none; margin: 0; padding: 0; }
+.record-tree ul ul {
+  margin-left: 12px;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+.record-tree .record-row { margin: 2px 0; border-radius: 5px; }
+.record-tree .record-row:hover,
+.record-tree summary:hover { background: color-mix(in srgb, currentColor 4%, transparent); }
+.record-tree .record-context { opacity: 0.55; }
+.record-tree .record-row[aria-current="true"] {
+  background: color-mix(in srgb, var(--primary-color, #5561a6) 10%, transparent);
+  box-shadow: inset 2px 0 var(--primary-color, #5561a6);
+}
+.record-tree summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  list-style: none;
+  font: 500 12px/1.5 system-ui, sans-serif;
+}
+.record-tree summary::-webkit-details-marker { display: none; }
+.record-tree summary::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+.record-tree details[open] > summary::before { transform: rotate(45deg); }
+.record-folder-name { overflow-wrap: anywhere; }
+.record-filter-group { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 12px; }
+.record-filter-label { flex-basis: 100%; font: 11px/1.4 system-ui, sans-serif; opacity: 0.65; }
+button:has(.record-filter-chip) {
+  height: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+button:has(.record-filter-chip) .paragraph { margin: 0 !important; }
+.record-filter-chip {
+  display: inline-block;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  font: 10px/1.5 system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  color: inherit;
+}
+.record-filter-chip.active {
+  border-color: var(--primary-color, #5561a6);
+  background: color-mix(in srgb, var(--primary-color, #5561a6) 15%, transparent);
+}
+button:has(.record-filter-chip):focus-visible {
+  outline: 2px solid var(--primary-color, #5561a6) !important;
+  border-radius: 14px;
+}
+
 button:has(.hiraku-record-node) {
   justify-content: flex-start !important;
   height: auto !important;
   min-height: 32px;
-  padding: 4px 10px !important;
+  padding: 7px 8px !important;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
@@ -18,16 +116,37 @@ button:has(.hiraku-record-node) .paragraph {
 }
 
 .hiraku-record-node {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 2px;
+  min-width: 0;
+}
+
+.hiraku-record-node .record-title {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
+  align-items: baseline;
+  gap: 6px;
+  font: 500 13px/1.4 system-ui, sans-serif;
+  overflow-wrap: anywhere;
+}
+
+.hiraku-record-node .record-symbol {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary-color, #5561a6);
+  opacity: 0.55;
+  align-self: center;
 }
 
 .hiraku-record-node .record-id {
-  font: 13px ui-monospace, monospace;
+  font: 10px/1.4 ui-monospace, monospace;
+  opacity: 0.65;
   overflow-wrap: anywhere;
 }
+
+.hiraku-record-node .record-badges { display: flex; flex-wrap: wrap; gap: 4px; }
 
 .hiraku-record-node .badge {
   font: 10px/1.6 system-ui, sans-serif;
@@ -37,14 +156,6 @@ button:has(.hiraku-record-node) .paragraph {
   padding: 1px 7px;
   color: var(--hiraku-record-badge-foreground, #61716d);
   white-space: nowrap;
-}
-
-.hiraku-record-node .dot {
-  width: 7px;
-  height: 7px;
-  background: var(--primary-color, #94a3b8);
-  border-radius: 50%;
-  flex-shrink: 0;
 }
 
 button:has(.hiraku-record-node):focus-visible {

@@ -45,6 +45,24 @@ RECORD_COLUMNS = (
 )
 
 
+def lineage_records(
+    records: Sequence[Record], *, types: Sequence[str] = (), states: Sequence[str] = ()
+) -> list[Record]:
+    """Filter local fields while retaining lineage ancestors, tolerating cycles."""
+    by_id = {record.id: record for record in records}
+    visible: set[str] = set()
+    for record in records:
+        if (types and record.type not in types) or (
+            states and record.state not in states
+        ):
+            continue
+        current = record
+        while current is not None and current.id not in visible:
+            visible.add(current.id)
+            current = by_id.get(current.parent_id)
+    return [record for record in records if record.id in visible]
+
+
 def record_paths(records: Iterable[Record]) -> dict[str, str]:
     """Map each record ID to its ancestry, such as ``root/a/a1``.
 
