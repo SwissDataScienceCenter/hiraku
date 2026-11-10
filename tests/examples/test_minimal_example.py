@@ -9,7 +9,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
-from hiraku.tracking import TrackingBackendFactory
+from hiraku.tracking import Leaderboard
 
 
 def git(path: Path, *arguments: str) -> str:
@@ -53,8 +53,6 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
             "Binary classification",
             "--type",
             "task",
-            "--set",
-            "metrics=[{name: val/accuracy, direction: maximize}]",
         ],
     )
     invoke(
@@ -91,11 +89,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
 
     config = Project.discover(project)
     record = config.vault.load("binary-classification/threshold-baseline")
-    runs = (
-        TrackingBackendFactory(config)
-        .create(config.tracking_backend)
-        .list_runs(record_id=record.id)
-    )
+    runs = Leaderboard.load(config).list_runs(config, record_id=record.id)
     assert len(runs) == 1
     assert runs[0].commit == commit
     assert runs[0].raw["git_state"] == "clean"
@@ -129,8 +123,6 @@ def test_minimal_documented_sequence(tmp_path: Path, monkeypatch) -> None:
             "task",
             "--set",
             "goal=Improve validation accuracy on my dataset",
-            "--set",
-            "metrics=[{name: val/accuracy, direction: maximize}]",
         ],
     )
     invoke(

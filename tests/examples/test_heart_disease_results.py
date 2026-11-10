@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
-from hiraku.tracking import TrackingBackendFactory
+from hiraku.tracking import Leaderboard
 
 
 def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypatch):
@@ -48,15 +48,16 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
         ).parent_id
         == forest.id
     )
-    assert forest.metrics is None
-    parent = config.vault.load(forest.parent_id)
-    assert [metric.direction for metric in parent.metrics] == ["minimize", "maximize"]
-    backend = TrackingBackendFactory(config).create(config.tracking_backend)
-    runs = backend.list_runs(record_id=forest.id)
+    assert [metric.direction for metric in Leaderboard.load(config).metrics] == [
+        "minimize",
+        "maximize",
+    ]
+    leaderboard = Leaderboard.load(config)
+    runs = leaderboard.list_runs(config, record_id=forest.id)
     assert len(runs) == 3
-    assert len(backend.list_runs(record_id=forest.id)) == 3
+    assert len(leaderboard.list_runs(config, record_id=forest.id)) == 3
     monkeypatch.chdir(project)
-    result = runner.invoke(main, ["runs", "--record", forest.id, "--all", "--json"])
+    result = runner.invoke(main, ["runs", "--json"])
     assert result.exit_code == 0, result.output
     assert len(json.loads(result.output)) == 9
     training = runpy.run_path(str(project / "train.py"))
@@ -76,6 +77,6 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
             "git_state": "",
         },
     )
-    runs = TrackingBackendFactory(config).create(config.tracking_backend).list_runs()
+    runs = Leaderboard.load(config).list_runs(config)
     assert len(runs) == 10
     assert next(run for run in runs if run.id == "new-training-run").duration == 1.5

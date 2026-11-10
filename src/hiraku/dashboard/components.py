@@ -281,7 +281,7 @@ def performance_controls(
 
 
 def tradeoff_controls(
-    records_df: pd.DataFrame, metrics: Sequence[str]
+    directions: Mapping[str, str | None], metrics: Sequence[str]
 ) -> tuple[mo.ui.dropdown, mo.ui.dropdown, mo.ui.dropdown, mo.ui.dropdown]:
     """Create independent metric and objective selectors for the trade-off plot."""
     x_default = metrics[0] if metrics else None
@@ -290,16 +290,7 @@ def tradeoff_controls(
     y_metric = mo.ui.dropdown(metrics, value=y_default, label="Y metric")
 
     def direction(metric_name):
-        return next(
-            (
-                item["direction"]
-                for declared in records_df["metrics"]
-                if isinstance(declared, list)
-                for item in declared
-                if item["name"] == metric_name
-            ),
-            "minimize",
-        )
+        return directions.get(metric_name) or "minimize"
 
     x_objective = mo.ui.dropdown(
         ["minimize", "maximize"],
@@ -323,7 +314,8 @@ def performance_plot(
 ) -> mo.Html:
     """Plot one metric over execution order for an already scoped run table."""
     _points, _missing = plot_frame(runs_df, metric)
-    _notes = [f"{len(runs_df)} runs under **{scope}**, numbered by execution order."]
+    _label = f"under **{scope}**" if scope else "in this leaderboard"
+    _notes = [f"{len(runs_df)} runs {_label}, numbered by execution order."]
     if _missing:
         _notes.append(f"{_missing} without a numeric `{metric}` are not shown.")
     if _points.empty:

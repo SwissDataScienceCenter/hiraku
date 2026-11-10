@@ -73,8 +73,7 @@ hiraku record create sep10 \
   --type task \
   --set 'branch=autoresearch/sep10' \
   --set "goal=Find the best architecture, optimizer, and hyperparameters to minimize `val_bpb` within the fixed 5-minute training budget." \
-  --markdown-file task.md \
-  --set 'metrics=[{name: val_bpb, direction: minimize}]'
+  --markdown-file task.md
 
 git switch -c autoresearch/sep10
 ```
@@ -148,5 +147,5 @@ Track the agent's progress with:
 
 ```bash
 hiraku record list --json
-hiraku runs --record sep10 --all --sort val_bpb --ascending
+hiraku runs --sort val_bpb --ascending
 ```

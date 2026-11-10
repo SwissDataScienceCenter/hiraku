@@ -48,15 +48,15 @@ custom tracking store.
 
 ## Create the research root and child records
 
-The example ships with MLflow configured as the project-wide tracking backend.
+The example ships with MLflow configured in `hiraku/leaderboards/default.yml`.
+The leaderboard reads results; the training script configures its logging destination.
 
 ```bash
 hiraku record create digit-classification \
   --title "Digit classification" \
   --type task \
   --set "goal=Understand how L2 regularization affects Digits learning curves" \
-  --set "question=Does stronger regularization reduce overfitting on the Digits dataset?" \
-  --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]'
+  --set "question=Does stronger regularization reduce overfitting on the Digits dataset?"
 
 hiraku record create digit-classification/weak-l2 \
   --title "Weak L2 regularization" \
@@ -83,10 +83,10 @@ hiraku run --record digit-classification/strong-l2 -- uv run python train.py --a
 ## Compare final metrics and inspect curves
 
 ```bash
-hiraku runs --record digit-classification --all
+hiraku runs
 
 # list with additional details
-hiraku runs --record digit-classification --all \
+hiraku runs \
   --params alpha,epochs,seed \
   --metrics train/log_loss,val/log_loss,train/accuracy,val/accuracy \
   --sort val/log_loss --ascending
@@ -106,7 +106,7 @@ value of each metric. Full epoch histories remain in MLflow and its UI.
 
 You can list the same runs using Hiraku:
 ```
-hiraku runs --record digit-classification --all
+hiraku runs
 ```
 
 Or browse them, with a per-run plot and links into the MLflow UI, in the

@@ -21,7 +21,7 @@ from hiraku.git import GitRepository
 from hiraku.markdown import Markdown, render
 from hiraku.project import Project
 from hiraku.record import Record
-from hiraku.tracking import Run, TrackingBackendFactory
+from hiraku.tracking import Leaderboard
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
 STEPS = ("draft", "implement", "launch", "analyze")
@@ -30,6 +30,7 @@ STEPS = ("draft", "implement", "launch", "analyze")
 class ResearchState(TypedDict, total=False):
     arguments: dict[str, Any]
     task: str
+    leaderboard: str | None
     command: list[str]
     rounds: int
     step: str
@@ -47,6 +48,7 @@ class CollaborativeInput(BaseModel):
     )
     command: list[str] = Field(min_length=1)
     rounds: int = Field(default=3, ge=1)
+    leaderboard: str | None = Field(default=None, description="Leaderboard name.")
 
 
 class DraftedArguments(BaseModel):
@@ -118,6 +120,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         return Command(
             update={
                 "task": task,
+                "leaderboard": arguments.leaderboard,
                 "command": command,
                 "rounds": rounds,
                 "step": "draft",
@@ -347,7 +350,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 },
                 goto="launch",
             )
-        runs = _runs(record, project)
+        runs = Leaderboard.load(project, state.get("leaderboard")).list_runs(
+            project, record_id=record.id
+        )
         if not runs:
             return Command(
                 update={"feedback": f"No run is attributed to {record.id!r} yet."},
@@ -366,9 +371,11 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def analyze(state: ResearchState) -> Command[Literal["analyze", "draft", "done"]]:
         record = experiment(state)
-        runs = _runs(record, project)
+        leaderboard = Leaderboard.load(project, state.get("leaderboard"))
+        runs = leaderboard.list_runs(project, record_id=record.id)
         data = {
             **experiment_context(state),
+            "metrics": [metric.model_dump() for metric in leaderboard.metrics or ()],
             "runs": [{"run_id": run.id, "metrics": dict(run.metrics)} for run in runs],
             "previous": state.get("results", []),
         }
@@ -440,14 +447,6 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
     builder.add_edge(START, "initialize")
     builder.add_edge("done", END)
     return builder.compile(checkpointer=checkpointer)
-
-
-def _runs(record: Record, project: Project) -> list[Run]:
-    return (
-        TrackingBackendFactory(project)
-        .create(project.tracking_backend)
-        .list_runs(record_id=record.id)
-    )
 
 
 class WorkflowApproval(BaseModel):

@@ -20,13 +20,14 @@ from hiraku.errors import (
 )
 from hiraku.project import Project
 from hiraku.record import Record
-from hiraku.tracking import CSVBackend, TrackingBackendFactory
+from hiraku.tracking import CSVBackend, Leaderboard
 
 
 def test_project_create_can_skip_mcp_configuration(tmp_path: Path) -> None:
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
 
-    assert project.tracking_backend == "csv"
+    assert project.leaderboards_dir == tmp_path / "hiraku" / "leaderboards"
+    assert list(project.leaderboards_dir.iterdir()) == []
     assert project.active_record_id is None
     assert project.records_dir == tmp_path / "hiraku" / "records"
     assert not (tmp_path / ".mcp.json").exists()
@@ -172,12 +173,6 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
         Project.discover(tmp_path / "missing")
 
 
-def test_project_config_tracking_backend_is_project_wide(tmp_path: Path) -> None:
-    config = Project.create(tmp_path, install_skill=False)
-    config.tracking_backend = {"type": "wandb", "project": "research"}
-    assert config.tracking_backend == {"type": "wandb", "project": "research"}
-
-
 def test_init_from_template_applies_overlay(tmp_path: Path) -> None:
     template = tmp_path / "template"
     (template / "custom/dispatch").mkdir(parents=True)
@@ -266,7 +261,6 @@ def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
         "hiraku_dir",
         "default_dispatch",
         "active_record_id",
-        "tracking_backend",
     }
 
 
@@ -339,7 +333,7 @@ def test_unavailable_results_leave_no_project(tmp_path: Path, example):
     assert not (tmp_path / "hiraku.yml").exists()
 
 
-def test_results_configure_project_tracking(tmp_path: Path):
+def test_results_include_leaderboard_configuration(tmp_path: Path):
     config = Project.create(
         tmp_path,
         example="digits-mlflow",
@@ -349,16 +343,14 @@ def test_results_configure_project_tracking(tmp_path: Path):
     assert (
         config.active_record_id == config.vault.load("digit-classification/weak-l2").id
     )
-    assert config.tracking_backend == {
+    assert Leaderboard.load(config).source.model_dump(
+        mode="json", exclude_none=True
+    ) == {
         "type": "mlflow",
         "database": "mlflow.db",
         "experiment_name": "hiraku-digits",
     }
     assert config.vault.load("digit-classification").id == "digit-classification"
-    assert (
-        TrackingBackendFactory(config).create(config.tracking_backend).backend_name
-        == "mlflow"
-    )
 
 
 def test_results_override_base_files(tmp_path: Path, monkeypatch):
@@ -369,7 +361,7 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
     base.mkdir(parents=True)
     results.mkdir()
     (base / "train.py").write_text("base")
-    (base / "hiraku.yml").write_text("tracking_backend: csv\n")
+    (base / "hiraku.yml").write_text("{}\n")
     (results / "train.py").write_text("results")
     (results / "hiraku.yml").write_text("active_record_id: root\n")
     monkeypatch.setattr(hiraku.project, "files", lambda name: resources)
@@ -480,10 +472,6 @@ def _create_task(project: Project) -> Record:
         "on a fixed Cleveland cohort",
         question="Which modeling approaches achieve the best validation log loss "
         "and accuracy on this cohort?",
-        metrics=[
-            {"name": "val/log_loss", "direction": "minimize"},
-            {"name": "val/accuracy", "direction": "maximize"},
-        ],
         title="Heart disease prediction",
     )
     project.set_active_record(record)
@@ -523,7 +511,7 @@ to develop and evaluate predictive models for heart disease on the fixed
 Cleveland cohort without restricting the task to particular model families. Ask
 which modeling approaches achieve the best validation log loss and accuracy.
 Track val/log_loss to minimize and val/accuracy to maximize. Only create and
-verify the record.""",
+verify the record and its leaderboard.""",
     )
 
     tasks = config.vault.list()
@@ -540,12 +528,12 @@ verify the record.""",
     assert "model" in question
     assert "log loss" in question
     assert "accuracy" in question
-    assert [metric.model_dump() for metric in task.metrics] == [
+    assert [metric.model_dump() for metric in Leaderboard.load(config).metrics] == [
         {"name": "val/log_loss", "direction": "minimize"},
         {"name": "val/accuracy", "direction": "maximize"},
     ]
     assert config.vault.children(task.id) == []
-    assert CSVBackend(config).list_runs(record_id=task.id) == []
+    assert CSVBackend(config, path="runs.csv").list_runs(record_id=task.id) == []
     assert _skill_git(project, "status", "--porcelain") == ""
 
 
@@ -575,7 +563,7 @@ Bind it to the current commit. Only create and verify the record; do not run it.
         "Regularized logistic regression provides a calibrated baseline"
     )
     assert experiment.commit == commit
-    assert CSVBackend(config).list_runs(record_id=task.id) == []
+    assert CSVBackend(config, path="runs.csv").list_runs(record_id=task.id) == []
     assert _skill_git(project, "status", "--porcelain") == ""
 
 
@@ -602,7 +590,7 @@ report its tracked validation metrics. Do not create or update other records."""
     assert [item.title for item in config.vault.children(task.id)] == [
         "Logistic regression"
     ]
-    runs = CSVBackend(config).list_runs(
+    runs = CSVBackend(config, path="runs.csv").list_runs(
         record_id=experiment.id,
     )
     assert len(runs) == 1

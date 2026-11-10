@@ -35,7 +35,7 @@ or resume an experiment, work with the user to:
    `git switch <root-branch>`.
 3. **Read the research history**: Run
    `hiraku record list --json` and
-   `hiraku runs --record <root-id> --all --json`. If an experiment is active or
+   `hiraku runs --json`. If an experiment is active or
    incomplete, inspect it with
    `hiraku record show <experiment-id> --json` and inspect
    its attributed runs before doing new work.

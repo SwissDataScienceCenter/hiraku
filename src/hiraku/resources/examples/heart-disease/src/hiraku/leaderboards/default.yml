@@ -1,0 +1,8 @@
+source:
+  type: csv
+  path: runs.csv
+metrics:
+- name: val/log_loss
+  direction: minimize
+- name: val/accuracy
+  direction: maximize

@@ -1,15 +1,37 @@
 # Track with CSV
 
-CSV is the default backend. It reads `runs.csv` from the Hiraku project root.
-To choose another CSV path, set the project-wide backend in `hiraku.yml`:
+The CSV source requires an explicit file path.
+Create `hiraku/leaderboards/local.yml` to configure a leaderboard:
 
 ```yaml
-tracking_backend:
+source:
   type: csv
   path: results/runs.csv
 ```
 
 Relative paths resolve from the project root.
+
+Paths can reference environment variables using `${NAME}`:
+
+```yaml
+source:
+  type: csv
+  path: ${MY_RESULTS_DIR}/runs.csv
+```
+
+Define `MY_RESULTS_DIR` in the environment running Hiraku. Variables expand when
+the CSV adapter is constructed; unset variables raise an error. Relative expanded
+paths resolve from the project root, while absolute paths can refer to external
+storage. The YAML retains the expression so each system can use its own location.
+Expansion evaluates no shell commands or expressions.
+
+For a project-local file, use `path: runs.csv`. From the CLI:
+
+```bash
+hiraku leaderboard create local --source csv --path '${MY_RESULTS_DIR}/runs.csv'
+```
+
+Single quotes preserve the reference for Hiraku to expand when querying runs.
 
 ## Log from your script
 
@@ -40,14 +62,15 @@ Use `HIRAKU_RECORD_ID`, `HIRAKU_COMMIT`, and
 Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 `hiraku example create heart-disease` to get a complete writer in `train.py`.
 
-The `id` column is the tracking backend's run ID.
+The `id` column is required and is the source run ID. The `record_id`
+column is optional; use `hiraku runs --include-unattributed` to include runs
+without a record ID.
 
 ## Inspect
 
 ```bash
-hiraku runs --record my-task --all --sort val/accuracy
+hiraku runs --sort val/accuracy
 ```
 
-Metric values read from CSV remain strings in normalized runs; sorting
-converts numeric values where possible. A script that fails before writing
+Metric values read from CSV are normalized to floats. A script that fails before writing
 a row has no recorded execution in this backend.

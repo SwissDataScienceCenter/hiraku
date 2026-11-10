@@ -7,14 +7,14 @@ import pytest
 
 from hiraku.errors import BackendError
 from hiraku.project import Project
-from hiraku.tracking import CSVBackend, TrackingBackendFactory
+from hiraku.tracking import CSVBackend, MLflowBackend, MLflowBackendConfig
 
 
 def test_backend_runs_rejects_empty_record_id_before_reading_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = Project.create(tmp_path)
-    backend = CSVBackend(config)
+    backend = CSVBackend(config, path="runs.csv")
     monkeypatch.setattr(
         backend,
         "_read_source_runs",
@@ -27,7 +27,7 @@ def test_backend_runs_rejects_empty_record_id_before_reading_source(
 def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     mlflow = pytest.importorskip("mlflow")
     config = Project.create(tmp_path)
-    config.tracking_backend = {"type": "mlflow", "experiment_name": "hiraku-test"}
+    source = MLflowBackendConfig(experiment_name="hiraku-test")
     task = config.vault.create("task/task", type="task", title="task")
     config.set_active_record(task)
     config.set_active_record(
@@ -56,9 +56,10 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     with mlflow.start_run() as active:
         mlflow.set_tag("unrelated", "no-record-id")
         mlflow.log_metric("loss", 4.0)
-    backend = TrackingBackendFactory(config).create(config.tracking_backend)
+    backend = MLflowBackend(config, settings=source)
     run = backend.list_runs()[0]
     assert len(backend.list_runs()) == 1
+    assert len(backend.list_runs(include_unattributed=True)) == 2
     assert backend.list_runs(record_id="task/task") == []
     assert run.id == run_id
     assert run.record_id == "task/exp/exp"

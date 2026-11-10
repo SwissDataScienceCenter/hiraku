@@ -33,8 +33,9 @@ from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
 from .project import Project
-from .record import Record, resolve_metrics, validate_identifier
-from .tracking import Run, TrackingBackendFactory
+from .record import Record, validate_identifier
+from .tracking import Leaderboard, Run
+from .tracking.leaderboard import _leaderboard_path
 
 
 class CLIContext:
@@ -160,7 +161,7 @@ def _edit(path: Path) -> None:
         raise ValidationError(f"Editor exited with status {result.returncode}")
 
 
-def _edit_recoverable(path: Path, loader: Callable[[], Record], label: str) -> Record:
+def _edit_recoverable(path: Path, loader: Callable[[], Any], label: str) -> Any:
     try:
         loader()
     except (ValidationError, PydanticValidationError) as exc:
@@ -342,13 +343,9 @@ def status_command(state: CLIContext, json_output: bool, pretty: bool) -> None:
         branch = GitRepository(project.root).current_branch
     except GitError:
         branch = None
-    tracking_backend = project.tracking_backend
-    if isinstance(tracking_backend, Mapping):
-        tracking_backend = tracking_backend.get("type", tracking_backend.get("name"))
     result = {
         "project_root": project.root,
         "active_record_id": project.active_record_id,
-        "tracking_backend": tracking_backend,
         "git_branch": branch,
     }
     if json_output:
@@ -739,14 +736,105 @@ def run_command(
     raise click.exceptions.Exit(128 - code if code < 0 else code)
 
 
-@main.command("runs")
-@click.option("--record", "record_id")
+@main.group("leaderboard")
+def leaderboard_group() -> None:
+    """Manage leaderboard definitions and their tracking sources."""
+
+
+@leaderboard_group.command("list")
+@click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True)
+@click.pass_obj
+def leaderboard_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
+    """List leaderboard names without loading their definitions."""
+    _validate_json_options(json_output, pretty)
+    names = Leaderboard.list(state.project)
+    if json_output:
+        _emit_json(names, pretty=pretty)
+    else:
+        _print_table(("name",), [(name,) for name in names])
+
+
+@leaderboard_group.command("show")
+@click.argument("name")
+@click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True)
+@click.pass_obj
+def leaderboard_show(
+    state: CLIContext, name: str, json_output: bool, pretty: bool
+) -> None:
+    """Show validated leaderboard configuration without API keys."""
+    _validate_json_options(json_output, pretty)
+    data = Leaderboard.load(state.project, name).model_dump(
+        mode="json", exclude_none=True
+    )
+    if json_output:
+        _emit_json(data, pretty=pretty)
+    else:
+        click.echo(dump_yaml(data), nl=False)
+
+
+@leaderboard_group.command("create")
+@click.argument("name")
 @click.option(
-    "--all",
-    "all_records",
-    is_flag=True,
-    help="List all attributed runs from the record's tracking source.",
+    "--source",
+    "source_type",
+    type=click.Choice(["csv", "mlflow", "wandb"]),
+    required=True,
 )
+@click.option(
+    "--path",
+    type=click.Path(),
+    help="Required for CSV. Absolute or project-relative path; supports ${NAME}.",
+)
+@click.option("--tracking-uri", help="MLflow tracking server URI.")
+@click.option(
+    "--database", type=click.Path(path_type=Path), help="Local MLflow database."
+)
+@click.option("--experiment-name", help="MLflow experiment name.")
+@click.option("--entity", help="W&B account or team.")
+@click.option("--project", help="W&B project name.")
+@click.pass_obj
+def leaderboard_create(
+    state: CLIContext, name: str, source_type: str, **options: Any
+) -> None:
+    """Create a leaderboard; edit its YAML to declare comparison metrics."""
+    source = {
+        "type": source_type,
+        **{key: value for key, value in options.items() if value is not None},
+    }
+    Leaderboard.create(state.project, name, source)
+    click.echo(f"Created leaderboard {name}")
+
+
+@leaderboard_group.command("edit")
+@click.argument("name")
+@click.pass_obj
+def leaderboard_edit(state: CLIContext, name: str) -> None:
+    """Edit a definition and validate it after the editor exits."""
+    _edit_recoverable(
+        _leaderboard_path(state.project, name),
+        lambda: Leaderboard.load(state.project, name),
+        f"Leaderboard {name!r}",
+    )
+    click.echo(f"Validated leaderboard {name}")
+
+
+@leaderboard_group.command("delete")
+@click.argument("name")
+@click.pass_obj
+def leaderboard_delete(state: CLIContext, name: str) -> None:
+    """Delete a definition, leaving its tracked runs untouched."""
+    Leaderboard.delete(state.project, name)
+    click.echo(f"Deleted leaderboard {name}")
+
+
+@main.command("runs")
+@click.option(
+    "--include-unattributed", is_flag=True, help="Include runs without a record ID."
+)
+@click.option("--record", "record_id")
+@click.option("--leaderboard", "leaderboard_name")
 @click.option("--metrics")
 @click.option("--params")
 @click.option("--sort")
@@ -759,7 +847,8 @@ def run_command(
 def run_list(
     state: CLIContext,
     record_id: str | None,
-    all_records: bool,
+    leaderboard_name: str | None,
+    include_unattributed: bool,
     metrics: str | None,
     params: str | None,
     sort: str | None,
@@ -769,42 +858,30 @@ def run_list(
     json_output: bool,
     pretty: bool,
 ) -> None:
-    """List runs attributed to the selected record.
-
-    Use --all for every attributed run in the record's tracking source.
-    """
+    """List attributed runs in a leaderboard, optionally filtered by record ID."""
     _validate_json_options(json_output, pretty)
     if ascending and descending:
         raise ValidationError("--ascending and --descending are mutually exclusive")
     if (ascending or descending) and sort is None:
         raise ValidationError("A sort direction requires --sort")
-    record = _active(state.project, record_id)
-    declarations = [
-        item.model_dump() for item in resolve_metrics(record, state.project.vault)
-    ]
+    leaderboard = Leaderboard.load(state.project, leaderboard_name)
+    runs = leaderboard.list_runs(
+        state.project,
+        record_id=record_id,
+        include_unattributed=include_unattributed,
+        sort=sort,
+        ascending=(ascending if ascending or descending else None),
+        limit=limit,
+    )
     metric_names = (
         _names(metrics, "metric")
         if metrics is not None
-        else [item["name"] for item in declarations]
+        else leaderboard.metric_names(runs)
     )
-    param_names = _names(params, "parameter")
-    query = {
-        key: value
-        for key, value in {"sort": sort, "limit": limit}.items()
-        if value is not None
-    }
-    if sort is not None:
-        directions = {item["name"]: item["direction"] for item in declarations}
-        query["ascending"] = (
-            ascending if ascending or descending else directions.get(sort) != "maximize"
-        )
-    runs = (
-        TrackingBackendFactory(state.project)
-        .create(state.project.tracking_backend)
-        .list_runs(
-            record_id=None if all_records else record.id,
-            **query,
-        )
+    param_names = (
+        _names(params, "parameter")
+        if params is not None
+        else list(dict.fromkeys(name for run in runs for name in run.params))
     )
     if json_output:
         _emit_json(runs, pretty=pretty)
@@ -831,6 +908,9 @@ def run_list(
 
 
 @main.command("dashboard")
+@click.option(
+    "--leaderboard", "leaderboard_name", help="Leaderboard selected when opening."
+)
 @click.option("--record", "record_id", help="Record selected when the page opens.")
 @click.option(
     "--port",
@@ -855,6 +935,7 @@ def run_list(
 @click.pass_obj
 def dashboard_command(
     state: CLIContext,
+    leaderboard_name: str | None,
     record_id: str | None,
     port: int | None,
     no_browser: bool,
@@ -871,6 +952,7 @@ def dashboard_command(
             return
     exit_code = serve_dashboard(
         state.project,
+        leaderboard_name=leaderboard_name,
         record_id=record_id,
         port=port,
         no_browser=no_browser,

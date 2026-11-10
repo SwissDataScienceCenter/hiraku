@@ -97,8 +97,6 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
             "minimize `val_bpb` within the fixed 5-minute training budget.",
             "--markdown-file",
             "task.md",
-            "--set",
-            "metrics=[{name: val_bpb, direction: minimize}]",
         ],
     )
     git(project, "add", "hiraku")
@@ -111,6 +109,7 @@ def test_autoresearch_is_an_overlay() -> None:
         "README.md",
         "example.yml",
         "src/hiraku.yml",
+        "src/hiraku/leaderboards/default.yml",
         "src/task.md",
         "src/cpu_mock.py",
         "src/hiraku/dispatch/autoresearch.sh",

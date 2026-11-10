@@ -9,11 +9,9 @@ from hiraku.dashboard.data import (
     RECORD_COLUMNS,
     RUN_COLUMNS,
     arrow_frame,
-    default_metric,
     execution_order,
     find_run,
     format_duration,
-    load,
     metric_names,
     plot_frame,
     record_rows,
@@ -26,18 +24,21 @@ from hiraku.dashboard.data import (
     tree_rows,
     within,
 )
-from hiraku.errors import BackendError
 from hiraku.project import Project
 from hiraku.record import Record
-from hiraku.tracking import Run, TrackingBackendFactory
+from hiraku.tracking import Leaderboard, Run
 
 
 def tables(project: Project) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build ``records_df`` and ``runs_df`` as the notebook does."""
-    loaded = load(project)
+    records = project.vault.list()
+    leaderboard = Leaderboard.load(project)
+    runs = leaderboard.list_runs(project)
     return (
-        arrow_frame(record_rows(loaded.records), RECORD_COLUMNS),
-        arrow_frame(run_rows(loaded), RUN_COLUMNS),
+        arrow_frame(record_rows(records), RECORD_COLUMNS),
+        arrow_frame(
+            run_rows(runs, records=records, source=leaderboard.source.type), RUN_COLUMNS
+        ),
     )
 
 
@@ -47,7 +48,7 @@ def tables(project: Project) -> tuple[pd.DataFrame, pd.DataFrame]:
         ("record:root/b/b", "root/b/b"),
         ("run:r2", "root/a/a"),
         ("run:r1", "root/b/b"),
-        (None, "root/a/a"),
+        (None, None),
     ],
 )
 def test_selection_scope_preserves_subtree_for_descendant_runs(
@@ -58,43 +59,27 @@ def test_selection_scope_preserves_subtree_for_descendant_runs(
     assert selection_scope(key, "root/a/a", paths, runs) == expected
 
 
-def test_load_reads_records_and_attributed_runs(project: Project) -> None:
-    loaded = load(project)
-
-    assert [record.id for record in loaded.records] == [
-        "root/a/a",
-        "root/a/a1/a1",
-        "root/b/b",
-        "root/root",
-    ]
-    # Runs attributed to records outside the project are dropped.
-    assert sorted(run.id for run in loaded.runs) == ["r0", "r1", "r2", "r3", "r4"]
-    assert set(loaded.sources.values()) == {"csv"}
-    assert loaded.errors == []
-
-
-def test_load_reports_unavailable_source_without_failing(
-    project: Project, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project.set_active_record(
-        project.vault.create("broken/broken", type="task", title="broken")
+def test_run_rows_keep_runs_without_matching_records() -> None:
+    records = [Record(id="known", type="task")]
+    rows = run_rows(
+        [Run(id="a", record_id="known"), Run(id="b", record_id="unknown"), Run(id="c")],
+        records=records,
+        source="csv",
     )
-
-    def resolve(self: TrackingBackendFactory, raw_config):
-        raise BackendError("source offline")
-
-    monkeypatch.setattr(TrackingBackendFactory, "create", resolve)
-
-    loaded = load(project)
-
-    assert loaded.errors == ["Tracking source unavailable: source offline"]
-    assert loaded.runs == []
+    assert [row["run"] for row in rows] == ["a", "b", "c"]
+    assert [row["record_path"] for row in rows] == ["known", None, None]
+    assert [row["source"] for row in rows] == ["csv", "csv", "csv"]
 
 
 def test_run_rows_flatten_runs_in_execution_order(project: Project) -> None:
-    rows = run_rows(load(project))
+    leaderboard = Leaderboard.load(project)
+    rows = run_rows(
+        leaderboard.list_runs(project),
+        records=project.vault.list(),
+        source=leaderboard.source.type,
+    )
 
-    assert [row["run"] for row in rows] == ["r0", "r1", "r2", "r3", "r4"]
+    assert [row["run"] for row in rows] == ["r0", "r1", "r2", "r3", "r5", "r4"]
     assert rows[0]["record_path"] == "root/a"
     assert rows[0]["source"] == "csv"
     assert rows[0]["started"] == datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
@@ -161,7 +146,6 @@ def test_record_rows_list_records_in_tree_order() -> None:
         Record(
             id="root",
             type="task",
-            metrics=[{"name": "loss", "direction": "minimize"}],
         ),
         Record(id="a-b", type="record", parent_id="root"),
         Record(id="a", type="record", parent_id="root"),
@@ -177,8 +161,6 @@ def test_record_rows_list_records_in_tree_order() -> None:
         "root/a/x",
         "root/a-b",
     ]
-    assert rows[0]["metrics"] == [{"name": "loss", "direction": "minimize"}]
-    assert rows[1]["metrics"] == []
 
 
 def test_arrow_frame_types_columns_and_falls_back_to_text() -> None:
@@ -214,12 +196,13 @@ def test_tree_rows_nest_runs_under_records_in_execution_order(
         ("record:root/b/b", 1),
         ("run:r1", 2),
         ("run:r4", 2),
+        ("run:r5", 0),
     ]
     assert rows[0]["loss"] == ""
     assert rows[2]["loss"] == 0.9
     assert rows[2]["Type"] == "run"
     assert rows[2]["Started"] == "2026-10-14 10:00:00"
-    assert rows[-1]["Started"] == ""
+    assert rows[-2]["Started"] == ""
     assert [row["Duration"] for row in rows] == [
         "",
         "",
@@ -230,6 +213,7 @@ def test_tree_rows_nest_runs_under_records_in_execution_order(
         "",
         "1 m 15 s",
         "",
+        "1.0 s",
     ]
 
 
@@ -268,16 +252,11 @@ def test_deep_trees_do_not_hit_the_recursion_limit() -> None:
     assert [row["depth"] for row in rows] == list(range(depth))
 
 
-def test_metric_choice_prefers_declared_metrics(project: Project) -> None:
-    records_df, _ = tables(project)
+def test_metric_names_exclude_non_numeric_columns() -> None:
     runs_df = arrow_frame(
         [{"run": "r0", "metric.runtime": 1.0, "metric.loss": 0.1, "metric.note": "x"}]
     )
-
     assert metric_names(runs_df) == ["runtime", "loss"]
-    assert default_metric(records_df, ["runtime", "loss"]) == "loss"
-    assert default_metric(records_df, ["runtime"]) == "runtime"
-    assert default_metric(records_df, []) is None
 
 
 def test_find_run_and_run_text(project: Project) -> None:
@@ -305,7 +284,7 @@ def test_subtree_selects_descendants_by_record_id(project: Project) -> None:
 
     assert subtree(runs_df, "root/a")["run"].tolist() == ["r0", "r2", "r3"]
     assert subtree(runs_df, "root/b")["run"].tolist() == ["r1", "r4"]
-    assert subtree(runs_df, None).empty
+    assert subtree(runs_df, None).equals(runs_df)
     # A sibling whose ID extends another's is not its descendant.
     assert not within("root/ab", "root/a")
 

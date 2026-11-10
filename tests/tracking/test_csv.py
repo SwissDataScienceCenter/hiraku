@@ -7,12 +7,36 @@ import pytest
 
 from hiraku.errors import BackendError
 from hiraku.project import Project
-from hiraku.tracking import CSVBackend, CSVBackendConfig, TrackingBackendFactory
+from hiraku.tracking import CSVBackend, CSVBackendConfig
 
 
 def test_csv_backend_config_is_validated() -> None:
     config = CSVBackendConfig.model_validate({"type": "csv", "path": "runs.csv"})
     assert config.path == Path("runs.csv")
+
+
+@pytest.mark.parametrize("fields", [{}, {"path": None}, {"path": ""}, {"path": "  "}])
+def test_csv_path_is_required_and_nonblank(fields):
+    with pytest.raises(ValueError):
+        CSVBackendConfig(**fields)
+
+
+def test_csv_backend_requires_a_path(tmp_path):
+    with pytest.raises(BackendError, match="requires a path"):
+        CSVBackend(Project(tmp_path))
+
+
+def test_csv_path_rejects_unset_environment_variable(tmp_path, monkeypatch):
+    monkeypatch.delenv("HIRAKU_TEST_RESULTS", raising=False)
+    with pytest.raises(BackendError, match="HIRAKU_TEST_RESULTS.*not set"):
+        CSVBackend(Project(tmp_path), path="${HIRAKU_TEST_RESULTS}/runs.csv")
+
+
+@pytest.mark.parametrize("value", ["", "  "])
+def test_csv_path_rejects_blank_expansion(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("HIRAKU_TEST_RESULTS", value)
+    with pytest.raises(BackendError, match="blank after variable expansion"):
+        CSVBackend(Project(tmp_path), path="${HIRAKU_TEST_RESULTS}")
 
 
 def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
@@ -28,7 +52,7 @@ def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    runs = CSVBackend(config).list_runs(
+    runs = CSVBackend(config, path="runs.csv").list_runs(
         record_id="iris/iris", sort="accuracy", ascending=False
     )
     assert [run.id for run in runs] == ["b", "a"]
@@ -50,7 +74,7 @@ def test_csv_backend_reads_duration_in_seconds(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    runs = CSVBackend(config).list_runs(record_id="iris/iris")
+    runs = CSVBackend(config, path="runs.csv").list_runs(record_id="iris/iris")
 
     assert [run.duration for run in runs] == [4.25, None]
     assert runs[0].raw == {}
@@ -67,33 +91,39 @@ def test_csv_backend_rejects_invalid_duration(tmp_path: Path, value: str) -> Non
     )
 
     with pytest.raises(BackendError, match="malformed row"):
-        CSVBackend(config).list_runs(record_id="iris/iris")
+        CSVBackend(config, path="runs.csv").list_runs(record_id="iris/iris")
 
 
-def test_csv_source_listing_returns_all_attributed_runs(tmp_path: Path) -> None:
+def test_csv_source_listing_can_include_unattributed_runs(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     path = config.root / "runs.csv"
     path.write_text("id,record_id\none,first\ntwo,second\nthree,\n", encoding="utf-8")
 
-    runs = CSVBackend(config).list_runs()
+    runs = CSVBackend(config, path="runs.csv").list_runs()
 
     assert {run.id for run in runs} == {"one", "two"}
+    assert {
+        run.id
+        for run in CSVBackend(config, path="runs.csv").list_runs(
+            include_unattributed=True
+        )
+    } == {
+        "one",
+        "two",
+        "three",
+    }
 
 
 def test_csv_backend_resolves_record_id_from_project_root(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
-    config.tracking_backend = {"type": "csv", "path": "results/iris.csv"}
+    source = {"type": "csv", "path": "results/iris.csv"}
     record = config.vault.create("iris/iris", type="task", title="iris")
     config.set_active_record(record)
     path = tmp_path / "results" / "iris.csv"
     path.parent.mkdir()
     path.write_text("id,record_id\na,iris/iris\n", encoding="utf-8")
 
-    runs = (
-        TrackingBackendFactory(config)
-        .create(config.tracking_backend)
-        .list_runs(record_id=record.id)
-    )
+    runs = CSVBackend(config, path=source["path"]).list_runs(record_id=record.id)
 
     assert [run.id for run in runs] == ["a"]
 
@@ -104,7 +134,7 @@ def test_tracking_filters_exact_concept_ids(tmp_path):
     (tmp_path / "runs.csv").write_text(
         "id,record_id\na,data/example\nb,other/concept\n"
     )
-    backend = CSVBackend(project)
+    backend = CSVBackend(project, path="runs.csv")
     assert [run.id for run in backend.list_runs(record_id="data/example")] == ["a"]
     assert [run.record_id for run in backend.list_runs()] == [
         "data/example",
@@ -123,11 +153,17 @@ def test_csv_backend_preserves_absolute_path_override(tmp_path: Path) -> None:
     assert [run.id for run in runs] == ["a"]
 
 
-def test_csv_backend_requires_record_id_column(tmp_path: Path) -> None:
+def test_csv_backend_accepts_missing_record_id_column(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     (tmp_path / "runs.csv").write_text("id,note\na,missing\n")
-    with pytest.raises(BackendError, match="no record_id column"):
-        CSVBackend(config).list_runs(record_id="child/child")
+    assert CSVBackend(config, path="runs.csv").list_runs() == []
+    assert (
+        CSVBackend(config, path="runs.csv")
+        .list_runs(include_unattributed=True)[0]
+        .record_id
+        is None
+    )
+    assert CSVBackend(config, path="runs.csv").list_runs(record_id="child/child") == []
 
 
 def test_run_query_reads_source_once(tmp_path, monkeypatch):
@@ -142,5 +178,8 @@ def test_run_query_reads_source_once(tmp_path, monkeypatch):
 
     monkeypatch.setattr(CSVBackend, "_read_source_runs", read_source)
 
-    assert [run.id for run in CSVBackend(project).list_runs()] == ["one", "two"]
+    assert [run.id for run in CSVBackend(project, path="runs.csv").list_runs()] == [
+        "one",
+        "two",
+    ]
     assert len(reads) == 1

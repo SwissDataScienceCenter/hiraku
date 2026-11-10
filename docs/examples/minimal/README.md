@@ -42,8 +42,7 @@ Create a research root and a child record.
 hiraku record create binary-classification \
   --title "Binary classification" \
   --type task \
-  --set "goal=Improve validation accuracy on my dataset" \
-  --set 'metrics=[{name: val/accuracy, direction: maximize}]'
+  --set "goal=Improve validation accuracy on my dataset"
 
 hiraku record create binary-classification/threshold-baseline \
   --title "Threshold baseline" \
@@ -59,7 +58,7 @@ hiraku runs --record binary-classification/threshold-baseline
 
 The command runs `uv run python evaluate.py --seed 0`. The script writes its
 score and launch attribution to the project-root `runs.csv`, so the final
-command lists the baseline result. Metric declarations describe how to compare
+command lists the baseline result. Metric declarations in `hiraku/leaderboards/default.yml` describe how to compare
 results; the evaluation script is responsible for calculating and logging.
 For other tracking backends, see [W&B](../../guides/tracking-wandb.md) or
 [MLflow](../../guides/tracking-mlflow.md).

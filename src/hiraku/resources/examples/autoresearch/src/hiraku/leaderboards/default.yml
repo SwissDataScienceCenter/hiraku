@@ -1,0 +1,6 @@
+source:
+  type: csv
+  path: runs.csv
+metrics:
+- name: val_bpb
+  direction: minimize

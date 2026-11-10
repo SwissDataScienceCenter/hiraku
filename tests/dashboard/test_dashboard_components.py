@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pandas as pd
 import pytest
 
 pytest.importorskip("marimo")
@@ -203,19 +202,10 @@ def test_run_details_escapes_content_and_only_links_safe_urls(
 
 
 def test_independent_plot_controls_use_declared_defaults() -> None:
-    records = pd.DataFrame(
-        {
-            "metrics": [
-                [
-                    {"name": "loss", "direction": "minimize"},
-                    {"name": "accuracy", "direction": "maximize"},
-                ]
-            ]
-        }
-    )
+    directions = {"loss": "minimize", "accuracy": "maximize"}
 
     metric = hc.performance_controls(["loss", "accuracy"], "loss")
-    controls = hc.tradeoff_controls(records, ["loss", "accuracy"])
+    controls = hc.tradeoff_controls(directions, ["loss", "accuracy"])
 
     assert metric.value == "loss"
     assert [control.value for control in controls] == [

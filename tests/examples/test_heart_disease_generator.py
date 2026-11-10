@@ -10,7 +10,7 @@ from click.testing import CliRunner
 
 from hiraku import Project
 from hiraku.cli import main
-from hiraku.tracking import TrackingBackendFactory
+from hiraku.tracking import Leaderboard
 
 
 @pytest.fixture
@@ -134,11 +134,7 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     assert config.active_record_id
     record = config.vault.load("generated/generated")
     assert record.id == config.active_record_id
-    runs = (
-        TrackingBackendFactory(config)
-        .create(config.tracking_backend)
-        .list_runs(record_id=record.id)
-    )
+    runs = Leaderboard.load(config).list_runs(config, record_id=record.id)
     assert runs[0].id == "run"
     assert not (tmp_path / ".git").exists()
 
@@ -168,6 +164,7 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
     }
     assert exported_files == {
         "hiraku.yml",
+        "hiraku/leaderboards/default.yml",
         "runs.csv",
         *(
             Project.discover(output)
@@ -179,7 +176,7 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
     }
     assert len(config.vault.list()) == 4
     config.vault.load("heart-disease-prediction/random-forest")
-    runs = TrackingBackendFactory(config).create(config.tracking_backend).list_runs()
+    runs = Leaderboard.load(config).list_runs(config)
     ids_by_name = {
         record.id.rsplit("/", 1)[-1]: record.id for record in config.vault.list()
     }

@@ -1,8 +1,7 @@
 """Data for the dashboard: two tables and the views built from them.
 
-``load`` reads the records and the runs of their tracking backends. ``run_rows``
-and ``record_rows`` flatten them into ``runs_df`` and ``records_df`` for the
-run tree, run details, metric choice, and plots. Markdown details use the same
+``run_rows`` and ``record_rows`` flatten runs and records for the run tree,
+run details, metric choice, and plots. Markdown details use the same
 loaded records to retain their complete front matter. Nothing here imports
 marimo, so it can be tested without a notebook runtime.
 """
@@ -11,7 +10,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -20,9 +18,8 @@ import pandas as pd
 import pyarrow as pa
 
 from ..io import dump_yaml
-from ..project import Project
 from ..record import Record
-from ..tracking import Run, TrackingBackendFactory
+from ..tracking import Run
 
 _LAST = datetime.max.replace(tzinfo=UTC)
 
@@ -44,37 +41,8 @@ RECORD_COLUMNS = (
     "state",
     "decision",
     "commit",
-    "metrics",
     "description",
 )
-
-
-@dataclass(frozen=True)
-class ProjectRuns:
-    """Records, their attributed runs, and per-source failures."""
-
-    records: list[Record]
-    runs: list[Run]
-    sources: dict[str, str] = field(default_factory=dict)
-    errors: list[str] = field(default_factory=list)
-
-
-def load(project: Project) -> ProjectRuns:
-    """Read all records and query the project's tracking source once."""
-    records = project.vault.list()
-    if not records:
-        return ProjectRuns(records, [])
-    try:
-        backend = TrackingBackendFactory(project).create(project.tracking_backend)
-        found = backend.list_runs()
-    except Exception as exc:
-        return ProjectRuns(records, [], errors=[f"Tracking source unavailable: {exc}"])
-    known = {record.id for record in records}
-    runs = [run for run in found if run.record_id in known]
-    return ProjectRuns(records, runs, {run.id: backend.backend_name for run in runs})
-
-
-# Building the tables
 
 
 def record_paths(records: Iterable[Record]) -> dict[str, str]:
@@ -106,19 +74,21 @@ def execution_order(runs: Iterable[Run]) -> list[Run]:
     return sorted(runs, key=lambda run: (run.timestamp or _LAST, run.id))
 
 
-def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
+def run_rows(
+    runs: Iterable[Run], *, records: Iterable[Record], source: str | None
+) -> list[dict[str, Any]]:
     """Return one flat row per run, in execution order.
 
     Metrics and parameters become ``metric.<name>`` and ``param.<name>`` columns,
     and ``record_path`` places the run's record in the tree.
     """
-    paths = record_paths(project.records)
+    paths = record_paths(records)
     return [
         {
             "run": run.id,
             "record": run.record_id,
             "record_path": paths.get(str(run.record_id)),
-            "source": project.sources.get(run.id),
+            "source": source,
             "started": run.timestamp,
             "duration": run.duration,
             "commit": run.commit,
@@ -126,12 +96,12 @@ def run_rows(project: ProjectRuns) -> list[dict[str, Any]]:
             **{f"metric.{name}": value for name, value in run.metrics.items()},
             **{f"param.{name}": value for name, value in run.params.items()},
         }
-        for run in execution_order(project.runs)
+        for run in execution_order(runs)
     ]
 
 
 def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
-    """Return one row per record in tree order, with its declared metrics."""
+    """Return one row per record in tree order."""
     paths = record_paths(records)
     # Sorting with the separator below every other character puts each record
     # right after its parent and before the parent's next sibling.
@@ -145,10 +115,6 @@ def record_rows(records: Sequence[Record]) -> list[dict[str, Any]]:
             "state": record.state,
             "decision": record.decision,
             "commit": record.commit,
-            "metrics": [
-                {"name": metric.name, "direction": metric.direction}
-                for metric in record.metrics or ()
-            ],
             "description": record.markdown.strip() or None,
         }
         for record in ordered
@@ -197,15 +163,6 @@ def metric_names(runs_df: pd.DataFrame) -> list[str]:
     return [name for name in names if metric_values(runs_df, name).notna().any()]
 
 
-def default_metric(records_df: pd.DataFrame, available: Sequence[str]) -> str | None:
-    """Prefer the first metric a record declares, else the first one logged."""
-    for declared in records_df["metrics"]:
-        for metric in declared or ():
-            if metric["name"] in available:
-                return metric["name"]
-    return available[0] if available else None
-
-
 def within(path: str, ancestor: str) -> bool:
     """Return whether record ``path`` is ``ancestor`` or lies below it."""
     return f"{path}/".startswith(f"{ancestor}/")
@@ -214,7 +171,7 @@ def within(path: str, ancestor: str) -> bool:
 def subtree(runs_df: pd.DataFrame, ancestor: str | None) -> pd.DataFrame:
     """Return the rows of ``runs_df`` whose record lies in ``ancestor``'s subtree."""
     if ancestor is None or runs_df.empty:
-        return runs_df.iloc[0:0]
+        return runs_df
     return runs_df[runs_df["record_path"].map(lambda path: within(path, ancestor))]
 
 
@@ -240,10 +197,16 @@ def tree_rows(
         )
         if metric:
             rows[-1][metric] = ""
-        for run in runs_by_record.get(record["record"], ()):
+        for run in runs_by_record.pop(record["record"], ()):
             rows.append(
                 _row(f"run:{run['run']}", depth + 1, "• " + run["run"][:12], run)
             )
+            rows[-1]["Type"] = "run"
+            if metric:
+                rows[-1][metric] = run["value"]
+    for remaining in runs_by_record.values():
+        for run in remaining:
+            rows.append(_row(f"run:{run['run']}", 0, "• " + run["run"][:12], run))
             rows[-1]["Type"] = "run"
             if metric:
                 rows[-1][metric] = run["value"]
@@ -290,7 +253,9 @@ def selection_scope(
     runs_df: pd.DataFrame,
 ) -> str | None:
     """Resolve the comparison subtree after a record or run selection."""
-    kind, _, identifier = (key or "").partition(":")
+    if key is None:
+        return None
+    kind, _, identifier = key.partition(":")
     if kind == "record" and identifier in paths:
         return identifier
     selected_run = find_run(runs_df, identifier) if kind == "run" else None
@@ -298,7 +263,7 @@ def selection_scope(
         current_scope not in paths
         or not within(selected_run["record_path"], paths[current_scope])
     ):
-        return selected_run["record"]
+        return selected_run["record"] if selected_run["record"] in paths else None
     return current_scope
 
 

@@ -14,6 +14,12 @@ from hiraku.errors import RecordNotFoundError, ValidationError
 from hiraku.project import Project
 
 
+def test_launcher_rejects_unknown_leaderboard_before_starting_server(tmp_path):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    with pytest.raises(ValidationError, match="Cannot read YAML"):
+        launcher.serve_dashboard(project, leaderboard_name="missing")
+
+
 @pytest.mark.parametrize(
     ("options", "flags"),
     [
@@ -226,6 +232,7 @@ def test_dashboard_cli_forwards_options(
 
     assert result.exit_code == 0, result.output
     assert received == {
+        "leaderboard_name": None,
         "record_id": "a",
         "port": 9000,
         "no_browser": True,

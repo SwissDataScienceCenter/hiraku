@@ -24,8 +24,7 @@ from pydantic_core import to_jsonable_python
 from .errors import HirakuError, ValidationError
 from .execution import execute_command
 from .project import Project
-from .record import resolve_metrics
-from .tracking import TrackingBackendFactory
+from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details
@@ -103,9 +102,9 @@ def create_server(project: Project | None = None) -> ProjectMCP:
 def register_tools(server: MCPServer, selected: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
-    Tools: project_info, record_list, record_show, record_create, record_update,
-    record_delete, execute, and runs. Also registers the record catalog and
-    record resources, and the propose_implementation prompt.
+    Tools: project_info, leaderboard_list, record_list, record_show, record_create,
+    record_update, record_delete, execute, and runs. Also registers the record
+    catalog and record resources, and the propose_implementation prompt.
     """
 
     @server.tool(
@@ -113,8 +112,16 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     def project_info() -> dict[str, Any]:
-        """Read the current project configuration and metadata."""
+        """Read the current project settings."""
         return to_jsonable_python(Project.load(selected.path).to_dict(), fallback=dict)
+
+    @server.tool(
+        title="List leaderboards",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
+    def leaderboard_list() -> list[str]:
+        """List leaderboard names, like `hiraku leaderboard list --json`."""
+        return Leaderboard.list(selected)
 
     @server.tool(
         title="List research records",
@@ -245,39 +252,27 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     def runs(
-        record_id: str,
-        all_records: bool = False,
+        leaderboard: str | None = None,
+        record_id: str | None = None,
+        include_unattributed: bool = False,
         sort: str | None = None,
         ascending: bool | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """List tracked runs attributed to a record, like `hiraku runs`.
+        """List attributed runs in a leaderboard, optionally filtered by record ID.
 
-        With all_records, list every attributed run in the record's tracking
-        source. Sorting by a declared metric follows its direction unless
-        ascending is given.
+        Set include_unattributed to include runs without a record ID.
+
+        Sorting uses plain metric names and their declared direction.
         """
-        if ascending is not None and sort is None:
-            raise ValidationError("A sort direction requires sort")
-        record = selected.vault.load(record_id)
-        query: dict[str, Any] = {"limit": limit} if limit is not None else {}
-        if sort is not None:
-            declarations = [
-                item.model_dump() for item in resolve_metrics(record, selected.vault)
-            ]
-            directions = {item["name"]: item["direction"] for item in declarations}
-            query["sort"] = sort
-            query["ascending"] = (
-                ascending
-                if ascending is not None
-                else directions.get(sort) != "maximize"
-            )
-        found = (
-            TrackingBackendFactory(selected)
-            .create(selected.tracking_backend)
-            .list_runs(record_id=None if all_records else record.id, **query)
+        found = Leaderboard.load(selected, leaderboard).list_runs(
+            selected,
+            record_id=record_id,
+            include_unattributed=include_unattributed,
+            sort=sort,
+            ascending=ascending,
+            limit=limit,
         )
-        # Runs keep their fields in read-only mappings.
         return to_jsonable_python(found, fallback=dict)
 
     @server.resource("hiraku://catalog", mime_type="application/json")

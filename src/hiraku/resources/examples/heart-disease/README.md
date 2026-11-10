@@ -20,7 +20,7 @@ dataset. Browsing them requires no training, credentials, or network access.
 Query the prepared runs locally:
 
 ```bash
-uv run hiraku runs --record random-forest --all
+uv run hiraku runs
 ```
 
 To generate fresh runs directly during initialization instead of copying bundled

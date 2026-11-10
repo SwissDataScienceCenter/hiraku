@@ -9,7 +9,7 @@ from .base import (
     WandbBackendConfig,
 )
 from .csv import CSVBackend
-from .factory import TrackingBackendFactory
+from .leaderboard import Leaderboard, Metric
 from .mlflow import MLflowBackend
 from .wandb import WandbBackend
 
@@ -22,6 +22,7 @@ __all__ = [
     "WandbBackend",
     "WandbBackendConfig",
     "TrackingBackend",
-    "TrackingBackendFactory",
     "Run",
+    "Metric",
+    "Leaderboard",
 ]

@@ -34,6 +34,7 @@ def main() -> None:
         tags.extend(tag.strip() for tag in os.environ["WANDB_TAGS"].split(","))
 
     run = wandb.init(
+        project=os.environ.get("WANDB_PROJECT", "iris-wandb"),
         entity=entity,
         name=os.environ.get("WANDB_RUN_NAME"),
         group=group,

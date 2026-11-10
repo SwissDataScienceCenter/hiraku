@@ -13,7 +13,7 @@ class WandbBackend(BackendOperations):
 
     Args:
         project: W&B project name.
-        settings: Pre-validated W&B settings used by the factory.
+        settings: Pre-validated W&B settings supplied by a leaderboard.
         entity: Optional W&B entity.
         id: Optional W&B run ID.
         experiment_name: Optional W&B experiment name.
@@ -43,7 +43,7 @@ class WandbBackend(BackendOperations):
         """Create an W&B adapter from validated settings.
 
         Args:
-            settings: Pre-validated W&B settings used by the factory.
+            settings: Pre-validated W&B settings supplied by a leaderboard.
             entity: Optional W&B entity.
             project: Explicit W&B project name.
             id: Optional W&B run ID.

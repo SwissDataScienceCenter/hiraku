@@ -11,7 +11,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
-from hiraku.tracking import TrackingBackendFactory
+from hiraku.tracking import Leaderboard
 
 EXPECTED_METRICS = {
     "logistic-regression": (0.32254890, 0.85526316),
@@ -54,9 +54,6 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
             "Heart disease prediction",
             "--type",
             "task",
-            "--set",
-            "metrics=[{name: val/log_loss, direction: minimize}, "
-            "{name: val/accuracy, direction: maximize}]",
         ],
     )
     for record_id, model in (
@@ -101,11 +98,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
 
     config = Project.discover(project)
     config.vault.load("heart-disease-prediction")
-    runs = (
-        TrackingBackendFactory(config)
-        .create(config.tracking_backend)
-        .list_runs(sort="val/log_loss")
-    )
+    runs = Leaderboard.load(config).list_runs(config, sort="val/log_loss")
     assert len(runs) == 2
     records_by_id = {
         record.id: record.id.rsplit("/", 1)[-1] for record in config.vault.list()
@@ -126,7 +119,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
     queried = json.loads(
         invoke(
             runner,
-            ["runs", "--record", "heart-disease-prediction", "--all", "--json"],
+            ["runs", "--json"],
         ).output
     )
     assert len(queried) == 2
