@@ -276,6 +276,19 @@ def test_config_persists_active_record(tmp_path: Path) -> None:
     assert Project.load(config.path).active_record_id is None
 
 
+def test_load_project_through_symlinked_directory(tmp_path: Path) -> None:
+    project = Project.create(
+        tmp_path / "project", install_skill=False, install_mcp=False
+    )
+    linked = tmp_path / "linked"
+    linked.symlink_to(project.root, target_is_directory=True)
+
+    loaded = Project.load(linked / "hiraku.yml")
+
+    assert loaded.root == project.root
+    assert loaded.path == project.path
+
+
 def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False, install_mcp=False)
     first = config.vault.create("first/first", type="task", title="first")

@@ -117,7 +117,7 @@ class Project(BaseModel):
         Raises:
             hiraku.errors.ValidationError: If the file or its settings are invalid.
         """
-        marker = Path(path).expanduser().absolute()
+        marker = Path(path).expanduser().resolve()
         data = load_yaml_mapping(marker)
         try:
             project = cls(marker.parent, **data)
