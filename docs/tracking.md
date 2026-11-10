@@ -42,26 +42,11 @@ hiraku dashboard --leaderboard validation
 hiraku leaderboard delete validation
 ```
 
-A sole leaderboard is selected automatically; select a name when several exist.
+A single leaderboard is selected automatically; select a name when several exist.
 Queries list runs with a nonempty record ID, even when the record file is missing.
 Use `--include-unattributed` to include all source runs. `--record` matches an exact
-record ID, independently of the active record and the include flag. Attribution
-filters apply before sorting and limits. In Python and MCP, pass
-`include_unattributed=True` to include unattributed runs.
-The dashboard offers an **Include unattributed runs** toggle and record subtree
-filtering; **Clear record filter** clears the subtree selection.
-The collaborative workflow accepts a `leaderboard` argument for result queries.
+record ID, independently of the active record and the include flag.
 
-Creation refuses to overwrite definitions. `edit` uses `$EDITOR` (default `vim`)
-and validates after editing; invalid edits remain on disk for correction.
-Listing returns names without reading definitions; `show NAME` loads and validates
-one definition. Deletion removes only
-the definition. API keys are excluded from serialization; configure credentials
-through the backend environment.
-
-Records describe research objectives and conclusions. Training code configures
-logging destinations and records measurements; `hiraku run` supplies record and
-commit attribution. Leaderboards query the results.
 
 See [CSV](guides/tracking-csv.md), [MLflow](guides/tracking-mlflow.md),
 [W&B](guides/tracking-wandb.md), and the [Python API](api/python/tracking.md).
