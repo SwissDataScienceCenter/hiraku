@@ -208,6 +208,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     def record_delete(record_id: str) -> dict[str, str]:
         """Delete the document at the given OKF ID."""
         selected.vault.delete(record_id)
+        if selected.active_record_id == record_id:
+            selected.clear_active_record()
         return {"deleted": record_id}
 
     @server.tool(

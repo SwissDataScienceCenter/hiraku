@@ -169,6 +169,22 @@ def test_tools_and_validation(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("deleted_id", ["active", "other"])
+def test_record_delete_preserves_valid_active_selection(tmp_path, deleted_id):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    project.vault.create("active", type="task")
+    project.vault.create("other", type="task")
+    project.set_active_record("active")
+    server = create_server(project)
+
+    asyncio.run(server.call_tool("record_delete", {"record_id": deleted_id}))
+
+    expected = None if deleted_id == "active" else "active"
+    assert project.active_record_id == expected
+    assert Project.load(project.path).active_record_id == expected
+    assert not project.vault.file_path(deleted_id).exists()
+
+
 def test_record_update_uses_vault_validation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
