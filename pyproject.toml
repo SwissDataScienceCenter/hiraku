@@ -34,6 +34,9 @@ dependencies = [
 [project.scripts]
 hiraku = "hiraku.cli:main"
 
+[project.entry-points."marimo_studio.view_provider"]
+html = "hiraku.dashboard.provider:provider"
+
 [project.optional-dependencies]
 mlflow = ["mlflow-skinny==3.16.0"]
 wandb = ["wandb>=0.29.0"]

@@ -49,12 +49,12 @@ above its output. The code is read-only here; use the edit mode to change it.
 hiraku dashboard --init
 ```
 
-Copies the included notebook to `hiraku/dashboard/app.py` and the Studio view,
+Copies the bundled notebook to `hiraku/dashboard/app.py` and the Studio view,
 including its HTML, CSS, and logos, to `hiraku/dashboard/studio/`. It also adds
 a `.gitignore` for marimo's `__marimo__/` caches and Studio's build state. From
 then on, `hiraku dashboard` serves this copy, so commit it with the project.
 `--init` refuses to overwrite an existing copy. Delete `hiraku/dashboard/` to
-start over from the original version.
+start over from the bundled version.
 
 The notebook imports data helpers from `hiraku.dashboard.data` and reusable
 widgets and renderers from `hiraku.dashboard.components`. Components build the
@@ -73,9 +73,6 @@ assets; edit those files to customize the presentation. To customize a widget
 or plot, replace its component call in the notebook cell. Project copies pick
 up component fixes from the installed Hiraku package.
 
-Studio permits local CSS and JavaScript references in the HTML entry document;
-images must be inline. The included HTML embeds its logos as SVG data URLs.
-Keep replacement images inline when customizing the view.
 
 ### Edit
 
@@ -165,7 +162,7 @@ metric selector and `hc.tradeoff_controls(directions, metrics)` for the second
 plot's four selectors. Keep the returned widgets in notebook variables and pass
 their values to the corresponding plot.
 
-The default notebook displays both plots without a mode selector. Each has its
+The bundled notebook displays both plots without a mode selector. Each has its
 own named cell and can be placed, moved, or omitted independently in Studio:
 
 ```html
@@ -178,8 +175,8 @@ own named cell and can be placed, moved, or omitted independently in Studio:
 `hc.record_tree(records, selected_id, on_select)` renders record navigation and
 returns `(tree, buttons)`. Keep `buttons` in a notebook variable so their callbacks
 remain live. The component loads no data and owns no selection state. Wire
-`on_select` into the same selection callback used by the run table; the notebook
-uses `select_key("record:" + record_id)` and passes the resulting key to
+`on_select` into the same selection callback used by the run table; the bundled
+notebook uses `select_key("record:" + record_id)` and passes the resulting key to
 `hc.run_table(..., selected_key=key, on_select=select_key)`.
 
 The Studio entry document places the `record_navigation` cell inside a collapsed
@@ -283,7 +280,7 @@ shown.
 
 ## Try it on the Digits example
 
-The Digits example includes three records and six measured MLflow runs,
+The bundled Digits example includes three records and six measured MLflow runs,
 so you can try the dashboard without training first. Install both optional
 extras, then create a project with the prepared results (Git is optional):
 
@@ -303,7 +300,7 @@ export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 hiraku dashboard --record digit-classification
 ```
 
-The dashboard reads the six prepared runs through the MLflow server.
+The dashboard reads the six bundled runs through the MLflow server.
 You can also try the other modes in that project:
 
 ```bash
