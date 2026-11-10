@@ -165,11 +165,16 @@ def record_tree(
         children.setdefault(record.parent_id, []).append(record)
     buttons: dict[str, mo.ui.button] = {}
     fragments = ["<ul>"]
-    stack = [(record, False) for record in reversed(children.get(None, []))]
+    known = {record.id for record in records}
+    roots = [record for record in records if record.parent_id not in known]
+    # Remaining records seed components without roots, such as cycles.
+    stack = [(record, False) for record in reversed(roots + list(records))]
     while stack:
         record, closing = stack.pop()
         if closing:
             fragments.append("</ul></li>")
+            continue
+        if record.id in buttons:
             continue
         badges = " ".join(
             f'<span class="badge">{html.escape(value)}</span>'
@@ -189,7 +194,9 @@ def record_tree(
         buttons[record.id] = button
         selected = ' aria-current="true"' if record.id == selected_id else ""
         fragments.append(f'<li><div class="record-row"{selected}>{button.text}</div>')
-        nested = children.get(record.id, [])
+        nested = [
+            child for child in children.get(record.id, []) if child.id not in buttons
+        ]
         if nested:
             fragments.append("<ul>")
             stack.append((record, True))

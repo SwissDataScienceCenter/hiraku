@@ -23,6 +23,32 @@ def test_root_help_lists_primary_commands() -> None:
         assert command in result.output
 
 
+def test_record_tree_includes_missing_parents_and_cycles(tmp_path, monkeypatch):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    for identifier, parent in (
+        ("child", "root"),
+        ("root", None),
+        ("orphan", "missing"),
+        ("a", "b"),
+        ("b", "a"),
+        ("self", "self"),
+    ):
+        project.vault.create(identifier, type="task", parent_id=parent)
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("record", "tree")
+
+    assert result.exit_code == 0
+    assert result.output.splitlines() == [
+        "orphan",
+        "root",
+        "  child",
+        "a",
+        "  b",
+        "self",
+    ]
+
+
 def test_record_list_shows_research_state(tmp_path: Path, monkeypatch) -> None:
     project = Project.create(tmp_path, install_skill=False)
     project.vault.create(

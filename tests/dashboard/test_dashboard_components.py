@@ -152,6 +152,29 @@ def test_record_tree_handles_empty_and_deep_hierarchies() -> None:
     assert tree.text.count("<li>") == tree.text.count("</li>") == 1050
 
 
+def test_record_tree_includes_missing_parents_and_cycles() -> None:
+    records = [
+        Record(id=identifier, type="task", parent_id=parent)
+        for identifier, parent in (
+            ("child", "orphan"),
+            ("orphan", "missing"),
+            ("a", "b"),
+            ("b", "a"),
+            ("self", "self"),
+        )
+    ]
+    selections = []
+
+    tree, buttons = hc.record_tree(records, "b", selections.append)
+
+    assert list(buttons) == ["orphan", "child", "a", "b", "self"]
+    assert tree.text.count("<li>") == tree.text.count("</li>") == len(records)
+    assert tree.text.count("<ul>") == tree.text.count("</ul>")
+    assert tree.text.count('aria-current="true"') == 1
+    buttons["b"]._update(1)
+    assert selections == ["b"]
+
+
 def test_record_tree_escapes_badges() -> None:
     tree, _buttons = hc.record_tree(
         [Record(id="notes", type="<script>bad()</script>")],

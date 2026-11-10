@@ -542,12 +542,20 @@ def record_tree(state: CLIContext, json_output: bool, pretty: bool) -> None:
     for record in records:
         children.setdefault(record.parent_id, []).append(record)
 
-    def visit(parent: str | None, depth: int) -> None:
-        for child in children.get(parent, []):
-            click.echo("  " * depth + child.id)
-            visit(child.id, depth + 1)
-
-    visit(None, 0)
+    known = {record.id for record in records}
+    roots = [record for record in records if record.parent_id not in known]
+    seen: set[str] = set()
+    # Remaining records seed components without roots, such as cycles.
+    stack = [(record, 0) for record in reversed(roots + records)]
+    while stack:
+        record, depth = stack.pop()
+        if record.id in seen:
+            continue
+        seen.add(record.id)
+        click.echo("  " * depth + record.id)
+        stack.extend(
+            (child, depth + 1) for child in reversed(children.get(record.id, []))
+        )
 
 
 @main.group("workflow")
