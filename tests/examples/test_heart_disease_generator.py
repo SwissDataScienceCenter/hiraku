@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from hiraku import HirakuConfig
+from hiraku import Project
 from hiraku.cli import main
-from hiraku.record import list_records, load_record
+from hiraku.tracking import TrackingBackendFactory
 
 
 @pytest.fixture
@@ -107,12 +107,14 @@ def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch)
 
 def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     import hiraku.cli as cli
-    from hiraku.record import Record
 
     def export(output):
-        generated = HirakuConfig.init(output, install_skill=False)
-        Record.create("generated", config=generated)
-        (output / "runs.csv").write_text("id,record_id\nrun,generated\n")
+        generated = Project.create(output, install_skill=False)
+        record = generated.vault.create(
+            "generated/generated", type="task", title="generated"
+        )
+        generated.set_active_record(record)
+        (output / "runs.csv").write_text(f"id,record_id\nrun,{record.id}\n")
 
     monkeypatch.setattr(
         cli.runpy, "run_path", lambda path: {"generate_results": export}
@@ -128,9 +130,16 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
         ],
     )
     assert result.exit_code == 0, result.output
-    config = HirakuConfig.discover(tmp_path)
-    assert config.active_record_id == "generated"
-    assert load_record("generated", config=config).runs(config=config)[0].id == "run"
+    config = Project.discover(tmp_path)
+    assert config.active_record_id
+    record = config.vault.load("generated/generated")
+    assert record.id == config.active_record_id
+    runs = (
+        TrackingBackendFactory(config)
+        .create(config.tracking_backend)
+        .list_runs(record_id=record.id)
+    )
+    assert runs[0].id == "run"
     assert not (tmp_path / ".git").exists()
 
 
@@ -152,34 +161,35 @@ def test_generator_trains_and_exports_overlay(generator, tmp_path, monkeypatch):
     monkeypatch.setenv("UV_NO_SYNC", "1")
     output = tmp_path / "results"
     generator["generate_results"](output)
-    assert {
+    config = Project.create(tmp_path / "project", template=output, install_skill=False)
+    output_records = Project.discover(output).vault.list()
+    exported_files = {
         p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()
-    } == {
+    }
+    assert exported_files == {
         "hiraku.yml",
         "runs.csv",
         *(
-            f"hiraku/records/heart-disease/{name}.md"
-            for name in (
-                "heart-disease",
-                "logistic-baseline",
-                "random-forest",
-                "forest-tuning",
-            )
+            Project.discover(output)
+            .vault.file_path(record.id)
+            .relative_to(output)
+            .as_posix()
+            for record in output_records
         ),
     }
-    config = HirakuConfig.init(
-        tmp_path / "project", template=output, install_skill=False
-    )
-    assert len(list_records(config=config)) == 4
-    record = load_record("random-forest", config=config)
-    runs = record.resolve_tracking_backend(config=config).list_runs()
+    assert len(config.vault.list()) == 4
+    config.vault.load("heart-disease-prediction/random-forest")
+    runs = TrackingBackendFactory(config).create(config.tracking_backend).list_runs()
+    ids_by_name = {
+        record.id.rsplit("/", 1)[-1]: record.id for record in config.vault.list()
+    }
     assert Counter(r.record_id for r in runs) == {
-        "logistic-baseline": 3,
-        "random-forest": 3,
-        "forest-tuning": 3,
+        ids_by_name["logistic-regression"]: 3,
+        ids_by_name["random-forest"]: 3,
+        ids_by_name["validation-split"]: 3,
     }
     assert all(r.id and r.timestamp for r in runs)
-    assert all(r.decision is None for r in list_records(config=config))
+    assert all(r.decision is None for r in config.vault.list())
 
 
 def test_validation_rejects_incomplete_results(generator, tmp_path):
@@ -187,7 +197,8 @@ def test_validation_rejects_incomplete_results(generator, tmp_path):
         Path(__file__).parents[2] / "src/hiraku/resources/examples/"
         "heart-disease/src/train.py"
     )
+    project = Project.create(tmp_path, install_skill=False)
     (tmp_path / "train.py").write_text(source.read_text())
     (tmp_path / "runs.csv").write_text("id,record_id\n")
     with pytest.raises(ValueError, match="header"):
-        generator["validate_runs"](tmp_path)
+        generator["validate_runs"](project)

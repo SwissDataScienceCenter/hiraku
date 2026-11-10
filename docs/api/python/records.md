@@ -4,17 +4,43 @@
 
 ::: hiraku.record.Record
 
-`Record` is Hiraku's only research entity. Tasks, experiments, contexts, and
-literature share the same model and use `type` to describe their role. A record
-stores validated YAML front matter and a Markdown body.
+`Record` is document data with a required OKF `id`: its bundle-relative path without the
+`.md` suffix. Field validation is local: required nonblank `type`,
+metadata shapes, reference syntax, commit hashes, and metric declarations.
+Unknown metadata is preserved. `title` is the optional OKF display title.
 
-Use `record.save_markdown(body)` to save a replacement body while preserving
-metadata. It returns a saved copy and leaves the supplied object unchanged. The
-record must already have a path; changes on disk since loading are rejected.
-This check does not lock the file against concurrent writers.
+`status` is restricted to the OKF lifecycle values `draft`, `stable` (the
+default), and `deprecated`. `state` is an optional string for workflow-defined
+research progress, such as `drafted`, `implemented`, or `analyzed`.
 
-## Registry helpers
+`record.metadata` is a serialized snapshot of front matter. It excludes `id`
+and the Markdown body. Loading derives the ID from the filename; it is never
+persisted in front matter. Moving a document changes its ID.
+`parent_id` and `related_to` are ordinary persisted
+relationships to other concept paths. Placement does not determine parentage.
+All fields, including metrics, are local.
 
-::: hiraku.record.load_record
+```python
+from pathlib import Path
+from hiraku.record import Record, Vault
 
-::: hiraku.record.list_records
+vault = Vault(root=Path("hiraku/records"))
+record = Record(id="experiments/baseline", type="experiment", title="Baseline")
+vault.save(record)
+record = vault.load("experiments/baseline")
+record.markdown = "Results from this experiment."
+vault.save(record, overwrite=True)
+```
+
+## `Vault`
+
+::: hiraku.record.Vault
+
+`Vault` owns bundle operations, validation and filesystem access and persistence.
+
+Saving persists explicitly supplied fields and values changed from their defaults,
+including in-place collection edits. Unchanged implicit defaults are omitted.
+
+## `Metric`
+
+::: hiraku.record.Metric

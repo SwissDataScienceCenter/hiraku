@@ -6,13 +6,17 @@ Typical workflow:
 
 ```bash
 hiraku init
-hiraku record create <root-id>
-hiraku record create <child-id> --parent <root-id>
-hiraku run --record <child-id> -- python train.py
-hiraku runs --record <record-id>
+hiraku record create tasks/question --title "Research question" --type task
+hiraku record create experiments/baseline --parent tasks/question --type experiment
+hiraku run --record experiments/baseline -- python train.py
+hiraku runs --record experiments/baseline
 ```
 
-`hiraku record list` includes each record's local `status` in its table.
+`record create RECORD_ID` takes the OKF ID: a bundle-relative path without `.md`.
+Use `--title` for the optional display title. References and run attribution use
+this ID. IDs are derived from placement and never stored in front matter.
+
+`hiraku record list` includes each record's local `state` in its table.
 Commands with an optional `--json` output accept `--pretty` alongside it to
 render the JSON with Rich. For example, use `hiraku runs --json --pretty`.
 Workflow start, sessions, history, status, and resume commands always return

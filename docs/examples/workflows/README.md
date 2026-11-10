@@ -73,8 +73,8 @@ The workflow is `hiraku/workflows/scheduler/workflow.py`, with its defaults and
 instructions in `workflow.md`. Its next assignment comes from project records:
 
 1. `start` creates a task record `scheduler-<id>` and `records` experiment
-   records below it (default 3), each with a random `priority` from 1 to 9 and
-   `count: 0`.
+   records with IDs `scheduler-<id>/counter-1`, etc. (default 3), each with a
+   random `priority` from 1 to 9 and `count: 0`.
 2. Hiraku assigns the open record with the highest priority, ties going to the
    larger ID. A record is open while its `count` is below `target` (default 2).
 3. The harness raises the assigned record's `count` by one, with

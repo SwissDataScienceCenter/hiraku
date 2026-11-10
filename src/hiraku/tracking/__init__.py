@@ -1,10 +1,17 @@
-"""Built-in tracking adapters and their shared interface."""
+"""Normalized tracking models, contracts, and built-in adapters."""
 
-from .base import TrackingBackend
-from .csv import CSVBackend, CSVBackendConfig
-from .factory import BackendConfig, create_backend
-from .mlflow import MLflowBackend, MLflowBackendConfig
-from .wandb import WandbBackend, WandbBackendConfig
+from .base import (
+    BackendConfig,
+    CSVBackendConfig,
+    MLflowBackendConfig,
+    Run,
+    TrackingBackend,
+    WandbBackendConfig,
+)
+from .csv import CSVBackend
+from .factory import TrackingBackendFactory
+from .mlflow import MLflowBackend
+from .wandb import WandbBackend
 
 __all__ = [
     "BackendConfig",
@@ -15,5 +22,6 @@ __all__ = [
     "WandbBackend",
     "WandbBackendConfig",
     "TrackingBackend",
-    "create_backend",
+    "TrackingBackendFactory",
+    "Run",
 ]

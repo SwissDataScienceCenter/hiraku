@@ -1,5 +1,3 @@
-# Project initialization API
+# Project
 
-## `initialize_project`
-
-::: hiraku.project.initialize_project
+::: hiraku.project.Project

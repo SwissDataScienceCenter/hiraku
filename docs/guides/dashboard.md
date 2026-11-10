@@ -97,7 +97,7 @@ location.
 ## Sections
 
 **Record navigation**
-:   An optional, initially collapsed tree of records with type and status
+:   An optional, initially collapsed tree of records with type and state
     badges. Expand it to navigate the hierarchy. Choosing a record
     selects the same row in the runs table, clears any selected run, and compares
     that record's subtree. Table selections highlight the corresponding record
@@ -111,7 +111,7 @@ location.
     compare its subtree, or a run to inspect it.
 
 **Run**
-:   The selected run's ID, record, entrypoint, commit, start time, duration,
+:   The selected run's ID, record, commit, start time, duration,
     parameters, and metrics, plus a link to the run in its tracking backend when
     one is available.
 
@@ -218,12 +218,12 @@ details use the already loaded record objects to retain complete front matter.
 
 `runs_df`
 :   One row per run in execution order: `run`, `record`, `record_path`,
-    `source`, `started`, `entrypoint`, `commit`, `url`, plus a
+    `source`, `started`, `commit`, `url`, plus a
     `metric.<name>` and `param.<name>` column for each metric and parameter.
 
 `records_df`
 :   One row per record in tree order: `record`, `parent`, `record_path`,
-    `type`, `status`, `decision`, `commit`, `metrics` (a list of declared
+    `type`, `state`, `decision`, `commit`, `metrics` (a list of declared
     `name` and `direction` pairs), and `description` (the record's Markdown).
 
 | View | Reads |

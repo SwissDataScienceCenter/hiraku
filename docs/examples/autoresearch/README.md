@@ -54,7 +54,7 @@ cat >> .gitignore <<'EOF'
 /.mcp.json
 /hiraku/*
 !/hiraku/dispatch/
-/hiraku.yml
+!/hiraku/records/
 /task.md
 /runs.csv
 /run.log
@@ -68,7 +68,9 @@ git commit -m "add Hiraku autoresearch workflow"
 As in the upstream
 example, choose a tag and branch for the autoresearch, e.g., `sep10` and `autoresearch/sep10`. The record ID must be new.
 ```bash
-hiraku record create sep10 --type task \
+hiraku record create sep10 \
+  --title "Language model optimization" \
+  --type task \
   --set 'branch=autoresearch/sep10' \
   --set "goal=Find the best architecture, optimizer, and hyperparameters to minimize `val_bpb` within the fixed 5-minute training budget." \
   --markdown-file task.md \
@@ -80,15 +82,17 @@ git switch -c autoresearch/sep10
 ## Test the CPU workflow with Hiraku
 
 ```bash
-hiraku record create cpu-test --parent sep10 --type experiment \
+hiraku record create sep10/cpu-test \
+  --title "CPU smoke test" \
+  --parent sep10 --type experiment \
   --set "summary=CPU-only mock run" \
   --set "hypothesis=The Hiraku dispatcher records an attributed mock result" \
   --commit HEAD
 
-hiraku run --record cpu-test -- uv run python cpu_mock.py --val-bpb 1.0
-hiraku runs --record cpu-test
+hiraku run --record sep10/cpu-test -- uv run python cpu_mock.py --val-bpb 1.0
+hiraku runs --record sep10/cpu-test
 
-hiraku record update cpu-test \
+hiraku record update sep10/cpu-test \
   --set decision=discard \
   --set 'conclusion="CPU-only workflow test; not a training result."'
 ```
@@ -98,15 +102,17 @@ hiraku record update cpu-test \
 Here we manually create and run the baseline experiment. Alternatively, ask your agent to invoke the Hiraku skill to create and run the baseline experiment for you.
 
 ```bash
-hiraku record create baseline --parent sep10 --type experiment \
+hiraku record create sep10/baseline \
+  --title "Training baseline" \
+  --parent sep10 --type experiment \
   --set "summary=Establish the baseline" \
   --set "hypothesis=Provide a reasonable starting point for comparison" \
   --commit HEAD
 
-hiraku run --record baseline -- uv run python train.py
-hiraku runs --record baseline
+hiraku run --record sep10/baseline -- uv run python train.py
+hiraku runs --record sep10/baseline
 
-hiraku record update baseline \
+hiraku record update sep10/baseline \
   --set decision=keep --set 'conclusion="Baseline run completed."'
 ```
 

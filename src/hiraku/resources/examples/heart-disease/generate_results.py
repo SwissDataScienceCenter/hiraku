@@ -12,34 +12,41 @@ from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hiraku import HirakuConfig
+from hiraku import Project
 from hiraku.execution import execute_command
-from hiraku.record import Record
 
 EXPERIMENTS = (
-    ("logistic-baseline", "heart-disease", "logistic", 0.2),
-    ("random-forest", "heart-disease", "random_forest", 0.2),
-    ("forest-tuning", "random-forest", "random_forest", 0.3),
+    ("logistic-regression", "heart-disease-prediction", "logistic", 0.2),
+    ("random-forest", "heart-disease-prediction", "random_forest", 0.2),
+    ("validation-split", "random-forest", "random_forest", 0.3),
 )
 METRICS = ("val/log_loss", "val/accuracy")
 
 
-def validate_runs(project: Path) -> list[dict[str, str]]:
+def validate_runs(project: Project | Path) -> list[dict[str, str]]:
     """Check the writer schema, experiment attribution and finite measurements."""
-    tree = ast.parse((project / "train.py").read_text())
+    if isinstance(project, Path):
+        project = Project.discover(project)
+    tree = ast.parse((project.root / "train.py").read_text())
     fields = next(
         ast.literal_eval(node.value)
         for node in tree.body
         if isinstance(node, ast.Assign)
         and any(isinstance(t, ast.Name) and t.id == "RUN_FIELDS" for t in node.targets)
     )
-    with (project / "runs.csv").open(newline="") as stream:
+    with (project.root / "runs.csv").open(newline="") as stream:
         reader = csv.DictReader(stream)
         if reader.fieldnames != fields:
             raise ValueError("Unexpected runs CSV header")
         rows = list(reader)
+    paths = {record.id.rsplit("/", 1)[-1]: record.id for record in project.vault.list()}
     expected = Counter(
-        (identifier, model, str(seed), str(fraction))
+        (
+            paths[identifier],
+            model,
+            str(seed),
+            str(fraction),
+        )
         for identifier, _, model, fraction in EXPERIMENTS
         for seed in (1, 2, 3)
     )
@@ -61,15 +68,14 @@ def validate_runs(project: Path) -> list[dict[str, str]]:
     return rows
 
 
-def generate(config: HirakuConfig) -> None:
+def generate(project: Project) -> None:
     """Generate records and runs in an initialized, empty example project."""
-    if list(config.records_dir.rglob("*.md")) or (config.root / "runs.csv").exists():
+    if list(project.records_dir.rglob("*.md")) or (project.root / "runs.csv").exists():
         raise FileExistsError("Generation requires an example without records or runs")
-    Record.create(
-        "heart-disease",
+    root = project.vault.create(
+        "heart-disease-prediction",
         type="task",
-        status="concluded",
-        activate=False,
+        state="concluded",
         metrics=[
             {"name": m, "direction": d}
             for m, d in zip(METRICS, ("minimize", "maximize"), strict=True)
@@ -77,29 +83,34 @@ def generate(config: HirakuConfig) -> None:
         markdown="# Heart disease classification\n\n"
         "Measured runs on the processed Cleveland dataset with seeds 1, 2 and 3.\n"
         "These small validation comparisons are not clinical evidence.\n",
-        config=config,
+        title="Heart disease prediction",
     )
+    record_ids = {root.id: root.id}
     for identifier, parent, model, fraction in EXPERIMENTS:
-        record = Record.create(
-            identifier,
-            parent_id=parent,
+        record = project.vault.create(
+            f"{record_ids[parent]}/{identifier}",
+            title={
+                "logistic-regression": "Logistic regression",
+                "random-forest": "Random forest",
+                "validation-split": "Validation split sensitivity",
+            }[identifier],
+            parent_id=record_ids[parent],
             type="baseline"
             if model == "logistic"
             else "diagnostic"
-            if identifier == "forest-tuning"
+            if identifier == "validation-split"
             else "hypothesis",
-            status="concluded",
-            activate=False,
-            config=config,
+            state="concluded",
             markdown=f"## {identifier}\n\n"
             f"Model: `{model}`; validation fraction: {fraction}; seeds: 1, 2, 3.\n"
             + (
                 "This is a validation-split sensitivity check; its metrics are "
                 "not a directly comparable improvement.\n"
-                if identifier == "forest-tuning"
+                if identifier == "validation-split"
                 else ""
             ),
         )
+        record_ids[identifier] = record.id
         command = [
             "uv",
             "run",
@@ -113,18 +124,18 @@ def generate(config: HirakuConfig) -> None:
         for seed in (1, 2, 3):
             result = execute_command(
                 [*command, "--seed", str(seed)],
-                record_id=identifier,
-                config=config,
+                record_id=record.id,
+                project=project,
             )
             if result.returncode:
                 raise RuntimeError(
                     f"Training command for {identifier} failed with "
                     f"exit code {result.returncode}"
                 )
-    rows = validate_runs(config.root)
+    rows = validate_runs(project)
     for identifier, _, _, _ in EXPERIMENTS:
-        values = [r for r in rows if r["record_id"] == identifier]
-        record = Record.load(config.records_dir / "heart-disease" / f"{identifier}.md")
+        record = project.vault.load(record_ids[identifier])
+        values = [r for r in rows if r["record_id"] == record.id]
         record.markdown += (
             "\nMean across the three runs:\n\n"
             + "\n".join(
@@ -133,9 +144,8 @@ def generate(config: HirakuConfig) -> None:
             )
             + "\n\nNo statistical significance is claimed.\n"
         )
-        record.save(overwrite=True)
-    config.active_record_id = "random-forest"
-    config.save()
+        project.vault.save(record, overwrite=True)
+    project.set_active_record(record_ids["random-forest"])
 
 
 def generate_results(output: Path) -> None:
@@ -144,9 +154,9 @@ def generate_results(output: Path) -> None:
     if output.exists():
         raise FileExistsError(f"Output already exists: {output}")
     with TemporaryDirectory(prefix="hiraku-heart-disease-") as temporary:
-        project = Path(temporary).resolve() / "project"
-        config = HirakuConfig.init(
-            project, example="heart-disease", install_skill=False
+        project_dir = Path(temporary).resolve() / "project"
+        project = Project.create(
+            project_dir, example="heart-disease", install_skill=False
         )
         for arguments in (
             ["init", "-q"],
@@ -163,14 +173,14 @@ def generate_results(output: Path) -> None:
                 "Initialize isolated example source",
             ],
         ):
-            subprocess.run(["git", *arguments], cwd=config.root, check=True)
-        generate(config)
+            subprocess.run(["git", *arguments], cwd=project.root, check=True)
+        generate(project)
         output.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".results-", dir=output.parent) as staging:
             overlay = Path(staging) / "overlay"
-            shutil.copytree(config.records_dir, overlay / "hiraku/records")
+            shutil.copytree(project.records_dir, overlay / "hiraku/records")
             for name in ("hiraku.yml", "runs.csv"):
-                shutil.copyfile(project / name, overlay / name)
+                shutil.copyfile(project.root / name, overlay / name)
             overlay.rename(output)
 
 
@@ -183,4 +193,4 @@ if __name__ == "__main__":
     if args.output is not None:
         generate_results(args.output)
     else:
-        generate(HirakuConfig.discover())
+        generate(Project.discover())

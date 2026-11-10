@@ -8,10 +8,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .config import HirakuConfig
 from .errors import ExecutionError, GitError, NoActiveRecordError, ValidationError
 from .git import GitRepository
-from .record import load_record
+from .project import Project
 
 
 def validate_command(value: Any) -> list[str] | None:
@@ -35,21 +34,19 @@ def execute_command(
     dispatch: str | None = None,
     env: Mapping[str, str] | None = None,
     capture_output: bool = False,
-    config: HirakuConfig | None = None,
+    project: Project | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command in the current project and return when it exits."""
-    selected = config or HirakuConfig.discover()
+    selected = project or Project.discover()
     selected_record = record_id or selected.active_record_id
     if selected_record is None:
         raise NoActiveRecordError("Select a record with --record or hiraku record set")
-    record = load_record(selected_record, config=selected)
+    record = selected.vault.load(selected_record)
     if isinstance(command, str | bytes):
         raise ValidationError("command must be an argv sequence, not a shell string")
-    if command is None or isinstance(command, str | bytes):
+    if command is None:
         raise ValidationError("command must be an argv sequence")
     argv = validate_command(list(command))
-    if argv is None:
-        raise ValidationError("command must be a non-empty argv sequence")
 
     additions = dict(env or {})
     if any(
@@ -70,16 +67,19 @@ def execute_command(
         "HIRAKU_COMMIT",
         "HIRAKU_GIT_STATE",
         "HIRAKU_SOURCE_DIGEST",
-        "HIRAKU_ENTRYPOINT",
     }
     if reserved.intersection(additions):
         raise ValidationError("Environment cannot override reserved run attribution")
 
-    tracking_spec = record.tracking_backend_spec(config=selected)
-    if tracking_spec.get("type") == "wandb":
+    raw_tracking_spec = selected.tracking_backend
+    tracking_spec = (
+        {"type": raw_tracking_spec}
+        if isinstance(raw_tracking_spec, str)
+        else raw_tracking_spec
+    )
+    tracking_type = tracking_spec.get("type", tracking_spec.get("name"))
+    if tracking_type == "wandb":
         wandb_project = tracking_spec.get("project")
-        if wandb_project is None:
-            wandb_project = selected.root.name
         if (
             isinstance(wandb_project, str)
             and wandb_project
@@ -87,10 +87,10 @@ def execute_command(
             and "WANDB_PROJECT" not in os.environ
         ):
             additions["WANDB_PROJECT"] = wandb_project
-    elif tracking_spec.get("type") == "mlflow":
-        from .tracking import create_backend
+    elif tracking_type == "mlflow":
+        from .tracking import TrackingBackendFactory
 
-        backend = create_backend(tracking_spec, selected)
+        backend = TrackingBackendFactory(selected).create(tracking_spec)
         if (
             "MLFLOW_TRACKING_URI" not in additions
             and "MLFLOW_TRACKING_URI" not in os.environ
@@ -120,7 +120,7 @@ def execute_command(
     environment.update(
         {
             "HIRAKU_RECORD_ID": record.id,
-            "HIRAKU_RECORD_FILE": str(record.path),
+            "HIRAKU_RECORD_FILE": str(selected.vault.file_path(record.id)),
             "HIRAKU_ROOT": str(selected.root),
             "HIRAKU_TRACKING_ROOT": str(selected.root),
             "HIRAKU_COMMIT": commit,

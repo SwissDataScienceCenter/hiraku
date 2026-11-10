@@ -9,16 +9,15 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.project import Project
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import start_workflow, workflow_status
 
 
-def resume_workflow(session_id, response, *, config):
-    status = workflow_status(session_id, config=config)
+def resume_workflow(session_id, response, *, project):
+    status = workflow_status(session_id, project=project)
     return _resume_workflow(
-        session_id, response, config=config, checkpoint_id=status["checkpoint_id"]
+        session_id, response, project=project, checkpoint_id=status["checkpoint_id"]
     )
 
 
@@ -66,14 +65,14 @@ def test_all_examples_use_the_langgraph_cli(
 def test_greet_is_one_final_prompt_filled_from_its_arguments(
     runner: CliRunner,
 ) -> None:
-    config = HirakuConfig.discover()
-    response = start_workflow("greet", {"name": "Ada", "times": 3}, config=config)
+    config = Project.discover()
+    response = start_workflow("greet", {"name": "Ada", "times": 3}, project=config)
     assert response["status"] == "completed"
     assert response["workflow_id"] == "greet"
     assert response["result"].startswith("# Greet\n\nPrint 3 greetings to Ada")
     assert "Greet formally:\nfalse." in response["result"]
 
-    default = start_workflow("greet", {}, config=config)
+    default = start_workflow("greet", {}, project=config)
     assert default["result"].startswith("# Greet\n\nPrint 2 greetings to World")
     assert "Greet formally:\nfalse." in default["result"]
 
@@ -114,9 +113,9 @@ def test_cli_uses_workflow_session_ids_for_resume_and_status(runner: CliRunner) 
 
 
 def children(parent: str) -> list[Any]:
-    config = HirakuConfig.discover()
+    config = Project.discover()
     return sorted(
-        load_record(parent, config=config).children(config=config),
+        config.vault.children(parent),
         key=lambda item: item.id,
     )
 
@@ -128,12 +127,16 @@ def set_count(runner: CliRunner, record_id: str, count: int) -> None:
 def test_scheduler_langgraph_works_by_priority_until_every_record_reaches_target(
     runner: CliRunner,
 ) -> None:
-    config = HirakuConfig.discover()
-    response = start_workflow("scheduler", {"records": 3, "target": 2}, config=config)
+    config = Project.discover()
+    response = start_workflow("scheduler", {"records": 3, "target": 2}, project=config)
     interruption = response["interrupts"][0]["value"]
     parent = interruption["data"]["parent"]
     records = children(parent)
     assert len(records) == 3
+    assert {item.id: item.title for item in records} == {
+        f"{parent}/counter-{index}": f"Counter {index}" for index in range(1, 4)
+    }
+    assert config.vault.load(parent).title == "Counter scheduling"
     assert all(1 <= item.priority <= 9 and item.count == 0 for item in records)
     # The highest priority runs to the target first; ties go to the larger ID.
     order = sorted(records, key=lambda item: (item.priority, item.id), reverse=True)
@@ -148,40 +151,44 @@ def test_scheduler_langgraph_works_by_priority_until_every_record_reaches_target
         assert f"--set count={count + 1}" in interruption["instruction"]
         other = next(item.id for item in records if item.id != record_id)
         wrong = resume_workflow(
-            response["workflow_session_id"], {"record_id": other}, config=config
+            response["workflow_session_id"], {"record_id": other}, project=config
         )
         retry = wrong["interrupts"][0]["value"]
         assert retry["data"] == context
         assert "assigned record" in retry["error"]
 
         unchanged = resume_workflow(
-            response["workflow_session_id"], {"record_id": record_id}, config=config
+            response["workflow_session_id"],
+            {"record_id": record_id},
+            project=config,
         )
         retry = unchanged["interrupts"][0]["value"]
         assert f"set it to {count + 1}" in retry["error"]
 
         set_count(runner, record_id, count + 1)
         response = resume_workflow(
-            response["workflow_session_id"], {"record_id": record_id}, config=config
+            response["workflow_session_id"],
+            {"record_id": record_id},
+            project=config,
         )
 
     assert response["status"] == "completed"
     assert response["workflow_id"] == "scheduler"
-    assert workflow_status(response["workflow_session_id"], config=config) == response
+    assert workflow_status(response["workflow_session_id"], project=config) == response
     assert all(item.id in response["result"] for item in records)
 
 
 def test_langgraph_runs_are_routed_to_their_own_workflow(runner: CliRunner) -> None:
-    config = HirakuConfig.discover()
-    count_run = start_workflow("count-steps", {"count": 1}, config=config)
-    scheduler_run = start_workflow("scheduler", {"records": 1}, config=config)
+    config = Project.discover()
+    count_run = start_workflow("count-steps", {"count": 1}, project=config)
+    scheduler_run = start_workflow("scheduler", {"records": 1}, project=config)
 
     assert (
-        workflow_status(count_run["workflow_session_id"], config=config)["workflow_id"]
+        workflow_status(count_run["workflow_session_id"], project=config)["workflow_id"]
         == "count-steps"
     )
     assert (
-        workflow_status(scheduler_run["workflow_session_id"], config=config)[
+        workflow_status(scheduler_run["workflow_session_id"], project=config)[
             "workflow_id"
         ]
         == "scheduler"

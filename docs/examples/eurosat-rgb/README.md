@@ -6,7 +6,7 @@
 
 This example trains a multilayer perceptron (MLP) and a convolutional neural network (CNN) on the EuroSAT RGB dataset and logs their training and validation metrics to Weights & Biases (W&B). Hiraku reads the resulting W&B runs through its tracking adapter.
 
-## 1. Install Hiraku and initialize the example
+## Setup
 
 From a local Hiraku source checkout, install the Hiraku CLI:
 
@@ -21,14 +21,14 @@ Then create a project and let Hiraku install the training script, model definiti
 ```bash
 hiraku example create eurosat-rgb --git
 cd eurosat-rgb
-
+uv sync
 git add .
 git commit -m "initialize EuroSAT RGB example"
 ```
 
 The first training run downloads the RGB EuroSAT dataset automatically.
 
-## 2. Login to W&B
+## Login to W&B
 
 ```bash
 uv run wandb login
@@ -38,72 +38,45 @@ The example uses the `eurosat-rgb` W&B project, experiment-specific groups, and 
 
 Set `WANDB_ENTITY` only if you want to log under a specific team or account.
 
-## 3. Define the research root
+## Create the research root and child records
 
 The example ships with W&B configured as the project-wide tracking backend.
-Create the research root:
 
 ```bash
-hiraku record create eurosat --type task \
+hiraku record create land-cover-classification \
+  --title "Land cover classification" \
+  --type task \
   --set "goal=Maximize EuroSAT RGB validation accuracy" \
   --set "question=How accurately can MLP and CNN architectures classify EuroSAT RGB land-cover images?" \
   --set 'metrics=[{name: val/accuracy, direction: maximize}, {name: val/loss, direction: minimize}]'
 
-hiraku record show eurosat
-hiraku status
-```
-
-The research goal is to compare the ability of fully connected and convolutional architectures to classify satellite imagery under comparable training conditions.
-
-## 4. Create an MLP baseline experiment
-
-Create an experiment using a MLP with fully connected layers.
-
-```bash
-hiraku record create mlp --parent eurosat --type experiment \
+hiraku record create land-cover-classification/mlp-baseline \
+  --title "MLP baseline" \
+  --parent land-cover-classification --type experiment \
   --set "summary=MLP baseline for EuroSAT RGB classification" \
   --set "hypothesis=A fully connected neural network can learn a useful baseline from flattened RGB image pixels." \
   --commit HEAD
 
-hiraku record show mlp
-
-hiraku run --record mlp -- uv run python train.py --model mlp --seed 42 \
-  --epochs 10 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
-
-hiraku runs --record eurosat --all
-hiraku runs --record mlp
-```
-
-The MLP flattens the input RGB image into a vector and applies fully connected layers to predict one of the 10 land-cover classes.
-
-During training, the script logs training and validation loss, accuracy, and model parameter count to W&B.
-
-## 5. Run a CNN experiment
-
-Create a second experiment using a CNN.
-
-```bash
-hiraku record create cnn --parent eurosat --type experiment \
+hiraku record create land-cover-classification/cnn \
+  --title "Convolutional network" \
+  --parent land-cover-classification --type experiment \
   --set "summary=CNN baseline for EuroSAT RGB classification" \
   --set "hypothesis=A convolutional neural network improves classification accuracy over the MLP by learning spatial features from satellite imagery." \
   --commit HEAD
 
-hiraku record show cnn
-hiraku record show cnn
+hiraku record list
 
-hiraku run --record cnn -- uv run python train.py --model cnn --seed 42 \
-  --epochs 10 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
-hiraku runs --record eurosat --all --sort val/accuracy
+hiraku run --record land-cover-classification/mlp-baseline -- uv run python train.py --model mlp --seed 42 \
+  --epochs 5 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
+
+hiraku run --record land-cover-classification/cnn -- uv run python train.py --model cnn --seed 42 \
+  --epochs 5 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
 ```
 
-The CNN uses convolutional layers and spatial pooling to extract image features before producing class predictions.
-
-## 6. Compare the experiments
+## Compare final metrics
 
 Inspect all runs associated with the research root:
 
 ```bash
-hiraku runs --record eurosat --all --sort val/accuracy
+hiraku runs --record land-cover-classification --all --sort val/accuracy
 ```
-
-Each run stores Hiraku provenance, model and dataset configuration, random seed, training hyperparameters, epoch-level metrics, model parameter count, and W&B metadata.

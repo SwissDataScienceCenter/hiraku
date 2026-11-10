@@ -1,121 +1,247 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import sys
 from pathlib import Path
+from typing import Any
+from urllib.parse import quote
 
+import anyio
 import pytest
 from click.testing import CliRunner
 
 pytest.importorskip("mcp")
 
-from mcp import ClientSession, StdioServerParameters  # noqa: E402
+from mcp import (  # noqa: E402
+    Client,
+    ClientSession,
+    StdioServerParameters,
+    types,
+)
 from mcp.client.stdio import stdio_client  # noqa: E402
+from mcp.server.elicitation import render_elicitation_schema  # noqa: E402
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E402
 
 from hiraku.cli import main  # noqa: E402
-from hiraku.config import HirakuConfig  # noqa: E402
-from hiraku.mcp import create_server  # noqa: E402
-from hiraku.record import load_record  # noqa: E402
+from hiraku.errors import ValidationError  # noqa: E402
+from hiraku.mcp import (  # noqa: E402
+    WorkflowApproval,
+    create_server,
+    register_tools,
+    register_workflow_tools,
+)
+from hiraku.project import Project  # noqa: E402
+from hiraku.workflows.langgraph import resume_workflow as _resume_workflow  # noqa: E402
+from hiraku.workflows.langgraph import (  # noqa: E402
+    start_workflow,
+    workflow_mermaid,
+    workflow_status,
+)
+
+
+def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> None:
+    from mcp.server.mcpserver import MCPServer
+
+    project = Project.create(tmp_path, install_skill=False)
+    server = MCPServer("test")
+    register_tools(server, project)
+    register_workflow_tools(server, project)
+
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
+
+    async def exercise() -> None:
+        tools = {tool.name: tool for tool in await server.list_tools()}
+        assert {"project_info", "record_list", "runs", "workflow_start"} <= tools.keys()
+        assert tools["project_info"].title == "Project information"
+        assert tools["record_list"].annotations.read_only_hint is True
+        assert tools["workflow_start"].title == "Start workflow"
+        assert tools["workflow_start"].description
+        result = await server.call_tool("project_info", {})
+        assert result.structured_content["tracking_backend"] == "csv"
+
+    asyncio.run(exercise())
 
 
 def test_tools_and_validation(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     server = create_server(config)
 
     async def exercise() -> None:
-        async def call(name: str, **args):
-            print(f"calling {name}", flush=True)
-            return await server.call_tool(name, args)
+        async def call(tool_name: str, **args):
+            return await server.call_tool(tool_name, args)
 
         await call(
             "record_create",
-            record_id="root",
+            title="root",
             fields={
-                "status": "new",
+                "type": "task",
+                "state": "new",
             },
+            record_id="root/root",
         )
-        await call("record_create", record_id="child", parent_id="root")
-        await call("record_update", record_id="child", fields={"status": "done"})
-        assert load_record("child", config=config).status == "done"
+        await call(
+            "record_create",
+            title="child",
+            parent_id="root/root",
+            fields={"type": "task"},
+            record_id="root/child/child",
+        )
+        await call(
+            "record_update", record_id="root/child/child", fields={"state": "done"}
+        )
+        assert config.vault.load("root/child/child").state == "done"
         for name, args in [
-            ("record_create", {"record_id": "bad", "parent_id": "missing"}),
-            ("record_create", {"record_id": "../escape"}),
-            ("record_create", {"record_id": "root"}),
-            ("record_update", {"record_id": "child", "fields": {"id": "renamed"}}),
-            ("record_update", {"record_id": "child", "fields": {"related_to": ["no"]}}),
-            ("record_delete", {"record_id": "root"}),
+            (
+                "record_create",
+                {
+                    "record_id": "../bad/bad",
+                    "title": "bad",
+                    "parent_id": "../missing",
+                    "fields": {"type": "task"},
+                },
+            ),
+            (
+                "record_create",
+                {"record_id": "  ", "title": "  ", "fields": {"type": "task"}},
+            ),
+            (
+                "record_update",
+                {"record_id": "root/child/child", "fields": {"id": "renamed"}},
+            ),
+            (
+                "record_update",
+                {
+                    "record_id": "root/child/child",
+                    "fields": {"related_to": ["../no"]},
+                },
+            ),
+            ("record_delete", {"record_id": "missing"}),
         ]:
             with pytest.raises(ToolError):
                 await server.call_tool(name, args)
-        assert load_record("child", config=config).related_to == []
-        await call("record_reparent", record_id="child", parent_id=None)
-        await call("record_delete", record_id="child")
+        assert config.vault.load("root/child/child").related_to == []
+        await call("record_delete", record_id="root/child/child")
         await call(
             "record_create",
-            record_id="sources",
+            title="sources",
             fields={"type": "context"},
             markdown="Evidence",
+            record_id="sources/sources",
         )
         with pytest.raises(ToolError):
-            await call("record_create", record_id="sources")
-        with pytest.raises(ToolError):
-            await call("record_create", record_id="../escape")
-        await call("record_update", record_id="sources", fields={}, markdown="Updated")
-        assert load_record("sources", config=config).markdown == "Updated"
-        await call("record_show", record_id="sources")
+            await call(
+                "record_create", title="  ", fields={"type": "task"}, record_id="  "
+            )
+        await call(
+            "record_update",
+            record_id="sources/sources",
+            fields={},
+            markdown="Updated",
+        )
+        assert config.vault.load("sources/sources").markdown == "Updated"
+        await call("record_show", record_id="sources/sources")
         await call("record_list")
-        await call("record_show", record_id="root")
+        await call("record_show", record_id="root/root")
         await call("record_list")
-        await call("record_delete", record_id="sources")
-        assert list(config.records_dir.glob("*/sources.md")) == []
+        await call("record_delete", record_id="sources/sources")
+        assert "sources" not in {record.title for record in config.vault.list()}
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("deleted_id", ["active", "other"])
+def test_record_delete_preserves_valid_active_selection(tmp_path, deleted_id):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    project.vault.create("active", type="task")
+    project.vault.create("other", type="task")
+    project.set_active_record("active")
+    server = create_server(project)
+
+    asyncio.run(server.call_tool("record_delete", {"record_id": deleted_id}))
+
+    expected = None if deleted_id == "active" else "active"
+    assert project.active_record_id == expected
+    assert Project.load(project.path).active_record_id == expected
+    assert not project.vault.file_path(deleted_id).exists()
+
+
+def test_record_update_uses_vault_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    record = project.vault.create(
+        "original/original",
+        type="task",
+        state="new",
+        markdown="Before",
+        title="original",
+    )
+    other = project.vault.create("other/other", type="task", title="other")
+    server = create_server(project)
+
+    # Exercise MCP routing without relying on the SDK's worker-thread scheduler.
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
+
+    async def exercise() -> None:
+        result = await server.call_tool(
+            "record_update",
+            {
+                "record_id": record.id,
+                "fields": {"related_to": [other.id]},
+                "markdown": "After",
+            },
+        )
+        assert result.structured_content["title"] == "original"
+        updated = project.vault.load(record.id)
+        assert updated.id == "original/original"
+        assert updated.state == "new"
+        assert updated.markdown == "After"
+        assert updated.related_to == [other.id]
+
+        for fields in ({"related_to": ["../missing"]}, {"title": []}):
+            with pytest.raises(ToolError):
+                await server.call_tool(
+                    "record_update", {"record_id": record.id, "fields": fields}
+                )
+        assert project.vault.load(record.id).title == "original"
+        assert project.vault.load(record.id).related_to == [other.id]
 
     asyncio.run(exercise())
 
 
 def test_resources_and_prompt(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     server = create_server(config)
 
     async def exercise() -> None:
-        await server.call_tool("record_create", {"record_id": "demo"})
+        await server.call_tool(
+            "record_create",
+            {"record_id": "demo/demo", "title": "demo", "fields": {"type": "task"}},
+        )
         await server.call_tool(
             "record_create",
             {
-                "record_id": "literature",
+                "record_id": "literature/literature",
+                "title": "literature",
                 "fields": {"type": "context"},
                 "markdown": "Curated evidence",
             },
         )
-        folder = config.records_dir / "literature"
-        (folder / "papers").mkdir()
-        pdf = b"%PDF-1.4\nsource bytes"
-        (folder / "papers" / "paper one.pdf").write_bytes(pdf)
-        outside = tmp_path / "private.txt"
-        outside.write_text("secret")
-        (folder / "outside.txt").symlink_to(outside)
+        literature = config.vault.load("literature/literature")
         catalog = list(await server.read_resource("hiraku://catalog"))[0]
-        uris = json.loads(catalog.content)
-        assert "hiraku://sources/literature/papers%2Fpaper%20one.pdf" in uris
-        assert "hiraku://sources/literature/outside.txt" not in uris
-        content = list(
-            await server.read_resource(
-                "hiraku://sources/literature/papers%2Fpaper%20one.pdf"
-            )
-        )[0]
-        assert content.content == pdf
-        assert content.mime_type == "application/pdf"
-        for path in ["outside.txt", "%2E%2E%2F%2E%2E%2Fprivate.txt", "%2Fetc%2Fpasswd"]:
-            # Encoded traversal may already fail to match the URI template.
-            with pytest.raises(
-                ResourceError, match="Source must be a file|Unknown resource"
-            ):
-                await server.read_resource(f"hiraku://sources/literature/{path}")
+        assert json.loads(catalog.content) == ["demo/demo", "literature/literature"]
+        record_uri = f"hiraku://records/{quote(literature.id, safe='')}"
+        assert list(await server.read_resource(record_uri))[0].content
         for uri in [
-            "hiraku://records/demo",
-            "hiraku://records/literature",
+            "hiraku://records/demo%2Fdemo",
+            "hiraku://records/literature%2Fliterature",
         ]:
             assert list(await server.read_resource(uri))[0].content
         with pytest.raises(ResourceError, match="'missing' not found"):
@@ -123,8 +249,8 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
         prompt = await server.get_prompt(
             "propose_implementation",
             {
-                "record_id": "demo",
-                "related_record_ids": "literature",
+                "record_id": "demo/demo",
+                "related_record_ids": "literature/literature",
             },
         )
         assert "Curated evidence" in prompt.messages[0].content.text
@@ -133,15 +259,18 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
 
 
 def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     server = create_server(config)
 
     async def exercise() -> None:
-        await server.call_tool("record_create", {"record_id": "demo"})
+        await server.call_tool(
+            "record_create",
+            {"record_id": "demo/demo", "title": "demo", "fields": {"type": "task"}},
+        )
         result = await server.call_tool(
             "execute",
             {
-                "record_id": "demo",
+                "record_id": "demo/demo",
                 "command": [
                     sys.executable,
                     "-c",
@@ -160,9 +289,9 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
 
 
 def test_runs(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     (tmp_path / "runs.csv").write_text(
-        "id,record_id,metric.acc\na,task,0.5\nb,task,0.9\nc,other,0.7\n"
+        "id,record_id,metric.acc\na,task/task,0.5\nb,task/task,0.9\nc,other,0.7\n"
     )
     server = create_server(config)
 
@@ -170,28 +299,32 @@ def test_runs(tmp_path: Path) -> None:
         await server.call_tool(
             "record_create",
             {
-                "record_id": "task",
-                "fields": {"metrics": [{"name": "acc", "direction": "maximize"}]},
+                "record_id": "task/task",
+                "title": "task",
+                "fields": {
+                    "type": "task",
+                    "metrics": [{"name": "acc", "direction": "maximize"}],
+                },
             },
         )
 
         async def ids(**args) -> list[str]:
-            result = await server.call_tool("runs", {"record_id": "task", **args})
+            result = await server.call_tool("runs", {"record_id": "task/task", **args})
             return [run["id"] for run in result.structured_content["result"]]
 
         assert await ids(sort="acc") == ["b", "a"]
         assert await ids(sort="acc", ascending=True, limit=1) == ["a"]
         assert sorted(await ids(all_records=True)) == ["a", "b", "c"]
         with pytest.raises(ToolError, match="requires sort"):
-            await server.call_tool("runs", {"record_id": "task", "ascending": True})
+            await server.call_tool(
+                "runs", {"record_id": "task/task", "ascending": True}
+            )
 
     asyncio.run(exercise())
 
 
 def test_stdio_session(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
-    source = config.records_dir / "papers"
-    source.mkdir()
+    Project.create(tmp_path)
 
     async def exercise() -> None:
         params = StdioServerParameters(
@@ -214,7 +347,7 @@ def test_stdio_session(tmp_path: Path) -> None:
                 )
                 assert (
                     len((await client.list_resource_templates()).resource_templates)
-                    == 4
+                    == 3
                 )
                 assert (await client.list_prompts()).prompts[
                     0
@@ -223,17 +356,17 @@ def test_stdio_session(tmp_path: Path) -> None:
                     await client.call_tool(
                         "record_create",
                         {
-                            "record_id": "papers",
+                            "record_id": "papers/papers",
+                            "title": "papers",
                             "fields": {"type": "context"},
                             "markdown": "Literature",
                         },
                     )
                 ).is_error
-                pdf = b"%PDF-test"
-                (source / "paper.pdf").write_bytes(pdf)
-                result = await client.read_resource("hiraku://sources/papers/paper.pdf")
-                assert result.contents[0].mime_type == "application/pdf"
-                assert base64.b64decode(result.contents[0].blob) == pdf
+                result = await client.read_resource("hiraku://catalog")
+                assert json.loads(result.contents[0].text) == ["papers/papers"]
+                result = await client.read_resource("hiraku://records/papers%2Fpapers")
+                assert json.loads(result.contents[0].text)["id"] == "papers/papers"
                 error = await client.call_tool("record_show", {"record_id": "missing"})
                 assert error.is_error
                 assert "missing" in error.content[0].text
@@ -251,7 +384,7 @@ def test_cli_project_error(tmp_path: Path, monkeypatch) -> None:
 def test_cli_serves_project(tmp_path, monkeypatch):
     from unittest.mock import Mock
 
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     factory = Mock()
     monkeypatch.setattr("hiraku.mcp.create_server", factory)
@@ -260,3 +393,388 @@ def test_cli_serves_project(tmp_path, monkeypatch):
     assert factory.call_args.kwargs == {}
     assert factory.call_args.args[0].path == config.path
     factory.return_value.run.assert_called_once_with(transport="stdio")
+
+
+def test_workflow_mcp_uses_generic_langgraph_controls(tmp_path) -> None:
+    config = Project.create(tmp_path, example="workflows", install_skill=False)
+    server = create_server(config)
+
+    tools = asyncio.run(server.list_tools())
+    names = {tool.name for tool in tools}
+    assert {
+        "workflow_list",
+        "workflow_start",
+        "workflow_status",
+        "workflow_resume",
+        "workflow_approval",
+    } <= names
+
+
+def resume_workflow(session_id, response, *, project):
+    status = workflow_status(session_id, project=project)
+    return _resume_workflow(
+        session_id, response, project=project, checkpoint_id=status["checkpoint_id"]
+    )
+
+
+def _project(tmp_path) -> Project:
+    return Project.create(tmp_path, example="workflows", install_skill=False)
+
+
+def _tool_names(server: Any) -> set[str]:
+    return {tool.name for tool in asyncio.run(server.list_tools())}
+
+
+def _interrupt(result: dict[str, Any]) -> dict[str, Any]:
+    assert result["status"] == "waiting"
+    assert len(result["interrupts"]) == 1
+    return result["interrupts"][0]["value"]
+
+
+def test_workflow_approval_schema_omits_codex_unsupported_root_title() -> None:
+    schema = render_elicitation_schema(WorkflowApproval)
+    assert set(schema) <= {"type", "properties", "required", "$schema"}
+    assert schema["properties"]["decision"]["enum"] == [
+        "approve",
+        "revise",
+        "stop",
+    ]
+    assert set(schema["properties"]) == {"decision", "feedback"}
+
+
+def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
+    config = _project(tmp_path)
+    server = create_server(config)
+    assert {"workflow_start", "workflow_status", "workflow_resume"}.issubset(
+        _tool_names(server)
+    )
+    assert "workflow_approval" in _tool_names(server)
+
+    started = start_workflow("count-steps", {"count": 2}, project=config)
+    first = _interrupt(started)
+    assert "Step 1/2: token" in first["instruction"]
+    assert first["data"]["step"] == 1
+    assert first["response_schema"]["type"] == "object"
+    assert first["response_schema"]["additionalProperties"] is False
+    assert first["response_schema"]["properties"]["decision"]["enum"] == [
+        "continue",
+        "finish",
+    ]
+
+    wrong = resume_workflow(
+        started["workflow_session_id"],
+        {"token": "wrong", "decision": "continue"},
+        project=config,
+    )
+    retry = _interrupt(wrong)
+    assert retry["data"] == first["data"]
+    assert "does not match" in retry["error"]
+
+    invalid_decision = resume_workflow(
+        started["workflow_session_id"],
+        {"token": first["data"]["token"], "decision": "skip"},
+        project=config,
+    )
+    retry = _interrupt(invalid_decision)
+    assert retry["data"] == first["data"]
+    assert "continue" in retry["error"] and "finish" in retry["error"]
+
+    next_step = resume_workflow(
+        started["workflow_session_id"],
+        {"token": first["data"]["token"], "decision": "continue"},
+        project=config,
+    )
+    second = _interrupt(next_step)
+    assert "Step 2/2: token" in second["instruction"]
+    assert second["data"]["token"] != first["data"]["token"]
+
+    done = resume_workflow(
+        started["workflow_session_id"],
+        {"token": second["data"]["token"], "decision": "continue"},
+        project=config,
+    )
+    assert done["status"] == "completed"
+    assert "Finished after 2 of 2 steps." in done["result"]
+    assert workflow_status(started["workflow_session_id"], project=config) == done
+
+
+def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) -> None:
+    config = _project(tmp_path)
+    server = create_server(config)
+    assert "workflow_resume" in _tool_names(server)
+
+    started = start_workflow("count-steps", {}, project=config)
+    first = _interrupt(started)
+    assert first["data"]["count"] == 5
+
+    # Recreate the server to verify that the run lives in LangGraph's SQLite state.
+    server = create_server(config)
+    assert "workflow_status" in _tool_names(server)
+    completed = resume_workflow(
+        started["workflow_session_id"],
+        {"token": first["data"]["token"], "decision": "finish"},
+        project=config,
+    )
+    assert completed["status"] == "completed"
+    assert "Finished after 1 of 5 steps." in completed["result"]
+
+
+def test_count_steps_rejects_invalid_arguments(tmp_path) -> None:
+    config = _project(tmp_path)
+    with pytest.raises(ValidationError, match="positive integer"):
+        start_workflow("count-steps", {"count": 0}, project=config)
+
+
+def test_workflow_graph_is_available_from_cli_and_mcp(tmp_path, monkeypatch) -> None:
+    config = _project(tmp_path)
+    server = create_server(config)
+
+    monkeypatch.chdir(tmp_path)
+    cli_result = CliRunner().invoke(main, ["workflow", "graph", "count-steps"])
+    assert cli_result.exit_code == 0, cli_result.output
+    assert "graph TD" in cli_result.output
+    assert "harness_step" in cli_result.output
+
+    templates = anyio.run(server.list_resource_templates)
+    assert "hiraku://workflows/{workflow_id}/graph" in {
+        template.uri_template for template in templates
+    }
+    mermaid = workflow_mermaid("count-steps", project=config)
+    assert "graph TD" in mermaid
+    assert "harness_step" in mermaid
+
+
+def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    config.set_active_record(
+        config.vault.create("task/task", type="task", title="task")
+    )
+    started = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        project=config,
+    )
+    assert started["status"] == "waiting"
+    interrupt = _interrupt(started)
+    assert interrupt["step"] == "draft"
+    assert interrupt["data"]["task"] == config.vault.load("task/task").id
+
+    bypass = resume_workflow(
+        started["workflow_session_id"], {"event": "finish"}, project=config
+    )
+    assert bypass["status"] == "waiting"
+    assert "approval decision is required" in _interrupt(bypass)["error"]
+    invalid = resume_workflow(
+        started["workflow_session_id"], {"approval": {"decision": []}}, project=config
+    )
+    assert "approval decision is required" in _interrupt(invalid)["error"]
+    revised = resume_workflow(
+        started["workflow_session_id"],
+        {"approval": {"decision": "revise", "feedback": "Use a smaller model."}},
+        project=config,
+    )
+    assert _interrupt(revised)["feedback"] == "Use a smaller model."
+    completed = resume_workflow(
+        started["workflow_session_id"],
+        {"approval": {"decision": "stop"}},
+        project=config,
+    )
+    assert completed["status"] == "completed"
+    assert "results" in completed["result"]
+
+
+def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    config.set_active_record(
+        config.vault.create("task/task", type="task", title="task")
+    )
+    started = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        project=config,
+    )
+    requested = []
+
+    async def elicit(_context, params):
+        requested.append(params)
+        return types.ElicitResult(
+            action="accept",
+            content={"decision": "approve"},
+        )
+
+    async def exercise() -> tuple[Any, Any]:
+        async with Client(
+            create_server(config),
+            elicitation_callback=elicit,
+        ) as client:
+            approval = await client.call_tool(
+                "workflow_approval",
+                {
+                    "workflow_session_id": started["workflow_session_id"],
+                    "interrupt_id": started["interrupts"][0]["id"],
+                    "proposal": "Try a larger learning rate.",
+                    "response": {"event": "finish"},
+                },
+            )
+            resumed = await client.call_tool(
+                "workflow_resume",
+                {
+                    "workflow_session_id": started["workflow_session_id"],
+                    "response": approval.structured_content,
+                    "checkpoint_id": started["checkpoint_id"],
+                },
+            )
+            return approval, resumed
+
+    result, resumed = anyio.run(exercise)
+    assert resumed.structured_content["status"] == "completed"
+    assert len(requested) == 1
+    assert "draft" in requested[0].message
+    assert "larger learning rate" in requested[0].message
+    schema = requested[0].requested_schema
+    assert set(schema) <= {"type", "properties", "required", "$schema"}
+    assert schema["properties"]["decision"]["enum"] == [
+        "approve",
+        "revise",
+        "stop",
+    ]
+    assert set(schema["properties"]) == {"decision", "feedback"}
+    assert result.structured_content == {
+        "approval": {"decision": "approve"},
+        "response": {"event": "finish"},
+    }
+
+
+def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    config.set_active_record(
+        config.vault.create("task/task", type="task", title="task")
+    )
+    started = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        project=config,
+    )
+
+    async def elicit(_context, _params):
+        return types.ElicitResult(action="cancel")
+
+    async def exercise() -> tuple[Any, Any]:
+        async with Client(
+            create_server(config),
+            elicitation_callback=elicit,
+        ) as client:
+            approval = await client.call_tool(
+                "workflow_approval",
+                {
+                    "workflow_session_id": started["workflow_session_id"],
+                    "interrupt_id": started["interrupts"][0]["id"],
+                    "proposal": "Try a larger learning rate.",
+                    "response": {"event": "finish"},
+                },
+            )
+            status = await client.call_tool(
+                "workflow_status",
+                {"workflow_session_id": started["workflow_session_id"]},
+            )
+            return approval, status
+
+    approval, status = anyio.run(exercise)
+    assert approval.structured_content == {"decision": "cancel"}
+    assert status.structured_content["status"] == "waiting"
+
+
+def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    directory = config.workflows_dir / "review"
+    directory.mkdir()
+    (directory / "workflow.py").write_text(
+        "from langgraph.graph import START, END, StateGraph\n"
+        "from langgraph.types import interrupt\n"
+        "from typing import TypedDict\n"
+        "class State(TypedDict, total=False):\n"
+        "    run_id: str\n"
+        "    final: str\n"
+        "def input_schema():\n"
+        "    return {\n"
+        "        'type': 'object',\n"
+        "        'properties': {},\n"
+        "        'additionalProperties': False,\n"
+        "    }\n"
+        "def build_graph(checkpointer, *, project):\n"
+        "    def review(state):\n"
+        "        answer = interrupt({'approval': {'message': 'Review this'}})\n"
+        "        return {'final': answer['response']['value']}\n"
+        "    graph = StateGraph(State)\n"
+        "    graph.add_node('review', review)\n"
+        "    graph.add_edge(START, 'review')\n"
+        "    graph.add_edge('review', END)\n"
+        "    return graph.compile(checkpointer=checkpointer)\n",
+        encoding="utf-8",
+    )
+    started = start_workflow("review", project=config)
+
+    async def elicit(_context, _params):
+        return types.ElicitResult(action="accept", content={"decision": "approve"})
+
+    async def exercise():
+        async with Client(create_server(config), elicitation_callback=elicit) as client:
+            approval = await client.call_tool(
+                "workflow_approval",
+                {
+                    "workflow_session_id": started["workflow_session_id"],
+                    "interrupt_id": started["interrupts"][0]["id"],
+                    "proposal": "Accept the value",
+                    "response": {"value": "approved"},
+                },
+            )
+            return await client.call_tool(
+                "workflow_resume",
+                {
+                    "workflow_session_id": started["workflow_session_id"],
+                    "response": approval.structured_content,
+                    "checkpoint_id": started["checkpoint_id"],
+                },
+            )
+
+    result = anyio.run(exercise)
+    assert result.structured_content["result"] == "approved"
+
+
+def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
+    config = Project.create(tmp_path, install_skill=False)
+    config.set_active_record(
+        config.vault.create("task/task", type="task", title="task")
+    )
+    first = start_workflow(
+        "collaborative",
+        {"rounds": 1, "command": ["python", "train.py"]},
+        project=config,
+    )
+
+    async def elicit(_context, _params):
+        return types.ElicitResult(action="accept", content={"decision": "stop"})
+
+    async def exercise():
+        async with Client(create_server(config), elicitation_callback=elicit) as client:
+            approval = await client.call_tool(
+                "workflow_approval",
+                {
+                    "workflow_session_id": first["workflow_session_id"],
+                    "interrupt_id": first["interrupts"][0]["id"],
+                    "proposal": "Stop the workflow",
+                    "response": {},
+                },
+            )
+        async with Client(create_server(config)) as client:
+            return await client.call_tool(
+                "workflow_resume",
+                {
+                    "workflow_session_id": first["workflow_session_id"],
+                    "response": approval.structured_content,
+                    "checkpoint_id": first["checkpoint_id"],
+                },
+            )
+
+    resumed = anyio.run(exercise)
+    assert resumed.structured_content["status"] == "completed"

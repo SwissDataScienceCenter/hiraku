@@ -1,18 +1,16 @@
 """Hiraku's production core Python API."""
 
-from .config import HirakuConfig
 from .git import GitRepository
 from .markdown import Markdown
-from .project import initialize_project
+from .project import Project
 from .record import Metric, Record
-from .run import Run
+from .tracking import Run
 
 __all__ = [
-    "HirakuConfig",
+    "Project",
     "Metric",
     "Record",
     "Run",
     "GitRepository",
     "Markdown",
-    "initialize_project",
 ]

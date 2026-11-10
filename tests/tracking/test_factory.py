@@ -4,25 +4,25 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import BackendError
-from hiraku.tracking import create_backend
+from hiraku.project import Project
+from hiraku.tracking import TrackingBackendFactory
 from hiraku.tracking.csv import CSVBackend
 
 
 def test_factory_constructs_csv_backend_from_mapping(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
-    backend = create_backend({"type": "csv"}, config)
+    config = Project.create(tmp_path)
+    backend = TrackingBackendFactory(config).create({"type": "csv"})
     assert isinstance(backend, CSVBackend)
 
 
 def test_factory_rejects_unknown_backend(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     with pytest.raises(BackendError, match="tracking backend configuration"):
-        create_backend({"type": "json"}, config)
+        TrackingBackendFactory(config).create({"type": "json"})
 
 
 def test_factory_rejects_unknown_backend_options(tmp_path: Path) -> None:
-    config = HirakuConfig.init(tmp_path)
+    config = Project.create(tmp_path)
     with pytest.raises(BackendError, match="Invalid tracking backend configuration"):
-        create_backend({"type": "csv", "extra": True}, config)
+        TrackingBackendFactory(config).create({"type": "csv", "extra": True})

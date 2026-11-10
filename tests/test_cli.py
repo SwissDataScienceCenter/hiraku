@@ -1,238 +1,428 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.project import Project
 
 
 def invoke(*args: str):
     return CliRunner().invoke(main, args, catch_exceptions=False)
 
 
-def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+def test_root_help_lists_primary_commands() -> None:
+    result = invoke("--help")
+
+    assert result.exit_code == 0
+    for command in ("init", "record", "run", "runs", "workflow"):
+        assert command in result.output
+
+
+def test_record_tree_includes_missing_parents_and_cycles(tmp_path, monkeypatch):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    for identifier, parent in (
+        ("child", "root"),
+        ("root", None),
+        ("orphan", "missing"),
+        ("a", "b"),
+        ("b", "a"),
+        ("self", "self"),
+    ):
+        project.vault.create(identifier, type="task", parent_id=parent)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setitem(sys.modules, "mcp.server.mcpserver", None)
-    monkeypatch.delitem(sys.modules, "hiraku.mcp", raising=False)
-    result = invoke("mcp")
-    assert result.exit_code == 1
-    assert "MCP SDK dependency" in result.output
-    assert invoke("--help").exit_code == 0
+
+    result = invoke("record", "tree")
+
+    assert result.exit_code == 0
+    assert result.output.splitlines() == [
+        "orphan",
+        "root",
+        "  child",
+        "a",
+        "  b",
+        "self",
+    ]
 
 
-def test_workflow_cli_exposes_langgraph_controls_only() -> None:
-    help_text = CliRunner().invoke(main, ["workflow", "--help"]).output
-    root_help = CliRunner().invoke(main, ["--help"]).output
-
-    assert "list" in help_text
-    assert "graph" in help_text
-    assert "start" in help_text
-    assert "status" in help_text
-    assert "resume" in help_text
-    assert "send-event" not in help_text
-    assert "session" not in root_help
-
-
-def test_record_cli_lifecycle(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
-    monkeypatch.chdir(tmp_path)
-    assert invoke("record", "create", "root", "--set", "goal=Improve").exit_code == 0
-    assert invoke("record", "create", "child", "--parent", "root").exit_code == 0
-    assert config.records_dir.joinpath("root/root.md").is_file()
-    assert config.records_dir.joinpath("root/child.md").is_file()
-    shown = invoke("record", "show", "child", "--json")
-    assert shown.exit_code == 0
-    payload = json.loads(shown.output)
-    assert payload["values"]["goal"] == "Improve"
-    assert payload["sources"]["goal"] == "root"
-    raw = json.loads(invoke("record", "show", "child", "--raw", "--json").output)
-    assert "goal" not in raw["values"]
-    assert invoke("record", "update", "child", "--set", "goal=null").exit_code == 0
-    assert (
-        json.loads(invoke("record", "show", "child", "--json").output)["values"]["goal"]
-        is None
+def test_record_list_shows_research_state(tmp_path: Path, monkeypatch) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    project.vault.create(
+        "experiment", type="experiment", status="draft", state="implemented"
     )
-    assert invoke("record", "update", "child", "--unset", "goal").exit_code == 0
+    monkeypatch.chdir(tmp_path)
+    result = invoke("record", "list")
+    assert result.exit_code == 0
+    assert "state" in result.output
+    assert "implemented" in result.output
+    data = json.loads(invoke("record", "list", "--json").output)
+    assert data[0]["status"] == "draft"
+    assert data[0]["state"] == "implemented"
+
+
+def test_record_create_persists_parent_without_changing_body(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    body = tmp_path / "body.md"
+    body.write_text("## Hypothesis\n\nTest it.\n", encoding="utf-8")
     assert (
-        json.loads(invoke("record", "show", "child", "--json").output)["values"]["goal"]
-        == "Improve"
+        invoke(
+            "record",
+            "create",
+            "Parent -A/Parent -A",
+            "--title",
+            "Parent [A]",
+            "--type",
+            "task",
+        ).exit_code
+        == 0
     )
-    assert invoke("record", "tree").output == "root\n  child\n"
-    assert invoke("record", "delete", "root").exit_code != 0
-    assert invoke("record", "delete", "child").exit_code == 0
-    assert invoke("record", "delete", "root").exit_code == 0
 
-
-def test_record_cli_active_and_validation(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
-    monkeypatch.chdir(tmp_path)
-    assert invoke("record", "create", "first").exit_code == 0
-    assert HirakuConfig.load(config.path).active_record_id == "first"
-    assert invoke("record", "create", "second", "--no-activate").exit_code == 0
-    assert HirakuConfig.load(config.path).active_record_id == "first"
-    assert invoke("record", "set", "second").exit_code == 0
-    assert json.loads(invoke("status", "--json").output)["active_record_id"] == "second"
-    assert invoke("record", "create", "third", "--parent", "missing").exit_code != 0
-    assert invoke("record", "create", "first").exit_code != 0
-    assert invoke("record", "update", "first", "--set", "id=other").exit_code != 0
-    invalid_link = invoke("record", "update", "second", "--set", "related_to=[missing]")
-    assert invalid_link.exit_code != 0
-    assert invoke("record", "update", "second", "--related-to", "first").exit_code == 0
-
-
-def test_status_reports_project_tracking_backend(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
-    config.tracking_backend = {"type": "wandb", "project": "eurosat-rgb"}
-    config.save()
-    monkeypatch.chdir(tmp_path)
     result = invoke(
         "record",
         "create",
-        "eurosat",
+        "Parent -A/child/child",
+        "--title",
+        "child",
         "--type",
         "task",
-        "--set",
-        "metrics=[{name: val/accuracy, direction: maximize}]",
-    )
-    assert result.exit_code == 0
-    child = invoke(
-        "record", "create", "mlp", "--parent", "eurosat", "--type", "experiment"
-    )
-    assert child.exit_code == 0
-
-    shown = json.loads(invoke("record", "show", "mlp", "--json").output)
-    assert shown["values"]["metrics"] == [
-        {"name": "val/accuracy", "direction": "maximize"}
-    ]
-    assert shown["sources"]["metrics"] == "mlp"
-    assert "tracking_backend" not in shown["values"]
-
-    raw = json.loads(invoke("record", "show", "mlp", "--raw", "--json").output)
-    assert raw["values"]["metrics"] == [
-        {"name": "val/accuracy", "direction": "maximize"}
-    ]
-
-    override = invoke(
-        "record",
-        "create",
-        "cnn",
         "--parent",
-        "eurosat",
-        "--type",
-        "experiment",
-        "--set",
-        "metrics=[{name: val/loss, direction: minimize}]",
+        "Parent -A/Parent -A",
+        "--markdown-file",
+        str(body),
     )
-    assert override.exit_code == 0
-    cnn = json.loads(invoke("record", "show", "cnn", "--raw", "--json").output)
-    assert cnn["values"]["metrics"] == [{"name": "val/loss", "direction": "minimize"}]
 
-    assert invoke("record", "set", "mlp").exit_code == 0
-    status = json.loads(invoke("status", "--json").output)
-    assert status["tracking_backend"] == "wandb"
-    assert "tracking_backend" not in load_record("mlp", config=config).to_dict()
+    assert result.exit_code == 0, result.output
+    child = project.vault.load("Parent -A/child/child")
+    assert child.markdown == "## Hypothesis\n\nTest it."
+    assert child.parent_id == "Parent -A/Parent -A"
+    assert (
+        invoke(
+            "record",
+            "create",
+            "Parent -A/child/empty/empty",
+            "--title",
+            "empty",
+            "--type",
+            "task",
+            "--parent",
+            "Parent -A/child/child",
+        ).exit_code
+        == 0
+    )
+    empty = project.vault.load("Parent -A/child/empty/empty")
+    assert empty.markdown == ""
+    assert empty.parent_id == child.id
 
 
-def test_record_list_displays_local_status(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+def test_unknown_command_uses_click_error() -> None:
+    result = invoke("not-a-command")
+
+    assert result.exit_code == 2
+    assert "No such command" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_domain_error_is_reported_as_click_error(tmp_path: Path, monkeypatch) -> None:
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    invoke("record", "create", "root", "--type", "task", "--set", "status=active")
-    invoke("record", "create", "child", "--parent", "root")
 
-    lines = invoke("record", "list").output.splitlines()
-    assert "id" in lines[1]
-    assert "parent" in lines[1]
-    assert "type" in lines[1]
-    assert "status" in lines[1]
-    assert any("child" in line and "root" in line for line in lines)
-    assert any("root" in line and "task" in line and "active" in line for line in lines)
+    result = invoke("record", "show", "missing")
+
+    assert result.exit_code == 1
+    assert "Record 'missing' not found" in result.output
+    assert "Traceback" not in result.output
 
 
-def test_record_list_with_no_records(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
-    monkeypatch.chdir(tmp_path)
+def test_workflow_help_lists_supported_commands() -> None:
+    result = invoke("workflow", "--help")
 
-    result = invoke("record", "list")
     assert result.exit_code == 0
-    assert "id" in result.output
-    assert "parent" in result.output
-    assert "status" in result.output
+    for command in ("list", "graph", "start", "status", "resume"):
+        assert command in result.output
+    assert "send-event" not in result.output
 
 
-def test_record_cli_reparents_and_makes_root(tmp_path: Path, monkeypatch) -> None:
-    config = HirakuConfig.init(tmp_path, install_skill=False)
+def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch) -> None:
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    invoke("record", "create", "one")
-    invoke("record", "create", "two")
-    invoke("record", "create", "child", "--parent", "one")
-    assert invoke("record", "update", "child", "--parent", "two").exit_code == 0
-    assert load_record("child").path == config.records_dir / "two/child.md"
-    assert invoke("record", "update", "child", "--root").exit_code == 0
-    assert load_record("child").path == config.records_dir / "child/child.md"
+    monkeypatch.setitem(sys.modules, "mcp.server.mcpserver", None)
+    monkeypatch.delitem(sys.modules, "hiraku.mcp", raising=False)
+
+    result = invoke("mcp")
+
+    assert result.exit_code == 1
+    assert "MCP SDK dependency" in result.output
 
 
-@pytest.mark.parametrize("value", ["null", "42"])
-def test_record_update_rejects_invalid_markdown(
-    value: str, tmp_path: Path, monkeypatch
+def test_example_list_works_outside_a_project(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("example", "list")
+
+    assert result.exit_code == 0
+    assert "minimal" in result.output
+    assert "heart-disease" in result.output
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_init_and_example_create_accept_destination(
+    tmp_path: Path, monkeypatch
 ) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
-    assert invoke("record", "create", "test", "--type", "context").exit_code == 0
-    result = invoke("record", "update", "test", "--set", f"markdown={value}")
-    assert result.exit_code != 0
-    assert "Use --markdown-file" in result.output
-    assert invoke("record", "show", "test").exit_code == 0
+
+    plain = invoke("init", "research")
+    example = invoke("example", "create", "minimal", "demo")
+
+    assert plain.exit_code == 0, plain.output
+    assert example.exit_code == 0, example.output
+    assert Project.load(tmp_path / "research/hiraku.yml").root == (
+        tmp_path / "research"
+    )
+    assert Project.load(tmp_path / "demo/hiraku.yml").root == tmp_path / "demo"
+    assert (tmp_path / "demo/evaluate.py").is_file()
 
 
-def test_contexts_use_record_commands(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+def test_init_reports_existing_project_without_overwriting_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = Project.create(tmp_path)
+    marker_before = project.path.read_bytes()
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("init")
+
+    assert result.exit_code == 0
+    assert "already initialized" in result.output
+    assert project.path.read_bytes() == marker_before
+
+
+def test_init_rejects_example_options_and_example_create_requires_example(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    invalid_init = invoke("init", "--example")
+    missing_example = invoke("example", "create")
+
+    assert invalid_init.exit_code == 2
+    assert missing_example.exit_code == 2
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
+    Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     assert (
         invoke(
-            "record", "create", "literature", "--type", "context", "--set", "x=1"
+            "record", "create", "root/root", "--title", "root", "--type", "task"
+        ).exit_code
+        == 0
+    )
+    (tmp_path / "runs.csv").write_text(
+        "id,record_id,duration\na,root/root,4.25\nb,root/root,\n"
+    )
+
+    rows = json.loads(invoke("runs", "--record", "root/root", "--json").output)
+    table = invoke("runs", "--record", "root/root").output
+
+    assert [row["duration"] for row in rows] == [4.25, None]
+    assert all(
+        column in table
+        for column in ("id", "record", "timestamp", "duration", "commit")
+    )
+    assert "a" in table
+    assert "root" in table
+    assert "4.25" in table
+
+
+def test_runs_json_keeps_extra_fields_in_raw(tmp_path: Path, monkeypatch) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    project.vault.create("root/root", type="task", title="root")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "runs.csv").write_text("id,record_id,entrypoint\na,root/root,train\n")
+
+    result = invoke("runs", "--record", "root/root", "--json")
+
+    assert result.exit_code == 0
+    run = json.loads(result.output)[0]
+    assert "entrypoint" not in run
+    assert run["raw"]["entrypoint"] == "train"
+
+
+def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
+    Project.create(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=tmp_path,
+        check=True,
+    )
+    assert (
+        invoke(
+            "record", "create", "root/root", "--title", "root", "--type", "task"
         ).exit_code
         == 0
     )
     assert (
-        json.loads(invoke("record", "show", "literature", "--raw", "--json").output)[
-            "values"
-        ]["x"]
-        == 1
+        invoke(
+            "record",
+            "create",
+            "root/child/child",
+            "--title",
+            "child",
+            "--type",
+            "task",
+            "--parent",
+            "root/root",
+        ).exit_code
+        == 0
     )
-    assert invoke("record", "update", "literature", "--set", "x=2").exit_code == 0
-    for removed in ("context", "program", "action"):
-        result = invoke(removed, "list")
-        assert result.exit_code != 0
-        assert "No such command" in result.output
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "records"], cwd=tmp_path, check=True)
+    result = invoke(
+        "run",
+        "--record",
+        "root/child/child",
+        "--",
+        sys.executable,
+        "-c",
+        "from pathlib import Path; Path('ran.txt').write_text('7')",
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "ran.txt").read_text() == "7"
+    (tmp_path / "runs.csv").write_text(
+        "id,record_id,metric.loss\na,root/root,0.5\nb,root/child/child,0.2\nc,,0.1\n"
+    )
+    direct = json.loads(invoke("runs", "--record", "root/root", "--json").output)
+    all_runs = json.loads(
+        invoke("runs", "--record", "root/root", "--all", "--json").output
+    )
+    assert {run["id"] for run in direct} == {"a"}
+    assert {run["id"] for run in all_runs} == {"a", "b"}
+    sorted_table = invoke(
+        "runs",
+        "--record",
+        "root/root",
+        "--all",
+        "--metrics",
+        "loss",
+        "--sort",
+        "loss",
+        "--ascending",
+    )
+    assert sorted_table.exit_code == 0
+    data_rows = [
+        cells
+        for line in sorted_table.output.splitlines()
+        if line.startswith("│")
+        if (cells := [cell.strip() for cell in line.split("│")[1:-1]])
+        and cells[0] != "id"
+    ]
+    assert [row[0] for row in data_rows] == ["b", "a"]
+    assert invoke("runs", "list", "--record", "root/root").exit_code != 0
 
 
-@pytest.mark.parametrize(
-    ("command", "header"),
-    [
-        ("record", ["id", "parent", "type", "status"]),
-    ],
-)
-def test_generic_list_with_no_entries(
-    command: str, header: list[str], tmp_path: Path, monkeypatch
+def test_runs_default_scope_is_active_record(tmp_path: Path, monkeypatch) -> None:
+    Project.create(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "runs.csv").write_text(
+        "id,record_id\na,root/root\nb,root/child/child\nc,\n"
+    )
+    no_active = invoke("runs", "--json")
+    assert no_active.exit_code != 0
+    assert "No active record" in no_active.output
+    assert (
+        invoke(
+            "record",
+            "create",
+            "root/root",
+            "--title",
+            "root",
+            "--type",
+            "task",
+            "--no-activate",
+        ).exit_code
+        == 0
+    )
+    assert (
+        invoke(
+            "record",
+            "create",
+            "root/child/child",
+            "--title",
+            "child",
+            "--type",
+            "task",
+            "--parent",
+            "root/root",
+        ).exit_code
+        == 0
+    )
+
+    def ids(*args: str) -> set[str]:
+        result = invoke("runs", *args, "--json")
+        assert result.exit_code == 0
+        return {run["id"] for run in json.loads(result.output)}
+
+    assert ids() == {"b"}
+    assert ids("--all") == {"a", "b"}
+    assert ids("--record", "root/root") == {"a"}
+    assert ids("--record", "root/root", "--all") == {"a", "b"}
+
+
+def test_record_update_allows_unfinished_graph_relationships(
+    tmp_path: Path, monkeypatch
 ) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+    project = Project.create(tmp_path, install_skill=False)
+    parent = project.vault.create("parent/parent", type="task", title="parent")
+    child = project.vault.create(
+        f"{parent.id.rpartition('/')[0]}/child/child",
+        type="task",
+        parent_id=parent.id,
+        title="child",
+    )
     monkeypatch.chdir(tmp_path)
-    result = invoke(command, "list")
-    assert result.exit_code == 0
-    assert all(column in result.output for column in header)
+
+    cycle = invoke("record", "update", parent.id, "--set", f"parent_id={child.id}")
+    removed_option = invoke("record", "update", child.id, "--root")
+    missing = invoke("record", "update", child.id, "--related-to", "missing")
+
+    assert cycle.exit_code == 0
+    assert removed_option.exit_code != 0
+    assert missing.exit_code == 0
+    assert project.vault.load(parent.id).parent_id == child.id
 
 
-def test_edit_uses_stored_file(tmp_path: Path, monkeypatch) -> None:
-    HirakuConfig.init(tmp_path, install_skill=False)
+def test_record_update_preserves_child_parent(tmp_path: Path, monkeypatch) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    parent = project.vault.create("parent/parent", type="task", title="parent")
+    child = project.vault.create(
+        f"{parent.id.rpartition('/')[0]}/child/child",
+        type="record",
+        parent_id=parent.id,
+        title="child",
+    )
     monkeypatch.chdir(tmp_path)
-    invoke("record", "create", "one")
-    monkeypatch.setenv("EDITOR", "true")
-    assert invoke("record", "edit", "one").exit_code == 0
-    assert load_record("one").id == "one"
+
+    result = invoke("record", "update", child.id, "--set", "count=1")
+
+    assert result.exit_code == 0, result.output
+    updated = project.vault.load(child.id)
+    assert updated.parent_id == parent.id
+    assert updated.count == 1
+    assert project.vault.load(child.id).related_to == []
+
+
+def test_results_flag_requires_example(tmp_path: Path):
+    result = CliRunner().invoke(main, ["init", str(tmp_path), "--with-results"])
+    assert result.exit_code == 2
+    assert "No such option" in result.output

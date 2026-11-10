@@ -4,8 +4,13 @@ import sys
 import types
 from pathlib import Path
 
-from hiraku.config import HirakuConfig
-from hiraku.tracking.wandb import WandbBackend, WandbBackendConfig
+import pytest
+from click.testing import CliRunner
+
+from hiraku.cli import main
+from hiraku.errors import BackendError
+from hiraku.project import Project
+from hiraku.tracking import TrackingBackendFactory, WandbBackend, WandbBackendConfig
 
 
 class FakeRun:
@@ -54,20 +59,44 @@ def test_wandb_config_accepts_common_mapping() -> None:
 
 def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "wandb", types.SimpleNamespace(Api=FakeApi))
-    backend = WandbBackend(HirakuConfig.init(tmp_path), entity="team", project="iris")
+    backend = WandbBackend("iris", entity="team")
     runs = backend.list_runs(record_id="logistic")
     assert len(runs) == 1
     run = runs[0]
     assert run.id == "run-1"
-    assert run.params == {"seed": 42}
+    assert "entrypoint" not in run.raw
+    assert run.params == {"seed": "42"}
     assert run.metrics == {"test/accuracy": 0.95}
     assert run.raw["tags"] == ["baseline", "iris"]
     assert [item.id for item in backend.list_runs()] == ["run-1"]
     assert [item.id for item in backend.list_runs()] == ["run-1"]
 
 
+def test_wandb_factory_requires_explicit_project(tmp_path: Path) -> None:
+    factory = TrackingBackendFactory(Project.create(tmp_path, install_skill=False))
+    for settings in ("wandb", {"type": "wandb", "project": ""}):
+        with pytest.raises(BackendError, match="Invalid tracking backend"):
+            factory.create(settings)
+
+
+def test_wandb_runs_cli_uses_active_record(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "wandb", types.SimpleNamespace(Api=FakeApi))
+    monkeypatch.chdir(tmp_path)
+    project = Project.create(tmp_path, install_skill=False)
+    project.tracking_backend = {"type": "wandb", "entity": "team", "project": "iris"}
+    project.save()
+    record = project.vault.create("logistic/logistic", type="task", title="logistic")
+    project.set_active_record(record)
+    monkeypatch.setattr(FakeRun, "config", {"hiraku.record_id": record.id})
+
+    result = CliRunner().invoke(main, ["runs", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert '"run-1"' in result.output
+
+
 def test_wandb_backend_reads_runtime_as_duration(tmp_path: Path) -> None:
     backend = object.__new__(WandbBackend)
-    backend.config = HirakuConfig.init(tmp_path)
+    backend.project = Project.create(tmp_path)
     assert backend._normalize_run(FakeTimedRun()).duration == 12.5
     assert backend._normalize_run(FakeRun()).duration is None

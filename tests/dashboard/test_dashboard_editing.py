@@ -2,8 +2,17 @@ from pathlib import Path
 
 import pytest
 
-from hiraku.config import HirakuConfig
-from hiraku.record import Record
+from hiraku.project import Project
+from hiraku.record import Record, Vault
+
+
+def _save_markdown(project: Project):
+    def save(record: Record, markdown: str) -> Record:
+        record.markdown = markdown
+        project.vault.save(record, overwrite=True)
+        return record
+
+    return save
 
 
 def test_markdown_view_opts_into_editing_explicitly(tmp_path: Path) -> None:
@@ -11,9 +20,10 @@ def test_markdown_view_opts_into_editing_explicitly(tmp_path: Path) -> None:
     pytest.importorskip("altair")
     from hiraku.dashboard.components import MarkdownEditor, markdown_view
 
-    config = HirakuConfig.init(tmp_path, install_skill=False)
-    record = Record.create("notes", config=config)
-    editor = MarkdownEditor(Record.save_markdown)
+    config = Project.create(tmp_path, install_skill=False)
+    record = config.vault.create("notes/notes", type="task", title="notes")
+    config.set_active_record(record)
+    editor = MarkdownEditor(_save_markdown(config))
 
     plain = markdown_view(record, empty_message="No notes yet.").text
     editable = markdown_view(record, editor=editor, empty_message="No notes yet.").text
@@ -33,13 +43,17 @@ def test_editor_retains_drafts_across_selection_and_cancels(tmp_path: Path) -> N
     pytest.importorskip("altair")
     from hiraku.dashboard.components import MarkdownEditor
 
-    config = HirakuConfig.init(tmp_path, install_skill=False)
-    first = Record.create("first", markdown="Original", config=config)
-    other = Record.create("other", config=config)
-    editor = MarkdownEditor(Record.save_markdown)
+    config = Project.create(tmp_path, install_skill=False)
+    first = config.vault.create(
+        "first/first", type="task", markdown="Original", title="first"
+    )
+    config.set_active_record(first)
+    other = config.vault.create("other/other", type="task", title="other")
+    config.set_active_record(other)
+    editor = MarkdownEditor(_save_markdown(config))
     editor.render(first)
     editor._widgets[0]._update(1)
-    assert type(editor._drafts[first.path].markdown) is str
+    assert type(editor._drafts[first.id].markdown) is str
     editor.render(first)
     editor._widgets[0]._update("Draft")
 
@@ -48,31 +62,38 @@ def test_editor_retains_drafts_across_selection_and_cancels(tmp_path: Path) -> N
     editor._widgets[1]._update(1)
 
     assert "marimo-code-editor" not in editor.render(first).text
-    assert Record.load(first.path).markdown == "Original"
+    assert config.vault.load(first.id).markdown == "Original"
 
 
-def test_editor_saves_and_retains_failed_draft(tmp_path: Path) -> None:
+def test_editor_saves_and_retains_failed_draft(tmp_path: Path, monkeypatch) -> None:
     pytest.importorskip("marimo")
     pytest.importorskip("altair")
     from hiraku.dashboard.components import MarkdownEditor
 
-    config = HirakuConfig.init(tmp_path, install_skill=False)
-    record = Record.create("notes", markdown="Original", config=config)
-    editor = MarkdownEditor(Record.save_markdown)
+    config = Project.create(tmp_path, install_skill=False)
+    record = config.vault.create(
+        "notes/notes", type="task", markdown="Original", title="notes"
+    )
+    config.set_active_record(record)
+    editor = MarkdownEditor(_save_markdown(config))
     editor._start(record)
     editor.render(record)
     editor._widgets[0]._update("Saved body")
     editor._widgets[2]._update(1)
     assert record.markdown == "Saved body"
-    assert Record.load(record.path).markdown == "Saved body"
+    assert config.vault.load(record.id).markdown == "Saved body"
     assert "marimo-code-editor" not in editor.render(record).text
 
     editor._start(record)
-    editor._drafts[record.path].markdown = "Retained draft"
-    record.path.unlink()
+    editor._drafts[record.id].markdown = "Retained draft"
+
+    def fail(*args, **kwargs):
+        raise OSError("write failed")
+
+    monkeypatch.setattr(Vault, "save", fail)
     editor._save(record)
     rendered = editor.render(record).text
     assert "Retained draft" in rendered
-    assert editor._drafts[record.path].error
-    assert "notes.md" in rendered
+    assert editor._drafts[record.id].error
+    assert "write failed" in rendered
     assert record.markdown == "Saved body"

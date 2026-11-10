@@ -57,17 +57,11 @@ nav = [
   { "CLI" = "api/cli.md" },
   { "Python API" = [
       { "Overview" = "api/python/index.md" },
-      { "Configuration" = "api/python/config.md" },
-      { "Records" = "api/python/records.md" },
-      { "Workflows" = "api/python/workflows.md" },
-      { "Data models" = [
-          { "Record" = "api/python/records.md" },
-          { "Run" = "api/python/run.md" },
-          { "Metric" = "api/python/metric.md" },
-      ] },
+      { "Project" = "api/python/project.md" },
+      { "Records and Vault" = "api/python/records.md" },
       { "Tracking" = "api/python/tracking.md" },
-      { "Command execution" = "guides/execution.md" },
-      ] },
+      { "Workflows" = "api/python/workflows.md" },
+  ] },
 ]
 
 extra_css = ["stylesheets/extra.css"]

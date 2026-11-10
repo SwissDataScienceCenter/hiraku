@@ -10,11 +10,11 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.project import Project
+from hiraku.tracking import TrackingBackendFactory
 
 EXPECTED_METRICS = {
-    "logistic-baseline": (0.32254890, 0.85526316),
+    "logistic-regression": (0.32254890, 0.85526316),
     "random-forest": (0.35226763, 0.86842105),
 }
 
@@ -49,7 +49,9 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         [
             "record",
             "create",
-            "heart-disease",
+            "heart-disease-prediction",
+            "--title",
+            "Heart disease prediction",
             "--type",
             "task",
             "--set",
@@ -58,7 +60,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     for record_id, model in (
-        ("logistic-baseline", "logistic"),
+        ("logistic-regression", "logistic"),
         ("random-forest", "random_forest"),
     ):
         invoke(
@@ -66,22 +68,25 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
             [
                 "record",
                 "create",
-                record_id,
+                f"heart-disease-prediction/{record_id}",
+                "--title",
+                record_id.replace("-", " ").capitalize(),
                 "--parent",
-                "heart-disease",
+                "heart-disease-prediction",
                 "--type",
                 "experiment",
                 "--commit",
                 "HEAD",
             ],
         )
-        assert load_record(record_id).commit == source_commit
+        path = f"heart-disease-prediction/{record_id}"
+        assert Project.discover().vault.load(path).commit == source_commit
         invoke(
             runner,
             [
                 "run",
                 "--record",
-                record_id,
+                path,
                 "--",
                 sys.executable,
                 "train.py",
@@ -94,13 +99,21 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
             ],
         )
 
-    config = HirakuConfig.discover(project)
-    root = load_record("heart-disease", config=config)
-    runs = root.resolve_tracking_backend(config=config).list_runs(sort="val/log_loss")
+    config = Project.discover(project)
+    config.vault.load("heart-disease-prediction")
+    runs = (
+        TrackingBackendFactory(config)
+        .create(config.tracking_backend)
+        .list_runs(sort="val/log_loss")
+    )
     assert len(runs) == 2
-    assert {run.record_id for run in runs} == set(EXPECTED_METRICS)
+    records_by_id = {
+        record.id: record.id.rsplit("/", 1)[-1] for record in config.vault.list()
+    }
+    assert {records_by_id[run.record_id] for run in runs} == set(EXPECTED_METRICS)
     for run in runs:
-        expected_loss, expected_accuracy = EXPECTED_METRICS[run.record_id]
+        record_name = records_by_id[run.record_id]
+        expected_loss, expected_accuracy = EXPECTED_METRICS[record_name]
         assert float(run.metrics["val/log_loss"]) == pytest.approx(
             expected_loss, rel=1e-3
         )
@@ -113,7 +126,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
     queried = json.loads(
         invoke(
             runner,
-            ["runs", "--record", "heart-disease", "--all", "--json"],
+            ["runs", "--record", "heart-disease-prediction", "--all", "--json"],
         ).output
     )
     assert len(queried) == 2

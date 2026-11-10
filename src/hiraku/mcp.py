@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
-import mimetypes
 from typing import Annotated, Any, Literal
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 from mcp.server.mcpserver import Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import (
@@ -21,10 +21,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .config import HirakuConfig
 from .errors import HirakuError, ValidationError
 from .execution import execute_command
-from .record import Record, list_records, load_record
+from .project import Project
+from .record import resolve_metrics
+from .tracking import TrackingBackendFactory
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details
@@ -76,63 +77,73 @@ class ProjectMCP(MCPServer):
             if isinstance(exc.__cause__, HirakuError):
                 raise ResourceError(str(exc.__cause__)) from exc.__cause__
             raise
-        # Source templates contain many file types; MIME depends on the URI.
-        if str(uri).startswith("hiraku://sources/"):
-            mime = mimetypes.guess_type(unquote(str(uri)))[0]
-            for item in contents:
-                item.mime_type = mime or "application/octet-stream"
         return contents
 
 
-def _data(record: Record) -> dict[str, Any]:
-    return record.model_dump(mode="json", exclude={"path"})
-
-
-def _update(record: Record, fields: dict[str, Any], markdown: str | None) -> Record:
-    protected = {"id", "path", "markdown", "parent_id"}
-    invalid = protected.intersection(fields)
-    if invalid:
-        raise ValidationError(f"Cannot update fields: {sorted(invalid)}")
-    values = {
-        **record.model_dump(exclude_unset=True, exclude={"path"}),
-        **fields,
-    }
-    if markdown is not None:
-        values["markdown"] = markdown
-    updated = type(record).model_validate(values)
-    updated.save(record.path, overwrite=True)
-    return updated
-
-
-def create_server(config: HirakuConfig | None = None) -> Any:
+def create_server(project: Project | None = None) -> ProjectMCP:
     """Create a stdio-capable server bound to a discovered or supplied project.
 
     The MCP SDK is a regular Hiraku dependency. Resources are read afresh on
     each request so external edits and tool mutations remain visible.
     """
-    selected = config or HirakuConfig.discover()
+    selected = project or Project.discover()
 
-    server = ProjectMCP("Hiraku", instructions=INSTRUCTIONS)
+    server = ProjectMCP(
+        name="Hiraku",
+        title="Hiraku MCP Server",
+        instructions=INSTRUCTIONS,
+        description=INSTRUCTIONS,
+        version=importlib.metadata.version("hiraku"),
+    )
+    register_tools(server, selected)
+    register_workflow_tools(server, selected)
+    return server
 
-    @server.tool()
+
+def register_tools(server: MCPServer, selected: Project) -> None:
+    """Register the project, record, execution, and tracking capabilities.
+
+    Tools: project_info, record_list, record_show, record_create, record_update,
+    record_delete, execute, and runs. Also registers the record catalog and
+    record resources, and the propose_implementation prompt.
+    """
+
+    @server.tool(
+        title="Project information",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
+    def project_info() -> dict[str, Any]:
+        """Read the current project configuration and metadata."""
+        return to_jsonable_python(Project.load(selected.path).to_dict(), fallback=dict)
+
+    @server.tool(
+        title="List research records",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
     def record_list() -> list[dict[str, Any]]:
         """List research records in the selected project."""
-        return [_data(item) for item in list_records(config=selected)]
+        return [item.model_dump(mode="json") for item in selected.vault.list()]
 
-    @server.tool()
+    @server.tool(
+        title="Show research record",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
     def record_show(record_id: str) -> dict[str, Any]:
-        """Read a research record and its effective inherited fields."""
-        record = load_record(record_id, config=selected)
-        resolved = record.resolve(config=selected)
-        return {
-            **_data(record),
-            "resolved": resolved.values,
-            "sources": resolved.sources,
-        }
+        """Read the document's local fields and Markdown."""
+        return selected.vault.load(record_id).model_dump(mode="json")
 
-    @server.tool()
+    @server.tool(
+        title="Create research record",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+    )
     def record_create(
         record_id: str,
+        title: str | None = None,
         parent_id: str | None = None,
         related_to: list[str] | None = None,
         markdown: str = "",
@@ -142,52 +153,74 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         """Create a research record, optionally activating it like the CLI."""
         extras = fields or {}
         reserved = {
+            "title",
             "id",
-            "path",
             "parent_id",
             "related_to",
             "markdown",
             "record_id",
             "activate",
-            "config",
+            "project",
         }
         if reserved.intersection(extras):
             raise ValidationError("Use named arguments for identity and relationships")
-        return _data(
-            Record.create(
-                record_id,
-                parent_id=parent_id,
-                related_to=related_to,
-                markdown=markdown,
-                activate=activate,
-                config=selected,
-                **extras,
-            )
+        if title is not None:
+            extras = {**extras, "title": title}
+        record = selected.vault.create(
+            record_id,
+            parent_id=parent_id,
+            markdown=markdown,
+            related_to=related_to or [],
+            **extras,
         )
+        if activate:
+            selected.set_active_record(record)
+        return record.model_dump(mode="json")
 
-    @server.tool()
+    @server.tool(
+        title="Update research record",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+    )
     def record_update(
         record_id: str,
         fields: dict[str, Any],
         markdown: str | None = None,
     ) -> dict[str, Any]:
         """Merge record fields and optionally replace Markdown; null clears a field."""
-        return _data(_update(load_record(record_id, config=selected), fields, markdown))
+        return selected.vault.update(
+            selected.vault.load(record_id), fields, markdown=markdown
+        ).model_dump(mode="json")
 
-    @server.tool()
-    def record_reparent(record_id: str, parent_id: str | None = None) -> dict[str, Any]:
-        """Move a record subtree under a parent, or make it a root."""
-        record = load_record(record_id, config=selected)
-        record.reparent(parent_id, config=selected)
-        return _data(record)
-
-    @server.tool()
+    @server.tool(
+        title="Delete research record",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+    )
     def record_delete(record_id: str) -> dict[str, str]:
-        """Delete a record using Hiraku's relationship checks."""
-        load_record(record_id, config=selected).delete(config=selected)
+        """Delete the document at the given OKF ID."""
+        selected.vault.delete(record_id)
+        if selected.active_record_id == record_id:
+            selected.clear_active_record()
         return {"deleted": record_id}
 
-    @server.tool()
+    @server.tool(
+        title="Execute project command",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=True,
+        ),
+    )
     def execute(
         record_id: str,
         command: list[str],
@@ -199,7 +232,7 @@ def create_server(config: HirakuConfig | None = None) -> Any:
             record_id=record_id,
             dispatch=dispatch,
             capture_output=True,
-            config=selected,
+            project=selected,
         )
         return {
             "returncode": result.returncode,
@@ -207,7 +240,10 @@ def create_server(config: HirakuConfig | None = None) -> Any:
             "stderr": result.stderr or "",
         }
 
-    @server.tool()
+    @server.tool(
+        title="List tracked runs",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
     def runs(
         record_id: str,
         all_records: bool = False,
@@ -223,57 +259,42 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         """
         if ascending is not None and sort is None:
             raise ValidationError("A sort direction requires sort")
-        record = load_record(record_id, config=selected)
+        record = selected.vault.load(record_id)
         query: dict[str, Any] = {"limit": limit} if limit is not None else {}
         if sort is not None:
-            declarations = record.resolve(config=selected).values.get("metrics") or []
-            directions = {item.name: item.direction for item in declarations}
+            declarations = [
+                item.model_dump() for item in resolve_metrics(record, selected.vault)
+            ]
+            directions = {item["name"]: item["direction"] for item in declarations}
             query["sort"] = sort
             query["ascending"] = (
                 ascending
                 if ascending is not None
                 else directions.get(sort) != "maximize"
             )
-        found = record.resolve_tracking_backend(config=selected).list_runs(
-            record_id=None if all_records else record.id, **query
+        found = (
+            TrackingBackendFactory(selected)
+            .create(selected.tracking_backend)
+            .list_runs(record_id=None if all_records else record.id, **query)
         )
         # Runs keep their fields in read-only mappings.
         return to_jsonable_python(found, fallback=dict)
 
     @server.resource("hiraku://catalog", mime_type="application/json")
     def catalog() -> str:
-        """Discover current records and attached source files."""
-        records = list_records(config=selected)
-        uris = [f"hiraku://records/{item.id}" for item in records]
-        for record in records:
-            root = (selected.records_dir / record.path.parent.name).resolve()
-            for path in sorted(root.rglob("*")):
-                if path.is_file() and path.resolve().is_relative_to(root):
-                    relative = path.relative_to(root).as_posix()
-                    uris.append(
-                        f"hiraku://sources/{record.id}/{quote(relative, safe='')}"
-                    )
-        return json.dumps(uris)
+        """List current OKF record IDs."""
+        return json.dumps([record.id for record in selected.vault.list()])
 
     @server.resource("hiraku://records/{record_id}", mime_type="application/json")
     def record_resource(record_id: str) -> str:
-        return _research_content(record_id, selected)
+        return _research_content(unquote(record_id), selected)
 
-    @server.resource("hiraku://sources/{record_id}/{source_path}")
-    def source_resource(record_id: str, source_path: str) -> bytes:
-        record = load_record(record_id, config=selected)
-        root = (selected.records_dir / record.path.parent.name).resolve()
-        path = (root / unquote(source_path)).resolve()
-        if not path.is_relative_to(root) or not path.is_file():
-            raise ResourceError("Source must be a file inside its record directory")
-        return path.read_bytes()
-
-    @server.prompt()
+    @server.prompt(title="Propose implementation")
     def propose_implementation(record_id: str, related_record_ids: str = "") -> str:
         """Ground a proposal in a record and comma-separated related records."""
-        record = load_record(record_id, config=selected)
+        record = selected.vault.load(record_id)
         related = [
-            load_record(identifier.strip(), config=selected)
+            selected.vault.load(identifier.strip())
             for identifier in related_record_ids.split(",")
             if identifier.strip()
         ]
@@ -281,23 +302,26 @@ def create_server(config: HirakuConfig | None = None) -> Any:
         return (
             "Propose the next implementation for this research record. Cite the "
             "curated evidence, distinguish observations from assumptions, and "
-            "describe validation before making changes. Inspect attached sources "
+            "describe validation before making changes. Discover other records "
             "through hiraku://catalog when needed.\n\n"
-            f"Record: {json.dumps(_data(record))}\n\nRelated records:\n{evidence}"
+            f"Record: {json.dumps(record.model_dump(mode='json'))}\n\n"
+            f"Related records:\n{evidence}"
         )
 
-    add_workflow_tools(server, selected)
-    return server
 
+def register_workflow_tools(server: MCPServer, project: Project) -> None:
+    """Register workflow discovery, execution, sessions, and approval.
 
-def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
-    """Add LangGraph workflow tools and definitions to a server."""
-    path = config.path
+    Tools: workflow_list, workflow_start, workflow_sessions,
+    workflow_session_history, workflow_status, workflow_resume, and
+    workflow_approval. Also registers workflow definition and graph resources.
+    """
+    path = project.path
 
     def pending_approval(
         workflow_session_id: str, interrupt_id: str | None = None
     ) -> dict[str, Any]:
-        status = langgraph_workflow_status(workflow_session_id, config=project())
+        status = langgraph_workflow_status(workflow_session_id, project=project())
         interrupts = status["interrupts"]
         if status["status"] != "waiting" or len(interrupts) != 1:
             raise ValidationError("Workflow must have exactly one pending interrupt")
@@ -311,11 +335,11 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
             )
         return pending
 
-    def project() -> HirakuConfig:
-        return HirakuConfig.load(path)
+    def project() -> Project:
+        return Project.load(path)
 
     def workflow_list() -> list[dict[str, Any]]:
-        return langgraph_workflow_details(config=project())
+        return langgraph_workflow_details(project=project())
 
     def workflow_start(
         workflow_id: Annotated[str, Field(description="Project workflow ID.")],
@@ -328,25 +352,25 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         ] = None,
     ) -> dict[str, Any]:
         return start_langgraph_workflow(
-            workflow_id, arguments, config=project(), context=context
+            workflow_id, arguments, project=project(), context=context
         )
 
     def workflow_sessions() -> list[dict[str, Any]]:
-        return list_sessions(config=project())
+        return list_sessions(project=project())
 
     def workflow_session_history(
         workflow_session_id: Annotated[
             str, Field(description="Workflow session ID returned by workflow_start.")
         ],
     ) -> dict[str, Any]:
-        return session_history(workflow_session_id, config=project())
+        return session_history(workflow_session_id, project=project())
 
     def workflow_status(
         workflow_session_id: Annotated[
             str, Field(description="Workflow session ID returned by workflow_start.")
         ],
     ) -> dict[str, Any]:
-        return langgraph_workflow_status(workflow_session_id, config=project())
+        return langgraph_workflow_status(workflow_session_id, project=project())
 
     def workflow_resume(
         workflow_session_id: Annotated[
@@ -367,7 +391,7 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         return resume_langgraph_workflow(
             workflow_session_id,
             response,
-            config=project(),
+            project=project(),
             checkpoint_id=checkpoint_id,
             context=context,
         )
@@ -427,11 +451,13 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
 
     server.add_tool(
         workflow_list,
+        title="List workflows",
         description="List project LangGraph workflows.",
         annotations=ToolAnnotations(read_only_hint=True),
     )
     server.add_tool(
         workflow_start,
+        title="Start workflow",
         description=(
             "Start a LangGraph workflow and return its interrupt or final result."
         ),
@@ -439,16 +465,19 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     )
     server.add_tool(
         workflow_sessions,
+        title="List workflow sessions",
         description="List recorded workflow sessions and their metadata.",
         annotations=ToolAnnotations(read_only_hint=True),
     )
     server.add_tool(
         workflow_session_history,
+        title="Read workflow session history",
         description="Read a workflow session's recorded metadata and history.",
         annotations=ToolAnnotations(read_only_hint=True),
     )
     server.add_tool(
         workflow_status,
+        title="Check workflow status",
         description=(
             "Inspect a checkpointed LangGraph workflow run without advancing it."
         ),
@@ -456,11 +485,13 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     )
     server.add_tool(
         workflow_resume,
+        title="Resume workflow",
         description="Resume a paused LangGraph run with the response to its interrupt.",
         annotations=ToolAnnotations(read_only_hint=False),
     )
     server.add_tool(
         workflow_approval,
+        title="Request workflow approval",
         description=(
             "Open a structured MCP approval prompt when the current workflow "
             "interrupt declares an approval request. Supply the current interrupt "
@@ -477,7 +508,7 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
     )
     def workflow_resource(workflow_id: str) -> str:
         current = project()
-        if workflow_id not in workflow_ids(config=current):
+        if workflow_id not in workflow_ids(project=current):
             raise ResourceError(f"Unknown workflow {workflow_id!r}")
         markdown_path = current.workflows_dir / workflow_id / "workflow.md"
         if not markdown_path.is_file():
@@ -491,9 +522,9 @@ def add_workflow_tools(server: MCPServer, config: HirakuConfig) -> None:
         mime_type="text/vnd.mermaid",
     )
     def workflow_graph_resource(workflow_id: str) -> str:
-        return workflow_mermaid(workflow_id, config=project())
+        return workflow_mermaid(workflow_id, project=project())
 
 
-def _research_content(identifier: str, config: HirakuConfig) -> str:
+def _research_content(identifier: str, project: Project) -> str:
     """Read the same live representation for resources and tool attachments."""
-    return json.dumps(_data(load_record(identifier, config=config)))
+    return json.dumps(project.vault.load(identifier).model_dump(mode="json"))

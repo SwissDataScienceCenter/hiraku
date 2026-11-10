@@ -17,7 +17,7 @@ change code yet. Present the draft to the user, then call the MCP tool
 and the proposed response. Wait for the user's choice, then pass the returned
 result to `workflow_resume`. For an approved draft, the proposed
 response is `{"event": "drafted", "arguments":
-{"record_id": "...", "summary": "...", "hypothesis": "...", "change":
+{"name": "...", "summary": "...", "hypothesis": "...", "change":
 "..."}}`.
 If the elicitation is cancelled, explain that approval was not given and leave
 the workflow paused; do not resume it or proceed with the experiment.

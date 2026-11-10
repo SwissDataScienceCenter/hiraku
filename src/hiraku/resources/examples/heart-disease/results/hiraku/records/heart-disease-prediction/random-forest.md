@@ -1,11 +1,13 @@
 ---
-id: random-forest
-parent_id: heart-disease
+parent_id: heart-disease-prediction
+title: Random forest
 related_to: []
 type: hypothesis
-status: concluded
+state: concluded
 ---
-## random-forest
+## Random forest
+
+Parent: [Heart disease prediction](../heart-disease-prediction.md)
 
 Model: `random_forest`; validation fraction: 0.2; seeds: 1, 2, 3.
 

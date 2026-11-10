@@ -9,9 +9,9 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
 from hiraku.dashboard import launcher
 from hiraku.errors import RecordNotFoundError, ValidationError
+from hiraku.project import Project
 
 
 @pytest.mark.parametrize(
@@ -84,7 +84,7 @@ def test_bundled_views_place_all_interactive_cells() -> None:
     } <= named
 
 
-def test_init_dashboard_copies_the_notebook(project: HirakuConfig) -> None:
+def test_init_dashboard_copies_the_notebook(project: Project) -> None:
     notebook = launcher.init_dashboard(project)
 
     assert notebook == project.hiraku_dir / "dashboard" / "app.py"
@@ -112,7 +112,7 @@ def test_init_dashboard_copies_the_notebook(project: HirakuConfig) -> None:
         launcher.init_dashboard(project)
 
 
-def test_initialized_studio_view_builds(project: HirakuConfig) -> None:
+def test_initialized_studio_view_builds(project: Project) -> None:
     pytest.importorskip("marimo_studio")
     from marimo_studio.authoring import open_workspace
 
@@ -153,23 +153,23 @@ def popen(monkeypatch: pytest.MonkeyPatch) -> dict:
 
 
 def test_serve_dashboard_runs_a_copy_outside_the_project(
-    project: HirakuConfig, popen: dict
+    project: Project, popen: dict
 ) -> None:
-    assert launcher.serve_dashboard(project, record_id="a", port=9000) == 0
+    assert launcher.serve_dashboard(project, record_id="root/a/a", port=9000) == 0
 
     assert popen["notebook"].parent == popen["cwd"]
     assert not popen["cwd"].is_relative_to(project.root)
     assert popen["copied"].startswith("# /// script")
     assert popen["view"]
     assert popen["env"]["HIRAKU_PROJECT_ROOT"] == str(project.root)
-    assert popen["env"]["HIRAKU_DASHBOARD_RECORD"] == "a"
+    assert popen["env"]["HIRAKU_DASHBOARD_RECORD"] == "root/a/a"
     assert "9000" in popen["command"]
     assert "run" in popen["command"]
 
 
 @pytest.mark.parametrize("edit", [False, True])
 def test_serve_dashboard_prefers_the_project_notebook(
-    project: HirakuConfig, popen: dict, edit: bool
+    project: Project, popen: dict, edit: bool
 ) -> None:
     notebook = launcher.init_dashboard(project)
 
@@ -180,18 +180,18 @@ def test_serve_dashboard_prefers_the_project_notebook(
     assert ("edit" if edit else "run") in popen["command"]
 
 
-def test_serve_dashboard_edit_requires_init(project: HirakuConfig) -> None:
+def test_serve_dashboard_edit_requires_init(project: Project) -> None:
     with pytest.raises(ValidationError, match="hiraku dashboard --init"):
         launcher.serve_dashboard(project, edit=True)
 
 
-def test_serve_dashboard_rejects_unknown_record(project: HirakuConfig) -> None:
+def test_serve_dashboard_rejects_unknown_record(project: Project) -> None:
     with pytest.raises(RecordNotFoundError):
         launcher.serve_dashboard(project, record_id="missing")
 
 
 def test_serve_dashboard_explains_missing_extra(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(launcher, "find_spec", lambda name: None)
 
@@ -200,7 +200,7 @@ def test_serve_dashboard_explains_missing_extra(
 
 
 def test_dashboard_cli_forwards_options(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     received = {}
 
@@ -237,7 +237,7 @@ def test_dashboard_cli_forwards_options(
 
 @pytest.mark.parametrize("edit", [False, True])
 def test_dashboard_cli_init_serves_only_with_edit(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch, edit: bool
+    project: Project, monkeypatch: pytest.MonkeyPatch, edit: bool
 ) -> None:
     served = []
     monkeypatch.setattr(
@@ -257,7 +257,7 @@ def test_dashboard_cli_init_serves_only_with_edit(
 
 
 def test_dashboard_cli_propagates_server_exit_code(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(launcher, "serve_dashboard", lambda config, **options: 3)
     monkeypatch.chdir(project.root)
@@ -266,7 +266,7 @@ def test_dashboard_cli_propagates_server_exit_code(
 
 
 def test_dashboard_cli_defaults_to_automatic_port_selection(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     received = {}
 

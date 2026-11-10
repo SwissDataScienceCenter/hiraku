@@ -4,7 +4,7 @@ This example trains deterministic logistic-regression and random-forest
 classifiers on scikit-learn's built-in Iris dataset and logs the results to
 W&B. Hiraku reads the resulting W&B runs through its tracking adapter.
 
-## 1. Install Hiraku and initialize the example
+## Setup
 
 From a local Hiraku source checkout, install the Hiraku CLI:
 
@@ -25,67 +25,59 @@ git add .
 git commit -m "initialize Iris W&B example"
 ```
 
-## 2. Login to W&B
+## Login to W&B
 
 ```bash
 uv run wandb login
 ```
 
-The example uses the `iris-wandb` project (the project directory name),
+The example uses the explicitly configured `iris-wandb` project,
 model-specific groups, and built-in tags by default.
 
 Set `WANDB_ENTITY` only if you want to log under a specific team or account.
 
-## 3. Define the research root
+## Create the research root and child records
 
 The example ships with W&B configured as the project-wide tracking backend.
-Create the research root:
 
 ```bash
-hiraku record create iris --type task \
+hiraku record create iris-classification \
+  --title "Iris classification" \
+  --type task \
   --set "goal=Maximize Iris test accuracy" \
   --set "question=How accurately can model families classify Iris?" \
   --set 'metrics=[{name: test/accuracy, direction: maximize}, {name: test/f1_macro, direction: maximize}, {name: test/log_loss, direction: minimize}]'
 
-hiraku record show iris
-hiraku status
-```
-
-## 4. Create a baseline experiment
-
-```bash
-hiraku record create logistic --parent iris --type experiment \
+hiraku record create iris-classification/logistic-regression \
+  --title "Logistic regression" \
+  --parent iris-classification --type experiment \
   --set "summary=Logistic regression baseline" \
   --set "hypothesis=A regularized linear classifier provides a strong Iris baseline." \
   --commit HEAD
 
-hiraku record show logistic
-hiraku record show logistic
-
-hiraku run --record logistic -- \
-  uv run python train.py --model logistic --seed 42 --test-size 0.25
-hiraku runs --record iris --all
-hiraku runs --record logistic
-```
-
-## 5. Run a second experiment
-
-```bash
-hiraku record create random-forest --parent iris --type experiment \
+hiraku record create iris-classification/random-forest \
+  --title "Random forest" \
+  --parent iris-classification --type experiment \
   --set "summary=Random forest comparison" \
   --set "hypothesis=A random forest improves Iris classification accuracy." \
   --commit HEAD
 
-hiraku run --record random-forest -- \
+hiraku record list
+
+hiraku run --record iris-classification/logistic-regression -- \
+  uv run python train.py --model logistic --seed 42 --test-size 0.25
+
+hiraku run --record iris-classification/random-forest -- \
   uv run python train.py --model random_forest --seed 42 --test-size 0.25
-hiraku runs --record iris --all --sort test/accuracy
 ```
 
-Each run stores model and dataset configuration, seed, Python version, runtime,
-tags, group, notes, and summary metrics. W&B assigns the native run ID. Hiraku
-reads record and commit provenance from run metadata. The training script creates the remote W&B project
-on its first successful `wandb.init()` call. Hiraku queries and normalizes W&B
-runs; it does not create the W&B project or run.
+## Compare final metrics
+
+Inspect all runs associated with the research root:
+
+```bash
+hiraku runs --record iris-classification --all
+```
 
 ??? info "Example run results"
     These results are from the example's W&B runs. Click a column heading to

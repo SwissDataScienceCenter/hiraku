@@ -10,8 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
-from hiraku.record import load_record
+from hiraku.project import Project
 
 EXAMPLE = Path(__file__).parents[2] / "docs" / "examples" / "iris-wandb"
 
@@ -123,7 +122,11 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         [
             "record",
             "create",
-            "iris",
+            "iris-classification",
+            "--title",
+            "Iris classification",
+            "--type",
+            "task",
             "--set",
             "goal=Maximize Iris test accuracy",
             "--set",
@@ -134,19 +137,23 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "{name: test/log_loss, direction: minimize}]",
         ],
     )
-    config = HirakuConfig.discover(project)
-    root = load_record("iris", config=config)
-    assert config.tracking_backend == "wandb"
-    assert "tracking_backend" not in root.to_dict()
+    config = Project.discover(project)
+    root = config.vault.load("iris-classification")
+    assert config.tracking_backend == {"type": "wandb", "project": "iris-wandb"}
+    assert "tracking_backend" not in root.metadata
 
     invoke(
         runner,
         [
             "record",
             "create",
-            "logistic",
+            "iris-classification/logistic-regression",
+            "--title",
+            "Logistic regression",
+            "--type",
+            "experiment",
             "--parent",
-            "iris",
+            "iris-classification",
             "--set",
             "summary=Logistic regression baseline",
             "--set",
@@ -155,14 +162,14 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "HEAD",
         ],
     )
-    record = load_record("logistic", config=config)
+    record = config.vault.load("iris-classification/logistic-regression")
     assert record.commit == source_commit
     invoke(
         runner,
         [
             "run",
             "--record",
-            "logistic",
+            "iris-classification/logistic-regression",
             "--",
             sys.executable,
             "train.py",
@@ -175,32 +182,34 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     rows = json.loads(
-        invoke(runner, ["runs", "--record", "iris", "--all", "--json"]).output
+        invoke(
+            runner, ["runs", "--record", "iris-classification", "--all", "--json"]
+        ).output
     )
     assert len(rows) == 1
     row = rows[0]
-    assert row["record_id"] == "logistic"
+    assert row["record_id"] == record.id
     assert row["commit"] == source_commit
     run_id = row["id"]
     assert row["params"]["model"] == "logistic"
-    assert row["params"]["seed"] == 42
-    assert row["params"]["test_size"] == 0.25
+    assert row["params"]["seed"] == "42"
+    assert row["params"]["test_size"] == "0.25"
     assert row["params"]["dataset.name"] == "scikit-learn iris"
-    assert row["params"]["dataset.samples"] == 150
-    assert row["params"]["dataset.features"] == 4
+    assert row["params"]["dataset.samples"] == "150"
+    assert row["params"]["dataset.features"] == "4"
     assert row["params"]["python.version"]
     assert row["metrics"]["test/accuracy"] == pytest.approx(0.9473684210526316)
     assert row["raw"]["tags"] == ["hiraku", "iris", "logistic"]
     stored = json.loads(store.read_text(encoding="utf-8"))[0]
     assert stored["id"] == run_id
     assert stored["project"] == "iris-wandb"
-    assert stored["config"]["hiraku.record_id"] == "logistic"
+    assert stored["config"]["hiraku.record_id"] == record.id
     assert stored["config"]["hiraku.commit"] == source_commit
 
     filtered = json.loads(
         invoke(
             runner,
-            ["runs", "--record", "logistic", "--json"],
+            ["runs", "--record", "iris-classification/logistic-regression", "--json"],
         ).output
     )
     assert filtered == rows

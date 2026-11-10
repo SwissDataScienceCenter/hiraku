@@ -30,11 +30,11 @@ extra too and initialize a separate project with the six bundled runs:
 ```bash
 hiraku example create digits-mlflow digits-dashboard --with-results
 cd digits-dashboard
-hiraku dashboard --record digits
+hiraku dashboard --record digit-classification
 ```
 
 The dashboard reads the prepared `mlflow.db` directly, so an MLflow server is
-not required. Use `hiraku dashboard --init --edit --record digits` to copy the
+not required. Use `hiraku dashboard --init --edit --record digit-classification` to copy the
 notebook into the project and edit it. Run details only show an MLflow link
 after you start the MLflow UI. See the dashboard guide for adding a UI link to
 a custom project.
@@ -51,41 +51,47 @@ custom tracking store.
 The example ships with MLflow configured as the project-wide tracking backend.
 
 ```bash
-hiraku record create digits --type task \
+hiraku record create digit-classification \
+  --title "Digit classification" \
+  --type task \
   --set "goal=Understand how L2 regularization affects Digits learning curves" \
   --set "question=Does stronger regularization reduce overfitting on the Digits dataset?" \
   --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]'
 
-hiraku record create weak-l2 --parent digits --type experiment \
+hiraku record create digit-classification/weak-l2 \
+  --title "Weak L2 regularization" \
+  --parent digit-classification --type experiment \
   --set "summary=Weak L2 baseline" \
   --set "hypothesis=Weak regularization fits training data well but may overfit" \
   --commit HEAD
 
-hiraku record create strong-l2 --parent digits --type experiment \
+hiraku record create digit-classification/strong-l2 \
+  --title "Strong L2 regularization" \
+  --parent digit-classification --type experiment \
   --set "summary=Stronger L2 comparison" \
   --set "hypothesis=Stronger regularization reduces the training-validation gap" \
   --commit HEAD
 
 hiraku record list
 
-hiraku run --record weak-l2 -- uv run python train.py --alpha 0.0001 \
+hiraku run --record digit-classification/weak-l2 -- uv run python train.py --alpha 0.0001 \
   --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
-hiraku run --record strong-l2 -- uv run python train.py --alpha 1.0 \
+hiraku run --record digit-classification/strong-l2 -- uv run python train.py --alpha 1.0 \
   --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
 ```
 
 ## Compare final metrics and inspect curves
 
 ```bash
-hiraku runs --record digits --all
+hiraku runs --record digit-classification --all
 
 # list with additional details
-hiraku runs --record digits --all \
+hiraku runs --record digit-classification --all \
   --params alpha,epochs,seed \
   --metrics train/log_loss,val/log_loss,train/accuracy,val/accuracy \
   --sort val/log_loss --ascending
 
-hiraku runs --record strong-l2 --json
+hiraku runs --record digit-classification/strong-l2 --json
 
 uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
 ```
@@ -100,7 +106,7 @@ value of each metric. Full epoch histories remain in MLflow and its UI.
 
 You can list the same runs using Hiraku:
 ```
-hiraku runs --record digits --all
+hiraku runs --record digit-classification --all
 ```
 
 Or browse them, with a per-run plot and links into the MLflow UI, in the
@@ -108,7 +114,7 @@ Or browse them, with a per-run plot and links into the MLflow UI, in the
 custom project. Then open the dashboard:
 
 ```bash
-hiraku dashboard --record digits
+hiraku dashboard --record digit-classification
 ```
 
 ??? info "Example run results"

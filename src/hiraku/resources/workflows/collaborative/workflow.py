@@ -8,19 +8,20 @@ from operator import or_
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict
 
+import frontmatter
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import HirakuError, ValidationError
 from hiraku.execution import validate_command
 from hiraku.git import GitRepository
 from hiraku.markdown import Markdown, render
-from hiraku.record import Record, load_record
-from hiraku.run import Run
+from hiraku.project import Project
+from hiraku.record import Record
+from hiraku.tracking import Run, TrackingBackendFactory
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
 STEPS = ("draft", "implement", "launch", "analyze")
@@ -51,7 +52,7 @@ class CollaborativeInput(BaseModel):
 class DraftedArguments(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    record_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
     summary: str = Field(min_length=1)
     hypothesis: str = Field(min_length=1)
     change: str = Field(min_length=1)
@@ -85,13 +86,14 @@ def input_schema() -> dict[str, Any]:
     return CollaborativeInput.model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the collaborative research graph from its Markdown instructions."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = Record._parse_markdown(path)
+    post = frontmatter.load(path)
+    fields = post.metadata
     if fields.get("id") != "collaborative":
         raise ValueError("workflow.md must declare id: collaborative")
-    markdown = Markdown(body)
+    markdown = Markdown(post.content)
     rules = str(fields.get("rules", "")).strip()
 
     def initialize(state: ResearchState) -> Command[Literal["draft"]]:
@@ -99,7 +101,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             arguments = CollaborativeInput.model_validate(state.get("arguments", {}))
         except PydanticValidationError as exc:
             raise ValidationError(str(exc)) from exc
-        task = arguments.task or config.active_record_id
+        task = arguments.task or project.active_record_id
         command = arguments.command
         rounds = arguments.rounds
         if not isinstance(task, str) or not task:
@@ -110,7 +112,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         if type(rounds) is not int or rounds < 1:
             raise ValidationError("rounds must be a positive integer")
         try:
-            load_record(task, config=config)
+            project.vault.load(task)
         except HirakuError as exc:
             raise ValidationError(str(exc)) from exc
         return Command(
@@ -238,7 +240,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                     update={"feedback": "Feedback must be a string."}, goto="draft"
                 )
             return Command(update={"feedback": feedback}, goto="draft")
-        required = ("record_id", "summary", "hypothesis", "change")
+        required = ("name", "summary", "hypothesis", "change")
         if any(
             not isinstance(arguments.get(key), str) or not arguments[key].strip()
             for key in required
@@ -246,27 +248,30 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             return Command(
                 update={
                     "feedback": (
-                        "Provide non-empty record_id, summary, hypothesis, and change."
+                        "Provide non-empty name, summary, hypothesis, and change."
                     )
                 },
                 goto="draft",
             )
         try:
-            record = Record.create(
-                arguments["record_id"],
+            record = project.vault.create(
+                f"{state['task']}/{arguments['name']}",
+                title=arguments["name"],
                 parent_id=state["task"],
                 type="experiment",
-                status="drafted",
+                state="drafted",
                 summary=arguments["summary"],
                 hypothesis=arguments["hypothesis"],
                 markdown=f"## Change\n\n{arguments['change'].strip()}\n",
-                activate=False,
-                config=config,
             )
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="draft")
         return Command(
-            update={"experiment": record.id, "feedback": "", "step": "implement"},
+            update={
+                "experiment": record.id,
+                "feedback": "",
+                "step": "implement",
+            },
             goto="implement",
         )
 
@@ -274,7 +279,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
         identifier = state.get("experiment")
         if not identifier:
             raise ValidationError("No experiment has been drafted")
-        return load_record(identifier, config=config)
+        return project.vault.load(identifier)
 
     def experiment_context(state: ResearchState) -> dict[str, Any]:
         record = experiment(state)
@@ -313,11 +318,11 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 goto="implement",
             )
         try:
-            sha = GitRepository(config.root).resolve(commit)
+            sha = GitRepository(project.root).resolve(commit)
             record = experiment(state)
             record.commit = sha
-            record.status = "implemented"
-            record.save()
+            record.state = "implemented"
+            project.vault.save(record, overwrite=True)
         except HirakuError as exc:
             return Command(update={"feedback": str(exc)}, goto="implement")
         return Command(update={"feedback": "", "step": "launch"}, goto="launch")
@@ -342,7 +347,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 },
                 goto="launch",
             )
-        runs = _runs(record, config)
+        runs = _runs(record, project)
         if not runs:
             return Command(
                 update={"feedback": f"No run is attributed to {record.id!r} yet."},
@@ -355,13 +360,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 },
                 goto="launch",
             )
-        record.status = "launched"
-        record.save()
+        record.state = "launched"
+        project.vault.save(record, overwrite=True)
         return Command(update={"feedback": "", "step": "analyze"}, goto="analyze")
 
     def analyze(state: ResearchState) -> Command[Literal["analyze", "draft", "done"]]:
         record = experiment(state)
-        runs = _runs(record, config)
+        runs = _runs(record, project)
         data = {
             **experiment_context(state),
             "runs": [{"run_id": run.id, "metrics": dict(run.metrics)} for run in runs],
@@ -399,10 +404,10 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 update={"feedback": "Provide a verdict and non-empty conclusion."},
                 goto="analyze",
             )
-        record.status = "analyzed"
+        record.state = "analyzed"
         record.verdict = verdict
         record.conclusion = conclusion
-        record.save()
+        project.vault.save(record, overwrite=True)
         results = [
             *state.get("results", []),
             {"record_id": record.id, "verdict": verdict},
@@ -437,8 +442,12 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     return builder.compile(checkpointer=checkpointer)
 
 
-def _runs(record: Record, config: HirakuConfig) -> list[Run]:
-    return record.runs(config=config)
+def _runs(record: Record, project: Project) -> list[Run]:
+    return (
+        TrackingBackendFactory(project)
+        .create(project.tracking_backend)
+        .list_runs(record_id=record.id)
+    )
 
 
 class WorkflowApproval(BaseModel):

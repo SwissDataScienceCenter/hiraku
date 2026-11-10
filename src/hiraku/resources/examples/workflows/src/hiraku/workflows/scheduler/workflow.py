@@ -8,16 +8,17 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+import frontmatter
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.config import HirakuConfig
 from hiraku.errors import ValidationError
 from hiraku.markdown import Markdown, render
-from hiraku.record import Record, load_record
+from hiraku.project import Project
+from hiraku.record import Record
 
 
 class SchedulerState(BaseModel):
@@ -54,7 +55,7 @@ def _input_model(defaults: dict[str, Any]) -> type[BaseModel]:
 
 def input_schema() -> dict[str, Any]:
     """Return the JSON Schema for starting scheduler."""
-    fields, _ = Record._parse_markdown(Path(__file__).with_name("workflow.md"))
+    fields = frontmatter.load(Path(__file__).with_name("workflow.md")).metadata
     defaults = fields.get("arguments", {})
     if not isinstance(defaults, dict):
         raise ValueError("workflow.md must define scheduler argument defaults")
@@ -68,10 +69,11 @@ def input_schema() -> dict[str, Any]:
     return _input_model(defaults).model_json_schema()
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig) -> Any:
+def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> Any:
     """Build the graph that creates and schedules experiment records."""
     path = Path(__file__).with_name("workflow.md")
-    fields, body = Record._parse_markdown(path)
+    post = frontmatter.load(path)
+    fields = post.metadata
     if fields.get("id") != "scheduler":
         raise ValueError("workflow.md must declare id: scheduler")
     defaults = fields.get("arguments", {})
@@ -85,7 +87,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
                 f"{lower} to {upper}"
             )
     input_model = _input_model(defaults)
-    markdown = Markdown(body)
+    markdown = Markdown(post.content)
 
     def initialize(state: SchedulerState) -> dict[str, Any]:
         try:
@@ -94,27 +96,25 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             raise ValidationError(str(exc)) from exc
         records, target = arguments.records, arguments.target
 
-        parent = Record.create(
+        parent = project.vault.create(
             f"scheduler-{secrets.token_hex(4)}",
+            title="Counter scheduling",
             type="task",
             summary=f"Scheduler example: raise each count to {target}",
-            activate=False,
-            config=config,
         )
         for index in range(records):
-            Record.create(
-                f"{parent.id}-{index + 1}",
+            project.vault.create(
+                f"{parent.id}/counter-{index + 1}",
+                title=f"Counter {index + 1}",
                 parent_id=parent.id,
                 type="experiment",
                 priority=random.randint(1, 9),
                 count=0,
-                activate=False,
-                config=config,
             )
         return {"parent": parent.id, "target": target}
 
     def assign(state: SchedulerState) -> dict[str, Any]:
-        children = _children(state.parent, config)
+        children = _children(state.parent, project)
         open_records = [item for item in children if _count(item) < state.target]
         selected = max(
             open_records,
@@ -177,7 +177,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
             return {"error": f"Response does not match the expected schema: {exc}"}
         if response.record_id != state.current:
             return {"error": f"Report the assigned record {state.current!r}."}
-        record = load_record(str(state.current), config=config)
+        record = project.vault.load(str(state.current))
         count = _count(record)
         expected = state.baseline + 1
         if count != expected:
@@ -214,9 +214,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, config: HirakuConfig)
     return builder.compile(checkpointer=checkpointer)
 
 
-def _children(parent_id: str, config: HirakuConfig) -> list[Record]:
+def _children(parent_id: str, project: Project) -> list[Record]:
     return sorted(
-        load_record(parent_id, config=config).children(config=config),
+        project.vault.children(parent_id),
         key=lambda item: item.id,
     )
 

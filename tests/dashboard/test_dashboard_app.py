@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import pytest
 
-from hiraku.config import HirakuConfig
 from hiraku.dashboard.data import tree_rows
+from hiraku.project import Project
 
 pytest.importorskip("marimo")
 pytest.importorskip("altair")
 
 
 def test_app_runs_every_cell_against_a_project(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
-    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "a")
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
     from hiraku.dashboard.app import app
 
     outputs, definitions = app.run()
@@ -22,10 +22,10 @@ def test_app_runs_every_cell_against_a_project(
     assert "Select a run in the tree to see its details." in rendered
     assert "numbered by execution order." in rendered
 
-    assert definitions["scope"] == "a"
-    assert definitions["selected_record"].id == "a"
+    assert definitions["scope"] == "root/a/a"
+    assert definitions["selected_record"].id == "root/a/a"
     assert definitions["selected_run"] is None
-    assert definitions["tree"].value[0]["key"] == "record:a"
+    assert definitions["tree"].value[0]["key"] == "record:root/a/a"
     assert definitions["metric"].value == "loss"
     assert "plot_mode" not in definitions
     assert "Choose two different metrics." in rendered
@@ -43,17 +43,21 @@ def test_app_runs_every_cell_against_a_project(
 
 @pytest.mark.parametrize(
     ("key", "scope", "record_id"),
-    [("record:a", "a", "a"), ("run:r2", "a", "a1"), ("run:r1", "b", "b")],
+    [
+        ("record:root/a/a", "root/a/a", "root/a/a"),
+        ("run:r2", "root/a/a", "root/a/a1/a1"),
+        ("run:r1", "root/b/b", "root/b/b"),
+    ],
 )
 def test_record_details_follow_selection_without_changing_subtree_semantics(
-    project: HirakuConfig,
+    project: Project,
     monkeypatch: pytest.MonkeyPatch,
     key: str,
     scope: str,
     record_id: str,
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
-    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "a")
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
     from hiraku.dashboard.app import app
 
     _, initial = app.run()
@@ -79,19 +83,19 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
     assert definitions["selected_record"].id == record_id
     assert definitions["tree"].value[0]["key"] == key
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
-    assert f"id: {record_id}" in rendered
+    assert f"type: {definitions['selected_record'].type}" in rendered
 
 
 def test_navigation_selection_updates_table_and_clears_run(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     from hiraku.dashboard.app import app
 
     _, initial = app.run()
     initial["select_key"]("run:r1")
-    initial["record_buttons"]["a"]._update(1)
-    assert initial["get_selection"]() == ("record:a", "a")
+    initial["record_buttons"]["root/a/a"]._update(1)
+    assert initial["get_selection"]() == ("record:root/a/a", "root/a/a")
     _, definitions = app.run(
         defs={
             name: initial[name]
@@ -105,13 +109,13 @@ def test_navigation_selection_updates_table_and_clears_run(
             )
         }
     )
-    assert definitions["tree"].value[0]["key"] == "record:a"
-    assert definitions["selected_record"].id == "a"
+    assert definitions["tree"].value[0]["key"] == "record:root/a/a"
+    assert definitions["selected_record"].id == "root/a/a"
     assert definitions["selected_run"] is None
 
 
 def test_project_copy_finds_its_project_without_the_launcher(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
+    project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from marimo import App
 
@@ -126,4 +130,4 @@ def test_project_copy_finds_its_project_without_the_launcher(
 
     _, definitions = app.run()
 
-    assert definitions["config"].root == project.root
+    assert definitions["project_context"].root == project.root

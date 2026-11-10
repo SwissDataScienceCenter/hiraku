@@ -20,13 +20,13 @@ uv run hiraku --help
 Install the pre-commit hooks:
 
 ```bash
-uv run pre-commit install
+pre-commit install
 ```
 
 Run the hooks manually across the repository with:
 
 ```bash
-uv run pre-commit run --all-files
+pre-commit run --all-files
 ```
 
 Install optional tracking integrations when needed:
@@ -44,9 +44,9 @@ uv sync --all-extras
 Run these checks before opening a pull request:
 
 ```bash
-uv run pytest -n auto
-uv run ruff check src tests
-uv run zensical build --clean --strict
+pytest -n auto
+ruff check src tests
+zensical build --clean --strict
 ```
 
 Pytest uses parallel workers, capped at four to limit memory use.
@@ -63,7 +63,7 @@ update the relevant documentation when a public interface changes.
 Preview the documentation locally:
 
 ```bash
-uv run zensical serve
+zensical serve
 ```
 
 Keep onboarding instructions short. Examples should have simple commands and
@@ -80,7 +80,7 @@ Release permissions are restricted to maintainers and administrators. Make sure 
 ```bash
 git switch main
 git pull --ff-only
-uv run python scripts/release.py patch
+python scripts/release.py patch
 ```
 
 The script calculates the next version, checks the changelog, runs tests, linting, and the documentation build, then asks for confirmation. After confirmation, `bump-my-version` updates `pyproject.toml`, `CHANGELOG.md`, and `uv.lock`, creates the release commit and `vX.Y.Z` tag, and pushes both to `main`. The tag starts the release workflow, which builds the wheel and source distribution and attaches them to a new GitHub Release.

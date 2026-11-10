@@ -7,8 +7,8 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.config import HirakuConfig
-from hiraku.record import list_records, load_record
+from hiraku.project import Project
+from hiraku.tracking import TrackingBackendFactory
 
 
 def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypatch):
@@ -29,20 +29,32 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     assert project.joinpath("data/processed.cleveland.data").is_file()
     assert not project.joinpath("generate_results.py").exists()
     assert not project.joinpath("README.md").exists()
-    config = HirakuConfig.discover(project)
-    assert config.active_record_id == "random-forest"
-    records = list_records(config=config)
-    assert len(records) == 4
-    forest = load_record("random-forest", config=config)
-    assert forest.parent_id == "heart-disease"
-    assert load_record("forest-tuning", config=config).parent_id == forest.id
-    assert [
-        metric.direction for metric in forest.resolve(config=config).values["metrics"]
-    ] == ["minimize", "maximize"]
-    runs = forest.resolve_tracking_backend(config=config).list_runs()
-    assert len(runs) == 9
-    assert [run.record_id for run in runs][:3] == ["logistic-baseline"] * 3
-    assert len(forest.runs(config=config)) == 3
+    config = Project.discover(project)
+    forest = config.vault.load("heart-disease-prediction/random-forest")
+    assert config.active_record_id == forest.id
+    records = config.vault.list()
+    assert {record.id: record.title for record in records} == {
+        "heart-disease-prediction": "Heart disease prediction",
+        "heart-disease-prediction/logistic-regression": "Logistic regression",
+        "heart-disease-prediction/random-forest": "Random forest",
+        "heart-disease-prediction/random-forest/validation-split": (
+            "Validation split sensitivity"
+        ),
+    }
+    assert forest.parent_id == config.vault.load("heart-disease-prediction").id
+    assert (
+        config.vault.load(
+            "heart-disease-prediction/random-forest/validation-split"
+        ).parent_id
+        == forest.id
+    )
+    assert forest.metrics is None
+    parent = config.vault.load(forest.parent_id)
+    assert [metric.direction for metric in parent.metrics] == ["minimize", "maximize"]
+    backend = TrackingBackendFactory(config).create(config.tracking_backend)
+    runs = backend.list_runs(record_id=forest.id)
+    assert len(runs) == 3
+    assert len(backend.list_runs(record_id=forest.id)) == 3
     monkeypatch.chdir(project)
     result = runner.invoke(main, ["runs", "--record", forest.id, "--all", "--json"])
     assert result.exit_code == 0, result.output
@@ -64,6 +76,6 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
             "git_state": "",
         },
     )
-    runs = forest.resolve_tracking_backend(config=config).list_runs()
+    runs = TrackingBackendFactory(config).create(config.tracking_backend).list_runs()
     assert len(runs) == 10
     assert next(run for run in runs if run.id == "new-training-run").duration == 1.5

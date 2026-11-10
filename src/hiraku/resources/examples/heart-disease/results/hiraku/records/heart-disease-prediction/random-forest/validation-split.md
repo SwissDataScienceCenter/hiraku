@@ -1,11 +1,13 @@
 ---
-id: forest-tuning
-parent_id: random-forest
+parent_id: heart-disease-prediction/random-forest
+title: Validation split sensitivity
 related_to: []
 type: diagnostic
-status: concluded
+state: concluded
 ---
-## forest-tuning
+## Validation split sensitivity
+
+Parent: [Random forest](../random-forest.md)
 
 Model: `random_forest`; validation fraction: 0.3; seeds: 1, 2, 3.
 This is a validation-split sensitivity check; its metrics are not a directly comparable improvement.

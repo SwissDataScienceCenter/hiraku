@@ -42,8 +42,8 @@ training code and dataset that the initial baseline experiments will evaluate.
 
 ??? note "Tracking Hiraku metadata in Git"
     The project config `hiraku.yml` is committed with the project, including its
-    CSV tracking backend. `.gitignore` excludes generated Hiraku state
-    (`hiraku/*`) and `runs.csv`.
+    CSV tracking backend. `.gitignore` excludes generated Hiraku files while
+    keeping `hiraku.yml` and research records trackable, plus `runs.csv`.
 
     Hiraku runs commands directly in the working tree, including local changes.
     Merging research records is a user (or agent) responsibility.
@@ -57,17 +57,19 @@ training code and dataset that the initial baseline experiments will evaluate.
     same workflow.
 
 ```bash
-hiraku record create heart-disease --type task \
+hiraku record create heart-disease-prediction \
+  --title "Heart disease prediction" \
+  --type task \
   --set "goal=Develop and evaluate predictive models for heart disease on a fixed Cleveland cohort" \
   --set "question=Which modeling approaches achieve the best validation log loss and accuracy on this cohort?" \
   --set 'metrics=[{name: val/log_loss, direction: minimize}, {name: val/accuracy, direction: maximize}]'
 
-hiraku record show heart-disease
+hiraku record show heart-disease-prediction
 hiraku status
 ```
 
-You should see `active_record_id` set to `heart-disease` and the tracking
-backend set to CSV.
+`hiraku status` should report the active record's ID and CSV as the tracking
+backend. The active record's name and ID are stored in `hiraku.yml`.
 
 ??? tip "Defining a working branch"
     Store a branch name with `--set 'branch=main'` if the record should point to
@@ -76,21 +78,23 @@ backend set to CSV.
 ## 3. Create a baseline experiment
 
 ```bash
-hiraku record create logistic-baseline --parent heart-disease --type experiment \
+hiraku record create heart-disease-prediction/logistic-regression \
+  --title "Logistic regression" \
+  --parent heart-disease-prediction --type experiment \
   --set "summary=Logistic regression baseline" \
   --set "hypothesis=Regularized logistic regression provides a calibrated baseline" \
   --commit HEAD
 
-hiraku record show logistic-baseline
+hiraku record show heart-disease-prediction/logistic-regression
 
 # run the command and stream its output
-hiraku run --record logistic-baseline -- uv run python train.py \
+hiraku run --record heart-disease-prediction/logistic-regression -- uv run python train.py \
   --model logistic --seed 42 --validation-fraction 0.25
 
 # query all runs under the root's tracking source
-hiraku runs --record heart-disease --all
+hiraku runs --record heart-disease-prediction --all
 # or only the runs attributed to one child record
-hiraku runs --record logistic-baseline
+hiraku runs --record heart-disease-prediction/logistic-regression
 ```
 
 Expect one run with `val/log_loss` and `val/accuracy`. The training program
@@ -112,14 +116,16 @@ writes the CSV row to project-root `runs.csv`.
 ## 4. Run a second experiment
 
 ```bash
-hiraku record create random-forest --parent heart-disease --type experiment \
+hiraku record create heart-disease-prediction/random-forest \
+  --title "Random forest" \
+  --parent heart-disease-prediction --type experiment \
   --set "summary=Random forest comparison" \
   --set "hypothesis=Nonlinear feature interactions improve validation log loss" \
   --commit HEAD
 
-hiraku run --record random-forest -- uv run python train.py \
+hiraku run --record heart-disease-prediction/random-forest -- uv run python train.py \
   --model random_forest --seed 42 --validation-fraction 0.25
-hiraku runs --record heart-disease --all --sort val/log_loss
+hiraku runs --record heart-disease-prediction --all --sort val/log_loss
 ```
 
 Expect two runs, with lower log loss first. Both use the same committed
@@ -135,7 +141,7 @@ launch that never logs a row will not appear as a run.
 
     | Experiment | Run | Model | val/log_loss | val/accuracy |
     | --- | --- | --- | ---: | ---: |
-    | `logistic-baseline` | `23b1c42c` | Logistic regression | 0.32254890 | 0.85526316 |
+    | `logistic-regression` | `23b1c42c` | Logistic regression | 0.32254890 | 0.85526316 |
     | `random-forest` | `880d2cd3` | Random forest | 0.35226763 | 0.86842105 |
 
 ## Using the Hiraku skill
@@ -158,10 +164,12 @@ the manual workflow without limiting the task to those model families:
 
 ```text
 Use the Hiraku skill to investigate predictive models on the bundled Cleveland
-heart-disease data. Create an open-ended root record named heart-disease whose goal is
+heart-disease data. Create an open-ended root record with ID
+heart-disease-prediction and title "Heart disease prediction" whose goal is
 to identify models with low `val/log_loss` and high `val/accuracy`; do not
 restrict the task to particular model families. As initial baselines, create and
-run a logistic-baseline experiment and a random-forest experiment using seed 42
+run experiments heart-disease-prediction/logistic-regression ("Logistic regression")
+and heart-disease-prediction/random-forest ("Random forest") using seed 42
 and a validation fraction of 0.25, then compare their tracked results and tell
 me what the evidence shows.
 ```
@@ -178,7 +186,8 @@ research intent rather than Hiraku CLI syntax:
 1. Create the root record:
 
     ```text
-    Use the Hiraku skill to create a root record named heart-disease. Its goal is to
+    Use the Hiraku skill to create a root record with ID heart-disease-prediction
+    and title "Heart disease prediction". Its goal is to
     develop and evaluate predictive models for heart disease on the fixed
     Cleveland cohort without restricting the task to particular model
     families. Ask which modeling approaches achieve the best validation log
@@ -189,8 +198,9 @@ research intent rather than Hiraku CLI syntax:
 2. Create the baseline experiment:
 
     ```text
-    Use the Hiraku skill to create a child record named logistic-baseline under
-    heart-disease. Use the summary "Logistic regression baseline" and the
+    Use the Hiraku skill to create a child record with ID
+    heart-disease-prediction/logistic-regression and title "Logistic regression"
+    under heart-disease-prediction. Use the summary "Logistic regression baseline" and the
     hypothesis "Regularized logistic regression provides a calibrated
     baseline". It should use uv run to invoke train.py with the logistic model,
     seed 42, and a validation fraction of 0.25. Bind it to the current commit.
@@ -200,15 +210,16 @@ research intent rather than Hiraku CLI syntax:
 3. Run the baseline:
 
     ```text
-    Use the Hiraku skill to run the logistic-baseline experiment and report
+    Use the Hiraku skill to run heart-disease-prediction/logistic-regression and report
     its tracked validation metrics. Do not create or update other records.
     ```
 
 4. Create and run a second baseline:
 
     ```text
-    Use the Hiraku skill to create and run a random-forest child record as a
-    second baseline under heart-disease. Use uv run to invoke train.py with the
+    Use the Hiraku skill to create and run heart-disease-prediction/random-forest
+    with title "Random forest" as a second baseline under heart-disease-prediction.
+    Use uv run to invoke train.py with the
     random_forest model, seed 42, and a validation fraction of 0.25, bound to
     the current commit. Report its tracked validation metrics.
     ```
@@ -216,15 +227,15 @@ research intent rather than Hiraku CLI syntax:
 5. Compare the evidence:
 
     ```text
-    Use the Hiraku skill to compare the tracked logistic-baseline and
-    random-forest runs. Explain which has lower validation log loss and which
+    Use the Hiraku skill to compare the tracked heart-disease-prediction/logistic-regression and
+    heart-disease-prediction/random-forest runs. Explain which has lower validation log loss and which
     has higher validation accuracy, citing the run IDs and source commits.
     ```
 
 6. Propose, implement, and run another model:
 
     ```text
-    Use the Hiraku skill to review the heart-disease root record, its baseline results,
+    Use the Hiraku skill to review the heart-disease-prediction root record, its baseline results,
     and train.py. Suggest a promising model family that has not yet been
     evaluated and briefly justify it. Create a child record for that model,
     implement the focused support needed in train.py, commit the implementation on the intended working
@@ -241,9 +252,9 @@ two attributed runs. After the extension prompt, it should contain one
 additional child record and attributed run:
 
 ```bash
-hiraku record show heart-disease
+hiraku record show heart-disease-prediction
 hiraku record tree
-hiraku runs --record heart-disease --all \
+hiraku runs --record heart-disease-prediction --all \
   --params model,seed,validation_fraction \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending
@@ -254,19 +265,3 @@ seed and validation split, and differ only in the model argument. The logistic
 baseline should have lower validation log loss, while the random forest should
 have slightly higher validation accuracy. The extension experiment should bind
 the new implementation commit and use the same evaluation settings.
-
-??? note "Codex integration tests"
-
-    The first three stepwise prompts are covered by the opt-in Codex integration
-    tests. The remaining prompts provide additional user testing for the full
-    example.
-
-    Hiraku developers can run the three fresh-repository agent checks explicitly:
-
-    ```bash
-    HIRAKU_RUN_CODEX_SKILL_TESTS=1 \
-    uv run pytest -n 0 tests/integrations/test_hiraku_skill.py
-    ```
-
-    These tests invoke `codex exec` with GPT-5.6 Luna and require local Codex
-    authentication. They are skipped during the normal test suite and CI.

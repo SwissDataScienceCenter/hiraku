@@ -4,36 +4,17 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict
-
-from ..config import HirakuConfig
 from ..errors import BackendError, ValidationError
-from .base import TrackingBackend
-
-if TYPE_CHECKING:
-    from ..run import Run
+from ..project import Project
+from .base import BackendOperations, CSVBackendConfig, Run
 
 
-class CSVBackendConfig(BaseModel):
-    """Validated options for the CSV tracking backend.
-
-    Attributes:
-        type: Backend discriminator; must be "csv".
-        path: Optional CSV path override.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    type: Literal["csv"] = "csv"
-    path: Path | None = None
-
-
-class CSVBackend(TrackingBackend):
+class CSVBackend(BackendOperations):
     """Normalize runs from a project CSV file.
 
     Args:
-        config: Project configuration used to resolve the default CSV path.
+        project: Hiraku project used to resolve the default CSV path.
         path: Optional explicit CSV path.
     """
 
@@ -43,13 +24,12 @@ class CSVBackend(TrackingBackend):
         "commit",
         "timestamp",
         "duration",
-        "entrypoint",
         "url",
     }
 
     def __init__(
         self,
-        config: HirakuConfig,
+        project: Project,
         path: Path | str | None = None,
         *,
         settings: CSVBackendConfig | None = None,
@@ -57,7 +37,7 @@ class CSVBackend(TrackingBackend):
         """Create a CSV adapter.
 
         Args:
-            config: Project configuration.
+            project: Hiraku project.
             path: Optional CSV path override.
             settings: Pre-validated CSV backend settings used by the factory.
         """
@@ -67,7 +47,7 @@ class CSVBackend(TrackingBackend):
             settings = CSVBackendConfig(path=path)
         if not isinstance(settings, CSVBackendConfig):
             raise BackendError("CSV backend settings must be CSVBackendConfig")
-        self.config = config
+        self.project = project
         if settings.path is None:
             self.path = None
         else:
@@ -75,13 +55,11 @@ class CSVBackend(TrackingBackend):
             self.path = (
                 candidate.resolve()
                 if candidate.is_absolute()
-                else (config.root / candidate).resolve()
+                else (project.root / candidate).resolve()
             )
 
     def _read_source_runs(self) -> list[Run]:
-        from ..run import Run
-
-        path = self.path or self.config.root / "runs.csv"
+        path = self.path or self.project.root / "runs.csv"
         if not path.exists():
             return []
         runs: list[Run] = []
@@ -128,9 +106,10 @@ class CSVBackend(TrackingBackend):
                             key: (value if value != "" else None)
                             for key, value in row.items()
                         }
+                        record_reference = normalized.get("record_id")
                         run = Run(
                             id=run_id,
-                            record_id=normalized.get("record_id"),
+                            record_id=record_reference,
                             commit=normalized.get("commit"),
                             timestamp=self._timestamp(
                                 normalized.get("timestamp"),
@@ -138,7 +117,6 @@ class CSVBackend(TrackingBackend):
                                 context=f"{path} row {row_number}",
                             ),
                             duration=normalized.get("duration"),
-                            entrypoint=normalized.get("entrypoint"),
                             url=normalized.get("url"),
                             metrics=metrics,
                             params=params,
