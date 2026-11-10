@@ -784,8 +784,8 @@ def leaderboard_show(
 )
 @click.option(
     "--path",
-    type=click.Path(path_type=Path),
-    help="CSV file, relative to project root.",
+    type=click.Path(),
+    help="Required for CSV. Absolute or project-relative path; supports ${NAME}.",
 )
 @click.option("--tracking-uri", help="MLflow tracking server URI.")
 @click.option(

@@ -304,7 +304,9 @@ def test_leaderboard_list_matches_cli_and_reads_current_definitions(
     async def exercise():
         empty = await server.call_tool("leaderboard_list", {})
         assert empty.structured_content["result"] == []
-        (project.leaderboards_dir / "local.yml").write_text("source: {type: csv}\n")
+        (project.leaderboards_dir / "local.yml").write_text(
+            "source: {type: csv, path: runs.csv}\n"
+        )
         (project.leaderboards_dir / "broken.yml").write_text("source: [invalid]\n")
         result = await server.call_tool("leaderboard_list", {})
         cli = CliRunner().invoke(main, ["leaderboard", "list", "--json"])
@@ -321,7 +323,8 @@ def test_leaderboard_list_matches_cli_and_reads_current_definitions(
 def test_runs(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     (config.leaderboards_dir / "default.yml").write_text(
-        "source: {type: csv}\nmetrics: [{name: acc, direction: maximize}]\n"
+        "source: {type: csv, path: runs.csv}\n"
+        "metrics: [{name: acc, direction: maximize}]\n"
     )
     (tmp_path / "runs.csv").write_text(
         "id,record_id,metric.acc\na,task/task,0.5\nb,task/task,0.9\nc,other,0.7\nd,,1\n"

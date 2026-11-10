@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import os
+import re
 from pathlib import Path
 
 from ..errors import BackendError, ValidationError
@@ -14,8 +16,8 @@ class CSVBackend(BackendOperations):
     """Normalize runs from a project CSV file.
 
     Args:
-        project: Hiraku project used to resolve the default CSV path.
-        path: Optional explicit CSV path.
+        project: Hiraku project used to resolve relative CSV paths.
+        path: Explicit CSV path; required unless settings are supplied.
     """
 
     STANDARD = {
@@ -38,28 +40,33 @@ class CSVBackend(BackendOperations):
 
         Args:
             project: Hiraku project.
-            path: Optional CSV path override.
+            path: CSV path, supporting ``${NAME}`` environment references.
             settings: Pre-validated CSV backend settings supplied by a leaderboard.
         """
         if settings is not None and path is not None:
             raise BackendError("Pass CSV backend settings or path, not both")
         if settings is None:
+            if path is None:
+                raise BackendError("CSV backend requires a path")
             settings = CSVBackendConfig(path=path)
         if not isinstance(settings, CSVBackendConfig):
             raise BackendError("CSV backend settings must be CSVBackendConfig")
         self.project = project
-        if settings.path is None:
-            self.path = None
-        else:
-            candidate = settings.path.expanduser()
-            self.path = (
-                candidate.resolve()
-                if candidate.is_absolute()
-                else (project.root / candidate).resolve()
-            )
+
+        def expand(match: re.Match[str]) -> str:
+            name = match.group(1)
+            if name not in os.environ:
+                raise BackendError(f"CSV path environment variable {name!r} is not set")
+            return os.environ[name]
+
+        expanded = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", expand, str(settings.path))
+        if not expanded.strip():
+            raise BackendError("CSV path must not be blank after variable expansion")
+        candidate = Path(expanded).expanduser()
+        self.path = (project.root / candidate).resolve()
 
     def _read_source_runs(self) -> list[Run]:
-        path = self.path or self.project.root / "runs.csv"
+        path = self.path
         if not path.exists():
             return []
         runs: list[Run] = []

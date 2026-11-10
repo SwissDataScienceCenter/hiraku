@@ -54,7 +54,7 @@ def test_run_immutable_and_missing_csv_empty(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     record = config.vault.create("record/record", type="task", title="record")
     config.set_active_record(record)
-    assert CSVBackend(config).list_runs(record_id=record.id) == []
+    assert CSVBackend(config, path="runs.csv").list_runs(record_id=record.id) == []
     run = Run(id="one", metrics={}, params={})
     with pytest.raises(PydanticValidationError):
         run.id = "two"  # type: ignore[misc]

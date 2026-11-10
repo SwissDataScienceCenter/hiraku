@@ -14,7 +14,7 @@ def test_backend_runs_rejects_empty_record_id_before_reading_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = Project.create(tmp_path)
-    backend = CSVBackend(config)
+    backend = CSVBackend(config, path="runs.csv")
     monkeypatch.setattr(
         backend,
         "_read_source_runs",

@@ -11,7 +11,9 @@ def test_discovery_and_selection_are_independent_of_records(tmp_path: Path):
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
     with pytest.raises(ValidationError, match="No leaderboards"):
         Leaderboard.load(project)
-    (project.leaderboards_dir / "first.yml").write_text("source: {type: csv}\n")
+    (project.leaderboards_dir / "first.yml").write_text(
+        "source: {type: csv, path: runs.csv}\n"
+    )
     assert Leaderboard.list(project) == ["first"]
     assert Leaderboard.load(project).source.type == "csv"
     (project.leaderboards_dir / "broken.yml").write_text("source: [invalid]\n")
@@ -35,16 +37,49 @@ def test_leaderboard_names_cannot_traverse_directories(tmp_path: Path, name: str
     "config",
     [
         {"source": {"type": "unknown"}},
-        {"source": {"type": "csv", "unexpected": 1}},
-        {"source": {"type": "csv"}, "metrics": [{"name": " "}]},
-        {"source": {"type": "csv"}, "metrics": [{"name": "a"}, {"name": "a"}]},
-        {"source": {"type": "csv"}, "metrics": [{"name": "a", "direction": "up"}]},
-        {"source": {"type": "csv"}, "metrics": [{"name": "a", "unit": "s"}]},
+        {"source": {"type": "csv", "path": "runs.csv", "unexpected": 1}},
+        {"source": {"type": "csv", "path": "runs.csv"}, "metrics": [{"name": " "}]},
+        {
+            "source": {"type": "csv", "path": "runs.csv"},
+            "metrics": [{"name": "a"}, {"name": "a"}],
+        },
+        {
+            "source": {"type": "csv", "path": "runs.csv"},
+            "metrics": [{"name": "a", "direction": "up"}],
+        },
+        {
+            "source": {"type": "csv", "path": "runs.csv"},
+            "metrics": [{"name": "a", "unit": "s"}],
+        },
     ],
 )
 def test_invalid_leaderboard_configuration(config):
     with pytest.raises(ValueError):
         Leaderboard.model_validate(config)
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_csv_environment_path_resolves_without_rewriting_config(
+    tmp_path, monkeypatch, absolute
+):
+    project = Project(tmp_path / "project")
+    directory = tmp_path / "external" if absolute else project.root / "results"
+    directory.mkdir(parents=True)
+    (directory / "runs.csv").write_text("id,record_id\nrun,record\n")
+    expression = "${HIRAKU_TEST_RESULTS}/runs.csv"
+    monkeypatch.delenv("HIRAKU_TEST_RESULTS", raising=False)
+    Leaderboard.create(project, "local", {"type": "csv", "path": expression})
+    path = project.leaderboards_dir / "local.yml"
+    before = path.read_bytes()
+    leaderboard = Leaderboard.load(project)
+    assert str(leaderboard.source.path) == expression
+
+    monkeypatch.setenv("HIRAKU_TEST_RESULTS", str(directory) if absolute else "results")
+    monkeypatch.chdir(tmp_path)
+
+    assert [run.id for run in leaderboard.list_runs(project)] == ["run"]
+    assert path.read_bytes() == before
+    assert str(leaderboard.source.path) == expression
 
 
 @pytest.mark.parametrize(
@@ -115,7 +150,12 @@ def test_leaderboard_tolerates_schema_changes_and_keeps_full_runs(tmp_path: Path
     assert leaderboard.metric_names(runs) == ["missing", "accuracy"]
     discovered = Leaderboard(source={"type": "csv", "path": "results.csv"})
     assert discovered.metric_names(runs) == ["new"]
-    assert Leaderboard(source={"type": "csv"}, metrics=[]).metric_names(runs) == []
+    assert (
+        Leaderboard(
+            source={"type": "csv", "path": "runs.csv"}, metrics=[]
+        ).metric_names(runs)
+        == []
+    )
 
 
 def test_metric_sort_does_not_collide_with_metadata_or_parameters(tmp_path: Path):
@@ -124,7 +164,7 @@ def test_metric_sort_does_not_collide_with_metadata_or_parameters(tmp_path: Path
         "id,record_id,duration,metric.duration,param.duration,param.seed,metric.metric.score\n"
         "a,unknown,1,9,1,2,0\nb,unknown,9,1,9,1,1\nc,unknown,2,,0,3,0.5\n"
     )
-    leaderboard = Leaderboard(source={"type": "csv"})
+    leaderboard = Leaderboard(source={"type": "csv", "path": "runs.csv"})
     assert [run.id for run in leaderboard.list_runs(project, sort="duration")] == [
         "b",
         "a",
@@ -133,7 +173,9 @@ def test_metric_sort_does_not_collide_with_metadata_or_parameters(tmp_path: Path
     assert [
         run.id for run in leaderboard.list_runs(project, sort="duration", limit=1)
     ] == ["b"]
-    assert [run.id for run in CSVBackend(project).list_runs(sort="seed")] == [
+    assert [
+        run.id for run in CSVBackend(project, path="runs.csv").list_runs(sort="seed")
+    ] == [
         "a",
         "b",
         "c",

@@ -1,6 +1,6 @@
 # Track with CSV
 
-The CSV source reads `runs.csv` from the Hiraku project root by default.
+The CSV source requires an explicit file path.
 Create `hiraku/leaderboards/local.yml` to configure a leaderboard:
 
 ```yaml
@@ -10,6 +10,28 @@ source:
 ```
 
 Relative paths resolve from the project root.
+
+Paths can reference environment variables using `${NAME}`:
+
+```yaml
+source:
+  type: csv
+  path: ${MY_RESULTS_DIR}/runs.csv
+```
+
+Define `MY_RESULTS_DIR` in the environment running Hiraku. Variables expand when
+the CSV adapter is constructed; unset variables raise an error. Relative expanded
+paths resolve from the project root, while absolute paths can refer to external
+storage. The YAML retains the expression so each system can use its own location.
+Expansion evaluates no shell commands or expressions.
+
+For a project-local file, use `path: runs.csv`. From the CLI:
+
+```bash
+hiraku leaderboard create local --source csv --path '${MY_RESULTS_DIR}/runs.csv'
+```
+
+Single quotes preserve the reference for Hiraku to expand when querying runs.
 
 ## Log from your script
 

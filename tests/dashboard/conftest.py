@@ -23,7 +23,8 @@ def project(tmp_path: Path) -> Project:
     """A CSV-tracked tree ``root -> {a -> a1, b}`` with attributed runs."""
     config = Project.create(tmp_path, install_skill=False)
     (config.leaderboards_dir / "default.yml").write_text(
-        "source: {type: csv}\nmetrics: [{name: loss, direction: minimize}]\n"
+        "source: {type: csv, path: runs.csv}\n"
+        "metrics: [{name: loss, direction: minimize}]\n"
     )
     root = config.vault.create(
         "root/root",

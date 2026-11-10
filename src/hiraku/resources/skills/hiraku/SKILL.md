@@ -363,7 +363,9 @@ Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`,
 `HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, and cwd point to the project directory.
 Use a project dispatcher to prepare the runtime when needed.
 
-The CSV backend queries project-root `runs.csv`. Tracking backends generate
+CSV sources require a `path`, relative to the project root or absolute;
+`${NAME}` references expand from the environment when querying runs.
+Tracking backends generate
 and own run IDs. Tracking adapters read record and commit attribution from run
 metadata. Tracking code and adapters must use the same destination. Hiraku does
 not create tracking runs automatically; curves and artifacts remain with the

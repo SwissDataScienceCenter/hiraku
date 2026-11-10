@@ -96,12 +96,19 @@ class CSVBackendConfig(BaseModel):
 
     Attributes:
         type: Discriminator identifying the CSV backend.
-        path: Optional path overriding the project's default runs file.
+        path: Required CSV path, relative to the project root or absolute.
     """
 
     model_config = ConfigDict(extra="forbid")
     type: Literal["csv"] = "csv"
-    path: Path | None = None
+    path: Path
+
+    @field_validator("path", mode="before")
+    @classmethod
+    def validate_path(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("CSV path must not be blank")
+        return value
 
 
 class MLflowBackendConfig(BaseModel):

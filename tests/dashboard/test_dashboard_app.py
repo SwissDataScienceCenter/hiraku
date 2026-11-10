@@ -144,7 +144,8 @@ def test_project_copy_finds_its_project_without_the_launcher(
 def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
     (project.leaderboards_dir / "local.yml").write_text(
-        "source: {type: csv}\nmetrics: [{name: missing}, {name: score}]\n"
+        "source: {type: csv, path: runs.csv}\n"
+        "metrics: [{name: missing}, {name: score}]\n"
     )
     (tmp_path / "runs.csv").write_text("id,metric.score\nr,0.9\n")
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(tmp_path))

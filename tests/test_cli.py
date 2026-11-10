@@ -427,7 +427,9 @@ def test_results_flag_requires_example(tmp_path: Path):
 
 def create_tracked_project(*args, **kwargs):
     project = Project.create(*args, **kwargs)
-    (project.leaderboards_dir / "default.yml").write_text("source: {type: csv}\n")
+    (project.leaderboards_dir / "default.yml").write_text(
+        "source: {type: csv, path: runs.csv}\n"
+    )
     return project
 
 
@@ -438,7 +440,9 @@ def test_runs_require_view_selection_and_discover_parameters(tmp_path, monkeypat
     assert missing.exit_code != 0
     assert "No leaderboards" in missing.output
     for name in ("a", "b"):
-        (project.leaderboards_dir / f"{name}.yml").write_text("source: {type: csv}\n")
+        (project.leaderboards_dir / f"{name}.yml").write_text(
+            "source: {type: csv, path: runs.csv}\n"
+        )
     ambiguous = invoke("runs")
     assert ambiguous.exit_code != 0
     assert "Select a leaderboard" in ambiguous.output
@@ -473,21 +477,25 @@ def test_status_reports_project_context_only(project):
 
 
 def test_leaderboard_lifecycle(project):
-    result = invoke("leaderboard", "create", "local", "--source", "csv")
+    result = invoke(
+        "leaderboard", "create", "local", "--source", "csv", "--path", "runs.csv"
+    )
     assert result.exit_code == 0, result.output
     path = project.leaderboards_dir / "local.yml"
     assert path.is_file()
     assert json.loads(invoke("leaderboard", "list", "--json").output) == ["local"]
     shown = invoke("leaderboard", "show", "local", "--json")
     assert shown.exit_code == 0, shown.output
-    assert json.loads(shown.output) == {"source": {"type": "csv"}}
+    assert json.loads(shown.output) == {"source": {"type": "csv", "path": "runs.csv"}}
     source = project.root / "runs.csv"
     source.write_text("id,metric.score\nr,1\n")
     runs = invoke("runs", "--leaderboard", "local", "--include-unattributed", "--json")
     assert runs.exit_code == 0, runs.output
     assert json.loads(runs.output)[0]["metrics"] == {"score": 1}
     before = path.read_bytes()
-    duplicate = invoke("leaderboard", "create", "local", "--source", "csv")
+    duplicate = invoke(
+        "leaderboard", "create", "local", "--source", "csv", "--path", "runs.csv"
+    )
     assert duplicate.exit_code != 0
     assert "already exists" in duplicate.output
     assert path.read_bytes() == before
@@ -539,6 +547,8 @@ def test_leaderboard_source_options(project, options, expected, monkeypatch):
 @pytest.mark.parametrize(
     "arguments",
     [
+        ["missing-path", "--source", "csv"],
+        ["blank-path", "--source", "csv", "--path", ""],
         ["../escape", "--source", "csv"],
         ["bad", "--source", "csv", "--database", "mlflow.db"],
         ["bad", "--source", "wandb"],
@@ -580,7 +590,8 @@ def test_edit_leaderboard_validates_changes(project, monkeypatch):
     def edit_file(filename, **kwargs):
         assert filename == path
         path.write_text(
-            "source: {type: csv}\nmetrics: [{name: score, direction: maximize}]\n"
+            "source: {type: csv, path: runs.csv}\n"
+            "metrics: [{name: score, direction: maximize}]\n"
         )
 
     monkeypatch.setattr("hiraku.cli._edit", edit_file)

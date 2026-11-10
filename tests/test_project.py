@@ -533,7 +533,7 @@ verify the record and its leaderboard.""",
         {"name": "val/accuracy", "direction": "maximize"},
     ]
     assert config.vault.children(task.id) == []
-    assert CSVBackend(config).list_runs(record_id=task.id) == []
+    assert CSVBackend(config, path="runs.csv").list_runs(record_id=task.id) == []
     assert _skill_git(project, "status", "--porcelain") == ""
 
 
@@ -563,7 +563,7 @@ Bind it to the current commit. Only create and verify the record; do not run it.
         "Regularized logistic regression provides a calibrated baseline"
     )
     assert experiment.commit == commit
-    assert CSVBackend(config).list_runs(record_id=task.id) == []
+    assert CSVBackend(config, path="runs.csv").list_runs(record_id=task.id) == []
     assert _skill_git(project, "status", "--porcelain") == ""
 
 
@@ -590,7 +590,7 @@ report its tracked validation metrics. Do not create or update other records."""
     assert [item.title for item in config.vault.children(task.id)] == [
         "Logistic regression"
     ]
-    runs = CSVBackend(config).list_runs(
+    runs = CSVBackend(config, path="runs.csv").list_runs(
         record_id=experiment.id,
     )
     assert len(runs) == 1
