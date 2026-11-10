@@ -123,14 +123,14 @@ def test_run_rejects_reserved_attribution_environment(tmp_path: Path) -> None:
         )
 
 
-def test_run_does_not_reserve_legacy_entrypoint_environment(tmp_path: Path) -> None:
+def test_run_passes_custom_environment(tmp_path: Path) -> None:
     project = Project.create(tmp_path, install_skill=False)
     project.set_active_record(
         project.vault.create("root/root", type="task", title="root")
     )
     result = execute_command(
-        [sys.executable, "-c", "import os; print(os.environ['HIRAKU_ENTRYPOINT'])"],
-        env={"HIRAKU_ENTRYPOINT": "custom"},
+        [sys.executable, "-c", "import os; print(os.environ['CUSTOM_VALUE'])"],
+        env={"CUSTOM_VALUE": "custom"},
         project=project,
         capture_output=True,
     )

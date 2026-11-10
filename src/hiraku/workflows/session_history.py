@@ -18,8 +18,7 @@ CHECKPOINTS = "langgraph-checkpoints.sqlite"
 
 def checkpoint_database(project: Project) -> Path:
     """Return the checkpoint database path without changing the filesystem."""
-    legacy = project.hiraku_dir / CHECKPOINTS
-    return legacy if legacy.exists() else project.hiraku_dir / ".hiraku" / CHECKPOINTS
+    return project.hiraku_dir / ".hiraku" / CHECKPOINTS
 
 
 def prepare_checkpoint_storage(project: Project) -> Path:

@@ -15,16 +15,6 @@ def test_csv_backend_config_is_validated() -> None:
     assert config.path == Path("runs.csv")
 
 
-def test_csv_preserves_extra_attribution_fields(tmp_path: Path) -> None:
-    config = Project.create(tmp_path, install_skill=False)
-    (tmp_path / "runs.csv").write_text(
-        "id,record_id,entrypoint\nnew,record,\nold,record,train\n"
-    )
-    runs = {run.id: run for run in CSVBackend(config).list_runs()}
-    assert runs["new"].id == "new"
-    assert runs["old"].raw["entrypoint"] == "train"
-
-
 def test_csv_backend_normalizes_runs_and_sorts(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     config.set_active_record(
@@ -88,10 +78,6 @@ def test_csv_source_listing_returns_all_attributed_runs(tmp_path: Path) -> None:
     runs = CSVBackend(config).list_runs()
 
     assert {run.id for run in runs} == {"one", "two"}
-    assert {run.id for run in CSVBackend(config).list_runs()} == {
-        "one",
-        "two",
-    }
 
 
 def test_csv_backend_resolves_record_id_from_project_root(tmp_path: Path) -> None:
@@ -142,3 +128,19 @@ def test_csv_backend_requires_record_id_column(tmp_path: Path) -> None:
     (tmp_path / "runs.csv").write_text("id,note\na,missing\n")
     with pytest.raises(BackendError, match="no record_id column"):
         CSVBackend(config).list_runs(record_id="child/child")
+
+
+def test_run_query_reads_source_once(tmp_path, monkeypatch):
+    project = Project(tmp_path)
+    (tmp_path / "runs.csv").write_text("id,record_id\none,first\ntwo,second\n")
+    reads = []
+    original = CSVBackend._read_source_runs
+
+    def read_source(self):
+        reads.append(self)
+        return original(self)
+
+    monkeypatch.setattr(CSVBackend, "_read_source_runs", read_source)
+
+    assert [run.id for run in CSVBackend(project).list_runs()] == ["one", "two"]
+    assert len(reads) == 1

@@ -171,16 +171,11 @@ class Record(BaseModel):
     def metadata(self) -> dict[str, Any]:
         """Return the record's serialized metadata, excluding its Markdown body."""
         try:
-            metadata = self.model_dump(
+            return self.model_dump(
                 mode="json",
                 exclude={"markdown", "id"},
                 warnings=False,
             )
-            metadata["type"] = self.type
-            for field in self.model_fields_set & type(self).model_fields.keys():
-                if field not in {"markdown", "id"} and getattr(self, field) is None:
-                    metadata[field] = None
-            return metadata
         except PydanticSerializationError as exc:
             raise ValidationError(f"Unsupported YAML value: {exc}") from exc
 

@@ -60,30 +60,18 @@ class ProjectRuns:
 
 
 def load(project: Project) -> ProjectRuns:
-    """Read all records and query each distinct tracking source once."""
+    """Read all records and query the project's tracking source once."""
     records = project.vault.list()
-    by_source: dict[str, Record] = {}
-    for record in records:
-        key = repr(project.tracking_backend)
-        by_source.setdefault(key, record)
-
+    if not records:
+        return ProjectRuns(records, [])
+    try:
+        backend = TrackingBackendFactory(project).create(project.tracking_backend)
+        found = backend.list_runs()
+    except Exception as exc:
+        return ProjectRuns(records, [], errors=[f"Tracking source unavailable: {exc}"])
     known = {record.id for record in records}
-    runs: dict[tuple[str, str], Run] = {}
-    sources: dict[str, str] = {}
-    errors: list[str] = []
-    for record in by_source.values():
-        try:
-            backend = TrackingBackendFactory(project).create(project.tracking_backend)
-            # Without a record ID, the source lists every attributed run.
-            found = backend.list_runs()
-        except Exception as exc:
-            errors.append(f"Tracking source for {record.id!r} unavailable: {exc}")
-            continue
-        for run in found:
-            if run.record_id in known:
-                runs.setdefault((backend.backend_name, run.id), run)
-                sources[run.id] = backend.backend_name
-    return ProjectRuns(records, list(runs.values()), sources, errors)
+    runs = [run for run in found if run.record_id in known]
+    return ProjectRuns(records, runs, {run.id: backend.backend_name for run in runs})
 
 
 # Building the tables

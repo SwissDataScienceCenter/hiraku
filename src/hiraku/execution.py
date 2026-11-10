@@ -44,11 +44,9 @@ def execute_command(
     record = selected.vault.load(selected_record)
     if isinstance(command, str | bytes):
         raise ValidationError("command must be an argv sequence, not a shell string")
-    if command is None or isinstance(command, str | bytes):
+    if command is None:
         raise ValidationError("command must be an argv sequence")
     argv = validate_command(list(command))
-    if argv is None:
-        raise ValidationError("command must be a non-empty argv sequence")
 
     additions = dict(env or {})
     if any(

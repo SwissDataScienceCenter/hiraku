@@ -98,7 +98,7 @@ def serve_dashboard(
     Raises:
         hiraku.errors.ValidationError: If the dashboard extra is missing, or if
             ``edit`` is requested for a project without its own notebook.
-        hiraku.errors.RecordNotFoundError: If ``record_path`` does not exist.
+        hiraku.errors.RecordNotFoundError: If ``record_id`` does not exist.
     """
     local = project_notebook(project)
     if edit and not local.is_file():

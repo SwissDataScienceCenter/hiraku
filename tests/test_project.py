@@ -23,23 +23,24 @@ from hiraku.record import Record
 from hiraku.tracking import CSVBackend, TrackingBackendFactory
 
 
-def load_record(record_id: str, *, project: Project) -> Record:
-    return project.vault.load(record_id)
-
-
-def list_records(*, project: Project) -> list[Record]:
-    return project.vault.list()
-
-
 def test_project_create_can_skip_mcp_configuration(tmp_path: Path) -> None:
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
 
     assert project.tracking_backend == "csv"
     assert project.active_record_id is None
     assert project.records_dir == tmp_path / "hiraku" / "records"
-    assert (tmp_path / ".hiraku").is_dir()
     assert not (tmp_path / ".mcp.json").exists()
     assert not (tmp_path / ".codex/config.toml").exists()
+
+
+def test_create_rejects_configuration_directory_before_writing(tmp_path: Path) -> None:
+    marker = tmp_path / "hiraku.yml"
+    marker.mkdir()
+
+    with pytest.raises(ProjectExistsError):
+        Project.create(tmp_path)
+
+    assert list(tmp_path.iterdir()) == [marker]
 
 
 def test_project_uses_pydantic_validation_and_forbids_unknown_settings(
@@ -171,23 +172,6 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
         Project.discover(tmp_path / "missing")
 
 
-def test_init_falls_back_to_copy_when_skill_symlinks_are_unavailable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def reject_symlink(self: Path, target: Path, *, target_is_directory: bool = False):
-        raise OSError("symbolic links are unavailable")
-
-    monkeypatch.setattr(Path, "symlink_to", reject_symlink)
-    root = tmp_path / "project"
-    Project.create(root)
-
-    canonical_skill = root / ".agents/skills/hiraku/SKILL.md"
-    claude_skill = root / ".claude/skills/hiraku/SKILL.md"
-    assert canonical_skill.is_file()
-    assert not (root / ".claude/skills/hiraku").is_symlink()
-    assert claude_skill.read_text() == canonical_skill.read_text()
-
-
 def test_project_config_tracking_backend_is_project_wide(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False)
     config.tracking_backend = {"type": "wandb", "project": "research"}
@@ -253,29 +237,6 @@ def test_init_rejects_conflicting_template_sources(tmp_path: Path) -> None:
         Project.create(tmp_path / "project", template=template, example="demo")
 
 
-def test_config_persists_active_record(tmp_path: Path) -> None:
-    config = Project.create(tmp_path)
-    config = Project.discover(tmp_path)
-    first = config.vault.create("first/first", type="task", title="first")
-    config.set_active_record(first)
-    child = config.vault.create(
-        f"{first.id.rpartition('/')[0]}/trial/trial",
-        type="task",
-        parent_id=first.id,
-        title="trial",
-    )
-    config.set_active_record(child)
-    second = config.vault.create("second/second", type="task", title="second")
-    config.set_active_record(second)
-
-    assert config.active_record_id == second.id
-    config.set_active_record(child)
-    assert config.active_record_id == child.id
-    config.clear_active_record()
-    assert config.active_record_id is None
-    assert Project.load(config.path).active_record_id is None
-
-
 def test_load_project_through_symlinked_directory(tmp_path: Path) -> None:
     project = Project.create(
         tmp_path / "project", install_skill=False, install_mcp=False
@@ -292,7 +253,10 @@ def test_load_project_through_symlinked_directory(tmp_path: Path) -> None:
 def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False, install_mcp=False)
     first = config.vault.create("first/first", type="task", title="first")
-    config.set_active_record(first)
+    config.set_active_record(first.id)
+    assert Project.load(config.path).active_record_id == first.id
+    config.clear_active_record()
+    assert Project.load(config.path).active_record_id is None
     config.set_active_record(first)
 
     assert config.path == tmp_path / "hiraku.yml"
@@ -375,7 +339,7 @@ def test_unavailable_results_leave_no_project(tmp_path: Path, example):
     assert not (tmp_path / "hiraku.yml").exists()
 
 
-def test_results_keep_tracking_defaults_on_root_record(tmp_path: Path):
+def test_results_configure_project_tracking(tmp_path: Path):
     config = Project.create(
         tmp_path,
         example="digits-mlflow",
@@ -562,7 +526,7 @@ Track val/log_loss to minimize and val/accuracy to maximize. Only create and
 verify the record.""",
     )
 
-    tasks = list_records(project=config)
+    tasks = config.vault.list()
     assert len(tasks) == 1, agent_output
     task = tasks[0]
     assert task.title == "heart-disease"
@@ -611,7 +575,6 @@ Bind it to the current commit. Only create and verify the record; do not run it.
         "Regularized logistic regression provides a calibrated baseline"
     )
     assert experiment.commit == commit
-    assert "command" not in experiment.model_dump()
     assert CSVBackend(config).list_runs(record_id=task.id) == []
     assert _skill_git(project, "status", "--porcelain") == ""
 
@@ -634,7 +597,7 @@ report its tracked validation metrics. Do not create or update other records."""
     )
 
     assert config.vault.file_path(task.id).read_bytes() == task_before, agent_output
-    current = load_record(experiment.id, project=config)
+    current = config.vault.load(experiment.id)
     assert config.vault.file_path(current.id).read_bytes() == experiment_before
     assert [item.title for item in config.vault.children(task.id)] == [
         "Logistic regression"

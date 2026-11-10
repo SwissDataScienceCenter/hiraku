@@ -14,24 +14,16 @@ from hiraku.cli import main
 from hiraku.errors import ValidationError, WorkflowError
 from hiraku.mcp import create_server
 from hiraku.project import Project
-from hiraku.record import Record
 from hiraku.workflows.langgraph import (
     resume_workflow,
     start_workflow,
     workflow_status,
-)
-from hiraku.workflows.langgraph import (
-    resume_workflow as _resume_workflow,
 )
 from hiraku.workflows.session_history import (
     checkpoint_database,
     list_sessions,
     session_history,
 )
-
-
-def load_record(record_id: str, *, project: Project) -> Record:
-    return project.vault.load(record_id)
 
 
 def _write_workflow(project: Project, source: str) -> None:
@@ -124,7 +116,7 @@ def test_resume_rejects_stale_checkpoint(tmp_path: Path) -> None:
 
 def resume_current_workflow(session_id, response, *, project):
     status = workflow_status(session_id, project=project)
-    return _resume_workflow(
+    return resume_workflow(
         session_id, response, project=project, checkpoint_id=status["checkpoint_id"]
     )
 
@@ -157,11 +149,10 @@ def _approved(response: dict) -> dict:
     return {"approval": {"decision": "approve"}, "response": response}
 
 
-def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> None:
+@pytest.mark.parametrize("task_id", ["task", "research/task"])
+def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path, task_id):
     config = Project.create(tmp_path, install_skill=False)
-    config.set_active_record(
-        config.vault.create("task/task", type="task", title="task")
-    )
+    config.set_active_record(config.vault.create(task_id, type="task", title="task"))
     commit = _commit(tmp_path)
     command = ["python", "train.py"]
     result = start_workflow(
@@ -193,16 +184,15 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     )
     launch = _interrupt(result)
     assert launch["step"] == "launch"
-    experiment_id = config.vault.load("task/dropout/dropout").id
+    experiment_id = f"{task_id}/dropout"
+    assert config.vault.load(experiment_id).parent_id == task_id
     assert (
         f"hiraku run --record {experiment_id} -- python train.py"
         == (launch["data"]["command"])
     )
 
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
-        stream.write(
-            "id,record_id,entrypoint,metric.val\nrun-1,task/dropout/dropout,train,\n"
-        )
+        stream.write(f"id,record_id,metric.val\nrun-1,{experiment_id},\n")
     result = resume_current_workflow(
         result["workflow_session_id"], _approved({"event": "launched"}), project=config
     )
@@ -210,9 +200,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
     assert pending["step"] == "analyze"
     assert pending["data"]["metrics_pending"] is True
     with (tmp_path / "runs.csv").open("w", encoding="utf-8") as stream:
-        stream.write(
-            "id,record_id,entrypoint,metric.val\nrun-1,task/dropout/dropout,train,0.8\n"
-        )
+        stream.write(f"id,record_id,metric.val\nrun-1,{experiment_id},0.8\n")
     result = resume_current_workflow(
         result["workflow_session_id"],
         _approved({"event": "revise_analysis", "arguments": {"feedback": "Retry"}}),
@@ -234,7 +222,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path) -> Non
         project=config,
     )
     assert completed["status"] == "completed"
-    experiment = load_record("task/dropout/dropout", project=config)
+    experiment = config.vault.load(experiment_id)
     assert experiment.state == "analyzed"
     assert experiment.verdict == "supports"
     assert "Summarize the run" in completed["result"]
@@ -347,7 +335,7 @@ def test_invalid_context_and_failed_start_are_recorded_safely(tmp_path: Path) ->
         session_history("missing", project=config)
 
 
-def test_legacy_checkpoint_is_indexed_when_resumed(tmp_path: Path) -> None:
+def test_resume_rebuilds_missing_session_index(tmp_path: Path) -> None:
     config = _project(tmp_path)
     started = start_workflow("count-steps", {"count": 1}, project=config)
     session_id = started["workflow_session_id"]

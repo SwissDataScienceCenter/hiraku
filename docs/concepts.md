@@ -21,14 +21,14 @@ Hiraku uses records, foreground command execution, and tracked runs to document 
 
 Records and command execution are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
-A root *record* defines a working scope and goal, and documents the research progress. Child records are focused, reproducible units within that scope that can link code, explicit command executions, and runs. Records carry no required semantic type; users may create them for baselines, hypotheses, diagnostics, model runs, ablations, hyperparameter optimization, etc. *Runs* record execution traces attributed to one record and, when available, a code commit.
+A root *record* defines a working scope and goal, and documents the research progress. Child records are focused, reproducible units within that scope that can link code, explicit command executions, and runs. Each record has a producer-defined `type`, such as task, hypothesis, experiment, or dataset. *Runs* record execution traces attributed to one record and, when available, a code commit.
 
 | Term | Data | Summary |
 | --- | ---  | --- |
 | **Root record** | `hiraku/records/{name}.md` | Defines the scope of a research effort and may provide shared research defaults. |
 | **Child record** | `hiraku/records/{name}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
 | **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
-| **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku only queries results via a compatibility backend.|
+| **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku queries results through a backend adapter.|
 
 Records are stored as Markdown with YAML front matter. `Record.id` is the OKF ID: its bundle-relative path without `.md`. It is derived from placement and never persisted in front matter. `Vault` owns the bundle root, loading, saving, and discovery. `parent_id` and `related_to` declare relationships to concept IDs, independently of directory structure. Moving a document changes its ID.
 
@@ -38,11 +38,9 @@ or saved. Whitespace within the body is preserved.
 `status` describes the OKF concept lifecycle: `draft`, `stable` (the default),
 or `deprecated`. The optional `state` field describes research progress using
 workflow-defined values such as `drafted`, `launched`, or `concluded`.
-For existing records, move research progress values from `status` to `state`;
-other values in `status` are rejected. Workflow session statuses are separate
-from these record fields.
+Workflow session statuses are separate from these record fields.
 
-All record fields are local. There is no inheritance or effective-value resolution. Consumers needing ancestor information must traverse the declared graph themselves. CLI and MCP run queries explicitly walk parent links when selecting metric directions, stopping at an explicit metrics list. `hiraku record show PATH` displays only that document's fields and body.
+All record fields are local. Consumers needing ancestor information must traverse the declared graph themselves. CLI and MCP run queries explicitly walk parent links when selecting metric directions, stopping at an explicit metrics list. `hiraku record show PATH` displays only that document's fields and body.
 
 Saving validates one record and its destination without scanning the vault. Replacing a file requires `overwrite=True`. Loading, saving, updating, and deleting do not enforce collection integrity. `Vault.validate()` explicitly checks missing relationship targets; cycles are permitted.
 

@@ -87,9 +87,7 @@ def test_load_reports_unavailable_source_without_failing(
 
     loaded = load(project)
 
-    assert loaded.errors == [
-        f"Tracking source for {loaded.records[0].id!r} unavailable: source offline"
-    ]
+    assert loaded.errors == ["Tracking source unavailable: source offline"]
     assert loaded.runs == []
 
 

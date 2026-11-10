@@ -1,30 +1,18 @@
 from __future__ import annotations
 
-import csv
-from pathlib import Path
-
+import frontmatter
 import pytest
+from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import RecordExistsError, RecordNotFoundError, ValidationError
-from hiraku.project import Project
-from hiraku.record import Record, Vault, validate_identifier
-from hiraku.tracking import CSVBackend, TrackingBackendFactory
-
-
-def create_record(path: str, *, project: Project, **fields) -> Record:
-    record = project.vault.create(path, **fields)
-    project.set_active_record(record)
-    return record
+from hiraku.record import Record, Vault, resolve_metrics, validate_identifier
 
 
 def test_record_is_plain_local_document_data():
     record = Record(id="experiments/baseline", type="experiment")
     assert record.id == "experiments/baseline"
     assert record.title is None
-    assert not record.__private_attributes__
-    for name in ("file_path", "load", "create"):
-        assert not hasattr(record, name)
     with pytest.raises(PydanticValidationError):
         Record(type="task")
 
@@ -119,7 +107,7 @@ def test_directory_placement_does_not_create_relationships(tmp_path):
     assert vault.children("root/root") == []
 
 
-def test_fields_are_local_and_no_inheritance_api_exists(tmp_path):
+def test_record_fields_are_local(tmp_path):
     vault = Vault(root=tmp_path)
     parent = vault.create(
         "parent/parent",
@@ -137,7 +125,6 @@ def test_fields_are_local_and_no_inheritance_api_exists(tmp_path):
     loaded = vault.load(child.id)
     assert loaded.metrics is None
     assert loaded.commit is None
-    assert not hasattr(vault, "resolve")
 
 
 def test_relationship_changes_and_cycles_are_regular_graph_data(tmp_path):
@@ -244,108 +231,251 @@ def test_vault_rejects_symlink_escapes(tmp_path):
     assert list(outside.iterdir()) == []
 
 
-def test_runs_list_attributed_runs_from_current_backend(tmp_path: Path) -> None:
-    config = Project.create(tmp_path, install_skill=False)
-    root = create_record("root/root", type="task", project=config, title="root")
-    child = create_record(
-        f"{root.id.rpartition('/')[0]}/child/child",
-        type="task",
-        parent_id=root.id,
-        project=config,
-        title="child",
-    )
-    with (tmp_path / "runs.csv").open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=["id", "record_id", "metric.loss"])
-        writer.writeheader()
-        writer.writerow({"id": "one", "record_id": "root/root", "metric.loss": 0.5})
-        writer.writerow(
-            {"id": "two", "record_id": "root/child/child", "metric.loss": 0.3}
-        )
-    backend = TrackingBackendFactory(config).create(config.tracking_backend)
-    assert {run.id for run in backend.list_runs(record_id=root.id)} == {"one"}
-    assert {run.id for run in backend.list_runs(record_id=child.id)} == {"two"}
-    assert {run.id for run in backend.list_runs()} == {"one", "two"}
-
-
-def test_default_run_list_returns_attributed_runs_from_selected_source(
-    tmp_path: Path,
-) -> None:
-    config = Project.create(tmp_path, install_skill=False)
-    root = create_record("root/root", type="task", project=config, title="root")
-    create_record(
-        f"{root.id.rpartition('/')[0]}/child/child",
-        type="task",
-        parent_id=root.id,
-        project=config,
-        title="child",
-    )
-    (config.root / "runs.csv").write_text(
-        "id,record_id\none,root/root\ntwo,root/child/child\nthree,outside\nfour,\n",
-        encoding="utf-8",
-    )
-
-    backend = TrackingBackendFactory(config).create(config.tracking_backend)
-    assert {run.id for run in backend.list_runs()} == {"one", "two", "three"}
-
-
-def test_run_query_scans_selected_csv_once(tmp_path: Path, monkeypatch) -> None:
-    config = Project.create(tmp_path, install_skill=False)
-    root = create_record("root/root", type="task", project=config, title="root")
-    child = create_record(
-        f"{root.id.rpartition('/')[0]}/child/child",
-        type="task",
-        parent_id=root.id,
-        project=config,
-        title="child",
-    )
-    create_record(
-        f"{child.id.rpartition('/')[0]}/leaf/leaf",
-        type="task",
-        parent_id=child.id,
-        project=config,
-        title="leaf",
-    )
-    original = CSVBackend._read_source_runs
-    calls = 0
-
-    def count_reads(self: CSVBackend):
-        nonlocal calls
-        calls += 1
-        return original(self)
-
-    monkeypatch.setattr(CSVBackend, "_read_source_runs", count_reads)
-    (config.root / "runs.csv").write_text(
-        "id,record_id\none,root/root\ntwo,root/child/child\nthree,root/child/leaf/leaf\n",
-        encoding="utf-8",
-    )
-
-    assert {
-        run.id
-        for run in TrackingBackendFactory(config)
-        .create(config.tracking_backend)
-        .list_runs()
-    } == {
-        "one",
-        "two",
-        "three",
+def test_save_preserves_explicit_defaults_and_omits_implicit_defaults(tmp_path):
+    vault = Vault(root=tmp_path)
+    vault.create("minimal", type="task")
+    assert frontmatter.load(tmp_path / "minimal.md").metadata == {"type": "task"}
+    vault.create("explicit", type="task", status="stable", state=None, tags=[])
+    assert frontmatter.load(tmp_path / "explicit.md").metadata == {
+        "type": "task",
+        "status": "stable",
+        "state": None,
+        "tags": [],
     }
-    assert calls == 1
 
 
-def test_tracking_factory_uses_project_setting(tmp_path: Path) -> None:
-    config = Project.create(tmp_path, install_skill=False)
-    config.tracking_backend = {"type": "csv", "path": "results/root.csv"}
-    root = create_record("root/root", type="task", project=config, title="root")
-    child = create_record(
-        f"{root.id.rpartition('/')[0]}/child/child",
-        type="task",
-        parent_id=root.id,
-        project=config,
-        title="child",
+def test_save_preserves_mutated_implicit_defaults(tmp_path):
+    record = Record(id="example", type="task")
+    record.tags.append("research")
+    record.generated["by"] = "agent"
+    record.related_to.append("other")
+    vault = Vault(root=tmp_path)
+    vault.save(record)
+    loaded = vault.load(record.id)
+    assert loaded.tags == ["research"]
+    assert loaded.generated == {"by": "agent"}
+    assert loaded.related_to == ["other"]
+
+
+def test_save_preserves_complete_nested_custom_models(tmp_path):
+    class Custom(BaseModel):
+        label: str = "default"
+        values: list[int] = Field(default_factory=list)
+
+    custom = Custom(label="default")
+    custom.values.append(1)
+    vault = Vault(root=tmp_path)
+    vault.create("example", type="task", custom=custom)
+    assert vault.load("example").custom == {"label": "default", "values": [1]}
+
+
+@pytest.mark.parametrize("status", ["draft", "stable", "deprecated"])
+def test_okf_status_and_research_state_round_trip(tmp_path, status):
+    vault = Vault(root=tmp_path)
+    record = vault.create("experiment", type="experiment", status=status)
+    assert record.state is None
+    updated = vault.update(record, {"state": "custom research phase"})
+    assert updated.status == status
+    loaded = vault.load(record.id)
+    assert loaded.status == status
+    assert loaded.state == "custom research phase"
+    assert vault.update(loaded, {"state": None}).state is None
+
+
+@pytest.mark.parametrize("status", ["concluded", "drafted", "", None, 42])
+def test_invalid_okf_status_is_rejected_on_construction_load_and_assignment(
+    tmp_path, status
+):
+    with pytest.raises(PydanticValidationError):
+        Record(id="experiment", type="experiment", status=status)
+    record = Record(id="experiment", type="experiment")
+    assert record.status == "stable"
+    with pytest.raises(PydanticValidationError):
+        record.status = status
+    path = tmp_path / "experiment.md"
+    path.write_text(frontmatter.dumps(frontmatter.Post("", type="task", status=status)))
+    with pytest.raises(PydanticValidationError):
+        Vault(root=tmp_path).load("experiment")
+
+
+@pytest.mark.parametrize("state", [42, ["drafted"], {"phase": "drafted"}])
+def test_research_state_requires_a_string(state):
+    with pytest.raises(PydanticValidationError):
+        Record(id="experiment", type="experiment", state=state)
+
+
+@pytest.mark.parametrize("value", ["", "  ", None, 42, ["task"]])
+def test_type_is_validated_on_construction_load_and_assignment(tmp_path, value):
+    with pytest.raises(PydanticValidationError):
+        Record(id="example/example", title="example", type=value)
+    record = Record(id="example/example", title="example", type="Dataset")
+    with pytest.raises(PydanticValidationError):
+        record.type = value
+    path = tmp_path / "example.md"
+    path.write_text(frontmatter.dumps(frontmatter.Post("", type=value)))
+    with pytest.raises(PydanticValidationError):
+        Vault(root=tmp_path).load(path.relative_to(tmp_path).with_suffix("").as_posix())
+
+
+@pytest.mark.parametrize("relative", ["dataset.md", "data/tables/orders.md"])
+def test_minimal_concept_can_be_discovered_updated_and_saved(tmp_path, relative):
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("---\ntype: Dataset\n---\nSee [future](/future.md).\n")
+    vault = Vault(root=tmp_path)
+
+    record = vault.list()[0]
+    assert record.id == relative.removesuffix(".md")
+    assert record.title is None
+    assert vault.load(record.id).id == record.id
+    vault.validate()
+    record.markdown += "\n\nUpdated."
+    assert vault.save(record, overwrite=True) == path
+    loaded = vault.load(record.id)
+    assert loaded.markdown.endswith("Updated.")
+    metadata = frontmatter.load(path).metadata
+    assert metadata == {"type": "Dataset"}
+
+
+def test_file_location_defines_identity(tmp_path):
+    path = tmp_path / "document.md"
+    path.write_text("---\ntype: Reference\nid: arbitrary\n---\n")
+    vault = Vault(root=tmp_path)
+    record = vault.load("document")
+    assert record.id == "document"
+    vault.save(record, overwrite=True)
+    assert "id" not in frontmatter.load(path)
+
+
+def test_id_is_preserved_on_update_without_being_persisted(tmp_path):
+    vault = Vault(root=tmp_path)
+    record = vault.create("example/example", type="Dataset")
+    updated = vault.update(record, {"description": "Updated"}, markdown="# Body")
+    assert updated.id == record.id
+    assert updated.model_dump()["id"] == record.id
+    assert vault.load(record.id).id == record.id
+    assert "id" not in frontmatter.load(vault.file_path(record.id))
+    with pytest.raises(ValidationError, match="Cannot update"):
+        vault.update(record, {"id": "elsewhere"})
+
+
+def test_identity_is_derived_from_file_placement(tmp_path):
+    vault = Vault(root=tmp_path)
+    record = vault.create("first", type="Dataset")
+    vault.file_path(record.id).rename(tmp_path / "second.md")
+    assert vault.load("second").id == "second"
+    with pytest.raises(RecordNotFoundError):
+        vault.load("first")
+
+
+@pytest.mark.parametrize("title", ["Display name", "Index", "Log"])
+def test_title_and_unknown_metadata_round_trip(tmp_path, title):
+    path = tmp_path / "concept.md"
+    path.write_text(
+        f"---\ntype: Custom Concept\ntitle: {title}\n"
+        "custom:\n  values: [one, two]\n---\n# Body\n"
     )
-    other = create_record("other/other", type="task", project=config, title="other")
+    vault = Vault(root=tmp_path)
+    record = vault.list()[0]
+    assert record.title == title
+    vault.save(record, overwrite=True)
+    assert frontmatter.load(path)["custom"] == {"values": ["one", "two"]}
 
-    for _record in (root, child, other):
-        backend = TrackingBackendFactory(config).create(config.tracking_backend)
-        assert isinstance(backend, CSVBackend)
-        assert backend.path == (tmp_path / "results" / "root.csv").resolve()
+
+@pytest.mark.parametrize("as_list", [False, True])
+def test_verified_accepts_mapping_and_list(tmp_path, as_list):
+    event = {"by": "human:reviewer", "at": "2026-11-09T09:00:00Z"}
+    path = tmp_path / "verified.md"
+    path.write_text(
+        frontmatter.dumps(
+            frontmatter.Post(
+                "", type="Reference", verified=[event] if as_list else event
+            )
+        )
+    )
+    record = Vault(root=tmp_path).load(
+        path.relative_to(tmp_path).with_suffix("").as_posix()
+    )
+    assert record.verified == [event]
+    Vault(root=tmp_path).save(record, overwrite=True)
+    assert Vault(root=tmp_path).load(
+        path.relative_to(tmp_path).with_suffix("").as_posix()
+    ).verified == [event]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "type: Dataset\n",
+        "---\ntype: Dataset\n",
+        "---\n- Dataset\n---\n",
+        "---\n{}\n---\n",
+        "---\ntitle: Missing type\n---\n",
+    ],
+)
+def test_invalid_concept_frontmatter_is_rejected(tmp_path, content):
+    path = tmp_path / "invalid.md"
+    path.write_text(content)
+    with pytest.raises((ValidationError, PydanticValidationError)):
+        Vault(root=tmp_path).validate()
+
+
+@pytest.mark.parametrize(
+    ("relative", "content"),
+    [
+        ("index.md", "---\ntype: Dataset\n---\n"),
+        ("nested/index.md", '---\nokf_version: "0.2"\n---\n'),
+        ("index.md", '---\nokf_version: "0.2"\n'),
+        ("log.md", "---\ntype: Log\n---\n"),
+        ("log.md", "# Updates\n\n## Yesterday\n* Updated.\n"),
+        ("log.md", "# Updates\n\n## 2026-02-30\n* Updated.\n"),
+    ],
+)
+def test_reserved_documents_are_skipped_without_validating_contents(
+    tmp_path, relative, content
+):
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    vault = Vault(root=tmp_path)
+    vault.create("concept", type="Reference")
+    assert [record.id for record in vault.list()] == ["concept"]
+    vault.validate()
+
+
+@pytest.mark.parametrize(
+    "path", ["index", "log", "nested/index", "nested/log", "INDEX", "nested/LOG"]
+)
+def test_reserved_filenames_cannot_be_saved_as_records(tmp_path, path):
+    vault = Vault(root=tmp_path)
+    with pytest.raises(ValidationError, match="Reserved OKF filename"):
+        vault.save(Record(id=path, type="Reference"))
+    assert vault.list() == []
+
+
+def test_resolves_nearest_metrics_without_changing_records(tmp_path):
+    vault = Vault(root=tmp_path)
+    parent = vault.create(
+        "parent", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
+    )
+    child = vault.create("child", type="task", parent_id=parent.id)
+    before = child.model_dump()
+    assert resolve_metrics(child, vault) == parent.metrics
+    assert child.model_dump() == before
+    child.metrics = []
+    assert resolve_metrics(child, vault) == []
+
+
+@pytest.mark.parametrize("parent", [None, "missing", "child", "cycle"])
+def test_unresolved_graph_returns_empty_metrics(tmp_path, parent):
+    vault = Vault(root=tmp_path)
+    vault.create("cycle", type="task", parent_id="child")
+    record = Record(id="child", type="task", parent_id=parent)
+    assert resolve_metrics(record, vault) == []
+
+
+def test_malformed_parent_errors_are_not_hidden(tmp_path):
+    vault = Vault(root=tmp_path)
+    (tmp_path / "parent.md").write_text("---\ntitle: Missing type\n---\n")
+    with pytest.raises(PydanticValidationError):
+        resolve_metrics(Record(id="child", type="task", parent_id="parent"), vault)

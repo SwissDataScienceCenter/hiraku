@@ -255,7 +255,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             )
         try:
             record = project.vault.create(
-                f"{state['task'].rpartition('/')[0]}/{arguments['name']}/{arguments['name']}",
+                f"{state['task']}/{arguments['name']}",
                 title=arguments["name"],
                 parent_id=state["task"],
                 type="experiment",

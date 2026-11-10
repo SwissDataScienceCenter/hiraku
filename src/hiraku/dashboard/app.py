@@ -61,13 +61,11 @@ def project_data(project_context, refresh):
     records_df = hd.arrow_frame(
         hd.record_rows(dashboard_data.records), hd.RECORD_COLUMNS
     )
-    return project_context, dashboard_data, records_df, runs_df
+    return dashboard_data, records_df, runs_df
 
 
 @app.cell
-def selection_state(
-    project_context, dashboard_data, records_df, requested_record, runs_df
-):
+def selection_state(project_context, records_df, requested_record, runs_df):
     paths = dict(zip(records_df["record"], records_df["record_path"], strict=True))
     metrics = hd.metric_names(runs_df)
     tree_metric = hd.default_metric(records_df, metrics)

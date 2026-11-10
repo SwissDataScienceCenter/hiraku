@@ -5,24 +5,20 @@
 ::: hiraku.record.Record
 
 `Record` is document data with a required OKF `id`: its bundle-relative path without the
-`.md` suffix. It has no vault root, absolute filename, loading methods, or
-persistence history. Field validation is local: required nonblank `type`,
+`.md` suffix. Field validation is local: required nonblank `type`,
 metadata shapes, reference syntax, commit hashes, and metric declarations.
 Unknown metadata is preserved. `title` is the optional OKF display title.
 
 `status` is restricted to the OKF lifecycle values `draft`, `stable` (the
 default), and `deprecated`. `state` is an optional string for workflow-defined
-research progress, such as `drafted`, `implemented`, or `analyzed`. Neither is
-inherited. Existing research progress values such as `status: concluded` must
-be moved to `state: concluded` before loading the document.
+research progress, such as `drafted`, `implemented`, or `analyzed`.
 
 `record.metadata` is a serialized snapshot of front matter. It excludes `id`
 and the Markdown body. Loading derives the ID from the filename; it is never
 persisted in front matter. Moving a document changes its ID.
 `parent_id` and `related_to` are ordinary persisted
 relationships to other concept paths. Placement does not determine parentage.
-All fields, including metrics, are local. There is no inheritance or effective
-value resolution in `Record` or `Vault`.
+All fields, including metrics, are local.
 
 ```python
 from pathlib import Path

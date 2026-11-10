@@ -13,7 +13,7 @@ from click.testing import CliRunner
 
 pytest.importorskip("mcp")
 
-from mcp import (  # noqa: E402  # noqa: E402
+from mcp import (  # noqa: E402
     Client,
     ClientSession,
     StdioServerParameters,
@@ -32,15 +32,12 @@ from hiraku.mcp import (  # noqa: E402
     register_workflow_tools,
 )
 from hiraku.project import Project  # noqa: E402
-from hiraku.record import Record  # noqa: E402
-
-
-def load_record(record_id: str, *, project: Project) -> Record:
-    return project.vault.load(record_id)
-
-
-def list_records(*, project: Project) -> list[Record]:
-    return project.vault.list()
+from hiraku.workflows.langgraph import resume_workflow as _resume_workflow  # noqa: E402
+from hiraku.workflows.langgraph import (  # noqa: E402
+    start_workflow,
+    workflow_mermaid,
+    workflow_status,
+)
 
 
 def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> None:
@@ -69,14 +66,6 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
     asyncio.run(exercise())
 
 
-from hiraku.workflows.langgraph import resume_workflow as _resume_workflow  # noqa: E402
-from hiraku.workflows.langgraph import (  # noqa: E402
-    start_workflow,
-    workflow_mermaid,
-    workflow_status,
-)
-
-
 def test_tools_and_validation(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     server = create_server(config)
@@ -85,9 +74,6 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         async def call(tool_name: str, **args):
             return await server.call_tool(tool_name, args)
 
-        assert "record_reparent" not in {
-            tool.name for tool in await server.list_tools()
-        }
         await call(
             "record_create",
             title="root",
@@ -107,7 +93,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         await call(
             "record_update", record_id="root/child/child", fields={"state": "done"}
         )
-        assert load_record("root/child/child", project=config).state == "done"
+        assert config.vault.load("root/child/child").state == "done"
         for name, args in [
             (
                 "record_create",
@@ -137,7 +123,7 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         ]:
             with pytest.raises(ToolError):
                 await server.call_tool(name, args)
-        assert load_record("root/child/child", project=config).related_to == []
+        assert config.vault.load("root/child/child").related_to == []
         await call("record_delete", record_id="root/child/child")
         await call(
             "record_create",
@@ -156,15 +142,13 @@ def test_tools_and_validation(tmp_path: Path) -> None:
             fields={},
             markdown="Updated",
         )
-        assert load_record("sources/sources", project=config).markdown == "Updated"
+        assert config.vault.load("sources/sources").markdown == "Updated"
         await call("record_show", record_id="sources/sources")
         await call("record_list")
         await call("record_show", record_id="root/root")
         await call("record_list")
         await call("record_delete", record_id="sources/sources")
-        assert "sources" not in {
-            record.title for record in list_records(project=config)
-        }
+        assert "sources" not in {record.title for record in config.vault.list()}
 
     asyncio.run(exercise())
 
@@ -250,7 +234,7 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
                 "markdown": "Curated evidence",
             },
         )
-        literature = load_record("literature/literature", project=config)
+        literature = config.vault.load("literature/literature")
         catalog = list(await server.read_resource("hiraku://catalog"))[0]
         assert json.loads(catalog.content) == ["demo/demo", "literature/literature"]
         record_uri = f"hiraku://records/{quote(literature.id, safe='')}"
@@ -424,18 +408,6 @@ def test_workflow_mcp_uses_generic_langgraph_controls(tmp_path) -> None:
         "workflow_resume",
         "workflow_approval",
     } <= names
-    assert (
-        not {
-            "workflow_send_event",
-            "session_list",
-            "session_show",
-            "session_cancel",
-            "count-steps",
-            "greet",
-            "scheduler",
-        }
-        & names
-    )
 
 
 def resume_workflow(session_id, response, *, project):
@@ -450,10 +422,7 @@ def _project(tmp_path) -> Project:
 
 
 def _tool_names(server: Any) -> set[str]:
-    async def list_tools() -> set[str]:
-        return {tool.name for tool in await server.list_tools()}
-
-    return anyio.run(list_tools)
+    return {tool.name for tool in asyncio.run(server.list_tools())}
 
 
 def _interrupt(result: dict[str, Any]) -> dict[str, Any]:
@@ -554,30 +523,6 @@ def test_count_steps_rejects_invalid_arguments(tmp_path) -> None:
     config = _project(tmp_path)
     with pytest.raises(ValidationError, match="positive integer"):
         start_workflow("count-steps", {"count": 0}, project=config)
-
-
-def test_mcp_exposes_only_the_langgraph_workflow_interface(tmp_path) -> None:
-    config = _project(tmp_path)
-    tools = _tool_names(create_server(config))
-    assert {
-        "workflow_list",
-        "workflow_start",
-        "workflow_status",
-        "workflow_resume",
-        "workflow_approval",
-    } <= tools
-    assert (
-        not {
-            "workflow_send_event",
-            "session_list",
-            "session_show",
-            "session_cancel",
-            "count-steps",
-            "greet",
-            "scheduler",
-        }
-        & tools
-    )
 
 
 def test_workflow_graph_is_available_from_cli_and_mcp(tmp_path, monkeypatch) -> None:

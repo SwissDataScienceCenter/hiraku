@@ -125,10 +125,8 @@ class Project(BaseModel):
             raise ValidationError(
                 f"Invalid project configuration {marker}: {exc}"
             ) from exc
-        if project.path != marker:
-            raise ValidationError(
-                f"Project configuration path does not match hiraku_dir: {marker}"
-            )
+        if marker.name != "hiraku.yml":
+            raise ValidationError(f"Expected hiraku.yml: {marker}")
         return project
 
     @classmethod
@@ -266,7 +264,7 @@ class Project(BaseModel):
             hiraku.errors.ValidationError: If settings or resources are invalid.
         """
         root = Path(root).expanduser().resolve()
-        if (root / "hiraku.yml").is_file():
+        if (root / "hiraku.yml").exists():
             raise ProjectExistsError(f"Hiraku project already exists at {root}")
         if template and example:
             raise ValidationError("template and example are mutually exclusive")
@@ -315,31 +313,13 @@ class Project(BaseModel):
                     if not source.is_dir():
                         raise FileNotFoundError(source)
                     config_file = source / "hiraku.yml"
-                    if not config_file.is_file():
-                        config_file = source / "hiraku" / "hiraku.yml"
-                    if not config_file.is_file():
-                        config_file = next(
-                            (
-                                child / "hiraku.yml"
-                                for child in source.iterdir()
-                                if child.is_dir() and (child / "hiraku.yml").is_file()
-                            ),
-                            config_file,
-                        )
                     if config_file.is_file():
                         data.update(load_yaml_mapping(config_file))
 
-            data["hiraku_dir_name"] = data.pop("hiraku_dir", "hiraku")
             try:
                 project = cls(root, **data)
             except (TypeError, ValueError) as exc:
-                if isinstance(exc, ValidationError):
-                    raise
                 raise ValidationError(f"Invalid project configuration: {exc}") from exc
-            if project.path.exists():
-                raise ProjectExistsError(
-                    f"Hiraku project already exists at {project.root}"
-                )
             root.mkdir(parents=True, exist_ok=True)
             project.records_dir.mkdir(parents=True, exist_ok=True)
             project.workflows_dir.mkdir(parents=True, exist_ok=True)
