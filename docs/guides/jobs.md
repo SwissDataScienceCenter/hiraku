@@ -24,8 +24,8 @@ custom attributes. `--directory PATH` sets the execution-side working directory;
 the default is the project root for local jobs and the executor default otherwise.
 
 ```bash
-hiraku job list [--json] [--cached]
-hiraku job show JOB_ID [--json] [--cached]
+hiraku job list [--json]
+hiraku job show JOB_ID [--json]
 hiraku job logs JOB_ID
 hiraku job logs JOB_ID --follow
 hiraku job wait JOB_ID
@@ -33,27 +33,22 @@ hiraku job cancel JOB_ID
 ```
 
 `show` and `list` automatically observe nonfinal jobs through PSI/J attachment.
-Observations query the selected backend and persist status
-and logs where supported. Final jobs are left unchanged. Use `--cached` to read
-saved observations without contacting a backend. Listing observes jobs sequentially;
-Attachment is in-process and reused for subsequent updates of the same Job object;
-there is no observation subprocess or JSON transport. Hiraku waits up to 30 seconds
-for an initial PSI/J observation (plus up to one second for its lock). Backend
-calls retain their own timeouts; Renku CLI calls allow 20 seconds each.
-Our adapters synchronously refresh their observations on update. Other PSI/J
-executors use their existing polling and status notifications; subsequent reads
-return the latest status published by that executor.
-Failed updates log a warning and preserve the saved status and `updated_at`.
-Show/list continue with other jobs and return plain Job snapshots in JSON/MCP.
-Terminal output marks nonfinal jobs `(stale)` after 30 seconds without a saved
-update. Final jobs are never marked stale. `show` includes `updated_at`; JSON/MCP
-clients can assess freshness from that timestamp.
+Executors own backend polling; Hiraku displays their latest published status.
+Our adapters observe once during attachment, then monitor while their handle is
+retained. Hiraku reuses that handle instead of forcing additional backend queries.
+Listing attaches to jobs sequentially. Initial attachment errors log a warning;
+show/list continue and fall back to submission information for that job.
+Saved final outcomes are read without contacting the backend.
+Hiraku waits up to 30 seconds for an initial PSI/J status; backend calls retain
+their own timeouts, including 20 seconds per Renku CLI call.
 
 For every executor, `submit` uses PSI/J and returns after backend acceptance.
 Hiraku does not launch a generic submission runner. `wait` and
-`logs --follow` observe jobs every second while those commands run. `wait` prints no logs
+`logs --follow` read executor status every second. `wait` prints no logs
 and returns the job's exit code; `logs` alone prints saved output and returns.
-Observation failure stops waiting/following with an error, leaving the job running.
+Initial attachment failure stops waiting/following with an error, leaving the job
+running. Later polling failures are logged by the executor and retain its last
+observation; they do not establish a terminal outcome.
 
 Cancellation attaches through PSI/J. The detached adapter requests cancellation
 from its worker.
@@ -70,9 +65,12 @@ the command, record, host, native ID, timestamps, exit status, and launch-time G
 commit and cleanliness. Launch provenance describes the submitting checkout,
 not necessarily code loaded later by the command.
 
-Only Hiraku writes `job.json`, at submission or after successful observation.
-`updated_at` records that snapshot write; failed observations leave it unchanged.
-Without an observing command, the snapshot can lag execution even for local jobs.
+Hiraku writes `job.json` at creation, submission, and when it observes a final
+outcome. Intermediate observations remain in memory. Submission and final-outcome
+writes use a per-job lock; backend queries do not hold it. A saved final outcome
+remains available after backend history is removed. Without a Hiraku observer,
+completion remains in the backend until a later command attaches and saves it.
+`updated_at` is the last snapshot write, not an indication of backend freshness.
 
 The detached adapter independently owns
 `.hiraku/executors/detached/<native_id>/status.json`. Its worker retains
@@ -147,16 +145,16 @@ A Job exposes PSI/J's `spec` (`JobSpec`) and `status` (`JobStatus`);
 `job.wait()` returns a PSI/J status, `job.logs(follow=True)` yields output,
 and `job.cancel()` requests cancellation.
 `Job.load()` and `Job.list()` read snapshots without network access;
-`job.update()` observes once and raises `ExecutionError` if observation fails,
-leaving the saved snapshot unchanged. `job.status.state` is the sole execution
+`job.update()` reads the attached executor's latest status and saves final outcomes.
+It raises `ExecutionError` if initial attachment or final persistence fails.
+`job.status.state` is the sole execution
 state. `update_jobs(jobs)` attempts updates independently and logs failures.
 There are no additional observation states or result wrappers.
-`--cached` reports the saved state without claiming a current backend observation.
 State names follow PSI/J:
 `NEW`, `QUEUED`, `ACTIVE`, `COMPLETED`, `FAILED`, and `CANCELED`.
 
 MCP provides `job_submit` (default executor: `detached`), `job_list`,
-`job_show` (both accepting `cached`), `job_wait`, `job_logs`,
+`job_show`, `job_wait`, `job_logs`,
 and `job_cancel`. Submission returns Job metadata after startup/acceptance;
 use `job_wait` and `job_logs` separately. There is no `background` switch.
 
@@ -182,8 +180,8 @@ directory, not the local checkout. Hiraku does not upload local files or sync co
 The Renku submission key is a deterministic 20-character hash derived from the
 Hiraku job ID, within rnk's length limit, for deduplication. The
 returned Renku job name is PSI/J's `native_id` and is used for polling and logs.
-Waiting and following update every second; the Renku adapter also publishes
-background observations every five seconds while its handle is retained.
+The Renku adapter polls every five seconds while its handle is retained;
+waiting and following read those observations without extra backend queries.
 Transport failures and missing observations
 are logged during observation; they do not establish a terminal
 outcome. Renku's
@@ -194,8 +192,7 @@ returns CLI exit code zero; the stored native exit code remains absent.
 This initial adapter uses launcher resources and does not implement PSI/J resource
 requests, staging, or launch hooks. It supports PSI/J `attach()` to observe an
 existing native job; select its project in the executor URL or JobSpec attributes.
-Remote jobs may outlive the local monitor; automatic Hiraku monitor recovery is
-not implemented yet.
+Later commands attach again to resume observation.
 
 ## Adding executors
 

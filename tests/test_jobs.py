@@ -44,87 +44,128 @@ def remote_job(project):
 def backend(remote_job, monkeypatch):
     response = [psij.JobState.QUEUED]
     calls = []
+    observers = []
 
-    def refresh(native):
+    def observe(native):
         if isinstance(response[0], str):
             raise psij.SubmitException(response[0])
         native.status = psij.JobStatus(response[0])
 
-    executor = SimpleNamespace(refresh=refresh, _notify_callback=lambda *args: None)
+    executor = SimpleNamespace(
+        _notify_callback=lambda *args: None,
+        refresh=lambda *args: pytest.fail("Hiraku must not query the backend"),
+    )
 
     def attach(native, native_id):
         calls.append(native_id)
         native.executor = executor
         native._native_id = native_id
-        refresh(native)
+        observe(native)
+        observers.append(native)
 
     executor.attach = attach
     monkeypatch.setattr(Job, "_executor", lambda self: executor)
 
     def respond(status):
         response[0] = status
+        if not isinstance(status, str):
+            for native in observers:
+                observe(native)
 
     respond.calls = calls
     return respond
 
 
-def test_update_persists_and_preserves_snapshot_on_failure(remote_job, backend):
-    previous = remote_job.updated_at = datetime.now(UTC) - timedelta(minutes=1)
-    remote_job._path.write_text(remote_job.model_dump_json())
+def test_update_keeps_progress_in_memory_and_saves_final(remote_job, backend):
+    before = remote_job._path.read_bytes()
     backend(psij.JobState.ACTIVE)
     remote_job.update()
-    assert Job._read(remote_job._path).status.state == psij.JobState.ACTIVE
+    assert remote_job.status.state == psij.JobState.ACTIVE
     assert remote_job.started_at
-    assert remote_job.updated_at > previous
-
-    backend("offline")
-    before = remote_job._path.read_bytes()
-    with pytest.raises(ExecutionError, match="offline"):
-        remote_job.update()
     assert remote_job._path.read_bytes() == before
-    assert Job._read(remote_job._path).status.state == psij.JobState.ACTIVE
+
+    # A failed background observation does not replace the last real observation.
+    backend("offline")
+    remote_job.update()
+    assert remote_job.status.state == psij.JobState.ACTIVE
+    assert remote_job._path.read_bytes() == before
     backend(psij.JobState.COMPLETED)
     remote_job.update()
     assert remote_job.status.state == psij.JobState.COMPLETED
+    assert Job._read(remote_job._path).status.state == psij.JobState.COMPLETED
+    saved = remote_job._path.read_bytes()
+    remote_job.update()
+    assert remote_job._path.read_bytes() == saved
     assert backend.calls == [remote_job.native_id]
     assert not hasattr(remote_job, "observation_error")
     assert not hasattr(remote_job, "state")
 
 
-def test_update_uses_standard_psij_attachment_without_refresh(remote_job, monkeypatch):
-    calls = []
-    executor = SimpleNamespace(_notify_callback=lambda *args: None)
-
-    def attach(native, native_id):
-        calls.append(native_id)
-        native.executor = executor
-        native.status = psij.JobStatus(psij.JobState.ACTIVE)
-
-    executor.attach = attach
-    monkeypatch.setattr(Job, "_executor", lambda self: executor)
-    remote_job.update()
-    remote_job.update()
-    assert calls == [remote_job.native_id]
-    assert remote_job.status.state == psij.JobState.ACTIVE
-
-
 @pytest.mark.parametrize(
-    "args", [["submit", "--poll"], ["show", "id", "--refresh"], ["refresh", "id"]]
+    ("state", "expected"),
+    [
+        ("running", psij.JobState.ACTIVE),
+        ("hibernated", psij.JobState.CANCELED),
+        ("offline", None),
+    ],
 )
-def test_monitoring_cli_removed(project, monkeypatch, args):
-    monkeypatch.chdir(project.root)
-    assert CliRunner().invoke(main, ["job", *args]).exit_code == 2
+def test_renku_attachment_observes_before_starting_monitor(
+    monkeypatch, state, expected
+):
+    executor = psij.JobExecutor.get_instance(
+        "renku", url="https://renkulab.io/p/ns/demo"
+    )
+    monitors = []
+    calls = []
+
+    def rnk(*args, **kwargs):
+        calls.append(args)
+        if state == "offline":
+            raise psij.SubmitException("offline")
+        return [{"name": "remote-1", "status": {"state": state}}]
+
+    monkeypatch.setattr(executor, "_rnk", rnk)
+    monkeypatch.setattr(executor, "_monitor", monitors.append)
+    native = psij.Job(psij.JobSpec(executable="echo"))
+    if state == "offline":
+        with pytest.raises(psij.SubmitException, match="offline"):
+            executor.attach(native, "remote-1")
+        assert monitors == []
+    else:
+        executor.attach(native, "remote-1")
+        assert native.status.state == expected
+        assert monitors == [native]
+    assert calls == [("job", "list")]
+
+
+def test_final_outcome_save_can_be_retried(remote_job, backend, monkeypatch):
+    backend(psij.JobState.COMPLETED)
+    save = Job._save
+
+    def fail(job):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(Job, "_save", fail)
+    with pytest.raises(ExecutionError, match="disk unavailable"):
+        remote_job.update()
+    assert Job._read(remote_job._path).status.state == psij.JobState.QUEUED
+    monkeypatch.setattr(Job, "_save", save)
+    remote_job.update()
+    assert Job._read(remote_job._path).status.state == psij.JobState.COMPLETED
+    assert backend.calls == [remote_job.native_id]
 
 
 @pytest.mark.parametrize("command", ["show", "list"])
-def test_cli_updates_unless_cached(project, remote_job, monkeypatch, backend, command):
+def test_cli_shows_executor_observation(
+    project, remote_job, monkeypatch, backend, command
+):
     monkeypatch.chdir(project.root)
     backend(psij.JobState.COMPLETED)
     args = ["job", command]
     if command != "list":
         args.append(remote_job.id)
     runner = CliRunner()
-    assert runner.invoke(main, [*args, "--cached", "--json"]).exit_code == 0
+    assert runner.invoke(main, [*args, "--cached", "--json"]).exit_code == 2
     assert Job._read(remote_job._path).status.state == psij.JobState.QUEUED
     result = runner.invoke(main, args)
     assert result.exit_code == 0, result.output
@@ -293,7 +334,7 @@ def test_backend_completion_does_not_write_hiraku_snapshot(project):
         status = native.wait(timeout=timedelta(seconds=10))
         assert status and status.state == psij.JobState.COMPLETED
         assert job._path.read_bytes() == before
-        job.update()
+        job.wait()
         assert job.status.exit_code == 0
         assert job._path.read_bytes() != before
     finally:
@@ -301,7 +342,7 @@ def test_backend_completion_does_not_write_hiraku_snapshot(project):
 
 
 @pytest.mark.parametrize("command", ["show", "list"])
-def test_cli_stale_preserves_last_status(
+def test_cli_attachment_failure_preserves_submission(
     project, remote_job, monkeypatch, backend, command
 ):
     monkeypatch.chdir(project.root)
@@ -321,12 +362,13 @@ def test_cli_stale_preserves_last_status(
         "+00:00", "Z"
     )
     assert not value["status"]["metadata"]
-    assert "stale" in CliRunner().invoke(main, args).output
+    assert "stale" not in CliRunner().invoke(main, args).output
     assert remote_job._path.read_bytes() == before
     assert Job._read(remote_job._path).status.state == psij.JobState.QUEUED
 
 
 def test_final_job_update_skips_backend(remote_job, monkeypatch):
+    earlier = Job._read(remote_job._path)
     remote_job.status = psij.JobStatus(psij.JobState.COMPLETED)
     remote_job._save()
     monkeypatch.setattr(
@@ -336,6 +378,8 @@ def test_final_job_update_skips_backend(remote_job, monkeypatch):
     )
     remote_job.update()
     assert remote_job.status.state == psij.JobState.COMPLETED
+    earlier.update()
+    assert earlier.status.state == psij.JobState.COMPLETED
 
 
 def test_update_jobs_continues_after_failure(remote_job, monkeypatch, caplog):
@@ -369,7 +413,7 @@ def test_local_update_preserves_original_exit_code(project):
     try:
         before = job.updated_at
         job.update()
-        assert job.updated_at > before
+        assert job.updated_at == before
         assert not job.status.final
     finally:
         gate.touch()

@@ -178,7 +178,7 @@ class DetachedLocalExecutor(JobExecutor):
         def poll():
             while (current := reference()) is not None and not current.status.final:
                 try:
-                    self.refresh(current)
+                    self._set_job_status(current, self._status(str(current.native_id)))
                 except SubmitException as exc:
                     logger.warning("%s", exc)
                 del current
@@ -187,10 +187,6 @@ class DetachedLocalExecutor(JobExecutor):
                 runner.wait()
 
         threading.Thread(target=poll, name="durable-local-status", daemon=True).start()
-
-    def refresh(self, job: Job) -> None:
-        """Publish one current durable observation without another polling thread."""
-        self._set_job_status(job, self._status(str(job.native_id)))
 
     @staticmethod
     def _stop(native: Job) -> None:

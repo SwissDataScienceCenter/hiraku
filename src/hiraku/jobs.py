@@ -76,7 +76,7 @@ def _environment(env: Mapping[str, str] | None) -> dict[str, str]:
 
 
 class Job(BaseModel):
-    """A persisted Hiraku job execution wrapping PSI/J's specification and status."""
+    """Execution identity and final outcome, with live PSI/J status in memory."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     id: str = Field(pattern=r"^[a-f0-9]{32}$")
@@ -169,7 +169,7 @@ class Job(BaseModel):
 
     @classmethod
     def load(cls, job_id: str, *, project: Project) -> Job:
-        """Load the last recorded observation without attaching to a native PID."""
+        """Load execution identity and any saved final outcome without attaching."""
         if not re.fullmatch(r"[a-f0-9]{32}", job_id):
             raise JobNotFoundError(f"Invalid job ID: {job_id!r}")
         return cls._read(project.root / ".hiraku" / "jobs" / job_id / "job.json")
@@ -279,6 +279,7 @@ class Job(BaseModel):
                 self.native_id = str(native.native_id)
                 self.submitted_at = datetime.now(UTC)
                 self._set_status(native.status)
+                self._observer = native
             except Exception as exc:
                 self._set_status(psij.JobStatus(psij.JobState.FAILED, message=str(exc)))
                 self._save()
@@ -296,40 +297,31 @@ class Job(BaseModel):
             setattr(self, field, getattr(updated, field))
 
     def update(self) -> None:
-        """Query the selected backend and persist its status."""
-        self._reload()
-        if self.status.final:
+        """Read the executor's latest observation; persist only final outcomes."""
+        if (self.status.final and self._observer is None) or self.native_id is None:
             return
         try:
-            with FileLock(str(self._path.with_suffix(".lock")), timeout=1):
+            if self._observer is None:
                 self._reload()
                 if self.status.final:
                     return
-                if self.native_id is None:
-                    raise ExecutionError("Job has no native ID to observe")
-                if self._observer is None:
-                    native = psij.Job(self.spec)
-                    self._executor().attach(native, self.native_id)
-                    self._observer = native
-                native = self._observer
-                executor = native.executor
-                if (self._path.parent / "cancel").exists():
-                    native.cancel()
-                # Our adapters support a synchronous observation; other PSI/J
-                # executors retain their normal polling and notification behavior.
-                refresh = getattr(executor, "refresh", None)
-                if refresh is not None and not native.status.final:
-                    refresh(native)
-                status = native.wait(
-                    timeout=timedelta(seconds=30),
-                    target_states=[psij.JobState.QUEUED],
-                )
-                if status is None:
-                    raise ExecutionError("No backend observation; outcome unknown")
-                self._set_status(status)
-                self._save()
+                native = psij.Job(self.spec)
+                self._executor().attach(native, self.native_id)
+                self._observer = native
+            status = self._observer.wait(
+                timeout=timedelta(seconds=30),
+                target_states=[psij.JobState.QUEUED],
+            )
+            if status is None:
+                raise ExecutionError("No backend observation; outcome unknown")
+            self._set_status(status)
+            if status.final:
+                with FileLock(str(self._path.with_suffix(".lock")), timeout=1):
+                    if not self._read(self._path).status.final:
+                        self._save()
+                self._observer = None
         except Timeout as exc:
-            raise ExecutionError("Job observation is busy; outcome unknown") from exc
+            raise ExecutionError("Could not save final outcome: job is busy") from exc
         except (
             OSError,
             ValueError,
@@ -352,6 +344,8 @@ class Job(BaseModel):
             self.finished_at = datetime.fromtimestamp(status.time, UTC)
 
     def _poll(self) -> Iterator[psij.JobStatus]:
+        if self.native_id is None and not self.status.final:
+            raise ExecutionError("Job has no native ID to observe")
         while True:
             self.update()
             yield self.status
@@ -367,9 +361,11 @@ class Job(BaseModel):
 
     def cancel(self) -> None:
         """Request cancellation through PSI/J attachment."""
-        self._reload()
+        self.update()
         if not self.status.final:
-            (self._path.parent / "cancel").touch()
+            if self._observer is None:
+                raise ExecutionError("Job has no native ID to cancel")
+            self._observer.cancel()
             self.update()
 
     def logs(self, *, follow: bool = False) -> Iterator[tuple[str, str]]:

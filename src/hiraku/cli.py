@@ -826,27 +826,18 @@ def _run_job(job: Job, *, follow: bool) -> None:
     _exit_job(job)
 
 
-def _job_state(job: Job) -> str:
-    updated = job.updated_at or job.created_at
-    stale = not job.status.final and (datetime.now(UTC) - updated).total_seconds() > 30
-    return job.status.state.name + (" (stale)" if stale else "")
-
-
 @job_group.command("list")
 @click.option("--record", "record_id")
 @click.option("--json", "json_output", is_flag=True)
-@click.option("--cached", is_flag=True, help="Use saved observations without querying.")
 @click.pass_obj
 def job_list(
     state: CLIContext,
     record_id: str | None,
     json_output: bool,
-    cached: bool,
 ) -> None:
-    """List the last recorded observations of jobs."""
+    """List jobs with the latest executor observations or saved final outcomes."""
     jobs = Job.list(project=state.project, record_id=record_id)
-    if not cached:
-        update_jobs(jobs)
+    update_jobs(jobs)
     if json_output:
         _emit_json([job.model_dump(mode="json") for job in jobs])
     else:
@@ -857,7 +848,7 @@ def job_list(
                     job.id,
                     job.record_id,
                     job.executor,
-                    _job_state(job),
+                    job.status.state.name,
                     job.native_id,
                 )
                 for job in jobs
@@ -868,13 +859,11 @@ def job_list(
 @job_group.command("show")
 @click.argument("job_id")
 @click.option("--json", "json_output", is_flag=True)
-@click.option("--cached", is_flag=True, help="Use saved observations without querying.")
 @click.pass_obj
-def job_show(state: CLIContext, job_id: str, json_output: bool, cached: bool) -> None:
-    """Show one saved job."""
+def job_show(state: CLIContext, job_id: str, json_output: bool) -> None:
+    """Show the latest executor observation or saved final outcome."""
     job = Job.load(job_id, project=state.project)
-    if not cached:
-        update_jobs([job])
+    update_jobs([job])
     if json_output:
         _emit_json(job.model_dump(mode="json"))
     else:
@@ -884,7 +873,7 @@ def job_show(state: CLIContext, job_id: str, json_output: bool, cached: bool) ->
                 ("id", job.id),
                 ("record", job.record_id),
                 ("executor", job.executor),
-                ("state", _job_state(job)),
+                ("state", job.status.state.name),
                 ("updated_at", job.updated_at),
                 ("native_id", job.native_id),
                 (

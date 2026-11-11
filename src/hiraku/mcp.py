@@ -258,22 +258,19 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     )
     def job_list(
         record_id: str | None = None,
-        cached: bool = False,
     ) -> list[dict[str, Any]]:
-        """List saved local jobs."""
+        """List jobs with the latest executor observations or saved final outcomes."""
         jobs = Job.list(project=selected, record_id=record_id)
-        if not cached:
-            update_jobs(jobs)
+        update_jobs(jobs)
         return [job.model_dump(mode="json") for job in jobs]
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
     )
-    def job_show(job_id: str, cached: bool = False) -> dict[str, Any]:
-        """Read the last recorded observation of a job."""
+    def job_show(job_id: str) -> dict[str, Any]:
+        """Show the latest executor observation or saved final outcome."""
         job = Job.load(job_id, project=selected)
-        if not cached:
-            update_jobs([job])
+        update_jobs([job])
         return job.model_dump(mode="json")
 
     @server.tool(

@@ -48,7 +48,6 @@ class RenkuJobExecutor(JobExecutor):
             config or JobExecutorConfig(),
         )
         self._canceled: set[str] = set()
-        self._observation_lock = threading.Lock()
 
     @staticmethod
     def _attributes(job: Job) -> dict[str, Any]:
@@ -142,6 +141,7 @@ class RenkuJobExecutor(JobExecutor):
             raise InvalidJobException("Attach requires an unsubmitted PSI/J Job")
         job.executor = self
         job._native_id = native_id
+        self._observe(job)
         self._monitor(job)
 
     def cancel(self, job: Job) -> None:
@@ -161,7 +161,7 @@ class RenkuJobExecutor(JobExecutor):
         def poll() -> None:
             while (current := reference()) is not None and not current.status.final:
                 try:
-                    self.refresh(current)
+                    self._observe(current)
                 except Exception as exc:
                     # A transport failure is not evidence that execution failed.
                     logger.warning(
@@ -173,11 +173,6 @@ class RenkuJobExecutor(JobExecutor):
                     threading.Event().wait(5)
 
         threading.Thread(target=poll, name="renku-job-monitor", daemon=True).start()
-
-    def refresh(self, job: Job) -> None:
-        """Publish one real observation, serialized with background polling."""
-        with self._observation_lock:
-            self._observe(job)
 
     def _observe(self, job: Job) -> None:
         project = self._attributes(job).get("renku.project")
@@ -200,11 +195,10 @@ class RenkuJobExecutor(JobExecutor):
             "running": JobState.ACTIVE,
             "succeeded": JobState.COMPLETED,
             "failed": JobState.FAILED,
+            "hibernated": JobState.CANCELED,
         }
         if state == "stopping":
             return
-        if state == "hibernated" and job.native_id in self._canceled:
-            states[state] = JobState.CANCELED
         if state not in states:
             raise SubmitException(f"Unrecognized Renku state: {state}")
         if job.spec and job.spec.stdout_path:

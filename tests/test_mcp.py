@@ -64,6 +64,8 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
             "workflow_start",
         } <= tools.keys()
         assert "job_submit" in tools and "job_run" not in tools
+        for name in ("job_show", "job_list"):
+            assert "cached" not in tools[name].input_schema.get("properties", {})
         assert tools["project_info"].title == "Project information"
         assert tools["record_list"].annotations.read_only_hint is True
         assert tools["workflow_start"].title == "Start workflow"
