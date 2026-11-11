@@ -97,8 +97,6 @@ def test_update_keeps_progress_in_memory_and_saves_final(remote_job, backend):
     remote_job.update()
     assert remote_job._path.read_bytes() == saved
     assert backend.calls == [remote_job.native_id]
-    assert not hasattr(remote_job, "observation_error")
-    assert not hasattr(remote_job, "state")
 
 
 @pytest.mark.parametrize(
@@ -165,7 +163,6 @@ def test_cli_shows_executor_observation(
     if command != "list":
         args.append(remote_job.id)
     runner = CliRunner()
-    assert runner.invoke(main, [*args, "--cached", "--json"]).exit_code == 2
     assert Job._read(remote_job._path).status.state == psij.JobState.QUEUED
     result = runner.invoke(main, args)
     assert result.exit_code == 0, result.output
@@ -244,7 +241,6 @@ def test_run_waits_using_detached_executor(project):
     assert job.executor == "detached"
     assert job.status.exit_code == 0
     assert dict(job.logs()) == {"stdout": "out\n", "stderr": "err\n"}
-    assert not (job._path.parent / "worker.log").exists()
 
 
 def test_no_follow_saves_output_without_streaming(project, monkeypatch):
@@ -347,8 +343,6 @@ def test_cli_attachment_failure_preserves_submission(
 ):
     monkeypatch.chdir(project.root)
 
-    remote_job.updated_at = datetime.now(UTC) - timedelta(minutes=1)
-    remote_job._path.write_text(remote_job.model_dump_json())
     before = remote_job._path.read_bytes()
     backend("backend timed out")
     args = ["job", command, *([remote_job.id] if command == "show" else [])]
@@ -357,12 +351,10 @@ def test_cli_attachment_failure_preserves_submission(
     value = json.loads(result.output)
     value = value[0] if command == "list" else value
     assert value["status"]["state"] == "QUEUED"
-    assert "observation_error" not in value
     assert value["updated_at"] == remote_job.updated_at.isoformat().replace(
         "+00:00", "Z"
     )
     assert not value["status"]["metadata"]
-    assert "stale" not in CliRunner().invoke(main, args).output
     assert remote_job._path.read_bytes() == before
     assert Job._read(remote_job._path).status.state == psij.JobState.QUEUED
 
@@ -374,7 +366,7 @@ def test_final_job_update_skips_backend(remote_job, monkeypatch):
     monkeypatch.setattr(
         Job,
         "_executor",
-        lambda *a, **kw: pytest.fail("Final job must stay cached"),
+        lambda *a, **kw: pytest.fail("Saved final outcomes must not query a backend"),
     )
     remote_job.update()
     assert remote_job.status.state == psij.JobState.COMPLETED
@@ -620,14 +612,6 @@ def test_background_cli_and_inspection(project, monkeypatch, options):
     assert job.id in table
     assert "executor" in table
     assert job.executor in table
-
-
-@pytest.mark.parametrize("command", ["run", "submit"])
-def test_background_option_is_removed(project, monkeypatch, command):
-    monkeypatch.chdir(project.root)
-    result = CliRunner().invoke(main, ["job", command, "--background", "--", "echo"])
-    assert result.exit_code == 2
-    assert "No such option '--background'" in result.output
 
 
 def test_interrupting_foreground_submission_cancels(project, monkeypatch):

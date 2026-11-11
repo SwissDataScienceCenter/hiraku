@@ -32,71 +32,45 @@ hiraku job wait JOB_ID
 hiraku job cancel JOB_ID
 ```
 
-`show` and `list` automatically observe nonfinal jobs through PSI/J attachment.
-Executors own backend polling; Hiraku displays their latest published status.
-Our adapters observe once during attachment, then monitor while their handle is
-retained. Hiraku reuses that handle instead of forcing additional backend queries.
-Listing attaches to jobs sequentially. Initial attachment errors log a warning;
-show/list continue and fall back to submission information for that job.
-Saved final outcomes are read without contacting the backend.
-Hiraku waits up to 30 seconds for an initial PSI/J status; backend calls retain
-their own timeouts, including 20 seconds per Renku CLI call.
+`show` and `list` display the executor's latest observation, or a saved final
+outcome without contacting the backend. Executors own polling; Hiraku reuses
+their handles without forcing extra queries. Initial attachment errors log a
+warning; show/list continue with submission information for that job. Listing
+attaches sequentially, allowing up to 30 seconds for an initial PSI/J status.
 
-For every executor, `submit` uses PSI/J and returns after backend acceptance.
-Hiraku does not launch a generic submission runner. `wait` and
-`logs --follow` read executor status every second. `wait` prints no logs
-and returns the job's exit code; `logs` alone prints saved output and returns.
+`wait` and `logs --follow` read executor status every second. `wait` prints no
+logs and returns the job's exit code; `logs` alone prints saved output and returns.
 Initial attachment failure stops waiting/following with an error, leaving the job
 running. Later polling failures are logged by the executor and retain its last
 observation; they do not establish a terminal outcome.
 
-Cancellation attaches through PSI/J. The detached adapter requests cancellation
-from its worker.
-Ctrl-C during foreground waiting
-requests cancellation and waits for cleanup. Stopping log following does not
-cancel a job. Interrupting `job wait` also stops observation only.
+Cancellation uses the executor. Ctrl-C during foreground execution requests
+cancellation and waits for cleanup. Interrupting log following or `job wait`
+stops observation without canceling the job.
 
 ## Persistence
 
 Each job lives in `.hiraku/jobs/<job_id>/`: `job.json`, `stdout.log`, and `stderr.log`.
-Snapshots are replaced atomically. The launch process creates
-the initial snapshot; subsequent writers use a per-job lock. Job metadata includes
-the command, record, host, native ID, timestamps, exit status, and launch-time Git
-commit and cleanliness. Launch provenance describes the submitting checkout,
-not necessarily code loaded later by the command.
+Metadata includes the command, record, host, executor, native ID, timestamps, exit
+status, and launch-time Git commit and cleanliness. Launch provenance describes
+the submitting checkout, which may differ from code loaded by the command.
 
-Hiraku writes `job.json` at creation, submission, and when it observes a final
-outcome. Intermediate observations remain in memory. Submission and final-outcome
-writes use a per-job lock; backend queries do not hold it. A saved final outcome
+Hiraku atomically writes `job.json` at creation, submission, and when it observes
+a final outcome. Intermediate observations remain in memory. Submission and
+final-outcome writes use a per-job lock; backend queries do not hold it. A saved final outcome
 remains available after backend history is removed. Without a Hiraku observer,
 completion remains in the backend until a later command attaches and saves it.
 `updated_at` is the last snapshot write, not an indication of backend freshness.
 
-The detached adapter independently owns
-`.hiraku/executors/detached/<native_id>/status.json`. Its worker retains
-the built-in PSI/J local handle and records state, timestamps, and the real exit
-code there. It writes command output directly to the configured log paths, never
-to `job.json`. Execution specs and explicit environment additions travel over
-stdin and are not stored in adapter state. Local backend state is retained for
-later attachment, including after the worker exits.
+The detached executor keeps worker status under
+`.hiraku/executors/detached/<native_id>/`. Its worker owns the built-in PSI/J local
+handle and records the real exit code independently of Hiraku. Keep this state
+while jobs are active; attachment requires the same directory and host. A worker
+heartbeat older than 30 seconds is an observation error. Worker startup allows
+30 seconds. `executor_url` can select another directory or file URI.
 
-A detached native ID is an opaque execution token, not a PID. A nonfinal backend
-status older than 30 seconds is an observation error; disappearance is never
-treated as success. A saved final outcome remains valid regardless of age.
-Startup acknowledgment is bounded to 30 seconds. Do not delete backend state
-while execution is active.
-
-The adapter is registered as `detached`, leaving PSI/J's built-in `local` unchanged.
-`executor_url` selects the adapter state directory (a path or file URI); by default
-Hiraku uses the project path above. Standalone PSI/J callers can use
-`JobExecutor.get_instance("detached", url=...)`; without a URL the adapter uses
-`JobExecutorConfig.work_directory / "detached"`. Attachment must select the
-same state directory. Nonfinal execution can only be observed on its original host.
-
-Remote jobs can outlive the submitting host. Later commands observe them using
-PSI/J attachment. While a Job object is used, its attached PSI/J handle may poll;
-our adapters stop their observation loops when that handle is discarded or final.
-No persistent Hiraku remote-monitor process is started.
+Later commands attach again to resume observation. Executor monitors stop when
+their handles are discarded or final.
 
 Job storage is local runtime state and should be excluded from Git with
 `/.hiraku/`. Logs persist until explicitly removed by the user.
@@ -127,8 +101,11 @@ Python callers create an attempt before executing it:
 from hiraku.jobs import Job
 
 job = Job.create(["python", "train.py"], project=project)
-job.submit()  # Return after acceptance; use job.wait() for completion.
-# Alternatively: Job.create(command, project=project, executor="renku", ...).run()
+job.submit()
+status = job.wait()
+
+# Or create and wait in one expression:
+job = Job.create(["python", "train.py"], project=project).run()
 ```
 
 `Job.create()` validates and saves a `NEW` attempt without contacting an executor.
@@ -147,16 +124,12 @@ and `job.cancel()` requests cancellation.
 `Job.load()` and `Job.list()` read snapshots without network access;
 `job.update()` reads the attached executor's latest status and saves final outcomes.
 It raises `ExecutionError` if initial attachment or final persistence fails.
-`job.status.state` is the sole execution
-state. `update_jobs(jobs)` attempts updates independently and logs failures.
-There are no additional observation states or result wrappers.
+`update_jobs(jobs)` attempts updates independently and logs failures.
 State names follow PSI/J:
 `NEW`, `QUEUED`, `ACTIVE`, `COMPLETED`, `FAILED`, and `CANCELED`.
 
-MCP provides `job_submit` (default executor: `detached`), `job_list`,
-`job_show`, `job_wait`, `job_logs`,
-and `job_cancel`. Submission returns Job metadata after startup/acceptance;
-use `job_wait` and `job_logs` separately. There is no `background` switch.
+MCP provides `job_submit`, `job_list`, `job_show`, `job_wait`, `job_logs`, and
+`job_cancel`. Submission returns after acceptance; use wait and logs separately.
 
 ## Renku through rnk
 
@@ -177,30 +150,22 @@ For a Cloud Native Buildpacks image, add
 launch environment. Relative command paths resolve in the remote launcher's working
 directory, not the local checkout. Hiraku does not upload local files or sync code.
 
-The Renku submission key is a deterministic 20-character hash derived from the
-Hiraku job ID, within rnk's length limit, for deduplication. The
-returned Renku job name is PSI/J's `native_id` and is used for polling and logs.
 The Renku adapter polls every five seconds while its handle is retained;
 waiting and following read those observations without extra backend queries.
-Transport failures and missing observations
-are logged during observation; they do not establish a terminal
-outcome. Renku's
-combined application output is cached in `stdout.log`; separate stderr and
-numeric exit codes are not exposed by rnk. A known successful terminal state
-returns CLI exit code zero; the stored native exit code remains absent.
+Each `rnk` call allows 20 seconds. Combined output is saved in `stdout.log`;
+separate stderr and numeric exit codes are not exposed by rnk. A known successful
+terminal state returns CLI exit code zero; the stored native exit code remains absent.
 
-This initial adapter uses launcher resources and does not implement PSI/J resource
-requests, staging, or launch hooks. It supports PSI/J `attach()` to observe an
-existing native job; select its project in the executor URL or JobSpec attributes.
-Later commands attach again to resume observation.
+The adapter uses launcher resources; PSI/J resource requests, staging, and launch
+hooks are unsupported.
 
 ## Adding executors
 
-Implement PSI/J's `JobExecutor` contract and provide a standard
-`psij-descriptors/*.py` descriptor in the installed package. Hiraku discovers
-executors through `JobExecutor.get_instance()` without a separate registry.
-See `src/psij-descriptors/renku.py` for an implementation and its descriptor.
-Each custom adapter can live in its own module here (for example, `runai.py`),
-with its own `__PSI_J_EXECUTORS__` list. Do not add an `__init__.py` to this directory.
+Implement PSI/J's `JobExecutor` contract and register a descriptor in an installed
+`psij-descriptors/*.py` module, following `src/psij-descriptors/renku.py`.
+Hiraku discovers executors through `JobExecutor.get_instance()`. Do not add an
+`__init__.py` to the descriptors directory. Standalone PSI/J callers can use
+`detached` with a state-directory URL; without one it uses
+`JobExecutorConfig.work_directory / "detached"`.
 PSI/J's built-in Slurm executor is also discoverable; cluster access, shared
 paths, and scheduler configuration must be supplied by the execution environment.

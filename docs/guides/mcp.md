@@ -91,7 +91,6 @@ for completion. `executor="local"` is an alias for `detached`.
 The detached adapter owns its worker and state;
 Hiraku persists execution identity and final outcomes in `job.json`;
 intermediate observations stay in memory. Use `job_wait` and `job_logs` separately.
-MCP does not expose `job_run`.
 A connected client can run commands with the user's local permissions.
 
 ## Resources and evidence

@@ -9,30 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 - **Breaking:** Move `hiraku runs` to `hiraku leaderboard runs`.
-- Executors own backend polling through reusable in-process PSI/J handles.
-  Hiraku displays their latest observations and persists execution identity and
-  final outcomes; intermediate observations stay in memory.
-
-- Submission defaults to a durable `detached` PSI/J adapter composed with the
-  built-in local executor. The adapter owns worker status and exit codes; Hiraku
-  owns `job.json`. `run` uses the same adapter, streaming and waiting in the
-  foreground; `local` is an alias for `detached` in Hiraku submissions.
-  Python callers use `Job.create()` followed by instance `submit()` or blocking
-  `run()`, which uses the configured executor. Each Job permits one submission.
-  MCP exposes `job_submit`, without `job_run` or a `background` switch.
-
-- Leaderboards enrich traces with Job metadata before querying. Keep the
-  tracking source's `Run.commit` separate from launch provenance on `Job.commit`.
-
-- Job show/list display executor observations for nonfinal jobs and saved final
-  outcomes without querying completed jobs. Snapshot timestamps describe writes,
-  not backend freshness.
-
 - **Breaking:** Commands receive `HIRAKU_JOB_ID` instead of record and Git
-  environment variables. Leaderboards resolve job-linked traces to their saved
-  record and launch provenance. Tracking destinations remain user-managed.
-- **Breaking:** Use `hiraku job run` instead of `hiraku run`. Remove
-  `default_dispatch` and `--dispatch`; invoke project scripts directly.
+  environment variables. Leaderboards resolve record attribution from linked Jobs;
+  `Run.commit` retains source-reported provenance and `Job.commit` records the
+  submitting checkout. Tracking destinations remain user-managed.
+- **Breaking:** Replace record entrypoints and `hiraku launch` / `hiraku run` with
+  `hiraku job run --record ID -- COMMAND [ARGS...]`. Remove `entrypoints`,
+  `default_dispatch`, and `--dispatch`; invoke project scripts directly
+  ([issue #90](https://github.com/SwissDataScienceCenter/hiraku/issues/90),
+  [PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
 
 - MLflow leaderboards use standard tracking URI and experiment environment
   variables when explicit settings are absent, preserving existing defaults.
@@ -44,7 +29,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   attribution. Parameters are discovered automatically.
 - Training code or its environment configures logging destinations.
 
-- **Breaking:** Replace named record entrypoints and `hiraku launch` with `hiraku job run --record ID -- COMMAND [ARGS...]`, which runs the supplied argv in the foreground with record and Git attribution. Existing `entrypoints` fields are no longer accepted ([issue #90](https://github.com/SwissDataScienceCenter/hiraku/issues/90), [PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
 - Render human-readable CLI tables with Rich; JSON output remains available for programmatic use ([PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
 - Separate dashboard performance and trade-off plots into independently placeable components and named cells with their own controls, removing the analysis mode selector.
 - Exclude generated Marimo and Studio session/build caches from distribution archives.
@@ -58,13 +42,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- Select installed PSI/J executors with `--executor`, `--executor-url`, and
-  custom `--attribute KEY VALUE` settings. Add a Renku executor using `rnk`
-  launchers for submission, status polling, cancellation, and combined logs.
-
-- Local PSI/J jobs with foreground and background execution, atomic JSON
-  snapshots and saved logs under `.hiraku/jobs/`. Add `hiraku job
-  run/submit/list/show/logs/wait/cancel` and equivalent MCP tools.
+- Add `Job.create()` with instance `submit()` and blocking `run()`, plus CLI
+  `hiraku job run/submit/list/show/logs/wait/cancel` and MCP job tools. Each Job
+  records one attempt, saved logs, launch provenance, and its final outcome.
+  Executors supply live observations; intermediate status stays in memory.
+- Run local commands through the `detached` PSI/J executor, which survives the
+  submitting process exiting. Select other PSI/J executors with `--executor`,
+  `--executor-url`, and `--attribute KEY VALUE`; the bundled Renku executor uses
+  authenticated `rnk` launchers for submission, status, cancellation, and logs.
 
 - Add `hiraku example list` to list bundled examples with their descriptions.
 - Add project-local Codex and Claude Code hooks installed by `hiraku init` to attribute workflow event attempts to client conversations. Generated MCP and hook commands are portable: `uv run hiraku` when the project contains `uv.lock`, otherwise `hiraku`. Session history records one entry per event attempt with its outcome. Resubmissions for answered instructions return `stale` with the current instruction instead of acknowledging identical duplicates as accepted.
