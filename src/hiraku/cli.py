@@ -767,7 +767,7 @@ def job_submit(
     directory: Path | None,
 ) -> None:
     """Submit a command in the background and return its job ID."""
-    job = Job.submit(
+    job = Job.create(
         command,
         record_id=record_id,
         project=state.project,
@@ -777,12 +777,8 @@ def job_submit(
         attributes=JobAttributes(custom_attributes=dict(attributes))
         if attributes
         else None,
-    )
-    if executor == "local":
-        _run_job(job, follow=True)
+    ).submit()
     click.echo(job.id)
-    if job.status.final and job.submitted_at is None:
-        _exit_job(job)
 
 
 @job_group.command("run")
@@ -803,16 +799,15 @@ def job_run(
     no_follow: bool,
 ) -> None:
     """Submit locally, stream output, and wait for completion."""
-    job = Job.submit(
+    job = Job.create(
         command,
-        executor="local",
         record_id=record_id,
         project=state.project,
         directory=directory,
         attributes=JobAttributes(custom_attributes=dict(attributes))
         if attributes
         else None,
-    )
+    ).submit()
     _run_job(job, follow=not no_follow)
 
 
@@ -919,7 +914,7 @@ def job_wait(state: CLIContext, job_id: str) -> None:
 @click.argument("job_id")
 @click.pass_obj
 def job_cancel(state: CLIContext, job_id: str) -> None:
-    """Request cancellation by the original submitting process."""
+    """Request cancellation through the job's executor."""
     Job.load(job_id, project=state.project).cancel()
 
 

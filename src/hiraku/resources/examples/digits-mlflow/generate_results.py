@@ -113,7 +113,7 @@ def generate(project: Project) -> dict[str, str]:
             str(0.25),
         ]
         for seed in (1, 2, 3):
-            job = Job.run(
+            job = Job.create(
                 [*command, "--seed", str(seed)],
                 record_id=record.id,
                 project=project,
@@ -121,7 +121,7 @@ def generate(project: Project) -> dict[str, str]:
                     "MLFLOW_TRACKING_URI": f"sqlite:///{database}",
                     "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
                 },
-            )
+            ).run()
             status = job.wait()
             if status.exit_code:
                 raise RuntimeError(

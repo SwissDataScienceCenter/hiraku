@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 import psij
-import psutil
 from filelock import FileLock, Timeout
 from psij.serialize import JSONSerializer
 from pydantic import (
@@ -99,7 +98,6 @@ class Job(BaseModel):
     updated_at: AwareDatetime | None = None
     _path: Path = PrivateAttr()
     _env: dict[str, str] = PrivateAttr(default_factory=dict)
-    _native: psij.Job | None = PrivateAttr(default=None)
     _observer: psij.Job | None = PrivateAttr(default=None)
 
     @field_validator("spec", mode="before")
@@ -189,7 +187,7 @@ class Job(BaseModel):
         )
 
     @classmethod
-    def _create(
+    def create(
         cls,
         command: Sequence[str],
         *,
@@ -203,6 +201,8 @@ class Job(BaseModel):
         directory: Path | None = None,
     ) -> Job:
         """Validate and persist a new attempt before execution."""
+        if executor == "local":
+            executor = "detached"
         argv = validate_command(command)
         if argv is None:
             raise ValidationError("command must be an argv sequence")
@@ -228,13 +228,11 @@ class Job(BaseModel):
                 executable=argv[0],
                 arguments=argv[1:],
                 directory=directory
-                or (project.root if executor in {"local", "detached"} else None),
+                or (project.root if executor == "detached" else None),
                 attributes=attributes,
                 resources=resources,
                 environment={"HIRAKU_JOB_ID": job_id},
-                stdin_path=Path(os.devnull)
-                if executor in {"local", "detached"}
-                else None,
+                stdin_path=Path(os.devnull) if executor == "detached" else None,
                 stdout_path=job_directory / "stdout.log",
                 stderr_path=job_directory / "stderr.log",
             ),
@@ -252,93 +250,44 @@ class Job(BaseModel):
         job._save()
         return job
 
-    @classmethod
-    def run(
-        cls,
-        command: Sequence[str],
-        *,
-        project: Project,
-        record_id: str | None = None,
-        env: Mapping[str, str] | None = None,
-        directory: Path | None = None,
-        attributes: psij.JobAttributes | None = None,
-        resources: psij.ResourceSpec | None = None,
-    ) -> Job:
-        """Execute with the native local executor and wait for completion."""
-        job = cls.submit(
-            command,
-            project=project,
-            record_id=record_id,
-            env=env,
-            directory=directory,
-            attributes=attributes,
-            resources=resources,
-            executor="local",
-        )
+    def run(self) -> Job:
+        """Submit and wait using the configured executor; cancel on interruption."""
+        self.submit()
         try:
-            job.wait()
+            self.wait()
         except BaseException:
-            job.cancel()
-            job.wait()
+            self.cancel()
+            self.wait()
             raise
-        return job
+        return self
 
-    @classmethod
-    def submit(
-        cls,
-        command: Sequence[str],
-        *,
-        project: Project,
-        executor: str = "detached",
-        record_id: str | None = None,
-        env: Mapping[str, str] | None = None,
-        executor_url: str | None = None,
-        directory: Path | None = None,
-        attributes: psij.JobAttributes | None = None,
-        resources: psij.ResourceSpec | None = None,
-    ) -> Job:
-        """Submit through PSI/J and persist the accepted execution."""
-        job = cls._create(
-            command,
-            project=project,
-            record_id=record_id,
-            executor=executor,
-            executor_url=executor_url,
-            directory=directory,
-            env=env,
-            attributes=attributes,
-            resources=resources,
-        )
-        with FileLock(str(job._path.with_suffix(".lock"))):
-            job._submit()
-        return job
+    def submit(self) -> Job:
+        """Submit this attempt once through its configured PSI/J executor."""
+        with FileLock(str(self._path.with_suffix(".lock"))):
+            self._reload()
+            if (
+                self.status.state != psij.JobState.NEW
+                or self.native_id is not None
+                or self.submitted_at is not None
+            ):
+                raise ExecutionError(f"Job {self.id} has already been submitted")
+            spec = copy(self.spec)
+            spec.environment = {**(spec.environment or {}), **self._env}
+            native = psij.Job(spec)
+            try:
+                self._executor().submit(native)
+                self.native_id = str(native.native_id)
+                self.submitted_at = datetime.now(UTC)
+                self._set_status(native.status)
+            except Exception as exc:
+                self._set_status(psij.JobStatus(psij.JobState.FAILED, message=str(exc)))
+                self._save()
+                raise ExecutionError(f"Could not submit job {self.id}: {exc}") from exc
+            self._save()
+        return self
 
     def _executor(self) -> psij.JobExecutor:
         return psij.JobExecutor.get_instance(self.executor, url=self.executor_url)
-
-    def _submit(self) -> psij.Job:
-        spec = copy(self.spec)
-        spec.environment = {**(spec.environment or {}), **self._env}
-        native = psij.Job(spec)
-
-        def record_start(_job: psij.Job, status: psij.JobStatus) -> None:
-            if status.state == psij.JobState.ACTIVE:
-                self.started_at = datetime.fromtimestamp(status.time, UTC)
-
-        native.set_job_status_callback(record_start)
-        try:
-            self._executor().submit(native)
-            if self.executor == "local":
-                self._native = native
-            self.native_id = str(native.native_id)
-            self.submitted_at = datetime.now(UTC)
-            self._set_status(native.status)
-        except Exception as exc:
-            self._set_status(psij.JobStatus(psij.JobState.FAILED, message=str(exc)))
-            self._save()
-            raise ExecutionError(f"Could not submit job {self.id}: {exc}") from exc
-        self._save()
-        return native
 
     def _reload(self) -> None:
         """Reload the last saved observation."""
@@ -347,31 +296,9 @@ class Job(BaseModel):
             setattr(self, field, getattr(updated, field))
 
     def update(self) -> None:
-        """Persist owned native-local status, or query the selected backend."""
-        if self._native is not None:
-            if (
-                self._path.parent / "cancel"
-            ).exists() and not self._native.status.final:
-                self._native.cancel()
-                # PSI/J must reap its own child to retain the real exit status.
-                with suppress(psutil.NoSuchProcess):
-                    process = psutil.Process(int(self._native.native_id))
-                    deadline = time.monotonic() + 10
-                    while process.is_running():
-                        if time.monotonic() >= deadline:
-                            raise ExecutionError("Local cancellation timed out")
-                        time.sleep(0.05)
-            self._native.wait(timeout=timedelta(seconds=0.2))
-            self._set_status(self._native.status)
-            self._save()
-            return
+        """Query the selected backend and persist its status."""
         self._reload()
         if self.status.final:
-            return
-        if self.executor == "local":
-            observed = self.updated_at or self.created_at
-            if (datetime.now(UTC) - observed).total_seconds() > 30:
-                raise ExecutionError("Local owner lost; outcome unknown")
             return
         try:
             with FileLock(str(self._path.with_suffix(".lock")), timeout=1):
@@ -439,9 +366,8 @@ class Job(BaseModel):
         return self.status
 
     def cancel(self) -> None:
-        """Request cancellation through the owner or a remote attachment."""
-        if self._native is None:
-            self._reload()
+        """Request cancellation through PSI/J attachment."""
+        self._reload()
         if not self.status.final:
             (self._path.parent / "cancel").touch()
             self.update()

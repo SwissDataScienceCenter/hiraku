@@ -371,7 +371,7 @@ user-managed. Cwd is the project root. `hiraku job submit` returns after
 submission; `hiraku job list/show/logs/wait/cancel` inspects and controls saved jobs
 under `.hiraku/jobs/`. Default submission uses the `detached` PSI/J adapter, which
 owns status and exit codes under `.hiraku/executors/detached/`; only Hiraku updates
-`job.json`. `run` and explicit `submit --executor local` use native foreground execution.
+`job.json`. `run` streams output and waits for the same detached execution.
 Remote jobs have no persistent monitor. `show/list` observe nonfinal jobs
 automatically; use `--cached` for saved observations. Failed updates preserve
 status and `updated_at`; outdated nonfinal jobs are marked stale. `wait` and
@@ -397,8 +397,10 @@ The Python API exposes `Project` in `hiraku.project`; `Record`,
 record loaders and listing functions in `hiraku.record`;
 `Leaderboard` and `Metric` in `hiraku.tracking`; use `Leaderboard.create()`,
 `load()`, `list()`, and `delete()` for definitions;
-`Run` in `hiraku.tracking`; and blocking `Job.run()`, `Job.submit(executor=...)`, `load()`, `list()`, `wait()`,
-`logs()`, and `cancel()` in `hiraku.jobs` for execution.
+`Run` in `hiraku.tracking`; and `Job.create(command, project=..., executor=...)`
+in `hiraku.jobs`, followed by `job.submit()` or blocking `job.run()`.
+Each job permits one submission. Use `Job.load()`, `Job.list()`, `job.wait()`,
+`job.logs()`, and `job.cancel()` to inspect and control execution.
 Records with `type: context` store supporting material. Workflows run in the
 current coding agent through the Hiraku MCP server (`hiraku mcp serve`). V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.
