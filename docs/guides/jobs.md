@@ -11,11 +11,9 @@ hiraku job submit --record baseline -- python train.py
 Without `--record`, the active record is used. Commands run in the project root,
 including uncommitted changes. Foreground execution prints the job ID to stderr,
 streams saved output, and returns the command's exit code. Background execution
-prints the ID to stdout and returns after acceptance. `run` uses PSI/J's native
-`local` executor and owns execution until completion. `submit` defaults to our
-`detached` executor, whose worker runs independently of the submitting process.
-An explicit `submit --executor local` uses native local execution in the foreground,
-streaming and waiting just like `run`.
+prints the ID to stdout and returns after acceptance. Both use the `detached`
+executor, whose worker runs independently of the submitting process. `run` adds
+streaming and waiting; `submit --executor local` is an alias for `detached`.
 `run --no-follow` saves logs without streaming them. Commands have closed stdin;
 interactive terminal applications are not supported.
 
@@ -34,8 +32,7 @@ hiraku job wait JOB_ID
 hiraku job cancel JOB_ID
 ```
 
-`show` and `list` automatically observe nonfinal jobs through PSI/J attachment,
-except native `local` jobs, whose owning foreground process publishes snapshots.
+`show` and `list` automatically observe nonfinal jobs through PSI/J attachment.
 Observations query the selected backend and persist status
 and logs where supported. Final jobs are left unchanged. Use `--cached` to read
 saved observations without contacting a backend. Listing observes jobs sequentially;
@@ -58,9 +55,8 @@ Hiraku does not launch a generic submission runner. `wait` and
 and returns the job's exit code; `logs` alone prints saved output and returns.
 Observation failure stops waiting/following with an error, leaving the job running.
 
-Cancellation attaches through PSI/J for detached and remote jobs. The detached
-adapter requests cancellation from its worker. Native local jobs accept a request
-that their owning foreground process handles.
+Cancellation attaches through PSI/J. The detached adapter requests cancellation
+from its worker.
 Ctrl-C during foreground waiting
 requests cancellation and waits for cleanup. Stopping log following does not
 cancel a job. Interrupting `job wait` also stops observation only.
@@ -99,12 +95,6 @@ Hiraku uses the project path above. Standalone PSI/J callers can use
 `JobExecutorConfig.work_directory / "detached"`. Attachment must select the
 same state directory. Nonfinal execution can only be observed on its original host.
 
-Native local execution has no separate backend state file: its owning Hiraku
-process retains the original PSI/J handle and updates `job.json`. Later readers
-use that snapshot; they never attach to the PID to infer an exit code. Losing the
-owner leaves a stale nonfinal snapshot, reported as an unknown outcome after
-30 seconds. Background it using your shell only while retaining that process.
-
 Remote jobs can outlive the submitting host. Later commands observe them using
 PSI/J attachment. While a Job object is used, its attached PSI/J handle may poll;
 our adapters stop their observation loops when that handle is discarded or final.
@@ -133,20 +123,29 @@ Unknown or missing Job IDs preserve the trace's own record attribution; traces
 without it remain unattributed. Malformed Job snapshots raise an error.
 Existing directly attributed traces can still be queried without job history.
 
-Python callers use blocking `Job.run(command, project=project)`,
-`Job.submit(command, project=project, executor="renku", ...)`, `Job.load(id,
-project=project)`, and `Job.list(project=project)` from `hiraku.jobs`.
+Python callers create an attempt before executing it:
+
+```python
+from hiraku.jobs import Job
+
+job = Job.create(["python", "train.py"], project=project)
+job.submit()  # Return after acceptance; use job.wait() for completion.
+# Alternatively: Job.create(command, project=project, executor="renku", ...).run()
+```
+
+`Job.create()` validates and saves a `NEW` attempt without contacting an executor.
+It accepts `record_id`, `env`, `executor`, `executor_url`, `directory`, native
+PSI/J `attributes`, and `resources`. The default executor is `detached`;
+`local` selects the same adapter, which preserves PSI/J attributes and resources.
+Explicit environment additions stay in memory; submit the created object to
+retain them. They are not stored in snapshots.
+`job.submit()` and `job.run()` both return the job and allow only one submission
+per attempt, including failed attempts. Retry with a new `Job.create()`.
+`job.run()` submits using the configured executor, waits, and cancels on
+interruption. It does not stream output; the CLI owns foreground streaming.
 A Job exposes PSI/J's `spec` (`JobSpec`) and `status` (`JobStatus`);
 `job.wait()` returns a PSI/J status, `job.logs(follow=True)` yields output,
-and `job.cancel()` requests cancellation. `Job.submit()` also accepts `executor`,
-`executor_url`, `directory`, native PSI/J `attributes`, and `resources`.
-`Job.run()` accepts local `directory`, `env`, `attributes`, and `resources`, and
-blocks until completion. The CLI owns foreground streaming; the Python API does
-not expose output callbacks. `Job.submit()` defaults to `executor="detached"`.
-With explicit `executor="local"`, the caller must keep the process alive and
-call `job.wait()` or `job.logs(follow=True)` to record native local completion.
-The detached adapter composes the built-in executor, preserving PSI/J attributes
-and resources.
+and `job.cancel()` requests cancellation.
 `Job.load()` and `Job.list()` read snapshots without network access;
 `job.update()` observes once and raises `ExecutionError` if observation fails,
 leaving the saved snapshot unchanged. `job.status.state` is the sole execution
@@ -159,8 +158,7 @@ State names follow PSI/J:
 MCP provides `job_submit` (default executor: `detached`), `job_list`,
 `job_show` (both accepting `cached`), `job_wait`, `job_logs`,
 and `job_cancel`. Submission returns Job metadata after startup/acceptance;
-use `job_wait` and `job_logs` separately. Explicit `executor="local"` waits in the
-tool call for foreground completion. There is no `background` switch.
+use `job_wait` and `job_logs` separately. There is no `background` switch.
 
 ## Renku through rnk
 

@@ -309,7 +309,7 @@ def test_submit_tool_defaults_to_detached_execution(tmp_path: Path) -> None:
             "stdout": "out\n",
             "stderr": "err\n",
         }
-        foreground = await server.call_tool(
+        submitted = await server.call_tool(
             "job_submit",
             {
                 "executor": "local",
@@ -317,7 +317,11 @@ def test_submit_tool_defaults_to_detached_execution(tmp_path: Path) -> None:
                 "command": [sys.executable, "-c", "raise SystemExit(3)"],
             },
         )
-        assert foreground.structured_content["status"]["exit_code"] == 3
+        assert submitted.structured_content["executor"] == "detached"
+        completed = await server.call_tool(
+            "job_wait", {"job_id": submitted.structured_content["id"]}
+        )
+        assert completed.structured_content["status"]["exit_code"] == 3
 
     asyncio.run(exercise())
 

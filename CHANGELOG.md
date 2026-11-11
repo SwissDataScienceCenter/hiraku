@@ -15,8 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Submission defaults to a durable `detached` PSI/J adapter composed with the
   built-in local executor. The adapter owns worker status and exit codes; Hiraku
-  owns `job.json`. `run` and explicit `local` submissions use native foreground
-  execution. Public output callbacks have been removed from `Job.run()`.
+  owns `job.json`. `run` uses the same adapter, streaming and waiting in the
+  foreground; `local` is an alias for `detached` in Hiraku submissions.
+  Python callers use `Job.create()` followed by instance `submit()` or blocking
+  `run()`, which uses the configured executor. Each Job permits one submission.
   MCP exposes `job_submit`, without `job_run` or a `background` switch.
 
 - Leaderboards enrich traces with Job metadata before querying. Keep the

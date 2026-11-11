@@ -64,7 +64,9 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     assert result.exit_code == 0, result.output
     assert len(json.loads(result.output)) == 9
     training = runpy.run_path(str(project / "train.py"))
-    job = Job.run([sys.executable, "-c", "pass"], project=config, record_id=forest.id)
+    job = Job.create(
+        [sys.executable, "-c", "pass"], project=config, record_id=forest.id
+    ).run()
     job.wait()
     training["append_run"](
         project / "runs.csv",

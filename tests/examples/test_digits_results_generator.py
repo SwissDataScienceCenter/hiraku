@@ -148,7 +148,7 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         "--validation-fraction",
         "0.25",
     ]
-    job = Job.run(
+    job = Job.create(
         command,
         record_id=weak.id,
         project=config,
@@ -156,6 +156,6 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
             "MLFLOW_TRACKING_URI": f"sqlite:///{config.root / 'mlflow.db'}",
             "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
         },
-    )
+    ).run()
     assert job.wait().exit_code == 0
     assert len(leaderboard.list_runs(config)) == 7

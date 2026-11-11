@@ -237,7 +237,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         directory: str | None = None,
     ) -> dict[str, Any]:
         """Submit through PSI/J and return after acceptance, without waiting."""
-        job = Job.submit(
+        job = Job.create(
             command,
             record_id=record_id,
             project=selected,
@@ -247,9 +247,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             attributes=JobAttributes(custom_attributes=attributes)
             if attributes
             else None,
-        )
-        if executor == "local":
-            job.wait()
+        ).submit()
         return job.model_dump(mode="json")
 
     @server.tool(

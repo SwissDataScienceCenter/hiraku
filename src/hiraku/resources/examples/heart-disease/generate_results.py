@@ -122,11 +122,11 @@ def generate(project: Project) -> None:
             str(fraction),
         ]
         for seed in (1, 2, 3):
-            job = Job.run(
+            job = Job.create(
                 [*command, "--seed", str(seed)],
                 record_id=record.id,
                 project=project,
-            )
+            ).run()
             status = job.wait()
             if status.exit_code:
                 raise RuntimeError(
