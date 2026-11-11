@@ -1,4 +1,14 @@
 /* Reusable component styles shared by the notebook and Studio view. */
+.record-metadata { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 18px; font: 13px/1.5 system-ui; margin: 0 0 16px; }
+.record-metadata dt { opacity: 0.65; }
+.record-metadata dd { margin: 0; overflow-wrap: anywhere; }
+.record-runs, .record-raw { margin: 10px 0; font: 13px/1.5 system-ui; }
+.record-runs summary, .record-raw summary { cursor: pointer; }
+.record-raw pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.record-markdown { font: 14px/1.55 system-ui; }
+.record-markdown p { margin: 0 0 0.65em; }
+.record-markdown h1, .record-markdown h2, .record-markdown h3 { margin: 1em 0 0.4em; }
+.record-markdown ul, .record-markdown ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
 .record-navigation-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .record-navigation-header h2 { margin: 0; font: 600 18px/1.4 system-ui, sans-serif; }
 .record-navigation-mode { display: flex; justify-content: flex-end; margin-left: auto; }

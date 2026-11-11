@@ -84,6 +84,8 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "run_details",
         "performance_plot",
         "tradeoff_plot",
+        "workflow_selection",
+        "workflow_details",
     }
     assert {
         "data_setup",

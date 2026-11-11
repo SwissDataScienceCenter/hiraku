@@ -132,6 +132,11 @@ come from the leaderboard; parameters are discovered automatically.
 
 ## Sections
 
+The main tabs switch between **Experiment Workspace** and **Workflows**.
+Workflows lists local LangGraph workflows and displays their Markdown documentation
+and an expandable diagram. Diagram errors stay within that panel. Browsing does
+not start a workflow; producing a diagram imports the workflow's Python module.
+
 **Record navigation**
 :   Choose the **Files** (default) or **Lineage** tab in the left sidebar.
     Records show their title above a smaller bundle-relative ID, with type and
@@ -169,8 +174,10 @@ come from the leaderboard; parameters are discovered automatically.
     one is available.
 
 **Record**
-:   Expandable YAML front matter labeled with the selected record's ID,
-    followed by its Markdown body.
+:   A compact summary of local metadata, expandable runs and raw front matter,
+    followed by its Markdown body. Commit and branch links are shown when the
+    project's actual Git origin points to GitHub. Run links use the tracking
+    backend's HTTP(S) URL when available; missing links stay plain text.
     Click the pen to edit the body, then **Save** to write it back or **Cancel**
     to discard the draft. Front matter stays read-only. Drafts remain available
     when switching between records in the same session. Save errors keep the

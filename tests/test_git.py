@@ -19,6 +19,29 @@ def _git(path: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "git@github.com:team/repo.git",
+        "https://github.com/team/repo.git",
+        "ssh://git@github.com/team/repo.git",
+    ],
+)
+def test_dashboard_github_origin(tmp_path, origin):
+    pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    from hiraku.dashboard.data import github_repository
+
+    project, repository = _repository(tmp_path)
+    assert repository.origin_url is None
+    assert github_repository(project) is None
+    _git(tmp_path, "remote", "add", "origin", origin)
+    assert repository.origin_url == origin
+    assert github_repository(project) == "https://github.com/team/repo"
+    _git(tmp_path, "remote", "set-url", "origin", "https://gitlab.com/team/repo")
+    assert github_repository(project) is None
+
+
 def _repository(tmp_path: Path) -> tuple[Project, GitRepository]:
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "config", "user.email", "test@example.invalid")

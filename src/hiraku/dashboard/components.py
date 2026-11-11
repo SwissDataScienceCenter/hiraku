@@ -12,6 +12,7 @@ import html
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import altair as alt
 import marimo as mo
@@ -35,6 +36,8 @@ def markdown_view(
     *,
     editor: MarkdownEditor | None = None,
     empty_message: str = "This record has no Markdown.",
+    repository_url: str | None = None,
+    runs: Sequence[Mapping[str, Any]] = (),
 ) -> mo.Html:
     """Render a Record's front matter and Markdown body.
 
@@ -42,12 +45,75 @@ def markdown_view(
     opt into editing; without one this is a read-only viewer.
     """
     if editor is not None:
-        return editor.render(record, empty_message=empty_message)
+        return editor.render(
+            record,
+            empty_message=empty_message,
+            repository_url=repository_url,
+            runs=runs,
+        )
     if record is None:
         return mo.md("No record selected.")
     body = mo.md(record.markdown if record.markdown.strip() else empty_message)
-    metadata = mo.Html(f"<pre>{html.escape(dump_yaml(record.metadata))}</pre>")
-    return mo.vstack([mo.accordion({record.id: metadata}), body])
+    metadata = record_summary(record, repository_url=repository_url, runs=runs)
+    return mo.vstack(
+        [metadata, mo.Html(f'<div class="record-markdown">{body.text}</div>')]
+    )
+
+
+def record_summary(
+    record: Record,
+    *,
+    repository_url: str | None = None,
+    runs: Sequence[Mapping[str, Any]] = (),
+) -> mo.Html:
+    """Render local metadata and optional links supplied by the caller."""
+    rows = []
+    values = {"id": record.id, **record.metadata}
+    for field in (
+        "id",
+        "state",
+        "summary",
+        "description",
+        "goal",
+        "hypothesis",
+        "decision",
+        "parent_id",
+        "related_to",
+        "commit",
+        "branch",
+    ):
+        value = values.get(field)
+        if value is None or value == "" or value == []:
+            continue
+        text = ", ".join(map(str, value)) if isinstance(value, list) else str(value)
+        display = html.escape(text)
+        if field in {"commit", "branch"} and safe_url(repository_url):
+            route = "commit" if field == "commit" else "tree"
+            url = f"{repository_url.rstrip('/')}/{route}/{quote(text, safe='')}"
+            display = (
+                f'<a href="{html.escape(url, quote=True)}" target="_blank" '
+                f'rel="noopener noreferrer">{display}</a>'
+            )
+        rows.append(f"<dt>{field}</dt><dd>{display}</dd>")
+    items = []
+    for run in runs:
+        label = html.escape(str(run["run"]))
+        url = safe_url(run.get("url"))
+        if url:
+            source = html.escape(str(run.get("source") or "tracking backend"))
+            label = (
+                f'<a href="{html.escape(url, quote=True)}" target="_blank" '
+                f'rel="noopener noreferrer">{label} · {source}</a>'
+            )
+        items.append(f"<li>{label}</li>")
+    raw = html.escape(dump_yaml(record.metadata))
+    return mo.Html(
+        f'<dl class="record-metadata">{"".join(rows)}</dl>'
+        f'<details class="record-runs"><summary>Runs ({len(items)})</summary>'
+        f"<ul>{''.join(items)}</ul></details>"
+        '<details class="record-raw"><summary>Raw frontmatter · '
+        f"{html.escape(record.id)}</summary><pre>{raw}</pre></details>"
+    )
 
 
 @dataclass
@@ -105,6 +171,8 @@ class MarkdownEditor:
         record: Record | None,
         *,
         empty_message: str = "This record has no Markdown.",
+        repository_url: str | None = None,
+        runs: Sequence[Mapping[str, Any]] = (),
     ) -> mo.Html:
         """Show the record or its draft, retaining drafts across selections."""
         if record is None:
@@ -122,7 +190,12 @@ class MarkdownEditor:
             return mo.vstack(
                 [
                     mo.Html(f'<div class="hiraku-markdown-controls">{controls}</div>'),
-                    markdown_view(record, empty_message=empty_message),
+                    markdown_view(
+                        record,
+                        empty_message=empty_message,
+                        repository_url=repository_url,
+                        runs=runs,
+                    ),
                 ]
             )
         editor = mo.ui.code_editor(

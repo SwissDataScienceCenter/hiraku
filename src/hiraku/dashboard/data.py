@@ -17,7 +17,10 @@ from urllib.parse import urlsplit
 import pandas as pd
 import pyarrow as pa
 
+from ..errors import GitError
+from ..git import GitRepository
 from ..io import dump_yaml
+from ..project import Project
 from ..record import Record
 from ..tracking import Run
 
@@ -43,6 +46,23 @@ RECORD_COLUMNS = (
     "commit",
     "description",
 )
+
+
+def github_repository(project: Project) -> str | None:
+    """Resolve a github.com origin to a browser URL; missing Git is optional."""
+    try:
+        origin = GitRepository(project.root).origin_url or ""
+    except GitError:
+        return None
+    if origin.startswith("git@github.com:"):
+        origin = "https://github.com/" + origin.removeprefix("git@github.com:")
+    parsed = urlsplit(origin)
+    if parsed.hostname != "github.com" or parsed.scheme not in {"https", "ssh"}:
+        return None
+    parts = parsed.path.strip("/").removesuffix(".git").split("/")
+    if len(parts) != 2 or not all(parts):
+        return None
+    return "https://github.com/" + "/".join(parts)
 
 
 def lineage_records(

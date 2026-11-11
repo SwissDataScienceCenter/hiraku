@@ -1,5 +1,26 @@
 /* Resize only the presentation layout; notebook state stays independent. */
 (() => {
+  const tabs = [...document.querySelectorAll('.workspace-tabs [role="tab"]')];
+  const activate = (tab) => {
+    tabs.forEach((item) => {
+      const selected = item === tab;
+      item.setAttribute("aria-selected", String(selected));
+      item.tabIndex = selected ? 0 : -1;
+      document.getElementById(item.getAttribute("aria-controls")).hidden = !selected;
+    });
+    window.dispatchEvent(new Event("resize"));
+  };
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => activate(tab));
+    tab.addEventListener("keydown", (event) => {
+      const next = { ArrowRight: (index + 1) % tabs.length,
+        ArrowLeft: (index + tabs.length - 1) % tabs.length, Home: 0, End: tabs.length - 1 };
+      if (!(event.key in next)) return;
+      event.preventDefault();
+      tabs[next[event.key]].focus();
+      activate(tabs[next[event.key]]);
+    });
+  });
   const layout = document.querySelector(".dashboard-layout");
   const sidebar = document.querySelector(".record-navigation");
   const divider = document.querySelector(".dashboard-divider");
@@ -8,7 +29,7 @@
   const narrow = matchMedia("(max-width: 900px)");
   let drag = null;
   const resize = (width) => {
-    if (narrow.matches) return;
+    if (narrow.matches || !layout.clientWidth) return;
     const maximum = Math.min(600, layout.clientWidth - 390);
     const next = Math.round(Math.max(240, Math.min(maximum, width)));
     layout.style.setProperty("--record-sidebar-width", `${next}px`);

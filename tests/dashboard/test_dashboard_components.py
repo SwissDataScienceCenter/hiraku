@@ -121,6 +121,35 @@ def test_record_navigation_displays_title_and_secondary_id(renderer):
     assert set(buttons) == {"folder/record"}
 
 
+def test_record_summary_links_and_collapsible_metadata():
+    record = Record(
+        id="example",
+        title="Example",
+        type="task",
+        state="done",
+        commit="a" * 40,
+        branch="feature/test",
+        hypothesis="<check>",
+    )
+    summary = hc.record_summary(
+        record,
+        repository_url="https://github.com/team/repo",
+        runs=[
+            {"run": "r1", "source": "mlflow", "url": "https://mlflow.test/r1"},
+            {"run": "r2", "url": "javascript:alert(1)"},
+        ],
+    ).text
+    assert "https://github.com/team/repo/commit/" + "a" * 40 in summary
+    assert "https://github.com/team/repo/tree/feature%2Ftest" in summary
+    assert "https://mlflow.test/r1" in summary
+    assert "javascript:" not in summary
+    assert "&lt;check&gt;" in summary
+    assert "Runs (2)" in summary
+    assert "<details" in summary and "Raw frontmatter" in summary
+    plain = hc.record_summary(record).text
+    assert "<a " not in plain
+
+
 def test_record_filter_chips_keep_options_and_report_toggle_callbacks():
     records = [
         Record(id="a", type="note", state="draft"),
