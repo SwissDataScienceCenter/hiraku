@@ -25,6 +25,7 @@ from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E4
 
 from hiraku.cli import main  # noqa: E402
 from hiraku.errors import ValidationError  # noqa: E402
+from hiraku.jobs import Job
 from hiraku.mcp import (  # noqa: E402
     WorkflowApproval,
     create_server,
@@ -274,7 +275,7 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
             {"record_id": "demo/demo", "title": "demo", "fields": {"type": "task"}},
         )
         result = await server.call_tool(
-            "execute",
+            "job_submit",
             {
                 "record_id": "demo/demo",
                 "command": [
@@ -285,8 +286,11 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
                 ],
             },
         )
-        assert result.structured_content == {
-            "returncode": 7,
+        content = dict(result.structured_content)
+        job = content.pop("job")
+        assert Job.load(job["id"], project=config).record_id == "demo/demo"
+        assert job["status"]["exit_code"] == 7
+        assert content == {
             "stdout": "out\n",
             "stderr": "err\n",
         }

@@ -147,8 +147,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert (config.workflows_dir / "collaborative" / "workflow.md").is_file()
     assert not (config.hiraku_dir / "programs").exists()
     assert not (config.hiraku_dir / "actions").exists()
-    assert config.default_dispatch is None
-    assert not config.dispatch_dir.exists()
+    assert not hasattr(config, "default_dispatch")
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
     assert codex_skill.is_file()
@@ -261,7 +260,6 @@ def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
     assert Project.load(config.path).active_record_id == first.id
     assert set(config.to_dict()) == {
         "hiraku_dir",
-        "default_dispatch",
         "active_record_id",
     }
 

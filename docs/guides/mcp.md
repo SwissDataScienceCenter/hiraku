@@ -72,7 +72,9 @@ and fall back to the CLI when the host has not connected the server.
 | `leaderboard_list` | List leaderboard names without loading definitions, like `hiraku leaderboard list --json`. |
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
-| `execute` | Run a command in the foreground and return its exit code, stdout, and stderr. |
+| `job_submit` | Submit a local PSI/J job; wait by default or set `background`. Return Job metadata and saved output. |
+| `job_list`, `job_show` | Observe jobs automatically; pass `cached` for saved observations. |
+| `job_wait`, `job_logs`, `job_cancel` | Read saved output or request cancellation. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
@@ -83,8 +85,9 @@ the Markdown body. Explicit `null` values are retained in metadata. IDs and pers
 paths and the organizational parent cannot be changed through the update tool.
 Expected failures are returned as MCP tool errors.
 
-`execute` requires explicit command arguments. Commands are not stored in
-records. It waits for completion and returns the exit code, stdout, and stderr.
+`job_submit` requires explicit command arguments. Commands are not stored in
+records. It waits by default, returning the Job (including PSI/J status), stdout,
+and stderr. Set `background` to return after submission.
 A connected client can run commands with the user's local permissions.
 
 ## Resources and evidence

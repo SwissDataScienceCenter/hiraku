@@ -20,7 +20,7 @@ def test_root_help_lists_primary_commands() -> None:
     result = invoke("--help")
 
     assert result.exit_code == 0
-    for command in ("init", "record", "run", "leaderboard", "workflow"):
+    for command in ("init", "record", "job", "leaderboard", "workflow"):
         assert command in result.output
 
 
@@ -343,6 +343,7 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-qm", "records"], cwd=tmp_path, check=True)
     result = invoke(
+        "job",
         "run",
         "--record",
         "root/child/child",

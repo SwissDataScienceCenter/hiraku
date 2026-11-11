@@ -67,7 +67,7 @@ def create_overlay_project(tmp_path: Path, monkeypatch) -> tuple[Path, CliRunner
         gitignore.read_text(encoding="utf-8")
         + "\n# Hiraku local files and run artifacts\n"
         + "/.agents/\n/.claude/\n/.codex/\n/.pi/\n/.mcp.json\n/hiraku/*\n"
-        + "/hiraku.yml\n"
+        + "/hiraku.yml\n/.hiraku/\n"
         + "!/hiraku/records/\n"
         + "/task.md\n"
         + "/runs.csv\n/run.log\n",
@@ -108,7 +108,6 @@ def test_autoresearch_is_an_overlay() -> None:
     expected = {
         "README.md",
         "example.yml",
-        "src/hiraku.yml",
         "src/hiraku/leaderboards/default.yml",
         "src/task.md",
         "src/cpu_mock.py",
@@ -212,7 +211,6 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert task.type == "task"
     assert not hasattr(task, "command")
     config = Project.discover(project)
-    assert config.default_dispatch == "autoresearch.sh"
     assert "autoresearch" in workflow_ids(project=config)
     assert "collaborative" in workflow_ids(project=config)
     response = start_workflow("autoresearch", project=config)
@@ -225,7 +223,7 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
 
 
 @LINUX_ONLY
-def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
+def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch):
     project, runner = create_overlay_project(tmp_path, monkeypatch)
     invoke(
         runner,
@@ -247,14 +245,15 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
     git(project, "commit", "-m", "add cpu test record")
     commit = git(project, "rev-parse", "HEAD")
 
-    invoke(
+    result = invoke(
         runner,
         [
+            "job",
             "run",
             "--record",
             "sep10/cpu-test",
-            "--dispatch",
-            "autoresearch",
+            "--",
+            "./hiraku/dispatch/autoresearch.sh",
             "--",
             sys.executable,
             "cpu_mock.py",
@@ -263,7 +262,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
         ],
     )
 
-    assert "val_bpb: 0.900000" in capfd.readouterr().out
+    assert "val_bpb: 0.900000" in result.stdout
     rows = json.loads(
         invoke(
             runner,
@@ -288,7 +287,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
 
 
 @LINUX_ONLY
-def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
+def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch):
     _, runner = create_overlay_project(tmp_path, monkeypatch)
     invoke(
         runner,
@@ -310,11 +309,12 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
     failed = runner.invoke(
         main,
         [
+            "job",
             "run",
             "--record",
             "sep10/failure",
-            "--dispatch",
-            "autoresearch",
+            "--",
+            "./hiraku/dispatch/autoresearch.sh",
             "--",
             sys.executable,
             "cpu_mock.py",
@@ -323,7 +323,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
     )
 
     assert failed.exit_code != 0
-    assert "val_bpb: 0.000000" in capfd.readouterr().out
+    assert "val_bpb: 0.000000" in failed.stdout
     rows = json.loads(
         invoke(
             runner,
@@ -344,8 +344,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
 def dispatcher_environment(root: Path) -> dict[str, str]:
     return {
         **os.environ,
-        "HIRAKU_TRACKING_ROOT": str(root),
-        "HIRAKU_RECORD_ID": "cpu-test",
+        "HIRAKU_JOB_ID": "a" * 32,
     }
 
 

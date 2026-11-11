@@ -17,6 +17,7 @@ from typing import Any
 
 import click
 import yaml
+from psij import JobAttributes
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 from rich import box, print_json
@@ -29,9 +30,10 @@ from .errors import (
     NoActiveRecordError,
     ValidationError,
 )
-from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
+from .job_view import job_view
+from .jobs import Job
 from .project import Project
 from .record import Record, validate_identifier
 from .tracking import Leaderboard, Run
@@ -67,6 +69,7 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, Run):
         return {
             "id": value.id,
+            "job_id": value.job_id,
             "metrics": _json_value(value.metrics),
             "params": _json_value(value.params),
             "record_id": value.record_id,
@@ -729,29 +732,193 @@ def workflow_resume_command(
     )
 
 
-@main.command("run")
+@main.group("job")
+def job_group() -> None:
+    """Submit, inspect, and cancel local PSI/J jobs."""
+
+
+def _exit_job(job: Job) -> None:
+    code = job.status.exit_code
+    if code is None:
+        code = {"COMPLETED": 0, "CANCELED": 130}.get(job.status.state.name, 1)
+    if job.status.message:
+        click.echo(job.status.message, err=True)
+    raise click.exceptions.Exit(128 - code if code < 0 else code)
+
+
+@job_group.command("submit")
 @click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
+@click.option("--executor", default="local", show_default=True)
+@click.option("--executor-url")
 @click.option(
-    "--dispatch", help="Dispatcher name from the project's dispatch directory."
+    "--attribute", "attributes", type=(str, str), multiple=True, metavar="KEY VALUE"
 )
-@click.pass_context
-def run_command(
-    context: click.Context,
+@click.option("--directory", type=click.Path(path_type=Path))
+@click.pass_obj
+def job_submit(
+    state: CLIContext,
     command: tuple[str, ...],
     record_id: str | None,
-    dispatch: str | None,
+    executor: str,
+    executor_url: str | None,
+    attributes: tuple[tuple[str, str], ...],
+    directory: Path | None,
 ) -> None:
-    """Run a project command in the foreground."""
-    state: CLIContext = context.obj
-    result = execute_command(
+    """Submit a command in the background and return its job ID."""
+    job = Job.submit(
         command,
         record_id=record_id,
-        dispatch=dispatch,
         project=state.project,
+        executor=executor,
+        executor_url=executor_url,
+        directory=directory,
+        attributes=JobAttributes(custom_attributes=dict(attributes))
+        if attributes
+        else None,
     )
-    code = result.returncode
-    raise click.exceptions.Exit(128 - code if code < 0 else code)
+    click.echo(job.id)
+    if job.status.final and job.submitted_at is None:
+        _exit_job(job)
+
+
+@job_group.command("run")
+@click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
+@click.option("--record", "record_id")
+@click.option("--executor", default="local", show_default=True)
+@click.option("--executor-url")
+@click.option(
+    "--attribute", "attributes", type=(str, str), multiple=True, metavar="KEY VALUE"
+)
+@click.option("--directory", type=click.Path(path_type=Path))
+@click.pass_obj
+def job_run(
+    state: CLIContext,
+    command: tuple[str, ...],
+    record_id: str | None,
+    executor: str,
+    executor_url: str | None,
+    attributes: tuple[tuple[str, str], ...],
+    directory: Path | None,
+) -> None:
+    """Run a command in the foreground, streaming output and waiting for exit."""
+    job = Job.submit(
+        command,
+        record_id=record_id,
+        project=state.project,
+        executor=executor,
+        executor_url=executor_url,
+        directory=directory,
+        attributes=JobAttributes(custom_attributes=dict(attributes))
+        if attributes
+        else None,
+    )
+    click.echo(job.id, err=True)
+    try:
+        for name, text in job.logs(follow=True):
+            click.echo(text, nl=False, err=name == "stderr")
+    except KeyboardInterrupt:
+        job.cancel()
+        job.wait()
+        raise
+    _exit_job(job)
+
+
+@job_group.command("list")
+@click.option("--record", "record_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.option("--cached", is_flag=True, help="Use saved observations without querying.")
+@click.pass_obj
+def job_list(
+    state: CLIContext,
+    record_id: str | None,
+    json_output: bool,
+    cached: bool,
+) -> None:
+    """List the last recorded observations of jobs."""
+    jobs = Job.list(project=state.project, record_id=record_id)
+    views = [job_view(job, cached=cached) for job in jobs]
+    if json_output:
+        _emit_json(views)
+    else:
+        _print_table(
+            ("id", "record", "executor", "state", "native_id"),
+            [
+                (
+                    job.id,
+                    job.record_id,
+                    job.executor,
+                    f"UNKNOWN ({job.status.state.name})"
+                    if view["observation_error"]
+                    else view["state"],
+                    job.native_id,
+                )
+                for job, view in zip(jobs, views, strict=True)
+            ],
+        )
+
+
+@job_group.command("show")
+@click.argument("job_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.option("--cached", is_flag=True, help="Use saved observations without querying.")
+@click.pass_obj
+def job_show(state: CLIContext, job_id: str, json_output: bool, cached: bool) -> None:
+    """Show one saved job."""
+    job = Job.load(job_id, project=state.project)
+    view = job_view(job, cached=cached)
+    if json_output:
+        _emit_json(view)
+    else:
+        _print_table(
+            ("field", "value"),
+            [
+                ("id", job.id),
+                ("record", job.record_id),
+                ("executor", job.executor),
+                ("state", view["state"]),
+                ("last_known", job.status.state.name),
+                ("observation_error", view["observation_error"]),
+                ("native_id", job.native_id),
+                (
+                    "command",
+                    shlex.join([job.spec.executable, *(job.spec.arguments or [])]),
+                ),
+                ("directory", job.spec.directory),
+                ("commit", job.commit),
+                ("git_state", job.git_state),
+                ("exit_code", job.status.exit_code),
+                ("message", job.status.message),
+            ],
+        )
+
+
+@job_group.command("wait")
+@click.argument("job_id")
+@click.pass_obj
+def job_wait(state: CLIContext, job_id: str) -> None:
+    """Wait without replaying logs and return the command's exit code."""
+    job = Job.load(job_id, project=state.project)
+    job.wait()
+    _exit_job(job)
+
+
+@job_group.command("cancel")
+@click.argument("job_id")
+@click.pass_obj
+def job_cancel(state: CLIContext, job_id: str) -> None:
+    """Request cancellation by the original submitting process."""
+    Job.load(job_id, project=state.project).cancel()
+
+
+@job_group.command("logs")
+@click.argument("job_id")
+@click.option("--follow", is_flag=True)
+@click.pass_obj
+def job_logs(state: CLIContext, job_id: str, follow: bool) -> None:
+    """Read saved output; stopping observation does not cancel execution."""
+    for name, text in Job.load(job_id, project=state.project).logs(follow=follow):
+        click.echo(text, nl=False, err=name == "stderr")
 
 
 @main.group("leaderboard")

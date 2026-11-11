@@ -7,9 +7,7 @@ from pathlib import Path
 
 FIELDS = [
     "id",
-    "record_id",
-    "commit",
-    "git_state",
+    "hiraku_job_id",
     "timestamp",
     "duration",
     "param.seed",
@@ -27,7 +25,7 @@ expected = [0, 1, 1, 0]
 predicted = [int(value >= 0.5) for value in [0.1, 0.8, 0.7, 0.2]]
 accuracy = sum(a == b for a, b in zip(expected, predicted, strict=True)) / len(expected)
 
-runs_file = Path(os.environ["HIRAKU_TRACKING_ROOT"]) / "runs.csv"
+runs_file = Path("runs.csv")
 write_header = not runs_file.exists() or runs_file.stat().st_size == 0
 
 with runs_file.open("a", encoding="utf-8", newline="") as stream:
@@ -37,9 +35,7 @@ with runs_file.open("a", encoding="utf-8", newline="") as stream:
     writer.writerow(
         {
             "id": uuid.uuid4().hex,
-            "record_id": os.environ["HIRAKU_RECORD_ID"],
-            "commit": os.environ.get("HIRAKU_COMMIT", ""),
-            "git_state": os.environ["HIRAKU_GIT_STATE"],
+            "hiraku_job_id": os.environ["HIRAKU_JOB_ID"],
             "timestamp": started.isoformat(),
             "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
             "param.seed": args.seed,

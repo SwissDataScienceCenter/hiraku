@@ -38,7 +38,11 @@ class GitError(HirakuError):
 
 
 class ExecutionError(HirakuError):
-    """A foreground command could not be started or configured."""
+    """A job could not be submitted, stored, or observed."""
+
+
+class JobNotFoundError(ExecutionError):
+    """No local execution attempt exists for the supplied ID."""
 
 
 class BackendError(HirakuError):

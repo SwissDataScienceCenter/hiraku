@@ -10,6 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
+from hiraku.jobs import Job
 from hiraku.project import Project
 from hiraku.tracking import Leaderboard
 
@@ -164,6 +165,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     invoke(
         runner,
         [
+            "job",
             "run",
             "--record",
             "iris-classification/logistic-regression",
@@ -182,7 +184,8 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     assert len(rows) == 1
     row = rows[0]
     assert row["record_id"] == record.id
-    assert row["commit"] == source_commit
+    assert Job.load(row["job_id"], project=Project.discover()).commit == source_commit
+    assert row["commit"] is None
     run_id = row["id"]
     assert row["params"]["model"] == "logistic"
     assert row["params"]["seed"] == "42"
@@ -196,8 +199,9 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     stored = json.loads(store.read_text(encoding="utf-8"))[0]
     assert stored["id"] == run_id
     assert stored["project"] == "iris-wandb"
-    assert stored["config"]["hiraku.record_id"] == record.id
-    assert stored["config"]["hiraku.commit"] == source_commit
+    job = Job.load(stored["config"]["hiraku.job_id"], project=Project.discover())
+    assert job.record_id == record.id
+    assert job.commit == source_commit
 
     filtered = json.loads(
         invoke(

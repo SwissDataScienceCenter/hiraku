@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
 
@@ -17,12 +18,14 @@ from mcp.server.mcpserver.exceptions import (
 from mcp.types import (
     ToolAnnotations,
 )
+from psij import JobAttributes
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
 from .errors import HirakuError, ValidationError
-from .execution import execute_command
+from .job_view import job_view
+from .jobs import Job
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -34,7 +37,7 @@ from .workflows.session_history import list_sessions, session_history
 
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
-attributes tracked runs to them, runs commands with execute, and runs LangGraph
+attributes tracked runs to them, submits commands with job_submit, and runs LangGraph
 workflows. Use workflow_start, workflow_status, and workflow_resume to operate
 a workflow. When an interrupt requests approval, workflow_approval opens a
 structured MCP elicitation and waits for the user's answer.
@@ -103,7 +106,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
     Tools: project_info, leaderboard_list, record_list, record_show, record_create,
-    record_update, record_delete, execute, and runs. Also registers the record
+    record_update, record_delete, job_submit, job_list, job_show, job_wait,
+    job_cancel, job_logs, and runs. Also registers the record
     catalog and record resources, and the propose_implementation prompt.
     """
 
@@ -220,7 +224,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         return {"deleted": record_id}
 
     @server.tool(
-        title="Execute project command",
+        title="Submit local job",
         annotations=ToolAnnotations(
             read_only_hint=False,
             destructive_hint=True,
@@ -228,24 +232,76 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             open_world_hint=True,
         ),
     )
-    def execute(
-        record_id: str,
+    def job_submit(
         command: list[str],
-        dispatch: str | None = None,
+        record_id: str | None = None,
+        background: bool = False,
+        executor: str = "local",
+        executor_url: str | None = None,
+        attributes: dict[str, str] | None = None,
+        directory: str | None = None,
     ) -> dict[str, Any]:
-        """Run a command in the foreground and return output and exit code."""
-        result = execute_command(
+        """Submit a local job, optionally waiting; return metadata and output."""
+        job = Job.submit(
             command,
             record_id=record_id,
-            dispatch=dispatch,
-            capture_output=True,
             project=selected,
+            executor=executor,
+            executor_url=executor_url,
+            directory=Path(directory) if directory else None,
+            attributes=JobAttributes(custom_attributes=attributes)
+            if attributes
+            else None,
         )
+        if not background:
+            job.wait()
         return {
-            "returncode": result.returncode,
-            "stdout": result.stdout or "",
-            "stderr": result.stderr or "",
+            "job": job.model_dump(mode="json"),
+            **dict(job.logs()),
         }
+
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
+    )
+    def job_list(
+        record_id: str | None = None,
+        cached: bool = False,
+    ) -> list[dict[str, Any]]:
+        """List saved local jobs."""
+        jobs = Job.list(project=selected, record_id=record_id)
+        return [job_view(job, cached=cached) for job in jobs]
+
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
+    )
+    def job_show(job_id: str, cached: bool = False) -> dict[str, Any]:
+        """Read the last recorded observation of a job."""
+        job = Job.load(job_id, project=selected)
+        return job_view(job, cached=cached)
+
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True)
+    )
+    def job_cancel(job_id: str) -> dict[str, str]:
+        """Request local job cancellation."""
+        Job.load(job_id, project=selected).cancel()
+        return {"requested": job_id}
+
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)
+    )
+    def job_logs(job_id: str) -> dict[str, str]:
+        """Read saved job stdout and stderr."""
+        return dict(Job.load(job_id, project=selected).logs())
+
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=False)
+    )
+    def job_wait(job_id: str) -> dict[str, Any]:
+        """Wait for a local job's outcome without canceling on interruption."""
+        job = Job.load(job_id, project=selected)
+        job.wait()
+        return job.model_dump(mode="json")
 
     @server.tool(
         title="List tracked runs",

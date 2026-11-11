@@ -178,6 +178,7 @@ class WandbBackend(BackendOperations):
         }
         return Run(
             id=run.id,
+            job_id=config.get("hiraku.job_id"),
             metrics=metrics,
             params={key: str(value) for key, value in self._run_params(run).items()},
             record_id=record_id,

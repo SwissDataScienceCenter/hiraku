@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import runpy
+import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
+from hiraku.jobs import Job
 from hiraku.project import Project
 from hiraku.tracking import Leaderboard
 
@@ -61,11 +64,15 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     assert result.exit_code == 0, result.output
     assert len(json.loads(result.output)) == 9
     training = runpy.run_path(str(project / "train.py"))
+    job = Job.submit(
+        [sys.executable, "-c", "pass"], project=config, record_id=forest.id
+    )
+    job.wait()
     training["append_run"](
         project / "runs.csv",
         {
             "id": "new-training-run",
-            "record_id": forest.id,
+            "hiraku_job_id": job.id,
             "timestamp": "2026-01-02T00:00:00Z",
             "duration": "1.5",
             "param.model": "random_forest",
@@ -73,10 +80,26 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
             "param.validation_fraction": "0.2",
             "metric.val/log_loss": "0.4",
             "metric.val/accuracy": "0.8",
-            "commit": "",
-            "git_state": "",
         },
     )
     runs = Leaderboard.load(config).list_runs(config)
     assert len(runs) == 10
     assert next(run for run in runs if run.id == "new-training-run").duration == 1.5
+
+
+@pytest.mark.parametrize("include_job_id", [False, True])
+def test_writer_rejects_other_csv_schemas_without_migrating(tmp_path, include_job_id):
+    source = (
+        Path(__file__).parents[2]
+        / "src/hiraku/resources/examples/heart-disease/src/train.py"
+    )
+    training = runpy.run_path(str(source))
+    fields = [field for field in training["RUN_FIELDS"] if field != "hiraku_job_id"]
+    if include_job_id:
+        fields.append("hiraku_job_id")
+    path = tmp_path / "runs.csv"
+    path.write_text(",".join(fields) + "\n")
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError, match="Unexpected runs CSV header"):
+        training["append_run"](path, {"id": "new-run"})
+    assert path.read_bytes() == before

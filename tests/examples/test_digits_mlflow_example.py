@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
+from hiraku.jobs import Job
 from hiraku.project import Project
 
 REPOSITORY = Path(__file__).parents[2]
@@ -93,6 +94,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         invoke(
             runner,
             [
+                "job",
                 "run",
                 "--record",
                 ids_by_name[record_id],
@@ -134,7 +136,10 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     )
     client = MlflowClient(tracking_uri=uri)
     for row in rows:
-        assert row["commit"] == source_commit
+        assert (
+            Job.load(row["job_id"], project=Project.discover()).commit == source_commit
+        )
+        assert row["commit"] is None
         assert row["id"]
         assert row["raw"]["status"] == "FINISHED"
         assert row["params"]["epochs"] == "8"
@@ -190,19 +195,18 @@ def test_digits_requires_provenance_before_creating_runs(tmp_path):
         capture_output=True,
     )
     assert result.returncode != 0
-    assert "Missing launch environment variables: HIRAKU_RECORD_ID" in result.stderr
+    assert "Missing launch environment variables: HIRAKU_JOB_ID" in result.stderr
     assert not (tmp_path / "mlflow.db").exists()
 
 
-def test_digits_requires_root_for_default_tracking(tmp_path):
+def test_digits_uses_working_directory_for_default_tracking(tmp_path):
     pytest.importorskip("mlflow")
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("HIRAKU_")
     }
     env.update(
         {
-            "HIRAKU_RECORD_ID": "baseline",
-            "HIRAKU_COMMIT": "a" * 40,
+            "HIRAKU_JOB_ID": "a" * 32,
         }
     )
     result = subprocess.run(
@@ -212,6 +216,5 @@ def test_digits_requires_root_for_default_tracking(tmp_path):
         text=True,
         capture_output=True,
     )
-    assert result.returncode != 0
-    assert "Missing launch environment variables: HIRAKU_ROOT" in result.stderr
-    assert not (tmp_path / "mlflow.db").exists()
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "mlflow.db").exists()
