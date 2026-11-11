@@ -55,7 +55,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
 | Run a command | `hiraku job run [--record ID] [-- COMMAND ...]` |
-| Submit in background | `hiraku job submit [--record ID] -- COMMAND ...` |
+| Submit a job | `hiraku job submit [--executor NAME] [--record ID] -- COMMAND ...` |
 | Manage leaderboards | `hiraku leaderboard list`, `show NAME`, `create NAME --source TYPE`, `edit NAME`, `delete NAME` |
 | Inspect tracked evidence | `hiraku leaderboard runs [--leaderboard NAME] [--record ID]` |
 | Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; collaborative approvals use `workflow_approval`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
@@ -369,10 +369,12 @@ commit. Launch provenance stays on `Job.commit`, linked by `Run.job_id`.
 Tracking destinations remain
 user-managed. Cwd is the project root. `hiraku job submit` returns after
 submission; `hiraku job list/show/logs/wait/cancel` inspects and controls saved jobs
-under `.hiraku/jobs/`. Local jobs retain a PSI/J owner to collect exit codes.
+under `.hiraku/jobs/`. Default submission uses the `detached` PSI/J adapter, which
+owns status and exit codes under `.hiraku/executors/detached/`; only Hiraku updates
+`job.json`. `run` and explicit `submit --executor local` use native foreground execution.
 Remote jobs have no persistent monitor. `show/list` observe nonfinal jobs
-automatically; use `--cached` for saved observations. Failed observations show
-`UNKNOWN` while preserving the last known execution state. `wait` and
+automatically; use `--cached` for saved observations. Failed updates preserve
+status and `updated_at`; outdated nonfinal jobs are marked stale. `wait` and
 `logs --follow` poll remote jobs until completion or an observation error.
 Use a project dispatcher to prepare the runtime when needed.
 
@@ -395,7 +397,7 @@ The Python API exposes `Project` in `hiraku.project`; `Record`,
 record loaders and listing functions in `hiraku.record`;
 `Leaderboard` and `Metric` in `hiraku.tracking`; use `Leaderboard.create()`,
 `load()`, `list()`, and `delete()` for definitions;
-`Run` in `hiraku.tracking`; and `Job.submit()`, `load()`, `list()`, `wait()`,
+`Run` in `hiraku.tracking`; and blocking `Job.run()`, `Job.submit(executor=...)`, `load()`, `list()`, `wait()`,
 `logs()`, and `cancel()` in `hiraku.jobs` for execution.
 Records with `type: context` store supporting material. Workflows run in the
 current coding agent through the Hiraku MCP server (`hiraku mcp serve`). V1 does not

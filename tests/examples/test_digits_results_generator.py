@@ -31,7 +31,7 @@ def test_digits_refuses_existing_output_and_partial_export(
     def fail(*args, **kwargs):
         raise RuntimeError("failed training")
 
-    monkeypatch.setattr(generator["generate"].__globals__["Job"], "submit", fail)
+    monkeypatch.setattr(generator["generate"].__globals__["Job"], "run", fail)
     output = tmp_path / "results"
     with pytest.raises(RuntimeError, match="failed training"):
         generator["generate_results"](output)
@@ -148,7 +148,7 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         "--validation-fraction",
         "0.25",
     ]
-    job = Job.submit(
+    job = Job.run(
         command,
         record_id=weak.id,
         project=config,

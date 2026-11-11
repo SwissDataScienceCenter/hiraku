@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import codecs
 import json
+import logging
 import os
 import re
 import socket
-import subprocess
-import sys
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
+from copy import copy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -59,6 +59,23 @@ def validate_command(value: Any) -> list[str] | None:
     return command
 
 
+def _environment(env: Mapping[str, str] | None) -> dict[str, str]:
+    additions = dict(env or {})
+    if any(
+        not isinstance(k, str)
+        or not k
+        or "=" in k
+        or "\x00" in k
+        or not isinstance(v, str)
+        or "\x00" in v
+        for k, v in additions.items()
+    ):
+        raise ValidationError("Environment additions must map strings to strings")
+    if "HIRAKU_JOB_ID" in additions:
+        raise ValidationError("Environment cannot override reserved run attribution")
+    return additions
+
+
 class Job(BaseModel):
     """A persisted Hiraku job execution wrapping PSI/J's specification and status."""
 
@@ -69,7 +86,7 @@ class Job(BaseModel):
     status: psij.JobStatus = Field(
         default_factory=lambda: psij.JobStatus(psij.JobState.NEW)
     )
-    executor: str = Field(default="local", min_length=1)
+    executor: str = Field(default="detached", min_length=1)
     executor_url: str | None = None
     native_id: str | None = None
     hostname: str = Field(default_factory=socket.gethostname)
@@ -79,8 +96,11 @@ class Job(BaseModel):
     submitted_at: AwareDatetime | None = None
     started_at: AwareDatetime | None = None
     finished_at: AwareDatetime | None = None
-    heartbeat_at: AwareDatetime | None = None
+    updated_at: AwareDatetime | None = None
     _path: Path = PrivateAttr()
+    _env: dict[str, str] = PrivateAttr(default_factory=dict)
+    _native: psij.Job | None = PrivateAttr(default=None)
+    _observer: psij.Job | None = PrivateAttr(default=None)
 
     @field_validator("spec", mode="before")
     @classmethod
@@ -133,6 +153,7 @@ class Job(BaseModel):
         }
 
     def _save(self) -> None:
+        self.updated_at = datetime.now(UTC)
         atomic_write(self._path, self.model_dump_json(indent=2))
 
     @classmethod
@@ -168,20 +189,20 @@ class Job(BaseModel):
         )
 
     @classmethod
-    def submit(
+    def _create(
         cls,
         command: Sequence[str],
         *,
         project: Project,
         record_id: str | None = None,
         env: Mapping[str, str] | None = None,
-        executor: str = "local",
+        executor: str = "detached",
         executor_url: str | None = None,
         attributes: psij.JobAttributes | None = None,
         resources: psij.ResourceSpec | None = None,
         directory: Path | None = None,
     ) -> Job:
-        """Persist an attempt and return after the PSI/J executor accepts it."""
+        """Validate and persist a new attempt before execution."""
         argv = validate_command(command)
         if argv is None:
             raise ValidationError("command must be an argv sequence")
@@ -191,36 +212,29 @@ class Job(BaseModel):
                 "Select a record with --record or hiraku record set"
             )
         record = project.vault.load(selected)
-        additions = dict(env or {})
-        if any(
-            not isinstance(k, str)
-            or not k
-            or "=" in k
-            or "\x00" in k
-            or not isinstance(v, str)
-            or "\x00" in v
-            for k, v in additions.items()
-        ):
-            raise ValidationError("Environment additions must map strings to strings")
-        if "HIRAKU_JOB_ID" in additions:
-            raise ValidationError(
-                "Environment cannot override reserved run attribution"
-            )
+        additions = _environment(env)
         job_id = uuid4().hex
         job_directory = project.root / ".hiraku" / "jobs" / job_id
         job = cls(
             id=job_id,
             record_id=record.id,
             executor=executor,
-            executor_url=executor_url,
+            executor_url=(
+                executor_url or str(project.root / ".hiraku" / "executors" / "detached")
+                if executor == "detached"
+                else executor_url
+            ),
             spec=psij.JobSpec(
                 executable=argv[0],
                 arguments=argv[1:],
-                directory=directory or (project.root if executor == "local" else None),
+                directory=directory
+                or (project.root if executor in {"local", "detached"} else None),
                 attributes=attributes,
                 resources=resources,
                 environment={"HIRAKU_JOB_ID": job_id},
-                stdin_path=Path(os.devnull) if executor == "local" else None,
+                stdin_path=Path(os.devnull)
+                if executor in {"local", "detached"}
+                else None,
                 stdout_path=job_directory / "stdout.log",
                 stderr_path=job_directory / "stderr.log",
             ),
@@ -234,50 +248,97 @@ class Job(BaseModel):
             job_directory.mkdir(parents=True, exist_ok=False)
         except OSError as exc:
             raise ExecutionError(f"Cannot create job {job.id}: {exc}") from exc
+        job._env = additions
+        job._save()
+        return job
+
+    @classmethod
+    def run(
+        cls,
+        command: Sequence[str],
+        *,
+        project: Project,
+        record_id: str | None = None,
+        env: Mapping[str, str] | None = None,
+        directory: Path | None = None,
+        attributes: psij.JobAttributes | None = None,
+        resources: psij.ResourceSpec | None = None,
+    ) -> Job:
+        """Execute with the native local executor and wait for completion."""
+        job = cls.submit(
+            command,
+            project=project,
+            record_id=record_id,
+            env=env,
+            directory=directory,
+            attributes=attributes,
+            resources=resources,
+            executor="local",
+        )
         try:
-            job._save()
-            with (job_directory / "worker.log").open("ab") as log:
-                worker = subprocess.Popen(
-                    [
-                        sys.executable,
-                        "-c",
-                        "import sys; from hiraku.jobs import Job; "
-                        "Job._work(sys.argv[1])",
-                        str(job._path),
-                    ],
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=log,
-                    env={
-                        **{k: v for k, v in os.environ.items() if k != "HIRAKU_JOB_ID"},
-                        **additions,
-                    },
-                    start_new_session=True,
-                )
-        except OSError as exc:
-            job.status = psij.JobStatus(psij.JobState.FAILED, message=str(exc))
-            job.finished_at = datetime.now(UTC)
-            if job._path.exists():
-                job._save()
-            raise ExecutionError(f"Could not submit job {job.id}: {exc}") from exc
-        deadline = time.monotonic() + 30
-        try:
-            while True:
-                job._reload()
-                if job.submitted_at is not None or job.status.final:
-                    return job
-                if worker.poll() is not None:
-                    raise ExecutionError(
-                        f"Worker exited; see {job_directory / 'worker.log'}"
-                    )
-                if time.monotonic() >= deadline:
-                    job.cancel()
-                    raise ExecutionError(f"Submission timed out for job {job.id}")
-                time.sleep(0.05)
-        except KeyboardInterrupt:
+            job.wait()
+        except BaseException:
             job.cancel()
             job.wait()
             raise
+        return job
+
+    @classmethod
+    def submit(
+        cls,
+        command: Sequence[str],
+        *,
+        project: Project,
+        executor: str = "detached",
+        record_id: str | None = None,
+        env: Mapping[str, str] | None = None,
+        executor_url: str | None = None,
+        directory: Path | None = None,
+        attributes: psij.JobAttributes | None = None,
+        resources: psij.ResourceSpec | None = None,
+    ) -> Job:
+        """Submit through PSI/J and persist the accepted execution."""
+        job = cls._create(
+            command,
+            project=project,
+            record_id=record_id,
+            executor=executor,
+            executor_url=executor_url,
+            directory=directory,
+            env=env,
+            attributes=attributes,
+            resources=resources,
+        )
+        with FileLock(str(job._path.with_suffix(".lock"))):
+            job._submit()
+        return job
+
+    def _executor(self) -> psij.JobExecutor:
+        return psij.JobExecutor.get_instance(self.executor, url=self.executor_url)
+
+    def _submit(self) -> psij.Job:
+        spec = copy(self.spec)
+        spec.environment = {**(spec.environment or {}), **self._env}
+        native = psij.Job(spec)
+
+        def record_start(_job: psij.Job, status: psij.JobStatus) -> None:
+            if status.state == psij.JobState.ACTIVE:
+                self.started_at = datetime.fromtimestamp(status.time, UTC)
+
+        native.set_job_status_callback(record_start)
+        try:
+            self._executor().submit(native)
+            if self.executor == "local":
+                self._native = native
+            self.native_id = str(native.native_id)
+            self.submitted_at = datetime.now(UTC)
+            self._set_status(native.status)
+        except Exception as exc:
+            self._set_status(psij.JobStatus(psij.JobState.FAILED, message=str(exc)))
+            self._save()
+            raise ExecutionError(f"Could not submit job {self.id}: {exc}") from exc
+        self._save()
+        return native
 
     def _reload(self) -> None:
         """Reload the last saved observation."""
@@ -286,72 +347,82 @@ class Job(BaseModel):
             setattr(self, field, getattr(updated, field))
 
     def update(self) -> None:
-        """Persist a fresh observation, raising ExecutionError if unavailable."""
+        """Persist owned native-local status, or query the selected backend."""
+        if self._native is not None:
+            if (
+                self._path.parent / "cancel"
+            ).exists() and not self._native.status.final:
+                self._native.cancel()
+                # PSI/J must reap its own child to retain the real exit status.
+                with suppress(psutil.NoSuchProcess):
+                    process = psutil.Process(int(self._native.native_id))
+                    deadline = time.monotonic() + 10
+                    while process.is_running():
+                        if time.monotonic() >= deadline:
+                            raise ExecutionError("Local cancellation timed out")
+                        time.sleep(0.05)
+            self._native.wait(timeout=timedelta(seconds=0.2))
+            self._set_status(self._native.status)
+            self._save()
+            return
         self._reload()
         if self.status.final:
             return
         if self.executor == "local":
-            observed = self.heartbeat_at or self.created_at
+            observed = self.updated_at or self.created_at
             if (datetime.now(UTC) - observed).total_seconds() > 30:
                 raise ExecutionError("Local owner lost; outcome unknown")
             return
         try:
             with FileLock(str(self._path.with_suffix(".lock")), timeout=1):
                 self._reload()
-                if not self.status.final:
-                    self._update(self._observation())
-                    self._save()
+                if self.status.final:
+                    return
+                if self.native_id is None:
+                    raise ExecutionError("Job has no native ID to observe")
+                if self._observer is None:
+                    native = psij.Job(self.spec)
+                    self._executor().attach(native, self.native_id)
+                    self._observer = native
+                native = self._observer
+                executor = native.executor
+                if (self._path.parent / "cancel").exists():
+                    native.cancel()
+                # Our adapters support a synchronous observation; other PSI/J
+                # executors retain their normal polling and notification behavior.
+                refresh = getattr(executor, "refresh", None)
+                if refresh is not None and not native.status.final:
+                    refresh(native)
+                status = native.wait(
+                    timeout=timedelta(seconds=30),
+                    target_states=[psij.JobState.QUEUED],
+                )
+                if status is None:
+                    raise ExecutionError("No backend observation; outcome unknown")
+                self._set_status(status)
+                self._save()
         except Timeout as exc:
             raise ExecutionError("Job observation is busy; outcome unknown") from exc
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            psij.SubmitException,
+            psij.InvalidJobException,
+        ) as exc:
+            raise ExecutionError(f"Could not update job {self.id}: {exc}") from exc
 
-    def _update(self, status: psij.JobStatus) -> None:
+    def _set_status(self, status: psij.JobStatus) -> None:
         self.status = status
-        if status.state == psij.JobState.ACTIVE and self.started_at is None:
-            self.started_at = datetime.fromtimestamp(status.time, UTC)
+        started = (status.metadata or {}).get("started_at")
+        if self.started_at is None:
+            if started is not None:
+                self.started_at = datetime.fromtimestamp(started, UTC)
+            elif status.state == psij.JobState.ACTIVE:
+                self.started_at = datetime.fromtimestamp(status.time, UTC)
         if status.final:
             self.finished_at = datetime.fromtimestamp(status.time, UTC)
-
-    def _observation(self) -> psij.JobStatus:
-        """Use a short-lived attachment so executor polling threads cannot leak."""
-        try:
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-c",
-                    "import sys; from hiraku.jobs import Job; "
-                    "Job._observe(sys.argv[1])",
-                    str(self._path),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=40,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise ExecutionError(f"Could not observe job {self.id}: {exc}") from exc
-        if result.returncode:
-            detail = result.stderr.strip().splitlines()
-            raise ExecutionError(detail[-1] if detail else "Could not observe job")
-        try:
-            return self.read_status(json.loads(result.stdout))
-        except (ValueError, KeyError, TypeError) as exc:
-            raise ExecutionError("Invalid backend observation") from exc
-
-    @classmethod
-    def _observe(cls, path: str) -> None:
-        job = cls._read(Path(path))
-        if job.native_id is None:
-            raise ExecutionError("Job has no native ID to observe")
-        executor = psij.JobExecutor.get_instance(job.executor, url=job.executor_url)
-        native = psij.Job(job.spec)
-        executor.attach(native, job.native_id)
-        if (job._path.parent / "cancel").exists():
-            native.cancel()
-        status = native.wait(
-            timeout=timedelta(seconds=30), target_states=[psij.JobState.QUEUED]
-        )
-        if status is None:
-            raise ExecutionError("No fresh backend observation; outcome unknown")
-        print(json.dumps(job.write_status(status)))
 
     def _poll(self) -> Iterator[psij.JobStatus]:
         while True:
@@ -359,7 +430,7 @@ class Job(BaseModel):
             yield self.status
             if self.status.final:
                 return
-            time.sleep(0.1 if self.executor == "local" else 5)
+            time.sleep(1)
 
     def wait(self) -> psij.JobStatus:
         """Wait for completion without displaying output or canceling on Ctrl-C."""
@@ -369,20 +440,30 @@ class Job(BaseModel):
 
     def cancel(self) -> None:
         """Request cancellation through the owner or a remote attachment."""
-        self._reload()
+        if self._native is None:
+            self._reload()
         if not self.status.final:
             (self._path.parent / "cancel").touch()
-            if self.executor != "local":
-                self.update()
+            self.update()
 
     def logs(self, *, follow: bool = False) -> Iterator[tuple[str, str]]:
         """Yield saved (stream name, text) pairs, optionally until completion."""
+        yield from self._logs(
+            self._poll() if follow else (self.status,), flush=not follow
+        )
+
+    def _logs(
+        self,
+        statuses: Sequence[psij.JobStatus] | Iterator[psij.JobStatus],
+        *,
+        flush: bool = False,
+    ) -> Iterator[tuple[str, str]]:
         offsets = {"stdout": 0, "stderr": 0}
         decoders = {
             name: codecs.getincrementaldecoder("utf-8")(errors="replace")
             for name in offsets
         }
-        for status in self._poll() if follow else (self.status,):
+        for status in statuses:
             for name in offsets:
                 path = self._path.parent / f"{name}.log"
                 data = b""
@@ -393,60 +474,16 @@ class Job(BaseModel):
                         offsets[name] = source.tell()
                 yield (
                     name,
-                    decoders[name].decode(data, final=status.final or not follow),
+                    decoders[name].decode(data, final=status.final or flush),
                 )
 
-    @classmethod
-    def _work(cls, path: str) -> None:
-        with FileLock(str(Path(path).with_suffix(".lock"))):
-            cls._own(path)
 
-    @classmethod
-    def _own(cls, path: str) -> None:
-        """Own the original PSI/J handle until completion, including in background."""
-        job = cls._read(Path(path))
-        native = psij.Job(job.spec)
-        process = None
-
-        def observe_start(_job: psij.Job, status: psij.JobStatus) -> None:
-            if status.state == psij.JobState.ACTIVE:
-                job.started_at = datetime.fromtimestamp(status.time, UTC)
-
-        native.set_job_status_callback(observe_start)
+def update_jobs(jobs: Sequence[Job]) -> None:
+    """Attempt each update independently, preserving snapshots on failure."""
+    for job in jobs:
         try:
-            psij.JobExecutor.get_instance(job.executor, url=job.executor_url).submit(
-                native
+            job.update()
+        except ExecutionError as exc:
+            logging.getLogger(__name__).warning(
+                "Could not update job %s: %s", job.id, exc
             )
-            if job.executor == "local":
-                with suppress(psutil.NoSuchProcess):
-                    process = psutil.Process(int(native.native_id))
-            job.native_id = str(native.native_id)
-            job.submitted_at = datetime.now(UTC)
-            job._update(native.status)
-            job.heartbeat_at = datetime.now(UTC)
-            job._save()
-            if job.executor != "local":
-                return
-            while True:
-                if (job._path.parent / "cancel").exists() and not native.status.final:
-                    native.cancel()
-                    # PSI/J reports CANCELED before its reaper kills the child.
-                    if process is not None:
-                        process.wait(timeout=10)
-                native.wait(timeout=timedelta(seconds=0.2))
-                job._update(native.status)
-                job.heartbeat_at = datetime.now(UTC)
-                if job.status.final:
-                    job.finished_at = datetime.now(UTC)
-                job._save()
-                if job.status.final:
-                    return
-        except Exception as exc:
-            if native.native_id is not None and not native.status.final:
-                native.cancel()
-                if process is not None:
-                    with suppress(psutil.TimeoutExpired, psutil.NoSuchProcess):
-                        process.wait(timeout=10)
-            job.status = psij.JobStatus(psij.JobState.FAILED, message=str(exc))
-            job.finished_at = datetime.now(UTC)
-            job._save()
