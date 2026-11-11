@@ -1,81 +1,32 @@
 from pathlib import Path
 
-import psij
 import pytest
 
-from hiraku.errors import BackendError, ExecutionError, ValidationError
-from hiraku.jobs import Job
+from hiraku.errors import BackendError, ValidationError
 from hiraku.project import Project
 from hiraku.tracking import CSVBackend, Leaderboard, MLflowBackend, WandbBackend
 
 
-@pytest.mark.parametrize("launch_commit", [None, "launch-commit"])
-def test_job_join_preserves_trace_commit_and_queries_after_attribution(
-    tmp_path, monkeypatch, launch_commit
-):
+@pytest.mark.parametrize("malformed_job", [False, True])
+def test_source_attribution_does_not_require_job_history(tmp_path, malformed_job):
     project = Project(tmp_path)
-    job = Job(
-        id="a" * 32,
-        record_id="selected",
-        commit=launch_commit,
-        spec=psij.JobSpec(executable="echo"),
-    )
-    directory = tmp_path / ".hiraku/jobs" / job.id
-    directory.mkdir(parents=True)
-    (directory / "job.json").write_text(job.model_dump_json())
+    job_id = "a" * 32
+    if malformed_job:
+        directory = tmp_path / ".hiraku/jobs" / job_id
+        directory.mkdir(parents=True)
+        (directory / "job.json").write_text("{")
     (tmp_path / "runs.csv").write_text(
         "id,hiraku_job_id,record_id,commit,metric.score\n"
-        f"one,{job.id},wrong,trace-commit,2\n"
-        f"two,{job.id},,trace-commit,1\n"
-        f"missing,{'b' * 32},fallback,source-commit,0\n"
-        "unknown,unknown,,,0\n"
+        f"one,{job_id},selected,source-commit,2\n"
+        f"two,{job_id},selected,source-commit,1\n"
+        "other,,elsewhere,,0\nunknown,,,,0\n"
     )
-    loads = []
-    original = Job.load
-
-    def load(job_id, **kwargs):
-        loads.append(job_id)
-        return original(job_id, **kwargs)
-
-    monkeypatch.setattr(Job, "load", load)
     board = Leaderboard(source={"type": "csv", "path": "runs.csv"})
     runs = board.list_runs(project, record_id="selected", sort="score", limit=1)
     assert [run.id for run in runs] == ["two"]
-    assert runs[0].commit == "trace-commit"
-    assert "launch_commit" not in runs[0].model_dump(include={"launch_commit"})
-    assert original(runs[0].job_id, project=project).commit == launch_commit
-    assert loads.count(job.id) == 1
-    source = CSVBackend(project, path="runs.csv").read_runs()
-    assert source[0].record_id == "wrong"
-    missing = board.list_runs(project, record_id="fallback")[0]
-    assert missing.commit == "source-commit"
+    assert runs[0].job_id == job_id and runs[0].commit == "source-commit"
     assert len(board.list_runs(project)) == 3
     assert len(board.list_runs(project, include_unattributed=True)) == 4
-    (directory / "job.json").write_text("{")
-    with pytest.raises(ExecutionError, match="Cannot read job"):
-        board.list_runs(project)
-
-
-@pytest.mark.parametrize(
-    "query",
-    [
-        {"record_id": ""},
-        {"record_id": 1},
-        {"include_unattributed": "yes"},
-        {"sort": ""},
-        {"ascending": True},
-        {"sort": "score", "ascending": "yes"},
-        {"limit": -1},
-        {"limit": True},
-    ],
-)
-def test_leaderboard_validates_before_reading_source(tmp_path, monkeypatch, query):
-    monkeypatch.setattr(
-        CSVBackend, "read_runs", lambda self: pytest.fail("Source must not be read")
-    )
-    board = Leaderboard(source={"type": "csv", "path": "runs.csv"})
-    with pytest.raises(BackendError):
-        board.list_runs(Project(tmp_path), **query)
 
 
 def test_discovery_and_selection_are_independent_of_records(tmp_path: Path):

@@ -77,23 +77,19 @@ Job storage is local runtime state and should be excluded from Git with
 
 ## Tracking attribution
 
-Hiraku injects only `HIRAKU_JOB_ID`. Logging destinations and credentials remain
-configured by your script or its environment. Only `HIRAKU_JOB_ID` is reserved;
-other environment variables pass through unchanged. Record the job ID on each trace:
+Hiraku injects `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID`. Both are reserved;
+other environment variables pass through unchanged. Scripts log both values:
 
-- CSV: `hiraku_job_id` column.
-- MLflow: `hiraku.job_id` tag.
-- W&B: `hiraku.job_id` config value.
+- CSV: `record_id` and `hiraku_job_id` columns.
+- MLflow: `hiraku.record_id` and `hiraku.job_id` tags.
+- W&B: `hiraku.record_id` and `hiraku.job_id` config values.
 
-A job may produce several traces or none. Leaderboards join traces with local
-jobs before filtering by record, sorting metrics, or limiting results. A matched
-Job determines `Run.record_id`. `Run.commit` retains the commit reported by the
-tracking source, which may describe different code from the submitting checkout.
-Launch provenance stays on `Job.commit`; load the linked Job using `Run.job_id`
-when needed. Both commits may be absent.
-Unknown or missing Job IDs preserve the trace's own record attribution; traces
-without it remain unattributed. Malformed Job snapshots raise an error.
-Existing directly attributed traces can still be queried without job history.
+A job may produce several runs or none. Leaderboards read attribution directly
+from each run; sharing results does not require publishing `.hiraku/` job history.
+`Run.job_id` optionally links execution details. `Run.commit` retains the
+source-reported code commit, while `Job.commit` describes the submitting checkout.
+Logging destinations and code provenance remain user-managed. Scripts running
+outside Hiraku can supply attribution themselves.
 
 Python callers create an attempt before executing it:
 

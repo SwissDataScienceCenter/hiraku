@@ -44,6 +44,7 @@ def main() -> None:
             "WANDB_NOTES", "Deterministic Iris classification experiment"
         ),
         config={
+            "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
             "hiraku.job_id": os.environ["HIRAKU_JOB_ID"],
             "dataset.name": "scikit-learn iris",
             "dataset.samples": 150,

@@ -30,7 +30,7 @@ through an existing record lifecycle.
   are not stored in records.
 - **Job:** A local PSI/J execution attempt in the current project working tree,
   with a saved JSON snapshot and output. Foreground waits; background returns
-  after submission. Scripts log the injected `HIRAKU_JOB_ID` on their traces.
+  after submission. Scripts log `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` on runs.
   Hiraku streams output, returns the command's exit code, and supplies tracking
   attribution for that invocation.
 - **Dispatch script:** An optional project script under `hiraku/dispatch/`
@@ -362,10 +362,11 @@ Commands execute in the current project working tree, including uncommitted
 changes. `hiraku job run` waits until the command exits; `hiraku job submit` returns
 after submission. Commands have closed stdin and do not support interactive input.
 
-Hiraku injects only `HIRAKU_JOB_ID`. Log it as CSV `hiraku_job_id`, MLflow
-`hiraku.job_id` tag, or W&B `hiraku.job_id` config. Leaderboards resolve the
-record from the saved Job; `Run.commit` retains the tracking source's reported
-commit. Launch provenance stays on `Job.commit`, linked by `Run.job_id`.
+Hiraku injects `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID`. Log them as CSV
+`record_id` / `hiraku_job_id`, or MLflow tags and W&B config values
+`hiraku.record_id` / `hiraku.job_id`. Runs carry their own attribution and can be
+queried without local job history. `Run.commit` retains source-reported provenance;
+launch provenance stays on `Job.commit`, optionally linked by `Run.job_id`.
 Tracking destinations remain
 user-managed. Cwd is the project root. `hiraku job submit` returns after
 submission; `hiraku job list/show/logs/wait/cancel` inspects and controls saved jobs

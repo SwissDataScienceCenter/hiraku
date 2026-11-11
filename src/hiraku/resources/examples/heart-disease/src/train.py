@@ -50,6 +50,7 @@ RUN_FIELDS = [
     "metric.val/accuracy",
 ]
 PROVENANCE_VARIABLES = [
+    "HIRAKU_RECORD_ID",
     "HIRAKU_JOB_ID",
 ]
 
@@ -147,6 +148,7 @@ def main() -> None:
         {
             "id": uuid.uuid4().hex,
             "hiraku_job_id": attribution["HIRAKU_JOB_ID"],
+            "record_id": attribution["HIRAKU_RECORD_ID"],
             "timestamp": started.isoformat(),
             "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
             "param.model": args.model,

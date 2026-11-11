@@ -70,7 +70,7 @@ def _environment(env: Mapping[str, str] | None) -> dict[str, str]:
         for k, v in additions.items()
     ):
         raise ValidationError("Environment additions must map strings to strings")
-    if "HIRAKU_JOB_ID" in additions:
+    if {"HIRAKU_RECORD_ID", "HIRAKU_JOB_ID"} & additions.keys():
         raise ValidationError("Environment cannot override reserved run attribution")
     return additions
 
@@ -231,7 +231,7 @@ class Job(BaseModel):
                 or (project.root if executor == "detached" else None),
                 attributes=attributes,
                 resources=resources,
-                environment={"HIRAKU_JOB_ID": job_id},
+                environment={"HIRAKU_RECORD_ID": record.id, "HIRAKU_JOB_ID": job_id},
                 stdin_path=Path(os.devnull) if executor == "detached" else None,
                 stdout_path=job_directory / "stdout.log",
                 stderr_path=job_directory / "stderr.log",

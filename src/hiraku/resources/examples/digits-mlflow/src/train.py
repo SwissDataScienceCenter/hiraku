@@ -36,13 +36,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    required = ("HIRAKU_JOB_ID",)
+    required = ("HIRAKU_RECORD_ID", "HIRAKU_JOB_ID")
     missing = [name for name in required if name not in os.environ]
     if missing:
         raise RuntimeError(
             f"Missing launch environment variables: {', '.join(missing)}"
         )
-    tags = {"hiraku.job_id": os.environ["HIRAKU_JOB_ID"]}
+    tags = {
+        "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
+        "hiraku.job_id": os.environ["HIRAKU_JOB_ID"],
+    }
     database = Path.cwd() / "mlflow.db"
     default_tracking_uri = f"sqlite:///{database}"
     mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", default_tracking_uri))

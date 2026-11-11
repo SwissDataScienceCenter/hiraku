@@ -77,6 +77,7 @@ import mlflow
 mlflow.set_experiment("my-task")
 with mlflow.start_run():
     mlflow.set_tags({
+        "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
         "hiraku.job_id": os.environ["HIRAKU_JOB_ID"],
     })
     mlflow.log_metric("val/accuracy", accuracy)  # calculated by your code

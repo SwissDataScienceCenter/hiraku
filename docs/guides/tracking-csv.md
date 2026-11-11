@@ -39,13 +39,14 @@ The CSV adapter reads records; it does not write them. Your evaluation script
 can append a row using this schema:
 
 ```csv
-id,hiraku_job_id,timestamp,metric.val/accuracy,param.seed
-run-001,JOB_ID,2026-01-01T12:00:00Z,0.84,42
+id,record_id,hiraku_job_id,timestamp,metric.val/accuracy,param.seed
+run-001,baseline,JOB_ID,2026-01-01T12:00:00Z,0.84,42
 ```
 
 Choose a unique run ID for each execution. Prefix metric columns with
-`metric.` and parameter columns with `param.`. Populate `hiraku_job_id` from
-`os.environ["HIRAKU_JOB_ID"]`; Hiraku stores record and Git provenance on the Job.
+`metric.` and parameter columns with `param.`. Populate `record_id` and
+`hiraku_job_id` from `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` respectively.
+The optional `commit` column describes source-reported code provenance.
 
 Commands run in the project root. Your script chooses the CSV location:
 

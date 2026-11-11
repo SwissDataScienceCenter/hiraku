@@ -7,6 +7,7 @@ from pathlib import Path
 
 FIELDS = [
     "id",
+    "record_id",
     "hiraku_job_id",
     "timestamp",
     "duration",
@@ -35,6 +36,7 @@ with runs_file.open("a", encoding="utf-8", newline="") as stream:
     writer.writerow(
         {
             "id": uuid.uuid4().hex,
+            "record_id": os.environ["HIRAKU_RECORD_ID"],
             "hiraku_job_id": os.environ["HIRAKU_JOB_ID"],
             "timestamp": started.isoformat(),
             "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",

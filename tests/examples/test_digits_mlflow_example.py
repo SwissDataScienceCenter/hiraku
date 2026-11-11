@@ -195,7 +195,7 @@ def test_digits_requires_provenance_before_creating_runs(tmp_path):
         capture_output=True,
     )
     assert result.returncode != 0
-    assert "Missing launch environment variables: HIRAKU_JOB_ID" in result.stderr
+    assert "Missing launch environment variables: HIRAKU_RECORD_ID" in result.stderr
     assert not (tmp_path / "mlflow.db").exists()
 
 
@@ -206,6 +206,7 @@ def test_digits_uses_working_directory_for_default_tracking(tmp_path):
     }
     env.update(
         {
+            "HIRAKU_RECORD_ID": "digits/baseline",
             "HIRAKU_JOB_ID": "a" * 32,
         }
     )

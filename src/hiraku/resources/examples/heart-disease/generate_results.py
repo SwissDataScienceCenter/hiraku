@@ -39,11 +39,6 @@ def validate_runs(project: Project | Path) -> list[dict[str, str]]:
             raise ValueError("Unexpected runs CSV header")
         rows = list(reader)
     paths = {record.id.rsplit("/", 1)[-1]: record.id for record in project.vault.list()}
-    for row in rows:
-        job = Job.load(row["hiraku_job_id"], project=project)
-        row.update(
-            record_id=job.record_id, commit=job.commit or "", git_state=job.git_state
-        )
     expected = Counter(
         (
             paths[identifier],
@@ -127,7 +122,7 @@ def generate(project: Project) -> None:
                 record_id=record.id,
                 project=project,
             ).run()
-            status = job.wait()
+            status = job.status
             if status.exit_code:
                 raise RuntimeError(
                     f"Training command for {identifier} failed with "
@@ -183,13 +178,6 @@ def generate_results(output: Path) -> None:
             shutil.copytree(project.leaderboards_dir, overlay / "hiraku/leaderboards")
             for name in ("hiraku.yml", "runs.csv"):
                 shutil.copyfile(project.root / name, overlay / name)
-            # Export self-contained attribution without machine-local job history.
-            rows = validate_runs(project)
-            fields = list(rows[0])
-            with (overlay / "runs.csv").open("w", newline="") as stream:
-                writer = csv.DictWriter(stream, fieldnames=fields)
-                writer.writeheader()
-                writer.writerows(rows)
             overlay.rename(output)
 
 

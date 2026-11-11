@@ -14,7 +14,6 @@ from hiraku.cli import main
 from hiraku.errors import ExecutionError, RecordNotFoundError, ValidationError
 from hiraku.jobs import Job, update_jobs, validate_command
 from hiraku.project import Project
-from hiraku.tracking import Leaderboard
 
 
 @pytest.fixture
@@ -536,21 +535,6 @@ def test_unsubmitted_job_cannot_infer_success(project):
     assert Job.load(job.id, project=project).status.state == psij.JobState.NEW
 
 
-def test_job_attribution_precedes_filter_and_limit(project):
-    job = Job.create([sys.executable, "-c", "pass"], project=project).run()
-    job.wait()
-    (project.root / "runs.csv").write_text(
-        "id,hiraku_job_id,metric.score\n"
-        f"one,{job.id},2\ntwo,{job.id},1\nforeign,unknown,0\n"
-    )
-    board = Leaderboard(source={"type": "csv", "path": "runs.csv"})
-    runs = board.list_runs(project, record_id="test", sort="score", limit=1)
-    assert [run.id for run in runs] == ["two"]
-    assert runs[0].job_id == job.id and runs[0].record_id == "test"
-    assert len(board.list_runs(project)) == 2
-    assert len(board.list_runs(project, include_unattributed=True)) == 3
-
-
 @pytest.mark.parametrize("code", [0, 4])
 def test_foreground_cli_output_and_exit_code(project, monkeypatch, code):
     monkeypatch.chdir(project.root)
@@ -662,7 +646,10 @@ def test_environment_and_provenance_are_separate(project, monkeypatch):
     ).run()
     job.wait()
     lines = dict(job.logs())["stdout"].splitlines()
-    assert json.loads(lines[0]) == {"HIRAKU_JOB_ID": job.id}
+    assert json.loads(lines[0]) == {
+        "HIRAKU_RECORD_ID": "test",
+        "HIRAKU_JOB_ID": job.id,
+    }
     assert lines[1] == "private-value"
     assert "private-value" not in job.model_dump_json()
     assert job.commit and job.git_state == "dirty"
@@ -673,6 +660,7 @@ def test_environment_and_provenance_are_separate(project, monkeypatch):
     "env",
     [
         {"HIRAKU_JOB_ID": "other"},
+        {"HIRAKU_RECORD_ID": "other"},
         {"bad=key": "value"},
         {"valid": "bad\x00value"},
         {"valid": 1},

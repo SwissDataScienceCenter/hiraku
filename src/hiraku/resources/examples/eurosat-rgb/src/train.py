@@ -13,7 +13,7 @@ from torchvision import datasets, transforms
 
 IMAGE_SIZE = 64
 DEFAULT_EPOCHS = 10
-PROVENANCE_VARIABLES = ("HIRAKU_JOB_ID",)
+PROVENANCE_VARIABLES = ("HIRAKU_RECORD_ID", "HIRAKU_JOB_ID")
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -181,6 +181,7 @@ def main() -> None:
         name=os.environ.get("WANDB_RUN_NAME"),
         tags=["hiraku", "eurosat-rgb", args.model],
         config={
+            "hiraku.record_id": attribution["HIRAKU_RECORD_ID"],
             "hiraku.job_id": attribution["HIRAKU_JOB_ID"],
             "dataset.name": "EuroSAT RGB",
             "dataset.classes": 10,
