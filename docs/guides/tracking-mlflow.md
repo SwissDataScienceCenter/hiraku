@@ -23,9 +23,23 @@ source:
   type: mlflow
 ```
 
-Hiraku uses `mlflow.db` in the project root and an experiment named after the
-project directory. Configure the training script to log to that same database
-and experiment; leaderboard configuration only controls reading results.
+Share MLflow's standard environment variables between training and Hiraku:
+
+```bash
+export MLFLOW_TRACKING_URI="sqlite:///$PWD/mlflow.db"
+export MLFLOW_EXPERIMENT_NAME="my-task"
+```
+
+Explicit leaderboard `tracking_uri` or `database` overrides the environment URI.
+An explicit `experiment_name` overrides both experiment environment variables.
+Otherwise, Hiraku uses `MLFLOW_EXPERIMENT_NAME` or `MLFLOW_EXPERIMENT_ID`; when
+both are set, they must identify the same experiment. An unknown experiment name
+returns no runs instead of creating an experiment.
+
+Without environment settings, Hiraku retains its defaults: `mlflow.db` in the
+project root and an experiment named after the project directory. Leaderboards
+only configure reading; training must inherit the same environment or explicitly
+select the same destination and experiment.
 
 For a remote server or a different local database, use a mapping. The database
 path is relative to the Hiraku project root. Specify `tracking_uri` instead of

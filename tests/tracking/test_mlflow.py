@@ -8,7 +8,102 @@ import pytest
 
 from hiraku.errors import BackendError
 from hiraku.project import Project
-from hiraku.tracking import MLflowBackend, MLflowBackendConfig
+from hiraku.tracking import Leaderboard, MLflowBackend, MLflowBackendConfig
+
+
+@pytest.fixture(autouse=True)
+def clear_mlflow_environment(monkeypatch):
+    for name in (
+        "MLFLOW_TRACKING_URI",
+        "MLFLOW_EXPERIMENT_NAME",
+        "MLFLOW_EXPERIMENT_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{}, {"database": "custom.db"}, {"tracking_uri": "https://explicit.example"}],
+)
+def test_mlflow_destination_precedence(tmp_path, monkeypatch, options):
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://environment.example")
+    backend = MLflowBackend(Project(tmp_path), **options)
+    expected = options.get("tracking_uri", "https://environment.example")
+    if "database" in options:
+        expected = f"sqlite:///{tmp_path / 'custom.db'}"
+    assert backend.tracking_uri == expected
+    assert backend.ui_url == (None if "database" in options else expected)
+
+
+@pytest.mark.parametrize(
+    ("name", "experiment_id", "explicit", "error"),
+    [
+        ("shared", None, None, None),
+        (None, "e1", None, None),
+        ("shared", "e1", None, None),
+        ("shared", "e2", None, "different experiments"),
+        ("missing", None, None, None),
+        (None, "missing", None, "unknown experiment"),
+        ("shared", "e2", "explicit", None),
+    ],
+)
+def test_mlflow_experiment_environment(
+    tmp_path, monkeypatch, name, experiment_id, explicit, error
+):
+    mlflow = pytest.importorskip("mlflow")
+    for key, value in (
+        ("MLFLOW_EXPERIMENT_NAME", name),
+        ("MLFLOW_EXPERIMENT_ID", experiment_id),
+    ):
+        if value is not None:
+            monkeypatch.setenv(key, value)
+    searched = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_experiment_by_name(self, value):
+            assert value == (explicit or name)
+            return None if value == "missing" else SimpleNamespace(experiment_id="e1")
+
+        def get_experiment(self, value):
+            assert value == experiment_id
+            if value == "missing":
+                raise RuntimeError("unknown experiment")
+            return SimpleNamespace(experiment_id=value)
+
+        def search_runs(self, experiment_ids, **kwargs):
+            searched.extend(experiment_ids)
+            return []
+
+    monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
+    backend = MLflowBackend(
+        Project(tmp_path), tracking_uri="https://example.com", experiment_name=explicit
+    )
+    if error:
+        with pytest.raises(BackendError, match=error):
+            backend.list_runs()
+    else:
+        assert backend.list_runs() == []
+    assert searched == ([] if error or name == "missing" else ["e1"])
+
+
+def test_training_and_leaderboard_share_mlflow_environment(tmp_path, monkeypatch):
+    mlflow = pytest.importorskip("mlflow")
+    from mlflow.tracking._tracking_service import utils
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(utils, "_tracking_uri", None)
+    monkeypatch.setattr(mlflow.tracking.fluent, "_active_experiment_id", None)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'shared.db'}")
+    monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "shared")
+    with mlflow.start_run() as active:
+        mlflow.set_tag("hiraku.record_id", "baseline")
+        mlflow.log_metric("loss", 0.5)
+    runs = Leaderboard(source={"type": "mlflow"}).list_runs(Project(tmp_path))
+    assert [run.id for run in runs] == [active.info.run_id]
+    assert runs[0].record_id == "baseline" and runs[0].metrics["loss"] == 0.5
 
 
 def test_mlflow_backend_config_accepts_uri_or_database() -> None:

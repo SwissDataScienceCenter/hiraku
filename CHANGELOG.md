@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **Breaking:** Move `hiraku runs` to `hiraku leaderboard runs`.
 
+- MLflow leaderboards use standard tracking URI and experiment environment
+  variables when explicit settings are absent, preserving existing defaults.
+
 - Named leaderboards in `hiraku/leaderboards/<name>.yml` define sources and
   optional metrics, with `hiraku leaderboard` commands for managing definitions.
 - Run queries list attributed runs by default; `--include-unattributed` includes
