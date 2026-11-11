@@ -9,6 +9,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 - **Breaking:** Move `hiraku runs` to `hiraku leaderboard runs`.
+- Leaderboards enrich traces with Job metadata before querying. Keep the
+  tracking source's `Run.commit` separate from launch provenance on `Job.commit`.
+
+- Job show/list automatically observe nonfinal jobs, with `--cached` for offline
+  inspection and `UNKNOWN` on observation failure. Remote submissions have no
+  persistent monitor; local execution retains its owner for reliable exit codes.
+
+- **Breaking:** Commands receive `HIRAKU_JOB_ID` instead of record and Git
+  environment variables. Leaderboards resolve job-linked traces to their saved
+  record and launch provenance. Tracking destinations remain user-managed.
+- **Breaking:** Use `hiraku job run` instead of `hiraku run`. Remove
+  `default_dispatch` and `--dispatch`; invoke project scripts directly.
 
 - MLflow leaderboards use standard tracking URI and experiment environment
   variables when explicit settings are absent, preserving existing defaults.
@@ -20,7 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   attribution. Parameters are discovered automatically.
 - Training code or its environment configures logging destinations.
 
-- **Breaking:** Replace named record entrypoints and `hiraku launch` with `hiraku run --record ID -- COMMAND [ARGS...]`, which runs the supplied argv in the foreground with record and Git attribution. Existing `entrypoints` fields are no longer accepted ([issue #90](https://github.com/SwissDataScienceCenter/hiraku/issues/90), [PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
+- **Breaking:** Replace named record entrypoints and `hiraku launch` with `hiraku job run --record ID -- COMMAND [ARGS...]`, which runs the supplied argv in the foreground with record and Git attribution. Existing `entrypoints` fields are no longer accepted ([issue #90](https://github.com/SwissDataScienceCenter/hiraku/issues/90), [PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
 - Render human-readable CLI tables with Rich; JSON output remains available for programmatic use ([PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
 - Separate dashboard performance and trade-off plots into independently placeable components and named cells with their own controls, removing the analysis mode selector.
 - Exclude generated Marimo and Studio session/build caches from distribution archives.
@@ -33,6 +45,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Breaking:** Store all research material as `Record` objects under `hiraku/records/`; use `type: context` for supporting context. Remove `hiraku.context`, `Context`, the `hiraku context` CLI group, context-specific MCP tools and resources, and the separate `hiraku/contexts/` directory ([issue #133](https://github.com/SwissDataScienceCenter/hiraku/issues/133)).
 
 ### Added
+
+- Select installed PSI/J executors with `--executor`, `--executor-url`, and
+  custom `--attribute KEY VALUE` settings. Add a Renku executor using `rnk`
+  launchers for submission, status polling, cancellation, and combined logs.
+
+- Local PSI/J jobs with foreground and background execution, atomic JSON
+  snapshots and saved logs under `.hiraku/jobs/`. Add `hiraku job
+  run/submit/list/show/logs/wait/cancel` and equivalent MCP tools.
 
 - Add `hiraku example list` to list bundled examples with their descriptions.
 - Add project-local Codex and Claude Code hooks installed by `hiraku init` to attribute workflow event attempts to client conversations. Generated MCP and hook commands are portable: `uv run hiraku` when the project contains `uv.lock`, otherwise `hiraku`. Session history records one entry per event attempt with its outcome. Resubmissions for answered instructions return `stale` with the current instruction instead of acknowledging identical duplicates as accepted.

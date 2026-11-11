@@ -22,6 +22,7 @@ class CSVBackend(BackendOperations):
 
     STANDARD = {
         "id",
+        "hiraku_job_id",
         "record_id",
         "commit",
         "timestamp",
@@ -112,6 +113,7 @@ class CSVBackend(BackendOperations):
                         record_reference = normalized.get("record_id")
                         run = Run(
                             id=run_id,
+                            job_id=normalized.get("hiraku_job_id"),
                             record_id=record_reference,
                             commit=normalized.get("commit"),
                             timestamp=self._timestamp(

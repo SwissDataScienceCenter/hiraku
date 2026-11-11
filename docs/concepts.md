@@ -17,7 +17,7 @@ This fragmentation creates an inherent barrier for effective Human-AI collaborat
 
 ## Records and runs
 
-Hiraku uses records, foreground command execution, and tracked runs to document the model-development lifecycle.
+Hiraku uses records, local jobs, and tracked runs to document the model-development lifecycle.
 
 Records and command execution are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
@@ -27,7 +27,7 @@ A root *record* defines a working scope and goal, and documents the research pro
 | --- | ---  | --- |
 | **Root record** | `hiraku/records/{name}.md` | Defines the scope of a research effort and may provide shared research defaults. |
 | **Child record** | `hiraku/records/{name}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
-| **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
+| **Job** | `.hiraku/jobs/<job_id>/job.json` | One PSI/J execution attempt, its record, launch provenance, status, and saved output. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku queries results through a backend adapter.|
 
 Records are stored as Markdown with YAML front matter. `Record.id` is the OKF ID: its bundle-relative path without `.md`. It is derived from placement and never persisted in front matter. `Vault` owns the bundle root, loading, saving, and discovery. `parent_id` and `related_to` declare relationships to concept IDs, independently of directory structure. Moving a document changes its ID.
@@ -57,6 +57,13 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 - List runs from the project tracking source, optionally filtered by record ID.
 - Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, and URL attribution may be absent.
 
+Adapters expose `read_runs()` for unfiltered normalized traces and `list_runs()`
+for direct queries. Leaderboards read traces, join local Jobs, then filter and
+sort using the shared `validate_query()` and `query_runs()` functions in
+`hiraku.tracking.base`. A linked Job determines record attribution. `Run.commit`
+retains the tracking source's reported code commit; launch provenance stays on
+`Job.commit`, accessible through `Run.job_id` when needed.
+
 Define named [leaderboards](tracking.md) in `hiraku/leaderboards/<name>.yml`.
 Each contains a `source` mapping and optional ordered `metrics` declarations.
 Records do not configure tracking. `hiraku leaderboard runs --leaderboard NAME` queries attributed
@@ -68,10 +75,12 @@ A launch that never logs a row will not appear as a run.
 ## Command execution
 
 Commands are not record metadata. Pass the complete argv directly to
-`hiraku run`; a dispatcher can prepare repeatable project-specific runtime
-behavior around that invocation. Command execution runs synchronously in the
-project working tree; tracked runs own measurements and can be inspected after
-the command exits. See the [CLI reference](api/cli.md) for command options.
+`hiraku job run`; a dispatcher can prepare repeatable project-specific runtime
+behavior around that invocation. Local jobs run in the project working tree;
+foreground execution waits and streams output, while `hiraku job submit` returns
+after submission. A job can produce zero, one, or many tracked runs. Scripts log
+`HIRAKU_JOB_ID`; leaderboards resolve record attribution from job history.
+See [local jobs](guides/jobs.md) for persistence and lifecycle details.
 
 ## Agent Skill
 
@@ -143,7 +152,7 @@ git commit -m "implement logistic baseline"
 hiraku record update heart-disease-prediction/logistic-regression --commit HEAD
 
 # 4. run an arbitrary command and list attributed runs
-hiraku run --record heart-disease-prediction/logistic-regression -- uv run python train.py
+hiraku job run --record heart-disease-prediction/logistic-regression -- uv run python train.py
 hiraku leaderboard runs --record heart-disease-prediction/logistic-regression --sort val/log_loss --ascending
 
 # 5. review the runs and document the conclusion on the child record

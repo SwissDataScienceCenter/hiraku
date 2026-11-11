@@ -62,7 +62,7 @@ are never turned into links.
 
 ## Log from your script
 
-Set the logging URI in your script or environment, including for `hiraku run`:
+Set the logging URI in your script or environment, including for `hiraku job run`:
 
 ```bash
 export MLFLOW_TRACKING_URI="sqlite:///$PWD/mlflow.db"
@@ -77,10 +77,8 @@ import mlflow
 mlflow.set_experiment("my-task")
 with mlflow.start_run():
     mlflow.set_tags({
-        "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
+        "hiraku.job_id": os.environ["HIRAKU_JOB_ID"],
     })
-    if os.environ.get("HIRAKU_COMMIT"):
-        mlflow.set_tag("hiraku.commit", os.environ["HIRAKU_COMMIT"])
     mlflow.log_metric("val/accuracy", accuracy)  # calculated by your code
 ```
 

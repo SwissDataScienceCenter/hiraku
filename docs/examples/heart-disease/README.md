@@ -87,7 +87,7 @@ hiraku record create heart-disease-prediction/logistic-regression \
 hiraku record show heart-disease-prediction/logistic-regression
 
 # run the command and stream its output
-hiraku run --record heart-disease-prediction/logistic-regression -- uv run python train.py \
+hiraku job run --record heart-disease-prediction/logistic-regression -- uv run python train.py \
   --model logistic --seed 42 --validation-fraction 0.25
 
 # query all runs under the root's tracking source
@@ -110,7 +110,7 @@ writes the CSV row to project-root `runs.csv`.
 
 ??? note "Execution"
     Hiraku runs commands in the current project working tree.
-    `HIRAKU_GIT_STATE` records whether the tree had uncommitted changes.
+    The saved Job records whether the launch checkout had uncommitted changes.
 
 ## 4. Run a second experiment
 
@@ -122,7 +122,7 @@ hiraku record create heart-disease-prediction/random-forest \
   --set "hypothesis=Nonlinear feature interactions improve validation log loss" \
   --commit HEAD
 
-hiraku run --record heart-disease-prediction/random-forest -- uv run python train.py \
+hiraku job run --record heart-disease-prediction/random-forest -- uv run python train.py \
   --model random_forest --seed 42 --validation-fraction 0.25
 hiraku leaderboard runs --sort val/log_loss
 ```

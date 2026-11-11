@@ -147,6 +147,7 @@ class MLflowBackend(BackendOperations):
                 tags = dict(data.tags)
                 native_record = tags.get("hiraku.record_id")
                 known_tags = {
+                    "hiraku.job_id",
                     "hiraku.record_id",
                     "hiraku.commit",
                 }
@@ -163,6 +164,7 @@ class MLflowBackend(BackendOperations):
                 runs.append(
                     Run(
                         id=info.run_id,
+                        job_id=tags.get("hiraku.job_id"),
                         record_id=native_record,
                         commit=tags.get("hiraku.commit"),
                         timestamp=self._timestamp(

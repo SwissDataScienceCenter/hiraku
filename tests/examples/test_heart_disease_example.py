@@ -10,6 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
+from hiraku.jobs import Job
 from hiraku.project import Project
 from hiraku.tracking import Leaderboard
 
@@ -81,6 +82,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         invoke(
             runner,
             [
+                "job",
                 "run",
                 "--record",
                 path,
@@ -113,8 +115,9 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         assert float(run.metrics["val/accuracy"]) == pytest.approx(
             expected_accuracy, rel=1e-3
         )
-        assert run.commit == source_commit
-        assert run.raw["git_state"] == "dirty"
+        assert Job.load(run.job_id, project=config).commit == source_commit
+        assert run.commit is None
+        assert Job.load(run.job_id, project=Project.discover()).git_state == "dirty"
         assert math.isfinite(float(run.metrics["val/log_loss"]))
     queried = json.loads(
         invoke(

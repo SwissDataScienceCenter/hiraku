@@ -36,7 +36,6 @@ class Project(BaseModel):
     Attributes:
         root: Absolute project root directory.
         hiraku_dir_name: Name of the managed directory for Hiraku data.
-        default_dispatch: Optional name of the default dispatcher.
         active_record_id: Optional bundle-relative path of the active record.
 
     Args:
@@ -58,7 +57,6 @@ class Project(BaseModel):
         exclude=True,
         frozen=True,
     )
-    default_dispatch: str | None = Field(default=None, min_length=1, exclude=True)
     active_record_id: str | None = None
 
     def __init__(self, root: Path | str, **data: Any) -> None:
@@ -181,16 +179,10 @@ class Project(BaseModel):
         """Return the directory containing installed workflows."""
         return self.hiraku_dir / "workflows"
 
-    @property
-    def dispatch_dir(self) -> Path:
-        """Return the directory reserved for project dispatchers."""
-        return self.hiraku_dir / "dispatch"
-
     def to_dict(self) -> dict[str, Any]:
         """Return the persisted project settings."""
         return {
             "hiraku_dir": self.hiraku_dir_name,
-            "default_dispatch": self.default_dispatch,
             "active_record_id": self.active_record_id,
         }
 

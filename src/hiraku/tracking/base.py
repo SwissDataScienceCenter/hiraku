@@ -30,10 +30,11 @@ class Run(BaseModel):
 
     Attributes:
         id: Unique run ID.
+        job_id: Optional Hiraku execution attempt ID logged by the script.
         metrics: Mapping of metric names to float values.
         params: Mapping of parameter names to string values.
         record_id: Optional bundle-relative concept path associated with the run.
-        commit: Optional commit hash associated with the run.
+        commit: Optional commit hash reported by the tracking source.
         timestamp: Optional run start time as a timezone-aware UTC datetime.
         duration: Optional run duration in seconds; ``None`` while running.
         url: Optional URL to the run in the backend's UI.
@@ -42,6 +43,7 @@ class Run(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     id: str = Field(min_length=1)
+    job_id: str | None = None
     metrics: Mapping[str, float] = Field(default_factory=dict)
     params: Mapping[str, str] = Field(default_factory=dict)
     record_id: str | None = None
@@ -79,6 +81,8 @@ class TrackingBackend(Protocol):
     """Structural contract implemented by run tracking adapters."""
 
     backend_name: str
+
+    def read_runs(self) -> list[Run]: ...
 
     def list_runs(
         self,
@@ -184,13 +188,68 @@ BackendConfig = Annotated[
 ]
 
 
+def validate_query(
+    *,
+    record_id: str | None = None,
+    include_unattributed: bool = False,
+    sort: str | None = None,
+    ascending: bool | None = None,
+    limit: int | None = None,
+) -> None:
+    """Validate shared tracking query arguments before reading a source."""
+    if record_id is not None and (not isinstance(record_id, str) or not record_id):
+        raise BackendError("Tracking queries require a non-empty record_id")
+    if not isinstance(include_unattributed, bool):
+        raise BackendError("include_unattributed must be a boolean")
+    if sort is not None and (not isinstance(sort, str) or not sort):
+        raise BackendError("Tracking query sort must be a non-empty metric name")
+    if ascending is not None and not isinstance(ascending, bool):
+        raise BackendError("Tracking query ascending must be a boolean")
+    if sort is None and ascending is not None:
+        raise BackendError("Tracking query ascending requires a sort field")
+    if limit is not None and (
+        not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+    ):
+        raise BackendError("Tracking query limit must be a non-negative integer")
+
+
+def query_runs(
+    runs: list[Run],
+    *,
+    record_id: str | None = None,
+    include_unattributed: bool = False,
+    sort: str | None = None,
+    ascending: bool | None = None,
+    limit: int | None = None,
+) -> list[Run]:
+    """Filter and order normalized runs after attribution; validate inputs first."""
+    result = [
+        run
+        for run in runs
+        if (include_unattributed or run.record_id)
+        and (record_id is None or run.record_id == record_id)
+    ]
+    if sort is not None:
+        ranked = [run for run in result if sort in run.metrics]
+        unranked = [run for run in result if sort not in run.metrics]
+        ranked.sort(key=lambda run: run.id)
+        ranked.sort(key=lambda run: run.metrics[sort], reverse=ascending is False)
+        result = [*ranked, *sorted(unranked, key=lambda run: run.id)]
+    else:
+        result.sort(
+            key=lambda run: (
+                run.timestamp is None,
+                run.timestamp or datetime.max.replace(tzinfo=UTC),
+                run.id,
+            )
+        )
+    if limit is not None:
+        result = result[:limit]
+    return result
+
+
 class BackendOperations:
     """Shared query behavior for built-in tracking adapters."""
-
-    @staticmethod
-    def _validate_filters(record_id: str) -> None:
-        if not isinstance(record_id, str) or not record_id:
-            raise BackendError("Tracking queries require a non-empty record_id")
 
     @staticmethod
     def _timestamp(value: Any, *, backend: str, context: str) -> datetime | None:
@@ -212,59 +271,6 @@ class BackendOperations:
             raise BackendError(
                 f"{backend} backend returned invalid timestamp for {context}: {value!r}"
             ) from exc
-
-    @staticmethod
-    def _apply_query(
-        runs: list[Run],
-        *,
-        sort: str | None,
-        ascending: bool | None,
-        limit: int | None,
-    ) -> list[Run]:
-        result = list(runs)
-        if sort is not None:
-            ranked = [run for run in result if sort in run.metrics]
-            unranked = [run for run in result if sort not in run.metrics]
-            ranked.sort(key=lambda run: run.id)
-            ranked.sort(key=lambda run: run.metrics[sort], reverse=ascending is False)
-            result = [*ranked, *sorted(unranked, key=lambda run: run.id)]
-        else:
-            result.sort(
-                key=lambda run: (
-                    run.timestamp is None,
-                    run.timestamp or datetime.max.replace(tzinfo=UTC),
-                    run.id,
-                )
-            )
-        if limit is not None:
-            result = result[:limit]
-        return result
-
-    def _validate_query(
-        self,
-        *,
-        sort: str | None,
-        ascending: bool | None,
-        limit: int | None,
-    ) -> None:
-        if sort is not None and (not isinstance(sort, str) or not sort):
-            raise BackendError(
-                f"{self.backend_name} backend sort must be a non-empty metric name"
-            )
-        if ascending is not None and not isinstance(ascending, bool):
-            raise BackendError(
-                f"{self.backend_name} backend ascending must be a boolean"
-            )
-        if sort is None and ascending is not None:
-            raise BackendError(
-                f"{self.backend_name} backend ascending requires a sort field"
-            )
-        if limit is not None and (
-            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
-        ):
-            raise BackendError(
-                f"{self.backend_name} backend limit must be a non-negative integer"
-            )
 
     def list_runs(
         self,
@@ -288,22 +294,25 @@ class BackendOperations:
         Returns:
             A list of normalized Run objects matching the specified filters and query.
         """
-        if record_id is not None:
-            self._validate_filters(record_id)
-        if not isinstance(include_unattributed, bool):
-            raise BackendError("include_unattributed must be a boolean")
-        self._validate_query(sort=sort, ascending=ascending, limit=limit)
-        runs = self._read_source_runs()
-        if not include_unattributed:
-            runs = [run for run in runs if run.record_id]
-        if record_id is not None:
-            runs = [run for run in runs if run.record_id == record_id]
-        return self._apply_query(
-            runs,
+        validate_query(
+            record_id=record_id,
+            include_unattributed=include_unattributed,
             sort=sort,
             ascending=ascending,
             limit=limit,
         )
+        return query_runs(
+            self.read_runs(),
+            record_id=record_id,
+            include_unattributed=include_unattributed,
+            sort=sort,
+            ascending=ascending,
+            limit=limit,
+        )
+
+    def read_runs(self) -> list[Run]:
+        """Read normalized traces without filtering or Job enrichment."""
+        return self._read_source_runs()
 
     def _read_source_runs(self) -> list[Run]:
         """Read all runs from the configured source once."""

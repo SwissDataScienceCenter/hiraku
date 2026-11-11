@@ -26,9 +26,11 @@ through an existing record lifecycle.
 - **Run:** An execution trace returned by the configured tracking backend. A run
   may include record, commit, and invocation attribution together with
   parameters, metrics, timestamps, and an external URL.
-- **Command:** Explicit argv passed to each `hiraku run` invocation. Commands
+- **Command:** Explicit argv passed to each `hiraku job run` invocation. Commands
   are not stored in records.
-- **Execution:** A foreground command in the current project working tree.
+- **Job:** A local PSI/J execution attempt in the current project working tree,
+  with a saved JSON snapshot and output. Foreground waits; background returns
+  after submission. Scripts log the injected `HIRAKU_JOB_ID` on their traces.
   Hiraku streams output, returns the command's exit code, and supplies tracking
   attribution for that invocation.
 - **Dispatch script:** An optional project script under `hiraku/dispatch/`
@@ -52,7 +54,8 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | --- | --- |
 | Initialize or inspect the project | `hiraku init`, `hiraku status --json` |
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
-| Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
+| Run a command | `hiraku job run [--record ID] [-- COMMAND ...]` |
+| Submit in background | `hiraku job submit [--record ID] -- COMMAND ...` |
 | Manage leaderboards | `hiraku leaderboard list`, `show NAME`, `create NAME --source TYPE`, `edit NAME`, `delete NAME` |
 | Inspect tracked evidence | `hiraku leaderboard runs [--leaderboard NAME] [--record ID]` |
 | Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; collaborative approvals use `workflow_approval`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
@@ -246,7 +249,7 @@ For high-level child-record work:
    relevant code, make and verify the focused change, commit it if authorized,
    then bind that commit with `hiraku record update <record-id> --commit
    HEAD`.
-5. Inspect the runnable code and decide which argv to submit to `hiraku run`.
+5. Inspect the runnable code and decide which argv to submit to `hiraku job run`.
 6. Bind `--commit HEAD` during creation only when the record already
    represents the current source state. Leave a future idea as an unbound
    proposal and update its commit after implementation.
@@ -258,7 +261,7 @@ hiraku record create experiments/baseline --parent tasks/question --type experim
   --set 'hypothesis=...' \
   --commit HEAD
 hiraku record show experiments/baseline --json
-hiraku run --record experiments/baseline -- uv run --locked python train.py --seed 42
+hiraku job run --record experiments/baseline -- uv run --locked python train.py --seed 42
 ```
 
 Creating a record activates it by default. Several children may share a
@@ -288,14 +291,14 @@ For a high-level run request:
    experimental evidence.
 
 ```bash
-hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
+hiraku job run --record <record-id> -- uv run --locked python train.py --seed 42
 hiraku leaderboard runs --record <record-id> --json
 ```
 
 Tokens after `--` replace the complete invocation:
 
 ```bash
-hiraku run --record <record-id> -- uv run --locked python train.py --seed 7
+hiraku job run --record <record-id> -- uv run --locked python train.py --seed 7
 ```
 
 Do not repeat an existing successful run unless the user or workflow requires a
@@ -351,16 +354,26 @@ paused; do not resume it or launch the experiment. Do not replace elicitation
 with an ordinary assistant question.
 
 Commands are not record metadata. Pass the complete invocation directly after
-`--`, for example `hiraku run --record <record-id> -- uv run --locked python
+`--`, for example `hiraku job run --record <record-id> -- uv run --locked python
 train.py --seed 42`. A dispatcher can prepare repeatable project-specific
 runtime behavior around that invocation.
 
 Commands execute in the current project working tree, including uncommitted
-changes. `hiraku run` waits until the command exits.
+changes. `hiraku job run` waits until the command exits; `hiraku job submit` returns
+after submission. Commands have closed stdin and do not support interactive input.
 
-Hiraku injects `HIRAKU_RECORD_ID`, `HIRAKU_RECORD_FILE`, `HIRAKU_ROOT`,
-`HIRAKU_TRACKING_ROOT`, `HIRAKU_COMMIT`, and `HIRAKU_GIT_STATE`.
-`HIRAKU_ROOT`, `HIRAKU_TRACKING_ROOT`, and cwd point to the project directory.
+Hiraku injects only `HIRAKU_JOB_ID`. Log it as CSV `hiraku_job_id`, MLflow
+`hiraku.job_id` tag, or W&B `hiraku.job_id` config. Leaderboards resolve the
+record from the saved Job; `Run.commit` retains the tracking source's reported
+commit. Launch provenance stays on `Job.commit`, linked by `Run.job_id`.
+Tracking destinations remain
+user-managed. Cwd is the project root. `hiraku job submit` returns after
+submission; `hiraku job list/show/logs/wait/cancel` inspects and controls saved jobs
+under `.hiraku/jobs/`. Local jobs retain a PSI/J owner to collect exit codes.
+Remote jobs have no persistent monitor. `show/list` observe nonfinal jobs
+automatically; use `--cached` for saved observations. Failed observations show
+`UNKNOWN` while preserving the last known execution state. `wait` and
+`logs --follow` poll remote jobs until completion or an observation error.
 Use a project dispatcher to prepare the runtime when needed.
 
 CSV sources require a `path`, relative to the project root or absolute;
@@ -382,8 +395,8 @@ The Python API exposes `Project` in `hiraku.project`; `Record`,
 record loaders and listing functions in `hiraku.record`;
 `Leaderboard` and `Metric` in `hiraku.tracking`; use `Leaderboard.create()`,
 `load()`, `list()`, and `delete()` for definitions;
-`Run` in `hiraku.tracking`; and `execute_command` in `hiraku.execution` for scripted
-execution.
+`Run` in `hiraku.tracking`; and `Job.submit()`, `load()`, `list()`, `wait()`,
+`logs()`, and `cancel()` in `hiraku.jobs` for execution.
 Records with `type: context` store supporting material. Workflows run in the
 current coding agent through the Hiraku MCP server (`hiraku mcp serve`). V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.
