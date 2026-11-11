@@ -73,7 +73,7 @@ and fall back to the CLI when the host has not connected the server.
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
 | `job_submit` | Submit through PSI/J (default: detached) and return after acceptance. |
-| `job_list`, `job_show` | Observe jobs automatically; pass `cached` for saved observations. |
+| `job_list`, `job_show` | Show executor observations or saved final outcomes. |
 | `job_wait`, `job_logs`, `job_cancel` | Read saved output or request cancellation. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
@@ -89,8 +89,9 @@ Expected failures are returned as MCP tool errors.
 records. It defaults to detached execution and returns after startup, without waiting
 for completion. `executor="local"` is an alias for `detached`.
 The detached adapter owns its worker and state;
-Hiraku persists observations
-in `job.json`. Use `job_wait` and `job_logs` separately. MCP does not expose `job_run`.
+Hiraku persists execution identity and final outcomes in `job.json`;
+intermediate observations stay in memory. Use `job_wait` and `job_logs` separately.
+MCP does not expose `job_run`.
 A connected client can run commands with the user's local permissions.
 
 ## Resources and evidence

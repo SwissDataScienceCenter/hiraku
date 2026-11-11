@@ -373,9 +373,10 @@ under `.hiraku/jobs/`. Default submission uses the `detached` PSI/J adapter, whi
 owns status and exit codes under `.hiraku/executors/detached/`; only Hiraku updates
 `job.json`. `run` streams output and waits for the same detached execution.
 Remote jobs have no persistent monitor. `show/list` observe nonfinal jobs
-automatically; use `--cached` for saved observations. Failed updates preserve
-status and `updated_at`; outdated nonfinal jobs are marked stale. `wait` and
-`logs --follow` poll remote jobs until completion or an observation error.
+through executor-owned polling. Hiraku saves execution identity and final outcomes;
+intermediate observations remain in memory. `wait` and `logs --follow` read the
+executor's latest status until completion. Initial attachment errors stop waiting;
+later backend polling failures retain the executor's last observation.
 Use a project dispatcher to prepare the runtime when needed.
 
 CSV sources require a `path`, relative to the project root or absolute;
