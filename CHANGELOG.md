@@ -9,9 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 - **Breaking:** Move `hiraku runs` to `hiraku leaderboard runs`.
-- **Breaking:** Commands receive `HIRAKU_JOB_ID` instead of record and Git
-  environment variables. Leaderboards resolve record attribution from linked Jobs;
-  `Run.commit` retains source-reported provenance and `Job.commit` records the
+- **Breaking:** Commands receive `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID`; tracking
+  code logs both directly on runs. Leaderboards query source attribution without
+  local job history. Git environment variables are no longer injected;
+  `Run.commit` retains source-reported provenance and `Job.commit` describes the
   submitting checkout. Tracking destinations remain user-managed.
 - **Breaking:** Replace record entrypoints and `hiraku launch` / `hiraku run` with
   `hiraku job run --record ID -- COMMAND [ARGS...]`. Remove `entrypoints`,

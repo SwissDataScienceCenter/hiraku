@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import builtins
-from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..errors import BackendError, JobNotFoundError, ValidationError
+from ..errors import BackendError, ValidationError
 from ..io import dump_yaml, load_yaml_mapping
-from ..jobs import Job
 from ..project import Project
 from ..record import validate_identifier
 from .base import (
@@ -19,8 +17,6 @@ from .base import (
     CSVBackendConfig,
     MLflowBackendConfig,
     Run,
-    query_runs,
-    validate_query,
 )
 from .csv import CSVBackend
 from .mlflow import MLflowBackend
@@ -143,44 +139,13 @@ class Leaderboard(BaseModel):
                 metric.name == sort and metric.direction == "maximize"
                 for metric in self.metrics or ()
             )
-        validate_query(
+        return self._create_backend(project).list_runs(
             record_id=record_id,
             include_unattributed=include_unattributed,
             sort=sort,
             ascending=ascending,
             limit=limit,
         )
-        runs = self._attach_jobs(
-            self._create_backend(project).read_runs(), project=project
-        )
-        return query_runs(
-            runs,
-            record_id=record_id,
-            include_unattributed=include_unattributed,
-            sort=sort,
-            ascending=ascending,
-            limit=limit,
-        )
-
-    @staticmethod
-    def _attach_jobs(
-        runs: builtins.list[Run], *, project: Project
-    ) -> builtins.list[Run]:
-        """Resolve record attribution from local Jobs."""
-        jobs: dict[str, Job] = {}
-        for job_id in {run.job_id for run in runs if run.job_id}:
-            with suppress(JobNotFoundError):
-                jobs[job_id] = Job.load(job_id, project=project)
-        return [
-            run.model_copy(
-                update={
-                    "record_id": jobs[run.job_id].record_id,
-                }
-            )
-            if run.job_id in jobs
-            else run
-            for run in runs
-        ]
 
     def _create_backend(
         self, project: Project

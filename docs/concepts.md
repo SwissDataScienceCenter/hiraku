@@ -57,12 +57,10 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 - List runs from the project tracking source, optionally filtered by record ID.
 - Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, and URL attribution may be absent.
 
-Adapters expose `read_runs()` for unfiltered normalized traces and `list_runs()`
-for direct queries. Leaderboards read traces, join local Jobs, then filter and
-sort using the shared `validate_query()` and `query_runs()` functions in
-`hiraku.tracking.base`. A linked Job determines record attribution. `Run.commit`
-retains the tracking source's reported code commit; launch provenance stays on
-`Job.commit`, accessible through `Run.job_id` when needed.
+Leaderboards query adapters through `list_runs()`. Record attribution and commits
+come directly from the tracking source, so results remain usable without local
+job history. `Run.job_id` optionally links execution details; `Run.commit` and
+the submitting checkout's `Job.commit` describe their respective code provenance.
 
 Define named [leaderboards](tracking.md) in `hiraku/leaderboards/<name>.yml`.
 Each contains a `source` mapping and optional ordered `metrics` declarations.
@@ -79,7 +77,7 @@ Commands are not record metadata. Pass the complete argv directly to
 behavior around that invocation. Local jobs run in the project working tree;
 foreground execution waits and streams output, while `hiraku job submit` returns
 after submission. A job can produce zero, one, or many tracked runs. Scripts log
-`HIRAKU_JOB_ID`; leaderboards resolve record attribution from job history.
+the injected `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` on each run.
 See [local jobs](guides/jobs.md) for persistence and lifecycle details.
 
 ## Agent Skill

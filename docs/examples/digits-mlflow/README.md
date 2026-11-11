@@ -99,9 +99,9 @@ uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port
 Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs
 in the native MLflow interface.
 
-One MLflow experiment contains both Hiraku child records. Native MLflow tags
-`hiraku.job_id` links each run to its saved Hiraku Job, which holds the record
-and launch commit. The script owns logging; Hiraku queries the latest
+One MLflow experiment contains both Hiraku child records. The script logs native
+`hiraku.record_id` and `hiraku.job_id` tags for attribution and optional execution
+details. Queries do not require local job history. Hiraku reads the latest
 value of each metric. Full epoch histories remain in MLflow and its UI.
 
 You can list the same runs using Hiraku:

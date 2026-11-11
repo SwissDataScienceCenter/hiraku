@@ -344,6 +344,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch):
 def dispatcher_environment(root: Path) -> dict[str, str]:
     return {
         **os.environ,
+        "HIRAKU_RECORD_ID": "test",
         "HIRAKU_JOB_ID": "a" * 32,
     }
 

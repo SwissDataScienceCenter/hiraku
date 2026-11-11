@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import json
 import runpy
-import sys
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.jobs import Job
 from hiraku.project import Project
 from hiraku.tracking import Leaderboard
 
@@ -64,15 +62,12 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     assert result.exit_code == 0, result.output
     assert len(json.loads(result.output)) == 9
     training = runpy.run_path(str(project / "train.py"))
-    job = Job.create(
-        [sys.executable, "-c", "pass"], project=config, record_id=forest.id
-    ).run()
-    job.wait()
     training["append_run"](
         project / "runs.csv",
         {
             "id": "new-training-run",
-            "hiraku_job_id": job.id,
+            "record_id": forest.id,
+            "hiraku_job_id": "external-job",
             "timestamp": "2026-01-02T00:00:00Z",
             "duration": "1.5",
             "param.model": "random_forest",

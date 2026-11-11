@@ -60,7 +60,7 @@ sensitivity, not to establish a directly comparable improvement. Records report
 mean measurements without statistical significance or clinical claims.
 
 Metrics are reproducible within the pinned environment; generated run IDs and
-timestamps vary. The generator copies record and launch provenance from Jobs into
-the results CSV so it can be queried without local job history. Git provenance is
-unavailable in the isolated temporary project. Subsequent training can append runs
-using the same schema.
+timestamps vary. Training records attribution directly in the results CSV, which
+can be queried without local job history. Git provenance is left empty unless
+supplied by the logging code. Subsequent training can append runs using the same
+schema.
