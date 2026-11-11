@@ -9,12 +9,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 - **Breaking:** Move `hiraku runs` to `hiraku leaderboard runs`.
+- Observe jobs through in-process PSI/J attachment, reusing handles instead of
+  launching an observation subprocess. Detached and Renku monitors release
+  discarded handles; failed queries preserve saved status and timestamps.
+
+- Submission defaults to a durable `detached` PSI/J adapter composed with the
+  built-in local executor. The adapter owns worker status and exit codes; Hiraku
+  owns `job.json`. `run` and explicit `local` submissions use native foreground
+  execution. Public output callbacks have been removed from `Job.run()`.
+  MCP exposes `job_submit`, without `job_run` or a `background` switch.
+
 - Leaderboards enrich traces with Job metadata before querying. Keep the
   tracking source's `Run.commit` separate from launch provenance on `Job.commit`.
 
 - Job show/list automatically observe nonfinal jobs, with `--cached` for offline
-  inspection and `UNKNOWN` on observation failure. Remote submissions have no
-  persistent monitor; local execution retains its owner for reliable exit codes.
+  inspection. Failed updates preserve status and `updated_at`; outdated nonfinal
+  jobs are marked stale in terminal output. Remote submissions have no
+  Hiraku monitor; the local adapter retains its own execution handle for exit codes.
 
 - **Breaking:** Commands receive `HIRAKU_JOB_ID` instead of record and Git
   environment variables. Leaderboards resolve job-linked traces to their saved

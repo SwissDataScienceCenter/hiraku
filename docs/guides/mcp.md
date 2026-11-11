@@ -72,7 +72,7 @@ and fall back to the CLI when the host has not connected the server.
 | `leaderboard_list` | List leaderboard names without loading definitions, like `hiraku leaderboard list --json`. |
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
-| `job_submit` | Submit a local PSI/J job; wait by default or set `background`. Return Job metadata and saved output. |
+| `job_submit` | Submit through PSI/J (default: detached); explicit local execution waits for completion. |
 | `job_list`, `job_show` | Observe jobs automatically; pass `cached` for saved observations. |
 | `job_wait`, `job_logs`, `job_cancel` | Read saved output or request cancellation. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
@@ -86,8 +86,11 @@ paths and the organizational parent cannot be changed through the update tool.
 Expected failures are returned as MCP tool errors.
 
 `job_submit` requires explicit command arguments. Commands are not stored in
-records. It waits by default, returning the Job (including PSI/J status), stdout,
-and stderr. Set `background` to return after submission.
+records. It defaults to detached execution and returns after startup, without waiting
+for completion. Explicit `executor="local"` uses native local execution and waits
+for completion in the tool call. The detached adapter owns its worker and state;
+Hiraku persists observations
+in `job.json`. Use `job_wait` and `job_logs` separately. MCP does not expose `job_run`.
 A connected client can run commands with the user's local permissions.
 
 ## Resources and evidence

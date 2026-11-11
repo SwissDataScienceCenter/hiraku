@@ -63,6 +63,7 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
             "runs",
             "workflow_start",
         } <= tools.keys()
+        assert "job_submit" in tools and "job_run" not in tools
         assert tools["project_info"].title == "Project information"
         assert tools["record_list"].annotations.read_only_hint is True
         assert tools["workflow_start"].title == "Start workflow"
@@ -273,7 +274,7 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
+def test_submit_tool_defaults_to_detached_execution(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     server = create_server(config)
 
@@ -289,19 +290,34 @@ def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
                 "command": [
                     sys.executable,
                     "-c",
-                    "import sys; print('out'); print('err', file=sys.stderr); "
+                    "import sys,time; from pathlib import Path\n"
+                    "while not Path('release').exists(): time.sleep(.05)\n"
+                    "print('out'); print('err', file=sys.stderr); "
                     "raise SystemExit(7)",
                 ],
             },
         )
-        content = dict(result.structured_content)
-        job = content.pop("job")
+        job = dict(result.structured_content)
+        assert job["executor"] == "detached"
         assert Job.load(job["id"], project=config).record_id == "demo/demo"
-        assert job["status"]["exit_code"] == 7
-        assert content == {
+        assert job["status"]["state"] in {"ACTIVE", "QUEUED"}
+        (config.root / "release").touch()
+        completed = await server.call_tool("job_wait", {"job_id": job["id"]})
+        assert completed.structured_content["status"]["exit_code"] == 7
+        logs = await server.call_tool("job_logs", {"job_id": job["id"]})
+        assert dict(logs.structured_content) == {
             "stdout": "out\n",
             "stderr": "err\n",
         }
+        foreground = await server.call_tool(
+            "job_submit",
+            {
+                "executor": "local",
+                "record_id": "demo/demo",
+                "command": [sys.executable, "-c", "raise SystemExit(3)"],
+            },
+        )
+        assert foreground.structured_content["status"]["exit_code"] == 3
 
     asyncio.run(exercise())
 

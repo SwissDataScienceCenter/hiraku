@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import threading
 import time
+import weakref
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -155,16 +156,20 @@ class RenkuJobExecutor(JobExecutor):
             self._canceled.add(str(job.native_id))
 
     def _monitor(self, job: Job) -> None:
+        reference = weakref.ref(job)
+
         def poll() -> None:
-            while not job.status.final:
+            while (current := reference()) is not None and not current.status.final:
                 try:
-                    self.refresh(job)
+                    self.refresh(current)
                 except Exception as exc:
                     # A transport failure is not evidence that execution failed.
                     logger.warning(
-                        "Cannot observe Renku job %s: %s", job.native_id, exc
+                        "Cannot observe Renku job %s: %s", current.native_id, exc
                     )
-                if not job.status.final:
+                final = current.status.final
+                del current
+                if not final:
                     threading.Event().wait(5)
 
         threading.Thread(target=poll, name="renku-job-monitor", daemon=True).start()

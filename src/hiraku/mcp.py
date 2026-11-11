@@ -24,8 +24,7 @@ from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
 from .errors import HirakuError, ValidationError
-from .job_view import job_view
-from .jobs import Job
+from .jobs import Job, update_jobs
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -221,7 +220,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         return {"deleted": record_id}
 
     @server.tool(
-        title="Submit local job",
+        title="Submit job",
         annotations=ToolAnnotations(
             read_only_hint=False,
             destructive_hint=True,
@@ -231,14 +230,13 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     )
     def job_submit(
         command: list[str],
+        executor: str = "detached",
         record_id: str | None = None,
-        background: bool = False,
-        executor: str = "local",
         executor_url: str | None = None,
         attributes: dict[str, str] | None = None,
         directory: str | None = None,
     ) -> dict[str, Any]:
-        """Submit a local job, optionally waiting; return metadata and output."""
+        """Submit through PSI/J and return after acceptance, without waiting."""
         job = Job.submit(
             command,
             record_id=record_id,
@@ -250,12 +248,9 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             if attributes
             else None,
         )
-        if not background:
+        if executor == "local":
             job.wait()
-        return {
-            "job": job.model_dump(mode="json"),
-            **dict(job.logs()),
-        }
+        return job.model_dump(mode="json")
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
@@ -266,7 +261,9 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     ) -> list[dict[str, Any]]:
         """List saved local jobs."""
         jobs = Job.list(project=selected, record_id=record_id)
-        return [job_view(job, cached=cached) for job in jobs]
+        if not cached:
+            update_jobs(jobs)
+        return [job.model_dump(mode="json") for job in jobs]
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
@@ -274,7 +271,9 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     def job_show(job_id: str, cached: bool = False) -> dict[str, Any]:
         """Read the last recorded observation of a job."""
         job = Job.load(job_id, project=selected)
-        return job_view(job, cached=cached)
+        if not cached:
+            update_jobs([job])
+        return job.model_dump(mode="json")
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True)

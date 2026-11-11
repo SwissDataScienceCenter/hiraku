@@ -122,7 +122,7 @@ def generate(project: Project) -> None:
             str(fraction),
         ]
         for seed in (1, 2, 3):
-            job = Job.submit(
+            job = Job.run(
                 [*command, "--seed", str(seed)],
                 record_id=record.id,
                 project=project,

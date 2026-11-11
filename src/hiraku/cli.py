@@ -32,8 +32,7 @@ from .errors import (
 )
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .job_view import job_view
-from .jobs import Job
+from .jobs import Job, update_jobs
 from .project import Project
 from .record import Record, validate_identifier
 from .tracking import Leaderboard, Run
@@ -700,7 +699,7 @@ def workflow_resume_command(
 
 @main.group("job")
 def job_group() -> None:
-    """Submit, inspect, and cancel local PSI/J jobs."""
+    """Run locally, submit remotely, and inspect PSI/J jobs."""
 
 
 def _exit_job(job: Job) -> None:
@@ -715,7 +714,9 @@ def _exit_job(job: Job) -> None:
 @job_group.command("submit")
 @click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
-@click.option("--executor", default="local", show_default=True)
+@click.option(
+    "--executor", default="detached", show_default=True, help="PSI/J executor."
+)
 @click.option("--executor-url")
 @click.option(
     "--attribute", "attributes", type=(str, str), multiple=True, metavar="KEY VALUE"
@@ -743,6 +744,8 @@ def job_submit(
         if attributes
         else None,
     )
+    if executor == "local":
+        _run_job(job, follow=True)
     click.echo(job.id)
     if job.status.final and job.submitted_at is None:
         _exit_job(job)
@@ -751,43 +754,53 @@ def job_submit(
 @job_group.command("run")
 @click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
-@click.option("--executor", default="local", show_default=True)
-@click.option("--executor-url")
 @click.option(
     "--attribute", "attributes", type=(str, str), multiple=True, metavar="KEY VALUE"
 )
 @click.option("--directory", type=click.Path(path_type=Path))
+@click.option("--no-follow", is_flag=True, help="Save output without streaming it.")
 @click.pass_obj
 def job_run(
     state: CLIContext,
     command: tuple[str, ...],
     record_id: str | None,
-    executor: str,
-    executor_url: str | None,
     attributes: tuple[tuple[str, str], ...],
     directory: Path | None,
+    no_follow: bool,
 ) -> None:
-    """Run a command in the foreground, streaming output and waiting for exit."""
+    """Submit locally, stream output, and wait for completion."""
     job = Job.submit(
         command,
+        executor="local",
         record_id=record_id,
         project=state.project,
-        executor=executor,
-        executor_url=executor_url,
         directory=directory,
         attributes=JobAttributes(custom_attributes=dict(attributes))
         if attributes
         else None,
     )
+    _run_job(job, follow=not no_follow)
+
+
+def _run_job(job: Job, *, follow: bool) -> None:
     click.echo(job.id, err=True)
     try:
-        for name, text in job.logs(follow=True):
-            click.echo(text, nl=False, err=name == "stderr")
+        if follow:
+            for name, text in job.logs(follow=True):
+                click.echo(text, nl=False, err=name == "stderr")
+        else:
+            job.wait()
     except KeyboardInterrupt:
         job.cancel()
         job.wait()
         raise
     _exit_job(job)
+
+
+def _job_state(job: Job) -> str:
+    updated = job.updated_at or job.created_at
+    stale = not job.status.final and (datetime.now(UTC) - updated).total_seconds() > 30
+    return job.status.state.name + (" (stale)" if stale else "")
 
 
 @job_group.command("list")
@@ -803,9 +816,10 @@ def job_list(
 ) -> None:
     """List the last recorded observations of jobs."""
     jobs = Job.list(project=state.project, record_id=record_id)
-    views = [job_view(job, cached=cached) for job in jobs]
+    if not cached:
+        update_jobs(jobs)
     if json_output:
-        _emit_json(views)
+        _emit_json([job.model_dump(mode="json") for job in jobs])
     else:
         _print_table(
             ("id", "record", "executor", "state", "native_id"),
@@ -814,12 +828,10 @@ def job_list(
                     job.id,
                     job.record_id,
                     job.executor,
-                    f"UNKNOWN ({job.status.state.name})"
-                    if view["observation_error"]
-                    else view["state"],
+                    _job_state(job),
                     job.native_id,
                 )
-                for job, view in zip(jobs, views, strict=True)
+                for job in jobs
             ],
         )
 
@@ -832,9 +844,10 @@ def job_list(
 def job_show(state: CLIContext, job_id: str, json_output: bool, cached: bool) -> None:
     """Show one saved job."""
     job = Job.load(job_id, project=state.project)
-    view = job_view(job, cached=cached)
+    if not cached:
+        update_jobs([job])
     if json_output:
-        _emit_json(view)
+        _emit_json(job.model_dump(mode="json"))
     else:
         _print_table(
             ("field", "value"),
@@ -842,9 +855,8 @@ def job_show(state: CLIContext, job_id: str, json_output: bool, cached: bool) ->
                 ("id", job.id),
                 ("record", job.record_id),
                 ("executor", job.executor),
-                ("state", view["state"]),
-                ("last_known", job.status.state.name),
-                ("observation_error", view["observation_error"]),
+                ("state", _job_state(job)),
+                ("updated_at", job.updated_at),
                 ("native_id", job.native_id),
                 (
                     "command",

@@ -11,8 +11,8 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.errors import ExecutionError, ValidationError
-from hiraku.jobs import Job, validate_command
+from hiraku.errors import ExecutionError, RecordNotFoundError, ValidationError
+from hiraku.jobs import Job, update_jobs, validate_command
 from hiraku.project import Project
 from hiraku.tracking import Leaderboard
 
@@ -40,30 +40,72 @@ def remote_job(project):
     return job
 
 
-def test_update_persists_and_preserves_snapshot_on_failure(remote_job, monkeypatch):
-    monkeypatch.setattr(
-        Job, "_observation", lambda self: psij.JobStatus(psij.JobState.ACTIVE)
-    )
+@pytest.fixture
+def backend(remote_job, monkeypatch):
+    response = [psij.JobState.QUEUED]
+    calls = []
+
+    def refresh(native):
+        if isinstance(response[0], str):
+            raise psij.SubmitException(response[0])
+        native.status = psij.JobStatus(response[0])
+
+    executor = SimpleNamespace(refresh=refresh, _notify_callback=lambda *args: None)
+
+    def attach(native, native_id):
+        calls.append(native_id)
+        native.executor = executor
+        native._native_id = native_id
+        refresh(native)
+
+    executor.attach = attach
+    monkeypatch.setattr(Job, "_executor", lambda self: executor)
+
+    def respond(status):
+        response[0] = status
+
+    respond.calls = calls
+    return respond
+
+
+def test_update_persists_and_preserves_snapshot_on_failure(remote_job, backend):
+    previous = remote_job.updated_at = datetime.now(UTC) - timedelta(minutes=1)
+    remote_job._path.write_text(remote_job.model_dump_json())
+    backend(psij.JobState.ACTIVE)
     remote_job.update()
     assert Job._read(remote_job._path).status.state == psij.JobState.ACTIVE
     assert remote_job.started_at
+    assert remote_job.updated_at > previous
 
-    def fail(self):
-        raise ExecutionError("offline")
-
-    monkeypatch.setattr(Job, "_observation", fail)
+    backend("offline")
     before = remote_job._path.read_bytes()
     with pytest.raises(ExecutionError, match="offline"):
         remote_job.update()
     assert remote_job._path.read_bytes() == before
     assert Job._read(remote_job._path).status.state == psij.JobState.ACTIVE
-    monkeypatch.setattr(
-        Job, "_observation", lambda self: psij.JobStatus(psij.JobState.COMPLETED)
-    )
+    backend(psij.JobState.COMPLETED)
     remote_job.update()
     assert remote_job.status.state == psij.JobState.COMPLETED
+    assert backend.calls == [remote_job.native_id]
     assert not hasattr(remote_job, "observation_error")
     assert not hasattr(remote_job, "state")
+
+
+def test_update_uses_standard_psij_attachment_without_refresh(remote_job, monkeypatch):
+    calls = []
+    executor = SimpleNamespace(_notify_callback=lambda *args: None)
+
+    def attach(native, native_id):
+        calls.append(native_id)
+        native.executor = executor
+        native.status = psij.JobStatus(psij.JobState.ACTIVE)
+
+    executor.attach = attach
+    monkeypatch.setattr(Job, "_executor", lambda self: executor)
+    remote_job.update()
+    remote_job.update()
+    assert calls == [remote_job.native_id]
+    assert remote_job.status.state == psij.JobState.ACTIVE
 
 
 @pytest.mark.parametrize(
@@ -75,11 +117,9 @@ def test_monitoring_cli_removed(project, monkeypatch, args):
 
 
 @pytest.mark.parametrize("command", ["show", "list"])
-def test_cli_updates_unless_cached(project, remote_job, monkeypatch, command):
+def test_cli_updates_unless_cached(project, remote_job, monkeypatch, backend, command):
     monkeypatch.chdir(project.root)
-    monkeypatch.setattr(
-        Job, "_observation", lambda self: psij.JobStatus(psij.JobState.COMPLETED)
-    )
+    backend(psij.JobState.COMPLETED)
     args = ["job", command]
     if command != "list":
         args.append(remote_job.id)
@@ -91,7 +131,7 @@ def test_cli_updates_unless_cached(project, remote_job, monkeypatch, command):
     assert Job._read(remote_job._path).status.state == psij.JobState.COMPLETED
 
 
-def test_unmonitored_remote_owner_exits_after_submission(remote_job, monkeypatch):
+def test_remote_submission_returns_after_acceptance(project, monkeypatch):
     def submit(native):
         native._native_id = "submission-2"
         native.status = psij.JobStatus(psij.JobState.QUEUED)
@@ -101,30 +141,142 @@ def test_unmonitored_remote_owner_exits_after_submission(remote_job, monkeypatch
         "get_instance",
         lambda *a, **kw: SimpleNamespace(submit=submit),
     )
-    Job._work(str(remote_job._path))
-    saved = Job._read(remote_job._path)
+    job = Job.submit(["echo"], project=project, executor="remote")
+    saved = Job.load(job.id, project=project)
     assert saved.native_id == "submission-2"
     assert saved.status.state == psij.JobState.QUEUED
 
 
+def test_run_waits_using_builtin_local_executor(project):
+    job = Job.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; print('out'); print('err',file=sys.stderr)",
+        ],
+        project=project,
+    )
+    assert job.executor == "local"
+    assert job._native.executor.__class__.__module__ == "psij.executors.local"
+    assert job.status.exit_code == 0
+    assert dict(job.logs()) == {"stdout": "out\n", "stderr": "err\n"}
+    assert not (job._path.parent / "worker.log").exists()
+
+
+def test_no_follow_saves_output_without_streaming(project, monkeypatch):
+    monkeypatch.chdir(project.root)
+    result = CliRunner().invoke(
+        main,
+        ["job", "run", "--no-follow", "--", sys.executable, "-c", "print('saved')"],
+    )
+    assert result.exit_code == 0, result.output
+    assert result.stdout == ""
+    job = Job.load(result.stderr.strip(), project=project)
+    assert dict(job.logs())["stdout"] == "saved\n"
+
+
+def test_missing_record_is_rejected_before_starting_runner(project):
+    with pytest.raises(RecordNotFoundError, match="missing"):
+        Job.submit(
+            ["echo", "hello"], project=project, executor="detached", record_id="missing"
+        )
+
+
+@pytest.mark.parametrize("executor", ["detached", "remote"])
+def test_submit_uses_psij_for_every_executor(project, monkeypatch, executor):
+    names = []
+
+    def submit(native):
+        native._native_id = "accepted"
+        native.status = psij.JobStatus(psij.JobState.QUEUED)
+
+    def get_instance(name, **kwargs):
+        names.append(name)
+        return SimpleNamespace(submit=submit)
+
+    monkeypatch.setattr(psij.JobExecutor, "get_instance", get_instance)
+    job = Job.submit(["echo", "hello"], project=project, executor=executor)
+    assert job.native_id == "accepted"
+    assert names == [executor]
+
+
+def test_backend_submission_failure_is_persisted(project, monkeypatch):
+    def fail(native):
+        raise OSError("cannot submit")
+
+    monkeypatch.setattr(
+        psij.JobExecutor,
+        "get_instance",
+        lambda *a, **kw: SimpleNamespace(submit=fail),
+    )
+    with pytest.raises(ExecutionError, match="cannot submit"):
+        Job.submit(["echo"], project=project)
+    assert Job.list(project=project)[0].status.state == psij.JobState.FAILED
+
+
+def test_detached_local_preserves_resources_and_private_environment(project):
+    job = Job.submit(
+        [sys.executable, "-c", "import os; print(os.environ['CUSTOM_VALUE'])"],
+        project=project,
+        env={"CUSTOM_VALUE": "private-value"},
+        resources=psij.ResourceSpecV1(process_count=1),
+    )
+    assert job.executor == "detached"
+    assert job.wait().exit_code == 0
+    assert dict(job.logs())["stdout"] == "private-value\n"
+    assert job.spec.resources.computed_process_count == 1
+    assert "private-value" not in job._path.read_text()
+
+
+def test_backend_completion_does_not_write_hiraku_snapshot(project):
+    gate = project.root / "release"
+    job = Job.submit(
+        [
+            sys.executable,
+            "-c",
+            "import time; from pathlib import Path\n"
+            f"while not Path({str(gate)!r}).exists(): time.sleep(.05)",
+        ],
+        project=project,
+    )
+    before = job._path.read_bytes()
+    native = psij.Job()
+    job._executor().attach(native, job.native_id)
+    try:
+        gate.touch()
+        status = native.wait(timeout=timedelta(seconds=10))
+        assert status and status.state == psij.JobState.COMPLETED
+        assert job._path.read_bytes() == before
+        job.update()
+        assert job.status.exit_code == 0
+        assert job._path.read_bytes() != before
+    finally:
+        gate.touch()
+
+
 @pytest.mark.parametrize("command", ["show", "list"])
-def test_cli_unknown_preserves_last_status(project, remote_job, monkeypatch, command):
+def test_cli_stale_preserves_last_status(
+    project, remote_job, monkeypatch, backend, command
+):
     monkeypatch.chdir(project.root)
 
-    def fail(self):
-        raise ExecutionError("backend timed out")
-
-    monkeypatch.setattr(Job, "_observation", fail)
+    remote_job.updated_at = datetime.now(UTC) - timedelta(minutes=1)
+    remote_job._path.write_text(remote_job.model_dump_json())
+    before = remote_job._path.read_bytes()
+    backend("backend timed out")
     args = ["job", command, *([remote_job.id] if command == "show" else [])]
     result = CliRunner().invoke(main, [*args, "--json"])
     assert result.exit_code == 0, result.output
     value = json.loads(result.output)
     value = value[0] if command == "list" else value
-    assert value["state"] == "UNKNOWN"
     assert value["status"]["state"] == "QUEUED"
-    assert value["observation_error"] == "backend timed out"
+    assert "observation_error" not in value
+    assert value["updated_at"] == remote_job.updated_at.isoformat().replace(
+        "+00:00", "Z"
+    )
     assert not value["status"]["metadata"]
-    assert "UNKNOWN" in CliRunner().invoke(main, args).output
+    assert "stale" in CliRunner().invoke(main, args).output
+    assert remote_job._path.read_bytes() == before
     assert Job._read(remote_job._path).status.state == psij.JobState.QUEUED
 
 
@@ -132,10 +284,27 @@ def test_final_job_update_skips_backend(remote_job, monkeypatch):
     remote_job.status = psij.JobStatus(psij.JobState.COMPLETED)
     remote_job._save()
     monkeypatch.setattr(
-        Job, "_observation", lambda self: pytest.fail("Final job must stay cached")
+        Job,
+        "_executor",
+        lambda *a, **kw: pytest.fail("Final job must stay cached"),
     )
     remote_job.update()
     assert remote_job.status.state == psij.JobState.COMPLETED
+
+
+def test_update_jobs_continues_after_failure(remote_job, monkeypatch, caplog):
+    other = remote_job.model_copy(update={"id": "c" * 32})
+    calls = []
+
+    def update(self):
+        calls.append(self.id)
+        if self.id == remote_job.id:
+            raise ExecutionError("offline")
+
+    monkeypatch.setattr(Job, "update", update)
+    update_jobs([remote_job, other])
+    assert calls == [remote_job.id, other.id]
+    assert "offline" in caplog.text
 
 
 def test_local_update_preserves_original_exit_code(project):
@@ -149,21 +318,26 @@ def test_local_update_preserves_original_exit_code(project):
             "exec('while not p.exists(): time.sleep(.05)'); sys.exit(7)",
         ],
         project=project,
+        executor="detached",
     )
     try:
+        before = job.updated_at
         job.update()
+        assert job.updated_at > before
         assert not job.status.final
     finally:
         gate.touch()
     assert job.wait().exit_code == 7
 
 
-def test_local_update_without_owner_does_not_guess_exit_code(remote_job):
-    remote_job.executor = "local"
+def test_missing_local_backend_state_preserves_job(remote_job, project):
+    remote_job.executor = "detached"
+    remote_job.executor_url = str(project.root / "backend")
+    remote_job.native_id = "d" * 32
     remote_job._save()
-    remote_job.heartbeat_at = datetime.now(UTC) - timedelta(minutes=1)
-    remote_job._save()
-    with pytest.raises(ExecutionError, match="outcome unknown"):
+    remote_job.updated_at = datetime.now(UTC) - timedelta(minutes=1)
+    remote_job._path.write_text(remote_job.model_dump_json())
+    with pytest.raises(ExecutionError, match="Cannot observe local job"):
         remote_job.update()
     assert Job._read(remote_job._path).status.state == psij.JobState.QUEUED
 
@@ -171,7 +345,7 @@ def test_local_update_without_owner_does_not_guess_exit_code(remote_job):
 def test_snapshot_roundtrip_and_collision(project, monkeypatch):
     assert Job.list(project=project) == []
     assert not (project.root / ".hiraku/jobs").exists()
-    job = Job.submit([sys.executable, "-c", "pass"], project=project)
+    job = Job.run([sys.executable, "-c", "pass"], project=project)
     assert job.wait().state == psij.JobState.COMPLETED
     loaded = Job.load(job.id, project=project)
     assert loaded.model_dump(mode="json") == job.model_dump(mode="json")
@@ -179,7 +353,7 @@ def test_snapshot_roundtrip_and_collision(project, monkeypatch):
     assert loaded.started_at and loaded.finished_at
     monkeypatch.setattr("hiraku.jobs.uuid4", lambda: SimpleNamespace(hex=job.id))
     with pytest.raises(ExecutionError, match="Cannot create"):
-        Job.submit(["echo", "collision"], project=project)
+        Job.run(["echo", "collision"], project=project)
     assert Job.load(job.id, project=project).status.state == psij.JobState.COMPLETED
     with pytest.raises(ExecutionError):
         Job.load("../outside", project=project)
@@ -222,7 +396,8 @@ def test_background_survives_submitter_and_preserves_exit_code(project):
             "job = Job.submit([sys.executable, '-c', "
             '"import time, os; time.sleep(1); '
             "print(os.environ['HIRAKU_JOB_ID']); raise SystemExit(7)\"], "
-            f"project=Project.discover({str(project.root)!r})); print(job.id)",
+            f"project=Project.discover({str(project.root)!r}), executor='detached'); "
+            "print(job.id)",
         ],
         capture_output=True,
         text=True,
@@ -247,6 +422,7 @@ def test_cancel_stops_execution(project):
             f"Path({str(marker)!r}).touch()",
         ],
         project=project,
+        executor="detached",
     )
     try:
         job.cancel()
@@ -257,12 +433,12 @@ def test_cancel_stops_execution(project):
 
 
 def test_launch_failure_is_persisted(project):
-    job = Job.submit(["/nonexistent/hiraku-test-command"], project=project)
+    job = Job.run(["/nonexistent/hiraku-test-command"], project=project)
     assert job.wait().state == psij.JobState.FAILED
     assert job.status.exit_code != 0
 
 
-def test_stale_monitor_is_unknown_not_success(project):
+def test_unsubmitted_job_cannot_infer_success(project):
     directory = project.root / ".hiraku/jobs" / ("b" * 32)
     directory.mkdir(parents=True)
     job = Job(
@@ -273,13 +449,13 @@ def test_stale_monitor_is_unknown_not_success(project):
     )
     (directory / "job.json").write_text(job.model_dump_json())
     job = Job.load(job.id, project=project)
-    with pytest.raises(ExecutionError, match="outcome unknown"):
+    with pytest.raises(ExecutionError, match="no native ID"):
         job.wait()
     assert Job.load(job.id, project=project).status.state == psij.JobState.NEW
 
 
 def test_job_attribution_precedes_filter_and_limit(project):
-    job = Job.submit([sys.executable, "-c", "pass"], project=project)
+    job = Job.run([sys.executable, "-c", "pass"], project=project)
     job.wait()
     (project.root / "runs.csv").write_text(
         "id,hiraku_job_id,metric.score\n"
@@ -294,14 +470,15 @@ def test_job_attribution_precedes_filter_and_limit(project):
 
 
 @pytest.mark.parametrize("code", [0, 4])
-def test_foreground_cli_output_and_exit_code(project, monkeypatch, code):
+@pytest.mark.parametrize("entry", [["run"], ["submit", "--executor", "local"]])
+def test_foreground_cli_output_and_exit_code(project, monkeypatch, code, entry):
     monkeypatch.chdir(project.root)
     runner = CliRunner()
     result = runner.invoke(
         main,
         [
             "job",
-            "run",
+            *entry,
             "--",
             sys.executable,
             "-c",
@@ -347,7 +524,7 @@ def test_background_cli_and_inspection(project, monkeypatch):
     assert runner.invoke(main, ["job", "logs", job.id]).output == "hello\n"
     listed = runner.invoke(main, ["job", "list", "--json"])
     assert json.loads(listed.output)[0]["id"] == job.id
-    table = runner.invoke(main, ["job", "list"]).output
+    table = runner.invoke(main, ["job", "list"], env={"COLUMNS": "140"}).output
     assert job.id in table
     assert "executor" in table
     assert job.executor in table
@@ -367,7 +544,7 @@ def test_interrupting_foreground_submission_cancels(project, monkeypatch):
     def interrupt(*args, **kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(Job, "logs", interrupt)
+    monkeypatch.setattr(Job, "_logs", interrupt)
     result = CliRunner().invoke(
         main,
         [
@@ -381,6 +558,10 @@ def test_interrupting_foreground_submission_cancels(project, monkeypatch):
     )
     assert result.exit_code != 0
     assert Job.list(project=project)[0].status.state == psij.JobState.CANCELED
+    # Cancellation must leave PSI/J's shared reaper usable by the next run.
+    assert (
+        Job.run([sys.executable, "-c", "pass"], project=project).status.exit_code == 0
+    )
 
 
 def test_environment_and_provenance_are_separate(project, monkeypatch):
@@ -394,7 +575,7 @@ def test_environment_and_provenance_are_separate(project, monkeypatch):
     ):
         subprocess.run(["git", *args], cwd=project.root, check=True)
     (project.root / "dirty").touch()
-    job = Job.submit(
+    job = Job.run(
         [
             sys.executable,
             "-c",
@@ -424,7 +605,7 @@ def test_environment_and_provenance_are_separate(project, monkeypatch):
 )
 def test_invalid_environment(project, env):
     with pytest.raises(ValidationError):
-        Job.submit(["echo", "hello"], project=project, env=env)
+        Job.run(["echo", "hello"], project=project, env=env)
 
 
 def test_explicit_script_runs_in_working_tree(project):
@@ -432,9 +613,7 @@ def test_explicit_script_runs_in_working_tree(project):
     script.write_text('#!/bin/sh\n[ "$1" = "--" ] && shift\nexec "$@"\n')
     script.chmod(0o755)
     (project.root / "marker").write_text("working tree")
-    job = Job.submit(
-        [str(script), "--", "/bin/sh", "-c", "cat marker"], project=project
-    )
+    job = Job.run([str(script), "--", "/bin/sh", "-c", "cat marker"], project=project)
     assert job.wait().exit_code == 0
     assert dict(job.logs())["stdout"] == "working tree"
 
@@ -462,4 +641,4 @@ def test_invalid_commands(project, value):
     with pytest.raises(ValidationError):
         validate_command(value)
     with pytest.raises(ValidationError):
-        Job.submit(value, project=project)
+        Job.run(value, project=project)
