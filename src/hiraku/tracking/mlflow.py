@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -39,8 +40,8 @@ class MLflowBackend(BackendOperations):
             project: Hiraku project.
             settings: Pre-validated MLflow settings supplied by a leaderboard.
             tracking_uri: Optional remote tracking URI.
-            experiment_name: Experiment name; defaults to the project directory
-                name.
+            experiment_name: Experiment name; otherwise use MLflow environment
+                variables, then the project directory name.
             database: Optional local database path.
             ui_url: Optional web UI base URL. Defaults to an HTTP(S)
                 ``tracking_uri``, which MLflow servers also serve the UI from.
@@ -64,15 +65,25 @@ class MLflowBackend(BackendOperations):
         if not isinstance(settings, MLflowBackendConfig):
             raise BackendError("MLflow backend settings must be MLflowBackendConfig")
         self.project = project
-        self.tracking_uri = settings.tracking_uri or _mlflow_uri(
-            project, settings.database
-        )
+        tracking_uri = settings.tracking_uri
+        if tracking_uri is None and settings.database is None:
+            tracking_uri = os.environ.get("MLFLOW_TRACKING_URI") or None
+        self.tracking_uri = tracking_uri or _mlflow_uri(project, settings.database)
         self._database = (
             (project.root / (settings.database or "mlflow.db")).resolve()
-            if settings.tracking_uri is None
+            if tracking_uri is None
             else None
         )
-        self.experiment_name = settings.experiment_name or project.root.name
+        self._experiment_id = (
+            os.environ.get("MLFLOW_EXPERIMENT_ID") or None
+            if settings.experiment_name is None
+            else None
+        )
+        self.experiment_name = (
+            settings.experiment_name
+            or os.environ.get("MLFLOW_EXPERIMENT_NAME")
+            or (None if self._experiment_id else project.root.name)
+        )
         # Credential-bearing tracking URIs stay usable but never become links.
         self.ui_url = settings.ui_url or (
             self.tracking_uri if _is_web_base(self.tracking_uri) else None
@@ -93,9 +104,21 @@ class MLflowBackend(BackendOperations):
             client = MlflowClient(tracking_uri=self.tracking_uri)
             if self.experiment_name:
                 experiment = client.get_experiment_by_name(self.experiment_name)
+                if self._experiment_id is not None and (
+                    experiment is None
+                    or experiment.experiment_id != self._experiment_id
+                ):
+                    raise BackendError(
+                        "MLFLOW_EXPERIMENT_NAME and MLFLOW_EXPERIMENT_ID "
+                        "refer to different experiments"
+                    )
                 if experiment is None:
                     return []
                 experiment_ids = [experiment.experiment_id]
+            elif self._experiment_id is not None:
+                experiment_ids = [
+                    client.get_experiment(self._experiment_id).experiment_id
+                ]
             else:
                 experiment_ids = []
                 token = None
