@@ -380,6 +380,9 @@ not an execution failure. Do not resubmit automatically after a history-write
 failure: the execution may already have been accepted.
 An omitted `directory` leaves the execution directory to the executor; local jobs
 inherit the submitting process's cwd. Explicit paths refer to the execution side.
+CLI `run` and `job submit` accept `--launcher NAME`; MCP `job_submit` accepts
+`launcher`. Select an installed PSI/J launcher by its registered name, not a script
+path. Omission keeps the executor's default. Keep project wrapper scripts in argv.
 Explicit `env` values belong to the native job spec.
 `run` uses native PSI/J `LocalJobExecutor`, streams output through temporary
 files, waits, and returns the process exit code. The default submission executor,

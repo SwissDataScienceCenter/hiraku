@@ -18,6 +18,19 @@ changes; use `--directory` to choose another directory.
 Without `--record`, CLI and MCP use the active record when set, otherwise the job
 is unattributed. Commands are explicit argv, never record metadata.
 
+`run` and `job submit` accept `--launcher NAME` to select an installed PSI/J
+launcher by its registered name. It sets `JobSpec.launcher` and is retained in
+history. Omit it to use the executor's default; local execution selects
+`quoted-single`. The selected executor must support the launcher.
+
+```bash
+hiraku run --record baseline --launcher quoted-single -- python train.py
+hiraku job submit --launcher quoted-single -- python train.py
+```
+
+Launcher names are not script paths. Project wrapper scripts remain part of the
+command argv.
+
 ## Submit and retrieve status
 
 ```bash
@@ -114,7 +127,7 @@ status = attached.wait()
 ```
 
 `prepare_job()` returns a `psij.Job` without submitting or writing files.
-It accepts explicit `record_id`, `env`, `directory`, native PSI/J
+It accepts explicit `record_id`, `env`, `directory`, `launcher`, native PSI/J
 `attributes`, and `resources`. Python callers select record attribution
 explicitly; omission does not select the active record. The spec remains
 available for normal PSI/J configuration, including output paths.
@@ -135,6 +148,7 @@ logging destinations, and code provenance remain independent of executor state.
 MCP exposes `job_submit`, `job_list(record_id=...)`, and `job_status(job_id=...)`
 using the same project history and original PSI/J IDs as the CLI. MCP status
 requests return without waiting for completion.
+`job_submit` accepts an optional `launcher` registered name, like the CLI.
 
 ## Renku
 

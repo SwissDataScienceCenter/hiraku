@@ -49,6 +49,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   specifications, executor targets, and native IDs under the original PSI/J job
   ID. Executors own execution and status; observed final outcomes are persisted
   for later queries without backend access.
+- Add `--launcher NAME` to `hiraku run` and `hiraku job submit`, with an equivalent
+  MCP `job_submit` parameter. Registered PSI/J launcher names pass directly into
+  the native job specification and submission history.
 - Add the `local-detached` PSI/J executor with durable results and output,
   including final-status retrieval after the submitting process exits. The
   executor starts a detached Python supervisor to run the selected PSI/J launcher
