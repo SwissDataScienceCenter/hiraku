@@ -384,7 +384,9 @@ Explicit `env` values belong to the native job spec.
 `run` uses native PSI/J `LocalJobExecutor`, streams output through temporary
 files, waits, and returns the process exit code. The default submission executor,
 `local-detached`, records results and output under its backend URL, defaulting
-to `~/.psij/work/detached/`. It supports final-status retrieval after the
+to `~/.psij/work/detached/`. Its detached supervisor runs the selected PSI/J
+launcher and records the outcome; detachment belongs to the executor.
+It supports final-status retrieval after the
 submitter exits; cancellation is unsupported. Renku also reports final status
 through PSI/J, but does not expose process exit codes. Use `rnk job logs` and
 `rnk job stop` for Renku output and control. Foreground CLI execution saves its

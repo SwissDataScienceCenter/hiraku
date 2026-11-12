@@ -42,7 +42,7 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         {
             "psij-descriptors/local.py",
             "psij-descriptors/renku.py",
-            "hiraku/resources/launchers/detached.sh",
+            "psij-descriptors/_local_supervisor.py",
             "hiraku/resources/launchers/single.sh",
         }
     )
@@ -50,6 +50,7 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         packaged = set(wheel.namelist())
 
     assert expected <= packaged, f"Missing packaged resources: {expected - packaged}"
+    assert "hiraku/resources/launchers/detached.sh" not in packaged
 
     dashboard = {
         f"hiraku/dashboard/{name}"

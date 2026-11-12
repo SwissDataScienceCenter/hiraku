@@ -86,9 +86,9 @@ paths and the organizational parent cannot be changed through the update tool.
 Expected failures are returned as MCP tool errors.
 
 `job_submit` requires explicit command arguments. Commands are not stored in
-records. The default executor is `local-detached`, using a detached
-recording launcher. It saves `result.json`
-independently of the MCP server.
+records. The default executor is `local-detached`, which starts a detached
+supervisor to run a PSI/J launcher and save `result.json` independently of the
+MCP server.
 Record attribution is optional: an omitted ID uses the active record when set,
 otherwise the job is unattributed.
 When `directory` is omitted, the executor chooses its working directory; local

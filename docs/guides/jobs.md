@@ -67,18 +67,23 @@ values are not captured. Keep `/.hiraku/` excluded from Git. If history cannot b
 saved after acceptance, the error identifies the submitted execution; do not
 automatically resubmit it.
 
-The default submission executor, `local-detached`, is a PSI/J
-`LocalJobExecutor` subclass. It stores `result.json`, `stdout.log`, and
-`stderr.log` in `<executor_url>/<native_id>/`. The default backend directory is
+The default submission executor, `local-detached`, implements PSI/J's
+`JobExecutor` interface. It stores `result.json`, `stdout.log`, `stderr.log`, and
+launcher diagnostics in `launcher.log` under `<executor_url>/<native_id>/`.
+The default backend directory is
 `~/.psij/work/detached/`; a `file://` executor URL selects another directory.
 This is executor state on the submitting host. Keep it until the outcome and
 output are no longer needed.
 
-The detached launcher survives the submitting process and atomically records
-the exit code and completion time. A missing result remains pending: process
+The executor starts a small Python supervisor in a new process session. The
+supervisor runs the selected PSI/J launcher, waits, and atomically records its
+exit code and completion time, independently of the submitting process. Launch
+failures record a message with no invented exit code. A missing result remains pending: process
 disappearance is never interpreted as success. Detached execution requires
-POSIX and Bash, supports a single process and PSI/J pre/post hooks, and does not
-support cancellation. The native `local` executor does not recover exit codes
+POSIX and supports a single process and PSI/J pre/post hooks. The default
+`quoted-single` launcher requires Bash; Python callers may select another
+installed launcher through `job.spec.launcher`. Cancellation is unsupported.
+The native `local` executor does not recover exit codes
 after the submitting process exits.
 
 ## Python
@@ -161,6 +166,8 @@ Register executors using PSI/J descriptors in an installed
 `src/psij-descriptors/local.py` and `src/psij-descriptors/renku.py`.
 Do not add an `__init__.py` to the descriptor directory.
 The bundled `quoted-single` launcher works around PSI/J's unquoted redirection
-paths; `detached` additionally records the durable local outcome.
+paths. Detachment and result recording belong to the executor and its private
+`_local_supervisor.py` helper, not to a separate PSI/J launcher. Attachments use
+per-job observers; the submitting executor also reaps its supervisor process.
 Other installed PSI/J executors, such as Slurm, retain their own backend
 configuration and launcher behavior.
