@@ -29,6 +29,7 @@ from pydantic import ValidationError as PydanticValidationError
 from rich import box, print_json
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from .errors import (
     GitError,
@@ -116,19 +117,16 @@ def _validate_json_options(json_output: bool, pretty: bool) -> None:
         raise ValidationError("--pretty requires --json")
 
 
-def _print_table(
-    columns: Sequence[str],
-    rows: Sequence[Sequence[Any]],
-    *,
-    row_styles: Sequence[str] | None = None,
-) -> None:
+def _print_table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
     table = Table(box=box.ROUNDED, header_style="bold cyan", pad_edge=False)
     for column in columns:
         table.add_column(column, overflow="fold")
-    for index, row in enumerate(rows):
+    for row in rows:
         table.add_row(
-            *("" if item is None else str(item) for item in row),
-            style=row_styles[index] if row_styles is not None else None,
+            *(
+                item if isinstance(item, Text) else "" if item is None else str(item)
+                for item in row
+            )
         )
     console = Console()
     console.print(table)
@@ -913,6 +911,7 @@ def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> Non
     if json_output:
         _emit_json(entries)
     else:
+        status_colors = {"COMPLETED": "green", "FAILED": "red", "CANCELED": "red"}
         _print_table(
             (
                 "id",
@@ -928,7 +927,10 @@ def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> Non
                     entry["record_id"],
                     entry["submitted_at"],
                     entry["executor"],
-                    entry["status"]["state"],
+                    Text(
+                        entry["status"]["state"],
+                        style=status_colors.get(entry["status"]["state"], "white"),
+                    ),
                     shlex.join(
                         [
                             entry["spec"]["executable"],
@@ -936,14 +938,6 @@ def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> Non
                         ]
                     ),
                 )
-                for entry in entries
-            ],
-            row_styles=[
-                "green"
-                if entry["status"]["state"] == "COMPLETED"
-                else "red"
-                if entry["status"]["state"] in {"FAILED", "CANCELED"}
-                else "white"
                 for entry in entries
             ],
         )
