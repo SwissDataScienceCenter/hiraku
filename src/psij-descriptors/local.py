@@ -11,6 +11,7 @@ from pathlib import Path
 from threading import Thread
 from urllib.parse import unquote, urlsplit
 
+import psutil
 from packaging.version import Version
 from psij import (
     InvalidJobException,
@@ -33,6 +34,11 @@ class _Result(BaseModel):
     exit_code: int | None = Field(strict=True)
     finished_at: AwareDatetime
     message: str | None = None
+
+
+class _Supervisor(BaseModel):
+    pid: int = Field(strict=True, gt=0)
+    create_time: float = Field(strict=True)
 
 
 class LocalDetachedJobExecutor(JobExecutor):
@@ -94,6 +100,12 @@ class LocalDetachedJobExecutor(JobExecutor):
             raise SubmitException(
                 "Could not start detached supervisor", exception=exc
             ) from exc
+        identity = _Supervisor(
+            pid=process.pid, create_time=psutil.Process(process.pid).create_time()
+        )
+        temporary = path.with_name("supervisor.tmp")
+        temporary.write_text(identity.model_dump_json(), encoding="utf-8")
+        temporary.replace(path.with_name("supervisor.json"))
         job._native_id = job.id
         self._set_job_status(job, JobStatus(JobState.QUEUED))
         self._set_job_status(job, JobStatus(JobState.ACTIVE))
@@ -119,17 +131,48 @@ class LocalDetachedJobExecutor(JobExecutor):
             message=result.message,
         )
 
+    @classmethod
+    def _observe_status(cls, path: Path) -> JobStatus:
+        result = cls._read_result(path)
+        if result is not None:
+            return result
+        try:
+            identity = _Supervisor.model_validate_json(
+                path.with_name("supervisor.json").read_text(encoding="utf-8")
+            )
+        except FileNotFoundError:
+            # Older submissions have no supervisor identity.
+            return JobStatus(JobState.QUEUED)
+        try:
+            process = psutil.Process(identity.pid)
+            alive = (
+                process.create_time() == identity.create_time
+                and process.status() != psutil.STATUS_ZOMBIE
+            )
+        except psutil.NoSuchProcess:
+            alive = False
+        except psutil.AccessDenied as exc:
+            raise OSError("Cannot inspect detached supervisor") from exc
+        if alive:
+            return JobStatus(JobState.ACTIVE)
+        # Completion may have raced with the liveness check.
+        return cls._read_result(path) or JobStatus(
+            JobState.FAILED,
+            message="Supervisor exited without recording an outcome; "
+            "the command may still be running",
+        )
+
     def attach(self, job: Job, native_id: str) -> None:
         if job.status.state != JobState.NEW or job.executor is not None:
             raise InvalidJobException("Job must be new and unbound")
         path = self._result_path(native_id)
         if not path.parent.is_dir():
             raise InvalidJobException("No detached job with this ID")
-        status = self._read_result(path)
+        status = self._observe_status(path)
         job.executor = self
         job._native_id = native_id
-        self._set_job_status(job, status or JobStatus(JobState.QUEUED))
-        if status is None:
+        self._set_job_status(job, status)
+        if not status.final:
             Thread(
                 target=self._watch, args=(weakref.ref(job), path), daemon=True
             ).start()
@@ -155,9 +198,9 @@ class LocalDetachedJobExecutor(JobExecutor):
                 if job is None or job.status.final:
                     return
                 try:
-                    status = self._read_result(path)
-                    if status is not None:
-                        self._set_job_status(job, status)
+                    status = self._observe_status(path)
+                    self._set_job_status(job, status)
+                    if status.final:
                         return
                 except (OSError, ValueError) as exc:
                     logger.warning("Cannot read detached job result %s: %s", path, exc)

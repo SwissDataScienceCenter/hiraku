@@ -220,7 +220,10 @@ def test_attach_pending_job_and_callback(project, detached):
     )
     try:
         detached.attach(attached, job.native_id)
-        assert not attached.status.final
+        assert attached.status.state == psij.JobState.ACTIVE
+        entry = Submission.from_psi_job(job)
+        entry.sync()
+        assert entry.status.state == "ACTIVE"
         gate.touch()
         assert wait(attached).exit_code == 3
         assert done.wait(timeout=2)
@@ -418,7 +421,7 @@ def test_supervisor_preserves_native_signal_exit(project, detached, monkeypatch)
     assert wait(attached).exit_code == -15
 
 
-def test_killed_supervisor_leaves_unknown_outcome(project, detached):
+def test_killed_supervisor_reports_lost_outcome(project, detached):
     marker = project.root / "supervisor-session"
     command = (
         "import os,time; from pathlib import Path; "
@@ -432,10 +435,14 @@ def test_killed_supervisor_leaves_unknown_outcome(project, detached):
             assert time.monotonic() < deadline, "Command did not start"
             time.sleep(0.01)
         os.killpg(int(marker.read_text()), signal.SIGKILL)
-        assert job.wait(timeout=timedelta(seconds=0.2)) is None
+        status = wait(job)
+        assert status.state == psij.JobState.FAILED
+        assert status.exit_code is None
+        assert "Supervisor exited" in status.message
         attached = psij.Job()
         detached.attach(attached, job.native_id)
-        assert attached.wait(timeout=timedelta(seconds=0.2)) is None
+        assert attached.status.state == psij.JobState.FAILED
+        assert attached.status.exit_code is None
         assert not (detached.jobs_dir / job.native_id / "result.json").exists()
     finally:
         if marker.exists():
@@ -475,12 +482,65 @@ def test_background_survives_submitter(project, detached):
 
 
 def test_missing_result_does_not_infer_success(project, detached):
-    # An interrupted supervisor may leave only its backend directory.
+    # Legacy submissions have no supervisor identity.
     job = psij.Job()
     (detached.jobs_dir / job.id).mkdir(parents=True)
     detached.attach(job, job.id)
     assert job.wait(timeout=timedelta(seconds=0.2)) is None
     assert not job.status.final
+
+
+@pytest.mark.parametrize("condition", ["reused", "missing", "zombie", "denied"])
+def test_detached_supervisor_identity(detached, monkeypatch, condition):
+    job = psij.Job()
+    path = detached.jobs_dir / job.id / "result.json"
+    path.parent.mkdir(parents=True)
+    path.with_name("supervisor.json").write_text(
+        json.dumps({"pid": 12345, "create_time": 1.0})
+    )
+
+    def process(pid):
+        assert pid == 12345
+        if condition == "missing":
+            raise psutil.NoSuchProcess(pid)
+        if condition == "denied":
+            raise psutil.AccessDenied(pid)
+        return SimpleNamespace(
+            create_time=lambda: 2.0 if condition == "reused" else 1.0,
+            status=lambda: (
+                psutil.STATUS_ZOMBIE if condition == "zombie" else psutil.STATUS_RUNNING
+            ),
+        )
+
+    monkeypatch.setattr(psutil, "Process", process)
+    if condition == "denied":
+        with pytest.raises(OSError, match="Cannot inspect"):
+            detached.attach(job, job.id)
+        assert job.executor is None
+    else:
+        detached.attach(job, job.id)
+        assert job.status.state == psij.JobState.FAILED
+        assert job.status.exit_code is None
+
+
+def test_detached_completion_races_with_supervisor_exit(detached, monkeypatch):
+    job = psij.Job()
+    path = detached.jobs_dir / job.id / "result.json"
+    path.parent.mkdir(parents=True)
+    path.with_name("supervisor.json").write_text(
+        json.dumps({"pid": 12345, "create_time": 1.0})
+    )
+
+    def process(pid):
+        path.write_text(
+            json.dumps({"exit_code": 0, "finished_at": datetime.now(UTC).isoformat()})
+        )
+        raise psutil.NoSuchProcess(pid)
+
+    monkeypatch.setattr(psutil, "Process", process)
+    detached.attach(job, job.id)
+    assert job.status.state == psij.JobState.COMPLETED
+    assert job.status.exit_code == 0
 
 
 @pytest.mark.parametrize("code", [0, 4])
