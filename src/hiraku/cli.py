@@ -853,6 +853,15 @@ def _show_submission(result: dict[str, Any], json_output: bool) -> None:
             ("field", "value"),
             [
                 ("id", result["id"]),
+                (
+                    "command",
+                    shlex.join(
+                        [
+                            result["spec"]["executable"],
+                            *result["spec"].get("arguments", []),
+                        ]
+                    ),
+                ),
                 ("record_id", result["record_id"]),
                 ("submitted_at", result["submitted_at"]),
                 ("observed_at", result["observed_at"]),

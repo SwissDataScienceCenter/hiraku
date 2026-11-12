@@ -735,6 +735,17 @@ def history_entry(project, detached, *, record_id="test", final=False):
     return job, Submission.load(project, job.id).model_dump(mode="json")
 
 
+def test_cli_job_show_includes_command(project, detached, monkeypatch):
+    monkeypatch.chdir(project.root)
+    job, _ = history_entry(project, detached)
+
+    result = CliRunner().invoke(main, ["job", "show", job.id], env={"COLUMNS": "320"})
+
+    assert result.exit_code == 0, result.output
+    assert "command" in result.output
+    assert f"{sys.executable} train.py 'argument with spaces'" in result.output
+
+
 def test_history_uses_original_psij_id_and_native_spec(project, detached, monkeypatch):
     monkeypatch.chdir(project.root)
     job, entry = history_entry(project, detached)
