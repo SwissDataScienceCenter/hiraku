@@ -58,16 +58,16 @@ Use that `id` to read saved history or explicitly refresh it:
 ```bash
 hiraku job list
 hiraku job list --record baseline --json
-hiraku job show JOB_ID
-hiraku job sync JOB_ID --json
-hiraku job show JOB_ID --sync
+hiraku job status JOB_ID
+hiraku job status JOB_ID --json
 hiraku job list --record baseline --sync --json
 ```
 
-`show` and `list` read saved snapshots without contacting executors. `sync`
-attaches through PSI/J, captures the currently available status, and saves it.
-It does not wait for completion. `show --sync` and `list --sync` refresh before
-displaying; list filters apply before refresh, and failures are reported per job.
+`status` attaches through PSI/J, captures the currently available status, saves it,
+and displays the updated submission without waiting for completion.
+`list` reads saved snapshots without contacting executors. `list --sync` refreshes
+before displaying; list filters apply before refresh, and failures are reported
+per job.
 The text output includes the command with shell-quoted arguments.
 Attachment itself may contact the backend and take time.
 PSI/J's `executor.list()` independently discovers backend-native IDs where supported.
@@ -85,7 +85,7 @@ Sync actions attach through PSI/J, copy the current native status, and save it.
 Snapshots include state, status time, exit code, message, and metadata, including
 pending states. `list` reads saved snapshots without backend access. Attachment
 or status-reading failures raise `ObservationError` without changing the snapshot
-or file. Single-job CLI sync fails with an error; MCP sync returns a tool error.
+or file. CLI `status` fails with an error; MCP `job_status` returns a tool error.
 `list --sync` warns per failed submission and continues with its saved snapshot.
 A final outcome is recoverable only while the backend retains it or after it has
 been synced and saved. `observed_at` advances on every successful sync,
@@ -186,10 +186,11 @@ values `hiraku.record_id` / `hiraku.job_id`. Both environment names are
 reserved. A job may produce zero, one, or many runs. Tracking attribution,
 logging destinations, and code provenance remain independent of executor state.
 
-MCP exposes `job_submit`, read-only `job_show(job_id=...)` and
-`job_list(record_id=...)`, and mutating `job_sync(job_id=...)`. These use the same
-history and original PSI/J IDs as the CLI. MCP show/list do not accept a sync
-parameter; call `job_sync` explicitly. Waiting remains available through native
+MCP exposes `job_submit`, read-only `job_list(record_id=...)`, and mutating
+`job_status(job_id=...)`, which syncs, saves, and returns the updated submission.
+These use the same history and original PSI/J IDs as the CLI. MCP list does not
+accept a sync parameter; call `job_status` for a current observation.
+Waiting remains available through native
 PSI/J `job.wait()` in Python.
 `job_submit` accepts an optional `launcher` registered name, like the CLI.
 
@@ -201,7 +202,7 @@ Install and authenticate `rnk` independently, then choose an existing launcher:
 hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespace/project \
   --directory /path/to/remote/project --custom-attribute renku.launcher LAUNCHER_ID \
   -- python train.py
-hiraku job sync JOB_ID --json
+hiraku job status JOB_ID --json
 ```
 
 The executor URL identifies the Renku project. The launcher supplies the image,

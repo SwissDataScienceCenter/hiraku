@@ -102,7 +102,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
     Tools: project_info, leaderboard_list, record_list, record_show, record_create,
-    record_update, record_delete, job_submit, job_list, job_show, job_sync, and runs.
+    record_update, record_delete, job_submit, job_list, job_status, and runs.
     Also registers the record
     catalog and record resources, and the propose_implementation prompt.
     """
@@ -264,19 +264,12 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
     )
-    def job_sync(job_id: str) -> dict[str, Any]:
-        """Sync and save current PSI/J status without waiting for completion."""
+    def job_status(job_id: str) -> dict[str, Any]:
+        """Sync, save, and show current PSI/J status without waiting for completion."""
         entry = Submission.load(selected, job_id)
         entry.sync()
         entry.save(selected)
         return entry.model_dump(mode="json")
-
-    @server.tool(
-        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)
-    )
-    def job_show(job_id: str) -> dict[str, Any]:
-        """Read a saved submission without contacting its executor."""
-        return Submission.load(selected, job_id).model_dump(mode="json")
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)

@@ -814,31 +814,12 @@ def run(
     _exit_job(run_local(job, project=state.project))
 
 
-@job_group.command("show")
-@click.argument("job_id")
-@click.option("--sync", is_flag=True, help="Sync from PSI/J before showing.")
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def job_show(
-    state: CLIContext,
-    job_id: str,
-    sync: bool,
-    json_output: bool,
-) -> None:
-    """Show a saved submission by the original PSI/J job ID."""
-    entry = Submission.load(state.project, job_id)
-    if sync:
-        entry.sync()
-        entry.save(state.project)
-    _show_submission(entry.model_dump(mode="json"), json_output)
-
-
-@job_group.command("sync")
+@job_group.command("status")
 @click.argument("job_id")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def job_sync(state: CLIContext, job_id: str, json_output: bool) -> None:
-    """Sync and save current PSI/J status without waiting for completion."""
+def job_status(state: CLIContext, job_id: str, json_output: bool) -> None:
+    """Sync, save, and show current PSI/J status without waiting for completion."""
     entry = Submission.load(state.project, job_id)
     entry.sync()
     entry.save(state.project)
