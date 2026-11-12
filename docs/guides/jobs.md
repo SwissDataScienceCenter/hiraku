@@ -62,6 +62,7 @@ hiraku job list --record baseline --sync --json
 attaches through PSI/J, captures the currently available status, and saves it.
 It does not wait for completion. `show --sync` and `list --sync` refresh before
 displaying; list filters apply before refresh, and failures are reported per job.
+The text output includes the command with shell-quoted arguments.
 Attachment itself may contact the backend and take time.
 PSI/J's `executor.list()` independently discovers backend-native IDs where supported.
 
