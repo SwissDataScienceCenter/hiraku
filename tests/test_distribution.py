@@ -40,8 +40,8 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
     expected.add("hiraku/workflows/langgraph.py")
     expected.update(
         {
-            "psij-descriptors/recording.py",
-            "hiraku/resources/launchers/detach.sh",
+            "psij-descriptors/local.py",
+            "hiraku/resources/launchers/detached.sh",
             "hiraku/resources/launchers/single.sh",
         }
     )

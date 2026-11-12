@@ -1,4 +1,4 @@
-"""Local PSI/J execution with launcher-recorded outcomes."""
+"""PSI/J launchers and detached local execution."""
 
 import os
 import sys
@@ -25,18 +25,18 @@ class _Result(BaseModel):
     finished_at: AwareDatetime
 
 
-class RecordingLocalExecutor(LocalJobExecutor):
+class LocalDetachedJobExecutor(LocalJobExecutor):
     """Detach local commands and record their outcomes independently of the caller."""
 
     def submit(self, job: Job) -> None:
         if os.name != "posix":
             raise InvalidJobException("Local recording requires a POSIX system")
         spec = job.spec
-        if spec.launcher not in (None, "single", "hiraku-single"):
+        if spec.launcher not in (None, "single", "quoted-single"):
             raise InvalidJobException("Local recording requires the single launcher")
         if spec.stdout_path is None:
             raise InvalidJobException("Local recording requires stdout_path")
-        spec.launcher = "hiraku-record"
+        spec.launcher = "detached"
         spec.stdin_path = spec.stdin_path or Path(os.devnull)
         spec.attributes = copy(spec.attributes) or JobAttributes()
         spec.attributes.custom_attributes = {
@@ -58,7 +58,7 @@ class RecordingLocalExecutor(LocalJobExecutor):
         )
 
 
-class SingleLauncher(ScriptBasedLauncher):
+class QuotedSingleLauncher(ScriptBasedLauncher):
     """PSI/J's single launcher with quoted paths, including output redirections."""
 
     def __init__(self, config: JobExecutorConfig | None = None):
@@ -70,8 +70,8 @@ class SingleLauncher(ScriptBasedLauncher):
     script = "single.sh"
 
 
-class RecordingLauncher(SingleLauncher):
-    script = "detach.sh"
+class DetachedLauncher(QuotedSingleLauncher):
+    script = "detached.sh"
 
     def get_additional_args(self, job: Job) -> list[str]:
         attributes = job.spec.attributes.custom_attributes or {}
@@ -98,21 +98,21 @@ class RecordingLauncher(SingleLauncher):
 
 __PSI_J_LAUNCHERS__ = [
     Descriptor(
-        name="hiraku-single",
+        name="quoted-single",
         version=Version("0.1.0"),
-        cls="psij-descriptors.recording.SingleLauncher",
+        cls="psij-descriptors.local.QuotedSingleLauncher",
     ),
     Descriptor(
-        name="hiraku-record",
+        name="detached",
         version=Version("0.1.0"),
-        cls="psij-descriptors.recording.RecordingLauncher",
+        cls="psij-descriptors.local.DetachedLauncher",
     ),
 ]
 
 __PSI_J_EXECUTORS__ = [
     Descriptor(
-        name="hiraku-local",
+        name="local-detached",
         version=Version("0.1.0"),
-        cls="psij-descriptors.recording.RecordingLocalExecutor",
+        cls="psij-descriptors.local.LocalDetachedJobExecutor",
     )
 ]

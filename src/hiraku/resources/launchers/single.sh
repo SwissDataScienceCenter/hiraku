@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# PSI/J's single_launch.sh leaves redirection paths unquoted. Keep this equivalent
+# PSI/J's single_launch.sh leaves redirection paths unquoted. This equivalent
 # launcher until upstream supports paths with spaces (including its library path).
 source "$(dirname "$0")/launcher_lib.sh"
 pre_launch

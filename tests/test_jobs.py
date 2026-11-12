@@ -41,7 +41,7 @@ def finish(job):
 
 
 def execute(job, method):
-    return job.run() if method == "run" else job.submit(executor="hiraku-local")
+    return job.run() if method == "run" else job.submit(executor="local-detached")
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ def test_attempt_cannot_be_submitted_twice(project, method):
 def test_concurrent_submission_launches_once(project, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        type(psij.JobExecutor.get_instance("hiraku-local")),
+        type(psij.JobExecutor.get_instance("local-detached")),
         "submit",
         lambda self, native: calls.append(native),
     )
@@ -148,7 +148,7 @@ def test_concurrent_submission_launches_once(project, monkeypatch):
     def submit(attempt):
         barrier.wait(timeout=5)
         try:
-            attempt.submit(executor="hiraku-local")
+            attempt.submit(executor="local-detached")
         except ExecutionError as exc:
             return str(exc)
         return "submitted"
@@ -179,7 +179,7 @@ def test_run_records_local_result(project):
 
 def test_submit_returns_live_psij_job(project):
     job = Job.create([sys.executable, "-c", "pass"], project=project)
-    native = job.submit(executor="hiraku-local")
+    native = job.submit(executor="local-detached")
     assert isinstance(native, psij.Job)
     assert native.native_id == job.native_id
     assert native.wait(timeout=timedelta(seconds=10)).state == psij.JobState.COMPLETED
@@ -202,7 +202,7 @@ def test_native_run_records_foreground_outcome_with_spaces(project, monkeypatch)
         project=project,
         directory=project.root,
     )
-    assert job.spec.launcher == "hiraku-single"
+    assert job.spec.launcher == "quoted-single"
     job.run()
     assert submitted == [native_executor_type]
     assert job.executor.name == "local"
@@ -281,7 +281,7 @@ def test_hook_failure_is_recorded(project, hook, code, method):
 
 def test_fast_result_does_not_race_with_submission_metadata(project):
     job = Job.create(["/bin/bash", "-c", "exit 7"], record_id="test", project=project)
-    job.submit(executor="hiraku-local")
+    job.submit(executor="local-detached")
     assert finish(job).exit_code == 7
     result = job.path.with_name("result.json")
     before = result.read_bytes()
@@ -301,7 +301,7 @@ def test_fast_result_does_not_race_with_submission_metadata(project):
 )
 def test_malformed_result_is_an_error(project, result):
     job = Job.create(["echo"], record_id="test", project=project)
-    job.submit(executor="hiraku-local")
+    job.submit(executor="local-detached")
     finish(job)
     job.path.with_name("result.json").write_text(result)
     with pytest.raises(ExecutionError, match="Cannot read job"):
@@ -320,7 +320,7 @@ def test_killed_detached_launcher_leaves_an_unknown_outcome(project):
         record_id="test",
         project=project,
     )
-    job.submit(executor="hiraku-local")
+    job.submit(executor="local-detached")
     try:
         deadline = time.monotonic() + 10
         while not marker.exists():
@@ -429,7 +429,7 @@ def test_missing_record_is_rejected_before_starting_runner(project):
             ["echo", "hello"],
             project=project,
             record_id="missing",
-        ).submit(executor="hiraku-local")
+        ).submit(executor="local-detached")
 
 
 def test_backend_submission_failure_is_persisted(project, monkeypatch):
@@ -437,16 +437,16 @@ def test_backend_submission_failure_is_persisted(project, monkeypatch):
         raise OSError("cannot submit")
 
     monkeypatch.setattr(
-        type(psij.JobExecutor.get_instance("hiraku-local")), "submit", fail
+        type(psij.JobExecutor.get_instance("local-detached")), "submit", fail
     )
     with pytest.raises(ExecutionError, match="cannot submit"):
         Job.create(["echo"], record_id="test", project=project).submit(
-            executor="hiraku-local"
+            executor="local-detached"
         )
     job = Job.list(project=project)[0]
     assert job.status.state == psij.JobState.FAILED
     with pytest.raises(ExecutionError, match="already been submitted"):
-        job.submit(executor="hiraku-local")
+        job.submit(executor="local-detached")
 
 
 def test_local_launcher_startup_failure_is_persisted(project, monkeypatch):
@@ -456,10 +456,10 @@ def test_local_launcher_startup_failure_is_persisted(project, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", fail)
     job = Job.create(["echo"], record_id="test", project=project)
     with pytest.raises(ExecutionError, match="Could not submit job"):
-        job.submit(executor="hiraku-local")
+        job.submit(executor="local-detached")
     assert Job.load(job.id, project=project).status.state == psij.JobState.FAILED
     with pytest.raises(ExecutionError, match="already been submitted"):
-        job.submit(executor="hiraku-local")
+        job.submit(executor="local-detached")
 
 
 def test_saved_nonfinal_result_is_not_inferred_from_processes(project, monkeypatch):
@@ -484,8 +484,8 @@ def test_detached_local_preserves_resources_and_environment(project):
         env={"CUSTOM_VALUE": "private-value"},
         resources=psij.ResourceSpecV1(process_count=1),
     )
-    job.submit(executor="hiraku-local")
-    assert job.executor.name == "hiraku-local"
+    job.submit(executor="local-detached")
+    assert job.executor.name == "local-detached"
     assert finish(job).exit_code == 0
     assert job.spec.stdout_path.read_text() == "private-value\n"
     assert job.spec.resources.computed_process_count == 1
@@ -506,7 +506,7 @@ def test_launcher_records_result_without_parent_writes(project, monkeypatch):
         record_id="test",
         project=project,
     )
-    job.submit(executor="hiraku-local")
+    job.submit(executor="local-detached")
     monkeypatch.setattr(
         Job, "_save", lambda self: pytest.fail("Only the launcher writes completion")
     )
@@ -627,7 +627,7 @@ def test_background_survives_submitter_and_preserves_exit_code(project):
             "print(os.environ['HIRAKU_JOB_ID']); raise SystemExit(7)\"], "
             "record_id='test', "
             f"project=Project.discover({str(project.root)!r})); "
-            "job.submit(executor='hiraku-local'); print(job.id)",
+            "job.submit(executor='local-detached'); print(job.id)",
         ],
         capture_output=True,
         text=True,
@@ -682,7 +682,7 @@ def test_foreground_cli_output_and_exit_code(project, monkeypatch, code):
     assert runner.invoke(main, ["run", "--help"]).exit_code != 0
 
 
-@pytest.mark.parametrize("options", [[], ["--executor", "hiraku-local"]])
+@pytest.mark.parametrize("options", [[], ["--executor", "local-detached"]])
 def test_background_cli_and_inspection(project, monkeypatch, options):
     monkeypatch.chdir(project.root)
     runner = CliRunner()
@@ -704,9 +704,9 @@ def test_background_cli_and_inspection(project, monkeypatch, options):
     )
     assert result.exit_code == 0, result.output
     job = Job.load(result.output.strip(), project=project)
-    assert job.executor.name == "hiraku-local"
+    assert job.executor.name == "local-detached"
     with pytest.raises(ExecutionError, match="already been submitted"):
-        job.submit(executor="hiraku-local")
+        job.submit(executor="local-detached")
     assert not job.status.final
     (project.root / "release").touch()
     finish(job)

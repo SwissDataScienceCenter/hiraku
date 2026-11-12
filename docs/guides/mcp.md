@@ -85,7 +85,7 @@ paths and the organizational parent cannot be changed through the update tool.
 Expected failures are returned as MCP tool errors.
 
 `job_submit` requires explicit command arguments. Commands are not stored in
-records. The default executor is `hiraku-local`, a subclass of PSI/J's
+records. The default executor is `local-detached`, a subclass of PSI/J's
 `LocalJobExecutor` using a detached recording launcher. It saves `result.json`
 independently of the MCP server.
 Record attribution is optional: an omitted ID uses the active record when set,

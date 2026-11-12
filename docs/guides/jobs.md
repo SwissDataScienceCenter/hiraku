@@ -11,7 +11,7 @@ hiraku job submit --record baseline -- python train.py
 Without `--record`, the active record is used when set; otherwise the job is
 unattributed. Local commands run in the caller's working directory, including
 uncommitted changes. `run` uses PSI/J's native
-`LocalJobExecutor`; `submit` defaults to `hiraku-local`, a recording subclass.
+`LocalJobExecutor`; `submit` defaults to `local-detached`, a recording subclass.
 Commands have closed stdin. Git provenance belongs to records and user-managed
 tracking runs; Jobs do not collect it.
 
@@ -68,7 +68,7 @@ job = Job.create(["python", "train.py"], record_id="baseline", project=project).
 print(job.status.exit_code)
 
 job = Job.create(["python", "train.py"], record_id="baseline", project=project)
-native = job.submit(executor="hiraku-local")  # Live PSI/J handle
+native = job.submit(executor="local-detached")  # Live PSI/J handle
 # Later, read the saved result:
 job = Job.load(job.id, project=project)
 ```
@@ -78,7 +78,7 @@ an optional `record_id`, `project`, `env`, `directory`, native PSI/J
 `attributes`, and `resources`.
 Only CLI and MCP resolve the active record. Python callers may supply an explicit
 ID or omit it for an unattributed job.
-CLI and MCP submission default to `hiraku-local`. `directory` is unset by
+CLI and MCP submission default to `local-detached`. `directory` is unset by
 default and can be supplied for the execution environment. Explicit environment additions are
 stored in `job.spec.environment` and persisted in `job.json`; inherited environment
 values are not captured. The prepared spec is passed directly to PSI/J.
@@ -119,7 +119,7 @@ returns after acceptance; clients inspect saved results with `job_show`.
 
 Each local attempt stores `job.json`, `stdout.log`, and `stderr.log` under
 `.hiraku/jobs/<job_id>/`. For `run()`, Hiraku saves the native final status in
-`job.json`. For `submit(executor="hiraku-local")`, Hiraku writes submission metadata to `job.json`;
+`job.json`. For `submit(executor="local-detached")`, Hiraku writes submission metadata to `job.json`;
 the launcher alone records its exit code and completion time in `result.json`.
 These separate atomic writes cannot overwrite each other. Exclusive creation of
 the job directory prevents duplicate execution. An interrupted submission can leave
@@ -168,13 +168,13 @@ use their native tools to inspect results.
 
 Implement PSI/J's `JobExecutor` contract and register a descriptor in an installed
 `psij-descriptors/*.py` module, following `src/psij-descriptors/renku.py`.
-`RecordingLocalExecutor` in `src/psij-descriptors/recording.py` configures the
+`LocalDetachedJobExecutor` in `src/psij-descriptors/local.py` configures the
 recording launcher and reads its saved outcomes. The module also defines the
-launchers and registers executor `hiraku-local` and launcher
-`hiraku-record`. Foreground execution uses `hiraku-single`, a small single-command
+launchers and registers executor `local-detached` and launcher
+`detached`. Foreground execution uses `quoted-single`, a small single-command
 launcher with quoted paths to work around PSI/J's unquoted output redirections.
 It neither detaches nor records results. Other executors retain their own launchers.
-The bundled scripts are `single.sh` for that quoting workaround and `detach.sh`
+The bundled scripts are `single.sh` for that quoting workaround and `detached.sh`
 for detached submission and result recording.
 Do not add an `__init__.py` to the descriptors directory. Selecting the built-in `local` executor
 explicitly uses PSI/J's ordinary execution without Hiraku's detached recording.

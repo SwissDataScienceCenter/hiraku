@@ -375,7 +375,7 @@ An omitted `directory` leaves the execution directory to the executor; local job
 inherit the submitting process's cwd. Explicit paths refer to the execution side.
 Explicit `env` values are stored in the job spec and saved metadata.
 `run` uses native PSI/J `LocalJobExecutor`, waits, and saves its final status in
-`job.json`. The CLI and MCP default submission executor, `hiraku-local`, subclasses
+`job.json`. The CLI and MCP default submission executor, `local-detached`, subclasses
 `LocalJobExecutor` and starts a detached shell launcher that records `result.json`.
 Show/list combine saved metadata with the launcher's result. Read `stdout.log`
 and `stderr.log` directly; foreground `job run` also streams output. There is no
@@ -404,7 +404,7 @@ record loaders and listing functions in `hiraku.record`;
 `Leaderboard` and `Metric` in `hiraku.tracking`; use `Leaderboard.create()`,
 `load()`, `list()`, and `delete()` for definitions;
 `Run` in `hiraku.tracking`; and `Job.create(command, record_id=..., project=...)`
-in `hiraku.jobs`, followed by `job.submit(executor="hiraku-local")` or blocking
+in `hiraku.jobs`, followed by `job.submit(executor="local-detached")` or blocking
 `job.run()`. Pass another executor name or PSI/J instance to select it.
 Each job permits one execution. Use `Job.load()` and `Job.list()` to inspect
 saved execution results, and ordinary file tools for saved output.

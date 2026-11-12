@@ -715,7 +715,7 @@ def _exit_job(job: Job) -> None:
 @click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
 @click.option(
-    "--executor", default="hiraku-local", show_default=True, help="PSI/J executor."
+    "--executor", default="local-detached", show_default=True, help="PSI/J executor."
 )
 @click.option("--executor-url")
 @click.option(
