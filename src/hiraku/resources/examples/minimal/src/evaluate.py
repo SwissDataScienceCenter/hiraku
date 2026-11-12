@@ -28,6 +28,11 @@ accuracy = sum(a == b for a, b in zip(expected, predicted, strict=True)) / len(e
 
 runs_file = Path("runs.csv")
 write_header = not runs_file.exists() or runs_file.stat().st_size == 0
+if not write_header:
+    with runs_file.open(encoding="utf-8", newline="") as stream:
+        header = next(csv.reader(stream), None)
+    if header != FIELDS:
+        raise RuntimeError(f"Unexpected runs CSV header in {runs_file}: {header!r}")
 
 with runs_file.open("a", encoding="utf-8", newline="") as stream:
     writer = csv.DictWriter(stream, fieldnames=FIELDS)

@@ -15,8 +15,9 @@ Output is buffered through temporary files and removed afterward. Stdin is
 closed. Local execution uses the caller's working directory, including uncommitted
 changes; use `--directory` to choose another directory.
 
-Without `--record`, CLI and MCP use the active record when set, otherwise the job
-is unattributed. Commands are explicit argv, never record metadata.
+Without `--record`, the CLI uses the active record when set, otherwise the job
+is unattributed. MCP requires an explicit `record_id` for attribution; omitting
+it submits an unattributed job. Commands are explicit argv, never record metadata.
 
 `run` and `job submit` accept `--launcher NAME` to select an installed PSI/J
 launcher by its registered name. It sets `JobSpec.launcher` and is retained in

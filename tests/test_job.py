@@ -1,6 +1,7 @@
 """Native PSI/J jobs, attribution, history, and CLI behavior."""
 
 import gc
+import io
 import json
 import os
 import signal
@@ -160,6 +161,57 @@ def test_foreground_streams_before_completion(project):
         if process.poll() is None:
             process.kill()
         process.wait()
+
+
+def test_foreground_rejects_running_job_without_mutation(project):
+    release = project.root / "release"
+    job = prepare_job(
+        [
+            sys.executable,
+            "-c",
+            "import time; from pathlib import Path\n"
+            f"while not Path({str(release)!r}).exists(): time.sleep(.05)",
+        ],
+        project=project,
+    )
+    psij.JobExecutor.get_instance("local").submit(job)
+    original = job.spec.__dict__.copy()
+    try:
+        with pytest.raises(psij.InvalidJobException, match="new and unbound"):
+            run_local(job)
+        assert job.spec.__dict__ == original
+        assert not job.status.final
+    finally:
+        release.touch()
+        status = wait(job)
+    assert status.state == psij.JobState.COMPLETED
+
+
+@pytest.mark.parametrize("binary", [False, True])
+def test_foreground_binary_and_text_streams(project, monkeypatch, binary):
+    stdout = (
+        io.TextIOWrapper(io.BytesIO(), encoding="utf-8") if binary else io.StringIO()
+    )
+    stderr = (
+        io.TextIOWrapper(io.BytesIO(), encoding="utf-8") if binary else io.StringIO()
+    )
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    payload = b"\x00\x8b\xffh\xc3\xa9"
+    job = prepare_job(
+        [
+            sys.executable,
+            "-c",
+            f"import os; os.write(1, {payload!r}); os.write(2, {payload!r})",
+        ],
+        project=project,
+    )
+    assert run_local(job).exit_code == 0
+    for output in (stdout, stderr):
+        if binary:
+            assert output.buffer.getvalue() == payload
+        else:
+            assert output.getvalue() == payload.decode("utf-8", errors="replace")
 
 
 @pytest.mark.parametrize("hook", ["pre_launch", "post_launch"])

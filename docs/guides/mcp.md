@@ -87,8 +87,9 @@ paths and the organizational parent cannot be changed through the update tool.
 Expected failures are returned as MCP tool errors.
 
 `job_submit` takes explicit command arguments and defaults to `local-detached`.
-An omitted record ID uses the active record when set, otherwise the job is
-unattributed. `launcher` selects a registered PSI/J launcher; `custom_attributes`
+Record attribution requires an explicit `record_id`; omitting it submits an
+unattributed job regardless of the active record. `launcher` selects a registered
+PSI/J launcher; `custom_attributes`
 maps executor-specific settings, matching CLI `--custom-attribute KEY VALUE`.
 Explicit `directory` paths refer to the execution side; local jobs otherwise
 inherit the MCP server's directory. Pass the returned `id` as `job_id` to

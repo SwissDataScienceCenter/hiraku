@@ -18,12 +18,12 @@ from mcp.server.mcpserver.exceptions import (
 from mcp.types import (
     ToolAnnotations,
 )
-from psij import JobAttributes, JobExecutor
+from psij import InvalidJobException, JobAttributes, JobExecutor, SubmitException
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .errors import HirakuError, ValidationError
+from .errors import ExecutionError, HirakuError, ValidationError
 from .job import Submission, prepare_job
 from .project import Project
 from .tracking import Leaderboard
@@ -240,13 +240,12 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         directory: str | None = None,
         launcher: str | None = None,
     ) -> dict[str, Any]:
-        """Submit through PSI/J and return after acceptance, without waiting."""
+        """Submit through PSI/J; record attribution requires an explicit record_id."""
         if executor == "local":
             raise ValidationError(
                 "Native local execution cannot recover submission status; "
                 "use hiraku run or the local-detached executor"
             )
-        record_id = record_id if record_id is not None else selected.active_record_id
         job = prepare_job(
             command,
             record_id=record_id,
@@ -257,7 +256,10 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             if custom_attributes
             else None,
         )
-        JobExecutor.get_instance(executor, url=executor_url).submit(job)
+        try:
+            JobExecutor.get_instance(executor, url=executor_url).submit(job)
+        except (InvalidJobException, SubmitException, ValueError, OSError) as exc:
+            raise ExecutionError(str(exc)) from exc
         entry = Submission.from_psi_job(job)
         entry.save(selected)
         return entry.model_dump(mode="json")
