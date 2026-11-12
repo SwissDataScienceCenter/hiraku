@@ -13,9 +13,7 @@ so each client starts it in the project it is working on:
 uv run hiraku mcp serve
 ```
 
-The previous `hiraku mcp` invocation continues to serve the project for
-existing client configurations. There is no project-path flag; the process
-uses its working directory.
+There is no project-path flag; the process uses its working directory.
 
 The Codex config is ignored by Git so local MCP tool preferences remain
 private. Run `hiraku mcp install` after cloning to create it on your machine.

@@ -385,5 +385,5 @@ record loaders and listing functions in `hiraku.record`;
 `Run` in `hiraku.tracking`; and `execute_command` in `hiraku.execution` for scripted
 execution.
 Records with `type: context` store supporting material. Workflows run in the
-current coding agent through the Hiraku MCP server (`hiraku mcp`). V1 does not
+current coding agent through the Hiraku MCP server (`hiraku mcp serve`). V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.

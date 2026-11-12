@@ -197,12 +197,9 @@ def _serve_mcp() -> None:
     server.run(transport="stdio")
 
 
-@main.group("mcp", invoke_without_command=True)
-@click.pass_context
-def mcp_group(ctx: click.Context) -> None:
+@main.group("mcp")
+def mcp_group() -> None:
     """Install, remove, or serve the Hiraku MCP server."""
-    if ctx.invoked_subcommand is None:
-        _serve_mcp()
 
 
 @mcp_group.command("serve")

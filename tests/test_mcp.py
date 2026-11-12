@@ -371,8 +371,7 @@ def test_stdio_session(tmp_path: Path) -> None:
             command=sys.executable,
             args=[
                 "-c",
-                "from hiraku.cli import main; main()",
-                "mcp",
+                'from hiraku.cli import main; main(["mcp", "serve"])',
             ],
             cwd=str(tmp_path),
         )
@@ -414,7 +413,7 @@ def test_stdio_session(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("args", [("mcp",), ("mcp", "serve")])
+@pytest.mark.parametrize("args", [("mcp", "serve")])
 def test_cli_project_error(tmp_path: Path, monkeypatch, args) -> None:
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, list(args))
@@ -422,7 +421,7 @@ def test_cli_project_error(tmp_path: Path, monkeypatch, args) -> None:
     assert "No hiraku.yml" in result.output
 
 
-@pytest.mark.parametrize("args", [("mcp",), ("mcp", "serve")])
+@pytest.mark.parametrize("args", [("mcp", "serve")])
 def test_cli_serves_project(tmp_path, monkeypatch, args):
     from unittest.mock import Mock
 

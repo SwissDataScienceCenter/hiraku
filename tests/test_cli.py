@@ -150,7 +150,7 @@ def test_workflow_help_lists_supported_commands() -> None:
     assert "send-event" not in result.output
 
 
-@pytest.mark.parametrize("args", [("mcp",), ("mcp", "serve")])
+@pytest.mark.parametrize("args", [("mcp", "serve")])
 def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch, args) -> None:
     Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
@@ -161,6 +161,15 @@ def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch, args) -> None:
 
     assert result.exit_code == 1
     assert "MCP SDK dependency" in result.output
+
+
+def test_mcp_requires_explicit_subcommand() -> None:
+    result = invoke("mcp")
+
+    assert result.exit_code == 2
+    assert all(
+        command in result.output for command in ("serve", "install", "uninstall")
+    )
 
 
 def test_mcp_install_and_uninstall_preserve_other_client_settings(
