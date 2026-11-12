@@ -1177,7 +1177,7 @@ def test_list_syncs_nonfinal_jobs_and_continues_on_error(
         ("UNKNOWN", "white"),
     ],
 )
-def test_list_row_colors(project, detached, monkeypatch, state, color):
+def test_list_colors_only_status(project, detached, monkeypatch, state, color):
     monkeypatch.chdir(project.root)
     job, _ = history_entry(project, detached)
     entry = Submission.load(project, job.id)
@@ -1195,7 +1195,12 @@ def test_list_row_colors(project, detached, monkeypatch, state, color):
     )
     response = CliRunner().invoke(main, ["job", "list"])
     assert response.exit_code == 0, response.output
-    assert tables[0].rows[0].style == color
+    table = tables[0]
+    assert table.rows[0].style is None
+    assert table.columns[4]._cells[0].plain == state
+    assert table.columns[4]._cells[0].style == color
+    for column in (0, 1, 2, 3, 5):
+        assert isinstance(table.columns[column]._cells[0], str)
 
 
 def test_observation_helper_propagates_save_failure(project, detached, monkeypatch):

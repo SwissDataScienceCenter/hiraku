@@ -379,8 +379,8 @@ for completion. Use `job_list(record_id=...)` or
 CLI and MCP list automatically sync and save nonfinal jobs, skipping saved
 `COMPLETED`, `FAILED`, and `CANCELED` outcomes. Observation failures warn and
 return response-only `UNKNOWN` with `observation_error`, preserving the saved
-snapshot and `observed_at`. CLI rows are green for completed jobs, red for failed
-or canceled jobs, and white otherwise.
+snapshot and `observed_at`. CLI status values are green for completed jobs, red
+for failed or canceled jobs, and white otherwise; other cells use default styling.
 `observed_at` records the last successful observation. Failed sync raises an error
 without changing the snapshot.
 Do not resubmit

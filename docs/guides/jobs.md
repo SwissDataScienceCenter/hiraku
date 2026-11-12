@@ -66,10 +66,11 @@ hiraku job status JOB_ID --json
 and displays the updated submission without waiting for completion.
 `list` refreshes and saves each nonfinal submission before displaying status.
 Saved `COMPLETED`, `FAILED`, and `CANCELED` outcomes are not queried again.
-The CLI table colors completed rows green, failed or canceled rows red, and
-other rows white. JSON includes status and observation timestamps.
+The CLI table colors only the status value: completed is green, failed or
+canceled is red, and other states are white. JSON includes status and observation
+timestamps.
 If a job cannot be observed, listing warns and returns `UNKNOWN` with an
-`observation_error` in JSON/MCP output. The row is white. This is response-only:
+`observation_error` in JSON/MCP output. `UNKNOWN` is white. This is response-only:
 saved history and the last successful `observed_at` remain unchanged.
 The text output includes the command with shell-quoted arguments.
 Attachment itself may contact the backend and take time.
