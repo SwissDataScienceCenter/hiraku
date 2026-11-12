@@ -73,8 +73,8 @@ and fall back to the CLI when the host has not connected the server.
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
 | `job_submit` | Submit through PSI/J, record history, and return the original PSI/J job `id`. |
-| `job_list` | List project jobs with commands and refreshed or saved final status; optionally filter by `record_id`. |
-| `job_status` | Retrieve observed or saved final status using the original `job_id`. |
+| `job_list` | List project jobs with commands and saved status snapshots; optionally filter by `record_id`. |
+| `job_status` | Attach through PSI/J and save the current status using the original `job_id`. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
@@ -97,8 +97,8 @@ When `directory` is omitted, the executor chooses its working directory; local
 jobs inherit the MCP server's directory. Explicit paths refer to the execution
 side. Pass the original PSI/J `id` from the response as `job_id` to `job_status`.
 Project history keeps the command, executor target, and native ID, and retains
-observed final status for later queries without backend access. Backend errors
-appear as `observation_error` with status `UNKNOWN` without changing the outcome.
+saved status snapshots for listing without backend access. Refresh failures
+appear as `observation_error` alongside the unchanged saved status.
 Detached output remains in the executor's `stdout.log` and `stderr.log`
 files. Renku reports final states without process exit codes; its logs and
 control remain with the remote platform.

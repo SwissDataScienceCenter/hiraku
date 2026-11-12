@@ -135,29 +135,9 @@ def run_local(job: psij.Job, *, project: Project | None = None) -> psij.JobStatu
         finally:
             spec.stdout_path, spec.stderr_path = original
             if project is not None and submission is not None and job.status.final:
-                submission.final_status = _FinalStatus(**_status_data(job.status))
+                submission.sync(job)
                 submission.save(project)
     return job.status
-
-
-def describe_job(job: psij.Job) -> dict[str, Any]:
-    """Expose native identity and status to CLI and MCP clients."""
-    return {
-        "executor": job.executor.name,
-        "executor_url": job.executor.url,
-        "native_id": job.native_id,
-        "status": _status_data(job.status),
-    }
-
-
-def _status_data(status: psij.JobStatus) -> dict[str, Any]:
-    return {
-        "state": status.state.name,
-        "time": status.time,
-        "exit_code": status.exit_code,
-        "message": status.message,
-        "metadata": status.metadata,
-    }
 
 
 def _submission_path(job_id: str, project: Project) -> Path:
@@ -168,14 +148,29 @@ def _submission_path(job_id: str, project: Project) -> Path:
     return project.root / ".hiraku" / "jobs" / f"{job_id}.json"
 
 
-class _FinalStatus(BaseModel):
+class Status(BaseModel):
+    """Validated status data for observations and saved submission outcomes."""
+
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    state: Literal["COMPLETED", "FAILED", "CANCELED"]
-    time: float
+    state: Literal[
+        "NEW", "QUEUED", "ACTIVE", "COMPLETED", "FAILED", "CANCELED", "UNKNOWN"
+    ]
+    time: float | None
     exit_code: int | None
     message: str | None
     metadata: dict[str, Any] | None
+
+    @classmethod
+    def from_psi_status(cls, status: psij.JobStatus) -> Status:
+        """Copy a native PSI/J status into validated, serializable data."""
+        return cls(
+            state=status.state.name,
+            time=status.time,
+            exit_code=status.exit_code,
+            message=status.message,
+            metadata=status.metadata,
+        )
 
 
 class Submission(BaseModel):
@@ -190,7 +185,7 @@ class Submission(BaseModel):
     executor_url: str | None
     native_id: str = Field(min_length=1)
     spec: dict[str, Any]
-    final_status: _FinalStatus | None = None
+    status: Status
 
     @field_validator("id")
     @classmethod
@@ -225,15 +220,48 @@ class Submission(BaseModel):
                 executor_url=job.executor.url,
                 native_id=job.native_id,
                 spec=json.loads(JSONSerializer().dumps(job.spec)),
-                final_status=_FinalStatus(**_status_data(job.status))
-                if job.status.final
-                else None,
+                status=Status.from_psi_status(job.status),
             )
         except (TypeError, ValueError) as exc:
             raise ExecutionError(
                 f"Job {job.id} was submitted (native ID {job.native_id}), "
                 f"but its history could not be serialized: {exc}"
             ) from exc
+
+    def get_psi_job(self) -> psij.Job:
+        """Attach a native job without waiting, syncing, or saving metadata."""
+        if self.executor == "local":
+            raise ExecutionError("Native local jobs cannot be safely reattached")
+        try:
+            executor = psij.JobExecutor.get_instance(
+                self.executor, url=self.executor_url
+            )
+            job = psij.Job()
+            executor.attach(job, self.native_id)
+            return job
+        except (
+            psij.InvalidJobException,
+            psij.SubmitException,
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            ImportError,
+            NotImplementedError,
+        ) as exc:
+            raise ExecutionError(f"Cannot attach job {self.id}: {exc}") from exc
+
+    def sync(self, job: psij.Job) -> None:
+        """Copy status from the same native execution without polling or saving."""
+        if job.executor is None or (
+            job.executor.name,
+            job.executor.url,
+            job.native_id,
+        ) != (self.executor, self.executor_url, self.native_id):
+            raise ValidationError(
+                "Job executor target and native ID must match submission"
+            )
+        self.status = Status.from_psi_status(job.status)
 
     def save(self, project: Project) -> None:
         """Atomically save submission metadata."""
@@ -281,62 +309,6 @@ class Submission(BaseModel):
         return sorted(
             entries, key=lambda entry: (entry.submitted_at, entry.id), reverse=True
         )
-
-
-def observe_submission(
-    entry: Submission, *, project: Project, wait: bool = False
-) -> dict[str, Any]:
-    """Retrieve native status, retaining final outcomes independently of backends."""
-    if entry.final_status is not None:
-        return {
-            **entry.model_dump(mode="json"),
-            "status": entry.final_status.model_dump(),
-            "observation_error": None,
-        }
-    try:
-        if entry.executor == "local":
-            # Native local attachment cannot recover real exit codes.
-            raise ExecutionError("Final status must be saved by the foreground process")
-        executor = psij.JobExecutor.get_instance(entry.executor, url=entry.executor_url)
-        job = psij.Job()
-        executor.attach(job, entry.native_id)
-        status = (
-            job.wait()
-            if wait
-            else job.wait(
-                timeout=timedelta(seconds=0.2), target_states=[psij.JobState.QUEUED]
-            )
-        ) or job.status
-    except (
-        psij.InvalidJobException,
-        psij.SubmitException,
-        OSError,
-        ValueError,
-        TypeError,
-        KeyError,
-        ImportError,
-        NotImplementedError,
-        ExecutionError,
-    ) as exc:
-        return {
-            **entry.model_dump(mode="json"),
-            "status": {
-                "state": "UNKNOWN",
-                "time": None,
-                "exit_code": None,
-                "message": None,
-                "metadata": None,
-            },
-            "observation_error": str(exc),
-        }
-    if status.final:
-        entry.final_status = _FinalStatus(**_status_data(status))
-        entry.save(project)
-    return {
-        **entry.model_dump(mode="json"),
-        "status": _status_data(status),
-        "observation_error": None,
-    }
 
 
 def _follow_streams(job: psij.Job) -> None:

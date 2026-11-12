@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
@@ -18,18 +19,13 @@ from mcp.server.mcpserver.exceptions import (
 from mcp.types import (
     ToolAnnotations,
 )
-from psij import JobAttributes, JobExecutor
+from psij import JobAttributes, JobExecutor, JobState
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .errors import HirakuError, ValidationError
-from .job import (
-    Submission,
-    describe_job,
-    observe_submission,
-    prepare_job,
-)
+from .errors import ExecutionError, HirakuError, ValidationError
+from .job import Submission, prepare_job
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -267,20 +263,29 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         entry.save(selected)
         return {
             **entry.model_dump(mode="json"),
-            **describe_job(job),
             "observation_error": None,
         }
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True))
     def job_status(job_id: str) -> dict[str, Any]:
-        """Retrieve observed or saved final status by the original PSI/J job ID."""
-        return observe_submission(Submission.load(selected, job_id), project=selected)
+        """Refresh a saved status snapshot by the original PSI/J job ID."""
+        entry = Submission.load(selected, job_id)
+        observation_error = None
+        try:
+            job = entry.get_psi_job()
+            job.wait(timeout=timedelta(seconds=0.2), target_states=[JobState.QUEUED])
+            entry.sync(job)
+        except ExecutionError as exc:
+            observation_error = str(exc)
+        else:
+            entry.save(selected)
+        return {**entry.model_dump(mode="json"), "observation_error": observation_error}
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True))
     def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
-        """List project jobs and commands with their observed or saved final status."""
+        """List project jobs and commands with their saved status snapshots."""
         return [
-            observe_submission(entry, project=selected)
+            {**entry.model_dump(mode="json"), "observation_error": None}
             for entry in Submission.list(selected, record_id=record_id)
         ]
 

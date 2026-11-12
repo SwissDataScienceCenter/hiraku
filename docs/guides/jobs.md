@@ -2,7 +2,7 @@
 
 Hiraku uses native PSI/J jobs and executors. It adds record attribution and a
 foreground output helper. Executors own submission and final-status reporting;
-Hiraku records submission details and observed final outcomes in project history.
+Hiraku records submission details and saved status snapshots in project history.
 
 ## Run locally
 
@@ -51,7 +51,7 @@ hiraku job status JOB_ID
 hiraku job status JOB_ID --wait --json
 ```
 
-`list` shows jobs newest first, with commands and refreshed statuses. `status`
+`list` shows jobs newest first, with commands and saved status snapshots. `status`
 looks up the saved executor and attaches through PSI/J; `--wait` waits for a final
 state. Otherwise, a bounded initial observation may still report `NEW` or pending.
 PSI/J's `executor.list()` independently discovers backend-native IDs where supported.
@@ -60,23 +60,23 @@ PSI/J's `executor.list()` independently discovers backend-native IDs where suppo
 
 Each accepted submission is saved atomically to `.hiraku/jobs/<id>.json`.
 The file contains the original PSI/J job ID, record ID, submission timestamp,
-executor name and URL, backend native ID, serialized `JobSpec`, and optional
-`final_status`. No additional Hiraku submission ID is generated. Attaching creates
+executor name and URL, backend native ID, serialized `JobSpec`, and `status`.
+No additional Hiraku submission ID is generated. Attaching creates
 a new in-memory PSI/J job, but does not change the saved original ID.
 
-List and status queries persist native final statuses when observed, including
-state, status time, exit code, message, and metadata. Saved final outcomes need
-no backend access. Pending statuses and observation errors are not written back.
-An unavailable backend reports `UNKNOWN` with `observation_error`, preserving
-the submission and other jobs' results. A final outcome is recoverable only while
-the backend retains it or after Hiraku has observed and saved it.
+`status` queries attach through PSI/J, copy the current native status, and save it.
+Snapshots include state, status time, exit code, message, and metadata, including
+pending states. `list` reads saved snapshots without backend access. If attachment
+fails, `status` returns the saved snapshot with a separate `observation_error`;
+the file is unchanged. A final outcome is recoverable only while the backend
+retains it or after it has been synced and saved.
 Corrupt history files are reported as warnings and omitted from listings;
 loading one directly reports an error.
 
 Foreground CLI execution also records its submission and saves final status
-before returning. While its final status is unavailable, history reports
-`UNKNOWN`: native local attachment cannot safely recover the real exit code.
-If the foreground process crashes, no outcome is inferred from its PID.
+before returning. Native local jobs cannot safely be reattached; later refresh
+requests return the last saved snapshot with an observation error. If the
+foreground process crashes, no outcome is inferred from its PID.
 History may reference temporary foreground output paths; those files are removed
 after execution. Backend result files remain separate from project history.
 
@@ -109,9 +109,7 @@ after the submitting process exits.
 ```python
 import psij
 
-from hiraku.job import (
-    Submission, observe_submission, prepare_job, run_local,
-)
+from hiraku.job import Submission, prepare_job, run_local
 from hiraku.project import Project
 
 project = Project.discover()
@@ -123,13 +121,14 @@ executor = psij.JobExecutor.get_instance("local-detached")
 executor.submit(job)
 submission = Submission.from_psi_job(job)
 submission.save(project)
-result = observe_submission(submission, project=project, wait=True)
 entries = Submission.list(project, record_id="baseline")
 
-# In another process, reconstruct the executor using its name and URL:
-attached = psij.Job()
-executor.attach(attached, job.native_id)
+# In another process, attach and explicitly update the saved snapshot:
+submission = Submission.load(project, submission.id)
+attached = submission.get_psi_job()
 status = attached.wait()
+submission.sync(attached)
+submission.save(project)
 ```
 
 `prepare_job()` returns a `psij.Job` without submitting or writing files.
@@ -142,9 +141,14 @@ output files are retained. Passing `project` enables history. Native Python
 submissions opt in by converting an accepted job with `Submission.from_psi_job(job)`
 and calling `submission.save(project)`. Conversion does not write files.
 `Submission.load(project, job_id)` and `Submission.list(project, record_id=...)`
-read validated metadata without contacting executors. The model owns persistence,
-not execution. `observe_submission(submission, project=project)` refreshes status,
-saves observed final outcomes, and returns a dictionary for CLI and MCP clients.
+read validated metadata without contacting executors. `get_psi_job()` reconstructs
+the executor and attaches without waiting or changing saved metadata. `sync(job)`
+checks the executor target and native ID, then copies status without polling or
+writing files; call `save(project)` explicitly to persist it. PSI/J owns lifecycle
+operations such as waiting and cancellation.
+`Status` validates both observed and persisted status data. Convert native status
+with `Status.from_psi_status(status)` and serialize with `status.model_dump()`.
+`Submission.status` is the last explicitly saved observation, which may be pending.
 
 Scripts receive `HIRAKU_RECORD_ID` (empty when unattributed) and
 `HIRAKU_JOB_ID` (the PSI/J job's `id`, distinct from the backend `native_id`).
