@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import logging
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
@@ -23,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .errors import ExecutionError, HirakuError, ValidationError
+from .errors import ExecutionError, HirakuError, ObservationError, ValidationError
 from .job import Submission, prepare_job
 from .project import Project
 from .tracking import Leaderboard
@@ -33,6 +34,8 @@ from .workflows.langgraph import workflow_details as langgraph_workflow_details
 from .workflows.langgraph import workflow_ids, workflow_mermaid
 from .workflows.langgraph import workflow_status as langgraph_workflow_status
 from .workflows.session_history import list_sessions, session_history
+
+logger = logging.getLogger(__name__)
 
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
@@ -275,14 +278,21 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         return entry.model_dump(mode="json")
 
     @server.tool(
-        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)
+        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
     )
     def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
-        """List saved submission metadata without querying executors."""
-        return [
-            entry.model_dump(mode="json", exclude={"status", "observed_at"})
-            for entry in Submission.list(selected, record_id=record_id)
-        ]
+        """List jobs and status, refreshing and saving nonfinal submissions."""
+        entries = Submission.list(selected, record_id=record_id)
+        for entry in entries:
+            if entry.status.state in {"COMPLETED", "FAILED", "CANCELED"}:
+                continue
+            try:
+                entry.sync()
+            except ObservationError as exc:
+                logger.warning("Cannot sync job %s: %s", entry.id, exc)
+            else:
+                entry.save(selected)
+        return [entry.model_dump(mode="json") for entry in entries]
 
     @server.tool(
         title="List tracked runs",

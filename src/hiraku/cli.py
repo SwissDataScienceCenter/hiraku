@@ -34,6 +34,7 @@ from .errors import (
     GitError,
     HirakuError,
     NoActiveRecordError,
+    ObservationError,
     ValidationError,
 )
 from .git import GitRepository, init_code_repository, require_git
@@ -116,12 +117,20 @@ def _validate_json_options(json_output: bool, pretty: bool) -> None:
         raise ValidationError("--pretty requires --json")
 
 
-def _print_table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+def _print_table(
+    columns: Sequence[str],
+    rows: Sequence[Sequence[Any]],
+    *,
+    row_styles: Sequence[str] | None = None,
+) -> None:
     table = Table(box=box.ROUNDED, header_style="bold cyan", pad_edge=False)
     for column in columns:
         table.add_column(column, overflow="fold")
-    for row in rows:
-        table.add_row(*("" if item is None else str(item) for item in row))
+    for index, row in enumerate(rows):
+        table.add_row(
+            *("" if item is None else str(item) for item in row),
+            style=row_styles[index] if row_styles is not None else None,
+        )
     console = Console()
     console.print(table)
 
@@ -892,12 +901,18 @@ def _show_submission(result: dict[str, Any], json_output: bool) -> None:
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> None:
-    """List saved submission metadata without querying executors."""
+    """List jobs and status, refreshing nonfinal submissions."""
     submissions = Submission.list(state.project, record_id=record_id)
-    entries = [
-        entry.model_dump(mode="json", exclude={"status", "observed_at"})
-        for entry in submissions
-    ]
+    for entry in submissions:
+        if entry.status.state in {"COMPLETED", "FAILED", "CANCELED"}:
+            continue
+        try:
+            entry.sync()
+        except ObservationError as exc:
+            click.echo(f"Warning: cannot sync job {entry.id}: {exc}", err=True)
+        else:
+            entry.save(state.project)
+    entries = [entry.model_dump(mode="json") for entry in submissions]
     if json_output:
         _emit_json(entries)
     else:
@@ -907,6 +922,7 @@ def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> Non
                 "record",
                 "submitted_at",
                 "executor",
+                "state",
                 "command",
             ),
             [
@@ -915,6 +931,7 @@ def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> Non
                     entry["record_id"],
                     entry["submitted_at"],
                     entry["executor"],
+                    entry["status"]["state"],
                     shlex.join(
                         [
                             entry["spec"]["executable"],
@@ -922,6 +939,14 @@ def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> Non
                         ]
                     ),
                 )
+                for entry in entries
+            ],
+            row_styles=[
+                "green"
+                if entry["status"]["state"] == "COMPLETED"
+                else "red"
+                if entry["status"]["state"] in {"FAILED", "CANCELED"}
+                else "white"
                 for entry in entries
             ],
         )

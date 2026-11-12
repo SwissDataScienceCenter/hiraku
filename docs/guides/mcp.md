@@ -73,7 +73,7 @@ and fall back to the CLI when the host has not connected the server.
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
 | `job_submit` | Submit through PSI/J, record history, and return the original PSI/J job `id`. |
-| `job_list` | List saved submission metadata and commands, without status or observation timestamps; optionally filter by `record_id`. |
+| `job_list` | List jobs and status, refreshing and saving nonfinal jobs; optionally filter by `record_id`. Final outcomes use saved history. |
 | `job_status` | Attach through PSI/J, save, and return the current status using its original `job_id`, without waiting for completion. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
@@ -92,7 +92,8 @@ PSI/J launcher; `custom_attributes`
 maps executor-specific settings, matching CLI `--custom-attribute KEY VALUE`.
 Explicit `directory` paths refer to the execution side; local jobs otherwise
 inherit the MCP server's directory. Pass the returned `id` as `job_id` to
-`job_status`. List remains read-only; status failures return tool
+`job_status`. List refreshes nonfinal jobs and warns on observation failures;
+single-job status failures return tool
 errors without changing the saved snapshot or its `observed_at` timestamp.
 
 See [Jobs and executors](jobs.md) for executor setup, history, output locations,

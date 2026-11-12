@@ -26,6 +26,7 @@ from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E4
 
 from hiraku.cli import main  # noqa: E402
 from hiraku.errors import ObservationError, ValidationError  # noqa: E402
+from hiraku.job import Submission  # noqa: E402
 from hiraku.mcp import (  # noqa: E402
     WorkflowApproval,
     create_server,
@@ -68,7 +69,8 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
         assert tools["record_list"].annotations.read_only_hint is True
         assert tools["job_status"].annotations.read_only_hint is False
         assert {"job_show", "job_sync"}.isdisjoint(tools)
-        assert tools["job_list"].annotations.read_only_hint is True
+        assert tools["job_list"].annotations.read_only_hint is False
+        assert tools["job_list"].annotations.open_world_hint is True
         assert tools["workflow_start"].title == "Start workflow"
         assert tools["workflow_start"].description
         result = await server.call_tool("project_info", {})
@@ -286,6 +288,43 @@ def test_submit_rejects_native_local(tmp_path: Path, monkeypatch) -> None:
     assert not (tmp_path / ".hiraku/jobs").exists()
 
 
+@pytest.mark.parametrize("state", ["ACTIVE", "COMPLETED", "FAILED", "CANCELED"])
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_job_list_refreshes_only_nonfinal_jobs(
+    tmp_path, monkeypatch, caplog, state, unavailable
+):
+    project = Project.create(tmp_path)
+    job = psij.Job(psij.JobSpec("echo"))
+    job.executor = psij.JobExecutor.get_instance(
+        "local-detached", url=(tmp_path / "backend").as_uri()
+    )
+    job._native_id = job.id
+    job.status = psij.JobStatus(getattr(psij.JobState, state))
+    entry = Submission.from_psi_job(job)
+    entry.save(project)
+    synced = []
+
+    def sync(self):
+        synced.append(self.id)
+        if unavailable:
+            raise ObservationError("backend unavailable")
+        self.status.state = "COMPLETED"
+
+    monkeypatch.setattr(Submission, "sync", sync)
+    server = create_server(project)
+
+    async def exercise():
+        result = await server.call_tool("job_list", {})
+        expected = "COMPLETED" if state == "ACTIVE" and not unavailable else state
+        assert result.structured_content["result"][0]["status"]["state"] == expected
+        assert Submission.load(project, job.id).status.state == expected
+
+    asyncio.run(exercise())
+    assert synced == ([job.id] if state == "ACTIVE" else [])
+    if state == "ACTIVE" and unavailable:
+        assert job.id in caplog.text and "backend unavailable" in caplog.text
+
+
 def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> None:
     config = Project.create(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -352,10 +391,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
             "example": "value"
         }
         listed = await server.call_tool("job_list", {"record_id": "demo/demo"})
-        metadata = {
-            k: v for k, v in history.items() if k not in {"status", "observed_at"}
-        }
-        assert listed.structured_content["result"] == [metadata]
+        assert listed.structured_content["result"] == [history]
         cli = CliRunner().invoke(
             main, ["job", "list", "--record", "demo/demo", "--json"]
         )
@@ -408,16 +444,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
             await server.call_tool("job_status", {"job_id": cached["id"]})
         assert path.read_bytes() == before
         listed = await server.call_tool("job_list", {})
-        metadata = {
-            k: v
-            for k, v in json.loads(before).items()
-            if k not in {"status", "observed_at"}
-        }
-        assert metadata in listed.structured_content["result"]
-        assert all(
-            "status" not in entry and "observed_at" not in entry
-            for entry in listed.structured_content["result"]
-        )
+        assert json.loads(before) in listed.structured_content["result"]
         assert all(
             "observation_error" not in entry
             for entry in listed.structured_content["result"]
