@@ -39,11 +39,11 @@ from .errors import (
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
 from .job import (
-    list_submissions,
+    Submission,
+    describe_job,
     observe_submission,
     prepare_job,
     run_local,
-    save_submission,
 )
 from .project import Project
 from .record import Record, validate_identifier
@@ -787,6 +787,11 @@ def job_submit(
     directory: Path | None,
 ) -> None:
     """Submit and return history keyed by the original PSI/J job ID as JSON."""
+    if executor == "local":
+        raise ValidationError(
+            "Native local execution cannot recover submission status; "
+            "use hiraku run or the local-detached executor"
+        )
     job = prepare_job(
         command,
         record_id=record_id
@@ -800,8 +805,15 @@ def job_submit(
         else None,
     )
     JobExecutor.get_instance(executor, url=executor_url).submit(job)
-    entry = save_submission(job, project=state.project)
-    _emit_json(entry)
+    entry = Submission.from_psi_job(job)
+    entry.save(state.project)
+    _emit_json(
+        {
+            **entry.model_dump(mode="json"),
+            **describe_job(job),
+            "observation_error": None,
+        }
+    )
 
 
 @main.command("run")
@@ -849,7 +861,11 @@ def job_status(
     json_output: bool,
 ) -> None:
     """Retrieve status by the original PSI/J job ID, optionally waiting."""
-    result = observe_submission(job_id, project=state.project, wait=wait_for_completion)
+    result = observe_submission(
+        Submission.load(state.project, job_id),
+        project=state.project,
+        wait=wait_for_completion,
+    )
     if json_output:
         _emit_json(result)
     else:
@@ -872,7 +888,10 @@ def job_status(
 @click.pass_obj
 def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> None:
     """List project jobs and commands with their observed or saved final status."""
-    entries = list_submissions(project=state.project, record_id=record_id)
+    entries = [
+        observe_submission(entry, project=state.project)
+        for entry in Submission.list(state.project, record_id=record_id)
+    ]
     if json_output:
         _emit_json(entries)
     else:

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import builtins
 import codecs
 import json
+import logging
 import os
 import sys
 import time
@@ -12,18 +14,21 @@ from contextlib import ExitStack, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 import psij
 import psutil
 from psij.serialize import JSONSerializer
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from .errors import ExecutionError, ValidationError
 from .io import atomic_write
 
 if TYPE_CHECKING:
     from .project import Project
+
+logger = logging.getLogger(__name__)
 
 
 def validate_command(value: Any) -> list[str] | None:
@@ -110,7 +115,8 @@ def run_local(job: psij.Job, *, project: Project | None = None) -> psij.JobStatu
         try:
             psij.JobExecutor.get_instance("local").submit(job)
             if project is not None:
-                submission = save_submission(job, project=project)
+                submission = Submission.from_psi_job(job)
+                submission.save(project)
             _follow_streams(job)
         except BaseException as exc:
             if job.native_id is not None and not job.status.final:
@@ -129,7 +135,8 @@ def run_local(job: psij.Job, *, project: Project | None = None) -> psij.JobStatu
         finally:
             spec.stdout_path, spec.stderr_path = original
             if project is not None and submission is not None and job.status.final:
-                _save_final_status(submission, job.status, project=project)
+                submission.final_status = _FinalStatus(**_status_data(job.status))
+                submission.save(project)
     return job.status
 
 
@@ -155,127 +162,144 @@ def _status_data(status: psij.JobStatus) -> dict[str, Any]:
 
 def _submission_path(job_id: str, project: Project) -> Path:
     try:
-        if str(UUID(job_id)) != job_id:
-            raise ValueError("Expected a canonical PSI/J UUID")
+        Submission.validate_id(job_id)
     except (ValueError, TypeError, AttributeError) as exc:
         raise ExecutionError(f"Invalid job ID: {job_id!r}") from exc
     return project.root / ".hiraku" / "jobs" / f"{job_id}.json"
 
 
-def _write_submission(entry: dict[str, Any], project: Project) -> None:
-    data = {
-        key: value
-        for key, value in entry.items()
-        if key not in {"status", "observation_error"}
-    }
-    try:
-        atomic_write(
-            _submission_path(entry["id"], project),
-            json.dumps(data, indent=2),
-            mode=0o600,
-        )
-    except (OSError, TypeError, ValueError) as exc:
-        raise ExecutionError(
-            f"Cannot save history for job {entry['id']} "
-            f"({entry['executor']}, native ID {entry['native_id']}): {exc}. "
-            "The job was submitted; do not resubmit automatically."
-        ) from exc
+class _FinalStatus(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    state: Literal["COMPLETED", "FAILED", "CANCELED"]
+    time: float
+    exit_code: int | None
+    message: str | None
+    metadata: dict[str, Any] | None
 
 
-def save_submission(job: psij.Job, *, project: Project) -> dict[str, Any]:
-    """Record an accepted native job, keyed by its original PSI/J ID."""
-    if job.executor is None or job.native_id is None or job.spec is None:
-        raise ExecutionError("Only submitted jobs can be recorded")
-    try:
-        spec = json.loads(JSONSerializer().dumps(job.spec))
-    except (TypeError, ValueError) as exc:
-        raise ExecutionError(
-            f"Job {job.id} was submitted (native ID {job.native_id}), "
-            f"but its specification could not be serialized: {exc}"
-        ) from exc
-    status = job.status
-    entry = {
-        "id": job.id,
-        "record_id": (job.spec.environment or {}).get("HIRAKU_RECORD_ID") or None,
-        "submitted_at": datetime.now(UTC).isoformat(),
-        "executor": job.executor.name,
-        "executor_url": job.executor.url,
-        "native_id": job.native_id,
-        "spec": spec,
-        "final_status": _status_data(status) if status.final else None,
-    }
-    _write_submission(entry, project)
-    return {**entry, "status": _status_data(status), "observation_error": None}
+class Submission(BaseModel):
+    """Validated submission metadata persisted independently of execution."""
 
+    model_config = ConfigDict(strict=True, extra="forbid", validate_assignment=True)
 
-def load_submission(job_id: str, *, project: Project) -> dict[str, Any]:
-    """Read submission data without reconstructing jobs or executors."""
-    path = _submission_path(job_id, project)
-    try:
-        entry = json.loads(path.read_text(encoding="utf-8"))
-        if entry["id"] != job_id:
-            raise ValueError("History ID differs from filename")
-        if not isinstance(entry["spec"].get("arguments", []), list):
+    id: str
+    record_id: str | None
+    submitted_at: AwareDatetime
+    executor: str = Field(min_length=1)
+    executor_url: str | None
+    native_id: str = Field(min_length=1)
+    spec: dict[str, Any]
+    final_status: _FinalStatus | None = None
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if str(UUID(value)) != value:
+            raise ValueError("Expected a canonical PSI/J UUID")
+        return value
+
+    @field_validator("spec")
+    @classmethod
+    def validate_spec(cls, value: dict[str, Any]) -> dict[str, Any]:
+        arguments = value.get("arguments", [])
+        if not isinstance(arguments, list):
             raise ValueError("Command arguments must be a list")
-        validate_command(
-            [entry["spec"]["executable"], *entry["spec"].get("arguments", [])]
+        try:
+            validate_command([value.get("executable"), *arguments])
+        except ValidationError as exc:
+            raise ValueError(str(exc)) from exc
+        return value
+
+    @classmethod
+    def from_psi_job(cls, job: psij.Job) -> Submission:
+        """Copy accepted job metadata without executing or writing anything."""
+        if job.executor is None or job.native_id is None or job.spec is None:
+            raise ExecutionError("Only submitted jobs can be recorded")
+        try:
+            return cls(
+                id=job.id,
+                record_id=(job.spec.environment or {}).get("HIRAKU_RECORD_ID") or None,
+                submitted_at=datetime.now(UTC),
+                executor=job.executor.name,
+                executor_url=job.executor.url,
+                native_id=job.native_id,
+                spec=json.loads(JSONSerializer().dumps(job.spec)),
+                final_status=_FinalStatus(**_status_data(job.status))
+                if job.status.final
+                else None,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ExecutionError(
+                f"Job {job.id} was submitted (native ID {job.native_id}), "
+                f"but its history could not be serialized: {exc}"
+            ) from exc
+
+    def save(self, project: Project) -> None:
+        """Atomically save submission metadata."""
+        try:
+            atomic_write(
+                _submission_path(self.id, project),
+                type(self).model_validate(self.model_dump()).model_dump_json(indent=2),
+                mode=0o600,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise ExecutionError(
+                f"Cannot save history for job {self.id} "
+                f"({self.executor}, native ID {self.native_id}): {exc}. "
+                "The job was submitted; do not resubmit automatically."
+            ) from exc
+
+    @classmethod
+    def load(cls, project: Project, job_id: str) -> Submission:
+        """Read validated history without contacting an executor."""
+        path = _submission_path(job_id, project)
+        try:
+            entry = cls.model_validate_json(path.read_text(encoding="utf-8"))
+            if entry.id != job_id:
+                raise ValueError("History ID differs from filename")
+            return entry
+        except (OSError, ValueError) as exc:
+            raise ExecutionError(
+                f"Cannot read history for job {job_id}: {exc}"
+            ) from exc
+
+    @classmethod
+    def list(
+        cls, project: Project, *, record_id: str | None = None
+    ) -> builtins.list[Submission]:
+        """Read history newest first, warning and continuing past corrupt entries."""
+        entries = []
+        for path in (project.root / ".hiraku" / "jobs").glob("*.json"):
+            try:
+                entry = cls.load(project, path.stem)
+            except ExecutionError as exc:
+                logger.warning("%s", exc)
+                continue
+            if record_id is None or entry.record_id == record_id:
+                entries.append(entry)
+        return sorted(
+            entries, key=lambda entry: (entry.submitted_at, entry.id), reverse=True
         )
-        if not isinstance(entry["executor"], str) or not isinstance(
-            entry["native_id"], str
-        ):
-            raise ValueError("Missing executor or native ID")
-        datetime.fromisoformat(entry["submitted_at"])
-        if entry["record_id"] is not None and not isinstance(entry["record_id"], str):
-            raise ValueError("Invalid record ID")
-        if entry["executor_url"] is not None and not isinstance(
-            entry["executor_url"], str
-        ):
-            raise ValueError("Invalid executor URL")
-        if (
-            entry["final_status"] is not None
-            and not psij.JobState[entry["final_status"]["state"]].final
-        ):
-            raise ValueError("Saved status must be final")
-        return entry
-    except (
-        OSError,
-        ValueError,
-        TypeError,
-        KeyError,
-        AttributeError,
-        ValidationError,
-    ) as exc:
-        raise ExecutionError(f"Cannot read history for job {job_id}: {exc}") from exc
-
-
-def _save_final_status(
-    entry: dict[str, Any], status: psij.JobStatus, *, project: Project
-) -> None:
-    entry["final_status"] = _status_data(status)
-    _write_submission(entry, project)
 
 
 def observe_submission(
-    job_id: str, *, project: Project, wait: bool = False
+    entry: Submission, *, project: Project, wait: bool = False
 ) -> dict[str, Any]:
     """Retrieve native status, retaining final outcomes independently of backends."""
-    return _observe_submission(load_submission(job_id, project=project), project, wait)
-
-
-def _observe_submission(
-    entry: dict[str, Any], project: Project, wait: bool = False
-) -> dict[str, Any]:
-    if entry["final_status"] is not None:
-        return {**entry, "status": entry["final_status"], "observation_error": None}
+    if entry.final_status is not None:
+        return {
+            **entry.model_dump(mode="json"),
+            "status": entry.final_status.model_dump(),
+            "observation_error": None,
+        }
     try:
-        if entry["executor"] == "local":
+        if entry.executor == "local":
             # Native local attachment cannot recover real exit codes.
             raise ExecutionError("Final status must be saved by the foreground process")
-        executor = psij.JobExecutor.get_instance(
-            entry["executor"], url=entry["executor_url"]
-        )
+        executor = psij.JobExecutor.get_instance(entry.executor, url=entry.executor_url)
         job = psij.Job()
-        executor.attach(job, entry["native_id"])
+        executor.attach(job, entry.native_id)
         status = (
             job.wait()
             if wait
@@ -295,7 +319,7 @@ def _observe_submission(
         ExecutionError,
     ) as exc:
         return {
-            **entry,
+            **entry.model_dump(mode="json"),
             "status": {
                 "state": "UNKNOWN",
                 "time": None,
@@ -306,34 +330,23 @@ def _observe_submission(
             "observation_error": str(exc),
         }
     if status.final:
-        _save_final_status(entry, status, project=project)
-    return {**entry, "status": _status_data(status), "observation_error": None}
-
-
-def list_submissions(
-    *, project: Project, record_id: str | None = None
-) -> list[dict[str, Any]]:
-    """List project submissions with refreshed or saved final status, newest first."""
-    entries = [
-        load_submission(path.stem, project=project)
-        for path in (project.root / ".hiraku" / "jobs").glob("*.json")
-    ]
-    return [
-        _observe_submission(entry, project)
-        for entry in sorted(
-            entries, key=lambda item: (item["submitted_at"], item["id"]), reverse=True
-        )
-        if record_id is None or entry["record_id"] == record_id
-    ]
+        entry.final_status = _FinalStatus(**_status_data(status))
+        entry.save(project)
+    return {
+        **entry.model_dump(mode="json"),
+        "status": _status_data(status),
+        "observation_error": None,
+    }
 
 
 def _follow_streams(job: psij.Job) -> None:
+    directory = job.spec.directory or Path.cwd()
     with ExitStack() as stack:
         streams = [
             [path, output, None, codecs.getincrementaldecoder("utf-8")("replace")]
             for path, output in (
-                (job.spec.stdout_path, sys.stdout),
-                (job.spec.stderr_path, sys.stderr),
+                (directory / job.spec.stdout_path, sys.stdout),
+                (directory / job.spec.stderr_path, sys.stderr),
             )
         ]
         while True:

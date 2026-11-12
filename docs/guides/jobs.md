@@ -37,6 +37,9 @@ command argv.
 hiraku job submit --record baseline -- python train.py
 ```
 
+Native `local` is reserved for `hiraku run`; asynchronous submission requires
+an executor such as `local-detached` that can recover status after submission.
+
 Submission returns JSON with `id`, the original PSI/J job ID, plus its command
 specification, record, executor target, native ID, and currently observed status.
 Use that `id` for project history and status lookup:
@@ -67,6 +70,8 @@ no backend access. Pending statuses and observation errors are not written back.
 An unavailable backend reports `UNKNOWN` with `observation_error`, preserving
 the submission and other jobs' results. A final outcome is recoverable only while
 the backend retains it or after Hiraku has observed and saved it.
+Corrupt history files are reported as warnings and omitted from listings;
+loading one directly reports an error.
 
 Foreground CLI execution also records its submission and saves final status
 before returning. While its final status is unavailable, history reports
@@ -105,7 +110,7 @@ after the submitting process exits.
 import psij
 
 from hiraku.job import (
-    list_submissions, observe_submission, prepare_job, run_local, save_submission,
+    Submission, observe_submission, prepare_job, run_local,
 )
 from hiraku.project import Project
 
@@ -116,9 +121,10 @@ status = run_local(job, project=project)
 job = prepare_job(["python", "train.py"], project=project, record_id="baseline")
 executor = psij.JobExecutor.get_instance("local-detached")
 executor.submit(job)
-save_submission(job, project=project)
-result = observe_submission(job.id, project=project, wait=True)
-entries = list_submissions(project=project, record_id="baseline")
+submission = Submission.from_psi_job(job)
+submission.save(project)
+result = observe_submission(submission, project=project, wait=True)
+entries = Submission.list(project, record_id="baseline")
 
 # In another process, reconstruct the executor using its name and URL:
 attached = psij.Job()
@@ -133,10 +139,12 @@ explicitly; omission does not select the active record. The spec remains
 available for normal PSI/J configuration, including output paths.
 `run_local()` streams output and returns the native `JobStatus`; supplied
 output files are retained. Passing `project` enables history. Native Python
-submissions opt in with `save_submission()` after successful submission.
-`load_submission()` reads metadata without contacting executors;
-`observe_submission()` and `list_submissions()` refresh pending jobs and save
-observed final statuses. These functions return dictionaries, not live job wrappers.
+submissions opt in by converting an accepted job with `Submission.from_psi_job(job)`
+and calling `submission.save(project)`. Conversion does not write files.
+`Submission.load(project, job_id)` and `Submission.list(project, record_id=...)`
+read validated metadata without contacting executors. The model owns persistence,
+not execution. `observe_submission(submission, project=project)` refreshes status,
+saves observed final outcomes, and returns a dictionary for CLI and MCP clients.
 
 Scripts receive `HIRAKU_RECORD_ID` (empty when unattributed) and
 `HIRAKU_JOB_ID` (the PSI/J job's `id`, distinct from the backend `native_id`).
