@@ -350,10 +350,20 @@ class Project(BaseModel):
 
             # Install the MCP server configuration in supported project agent configs
             if install_mcp:
-                project._install_mcp_configs()
+                project.install_mcp()
             return project
 
-    def _install_mcp_configs(self) -> None:
+    def _ignore_codex_config(self) -> None:
+        """Keep local Codex MCP settings out of the project repository."""
+        path = self.root / ".gitignore"
+        content = path.read_text(encoding="utf-8") if path.exists() else ""
+        entry = "/.codex/config.toml"
+        if entry in content.splitlines():
+            return
+        separator = "" if not content or content.endswith("\n") else "\n"
+        atomic_write(path, f"{content}{separator}{entry}\n")
+
+    def install_mcp(self) -> None:
         """Register the stdio server in supported project agent configs.
 
         Claude, Pi, and Codex configuration files are merged while preserving
@@ -361,7 +371,14 @@ class Project(BaseModel):
         """
         root = self.root
         command = "uv" if (root / "uv.lock").is_file() else "hiraku"
-        args = ["run", "hiraku", "mcp"] if command == "uv" else ["mcp"]
+        args = (
+            ["run", "hiraku", "mcp", "serve"]
+            if command == "uv"
+            else [
+                "mcp",
+                "serve",
+            ]
+        )
         server = {"command": command, "args": args}
 
         for path in (root / ".mcp.json", root / ".pi" / "mcp.json"):
@@ -400,3 +417,5 @@ class Project(BaseModel):
                 raise ValidationError(f"Cannot merge MCP settings in {path}")
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(path, new_content)
+
+        self._ignore_codex_config()

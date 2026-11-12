@@ -371,8 +371,7 @@ def test_stdio_session(tmp_path: Path) -> None:
             command=sys.executable,
             args=[
                 "-c",
-                "from hiraku.cli import main; main()",
-                "mcp",
+                'from hiraku.cli import main; main(["mcp", "serve"])',
             ],
             cwd=str(tmp_path),
         )
@@ -414,21 +413,23 @@ def test_stdio_session(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_cli_project_error(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("args", [("mcp", "serve")])
+def test_cli_project_error(tmp_path: Path, monkeypatch, args) -> None:
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(main, ["mcp"])
+    result = CliRunner().invoke(main, list(args))
     assert result.exit_code == 1
     assert "No hiraku.yml" in result.output
 
 
-def test_cli_serves_project(tmp_path, monkeypatch):
+@pytest.mark.parametrize("args", [("mcp", "serve")])
+def test_cli_serves_project(tmp_path, monkeypatch, args):
     from unittest.mock import Mock
 
     config = Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     factory = Mock()
     monkeypatch.setattr("hiraku.mcp.create_server", factory)
-    result = CliRunner().invoke(main, ["mcp"])
+    result = CliRunner().invoke(main, list(args))
     assert result.exit_code == 0, result.output
     assert factory.call_args.kwargs == {}
     assert factory.call_args.args[0].path == config.path

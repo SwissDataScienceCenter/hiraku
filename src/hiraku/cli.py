@@ -182,8 +182,7 @@ def main(ctx: click.Context) -> None:
     ctx.ensure_object(CLIContext)
 
 
-@main.command("mcp")
-def mcp_command() -> None:
+def _serve_mcp() -> None:
     """Serve the Hiraku project discovered from the current directory over stdio."""
     try:
         from .mcp import create_server
@@ -196,6 +195,25 @@ def mcp_command() -> None:
             ) from exc
         raise
     server.run(transport="stdio")
+
+
+@main.group("mcp")
+def mcp_group() -> None:
+    """Install, remove, or serve the Hiraku MCP server."""
+
+
+@mcp_group.command("serve")
+def mcp_serve_command() -> None:
+    """Serve the Hiraku project discovered from the current directory over stdio."""
+    _serve_mcp()
+
+
+@mcp_group.command("install")
+def mcp_install_command() -> None:
+    """Install the Hiraku MCP server in supported client configurations."""
+    project = Project.discover()
+    project.install_mcp()
+    click.echo(f"Installed Hiraku MCP server for {project.root}")
 
 
 @main.command("init")

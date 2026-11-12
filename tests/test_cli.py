@@ -155,16 +155,62 @@ def test_workflow_help_lists_supported_commands() -> None:
     assert "send-event" not in result.output
 
 
-def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("args", [("mcp", "serve")])
+def test_mcp_missing_sdk_dependency(tmp_path: Path, monkeypatch, args) -> None:
     Project.create(tmp_path, install_skill=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setitem(sys.modules, "mcp.server.mcpserver", None)
     monkeypatch.delitem(sys.modules, "hiraku.mcp", raising=False)
 
-    result = invoke("mcp")
+    result = invoke(*args)
 
     assert result.exit_code == 1
     assert "MCP SDK dependency" in result.output
+
+
+def test_mcp_requires_explicit_subcommand() -> None:
+    result = invoke("mcp")
+
+    assert result.exit_code == 2
+    assert all(command in result.output for command in ("serve", "install"))
+
+
+def test_mcp_install_preserves_other_client_settings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    Project.create(tmp_path, install_skill=False, install_mcp=False)
+    (tmp_path / "uv.lock").touch()
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"other": {"command": "other"}}})
+    )
+    (tmp_path / ".pi").mkdir()
+    (tmp_path / ".pi/mcp.json").write_text(
+        json.dumps({"mcpServers": {"other": {"command": "other"}}})
+    )
+    (tmp_path / ".codex").mkdir()
+    codex = tmp_path / ".codex/config.toml"
+    codex.write_text('model = "local"\n\n[mcp_servers.other]\ncommand = "other"\n')
+    monkeypatch.chdir(tmp_path)
+
+    installed = invoke("mcp", "install")
+
+    assert installed.exit_code == 0, installed.output
+    server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["hiraku"]
+    assert server == {"command": "uv", "args": ["run", "hiraku", "mcp", "serve"]}
+    assert '"hiraku"' in (tmp_path / ".pi/mcp.json").read_text()
+    assert 'args = ["run", "hiraku", "mcp", "serve"]' in codex.read_text()
+
+    assert json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"] == {
+        "other": {"command": "other"},
+        "hiraku": server,
+    }
+    assert json.loads((tmp_path / ".pi/mcp.json").read_text())["mcpServers"] == {
+        "other": {"command": "other"},
+        "hiraku": server,
+    }
+    assert 'model = "local"' in codex.read_text()
+    assert "[mcp_servers.other]" in codex.read_text()
+    assert "[mcp_servers.hiraku]" in codex.read_text()
 
 
 def test_example_list_works_outside_a_project(tmp_path: Path, monkeypatch) -> None:

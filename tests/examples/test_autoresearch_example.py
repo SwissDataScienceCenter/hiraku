@@ -182,7 +182,10 @@ def test_autoresearch_overlay_initializes_record(tmp_path, monkeypatch):
     assert "/.agents/" in gitignore
     assert "/.claude/" in gitignore
     mcp_config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
-    assert mcp_config["mcpServers"]["hiraku"] == {"command": "hiraku", "args": ["mcp"]}
+    assert mcp_config["mcpServers"]["hiraku"] == {
+        "command": "hiraku",
+        "args": ["mcp", "serve"],
+    }
     codex_config = (project / ".codex/config.toml").read_text(encoding="utf-8")
     assert 'command = "hiraku"' in codex_config
     assert "/runs.csv" in gitignore
