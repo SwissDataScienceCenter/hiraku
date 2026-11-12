@@ -302,6 +302,8 @@ def test_job_list_refreshes_only_nonfinal_jobs(
     job.status = psij.JobStatus(getattr(psij.JobState, state))
     entry = Submission.from_psi_job(job)
     entry.save(project)
+    path = project.root / ".hiraku/jobs" / f"{job.id}.json"
+    before = path.read_bytes()
     synced = []
 
     def sync(self):
@@ -316,7 +318,15 @@ def test_job_list_refreshes_only_nonfinal_jobs(
     async def exercise():
         result = await server.call_tool("job_list", {})
         expected = "COMPLETED" if state == "ACTIVE" and not unavailable else state
-        assert result.structured_content["result"][0]["status"]["state"] == expected
+        listed = result.structured_content["result"][0]
+        if state == "ACTIVE" and unavailable:
+            assert listed["status"]["state"] == "UNKNOWN"
+            assert listed["observation_error"] == "backend unavailable"
+            assert listed["observed_at"] == entry.model_dump(mode="json")["observed_at"]
+            assert path.read_bytes() == before
+        else:
+            assert listed["status"]["state"] == expected
+            assert "observation_error" not in listed
         assert Submission.load(project, job.id).status.state == expected
 
     asyncio.run(exercise())

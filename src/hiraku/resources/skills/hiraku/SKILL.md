@@ -378,7 +378,8 @@ for completion. Use `job_list(record_id=...)` or
 `hiraku job list [--record ID] [--json]` to list jobs, commands, and status.
 CLI and MCP list automatically sync and save nonfinal jobs, skipping saved
 `COMPLETED`, `FAILED`, and `CANCELED` outcomes. Observation failures warn and
-retain the saved snapshot. CLI rows are green for completed jobs, red for failed
+return response-only `UNKNOWN` with `observation_error`, preserving the saved
+snapshot and `observed_at`. CLI rows are green for completed jobs, red for failed
 or canceled jobs, and white otherwise.
 `observed_at` records the last successful observation. Failed sync raises an error
 without changing the snapshot.

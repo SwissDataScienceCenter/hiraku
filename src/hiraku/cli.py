@@ -34,12 +34,11 @@ from .errors import (
     GitError,
     HirakuError,
     NoActiveRecordError,
-    ObservationError,
     ValidationError,
 )
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .job import Submission, prepare_job, run_local
+from .job import Submission, observe_submission, prepare_job, run_local
 from .project import Project
 from .record import Record, validate_identifier
 from .tracking import Leaderboard, Run
@@ -903,16 +902,14 @@ def _show_submission(result: dict[str, Any], json_output: bool) -> None:
 def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> None:
     """List jobs and status, refreshing nonfinal submissions."""
     submissions = Submission.list(state.project, record_id=record_id)
-    for entry in submissions:
-        if entry.status.state in {"COMPLETED", "FAILED", "CANCELED"}:
-            continue
-        try:
-            entry.sync()
-        except ObservationError as exc:
-            click.echo(f"Warning: cannot sync job {entry.id}: {exc}", err=True)
-        else:
-            entry.save(state.project)
-    entries = [entry.model_dump(mode="json") for entry in submissions]
+    entries = [observe_submission(entry, state.project) for entry in submissions]
+    for result in entries:
+        if "observation_error" in result:
+            click.echo(
+                f"Warning: cannot sync job {result['id']}: "
+                f"{result['observation_error']}",
+                err=True,
+            )
     if json_output:
         _emit_json(entries)
     else:
