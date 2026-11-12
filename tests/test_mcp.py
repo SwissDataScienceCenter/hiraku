@@ -25,7 +25,6 @@ from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E4
 
 from hiraku.cli import main  # noqa: E402
 from hiraku.errors import ValidationError  # noqa: E402
-from hiraku.jobs import Job
 from hiraku.mcp import (  # noqa: E402
     WorkflowApproval,
     create_server,
@@ -266,14 +265,20 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_submit_tool_uses_independent_worker(tmp_path: Path) -> None:
+def test_submit_and_status_use_native_executor(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     server = create_server(config)
 
     async def exercise() -> None:
-        async def completed_job(job_id):
+        async def completed_job(receipt):
             for _ in range(300):
-                result = await server.call_tool("job_show", {"job_id": job_id})
+                result = await server.call_tool(
+                    "job_status",
+                    {
+                        key: receipt[key]
+                        for key in ("executor", "executor_url", "native_id")
+                    },
+                )
                 if result.structured_content["status"]["state"] in {
                     "COMPLETED",
                     "FAILED",
@@ -291,45 +296,50 @@ def test_submit_tool_uses_independent_worker(tmp_path: Path) -> None:
             "job_submit",
             {
                 "record_id": "demo/demo",
+                "executor_url": (tmp_path / "backend").as_uri(),
                 "command": [
                     sys.executable,
                     "-c",
                     "import sys,time; from pathlib import Path\n"
                     f"while not Path({str(config.root / 'release')!r}).exists(): "
                     "time.sleep(.05)\n"
-                    "print('out'); print('err', file=sys.stderr); "
+                    "import os; print(os.environ['HIRAKU_RECORD_ID']); "
+                    "print('err', file=sys.stderr); "
                     "raise SystemExit(7)",
                 ],
             },
         )
         job = dict(result.structured_content)
         assert job["executor"] == "local-detached"
-        assert Job.load(job["id"], project=config).record_id == "demo/demo"
         assert job["status"]["state"] in {"ACTIVE", "QUEUED"}
         (config.root / "release").touch()
-        completed = await completed_job(job["id"])
+        completed = await completed_job(job)
         assert completed.structured_content["status"]["exit_code"] == 7
-        saved = Job.load(job["id"], project=config)
-        assert saved.spec.directory is None
-        assert saved.spec.stdout_path.read_text() == "out\n"
-        assert saved.spec.stderr_path.read_text() == "err\n"
+        output = tmp_path / "backend" / job["native_id"]
+        assert (output / "stdout.log").read_text() == "demo/demo\n"
+        assert (output / "stderr.log").read_text() == "err\n"
+        assert not (config.root / ".hiraku/jobs").exists()
         submitted = await server.call_tool(
             "job_submit",
             {
                 "executor": "local-detached",
+                "executor_url": (tmp_path / "backend").as_uri(),
                 "record_id": "demo/demo",
                 "command": [sys.executable, "-c", "raise SystemExit(3)"],
             },
         )
         assert submitted.structured_content["executor"] == "local-detached"
-        completed = await completed_job(submitted.structured_content["id"])
+        completed = await completed_job(submitted.structured_content)
         assert completed.structured_content["status"]["exit_code"] == 3
         config.clear_active_record()
         submitted = await server.call_tool(
-            "job_submit", {"command": [sys.executable, "-c", "pass"]}
+            "job_submit",
+            {
+                "command": [sys.executable, "-c", "pass"],
+                "executor_url": (tmp_path / "backend").as_uri(),
+            },
         )
-        assert submitted.structured_content["record_id"] is None
-        completed = await completed_job(submitted.structured_content["id"])
+        completed = await completed_job(submitted.structured_content)
         assert completed.structured_content["status"]["exit_code"] == 0
 
     asyncio.run(exercise())

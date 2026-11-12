@@ -12,7 +12,8 @@ from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hiraku import Job, Project
+from hiraku import Project
+from hiraku.execution import prepare_job, run_local
 
 EXPERIMENTS = (
     ("logistic-regression", "heart-disease-prediction", "logistic", 0.2),
@@ -117,13 +118,13 @@ def generate(project: Project) -> None:
             str(fraction),
         ]
         for seed in (1, 2, 3):
-            job = Job.create(
+            job = prepare_job(
                 [*command, "--seed", str(seed)],
                 record_id=record.id,
                 project=project,
                 directory=project.root,
-            ).run()
-            status = job.status
+            )
+            status = run_local(job)
             if status.exit_code:
                 raise RuntimeError(
                     f"Training command for {identifier} failed with "

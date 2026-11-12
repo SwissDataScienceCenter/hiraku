@@ -50,8 +50,8 @@ hiraku record create binary-classification/threshold-baseline \
   --set "hypothesis=The existing representation establishes a reference." \
   --commit HEAD
 
-hiraku job run --record binary-classification/threshold-baseline -- uv run python evaluate.py --seed 0
-hiraku job run --record binary-classification/threshold-baseline -- uv run python evaluate.py --seed 1
+hiraku run --record binary-classification/threshold-baseline -- uv run python evaluate.py --seed 0
+hiraku run --record binary-classification/threshold-baseline -- uv run python evaluate.py --seed 1
 hiraku record list
 hiraku leaderboard runs --record binary-classification/threshold-baseline
 ```

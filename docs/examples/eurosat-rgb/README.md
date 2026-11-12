@@ -66,10 +66,10 @@ hiraku record create land-cover-classification/cnn \
 
 hiraku record list
 
-hiraku job run --record land-cover-classification/mlp-baseline -- uv run python train.py --model mlp --seed 42 \
+hiraku run --record land-cover-classification/mlp-baseline -- uv run python train.py --model mlp --seed 42 \
   --epochs 5 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
 
-hiraku job run --record land-cover-classification/cnn -- uv run python train.py --model cnn --seed 42 \
+hiraku run --record land-cover-classification/cnn -- uv run python train.py --model cnn --seed 42 \
   --epochs 5 --batch-size 64 --learning-rate 0.001 --validation-fraction 0.2
 ```
 

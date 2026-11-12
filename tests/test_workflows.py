@@ -190,7 +190,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path, task_i
     experiment_id = f"{task_id}/dropout"
     assert config.vault.load(experiment_id).parent_id == task_id
     assert (
-        f"hiraku job run --record {experiment_id} -- python train.py"
+        f"hiraku run --record {experiment_id} -- python train.py"
         == (launch["data"]["command"])
     )
 

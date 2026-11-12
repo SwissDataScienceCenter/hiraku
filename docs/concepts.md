@@ -17,7 +17,7 @@ This fragmentation creates an inherent barrier for effective Human-AI collaborat
 
 ## Records and runs
 
-Hiraku uses records, local jobs, and tracked runs to document the model-development lifecycle.
+Hiraku uses records, PSI/J jobs, and tracked runs to document the model-development lifecycle.
 
 Records and command execution are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
@@ -27,7 +27,7 @@ A root *record* defines a working scope and goal, and documents the research pro
 | --- | ---  | --- |
 | **Root record** | `hiraku/records/{name}.md` | Defines the scope of a research effort and may provide shared research defaults. |
 | **Child record** | `hiraku/records/{name}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
-| **Job** | `.hiraku/jobs/<job_id>/job.json` | One PSI/J execution attempt, its record, saved output, and final status. |
+| **Job** | Native PSI/J job and executor | One execution attempt with research attribution and executor-reported status. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku queries results through a backend adapter.|
 
 Records are stored as Markdown with YAML front matter. `Record.id` is the OKF ID: its bundle-relative path without `.md`. It is derived from placement and never persisted in front matter. `Vault` owns the bundle root, loading, saving, and discovery. `parent_id` and `related_to` declare relationships to concept IDs, independently of directory structure. Moving a document changes its ID.
@@ -59,7 +59,7 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 
 Leaderboards query adapters through `list_runs()`. Record attribution and commits
 come directly from the tracking source, so results remain usable without local
-job history. `Run.job_id` optionally links execution details. Records and runs
+job history. `Run.job_id` optionally identifies the originating PSI/J job. Records and runs
 hold user-managed code provenance; Jobs do not collect it.
 
 Define named [leaderboards](tracking.md) in `hiraku/leaderboards/<name>.yml`.
@@ -73,12 +73,12 @@ A launch that never logs a row will not appear as a run.
 ## Command execution
 
 Commands are not record metadata. Pass the complete argv directly to
-`hiraku job run`; a dispatcher can prepare repeatable project-specific runtime
+`hiraku run`; a dispatcher can prepare repeatable project-specific runtime
 behavior around that invocation. Local jobs run in the project working tree;
-foreground execution waits and saves output, while `hiraku job submit` returns
+foreground execution streams output and waits, while `hiraku job submit` returns
 after submission. A job can produce zero, one, or many tracked runs. Scripts log
 the injected `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` on each run.
-See [local jobs](guides/jobs.md) for persistence and lifecycle details.
+See [jobs and executors](guides/jobs.md) for submission and final-status retrieval.
 
 ## Agent Skill
 
@@ -150,7 +150,7 @@ git commit -m "implement logistic baseline"
 hiraku record update heart-disease-prediction/logistic-regression --commit HEAD
 
 # 4. run an arbitrary command and list attributed runs
-hiraku job run --record heart-disease-prediction/logistic-regression -- uv run python train.py
+hiraku run --record heart-disease-prediction/logistic-regression -- uv run python train.py
 hiraku leaderboard runs --record heart-disease-prediction/logistic-regression --sort val/log_loss --ascending
 
 # 5. review the runs and document the conclusion on the child record

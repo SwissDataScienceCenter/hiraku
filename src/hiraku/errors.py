@@ -41,10 +41,6 @@ class ExecutionError(HirakuError):
     """A job could not be submitted, stored, or observed."""
 
 
-class JobNotFoundError(ExecutionError):
-    """No local execution attempt exists for the supplied ID."""
-
-
 class BackendError(HirakuError):
     """A tracking backend failed to return normalized runs."""
 

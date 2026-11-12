@@ -14,8 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   local job history. Git environment variables are no longer injected;
   records and tracking runs retain user-managed code provenance. Tracking
   destinations remain user-managed.
-- **Breaking:** Replace record entrypoints and `hiraku launch` / `hiraku run` with
-  `hiraku job run --record ID -- COMMAND [ARGS...]`. Remove `entrypoints`,
+- **Breaking:** Replace record entrypoints and `hiraku launch` with
+  `hiraku run --record ID -- COMMAND [ARGS...]`. Remove `entrypoints`,
   `default_dispatch`, and `--dispatch`; invoke project scripts directly
   ([issue #90](https://github.com/SwissDataScienceCenter/hiraku/issues/90),
   [PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
@@ -43,22 +43,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- Add `Job.create()` with instance `submit()` and blocking `run()`, plus CLI
-  `hiraku job run/submit/list/show` and MCP job tools. Each Job records one
-  attempt, saved output, and its final outcome.
-  The executor selects the working directory unless explicitly supplied; local jobs
-  inherit the submitting process's cwd. Explicit environment values are persisted
-  in the prepared PSI/J spec.
-- Default to the Hiraku `local-detached` executor with a detached
-  recording launcher. The launcher writes `result.json`
-  independently of submission metadata and the submitting process.
-  Foreground execution uses native `LocalJobExecutor` and saves its final status
-  in `job.json`, with a quoting-corrected single launcher for paths with spaces.
-  Output is saved to files.
-  Select other PSI/J executors with `--executor`,
-  `--executor-url`, and `--attribute KEY VALUE`; the bundled Renku executor uses
-  authenticated `rnk` launchers for submission only. Remote status, logs, and
-  control remain with the execution platform.
+- Add native PSI/J execution with `prepare_job()` for research attribution,
+  `run_local()` for foreground output, CLI `hiraku job submit/status`, and MCP
+  `job_submit` / `job_status`. Executors own submission and final status;
+  Hiraku does not maintain project job history.
+- Add the `local-detached` PSI/J executor with durable results and output,
+  including final-status retrieval after the submitting process exits. Add a
+  Renku executor using authenticated `rnk` launchers and final-state observation.
+  Renku process exit codes are unavailable; logs and control remain with Renku.
+  Foreground `hiraku run` streams output through temporary files and returns
+  the process exit code.
 
 - Add `hiraku example list` to list bundled examples with their descriptions.
 - Add project-local Codex and Claude Code hooks installed by `hiraku init` to attribute workflow event attempts to client conversations. Generated MCP and hook commands are portable: `uv run hiraku` when the project contains `uv.lock`, otherwise `hiraku`. Session history records one entry per event attempt with its outcome. Resubmissions for answered instructions return `stale` with the current instruction instead of acknowledging identical duplicates as accepted.

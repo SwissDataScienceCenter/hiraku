@@ -62,7 +62,7 @@ are never turned into links.
 
 ## Log from your script
 
-Set the logging URI in your script or environment, including for `hiraku job run`:
+Set the logging URI in your script or environment, including for `hiraku run`:
 
 ```bash
 export MLFLOW_TRACKING_URI="sqlite:///$PWD/mlflow.db"

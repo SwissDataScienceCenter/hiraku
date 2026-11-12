@@ -18,13 +18,13 @@ from mcp.server.mcpserver.exceptions import (
 from mcp.types import (
     ToolAnnotations,
 )
-from psij import JobAttributes, JobExecutor
+from psij import Job, JobAttributes, JobExecutor
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
 from .errors import HirakuError, ValidationError
-from .jobs import Job
+from .execution import describe_job, prepare_job
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -105,7 +105,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
     Tools: project_info, leaderboard_list, record_list, record_show, record_create,
-    record_update, record_delete, job_submit, job_list, job_show, and runs.
+    record_update, record_delete, job_submit, job_status, and runs.
     Also registers the record
     catalog and record resources, and the propose_implementation prompt.
     """
@@ -241,7 +241,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     ) -> dict[str, Any]:
         """Submit through PSI/J and return after acceptance, without waiting."""
         record_id = record_id if record_id is not None else selected.active_record_id
-        job = Job.create(
+        job = prepare_job(
             command,
             record_id=record_id,
             project=selected,
@@ -250,31 +250,19 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             if attributes
             else None,
         )
-        target = (
-            JobExecutor.get_instance(executor, url=executor_url)
-            if executor_url
-            else executor
-        )
-        job.submit(executor=target)
-        return job.model_dump(mode="json")
+        JobExecutor.get_instance(executor, url=executor_url).submit(job)
+        return describe_job(job)
 
-    @server.tool(
-        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)
-    )
-    def job_list(
-        record_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """List saved submission metadata and final results."""
-        jobs = Job.list(project=selected, record_id=record_id)
-        return [job.model_dump(mode="json") for job in jobs]
-
-    @server.tool(
-        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)
-    )
-    def job_show(job_id: str) -> dict[str, Any]:
-        """Show saved submission metadata and the final result."""
-        job = Job.load(job_id, project=selected)
-        return job.model_dump(mode="json")
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True))
+    def job_status(
+        native_id: str,
+        executor: str = "local-detached",
+        executor_url: str | None = None,
+    ) -> dict[str, Any]:
+        """Attach through PSI/J and return the currently observed status."""
+        job = Job()
+        JobExecutor.get_instance(executor, url=executor_url).attach(job, native_id)
+        return describe_job(job)
 
     @server.tool(
         title="List tracked runs",

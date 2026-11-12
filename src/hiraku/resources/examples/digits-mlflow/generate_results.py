@@ -11,7 +11,8 @@ from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hiraku import Job, Project
+from hiraku import Project
+from hiraku.execution import prepare_job, run_local
 
 EXPERIMENTS = (("weak-l2", 0.0001), ("strong-l2", 1.0))
 EPOCHS = 20
@@ -113,7 +114,7 @@ def generate(project: Project) -> dict[str, str]:
             str(0.25),
         ]
         for seed in (1, 2, 3):
-            job = Job.create(
+            job = prepare_job(
                 [*command, "--seed", str(seed)],
                 record_id=record.id,
                 project=project,
@@ -122,8 +123,8 @@ def generate(project: Project) -> dict[str, str]:
                     "MLFLOW_TRACKING_URI": f"sqlite:///{database}",
                     "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
                 },
-            ).run()
-            status = job.status
+            )
+            status = run_local(job)
             if status.exit_code:
                 raise RuntimeError(
                     f"Training command for {identifier} failed with "

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from hiraku import Project
-from hiraku.jobs import Job
+from hiraku.execution import prepare_job, run_local
 from hiraku.tracking import Leaderboard
 
 
@@ -31,7 +31,7 @@ def test_digits_refuses_existing_output_and_partial_export(
     def fail(*args, **kwargs):
         raise RuntimeError("failed training")
 
-    monkeypatch.setattr(generator["generate"].__globals__["Job"], "run", fail)
+    monkeypatch.setitem(generator["generate"].__globals__, "run_local", fail)
     output = tmp_path / "results"
     with pytest.raises(RuntimeError, match="failed training"):
         generator["generate_results"](output)
@@ -148,7 +148,7 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         "--validation-fraction",
         "0.25",
     ]
-    job = Job.create(
+    job = prepare_job(
         command,
         record_id=weak.id,
         project=config,
@@ -157,6 +157,6 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
             "MLFLOW_TRACKING_URI": f"sqlite:///{config.root / 'mlflow.db'}",
             "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
         },
-    ).run()
-    assert job.status.exit_code == 0
+    )
+    assert run_local(job).exit_code == 0
     assert len(leaderboard.list_runs(config)) == 7

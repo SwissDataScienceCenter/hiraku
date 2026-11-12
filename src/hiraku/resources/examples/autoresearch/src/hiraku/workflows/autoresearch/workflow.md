@@ -61,7 +61,7 @@ Once you get confirmation, kick off the experimentation.
 Each experiment runs on a single GPU. The training script runs for a **fixed
 time budget of 5 minutes** (wall clock training time, excluding
 startup/compilation). Submit the invocation directly:
-`hiraku job run --record <experiment-id> -- ./hiraku/dispatch/autoresearch.sh -- uv run python train.py`.
+`hiraku run --record <experiment-id> -- ./hiraku/dispatch/autoresearch.sh -- uv run python train.py`.
 
 **The first run**: Your very first run should always be to establish the
 baseline, so you will run the training script as is. If no successful baseline
@@ -76,7 +76,7 @@ hiraku record create <root-id>/baseline \
   --set 'summary=Unmodified upstream baseline' \
   --set 'hypothesis=The upstream implementation establishes the reference val_bpb' \
   --commit HEAD
-hiraku job run --record <root-id>/baseline -- ./hiraku/dispatch/autoresearch.sh -- uv run python train.py
+hiraku run --record <root-id>/baseline -- ./hiraku/dispatch/autoresearch.sh -- uv run python train.py
 hiraku leaderboard runs --record <root-id>/baseline --json
 ```
 
@@ -117,7 +117,7 @@ LOOP FOREVER:
    --set 'summary=<summary>' --set 'hypothesis=<hypothesis>' --commit HEAD`.
    Never rebind a completed attempt to another commit.
 5. Run the experiment:
-   run `hiraku job run --record <experiment-id> -- ./hiraku/dispatch/autoresearch.sh -- uv run python train.py` and wait
+   run `hiraku run --record <experiment-id> -- ./hiraku/dispatch/autoresearch.sh -- uv run python train.py` and wait
    for the command to finish before inspecting measurements.
 6. Inspect the result with
    `hiraku leaderboard runs --record <experiment-id> --json`.

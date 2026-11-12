@@ -1,6 +1,5 @@
 """PSI/J launchers and detached local execution."""
 
-import json
 import logging
 import os
 import re
@@ -15,13 +14,13 @@ from packaging.version import Version
 from psij import (
     InvalidJobException,
     Job,
-    JobExecutor,
     JobExecutorConfig,
     JobState,
     JobStatus,
     SubmitException,
 )
 from psij.descriptor import Descriptor
+from psij.executors.local import LocalJobExecutor
 from psij.launchers.script_based_launcher import ScriptBasedLauncher
 from pydantic import AwareDatetime, BaseModel, Field
 
@@ -33,7 +32,7 @@ class _Result(BaseModel):
     finished_at: AwareDatetime
 
 
-class LocalDetachedJobExecutor(JobExecutor):
+class LocalDetachedJobExecutor(LocalJobExecutor):
     """Run detached local jobs and attach to their saved results."""
 
     _watch_lock = Lock()
@@ -41,46 +40,40 @@ class LocalDetachedJobExecutor(JobExecutor):
     _attached = weakref.WeakKeyDictionary()
 
     def __init__(self, url: str | None = None, config: JobExecutorConfig | None = None):
-        super().__init__(url=url, config=config or JobExecutorConfig())
-        parsed = urlsplit(url or "")
+        config = config or JobExecutorConfig()
+        parsed = urlsplit(
+            url or (config.work_directory / "detached").absolute().as_uri()
+        )
         if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
             raise ValueError("Detached execution requires a jobs-directory file URL")
         self.jobs_dir = Path(unquote(parsed.path))
-        self._local = JobExecutor.get_instance("local", config=self.config)
-        self._submitted: dict[Job, Job] = {}
+        super().__init__(url=self.jobs_dir.as_uri(), config=config)
 
     def submit(self, job: Job) -> None:
         spec = job.spec
         if spec is None:
             raise InvalidJobException("Detached execution requires a job spec")
-        job_id = (spec.environment or {}).get("HIRAKU_JOB_ID", "")
-        result_path = self._result_path(str(job_id))
-        if spec.stdout_path is None or spec.stdout_path.parent != result_path.parent:
-            raise InvalidJobException("Detached stdout must be in the job directory")
+        if job.status.state != JobState.NEW or job.executor is not None:
+            raise InvalidJobException("Job must be new and unbound")
         if spec.launcher not in (None, "detached"):
             raise InvalidJobException("Detached execution requires its launcher")
-        self._check_job(job)
+        directory = self._result_path(job.id).parent
+        directory.mkdir(parents=True)
+        spec.stdout_path = spec.stdout_path or directory / "stdout.log"
+        spec.stderr_path = spec.stderr_path or directory / "stderr.log"
+        spec.stdin_path = spec.stdin_path or Path(os.devnull)
         spec.launcher = "detached"
-        native = Job(spec)
-        job._native_id = job_id
-        self._submitted[job] = native
+        super().submit(job)
 
-        def on_status(_job: Job, status: JobStatus) -> None:
-            self._set_job_status(job, status)
-            if status.final:
-                self._submitted.pop(job, None)
-
-        native.set_job_status_callback(on_status)
-        try:
-            self._local.submit(native)
-        except Exception:
-            self._submitted.pop(job, None)
-            job.executor = None
-            job._native_id = None
-            raise
+    def _set_job_status(self, job: Job, status: JobStatus) -> None:
+        if status.metadata and "nativeId" in status.metadata:
+            # LocalJobExecutor assigns a PID before its first notification.
+            job._native_id = job.id
+            status.metadata["nativeId"] = job.id
+        super()._set_job_status(job, status)
 
     def _result_path(self, native_id: str) -> Path:
-        if not re.fullmatch(r"[a-f0-9]{32}", native_id):
+        if not re.fullmatch(r"[a-f0-9-]{36}", native_id):
             raise InvalidJobException("Invalid detached job ID")
         return self.jobs_dir / native_id / "result.json"
 
@@ -107,18 +100,11 @@ class LocalDetachedJobExecutor(JobExecutor):
             self._publish_result(job, result)
 
     def list(self) -> list[str]:
-        jobs = []
-        for path in self.jobs_dir.glob("*/job.json"):
-            try:
-                snapshot = json.loads(path.read_text(encoding="utf-8"))
-                if (
-                    snapshot.get("executor") == "local-detached"
-                    and snapshot.get("native_id") == path.parent.name
-                ):
-                    jobs.append(path.parent.name)
-            except (OSError, ValueError, AttributeError):
-                continue
-        return sorted(jobs)
+        return sorted(
+            path.name
+            for path in self.jobs_dir.glob("*")
+            if path.is_dir() and re.fullmatch(r"[a-f0-9-]{36}", path.name)
+        )
 
     @classmethod
     def _watch(cls) -> None:
@@ -156,10 +142,7 @@ class LocalDetachedJobExecutor(JobExecutor):
         )
 
     def cancel(self, job: Job) -> None:
-        native = self._submitted.get(job)
-        if native is None:
-            raise SubmitException("Cancellation after attachment is not supported")
-        native.cancel()
+        raise SubmitException("Detached cancellation is not supported")
 
 
 class QuotedSingleLauncher(ScriptBasedLauncher):
@@ -180,11 +163,11 @@ class DetachedLauncher(QuotedSingleLauncher):
     def get_additional_args(self, job: Job) -> list[str]:
         if os.name != "posix":
             raise InvalidJobException("Local recording requires a POSIX system")
-        if job.spec.stdout_path is None:
-            raise InvalidJobException("Local recording requires stdout_path")
+        if job.executor.name != "local-detached":
+            raise InvalidJobException("Use the local-detached executor")
         if job.spec.resources and job.spec.resources.computed_process_count != 1:
             raise InvalidJobException("Recording supports a single local process")
-        return [str(Path(job.spec.stdout_path).with_name("result.json"))]
+        return [str(job.executor._result_path(job.id))]
 
     def get_launch_command(self, job: Job) -> list[str]:
         return [

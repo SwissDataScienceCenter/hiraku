@@ -343,7 +343,6 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-qm", "records"], cwd=tmp_path, check=True)
     result = invoke(
-        "job",
         "run",
         "--record",
         "root/child/child",
