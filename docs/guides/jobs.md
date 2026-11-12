@@ -46,6 +46,11 @@ hiraku job submit --record baseline -- python train.py
 Native `local` is reserved for `hiraku run`; asynchronous submission requires
 an executor such as `local-detached` that can recover status after submission.
 
+The detached supervisor saves its process identity before launching the command.
+If that startup step fails, the accepted job reports failure without running the
+command. The submitting process reaps the supervisor even if no outcome file
+could be written.
+
 Submission returns JSON with `id`, the original PSI/J job ID, plus its command
 specification, record, executor target, native ID, and currently observed status.
 Use that `id` to read saved history or explicitly refresh it:
@@ -112,8 +117,8 @@ output are no longer needed.
 The executor starts a small Python supervisor in a new process session. The
 supervisor runs the selected PSI/J launcher, waits, and atomically records its
 exit code and completion time, independently of the submitting process. Launch
-failures record a message with no invented exit code. Submission also records the
-supervisor PID and process creation time in `supervisor.json`. Sync reports
+failures record a message with no invented exit code. Before launching, the
+supervisor records its PID and process creation time in `supervisor.json`. Sync reports
 `ACTIVE` while that supervisor is alive. If it disappears without a result, the
 job reports `FAILED` with no exit code and a message that the command may still
 be running. Older submissions without supervisor identity remain pending until
