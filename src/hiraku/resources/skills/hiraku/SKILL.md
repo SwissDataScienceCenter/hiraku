@@ -375,11 +375,11 @@ An omitted `directory` leaves the execution directory to the executor; local job
 inherit the submitting process's cwd. Explicit paths refer to the execution side.
 Explicit `env` values are stored in the job spec and saved metadata.
 `run` uses native PSI/J `LocalJobExecutor`, waits, and saves its final status in
-`job.json`. The CLI and MCP default submission executor, `local-detached`, subclasses
-`LocalJobExecutor` and starts a detached shell launcher that records `result.json`.
+`job.json`. The CLI and MCP default submission executor is `local-detached`,
+which uses a detached shell launcher and reports its recorded result through PSI/J.
 Show/list combine saved metadata with the launcher's result. Read `stdout.log`
 and `stderr.log` directly; foreground `job run` also streams output. There is no
-reattachment or cancellation from another process.
+cross-process cancellation; PSI/J attachment can report detached results.
 Remote submissions retain their native ID without polling for completion.
 Renku status, output, and cancellation use native `rnk` commands.
 Use a project dispatcher to prepare the runtime when needed.
