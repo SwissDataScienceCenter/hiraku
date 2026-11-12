@@ -64,10 +64,10 @@ hiraku record create iris-classification/random-forest \
 
 hiraku record list
 
-hiraku job run --record iris-classification/logistic-regression -- \
+hiraku run --record iris-classification/logistic-regression -- \
   uv run python train.py --model logistic --seed 42 --test-size 0.25
 
-hiraku job run --record iris-classification/random-forest -- \
+hiraku run --record iris-classification/random-forest -- \
   uv run python train.py --model random_forest --seed 42 --test-size 0.25
 ```
 

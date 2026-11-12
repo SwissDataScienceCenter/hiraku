@@ -57,7 +57,7 @@ from pathlib import Path
 runs_path = Path("runs.csv")
 ```
 
-See [local jobs](jobs.md) for attribution and persistence.
+See [jobs and executors](jobs.md) for execution and attribution.
 Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 `hiraku example create heart-disease` to get a complete writer in `train.py`.
 

@@ -10,7 +10,6 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.jobs import Job
 from hiraku.project import Project
 from hiraku.tracking import Leaderboard
 
@@ -165,7 +164,6 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     invoke(
         runner,
         [
-            "job",
             "run",
             "--record",
             "iris-classification/logistic-regression",
@@ -198,8 +196,9 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     stored = json.loads(store.read_text(encoding="utf-8"))[0]
     assert stored["id"] == run_id
     assert stored["project"] == "iris-wandb"
-    job = Job.load(stored["config"]["hiraku.job_id"], project=Project.discover())
-    assert job.record_id == record.id
+    assert stored["config"]["hiraku.job_id"] == row["job_id"]
+    assert stored["config"]["hiraku.record_id"] == record.id
+    assert not (tmp_path / ".hiraku/jobs").exists()
 
     filtered = json.loads(
         invoke(

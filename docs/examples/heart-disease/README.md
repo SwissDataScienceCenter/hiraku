@@ -87,7 +87,7 @@ hiraku record create heart-disease-prediction/logistic-regression \
 hiraku record show heart-disease-prediction/logistic-regression
 
 # run the command and save its output
-hiraku job run --record heart-disease-prediction/logistic-regression -- uv run python train.py \
+hiraku run --record heart-disease-prediction/logistic-regression -- uv run python train.py \
   --model logistic --seed 42 --validation-fraction 0.25
 
 # query all runs under the root's tracking source
@@ -122,7 +122,7 @@ hiraku record create heart-disease-prediction/random-forest \
   --set "hypothesis=Nonlinear feature interactions improve validation log loss" \
   --commit HEAD
 
-hiraku job run --record heart-disease-prediction/random-forest -- uv run python train.py \
+hiraku run --record heart-disease-prediction/random-forest -- uv run python train.py \
   --model random_forest --seed 42 --validation-fraction 0.25
 hiraku leaderboard runs --sort val/log_loss
 ```

@@ -72,8 +72,8 @@ and fall back to the CLI when the host has not connected the server.
 | `leaderboard_list` | List leaderboard names without loading definitions, like `hiraku leaderboard list --json`. |
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
-| `job_submit` | Start a detached local launcher or submit remotely and save its ID. |
-| `job_list`, `job_show` | Read saved submission metadata and final outcomes. |
+| `job_submit` | Submit through PSI/J and return the executor target and native ID. |
+| `job_status` | Attach using `executor`, `executor_url`, and `native_id` to retrieve current status. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
@@ -92,10 +92,11 @@ Record attribution is optional: an omitted ID uses the active record when set,
 otherwise the job is unattributed.
 When `directory` is omitted, the executor chooses its working directory; local
 jobs inherit the MCP server's directory. Explicit paths refer to the execution
-side. Explicit environment values are saved with the spec.
-Use `job_show` to read saved metadata and local outcomes. Local output remains in
-the job's `stdout.log` and `stderr.log` files. Remote submissions retain their ID and submission-time status only;
-use the remote platform's native tools for results, logs, and cancellation.
+side. Retain `executor`, `executor_url`, and `native_id` from the response and
+pass them to `job_status` to retrieve the outcome. Hiraku stores no project job
+history. Detached output remains in the executor's `stdout.log` and `stderr.log`
+files. Renku reports final states without process exit codes; its logs and
+control remain with the remote platform.
 A connected client can run commands with the user's local permissions.
 
 ## Resources and evidence

@@ -12,7 +12,7 @@ Typical workflow:
 hiraku init
 hiraku record create tasks/question --title "Research question" --type task
 hiraku record create experiments/baseline --parent tasks/question --type experiment
-hiraku job run --record experiments/baseline -- python train.py
+hiraku run --record experiments/baseline -- python train.py
 hiraku leaderboard runs --record experiments/baseline
 ```
 

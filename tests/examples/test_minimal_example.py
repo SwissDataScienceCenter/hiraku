@@ -77,7 +77,6 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     invoke(
         runner,
         [
-            "job",
             "run",
             "--record",
             "binary-classification/threshold-baseline",
@@ -145,7 +144,6 @@ def test_minimal_documented_sequence(tmp_path: Path, monkeypatch) -> None:
         invoke(
             runner,
             [
-                "job",
                 "run",
                 "--record",
                 "binary-classification/threshold-baseline",

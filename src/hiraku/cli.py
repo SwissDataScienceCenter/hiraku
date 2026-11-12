@@ -17,7 +17,14 @@ from typing import Any
 
 import click
 import yaml
-from psij import JobAttributes, JobExecutor
+from psij import (
+    InvalidJobException,
+    Job,
+    JobAttributes,
+    JobExecutor,
+    JobStatus,
+    SubmitException,
+)
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 from rich import box, print_json
@@ -30,9 +37,9 @@ from .errors import (
     NoActiveRecordError,
     ValidationError,
 )
+from .execution import describe_job, prepare_job, run_local
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .jobs import Job
 from .project import Project
 from .record import Record, validate_identifier
 from .tracking import Leaderboard, Run
@@ -54,7 +61,13 @@ class HirakuGroup(click.Group):
     def invoke(self, ctx: click.Context) -> Any:
         try:
             return super().invoke(ctx)
-        except (HirakuError, PydanticValidationError) as exc:
+        except (
+            HirakuError,
+            PydanticValidationError,
+            InvalidJobException,
+            SubmitException,
+            ValueError,
+        ) as exc:
             raise click.ClickException(str(exc)) from exc
 
 
@@ -699,15 +712,15 @@ def workflow_resume_command(
 
 @main.group("job")
 def job_group() -> None:
-    """Run locally, submit remotely, and inspect PSI/J jobs."""
+    """Submit commands and retrieve native PSI/J status."""
 
 
-def _exit_job(job: Job) -> None:
-    code = job.status.exit_code
+def _exit_job(status: JobStatus) -> None:
+    code = status.exit_code
     if code is None:
-        code = {"COMPLETED": 0, "CANCELED": 130}.get(job.status.state.name, 1)
-    if job.status.message:
-        click.echo(job.status.message, err=True)
+        code = {"COMPLETED": 0, "CANCELED": 130}.get(status.state.name, 1)
+    if status.message:
+        click.echo(status.message, err=True)
     raise click.exceptions.Exit(128 - code if code < 0 else code)
 
 
@@ -732,8 +745,8 @@ def job_submit(
     attributes: tuple[tuple[str, str], ...],
     directory: Path | None,
 ) -> None:
-    """Submit a command in the background and return its job ID."""
-    job = Job.create(
+    """Submit and return the executor target and native ID as JSON."""
+    job = prepare_job(
         command,
         record_id=record_id
         if record_id is not None
@@ -744,16 +757,11 @@ def job_submit(
         if attributes
         else None,
     )
-    selected = (
-        JobExecutor.get_instance(executor, url=executor_url)
-        if executor_url
-        else executor
-    )
-    job.submit(executor=selected)
-    click.echo(job.id)
+    JobExecutor.get_instance(executor, url=executor_url).submit(job)
+    _emit_json(describe_job(job))
 
 
-@job_group.command("run")
+@main.command("run")
 @click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
 @click.option(
@@ -761,15 +769,15 @@ def job_submit(
 )
 @click.option("--directory", type=click.Path(path_type=Path))
 @click.pass_obj
-def job_run(
+def run(
     state: CLIContext,
     command: tuple[str, ...],
     record_id: str | None,
     attributes: tuple[tuple[str, str], ...],
     directory: Path | None,
 ) -> None:
-    """Run locally, wait, and return the command's exit code."""
-    job = Job.create(
+    """Run locally, stream output, and return the command's exit code."""
+    job = prepare_job(
         command,
         record_id=record_id
         if record_id is not None
@@ -780,67 +788,38 @@ def job_run(
         if attributes
         else None,
     )
-    click.echo(job.id, err=True)
-
-    job.run()
-    _exit_job(job)
+    _exit_job(run_local(job))
 
 
-@job_group.command("list")
-@click.option("--record", "record_id")
+@job_group.command("status")
+@click.argument("native_id")
+@click.option("--executor", default="local-detached", show_default=True)
+@click.option("--executor-url")
+@click.option("--wait", "wait_for_completion", is_flag=True)
 @click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def job_list(
-    state: CLIContext,
-    record_id: str | None,
+def job_status(
+    native_id: str,
+    executor: str,
+    executor_url: str | None,
+    wait_for_completion: bool,
     json_output: bool,
 ) -> None:
-    """List saved submission metadata and final results."""
-    jobs = Job.list(project=state.project, record_id=record_id)
+    """Attach to a native job, optionally waiting for its final status."""
+    job = Job()
+    JobExecutor.get_instance(executor, url=executor_url).attach(job, native_id)
+    if wait_for_completion:
+        job.wait()
+    result = describe_job(job)
     if json_output:
-        _emit_json([job.model_dump(mode="json") for job in jobs])
-    else:
-        _print_table(
-            ("id", "record", "executor", "state", "native_id"),
-            [
-                (
-                    job.id,
-                    job.record_id,
-                    job.executor.name,
-                    job.status.state.name,
-                    job.native_id,
-                )
-                for job in jobs
-            ],
-        )
-
-
-@job_group.command("show")
-@click.argument("job_id")
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def job_show(state: CLIContext, job_id: str, json_output: bool) -> None:
-    """Show saved submission metadata and the final result."""
-    job = Job.load(job_id, project=state.project)
-    if json_output:
-        _emit_json(job.model_dump(mode="json"))
+        _emit_json(result)
     else:
         _print_table(
             ("field", "value"),
             [
-                ("id", job.id),
-                ("record", job.record_id),
-                ("executor", job.executor.name),
-                ("state", job.status.state.name),
-                ("updated_at", job.updated_at),
-                ("native_id", job.native_id),
-                (
-                    "command",
-                    shlex.join([job.spec.executable, *(job.spec.arguments or [])]),
-                ),
-                ("directory", job.spec.directory),
-                ("exit_code", job.status.exit_code),
-                ("message", job.status.message),
+                ("executor", result["executor"]),
+                ("executor_url", result["executor_url"]),
+                ("native_id", native_id),
+                *result["status"].items(),
             ],
         )
 

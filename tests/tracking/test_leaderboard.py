@@ -7,14 +7,9 @@ from hiraku.project import Project
 from hiraku.tracking import CSVBackend, Leaderboard, MLflowBackend, WandbBackend
 
 
-@pytest.mark.parametrize("malformed_job", [False, True])
-def test_source_attribution_does_not_require_job_history(tmp_path, malformed_job):
+def test_source_attribution(tmp_path):
     project = Project(tmp_path)
     job_id = "a" * 32
-    if malformed_job:
-        directory = tmp_path / ".hiraku/jobs" / job_id
-        directory.mkdir(parents=True)
-        (directory / "job.json").write_text("{")
     (tmp_path / "runs.csv").write_text(
         "id,hiraku_job_id,record_id,commit,metric.score\n"
         f"one,{job_id},selected,source-commit,2\n"

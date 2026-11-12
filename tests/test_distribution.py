@@ -41,6 +41,7 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
     expected.update(
         {
             "psij-descriptors/local.py",
+            "psij-descriptors/renku.py",
             "hiraku/resources/launchers/detached.sh",
             "hiraku/resources/launchers/single.sh",
         }

@@ -74,9 +74,9 @@ hiraku record create digit-classification/strong-l2 \
 
 hiraku record list
 
-hiraku job run --record digit-classification/weak-l2 -- uv run python train.py --alpha 0.0001 \
+hiraku run --record digit-classification/weak-l2 -- uv run python train.py --alpha 0.0001 \
   --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
-hiraku job run --record digit-classification/strong-l2 -- uv run python train.py --alpha 1.0 \
+hiraku run --record digit-classification/strong-l2 -- uv run python train.py --alpha 1.0 \
   --epochs 40 --hidden-units 64 --seed 42 --validation-fraction 0.25
 ```
 
@@ -100,8 +100,8 @@ Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs
 in the native MLflow interface.
 
 One MLflow experiment contains both Hiraku child records. The script logs native
-`hiraku.record_id` and `hiraku.job_id` tags for attribution and optional execution
-details. Queries do not require local job history. Hiraku reads the latest
+`hiraku.record_id` and `hiraku.job_id` tags for record and execution attribution.
+Queries do not require local job history. Hiraku reads the latest
 value of each metric. Full epoch histories remain in MLflow and its UI.
 
 You can list the same runs using Hiraku:

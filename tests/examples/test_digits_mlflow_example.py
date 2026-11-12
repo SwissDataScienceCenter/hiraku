@@ -92,7 +92,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         invoke(
             runner,
             [
-                "job",
                 "run",
                 "--record",
                 ids_by_name[record_id],

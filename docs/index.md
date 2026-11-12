@@ -70,7 +70,7 @@ flowchart LR
   Project settings and the active record live in `hiraku.yml`.
 * A child `Record` may focus on an experiment, diagnosis, or review. It declares its relationship through `parent_id` and may bind its own code commit. Record fields remain local.
 * A `Run` records one execution attributed to a `record_id`. Runs are managed by CSV, MLflow, W&B, or another backend and queried by Hiraku.
-* `hiraku job run` executes in the current working tree, saves output, and returns the command's exit code. Optional dispatch scripts can prepare its runtime.
+* `hiraku run` executes in the current working tree, saves output, and returns the command's exit code. Optional dispatch scripts can prepare its runtime.
 
 ??? tip "Branching and experiment lineage"
     Git remains responsible for commits, branches, and source history.

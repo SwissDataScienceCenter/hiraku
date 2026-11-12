@@ -4,7 +4,7 @@ Practical workflows for setting up Hiraku, choosing a tracking backend, and
 working with research records.
 
 - [Start from scratch](../examples/minimal/README.md)
-- [Local jobs](jobs.md): foreground and background command execution.
+- [Jobs and executors](jobs.md): native PSI/J execution and final-status retrieval.
 - [Workflows](workflows.md): run and write research workflows in your coding
   agent.
 - Tracking backends:
