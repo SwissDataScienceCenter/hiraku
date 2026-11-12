@@ -346,7 +346,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
             for _ in range(300):
                 result = await server.call_tool(
                     "job_status",
-                    {"job_id": receipt["id"]},
+                    {"job_id": receipt["id"][:8]},
                 )
                 if result.structured_content["status"]["state"] in {
                     "COMPLETED",

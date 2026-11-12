@@ -62,6 +62,11 @@ hiraku job status JOB_ID
 hiraku job status JOB_ID --json
 ```
 
+The list table shows 8-character ID prefixes, lengthened when displayed IDs
+collide, and local submission times as `YYYY-MM-DD HH:MM:SS`. JSON retains full
+IDs and ISO timestamps. CLI and MCP status accept full IDs or any nonempty unique
+prefix; ambiguous prefixes require more characters.
+
 `status` attaches through PSI/J, captures the currently available status, saves it,
 and displays the updated submission without waiting for completion.
 `list` refreshes and saves each nonfinal submission before displaying status.
@@ -170,7 +175,9 @@ output files are retained. Passing `project` enables history. Native Python
 submissions opt in by converting an accepted job with `Submission.from_psi_job(job)`
 and calling `submission.save(project)`. Conversion does not write files.
 `Submission.load(project, job_id)` and `Submission.list(project, record_id=...)`
-read validated metadata without contacting executors. CLI and MCP list handlers
+read validated metadata without contacting executors.
+`Submission.from_prefix(project, prefix)` resolves a unique ID prefix and loads
+that submission, rejecting missing or ambiguous matches. CLI and MCP list handlers
 call `observe_submission(entry, project)` for each loaded submission. This helper
 refreshes and saves nonfinal jobs and returns response-only `UNKNOWN` and
 `observation_error` on observation failures, preserving saved history. Final

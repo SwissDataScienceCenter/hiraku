@@ -271,8 +271,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
     )
     def job_status(job_id: str) -> dict[str, Any]:
-        """Sync, save, and show current PSI/J status without waiting for completion."""
-        entry = Submission.load(selected, job_id)
+        """Sync and show status by full ID or unique nonempty prefix."""
+        entry = Submission.from_prefix(selected, job_id)
         entry.sync()
         entry.save(selected)
         return entry.model_dump(mode="json")

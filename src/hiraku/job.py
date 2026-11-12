@@ -307,6 +307,34 @@ class Submission(BaseModel):
             ) from exc
 
     @classmethod
+    def from_prefix(cls, project: Project, prefix: str) -> Submission:
+        """Load the unique submission matching a UUID or nonempty prefix."""
+        if (
+            not isinstance(prefix, str)
+            or not 1 <= len(prefix) <= 36
+            or any(char not in "0123456789abcdef-" for char in prefix)
+        ):
+            raise ValidationError(
+                "Job ID must be a UUID or a nonempty hexadecimal UUID prefix"
+            )
+        if len(prefix) == 36:
+            return cls.load(project, prefix)
+        matches = []
+        for path in (project.root / ".hiraku" / "jobs").glob(f"{prefix}*.json"):
+            try:
+                cls.validate_id(path.stem)
+            except ValueError:
+                continue
+            matches.append(path.stem)
+        if not matches:
+            raise ExecutionError(f"No submission matches job ID prefix {prefix!r}")
+        if len(matches) > 1:
+            raise ValidationError(
+                f"Ambiguous job ID prefix {prefix!r}; provide more characters"
+            )
+        return cls.load(project, matches[0])
+
+    @classmethod
     def list(
         cls, project: Project, *, record_id: str | None = None
     ) -> builtins.list[Submission]:
