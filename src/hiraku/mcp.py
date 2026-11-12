@@ -258,12 +258,11 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         JobExecutor.get_instance(executor, url=executor_url).submit(job)
         entry = Submission.from_psi_job(job)
         entry.save(selected)
-        return {
-            **entry.model_dump(mode="json"),
-            "observation_error": None,
-        }
+        return entry.model_dump(mode="json")
 
-    @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True))
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
+    )
     def job_status(job_id: str) -> dict[str, Any]:
         """Refresh a saved status snapshot by the original PSI/J job ID."""
         entry = Submission.load(selected, job_id)
@@ -282,7 +281,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
         """List project jobs and commands with their saved status snapshots."""
         return [
-            {**entry.model_dump(mode="json"), "observation_error": None}
+            entry.model_dump(mode="json")
             for entry in Submission.list(selected, record_id=record_id)
         ]
 

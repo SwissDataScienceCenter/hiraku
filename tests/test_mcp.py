@@ -65,6 +65,8 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
         assert {"job_submit", "job_status", "job_list"} <= tools.keys()
         assert tools["project_info"].title == "Project information"
         assert tools["record_list"].annotations.read_only_hint is True
+        assert tools["job_status"].annotations.read_only_hint is False
+        assert tools["job_list"].annotations.read_only_hint is True
         assert tools["workflow_start"].title == "Start workflow"
         assert tools["workflow_start"].description
         result = await server.call_tool("project_info", {})
@@ -334,6 +336,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
             },
         )
         job = dict(result.structured_content)
+        assert "observation_error" not in job
         assert job["executor"] == "local-detached"
         assert job["spec"]["launcher"] == "single"
         assert job["status"]["state"] in {"ACTIVE", "QUEUED"}
@@ -350,7 +353,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         assert history["id"] == job["id"]
         assert history["spec"]["launcher"] == "single"
         listed = await server.call_tool("job_list", {"record_id": "demo/demo"})
-        assert listed.structured_content["result"] == [completed.structured_content]
+        assert listed.structured_content["result"] == [history]
         cli = CliRunner().invoke(
             main, ["job", "list", "--record", "demo/demo", "--json"]
         )
@@ -403,7 +406,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         assert path.read_bytes() == before
         listed = await server.call_tool("job_list", {})
         assert all(
-            entry["observation_error"] is None
+            "observation_error" not in entry
             for entry in listed.structured_content["result"]
         )
 

@@ -769,12 +769,7 @@ def job_submit(
     JobExecutor.get_instance(executor, url=executor_url).submit(job)
     entry = Submission.from_psi_job(job)
     entry.save(state.project)
-    _emit_json(
-        {
-            **entry.model_dump(mode="json"),
-            "observation_error": None,
-        }
-    )
+    _emit_json(entry.model_dump(mode="json"))
 
 
 @main.command("run")
@@ -859,14 +854,14 @@ def job_status(
 def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> None:
     """List project jobs and commands with their saved status snapshots."""
     entries = [
-        {**entry.model_dump(mode="json"), "observation_error": None}
+        entry.model_dump(mode="json")
         for entry in Submission.list(state.project, record_id=record_id)
     ]
     if json_output:
         _emit_json(entries)
     else:
         _print_table(
-            ("id", "record", "submitted_at", "executor", "state", "command", "error"),
+            ("id", "record", "submitted_at", "executor", "state", "command"),
             [
                 (
                     entry["id"],
@@ -880,7 +875,6 @@ def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> Non
                             *entry["spec"].get("arguments", []),
                         ]
                     ),
-                    entry["observation_error"],
                 )
                 for entry in entries
             ],

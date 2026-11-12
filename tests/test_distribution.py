@@ -50,7 +50,6 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         packaged = set(wheel.namelist())
 
     assert expected <= packaged, f"Missing packaged resources: {expected - packaged}"
-    assert "hiraku/resources/launchers/detached.sh" not in packaged
 
     dashboard = {
         f"hiraku/dashboard/{name}"

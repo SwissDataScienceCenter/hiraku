@@ -86,7 +86,7 @@ hiraku record create heart-disease-prediction/logistic-regression \
 
 hiraku record show heart-disease-prediction/logistic-regression
 
-# run the command and save its output
+# run the command and stream its output
 hiraku run --record heart-disease-prediction/logistic-regression -- uv run python train.py \
   --model logistic --seed 42 --validation-fraction 0.25
 

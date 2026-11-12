@@ -153,9 +153,7 @@ class Status(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    state: Literal[
-        "NEW", "QUEUED", "ACTIVE", "COMPLETED", "FAILED", "CANCELED", "UNKNOWN"
-    ]
+    state: Literal["NEW", "QUEUED", "ACTIVE", "COMPLETED", "FAILED", "CANCELED"]
     time: float | None
     exit_code: int | None
     message: str | None

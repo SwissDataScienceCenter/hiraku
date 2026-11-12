@@ -74,7 +74,8 @@ A launch that never logs a row will not appear as a run.
 
 Commands are not record metadata. Pass the complete argv directly to
 `hiraku run`; a dispatcher can prepare repeatable project-specific runtime
-behavior around that invocation. Local jobs run in the project working tree;
+behavior around that invocation. Local jobs inherit the submitter's working
+directory unless an execution directory is specified;
 foreground execution streams output and waits, while `hiraku job submit` returns
 after submission. A job can produce zero, one, or many tracked runs. Scripts log
 the injected `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` on each run.
