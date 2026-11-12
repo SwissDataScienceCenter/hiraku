@@ -770,11 +770,10 @@ def test_cli_submit_status_and_list(project, detached, monkeypatch):
     assert "FAILED" in runner.invoke(main, ["job", "status", receipt["id"]]).output
     shown = Submission.load(project, receipt["id"]).model_dump(mode="json")
     listed = runner.invoke(main, ["job", "list", "--record", "test", "--json"])
-    metadata = {k: v for k, v in shown.items() if k not in {"status", "observed_at"}}
-    assert json.loads(listed.output) == [metadata]
+    assert json.loads(listed.output) == [shown]
     table = runner.invoke(main, ["job", "list"], env={"COLUMNS": "320"})
-    assert "FAILED" not in table.output
-    assert "observed_at" not in table.output and "state" not in table.output
+    assert "FAILED" in table.output
+    assert "state" in table.output
     assert "test" in table.output
     assert "raise SystemExit(7)" in table.output
 
@@ -940,11 +939,12 @@ def test_history_uses_original_psij_id_and_native_spec(project, detached, monkey
     assert list((project.root / ".hiraku/jobs").glob("*.json")) == [
         project.root / ".hiraku/jobs" / f"{job.id}.json"
     ]
-    assert [item.id for item in Submission.list(project)] == [job.id]
     path = project.root / ".hiraku/jobs" / f"{job.id}.json"
     before = path.read_bytes()
-    shown = CliRunner().invoke(main, ["job", "list", "--json"])
-    assert shown.exit_code == 0, shown.output
+    monkeypatch.setattr(
+        Submission, "save", lambda *a, **k: pytest.fail("List must not save")
+    )
+    assert [item.id for item in Submission.list(project)] == [job.id]
     assert path.read_bytes() == before
 
 
@@ -1071,7 +1071,7 @@ def test_sync_error_preserves_snapshot_and_other_jobs(
     assert len(Submission.list(project, record_id="test")) == 1
     listed = CliRunner().invoke(main, ["job", "list", "--json"])
     assert listed.exit_code == 0, listed.output
-    assert [item["id"] for item in json.loads(listed.output)] == [other.id, job.id]
+    assert [item["id"] for item in json.loads(listed.stdout)] == [other.id, job.id]
 
 
 def test_record_filter_avoids_unrelated_backend_queries(project, detached, monkeypatch):
@@ -1107,28 +1107,81 @@ def test_cli_status_does_not_wait_for_completion(project, detached, monkeypatch)
     assert Submission.load(project, original.id).status.state == "ACTIVE"
 
 
-@pytest.mark.parametrize("final", [False, True])
-def test_list_omits_status_without_querying_or_saving(
-    project, detached, monkeypatch, final
+@pytest.mark.parametrize("state", ["COMPLETED", "FAILED", "CANCELED"])
+def test_list_preserves_final_status_without_sync(
+    project, detached, monkeypatch, state
 ):
     monkeypatch.chdir(project.root)
-    job, saved = history_entry(project, detached, final=final)
+    job, _ = history_entry(project, detached, final=True)
+    entry = Submission.load(project, job.id)
+    entry.status.state = state
+    entry.save(project)
     path = project.root / ".hiraku/jobs" / f"{job.id}.json"
     before = path.read_bytes()
 
     def unexpected(*args, **kwargs):
-        pytest.fail("List must not query or save")
+        pytest.fail("Final jobs must not sync or save")
 
     monkeypatch.setattr(Submission, "sync", unexpected)
     monkeypatch.setattr(Submission, "save", unexpected)
     response = CliRunner().invoke(main, ["job", "list", "--json"])
     assert response.exit_code == 0, response.output
-    expected = {k: v for k, v in saved.items() if k not in {"status", "observed_at"}}
-    assert json.loads(response.output) == [expected]
+    assert json.loads(response.output) == [json.loads(before)]
     assert path.read_bytes() == before
     rejected = CliRunner().invoke(main, ["job", "list", "--sync"])
     assert rejected.exit_code == 2
-    assert "No such option '--sync'" in rejected.output
+
+
+def test_list_syncs_nonfinal_jobs_and_continues_on_error(
+    project, detached, monkeypatch
+):
+    monkeypatch.chdir(project.root)
+    failed, saved = history_entry(project, detached)
+    succeeded, _ = history_entry(project, detached, record_id=None)
+    queried = []
+
+    def sync(self):
+        queried.append(self.id)
+        if self.id == failed.id:
+            raise ObservationError("backend unavailable")
+        self.status.state = "COMPLETED"
+
+    monkeypatch.setattr(Submission, "sync", sync)
+    response = CliRunner().invoke(main, ["job", "list", "--json"])
+    assert response.exit_code == 0, response.output
+    results = {entry["id"]: entry for entry in json.loads(response.stdout)}
+    assert set(queried) == {failed.id, succeeded.id}
+    assert results[failed.id] == saved
+    assert results[succeeded.id]["status"]["state"] == "COMPLETED"
+    assert Submission.load(project, succeeded.id).status.state == "COMPLETED"
+    assert failed.id in response.stderr and "backend unavailable" in response.stderr
+
+
+@pytest.mark.parametrize(
+    ("state", "color"),
+    [
+        ("COMPLETED", "green"),
+        ("FAILED", "red"),
+        ("CANCELED", "red"),
+        ("ACTIVE", "white"),
+        ("QUEUED", "white"),
+        ("NEW", "white"),
+    ],
+)
+def test_list_row_colors(project, detached, monkeypatch, state, color):
+    monkeypatch.chdir(project.root)
+    job, _ = history_entry(project, detached)
+    entry = Submission.load(project, job.id)
+    entry.status.state = state
+    entry.save(project)
+    monkeypatch.setattr(Submission, "sync", lambda self: None)
+    tables = []
+    monkeypatch.setattr(
+        "hiraku.cli.Console.print", lambda self, table: tables.append(table)
+    )
+    response = CliRunner().invoke(main, ["job", "list"])
+    assert response.exit_code == 0, response.output
+    assert tables[0].rows[0].style == color
 
 
 def test_history_write_failure_reports_accepted_job(project, detached, monkeypatch):

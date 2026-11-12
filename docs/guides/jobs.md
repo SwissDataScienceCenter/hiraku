@@ -64,8 +64,11 @@ hiraku job status JOB_ID --json
 
 `status` attaches through PSI/J, captures the currently available status, saves it,
 and displays the updated submission without waiting for completion.
-`list` reads saved submission metadata without contacting executors. It omits
-status and observation timestamps from both the table and JSON output.
+`list` refreshes and saves each nonfinal submission before displaying status.
+Saved `COMPLETED`, `FAILED`, and `CANCELED` outcomes are not queried again.
+The CLI table colors completed rows green, failed or canceled rows red, and
+other rows white. JSON includes status and observation timestamps.
+If a job cannot be observed, listing warns and continues with its saved snapshot.
 The text output includes the command with shell-quoted arguments.
 Attachment itself may contact the backend and take time.
 PSI/J's `executor.list()` independently discovers backend-native IDs where supported.
@@ -81,7 +84,7 @@ a new in-memory PSI/J job, but does not change the saved original ID.
 
 Sync actions attach through PSI/J, copy the current native status, and save it.
 Snapshots include state, status time, exit code, message, and metadata, including
-pending states. `list` reads submission metadata without backend access. Attachment
+pending states. List filters apply before nonfinal jobs are refreshed. Attachment
 or status-reading failures raise `ObservationError` without changing the snapshot
 or file. CLI `status` fails with an error; MCP `job_status` returns a tool error.
 A final outcome is recoverable only while the backend retains it or after it has
@@ -164,7 +167,10 @@ output files are retained. Passing `project` enables history. Native Python
 submissions opt in by converting an accepted job with `Submission.from_psi_job(job)`
 and calling `submission.save(project)`. Conversion does not write files.
 `Submission.load(project, job_id)` and `Submission.list(project, record_id=...)`
-read validated metadata without contacting executors. `get_psi_job()` reconstructs
+read validated metadata without contacting executors. CLI and MCP list handlers
+refresh and save nonfinal jobs after loading, retaining saved status on observation
+failures. Final outcomes are not refreshed.
+`get_psi_job()` reconstructs
 the executor and attaches without waiting or changing saved metadata. `sync()`
 attaches internally, checks identity, and copies current status. Pass an existing
 native job to `sync(job)` to use its in-memory status, including foreground local
@@ -183,10 +189,10 @@ values `hiraku.record_id` / `hiraku.job_id`. Both environment names are
 reserved. A job may produce zero, one, or many runs. Tracking attribution,
 logging destinations, and code provenance remain independent of executor state.
 
-MCP exposes `job_submit`, read-only `job_list(record_id=...)`, and mutating
+MCP exposes `job_submit`, `job_list(record_id=...)`, and mutating
 `job_status(job_id=...)`, which syncs, saves, and returns the updated submission.
-These use the same history and original PSI/J IDs as the CLI. MCP list does not
-accept a sync parameter; call `job_status` for a current observation.
+These use the same history and original PSI/J IDs as the CLI. List automatically
+refreshes and saves nonfinal jobs; final outcomes use saved history.
 Waiting remains available through native
 PSI/J `job.wait()` in Python.
 `job_submit` accepts an optional `launcher` registered name, like the CLI.
