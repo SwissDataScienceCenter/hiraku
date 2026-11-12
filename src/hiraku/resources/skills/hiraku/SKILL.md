@@ -370,13 +370,16 @@ Log them as CSV
 queried without local job history. Records and tracking runs hold user-managed
 code provenance; Jobs do not collect it.
 Tracking destinations remain user-managed. `hiraku job submit` returns JSON with
-`id`, the original PSI/J job ID. Use `job_status(job_id=...)` or
-`hiraku job status JOB_ID` to retrieve status. Use `job_list(record_id=...)` or
+`id`, the original PSI/J job ID. Use `job_show(job_id=...)` or
+`hiraku job show JOB_ID` to read a saved snapshot. Use `job_list(record_id=...)` or
 `hiraku job list [--record ID] [--json]` to list jobs and commands with status.
-The CLI status command accepts `--wait` to wait for the final outcome.
-List reads saved snapshots without backend access; status refreshes and saves
-the current PSI/J status. `observation_error` describes a failed refresh alongside
-the unchanged saved status. Do not resubmit automatically after a history-write
+Show/list read saved snapshots without backend access. Call `job_sync(job_id=...)`
+or `hiraku job sync JOB_ID` to refresh and save current status without waiting for
+completion. CLI show/list also accept `--sync`; MCP show/list remain read-only.
+`observed_at` records the last successful observation. Failed sync raises an error
+without changing the snapshot; CLI `list --sync` warns and continues per job.
+Do not resubmit
+automatically after a history-write
 failure: the execution may already have been accepted.
 CLI `run` and `job submit` accept `--launcher NAME`; MCP `job_submit` accepts
 `launcher`. Select an installed PSI/J launcher by its registered name, not a script

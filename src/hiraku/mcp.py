@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
-from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
@@ -19,12 +18,12 @@ from mcp.server.mcpserver.exceptions import (
 from mcp.types import (
     ToolAnnotations,
 )
-from psij import JobAttributes, JobExecutor, JobState
+from psij import JobAttributes, JobExecutor
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .errors import ExecutionError, HirakuError, ValidationError
+from .errors import HirakuError, ValidationError
 from .job import Submission, prepare_job
 from .project import Project
 from .tracking import Leaderboard
@@ -103,7 +102,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
     Tools: project_info, leaderboard_list, record_list, record_show, record_create,
-    record_update, record_delete, job_submit, job_list, job_status, and runs.
+    record_update, record_delete, job_submit, job_list, job_show, job_sync, and runs.
     Also registers the record
     catalog and record resources, and the propose_implementation prompt.
     """
@@ -263,21 +262,23 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
     )
-    def job_status(job_id: str) -> dict[str, Any]:
-        """Refresh a saved status snapshot by the original PSI/J job ID."""
+    def job_sync(job_id: str) -> dict[str, Any]:
+        """Sync and save current PSI/J status without waiting for completion."""
         entry = Submission.load(selected, job_id)
-        observation_error = None
-        try:
-            job = entry.get_psi_job()
-            job.wait(timeout=timedelta(seconds=0.2), target_states=[JobState.QUEUED])
-            entry.sync(job)
-        except ExecutionError as exc:
-            observation_error = str(exc)
-        else:
-            entry.save(selected)
-        return {**entry.model_dump(mode="json"), "observation_error": observation_error}
+        entry.sync()
+        entry.save(selected)
+        return entry.model_dump(mode="json")
 
-    @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True))
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)
+    )
+    def job_show(job_id: str) -> dict[str, Any]:
+        """Read a saved submission without contacting its executor."""
+        return Submission.load(selected, job_id).model_dump(mode="json")
+
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)
+    )
     def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
         """List project jobs and commands with their saved status snapshots."""
         return [

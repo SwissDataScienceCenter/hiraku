@@ -74,7 +74,8 @@ and fall back to the CLI when the host has not connected the server.
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
 | `job_submit` | Submit through PSI/J, record history, and return the original PSI/J job `id`. |
 | `job_list` | List project jobs with commands and saved status snapshots; optionally filter by `record_id`. |
-| `job_status` | Attach through PSI/J and save the current status using the original `job_id`. |
+| `job_show` | Read one saved submission using its original `job_id`, without backend access. |
+| `job_sync` | Attach through PSI/J and save the current status without waiting for completion. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
@@ -91,8 +92,8 @@ unattributed. `launcher` selects a registered PSI/J launcher; `custom_attributes
 maps executor-specific settings, matching CLI `--custom-attribute KEY VALUE`.
 Explicit `directory` paths refer to the execution side; local jobs otherwise
 inherit the MCP server's directory. Pass the returned `id` as `job_id` to
-`job_status`. Refresh failures return `observation_error` alongside the saved
-snapshot.
+`job_show` or `job_sync`. Show/list remain read-only; sync failures return tool
+errors without changing the saved snapshot or its `observed_at` timestamp.
 
 See [Jobs and executors](jobs.md) for executor setup, history, output locations,
 and platform limitations.

@@ -22,7 +22,7 @@ import psutil
 from psij.serialize import JSONSerializer
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
-from .errors import ExecutionError, ValidationError
+from .errors import ExecutionError, ObservationError, ValidationError
 from .io import atomic_write
 
 if TYPE_CHECKING:
@@ -179,6 +179,7 @@ class Submission(BaseModel):
     id: str
     record_id: str | None
     submitted_at: AwareDatetime
+    observed_at: AwareDatetime
     executor: str = Field(min_length=1)
     executor_url: str | None
     native_id: str = Field(min_length=1)
@@ -210,15 +211,18 @@ class Submission(BaseModel):
         if job.executor is None or job.native_id is None or job.spec is None:
             raise ExecutionError("Only submitted jobs can be recorded")
         try:
+            status = Status.from_psi_status(job.status)
+            now = datetime.now(UTC)
             return cls(
                 id=job.id,
                 record_id=(job.spec.environment or {}).get("HIRAKU_RECORD_ID") or None,
-                submitted_at=datetime.now(UTC),
+                submitted_at=now,
+                observed_at=now,
                 executor=job.executor.name,
                 executor_url=job.executor.url,
                 native_id=job.native_id,
                 spec=json.loads(JSONSerializer().dumps(job.spec)),
-                status=Status.from_psi_status(job.status),
+                status=status,
             )
         except (TypeError, ValueError) as exc:
             raise ExecutionError(
@@ -229,7 +233,7 @@ class Submission(BaseModel):
     def get_psi_job(self) -> psij.Job:
         """Attach a native job without waiting, syncing, or saving metadata."""
         if self.executor == "local":
-            raise ExecutionError("Native local jobs cannot be safely reattached")
+            raise ObservationError("Native local jobs cannot be safely reattached")
         try:
             executor = psij.JobExecutor.get_instance(
                 self.executor, url=self.executor_url
@@ -247,10 +251,12 @@ class Submission(BaseModel):
             ImportError,
             NotImplementedError,
         ) as exc:
-            raise ExecutionError(f"Cannot attach job {self.id}: {exc}") from exc
+            raise ObservationError(f"Cannot attach job {self.id}: {exc}") from exc
 
-    def sync(self, job: psij.Job) -> None:
-        """Copy status from the same native execution without polling or saving."""
+    def sync(self, job: psij.Job | None = None) -> None:
+        """Attach if needed and copy current status without waiting or saving."""
+        if job is None:
+            job = self.get_psi_job()
         if job.executor is None or (
             job.executor.name,
             job.executor.url,
@@ -259,7 +265,15 @@ class Submission(BaseModel):
             raise ValidationError(
                 "Job executor target and native ID must match submission"
             )
-        self.status = Status.from_psi_status(job.status)
+        try:
+            status = Status.from_psi_status(job.status)
+            observed_at = datetime.now(UTC)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ObservationError(
+                f"Cannot read status for job {self.id}: {exc}"
+            ) from exc
+        self.status = status
+        self.observed_at = observed_at
 
     def save(self, project: Project) -> None:
         """Atomically save submission metadata."""
