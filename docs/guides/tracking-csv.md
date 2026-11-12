@@ -48,7 +48,7 @@ Choose a unique run ID for each execution. Prefix metric columns with
 `hiraku_job_id` from `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` respectively.
 The optional `commit` column describes source-reported code provenance.
 
-Commands run in the project root. Your script chooses the CSV location:
+Your script chooses the CSV location, relative to its working directory:
 
 ```python
 import os

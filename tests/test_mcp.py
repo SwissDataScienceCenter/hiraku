@@ -303,7 +303,8 @@ def test_submit_tool_uses_independent_worker(tmp_path: Path) -> None:
                     sys.executable,
                     "-c",
                     "import sys,time; from pathlib import Path\n"
-                    "while not Path('release').exists(): time.sleep(.05)\n"
+                    f"while not Path({str(config.root / 'release')!r}).exists(): "
+                    "time.sleep(.05)\n"
                     "print('out'); print('err', file=sys.stderr); "
                     "raise SystemExit(7)",
                 ],
@@ -317,6 +318,7 @@ def test_submit_tool_uses_independent_worker(tmp_path: Path) -> None:
         completed = await completed_job(job["id"])
         assert completed.structured_content["status"]["exit_code"] == 7
         saved = Job.load(job["id"], project=config)
+        assert saved.spec.directory is None
         assert saved.spec.stdout_path.read_text() == "out\n"
         assert saved.spec.stderr_path.read_text() == "err\n"
         submitted = await server.call_tool(

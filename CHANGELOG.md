@@ -46,8 +46,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Add `Job.create()` with instance `submit()` and blocking `run()`, plus CLI
   `hiraku job run/submit/list/show` and MCP job tools. Each Job records one
   attempt, saved output, and its final outcome.
-  Python execution defaults to the creation-time cwd; explicit environment values
-  are persisted in the prepared PSI/J spec. CLI and MCP default to the project root.
+  The executor selects the working directory unless explicitly supplied; local jobs
+  inherit the submitting process's cwd. Explicit environment values are persisted
+  in the prepared PSI/J spec.
 - Default to `hiraku-local`, a PSI/J `LocalJobExecutor` subclass with a detached
   recording launcher. The launcher writes `result.json`
   independently of submission metadata and the submitting process.

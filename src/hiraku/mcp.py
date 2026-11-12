@@ -242,7 +242,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             command,
             record_id=record_id,
             project=selected,
-            directory=Path(directory) if directory else selected.root,
+            directory=Path(directory) if directory is not None else None,
             attributes=JobAttributes(custom_attributes=attributes)
             if attributes
             else None,
