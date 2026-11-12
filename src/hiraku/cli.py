@@ -824,8 +824,8 @@ def run(
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def job_status(state: CLIContext, job_id: str, json_output: bool) -> None:
-    """Sync, save, and show current PSI/J status without waiting for completion."""
-    entry = Submission.load(state.project, job_id)
+    """Sync and show status by full ID or unique nonempty prefix."""
+    entry = Submission.from_prefix(state.project, job_id)
     entry.sync()
     entry.save(state.project)
     _show_submission(entry.model_dump(mode="json"), json_output)
@@ -878,6 +878,9 @@ def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> Non
         _emit_json(entries)
     else:
         status_colors = {"COMPLETED": "green", "FAILED": "red", "CANCELED": "red"}
+        id_width = 8
+        while len({entry["id"][:id_width] for entry in entries}) < len(entries):
+            id_width += 1
         _print_table(
             (
                 "id",
@@ -889,9 +892,11 @@ def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> Non
             ),
             [
                 (
-                    entry["id"],
+                    entry["id"][:id_width],
                     entry["record_id"],
-                    entry["submitted_at"],
+                    datetime.fromisoformat(entry["submitted_at"])
+                    .astimezone()
+                    .strftime("%Y-%m-%d %H:%M:%S"),
                     entry["executor"],
                     Text(
                         entry["status"]["state"],

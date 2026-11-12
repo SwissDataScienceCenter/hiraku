@@ -374,7 +374,8 @@ code provenance; Jobs do not collect it.
 Tracking destinations remain user-managed. `hiraku job submit` returns JSON with
 `id`, the original PSI/J job ID. Use `job_status(job_id=...)` or
 `hiraku job status JOB_ID` to sync, save, and show current status without waiting
-for completion. Use `job_list(record_id=...)` or
+for completion. Status accepts a full ID or any nonempty unique prefix.
+Use `job_list(record_id=...)` or
 `hiraku job list [--record ID] [--json]` to list jobs, commands, and status.
 CLI and MCP list automatically sync and save nonfinal jobs, skipping saved
 `COMPLETED`, `FAILED`, and `CANCELED` outcomes. Observation failures warn and

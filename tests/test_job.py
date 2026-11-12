@@ -759,7 +759,7 @@ def test_cli_submit_status_and_list(project, detached, monkeypatch):
     args = [
         "job",
         "status",
-        receipt["id"],
+        receipt["id"][:8],
         "--json",
     ]
     status = runner.invoke(main, args)
@@ -777,6 +777,10 @@ def test_cli_submit_status_and_list(project, detached, monkeypatch):
     assert "state" in table.output
     assert "test" in table.output
     assert "raise SystemExit(7)" in table.output
+    assert receipt["id"][:8] in table.output
+    assert receipt["id"] not in table.output
+    submitted = datetime.fromisoformat(receipt["submitted_at"]).astimezone()
+    assert submitted.strftime("%Y-%m-%d %H:%M:%S") in table.output
 
 
 def test_interrupting_foreground_cleans_up(project, monkeypatch):
@@ -900,6 +904,42 @@ def history_entry(project, detached, *, record_id="test", final=False):
     entry = Submission.from_psi_job(job)
     entry.save(project)
     return job, Submission.load(project, job.id).model_dump(mode="json")
+
+
+@pytest.mark.parametrize("length", [1, 5, 6, 8, 36])
+def test_submission_from_prefix(project, detached, length):
+    job, saved = history_entry(project, detached)
+    loaded = Submission.from_prefix(project, job.id[:length])
+    assert loaded.model_dump(mode="json") == saved
+
+
+@pytest.mark.parametrize("prefix", ["", "../jobs", "abcde*", "zzzzzz"])
+def test_submission_rejects_invalid_prefix(project, prefix):
+    with pytest.raises(ValidationError, match="nonempty hexadecimal UUID prefix"):
+        Submission.from_prefix(project, prefix)
+
+
+def test_submission_missing_prefix(project):
+    with pytest.raises(ExecutionError, match="No submission matches"):
+        Submission.from_prefix(project, "abcdef")
+
+
+def test_submission_ambiguous_prefix_and_table_ids(project, detached, monkeypatch):
+    monkeypatch.chdir(project.root)
+    job, _ = history_entry(project, detached, final=True)
+    entry = Submission.load(project, job.id)
+    (project.root / ".hiraku/jobs" / f"{job.id}.json").unlink()
+    for digit in ("0", "1"):
+        entry.id = f"12345678-{digit}000-4000-8000-000000000001"
+        entry.save(project)
+    for prefix in ("1", "12345678"):
+        with pytest.raises(ValidationError, match="Ambiguous.*more characters"):
+            Submission.from_prefix(project, prefix)
+    assert Submission.from_prefix(project, "12345678-0").id.startswith("12345678-0")
+    result = CliRunner().invoke(main, ["job", "list"], env={"COLUMNS": "320"})
+    assert result.exit_code == 0, result.output
+    assert "12345678-0" in result.output and "12345678-1" in result.output
+    assert "4000-8000" not in result.output
 
 
 @pytest.mark.parametrize("removed", ["show", "sync"])

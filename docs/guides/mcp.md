@@ -92,7 +92,8 @@ PSI/J launcher; `custom_attributes`
 maps executor-specific settings, matching CLI `--custom-attribute KEY VALUE`.
 Explicit `directory` paths refer to the execution side; local jobs otherwise
 inherit the MCP server's directory. Pass the returned `id` as `job_id` to
-`job_status`. List refreshes nonfinal jobs; observation failures return a
+`job_status`, which also accepts any nonempty unique ID prefix.
+List refreshes nonfinal jobs; observation failures return a
 response-only `UNKNOWN` state and `observation_error`, retaining saved history and
 the last successful `observed_at`. List also logs a warning;
 single-job status failures return tool
