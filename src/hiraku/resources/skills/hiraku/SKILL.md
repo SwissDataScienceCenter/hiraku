@@ -362,6 +362,8 @@ runtime behavior around that invocation.
 return after submission, defaulting to `local-detached`. Local jobs inherit the
 submitter's working directory unless `directory` is specified. Commands have
 closed stdin and do not support interactive input.
+MCP `job_submit` requires an explicit `record_id` for attribution; omitting it
+submits an unattributed job regardless of the active record.
 
 Hiraku injects `HIRAKU_RECORD_ID` (empty for unattributed jobs) and `HIRAKU_JOB_ID`.
 Log them as CSV

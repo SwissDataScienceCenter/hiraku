@@ -102,6 +102,8 @@ def run_local(job: psij.Job, *, project: Project | None = None) -> psij.JobStatu
     Output uses temporary files unless the caller supplied output paths.
     Supplying a project records the submission and its final native status.
     """
+    if job.status.state != psij.JobState.NEW or job.executor is not None:
+        raise psij.InvalidJobException("Job must be new and unbound")
     spec = job.spec
     if spec is None:
         raise ValidationError("A job specification is required")
@@ -340,7 +342,13 @@ def _follow_streams(job: psij.Job) -> None:
                 if file is None and path.is_file():
                     file = stream[2] = stack.enter_context(path.open("rb"))
                 if file is not None:
-                    output.write(decoder.decode(file.read(), final=done))
-                    output.flush()
+                    data = file.read()
+                    buffer = getattr(output, "buffer", None)
+                    if buffer is not None:
+                        buffer.write(data)
+                        buffer.flush()
+                    else:
+                        output.write(decoder.decode(data, final=done))
+                        output.flush()
             if done:
                 break

@@ -1,15 +1,54 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
 from hiraku.tracking import Leaderboard
+
+
+@pytest.mark.parametrize(
+    "existing", ["", "commit,git_state,record_id\nold,clean,test\n"]
+)
+def test_minimal_csv_header_validation(tmp_path, existing):
+    script = (
+        Path(__file__).parents[2]
+        / "src/hiraku/resources/examples/minimal/src/evaluate.py"
+    )
+    path = tmp_path / "runs.csv"
+    path.write_text(existing)
+    environment = {**os.environ, "HIRAKU_RECORD_ID": "test", "HIRAKU_JOB_ID": "job"}
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    if existing:
+        assert result.returncode != 0
+        assert "Unexpected runs CSV header" in result.stderr
+        assert path.read_bytes() == existing.encode()
+    else:
+        assert result.returncode == 0, result.stderr
+        before = path.read_text()
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert path.read_text().startswith(before)
+        assert len(path.read_text().splitlines()) == 3
 
 
 def git(path: Path, *arguments: str) -> str:

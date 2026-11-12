@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import quote
 
 import anyio
+import psij
 import pytest
 from click.testing import CliRunner
 
@@ -297,6 +298,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
     config = Project.create(tmp_path)
     monkeypatch.chdir(tmp_path)
     server = create_server(config)
+    config.set_active_record(config.vault.create("active", title="Active", type="task"))
 
     async def exercise() -> None:
         async def completed_job(receipt):
@@ -385,7 +387,6 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         assert submitted.structured_content["executor"] == "local-detached"
         completed = await completed_job(submitted.structured_content)
         assert completed.structured_content["status"]["exit_code"] == 3
-        config.clear_active_record()
         submitted = await server.call_tool(
             "job_submit",
             {
@@ -395,6 +396,11 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         )
         completed = await completed_job(submitted.structured_content)
         assert completed.structured_content["status"]["exit_code"] == 0
+        assert completed.structured_content["record_id"] is None
+        assert (
+            completed.structured_content["spec"]["environment"]["HIRAKU_RECORD_ID"]
+            == ""
+        )
 
         def unavailable(self):
             raise ObservationError("backend unavailable")
@@ -416,6 +422,43 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         assert path.read_bytes() == before
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        psij.InvalidJobException("Set the renku.launcher attribute"),
+        psij.SubmitException("rnk unavailable"),
+        ValueError("Unknown executor"),
+        FileNotFoundError("rnk executable missing"),
+    ],
+)
+@pytest.mark.parametrize("during_submit", [False, True])
+def test_submit_exposes_expected_backend_errors(
+    tmp_path, monkeypatch, error, during_submit
+):
+    server = create_server(Project.create(tmp_path))
+
+    def fail(*args, **kwargs):
+        raise error
+
+    if during_submit:
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(
+            "hiraku.mcp.JobExecutor.get_instance",
+            lambda *args, **kwargs: SimpleNamespace(submit=fail),
+        )
+    else:
+        monkeypatch.setattr("hiraku.mcp.JobExecutor.get_instance", fail)
+
+    async def exercise():
+        with pytest.raises(ToolError) as caught:
+            await server.call_tool("job_submit", {"command": ["echo", "hello"]})
+        assert str(error) in str(caught.value)
+
+    asyncio.run(exercise())
+    assert not (tmp_path / ".hiraku/jobs").exists()
 
 
 def test_leaderboard_list_matches_cli_and_reads_current_definitions(
