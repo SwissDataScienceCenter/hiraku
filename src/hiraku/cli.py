@@ -216,14 +216,6 @@ def mcp_install_command() -> None:
     click.echo(f"Installed Hiraku MCP server for {project.root}")
 
 
-@mcp_group.command("uninstall")
-def mcp_uninstall_command() -> None:
-    """Remove the Hiraku MCP server from supported client configurations."""
-    project = Project.discover()
-    project.uninstall_mcp()
-    click.echo(f"Uninstalled Hiraku MCP server for {project.root}")
-
-
 @main.command("init")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
 @click.option("--template", type=click.Path(path_type=Path))

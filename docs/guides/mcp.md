@@ -4,8 +4,7 @@ Hiraku includes an MCP server that works with any initialized Hiraku project.
 `hiraku init` and `hiraku example create` install project-scoped MCP
 configuration for Claude Code, Codex, and Pi. After cloning a shared project,
 run `hiraku mcp install` to add the local Codex configuration and restore any
-missing client entries. Run `hiraku mcp uninstall` to remove Hiraku's entries
-while preserving other MCP settings.
+missing client entries.
 The server process discovers the nearest `hiraku.yml` from its working directory,
 so each client starts it in the project it is working on:
 

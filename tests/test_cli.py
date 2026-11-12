@@ -167,12 +167,10 @@ def test_mcp_requires_explicit_subcommand() -> None:
     result = invoke("mcp")
 
     assert result.exit_code == 2
-    assert all(
-        command in result.output for command in ("serve", "install", "uninstall")
-    )
+    assert all(command in result.output for command in ("serve", "install"))
 
 
-def test_mcp_install_and_uninstall_preserve_other_client_settings(
+def test_mcp_install_preserves_other_client_settings(
     tmp_path: Path, monkeypatch
 ) -> None:
     Project.create(tmp_path, install_skill=False, install_mcp=False)
@@ -197,18 +195,17 @@ def test_mcp_install_and_uninstall_preserve_other_client_settings(
     assert '"hiraku"' in (tmp_path / ".pi/mcp.json").read_text()
     assert 'args = ["run", "hiraku", "mcp", "serve"]' in codex.read_text()
 
-    removed = invoke("mcp", "uninstall")
-
-    assert removed.exit_code == 0, removed.output
     assert json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"] == {
-        "other": {"command": "other"}
+        "other": {"command": "other"},
+        "hiraku": server,
     }
     assert json.loads((tmp_path / ".pi/mcp.json").read_text())["mcpServers"] == {
-        "other": {"command": "other"}
+        "other": {"command": "other"},
+        "hiraku": server,
     }
     assert 'model = "local"' in codex.read_text()
     assert "[mcp_servers.other]" in codex.read_text()
-    assert "[mcp_servers.hiraku]" not in codex.read_text()
+    assert "[mcp_servers.hiraku]" in codex.read_text()
 
 
 def test_example_list_works_outside_a_project(tmp_path: Path, monkeypatch) -> None:
