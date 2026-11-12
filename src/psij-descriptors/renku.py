@@ -85,7 +85,7 @@ class RenkuJobExecutor(JobExecutor):
         if (
             spec.pre_launch
             or spec.post_launch
-            or spec.launcher not in (None, "single", "hiraku-single")
+            or spec.launcher not in (None, "single", "quoted-single")
         ):
             raise InvalidJobException(
                 "Renku does not support PSI/J launch/staging hooks"

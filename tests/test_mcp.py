@@ -303,7 +303,7 @@ def test_submit_tool_uses_independent_worker(tmp_path: Path) -> None:
             },
         )
         job = dict(result.structured_content)
-        assert job["executor"] == "hiraku-local"
+        assert job["executor"] == "local-detached"
         assert Job.load(job["id"], project=config).record_id == "demo/demo"
         assert job["status"]["state"] in {"ACTIVE", "QUEUED"}
         (config.root / "release").touch()
@@ -316,12 +316,12 @@ def test_submit_tool_uses_independent_worker(tmp_path: Path) -> None:
         submitted = await server.call_tool(
             "job_submit",
             {
-                "executor": "hiraku-local",
+                "executor": "local-detached",
                 "record_id": "demo/demo",
                 "command": [sys.executable, "-c", "raise SystemExit(3)"],
             },
         )
-        assert submitted.structured_content["executor"] == "hiraku-local"
+        assert submitted.structured_content["executor"] == "local-detached"
         completed = await completed_job(submitted.structured_content["id"])
         assert completed.structured_content["status"]["exit_code"] == 3
         config.clear_active_record()

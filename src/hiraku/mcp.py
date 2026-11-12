@@ -233,7 +233,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     )
     def job_submit(
         command: list[str],
-        executor: str = "hiraku-local",
+        executor: str = "local-detached",
         record_id: str | None = None,
         executor_url: str | None = None,
         attributes: dict[str, str] | None = None,

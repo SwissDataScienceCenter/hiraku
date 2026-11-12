@@ -227,7 +227,7 @@ class Job(BaseModel):
             executable=argv[0],
             arguments=argv[1:],
             directory=directory,
-            launcher="hiraku-single",
+            launcher="quoted-single",
             attributes=attributes,
             resources=resources,
             environment={

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# RecordingLauncher starts a new session; disconnect streams and save the outcome.
+# DetachedLauncher starts a new session; disconnect streams and save the outcome.
 # The first seven arguments belong to PSI/J; ours precede the command argv.
 result_path="$8"
 exec </dev/null >/dev/null 2>&1
