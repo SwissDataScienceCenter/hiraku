@@ -24,8 +24,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .errors import ExecutionError, HirakuError, ObservationError, ValidationError
-from .job import Submission, prepare_job
+from .errors import ExecutionError, HirakuError, ValidationError
+from .job import Submission, observe_submission, prepare_job
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -280,16 +280,13 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
         """List jobs and status, refreshing and saving nonfinal submissions."""
         entries = Submission.list(selected, record_id=record_id)
-        for entry in entries:
-            if entry.status.state in {"COMPLETED", "FAILED", "CANCELED"}:
-                continue
-            try:
-                entry.sync()
-            except ObservationError as exc:
-                logger.warning("Cannot sync job %s: %s", entry.id, exc)
-            else:
-                entry.save(selected)
-        return [entry.model_dump(mode="json") for entry in entries]
+        results = [observe_submission(entry, selected) for entry in entries]
+        for result in results:
+            if "observation_error" in result:
+                logger.warning(
+                    "Cannot sync job %s: %s", result["id"], result["observation_error"]
+                )
+        return results
 
     @server.tool(
         title="List tracked runs",

@@ -325,6 +325,25 @@ class Submission(BaseModel):
         )
 
 
+def observe_submission(entry: Submission, project: Project) -> dict[str, Any]:
+    """Return current submission data, saving observations of nonfinal jobs.
+
+    Observation failures return UNKNOWN and an error without changing history.
+    Callers own warning reporting; storage failures propagate.
+    """
+    result = entry.model_dump(mode="json")
+    if entry.status.state in {"COMPLETED", "FAILED", "CANCELED"}:
+        return result
+    try:
+        entry.sync()
+    except ObservationError as exc:
+        result["status"]["state"] = "UNKNOWN"
+        result["observation_error"] = str(exc)
+        return result
+    entry.save(project)
+    return entry.model_dump(mode="json")
+
+
 def _follow_streams(job: psij.Job) -> None:
     directory = job.spec.directory or Path.cwd()
     with ExitStack() as stack:

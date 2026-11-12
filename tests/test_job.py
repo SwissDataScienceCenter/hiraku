@@ -30,6 +30,7 @@ from hiraku.errors import (
 from hiraku.job import (
     Status,
     Submission,
+    observe_submission,
     prepare_job,
     run_local,
     validate_command,
@@ -1151,10 +1152,17 @@ def test_list_syncs_nonfinal_jobs_and_continues_on_error(
     assert response.exit_code == 0, response.output
     results = {entry["id"]: entry for entry in json.loads(response.stdout)}
     assert set(queried) == {failed.id, succeeded.id}
-    assert results[failed.id] == saved
+    failed_result = results[failed.id]
+    assert failed_result["status"]["state"] == "UNKNOWN"
+    assert failed_result["observation_error"] == "backend unavailable"
+    assert failed_result["observed_at"] == saved["observed_at"]
+    assert Submission.load(project, failed.id).model_dump(mode="json") == saved
     assert results[succeeded.id]["status"]["state"] == "COMPLETED"
     assert Submission.load(project, succeeded.id).status.state == "COMPLETED"
     assert failed.id in response.stderr and "backend unavailable" in response.stderr
+    table = CliRunner().invoke(main, ["job", "list"], env={"COLUMNS": "320"})
+    assert table.exit_code == 0, table.output
+    assert "UNKNOWN" in table.stdout
 
 
 @pytest.mark.parametrize(
@@ -1166,15 +1174,21 @@ def test_list_syncs_nonfinal_jobs_and_continues_on_error(
         ("ACTIVE", "white"),
         ("QUEUED", "white"),
         ("NEW", "white"),
+        ("UNKNOWN", "white"),
     ],
 )
 def test_list_row_colors(project, detached, monkeypatch, state, color):
     monkeypatch.chdir(project.root)
     job, _ = history_entry(project, detached)
     entry = Submission.load(project, job.id)
-    entry.status.state = state
+    entry.status.state = "ACTIVE" if state == "UNKNOWN" else state
     entry.save(project)
-    monkeypatch.setattr(Submission, "sync", lambda self: None)
+
+    def sync(self):
+        if state == "UNKNOWN":
+            raise ObservationError("backend unavailable")
+
+    monkeypatch.setattr(Submission, "sync", sync)
     tables = []
     monkeypatch.setattr(
         "hiraku.cli.Console.print", lambda self, table: tables.append(table)
@@ -1182,6 +1196,19 @@ def test_list_row_colors(project, detached, monkeypatch, state, color):
     response = CliRunner().invoke(main, ["job", "list"])
     assert response.exit_code == 0, response.output
     assert tables[0].rows[0].style == color
+
+
+def test_observation_helper_propagates_save_failure(project, detached, monkeypatch):
+    job, _ = history_entry(project, detached)
+    entry = Submission.load(project, job.id)
+    monkeypatch.setattr(Submission, "get_psi_job", lambda self: job)
+
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("hiraku.job.atomic_write", fail)
+    with pytest.raises(ExecutionError, match="disk full"):
+        observe_submission(entry, project)
 
 
 def test_history_write_failure_reports_accepted_job(project, detached, monkeypatch):

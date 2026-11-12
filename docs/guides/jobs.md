@@ -68,7 +68,9 @@ and displays the updated submission without waiting for completion.
 Saved `COMPLETED`, `FAILED`, and `CANCELED` outcomes are not queried again.
 The CLI table colors completed rows green, failed or canceled rows red, and
 other rows white. JSON includes status and observation timestamps.
-If a job cannot be observed, listing warns and continues with its saved snapshot.
+If a job cannot be observed, listing warns and returns `UNKNOWN` with an
+`observation_error` in JSON/MCP output. The row is white. This is response-only:
+saved history and the last successful `observed_at` remain unchanged.
 The text output includes the command with shell-quoted arguments.
 Attachment itself may contact the backend and take time.
 PSI/J's `executor.list()` independently discovers backend-native IDs where supported.
@@ -168,8 +170,10 @@ submissions opt in by converting an accepted job with `Submission.from_psi_job(j
 and calling `submission.save(project)`. Conversion does not write files.
 `Submission.load(project, job_id)` and `Submission.list(project, record_id=...)`
 read validated metadata without contacting executors. CLI and MCP list handlers
-refresh and save nonfinal jobs after loading, retaining saved status on observation
-failures. Final outcomes are not refreshed.
+call `observe_submission(entry, project)` for each loaded submission. This helper
+refreshes and saves nonfinal jobs and returns response-only `UNKNOWN` and
+`observation_error` on observation failures, preserving saved history. Final
+outcomes are not refreshed. Callers handle warnings; storage errors propagate.
 `get_psi_job()` reconstructs
 the executor and attaches without waiting or changing saved metadata. `sync()`
 attaches internally, checks identity, and copies current status. Pass an existing
