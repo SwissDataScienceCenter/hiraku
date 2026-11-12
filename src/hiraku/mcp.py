@@ -278,9 +278,9 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)
     )
     def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
-        """List project jobs and commands with their saved status snapshots."""
+        """List saved submission metadata without querying executors."""
         return [
-            entry.model_dump(mode="json")
+            entry.model_dump(mode="json", exclude={"status", "observed_at"})
             for entry in Submission.list(selected, record_id=record_id)
         ]
 
