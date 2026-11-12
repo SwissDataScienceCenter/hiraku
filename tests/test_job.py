@@ -735,7 +735,7 @@ def test_cli_rejects_unregistered_launcher(project, monkeypatch, command, launch
     assert not (project.root / ".hiraku/jobs").exists()
 
 
-def test_cli_submit_sync_show_and_list(project, detached, monkeypatch):
+def test_cli_submit_status_and_list(project, detached, monkeypatch):
     monkeypatch.chdir(project.root)
     runner = CliRunner()
     result = runner.invoke(
@@ -757,7 +757,7 @@ def test_cli_submit_sync_show_and_list(project, detached, monkeypatch):
     wait(Submission.load(project, receipt["id"]).get_psi_job())
     args = [
         "job",
-        "sync",
+        "status",
         receipt["id"],
         "--json",
     ]
@@ -767,9 +767,8 @@ def test_cli_submit_sync_show_and_list(project, detached, monkeypatch):
     shown = json.loads(status.output)
     assert shown["id"] == receipt["id"]
     assert shown["status"]["exit_code"] == 7
-    displayed = runner.invoke(main, ["job", "show", receipt["id"], "--json"])
-    assert json.loads(displayed.output) == shown
-    assert "FAILED" in runner.invoke(main, ["job", "show", receipt["id"]]).output
+    assert "FAILED" in runner.invoke(main, ["job", "status", receipt["id"]]).output
+    shown = Submission.load(project, receipt["id"]).model_dump(mode="json")
     listed = runner.invoke(main, ["job", "list", "--record", "test", "--json"])
     assert json.loads(listed.output) == [shown]
     table = runner.invoke(main, ["job", "list"], env={"COLUMNS": "320"})
@@ -900,11 +899,19 @@ def history_entry(project, detached, *, record_id="test", final=False):
     return job, Submission.load(project, job.id).model_dump(mode="json")
 
 
-def test_cli_job_show_includes_command(project, detached, monkeypatch):
+@pytest.mark.parametrize("removed", ["show", "sync"])
+def test_cli_job_removes_show_and_sync(removed):
+    result = CliRunner().invoke(main, ["job", removed, "--help"])
+    assert result.exit_code == 2
+    assert "No such command" in result.output
+
+
+def test_cli_job_status_includes_command(project, detached, monkeypatch):
     monkeypatch.chdir(project.root)
     job, _ = history_entry(project, detached)
+    monkeypatch.setattr(Submission, "get_psi_job", lambda self: job)
 
-    result = CliRunner().invoke(main, ["job", "show", job.id], env={"COLUMNS": "320"})
+    result = CliRunner().invoke(main, ["job", "status", job.id], env={"COLUMNS": "320"})
 
     assert result.exit_code == 0, result.output
     assert "command" in result.output
@@ -933,9 +940,8 @@ def test_history_uses_original_psij_id_and_native_spec(project, detached, monkey
     assert [item.id for item in Submission.list(project)] == [job.id]
     path = project.root / ".hiraku/jobs" / f"{job.id}.json"
     before = path.read_bytes()
-    for args in (["show", job.id], ["list"]):
-        shown = CliRunner().invoke(main, ["job", *args, "--json"])
-        assert shown.exit_code == 0, shown.output
+    shown = CliRunner().invoke(main, ["job", "list", "--json"])
+    assert shown.exit_code == 0, shown.output
     assert path.read_bytes() == before
 
 
@@ -1041,7 +1047,7 @@ def test_sync_rejects_another_execution(project, detached, mismatch):
 
 
 @pytest.mark.parametrize("final", [False, True])
-@pytest.mark.parametrize("action", ["sync", "show", "list"])
+@pytest.mark.parametrize("action", ["status", "list"])
 def test_sync_error_preserves_snapshot_and_other_jobs(
     project, detached, monkeypatch, final, action
 ):
@@ -1055,7 +1061,7 @@ def test_sync_error_preserves_snapshot_and_other_jobs(
     monkeypatch.setattr(psij.JobExecutor, "get_instance", unavailable)
     args = ["job", action]
     args += ["--record", "test"] if action == "list" else [job.id]
-    if action != "sync":
+    if action == "list":
         args += ["--sync"]
     response = CliRunner().invoke(main, [*args, "--json"])
     if action == "list":
@@ -1089,7 +1095,7 @@ def test_record_filter_avoids_unrelated_backend_queries(project, detached, monke
     assert json.loads(result.output) == []
 
 
-@pytest.mark.parametrize("action", ["sync", "show", "list"])
+@pytest.mark.parametrize("action", ["status", "list"])
 def test_cli_sync_does_not_wait_for_completion(project, detached, monkeypatch, action):
     monkeypatch.chdir(project.root)
     original, saved = history_entry(project, detached)
@@ -1104,7 +1110,7 @@ def test_cli_sync_does_not_wait_for_completion(project, detached, monkeypatch, a
     monkeypatch.setattr(psij.Job, "wait", lambda *a, **k: pytest.fail("Must not wait"))
     args = ["job", action]
     args += ["--record", "test"] if action == "list" else [original.id]
-    if action != "sync":
+    if action == "list":
         args += ["--sync"]
     response = CliRunner().invoke(main, [*args, "--json"])
     assert response.exit_code == 0, response.output
