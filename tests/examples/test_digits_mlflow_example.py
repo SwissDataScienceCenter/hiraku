@@ -11,7 +11,6 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
-from hiraku.jobs import Job
 from hiraku.project import Project
 
 REPOSITORY = Path(__file__).parents[2]
@@ -53,7 +52,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     assert not (project / "example.yml").exists()
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize Digits MLflow example")
-    source_commit = git(project, "rev-parse", "HEAD")
     invoke(
         runner,
         [
@@ -136,9 +134,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     )
     client = MlflowClient(tracking_uri=uri)
     for row in rows:
-        assert (
-            Job.load(row["job_id"], project=Project.discover()).commit == source_commit
-        )
         assert row["commit"] is None
         assert row["id"]
         assert row["raw"]["status"] == "FINISHED"

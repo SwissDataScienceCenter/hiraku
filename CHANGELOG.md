@@ -12,8 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Breaking:** Commands receive `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID`; tracking
   code logs both directly on runs. Leaderboards query source attribution without
   local job history. Git environment variables are no longer injected;
-  `Run.commit` retains source-reported provenance and `Job.commit` describes the
-  submitting checkout. Tracking destinations remain user-managed.
+  records and tracking runs retain user-managed code provenance. Tracking
+  destinations remain user-managed.
 - **Breaking:** Replace record entrypoints and `hiraku launch` / `hiraku run` with
   `hiraku job run --record ID -- COMMAND [ARGS...]`. Remove `entrypoints`,
   `default_dispatch`, and `--dispatch`; invoke project scripts directly
@@ -44,13 +44,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - Add `Job.create()` with instance `submit()` and blocking `run()`, plus CLI
-  `hiraku job run/submit/list/show/logs/wait/cancel` and MCP job tools. Each Job
-  records one attempt, saved logs, launch provenance, and its final outcome.
-  Executors supply live observations; intermediate status stays in memory.
-- Run local commands through the `detached` PSI/J executor, which survives the
-  submitting process exiting. Select other PSI/J executors with `--executor`,
+  `hiraku job run/submit/list/show` and MCP job tools. Each Job records one
+  attempt, saved output, and its final outcome.
+  Python execution defaults to the creation-time cwd; explicit environment values
+  are persisted in the prepared PSI/J spec. CLI and MCP default to the project root.
+- Default to `hiraku-local`, a PSI/J `LocalJobExecutor` subclass with a detached
+  recording launcher. The launcher writes `result.json`
+  independently of submission metadata and the submitting process.
+  Foreground execution uses native `LocalJobExecutor` and saves its final status
+  in `job.json`, with a quoting-corrected single launcher for paths with spaces.
+  Output is saved to files.
+  Select other PSI/J executors with `--executor`,
   `--executor-url`, and `--attribute KEY VALUE`; the bundled Renku executor uses
-  authenticated `rnk` launchers for submission, status, cancellation, and logs.
+  authenticated `rnk` launchers for submission only. Remote status, logs, and
+  control remain with the execution platform.
 
 - Add `hiraku example list` to list bundled examples with their descriptions.
 - Add project-local Codex and Claude Code hooks installed by `hiraku init` to attribute workflow event attempts to client conversations. Generated MCP and hook commands are portable: `uv run hiraku` when the project contains `uv.lock`, otherwise `hiraku`. Session history records one entry per event attempt with its outcome. Resubmissions for answered instructions return `stale` with the current instruction instead of acknowledging identical duplicates as accepted.

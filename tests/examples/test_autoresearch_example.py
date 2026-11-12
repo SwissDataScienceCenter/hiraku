@@ -12,6 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
+from hiraku.jobs import Job
 from hiraku.project import Project
 from hiraku.workflows.langgraph import start_workflow, workflow_ids
 
@@ -262,7 +263,8 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch):
         ],
     )
 
-    assert "val_bpb: 0.900000" in result.stdout
+    saved = Job.load(result.stderr.strip(), project=Project.discover(project))
+    assert "val_bpb: 0.900000" in saved.spec.stdout_path.read_text()
     rows = json.loads(
         invoke(
             runner,
@@ -288,7 +290,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch):
 
 @LINUX_ONLY
 def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch):
-    _, runner = create_overlay_project(tmp_path, monkeypatch)
+    project, runner = create_overlay_project(tmp_path, monkeypatch)
     invoke(
         runner,
         [
@@ -323,7 +325,8 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch):
     )
 
     assert failed.exit_code != 0
-    assert "val_bpb: 0.000000" in failed.stdout
+    saved = Job.load(failed.stderr.strip(), project=Project.discover(project))
+    assert "val_bpb: 0.000000" in saved.spec.stdout_path.read_text()
     rows = json.loads(
         invoke(
             runner,

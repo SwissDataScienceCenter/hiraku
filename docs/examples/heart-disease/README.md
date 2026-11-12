@@ -86,7 +86,7 @@ hiraku record create heart-disease-prediction/logistic-regression \
 
 hiraku record show heart-disease-prediction/logistic-regression
 
-# run the command and stream its output
+# run the command and save its output
 hiraku job run --record heart-disease-prediction/logistic-regression -- uv run python train.py \
   --model logistic --seed 42 --validation-fraction 0.25
 
@@ -110,7 +110,7 @@ writes the CSV row to project-root `runs.csv`.
 
 ??? note "Execution"
     Hiraku runs commands in the current project working tree.
-    The saved Job records whether the launch checkout had uncommitted changes.
+    Commit relevant source changes and bind the record to the implementation commit.
 
 ## 4. Run a second experiment
 

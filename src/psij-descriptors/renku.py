@@ -4,13 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import shlex
 import subprocess
-import threading
-import time
-import weakref
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -26,13 +21,9 @@ from psij import (
 )
 from psij.descriptor import Descriptor
 
-from hiraku.io import atomic_write
-
-logger = logging.getLogger(__name__)
-
 
 class RenkuJobExecutor(JobExecutor):
-    """Use a Renku launcher for resources/image; cache combined logs locally."""
+    """Submit through rnk; results and control remain with the remote service."""
 
     def __init__(
         self,
@@ -43,11 +34,8 @@ class RenkuJobExecutor(JobExecutor):
         self._project = target.path.removeprefix("/p/").strip("/") or None
         if target.path.strip("/") and not target.path.startswith("/p/"):
             raise ValueError("Use a Renku server URL or /p/namespace/project URL")
-        super().__init__(
-            urlunsplit((target.scheme, target.netloc, "", "", "")),
-            config or JobExecutorConfig(),
-        )
-        self._canceled: set[str] = set()
+        self._server_url = urlunsplit((target.scheme, target.netloc, "", "", ""))
+        super().__init__(url or "https://renkulab.io", config or JobExecutorConfig())
 
     @staticmethod
     def _attributes(job: Job) -> dict[str, Any]:
@@ -63,7 +51,7 @@ class RenkuJobExecutor(JobExecutor):
         project: str | None = None,
         json_output: bool = True,
     ) -> Any:
-        command = ["rnk", "--renku-url", self.url or "https://renkulab.io"]
+        command = ["rnk", "--renku-url", self._server_url]
         if json_output:
             command.extend(["--format", "json"])
         if project or self._project:
@@ -94,7 +82,11 @@ class RenkuJobExecutor(JobExecutor):
         if job.spec and job.spec.resources is not None:
             raise InvalidJobException("Renku resources are configured by the launcher")
         spec = self._check_job(job)
-        if spec.pre_launch or spec.post_launch or spec.launcher:
+        if (
+            spec.pre_launch
+            or spec.post_launch
+            or spec.launcher not in (None, "single", "hiraku-single")
+        ):
             raise InvalidJobException(
                 "Renku does not support PSI/J launch/staging hooks"
             )
@@ -131,90 +123,15 @@ class RenkuJobExecutor(JobExecutor):
         )
         job._native_id = result["name"]
         self._set_job_status(job, JobStatus(JobState.QUEUED))
-        self._monitor(job)
 
     def list(self) -> list[str]:
         return [item["name"] for item in self._rnk("job", "list")]
 
     def attach(self, job: Job, native_id: str) -> None:
-        if job.status.state != JobState.NEW or job.executor is not None:
-            raise InvalidJobException("Attach requires an unsubmitted PSI/J Job")
-        job.executor = self
-        job._native_id = native_id
-        self._observe(job)
-        self._monitor(job)
+        raise InvalidJobException("Inspect Renku submissions through rnk")
 
     def cancel(self, job: Job) -> None:
-        if job.native_id not in self._canceled and not job.status.final:
-            self._rnk(
-                "job",
-                "stop",
-                str(job.native_id),
-                json_output=False,
-                project=self._attributes(job).get("renku.project"),
-            )
-            self._canceled.add(str(job.native_id))
-
-    def _monitor(self, job: Job) -> None:
-        reference = weakref.ref(job)
-
-        def poll() -> None:
-            while (current := reference()) is not None and not current.status.final:
-                try:
-                    self._observe(current)
-                except Exception as exc:
-                    # A transport failure is not evidence that execution failed.
-                    logger.warning(
-                        "Cannot observe Renku job %s: %s", current.native_id, exc
-                    )
-                final = current.status.final
-                del current
-                if not final:
-                    threading.Event().wait(5)
-
-        threading.Thread(target=poll, name="renku-job-monitor", daemon=True).start()
-
-    def _observe(self, job: Job) -> None:
-        project = self._attributes(job).get("renku.project")
-        observation = next(
-            (
-                item
-                for item in self._rnk("job", "list", project=project)
-                if item["name"] == job.native_id
-            ),
-            None,
-        )
-        if observation is None:
-            if job.native_id in self._canceled:
-                self._set_job_status(job, JobStatus(JobState.CANCELED))
-                return
-            raise SubmitException("Job missing from Renku listing; outcome unknown")
-        state = observation["status"]["state"]
-        states = {
-            "starting": JobState.QUEUED,
-            "running": JobState.ACTIVE,
-            "succeeded": JobState.COMPLETED,
-            "failed": JobState.FAILED,
-            "hibernated": JobState.CANCELED,
-        }
-        if state == "stopping":
-            return
-        if state not in states:
-            raise SubmitException(f"Unrecognized Renku state: {state}")
-        if job.spec and job.spec.stdout_path:
-            try:
-                output = self._rnk("job", "logs", str(job.native_id), json_output=False)
-                atomic_write(Path(job.spec.stdout_path), output)
-            except SubmitException as exc:
-                logger.warning("Cannot fetch Renku logs for %s: %s", job.native_id, exc)
-        self._set_job_status(
-            job,
-            JobStatus(
-                states[state],
-                message=observation["status"].get("message"),
-            ),
-        )
-        job.status.metadata = {"observed_at": time.time()}
+        raise InvalidJobException("Use rnk job stop to cancel a Renku submission")
 
 
 __PSI_J_EXECUTORS__ = [

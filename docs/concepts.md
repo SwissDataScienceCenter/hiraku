@@ -27,7 +27,7 @@ A root *record* defines a working scope and goal, and documents the research pro
 | --- | ---  | --- |
 | **Root record** | `hiraku/records/{name}.md` | Defines the scope of a research effort and may provide shared research defaults. |
 | **Child record** | `hiraku/records/{name}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
-| **Job** | `.hiraku/jobs/<job_id>/job.json` | One PSI/J execution attempt, its record, launch provenance, status, and saved output. |
+| **Job** | `.hiraku/jobs/<job_id>/job.json` | One PSI/J execution attempt, its record, saved output, and final status. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku queries results through a backend adapter.|
 
 Records are stored as Markdown with YAML front matter. `Record.id` is the OKF ID: its bundle-relative path without `.md`. It is derived from placement and never persisted in front matter. `Vault` owns the bundle root, loading, saving, and discovery. `parent_id` and `related_to` declare relationships to concept IDs, independently of directory structure. Moving a document changes its ID.
@@ -59,8 +59,8 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 
 Leaderboards query adapters through `list_runs()`. Record attribution and commits
 come directly from the tracking source, so results remain usable without local
-job history. `Run.job_id` optionally links execution details; `Run.commit` and
-the submitting checkout's `Job.commit` describe their respective code provenance.
+job history. `Run.job_id` optionally links execution details. Records and runs
+hold user-managed code provenance; Jobs do not collect it.
 
 Define named [leaderboards](tracking.md) in `hiraku/leaderboards/<name>.yml`.
 Each contains a `source` mapping and optional ordered `metrics` declarations.
@@ -75,7 +75,7 @@ A launch that never logs a row will not appear as a run.
 Commands are not record metadata. Pass the complete argv directly to
 `hiraku job run`; a dispatcher can prepare repeatable project-specific runtime
 behavior around that invocation. Local jobs run in the project working tree;
-foreground execution waits and streams output, while `hiraku job submit` returns
+foreground execution waits and saves output, while `hiraku job submit` returns
 after submission. A job can produce zero, one, or many tracked runs. Scripts log
 the injected `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` on each run.
 See [local jobs](guides/jobs.md) for persistence and lifecycle details.

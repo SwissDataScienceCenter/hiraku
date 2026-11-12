@@ -121,6 +121,7 @@ def generate(project: Project) -> None:
                 [*command, "--seed", str(seed)],
                 record_id=record.id,
                 project=project,
+                directory=project.root,
             ).run()
             status = job.status
             if status.exit_code:

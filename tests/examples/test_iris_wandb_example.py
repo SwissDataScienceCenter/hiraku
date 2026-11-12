@@ -184,7 +184,6 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     assert len(rows) == 1
     row = rows[0]
     assert row["record_id"] == record.id
-    assert Job.load(row["job_id"], project=Project.discover()).commit == source_commit
     assert row["commit"] is None
     run_id = row["id"]
     assert row["params"]["model"] == "logistic"
@@ -201,7 +200,6 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     assert stored["project"] == "iris-wandb"
     job = Job.load(stored["config"]["hiraku.job_id"], project=Project.discover())
     assert job.record_id == record.id
-    assert job.commit == source_commit
 
     filtered = json.loads(
         invoke(
