@@ -91,6 +91,8 @@ supervisor to run a PSI/J launcher and save `result.json` independently of the
 MCP server.
 Record attribution is optional: an omitted ID uses the active record when set,
 otherwise the job is unattributed.
+The optional `launcher` parameter selects a registered PSI/J launcher by name
+and is saved in the job specification, matching CLI `--launcher NAME`.
 When `directory` is omitted, the executor chooses its working directory; local
 jobs inherit the MCP server's directory. Explicit paths refer to the execution
 side. Pass the original PSI/J `id` from the response as `job_id` to `job_status`.

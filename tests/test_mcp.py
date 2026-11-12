@@ -295,6 +295,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
             {
                 "record_id": "demo/demo",
                 "executor_url": (tmp_path / "backend").as_uri(),
+                "launcher": "single",
                 "command": [
                     sys.executable,
                     "-c",
@@ -309,6 +310,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         )
         job = dict(result.structured_content)
         assert job["executor"] == "local-detached"
+        assert job["spec"]["launcher"] == "single"
         assert job["status"]["state"] in {"ACTIVE", "QUEUED"}
         (config.root / "release").touch()
         completed = await completed_job(job)
@@ -321,6 +323,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         )
         assert history["final_status"]["exit_code"] == 7
         assert history["id"] == job["id"]
+        assert history["spec"]["launcher"] == "single"
         listed = await server.call_tool("job_list", {"record_id": "demo/demo"})
         assert listed.structured_content["result"] == [completed.structured_content]
         cli = CliRunner().invoke(
@@ -328,6 +331,15 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         )
         assert cli.exit_code == 0, cli.output
         assert json.loads(cli.output) == listed.structured_content["result"]
+        with pytest.raises(ToolError):
+            await server.call_tool(
+                "job_submit",
+                {
+                    "command": [sys.executable, "-c", "pass"],
+                    "launcher": "not-installed",
+                    "executor_url": (tmp_path / "backend").as_uri(),
+                },
+            )
         submitted = await server.call_tool(
             "job_submit",
             {

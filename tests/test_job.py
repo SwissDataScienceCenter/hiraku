@@ -251,8 +251,9 @@ def test_detached_rejects_multiple_processes(project, detached):
 
 @pytest.mark.parametrize("launcher", ["quoted-single", "single"])
 def test_detached_uses_selected_launcher(project, detached, launcher):
-    job = prepare_job([sys.executable, "-c", "print('selected')"], project=project)
-    job.spec.launcher = launcher
+    job = prepare_job(
+        [sys.executable, "-c", "print('selected')"], project=project, launcher=launcher
+    )
     detached.submit(job)
     assert wait(job).exit_code == 0
     assert job.spec.launcher == launcher
@@ -497,6 +498,55 @@ def test_cli_foreground(project, monkeypatch, code):
     assert len(entries) == 1
     assert entries[0]["final_status"]["exit_code"] == code
     assert entries[0]["record_id"] == "test"
+
+
+@pytest.mark.parametrize("command", [["run"], ["job", "submit"]])
+def test_cli_launcher_selection_is_executed_and_saved(project, monkeypatch, command):
+    monkeypatch.chdir(project.root)
+    result = CliRunner().invoke(
+        main,
+        [
+            *command,
+            "--launcher",
+            "single",
+            "--",
+            sys.executable,
+            "-c",
+            "pass",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    (path,) = (project.root / ".hiraku/jobs").glob("*.json")
+    entry = load_submission(path.stem, project=project)
+    assert entry["spec"]["launcher"] == "single"
+    assert (
+        observe_submission(entry["id"], project=project, wait=True)["status"][
+            "exit_code"
+        ]
+        == 0
+    )
+
+
+@pytest.mark.parametrize("command", [["run"], ["job", "submit"]])
+@pytest.mark.parametrize("launcher", ["not-installed", "./wrapper.sh"])
+def test_cli_rejects_unregistered_launcher(project, monkeypatch, command, launcher):
+    monkeypatch.chdir(project.root)
+    marker = project.root / "unexpected"
+    result = CliRunner().invoke(
+        main,
+        [
+            *command,
+            "--launcher",
+            launcher,
+            "--",
+            sys.executable,
+            "-c",
+            f"from pathlib import Path; Path({str(marker)!r}).touch()",
+        ],
+    )
+    assert result.exit_code != 0
+    assert not marker.exists()
+    assert not (project.root / ".hiraku/jobs").exists()
 
 
 def test_cli_submit_list_and_status(project, detached, monkeypatch):

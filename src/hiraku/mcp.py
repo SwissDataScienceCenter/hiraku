@@ -243,6 +243,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         executor_url: str | None = None,
         attributes: dict[str, str] | None = None,
         directory: str | None = None,
+        launcher: str | None = None,
     ) -> dict[str, Any]:
         """Submit through PSI/J and return after acceptance, without waiting."""
         record_id = record_id if record_id is not None else selected.active_record_id
@@ -251,6 +252,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             record_id=record_id,
             project=selected,
             directory=Path(directory) if directory is not None else None,
+            launcher=launcher,
             attributes=JobAttributes(custom_attributes=attributes)
             if attributes
             else None,

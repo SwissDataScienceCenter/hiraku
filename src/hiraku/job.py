@@ -49,6 +49,7 @@ def prepare_job(
     attributes: psij.JobAttributes | None = None,
     resources: psij.ResourceSpec | None = None,
     directory: Path | None = None,
+    launcher: str | None = None,
 ) -> psij.Job:
     """Construct a native PSI/J job with explicit research attribution.
 
@@ -80,6 +81,7 @@ def prepare_job(
         directory=directory,
         attributes=attributes,
         resources=resources,
+        launcher=launcher,
         environment={
             **additions,
             "HIRAKU_RECORD_ID": record_id or "",

@@ -770,6 +770,7 @@ def _exit_job(status: JobStatus) -> None:
     "--executor", default="local-detached", show_default=True, help="PSI/J executor."
 )
 @click.option("--executor-url")
+@click.option("--launcher", help="Registered PSI/J launcher name.")
 @click.option(
     "--attribute", "attributes", type=(str, str), multiple=True, metavar="KEY VALUE"
 )
@@ -781,6 +782,7 @@ def job_submit(
     record_id: str | None,
     executor: str,
     executor_url: str | None,
+    launcher: str | None,
     attributes: tuple[tuple[str, str], ...],
     directory: Path | None,
 ) -> None:
@@ -792,6 +794,7 @@ def job_submit(
         else state.project.active_record_id,
         project=state.project,
         directory=directory,
+        launcher=launcher,
         attributes=JobAttributes(custom_attributes=dict(attributes))
         if attributes
         else None,
@@ -804,6 +807,7 @@ def job_submit(
 @main.command("run")
 @click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
+@click.option("--launcher", help="Registered PSI/J launcher name.")
 @click.option(
     "--attribute", "attributes", type=(str, str), multiple=True, metavar="KEY VALUE"
 )
@@ -813,6 +817,7 @@ def run(
     state: CLIContext,
     command: tuple[str, ...],
     record_id: str | None,
+    launcher: str | None,
     attributes: tuple[tuple[str, str], ...],
     directory: Path | None,
 ) -> None:
@@ -824,6 +829,7 @@ def run(
         else state.project.active_record_id,
         project=state.project,
         directory=directory,
+        launcher=launcher,
         attributes=JobAttributes(custom_attributes=dict(attributes))
         if attributes
         else None,
