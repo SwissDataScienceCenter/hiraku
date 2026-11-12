@@ -60,14 +60,12 @@ hiraku job list
 hiraku job list --record baseline --json
 hiraku job status JOB_ID
 hiraku job status JOB_ID --json
-hiraku job list --record baseline --sync --json
 ```
 
 `status` attaches through PSI/J, captures the currently available status, saves it,
 and displays the updated submission without waiting for completion.
-`list` reads saved snapshots without contacting executors. `list --sync` refreshes
-before displaying; list filters apply before refresh, and failures are reported
-per job.
+`list` reads saved submission metadata without contacting executors. It omits
+status and observation timestamps from both the table and JSON output.
 The text output includes the command with shell-quoted arguments.
 Attachment itself may contact the backend and take time.
 PSI/J's `executor.list()` independently discovers backend-native IDs where supported.
@@ -83,10 +81,9 @@ a new in-memory PSI/J job, but does not change the saved original ID.
 
 Sync actions attach through PSI/J, copy the current native status, and save it.
 Snapshots include state, status time, exit code, message, and metadata, including
-pending states. `list` reads saved snapshots without backend access. Attachment
+pending states. `list` reads submission metadata without backend access. Attachment
 or status-reading failures raise `ObservationError` without changing the snapshot
 or file. CLI `status` fails with an error; MCP `job_status` returns a tool error.
-`list --sync` warns per failed submission and continues with its saved snapshot.
 A final outcome is recoverable only while the backend retains it or after it has
 been synced and saved. `observed_at` advances on every successful sync,
 even when the state is unchanged. `Status.time` remains the executor-reported

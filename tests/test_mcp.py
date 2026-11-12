@@ -360,7 +360,10 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
             "example": "value"
         }
         listed = await server.call_tool("job_list", {"record_id": "demo/demo"})
-        assert listed.structured_content["result"] == [history]
+        metadata = {
+            k: v for k, v in history.items() if k not in {"status", "observed_at"}
+        }
+        assert listed.structured_content["result"] == [metadata]
         cli = CliRunner().invoke(
             main, ["job", "list", "--record", "demo/demo", "--json"]
         )
@@ -413,7 +416,16 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
             await server.call_tool("job_status", {"job_id": cached["id"]})
         assert path.read_bytes() == before
         listed = await server.call_tool("job_list", {})
-        assert json.loads(before) in listed.structured_content["result"]
+        metadata = {
+            k: v
+            for k, v in json.loads(before).items()
+            if k not in {"status", "observed_at"}
+        }
+        assert metadata in listed.structured_content["result"]
+        assert all(
+            "status" not in entry and "observed_at" not in entry
+            for entry in listed.structured_content["result"]
+        )
         assert all(
             "observation_error" not in entry
             for entry in listed.structured_content["result"]

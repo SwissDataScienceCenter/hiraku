@@ -770,9 +770,12 @@ def test_cli_submit_status_and_list(project, detached, monkeypatch):
     assert "FAILED" in runner.invoke(main, ["job", "status", receipt["id"]]).output
     shown = Submission.load(project, receipt["id"]).model_dump(mode="json")
     listed = runner.invoke(main, ["job", "list", "--record", "test", "--json"])
-    assert json.loads(listed.output) == [shown]
+    metadata = {k: v for k, v in shown.items() if k not in {"status", "observed_at"}}
+    assert json.loads(listed.output) == [metadata]
     table = runner.invoke(main, ["job", "list"], env={"COLUMNS": "320"})
-    assert "FAILED" in table.output and "test" in table.output
+    assert "FAILED" not in table.output
+    assert "observed_at" not in table.output and "state" not in table.output
+    assert "test" in table.output
     assert "raise SystemExit(7)" in table.output
 
 
@@ -1047,9 +1050,8 @@ def test_sync_rejects_another_execution(project, detached, mismatch):
 
 
 @pytest.mark.parametrize("final", [False, True])
-@pytest.mark.parametrize("action", ["status", "list"])
 def test_sync_error_preserves_snapshot_and_other_jobs(
-    project, detached, monkeypatch, final, action
+    project, detached, monkeypatch, final
 ):
     monkeypatch.chdir(project.root)
     job, entry = history_entry(project, detached, final=final)
@@ -1059,17 +1061,8 @@ def test_sync_error_preserves_snapshot_and_other_jobs(
         raise psij.SubmitException("backend unavailable")
 
     monkeypatch.setattr(psij.JobExecutor, "get_instance", unavailable)
-    args = ["job", action]
-    args += ["--record", "test"] if action == "list" else [job.id]
-    if action == "list":
-        args += ["--sync"]
-    response = CliRunner().invoke(main, [*args, "--json"])
-    if action == "list":
-        assert response.exit_code == 0, response.output
-        assert json.loads(response.stdout)[0] == entry
-        assert job.id in response.stderr
-    else:
-        assert response.exit_code == 1, response.output
+    response = CliRunner().invoke(main, ["job", "status", job.id, "--json"])
+    assert response.exit_code == 1, response.output
     assert "backend unavailable" in response.stderr
     assert Submission.load(project, job.id).model_dump(mode="json") == entry
     entries = Submission.list(project)
@@ -1088,15 +1081,12 @@ def test_record_filter_avoids_unrelated_backend_queries(project, detached, monke
         psij.JobExecutor, "get_instance", lambda *a, **k: pytest.fail("Unrelated job")
     )
     assert Submission.list(project, record_id="other") == []
-    result = CliRunner().invoke(
-        main, ["job", "list", "--record", "other", "--sync", "--json"]
-    )
+    result = CliRunner().invoke(main, ["job", "list", "--record", "other", "--json"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == []
 
 
-@pytest.mark.parametrize("action", ["status", "list"])
-def test_cli_sync_does_not_wait_for_completion(project, detached, monkeypatch, action):
+def test_cli_status_does_not_wait_for_completion(project, detached, monkeypatch):
     monkeypatch.chdir(project.root)
     original, saved = history_entry(project, detached)
 
@@ -1108,46 +1098,37 @@ def test_cli_sync_does_not_wait_for_completion(project, detached, monkeypatch, a
     monkeypatch.setattr(detached, "attach", attach)
     monkeypatch.setattr(psij.JobExecutor, "get_instance", lambda *a, **k: detached)
     monkeypatch.setattr(psij.Job, "wait", lambda *a, **k: pytest.fail("Must not wait"))
-    args = ["job", action]
-    args += ["--record", "test"] if action == "list" else [original.id]
-    if action == "list":
-        args += ["--sync"]
-    response = CliRunner().invoke(main, [*args, "--json"])
+    response = CliRunner().invoke(main, ["job", "status", original.id, "--json"])
     assert response.exit_code == 0, response.output
     result = json.loads(response.output)
-    if action == "list":
-        result = result[0]
     assert result["status"]["state"] == "ACTIVE"
     assert "observation_error" not in result
     assert result["observed_at"] != saved["observed_at"]
     assert Submission.load(project, original.id).status.state == "ACTIVE"
 
 
-def test_list_sync_continues_after_attachment_failure(project, detached, monkeypatch):
+@pytest.mark.parametrize("final", [False, True])
+def test_list_omits_status_without_querying_or_saving(
+    project, detached, monkeypatch, final
+):
     monkeypatch.chdir(project.root)
-    failed, saved = history_entry(project, detached)
-    succeeded, _ = history_entry(project, detached)
-    entry = Submission.load(project, succeeded.id)
-    entry.native_id = "other-job"
-    entry.save(project)
+    job, saved = history_entry(project, detached, final=final)
+    path = project.root / ".hiraku/jobs" / f"{job.id}.json"
+    before = path.read_bytes()
 
-    def attach(job, native_id):
-        if native_id == "backend-id":
-            raise psij.SubmitException("backend unavailable")
-        job.executor = detached
-        job._native_id = native_id
-        job.status = psij.JobStatus(psij.JobState.ACTIVE)
+    def unexpected(*args, **kwargs):
+        pytest.fail("List must not query or save")
 
-    monkeypatch.setattr(detached, "attach", attach)
-    monkeypatch.setattr(psij.JobExecutor, "get_instance", lambda *a, **k: detached)
-    response = CliRunner().invoke(main, ["job", "list", "--sync", "--json"])
+    monkeypatch.setattr(Submission, "sync", unexpected)
+    monkeypatch.setattr(Submission, "save", unexpected)
+    response = CliRunner().invoke(main, ["job", "list", "--json"])
     assert response.exit_code == 0, response.output
-    results = {entry["id"]: entry for entry in json.loads(response.stdout)}
-    assert "backend unavailable" in response.stderr
-    assert failed.id in response.stderr
-    assert results[failed.id]["observed_at"] == saved["observed_at"]
-    assert results[succeeded.id]["status"]["state"] == "ACTIVE"
-    assert "observation_error" not in results[succeeded.id]
+    expected = {k: v for k, v in saved.items() if k not in {"status", "observed_at"}}
+    assert json.loads(response.output) == [expected]
+    assert path.read_bytes() == before
+    rejected = CliRunner().invoke(main, ["job", "list", "--sync"])
+    assert rejected.exit_code == 2
+    assert "No such option '--sync'" in rejected.output
 
 
 def test_history_write_failure_reports_accepted_job(project, detached, monkeypatch):

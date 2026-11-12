@@ -34,7 +34,6 @@ from .errors import (
     GitError,
     HirakuError,
     NoActiveRecordError,
-    ObservationError,
     ValidationError,
 )
 from .git import GitRepository, init_code_repository, require_git
@@ -856,23 +855,15 @@ def _show_submission(result: dict[str, Any], json_output: bool) -> None:
 
 @job_group.command("list")
 @click.option("--record", "record_id")
-@click.option("--sync", is_flag=True, help="Sync selected jobs before listing.")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def job_list(
-    state: CLIContext, record_id: str | None, sync: bool, json_output: bool
-) -> None:
-    """List project jobs and commands with their saved status snapshots."""
+def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> None:
+    """List saved submission metadata without querying executors."""
     submissions = Submission.list(state.project, record_id=record_id)
-    if sync:
-        for entry in submissions:
-            try:
-                entry.sync()
-            except ObservationError as exc:
-                click.echo(f"Warning: cannot sync {entry.id}: {exc}", err=True)
-            else:
-                entry.save(state.project)
-    entries = [entry.model_dump(mode="json") for entry in submissions]
+    entries = [
+        entry.model_dump(mode="json", exclude={"status", "observed_at"})
+        for entry in submissions
+    ]
     if json_output:
         _emit_json(entries)
     else:
@@ -881,9 +872,7 @@ def job_list(
                 "id",
                 "record",
                 "submitted_at",
-                "observed_at",
                 "executor",
-                "state",
                 "command",
             ),
             [
@@ -891,9 +880,7 @@ def job_list(
                     entry["id"],
                     entry["record_id"],
                     entry["submitted_at"],
-                    entry["observed_at"],
                     entry["executor"],
-                    entry["status"]["state"],
                     shlex.join(
                         [
                             entry["spec"]["executable"],

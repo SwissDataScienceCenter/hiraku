@@ -73,7 +73,7 @@ and fall back to the CLI when the host has not connected the server.
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
 | `job_submit` | Submit through PSI/J, record history, and return the original PSI/J job `id`. |
-| `job_list` | List project jobs with commands and saved status snapshots; optionally filter by `record_id`. |
+| `job_list` | List saved submission metadata and commands, without status or observation timestamps; optionally filter by `record_id`. |
 | `job_status` | Attach through PSI/J, save, and return the current status using its original `job_id`, without waiting for completion. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
