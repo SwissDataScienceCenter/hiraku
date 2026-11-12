@@ -11,7 +11,7 @@ hiraku job submit --record baseline -- python train.py
 Without `--record`, the active record is used when set; otherwise the job is
 unattributed. Local commands run in the caller's working directory, including
 uncommitted changes. `run` uses PSI/J's native
-`LocalJobExecutor`; `submit` defaults to `local-detached`, a recording subclass.
+`LocalJobExecutor`; local `submit` defaults to Hiraku's `local-detached` executor.
 Commands have closed stdin. Git provenance belongs to records and user-managed
 tracking runs; Jobs do not collect it.
 
@@ -28,7 +28,7 @@ atomically writes `result.json` before exiting. It survives the submitting proce
 exiting without a Python worker, reattachment, or an observation monitor.
 Default local submission requires a POSIX system with Bash and supports a single
 command with PSI/J pre/post hooks;
-custom launchers and multiple-process resource requests are unsupported.
+the detached launcher does not support multiple-process resource requests.
 
 For submission, `--executor NAME` selects an installed PSI/J executor,
 `--executor-url URL` selects its target, and repeated `--attribute KEY VALUE`
@@ -44,8 +44,8 @@ hiraku job list [--json]
 hiraku job show JOB_ID [--json]
 ```
 
-`show` and `list` read saved metadata and, for detached local jobs, the launcher's
-result file, without querying a backend. Until that result appears, they show submission-time
+`show` and `list` read saved metadata and attach to detached local jobs through
+their executor. Until the result appears, they show submission-time
 information. If the launcher or machine fails, a missing result means the outcome is unknown;
 Hiraku does not infer success from a missing process or invent a failure.
 
@@ -92,10 +92,18 @@ The saved executor name is `local`. `submit(executor=...)` requires a PSI/J
 executor name or instance and returns the PSI/J job after acceptance. The handle reports live
 status while its executor is running; waiting on it does not itself save the final
 status to the Hiraku snapshot. Detached local submission records its result separately.
+When no launcher is specified, `run()` selects `quoted-single` and the
+`local-detached` executor selects `detached`. Detached execution rejects other
+launchers and requires output inside its configured job directory.
+Selecting the native `local` executor directly for `submit()` uses PSI/J's
+ordinary launcher and does not provide detached result recording.
 
 `job.executor` is `None` until submission, then holds the selected PSI/J executor.
 Snapshots retain the string descriptor and executor URL; loading reconstructs
-the instance. To select another executor:
+the instance. For `local-detached`, Hiraku configures the URL to the jobs directory
+and uses the Hiraku job ID as the native ID. Attaching a PSI/J job to that ID
+reports the saved outcome, or waits for it if execution is still pending. To select
+another executor:
 
 ```python
 import psij
@@ -161,23 +169,21 @@ Hiraku does not poll for remote completion or create a local result file. Use
 `rnk job list`, `rnk job logs`, and `rnk job stop` for status, output, and control.
 Each `rnk` submission call allows 20 seconds. PSI/J resource requests, staging,
 and launch hooks are unsupported by this adapter. Other executors retain
-submission metadata only when using `submit()` unless they provide a result reader;
+submission metadata only when using `submit()`;
 use their native tools to inspect results.
 
 ## Adding executors
 
 Implement PSI/J's `JobExecutor` contract and register a descriptor in an installed
 `psij-descriptors/*.py` module, following `src/psij-descriptors/renku.py`.
-`LocalDetachedJobExecutor` in `src/psij-descriptors/local.py` configures the
-recording launcher and reads its saved outcomes. The module also defines the
-launchers and registers executor `local-detached` and launcher
-`detached`. Foreground execution uses `quoted-single`, a small single-command
+`src/psij-descriptors/local.py` defines the `local-detached` executor and the
+`detached` and `quoted-single` launchers. The detached executor delegates local
+execution to PSI/J and publishes saved outcomes through `attach()`.
+Foreground execution uses `quoted-single`, a small single-command
 launcher with quoted paths to work around PSI/J's unquoted output redirections.
 It neither detaches nor records results. Other executors retain their own launchers.
 The bundled scripts are `single.sh` for that quoting workaround and `detached.sh`
 for detached submission and result recording.
-Do not add an `__init__.py` to the descriptors directory. Selecting the built-in `local` executor
-explicitly uses PSI/J's ordinary execution without Hiraku's detached recording.
-Executors may expose `read_result(path)` for saved outcomes.
+Do not add an `__init__.py` to the descriptors directory.
 PSI/J's built-in Slurm executor is also available; supply cluster access and
 shared paths through the execution environment.

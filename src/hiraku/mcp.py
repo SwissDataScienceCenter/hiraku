@@ -250,7 +250,12 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             if attributes
             else None,
         )
-        job.submit(executor=JobExecutor.get_instance(executor, url=executor_url))
+        target = (
+            JobExecutor.get_instance(executor, url=executor_url)
+            if executor_url
+            else executor
+        )
+        job.submit(executor=target)
         return job.model_dump(mode="json")
 
     @server.tool(

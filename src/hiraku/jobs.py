@@ -173,10 +173,13 @@ class Job(BaseModel):
             )
             if job.id != path.parent.name:
                 raise ValueError("snapshot ID differs from directory")
-            reader = getattr(job.executor, "read_result", None)
-            result = reader(path.with_name("result.json")) if reader else None
-            if result is not None:
-                job._set_status(result)
+            if job.executor and job.executor.name == "local-detached" and job.native_id:
+                if job.native_id != job.id:
+                    raise ValueError("detached native ID differs from job ID")
+                native = psij.Job()
+                job.executor.attach(native, job.native_id)
+                if native.status.final:
+                    job._set_status(native.status)
             return job
         except FileNotFoundError as exc:
             raise JobNotFoundError(f"No job at {path}") from exc
@@ -227,7 +230,6 @@ class Job(BaseModel):
             executable=argv[0],
             arguments=argv[1:],
             directory=directory,
-            launcher="quoted-single",
             attributes=attributes,
             resources=resources,
             environment={
@@ -248,6 +250,8 @@ class Job(BaseModel):
 
     def run(self) -> Job:
         """Run locally through PSI/J and persist the native final status."""
+        if self.spec.launcher is None:
+            self.spec.launcher = "quoted-single"
         native = self.submit(executor="local")
         try:
             self._follow_streams(native)
@@ -300,7 +304,12 @@ class Job(BaseModel):
     def submit(self, *, executor: str | psij.JobExecutor) -> psij.Job:
         """Submit through the selected PSI/J executor and return its job."""
         if isinstance(executor, str):
-            executor = psij.JobExecutor.get_instance(executor)
+            executor = psij.JobExecutor.get_instance(
+                executor,
+                url=self.path.parent.parent.as_uri()
+                if executor == "local-detached"
+                else None,
+            )
         if not isinstance(executor, psij.JobExecutor):
             raise ValidationError("executor must be a PSI/J executor name or instance")
         try:

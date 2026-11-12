@@ -82,11 +82,7 @@ class RenkuJobExecutor(JobExecutor):
         if job.spec and job.spec.resources is not None:
             raise InvalidJobException("Renku resources are configured by the launcher")
         spec = self._check_job(job)
-        if (
-            spec.pre_launch
-            or spec.post_launch
-            or spec.launcher not in (None, "single", "quoted-single")
-        ):
+        if spec.pre_launch or spec.post_launch or spec.launcher not in (None, "single"):
             raise InvalidJobException(
                 "Renku does not support PSI/J launch/staging hooks"
             )

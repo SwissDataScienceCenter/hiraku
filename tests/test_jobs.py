@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from datetime import timedelta
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event
 from types import SimpleNamespace
 
 import psij
@@ -138,7 +138,7 @@ def test_attempt_cannot_be_submitted_twice(project, method):
 def test_concurrent_submission_launches_once(project, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        type(psij.JobExecutor.get_instance("local-detached")),
+        type(psij.JobExecutor.get_instance("local")),
         "submit",
         lambda self, native: calls.append(native),
     )
@@ -185,6 +185,57 @@ def test_submit_returns_live_psij_job(project):
     assert native.wait(timeout=timedelta(seconds=10)).state == psij.JobState.COMPLETED
 
 
+def test_detached_executor_attaches_and_publishes_saved_result(project):
+    gate = project.root / "release-attach"
+    command = (
+        "from pathlib import Path; import time; "
+        f"p = Path({str(gate)!r}); "
+        "exec('while not p.exists(): time.sleep(0.05)'); raise SystemExit(7)"
+    )
+    job = Job.create([sys.executable, "-c", command], project=project)
+    submitted = job.submit(executor="local-detached")
+    executor = psij.JobExecutor.get_instance(
+        "local-detached", url=(project.root / ".hiraku" / "jobs").as_uri()
+    )
+    attached = psij.Job()
+    finished = Event()
+    attached.set_job_status_callback(
+        lambda _, status: finished.set() if status.final else None
+    )
+    try:
+        assert job.id in executor.list()
+        executor.attach(attached, submitted.native_id)
+        assert attached.native_id == job.id
+        assert not attached.status.final
+        with pytest.raises(psij.SubmitException, match="after attachment"):
+            attached.cancel()
+        gate.touch()
+        status = attached.wait(timeout=timedelta(seconds=10))
+        assert status is not None
+        assert status.state == psij.JobState.FAILED
+        assert status.exit_code == 7
+        assert finished.wait(timeout=1)
+
+        completed = psij.Job()
+        executor.attach(completed, job.id)
+        assert completed.status.exit_code == 7
+        assert completed.status.state == psij.JobState.FAILED
+    finally:
+        gate.touch()
+        submitted.wait(timeout=timedelta(seconds=10))
+
+
+def test_detached_snapshot_rejects_a_different_native_id(project):
+    job = Job.create([sys.executable, "-c", "pass"], project=project)
+    native = job.submit(executor="local-detached")
+    assert native.wait(timeout=timedelta(seconds=10)) is not None
+    snapshot = json.loads(job.path.read_text())
+    snapshot["native_id"] = "f" * 32 if job.id != "f" * 32 else "e" * 32
+    job.path.write_text(json.dumps(snapshot))
+    with pytest.raises(ExecutionError, match="native ID differs"):
+        Job.load(job.id, project=project)
+
+
 def test_native_run_records_foreground_outcome_with_spaces(project, monkeypatch):
     native_executor_type = type(psij.JobExecutor.get_instance("local"))
     submitted = []
@@ -202,8 +253,9 @@ def test_native_run_records_foreground_outcome_with_spaces(project, monkeypatch)
         project=project,
         directory=project.root,
     )
-    assert job.spec.launcher == "quoted-single"
+    assert job.spec.launcher is None
     job.run()
+    assert job.spec.launcher == "quoted-single"
     assert submitted == [native_executor_type]
     assert job.executor.name == "local"
     assert job.status.exit_code == 7
@@ -306,6 +358,10 @@ def test_malformed_result_is_an_error(project, result):
     job.path.with_name("result.json").write_text(result)
     with pytest.raises(ExecutionError, match="Cannot read job"):
         Job.load(job.id, project=project)
+    attached = psij.Job()
+    with pytest.raises(ValueError):
+        job.executor.attach(attached, job.id)
+    assert attached.executor is None
 
 
 def test_killed_detached_launcher_leaves_an_unknown_outcome(project):
@@ -326,12 +382,13 @@ def test_killed_detached_launcher_leaves_an_unknown_outcome(project):
         while not marker.exists():
             assert time.monotonic() < deadline
             time.sleep(0.05)
-        assert marker.read_text() == job.native_id
-        os.killpg(int(job.native_id), signal.SIGKILL)
+        assert job.native_id == job.id
+        pid = int(marker.read_text())
+        os.killpg(pid, signal.SIGKILL)
         deadline = time.monotonic() + 5
         while True:
             try:
-                os.kill(int(job.native_id), 0)
+                os.kill(pid, 0)
             except ProcessLookupError:
                 break
             assert time.monotonic() < deadline
@@ -340,7 +397,7 @@ def test_killed_detached_launcher_leaves_an_unknown_outcome(project):
         assert not Job.load(job.id, project=project).status.final
     finally:
         with suppress(ProcessLookupError):
-            os.killpg(int(job.native_id), signal.SIGKILL)
+            os.killpg(int(marker.read_text()), signal.SIGKILL)
 
 
 @pytest.mark.parametrize("directory", [None, Path("remote/work")])
@@ -372,6 +429,7 @@ def test_renku_submission_only_saves_identity(project, monkeypatch, directory):
     assert job.native_id == "remote-1"
     saved = Job.load(job.id, project=project)
     assert saved.spec.directory == directory
+    assert saved.spec.launcher is None
     assert isinstance(saved.executor, psij.JobExecutor)
     assert saved.executor.name == "renku"
     assert saved.executor.url == "https://renkulab.io/p/ns/demo"
@@ -436,13 +494,9 @@ def test_backend_submission_failure_is_persisted(project, monkeypatch):
     def fail(self, native):
         raise OSError("cannot submit")
 
-    monkeypatch.setattr(
-        type(psij.JobExecutor.get_instance("local-detached")), "submit", fail
-    )
+    monkeypatch.setattr(type(psij.JobExecutor.get_instance("local")), "submit", fail)
     with pytest.raises(ExecutionError, match="cannot submit"):
-        Job.create(["echo"], record_id="test", project=project).submit(
-            executor="local-detached"
-        )
+        Job.create(["echo"], record_id="test", project=project).submit(executor="local")
     job = Job.list(project=project)[0]
     assert job.status.state == psij.JobState.FAILED
     with pytest.raises(ExecutionError, match="already been submitted"):
@@ -486,11 +540,42 @@ def test_detached_local_preserves_resources_and_environment(project):
     )
     job.submit(executor="local-detached")
     assert job.executor.name == "local-detached"
+    assert job.spec.launcher == "detached"
+    assert Job.load(job.id, project=project).spec.launcher == "detached"
     assert finish(job).exit_code == 0
     assert job.spec.stdout_path.read_text() == "private-value\n"
     assert job.spec.resources.computed_process_count == 1
     saved = Job.load(job.id, project=project)
     assert saved.spec.environment["CUSTOM_VALUE"] == "private-value"
+
+
+def test_local_submission_respects_explicit_launcher(project):
+    job = Job.create([sys.executable, "-c", "pass"], project=project)
+    job.spec.launcher = "quoted-single"
+    native = job.submit(executor="local")
+    assert native.wait(timeout=timedelta(seconds=10)).state == psij.JobState.COMPLETED
+    assert job.spec.launcher == "quoted-single"
+    assert not job.path.with_name("result.json").exists()
+    assert Job.load(job.id, project=project).spec.launcher == "quoted-single"
+
+
+def test_detached_result_follows_stdout_path(project):
+    job = Job.create([sys.executable, "-c", "raise SystemExit(7)"], project=project)
+    job.spec.stdout_path = job.path.parent / "custom.log"
+    job.submit(executor="local-detached")
+    assert finish(job).exit_code == 7
+    assert job.path.with_name("result.json").exists()
+
+
+def test_detached_launcher_rejects_multiple_processes(project):
+    job = Job.create(
+        [sys.executable, "-c", "pass"],
+        project=project,
+        resources=psij.ResourceSpecV1(process_count=2),
+    )
+    with pytest.raises(ExecutionError, match="single local process"):
+        job.submit(executor="local-detached")
+    assert Job.load(job.id, project=project).status.state == psij.JobState.FAILED
 
 
 def test_launcher_records_result_without_parent_writes(project, monkeypatch):

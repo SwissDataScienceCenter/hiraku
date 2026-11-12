@@ -778,7 +778,12 @@ def job_submit(
         if attributes
         else None,
     )
-    job.submit(executor=JobExecutor.get_instance(executor, url=executor_url))
+    selected = (
+        JobExecutor.get_instance(executor, url=executor_url)
+        if executor_url
+        else executor
+    )
+    job.submit(executor=selected)
     click.echo(job.id)
 
 

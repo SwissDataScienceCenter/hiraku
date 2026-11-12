@@ -49,7 +49,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   The executor selects the working directory unless explicitly supplied; local jobs
   inherit the submitting process's cwd. Explicit environment values are persisted
   in the prepared PSI/J spec.
-- Default to `local-detached`, a PSI/J `LocalJobExecutor` subclass with a detached
+- Default to the Hiraku `local-detached` executor with a detached
   recording launcher. The launcher writes `result.json`
   independently of submission metadata and the submitting process.
   Foreground execution uses native `LocalJobExecutor` and saves its final status
