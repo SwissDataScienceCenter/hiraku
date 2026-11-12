@@ -514,7 +514,7 @@ def test_cli_submit_rejects_native_local(project, monkeypatch):
 
 
 @pytest.mark.parametrize("command", [["run"], ["job", "submit"]])
-def test_cli_launcher_selection_is_executed_and_saved(project, monkeypatch, command):
+def test_cli_launcher_and_custom_attributes_are_saved(project, monkeypatch, command):
     monkeypatch.chdir(project.root)
     result = CliRunner().invoke(
         main,
@@ -522,6 +522,9 @@ def test_cli_launcher_selection_is_executed_and_saved(project, monkeypatch, comm
             *command,
             "--launcher",
             "single",
+            "--custom-attribute",
+            "example",
+            "value",
             "--",
             sys.executable,
             "-c",
@@ -532,6 +535,7 @@ def test_cli_launcher_selection_is_executed_and_saved(project, monkeypatch, comm
     (path,) = (project.root / ".hiraku/jobs").glob("*.json")
     entry = Submission.load(project, path.stem)
     assert entry.spec["launcher"] == "single"
+    assert entry.spec["attributes"]["custom_attributes"] == {"example": "value"}
     if command == ["job", "submit"]:
         job = entry.get_psi_job()
         wait(job)

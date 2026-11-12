@@ -53,6 +53,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Add `--launcher NAME` to `hiraku run` and `hiraku job submit`, with an equivalent
   MCP `job_submit` parameter. Registered PSI/J launcher names pass directly into
   the native job specification and submission history.
+- Add CLI `--custom-attribute KEY VALUE` and MCP `custom_attributes` for
+  executor-specific PSI/J custom attributes.
 - Add the `local-detached` PSI/J executor with durable results and output,
   including final-status retrieval after the submitting process exits. The
   executor starts a detached Python supervisor to run the selected PSI/J launcher

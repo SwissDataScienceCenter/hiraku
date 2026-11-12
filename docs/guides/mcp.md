@@ -85,23 +85,17 @@ the Markdown body. Explicit `null` values are retained in metadata. IDs and pers
 paths and the organizational parent cannot be changed through the update tool.
 Expected failures are returned as MCP tool errors.
 
-`job_submit` requires explicit command arguments. Commands are not stored in
-records. The default executor is `local-detached`, which starts a detached
-supervisor to run a PSI/J launcher and save `result.json` independently of the
-MCP server.
-Record attribution is optional: an omitted ID uses the active record when set,
-otherwise the job is unattributed.
-The optional `launcher` parameter selects a registered PSI/J launcher by name
-and is saved in the job specification, matching CLI `--launcher NAME`.
-When `directory` is omitted, the executor chooses its working directory; local
-jobs inherit the MCP server's directory. Explicit paths refer to the execution
-side. Pass the original PSI/J `id` from the response as `job_id` to `job_status`.
-Project history keeps the command, executor target, and native ID, and retains
-saved status snapshots for listing without backend access. Refresh failures
-appear as `observation_error` alongside the unchanged saved status.
-Detached output remains in the executor's `stdout.log` and `stderr.log`
-files. Renku reports final states without process exit codes; its logs and
-control remain with the remote platform.
+`job_submit` takes explicit command arguments and defaults to `local-detached`.
+An omitted record ID uses the active record when set, otherwise the job is
+unattributed. `launcher` selects a registered PSI/J launcher; `custom_attributes`
+maps executor-specific settings, matching CLI `--custom-attribute KEY VALUE`.
+Explicit `directory` paths refer to the execution side; local jobs otherwise
+inherit the MCP server's directory. Pass the returned `id` as `job_id` to
+`job_status`. Refresh failures return `observation_error` alongside the saved
+snapshot.
+
+See [Jobs and executors](jobs.md) for executor setup, history, output locations,
+and platform limitations.
 A connected client can run commands with the user's local permissions.
 
 ## Resources and evidence
