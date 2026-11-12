@@ -18,13 +18,18 @@ from mcp.server.mcpserver.exceptions import (
 from mcp.types import (
     ToolAnnotations,
 )
-from psij import Job, JobAttributes, JobExecutor
+from psij import JobAttributes, JobExecutor
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
 from .errors import HirakuError, ValidationError
-from .execution import describe_job, prepare_job
+from .job import (
+    list_submissions,
+    observe_submission,
+    prepare_job,
+    save_submission,
+)
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -105,7 +110,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
     Tools: project_info, leaderboard_list, record_list, record_show, record_create,
-    record_update, record_delete, job_submit, job_status, and runs.
+    record_update, record_delete, job_submit, job_list, job_status, and runs.
     Also registers the record
     catalog and record resources, and the propose_implementation prompt.
     """
@@ -251,18 +256,17 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             else None,
         )
         JobExecutor.get_instance(executor, url=executor_url).submit(job)
-        return describe_job(job)
+        return save_submission(job, project=selected)
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True))
-    def job_status(
-        native_id: str,
-        executor: str = "local-detached",
-        executor_url: str | None = None,
-    ) -> dict[str, Any]:
-        """Attach through PSI/J and return the currently observed status."""
-        job = Job()
-        JobExecutor.get_instance(executor, url=executor_url).attach(job, native_id)
-        return describe_job(job)
+    def job_status(job_id: str) -> dict[str, Any]:
+        """Retrieve observed or saved final status by the original PSI/J job ID."""
+        return observe_submission(job_id, project=selected)
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True))
+    def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
+        """List project jobs and commands with their observed or saved final status."""
+        return list_submissions(project=selected, record_id=record_id)
 
     @server.tool(
         title="List tracked runs",

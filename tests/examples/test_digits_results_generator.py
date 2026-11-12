@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from hiraku import Project
-from hiraku.execution import prepare_job, run_local
+from hiraku.job import prepare_job, run_local
 from hiraku.tracking import Leaderboard
 
 

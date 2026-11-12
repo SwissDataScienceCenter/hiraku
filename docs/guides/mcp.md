@@ -72,8 +72,9 @@ and fall back to the CLI when the host has not connected the server.
 | `leaderboard_list` | List leaderboard names without loading definitions, like `hiraku leaderboard list --json`. |
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
-| `job_submit` | Submit through PSI/J and return the executor target and native ID. |
-| `job_status` | Attach using `executor`, `executor_url`, and `native_id` to retrieve current status. |
+| `job_submit` | Submit through PSI/J, record history, and return the original PSI/J job `id`. |
+| `job_list` | List project jobs with commands and refreshed or saved final status; optionally filter by `record_id`. |
+| `job_status` | Retrieve observed or saved final status using the original `job_id`. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
@@ -92,9 +93,11 @@ Record attribution is optional: an omitted ID uses the active record when set,
 otherwise the job is unattributed.
 When `directory` is omitted, the executor chooses its working directory; local
 jobs inherit the MCP server's directory. Explicit paths refer to the execution
-side. Retain `executor`, `executor_url`, and `native_id` from the response and
-pass them to `job_status` to retrieve the outcome. Hiraku stores no project job
-history. Detached output remains in the executor's `stdout.log` and `stderr.log`
+side. Pass the original PSI/J `id` from the response as `job_id` to `job_status`.
+Project history keeps the command, executor target, and native ID, and retains
+observed final status for later queries without backend access. Backend errors
+appear as `observation_error` with status `UNKNOWN` without changing the outcome.
+Detached output remains in the executor's `stdout.log` and `stderr.log`
 files. Renku reports final states without process exit codes; its logs and
 control remain with the remote platform.
 A connected client can run commands with the user's local permissions.

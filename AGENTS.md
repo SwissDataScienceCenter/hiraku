@@ -42,7 +42,7 @@ Core responsibilities:
 - **`Project`** (`project.py`) — Project discovery, settings, active-record state, and managed paths.
 - **`Record` and `Vault`** (`record.py`) — Local document models and filesystem-backed bundle operations.
 - **`Run`** (`tracking/base.py`) — Normalized tracking traces with metrics and attribution.
-- **Execution** (`execution.py`) — Prepare native PSI/J jobs with research attribution and stream foreground output. Executors own submission and final status; Hiraku has no project job history.
+- **Execution** (`job.py`) — Prepare native PSI/J jobs, stream foreground output, and keep submission history keyed by PSI/J job ID. Executors own execution and status; history retains observed final outcomes.
 - **Tracking** (`tracking/`) — Backend adapters implementing `TrackingBackend`; `Leaderboard` validates source settings and creates adapters.
 - **Workflows** (`workflows/`) — LangGraph workflow discovery, execution, session history, and checkpoints.
 - **CLI and MCP** (`cli.py`, `mcp.py`) — User-facing interfaces to the underlying APIs.
