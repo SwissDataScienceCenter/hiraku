@@ -37,6 +37,33 @@ Use repeated `--custom-attribute KEY VALUE` options to populate PSI/J's
 `job_submit` accepts the equivalent `custom_attributes` mapping. Standard PSI/J
 job attributes and resources remain available through the Python API.
 
+## Slurm
+
+PSI/J provides a native `slurm` executor. Submit a batch job with:
+
+```bash
+hiraku job submit --executor slurm --record baseline -- python train.py
+```
+
+The executor uses Slurm's `sbatch`, `squeue`, and `scancel` commands. It writes
+the batch script and records its native Slurm job ID in Hiraku's job history.
+Pass Slurm options as custom attributes prefixed with `slurm.`; PSI/J renders
+them as `#SBATCH` directives:
+
+```bash
+hiraku job submit --executor slurm --record baseline \
+  --custom-attribute slurm.partition gpu \
+  --custom-attribute slurm.time 01:00:00 \
+  --custom-attribute slurm.account my-account \
+  -- python train.py
+```
+
+For example, `slurm.partition` becomes `--partition` and `slurm.time` becomes
+`--time`. PSI/J also maps its standard job attributes and `ResourceSpec` fields
+to Slurm options; use the PSI/J Python API for typed resources. The executor
+requires `sbatch`, `squeue`, and `scancel` to be available where Hiraku submits
+and observes jobs.
+
 ## Submit and retrieve status
 
 ```bash
