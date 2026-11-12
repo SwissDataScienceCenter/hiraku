@@ -374,9 +374,9 @@ Tracking destinations remain user-managed. `hiraku job submit` returns JSON with
 `hiraku job list [--record ID] [--json]` to list jobs and commands with status.
 The CLI status command accepts `--wait` to wait for the final outcome.
 History lives in `.hiraku/jobs/<id>.json`; no separate submission ID is generated.
-List/status persist observed final outcomes, so later queries do not need backend
-access. `UNKNOWN` with `observation_error` describes an unavailable observation,
-not an execution failure. Do not resubmit automatically after a history-write
+List reads saved snapshots without backend access; status refreshes and saves
+the current PSI/J status. `observation_error` describes a failed refresh alongside
+the unchanged saved status. Do not resubmit automatically after a history-write
 failure: the execution may already have been accepted.
 An omitted `directory` leaves the execution directory to the executor; local jobs
 inherit the submitting process's cwd. Explicit paths refer to the execution side.
@@ -393,8 +393,8 @@ It supports final-status retrieval after the
 submitter exits; cancellation is unsupported. Renku also reports final status
 through PSI/J, but does not expose process exit codes. Use `rnk job logs` and
 `rnk job stop` for Renku output and control. Foreground CLI execution saves its
-final status before returning; unfinished foreground history reports `UNKNOWN`
-because native local attachment cannot recover real exit codes safely.
+final status before returning; native local jobs cannot safely be reattached.
+Later refresh requests return their saved snapshot with an observation error.
 Use a project dispatcher to prepare the runtime when needed.
 
 CSV sources require a `path`, relative to the project root or absolute;
@@ -422,8 +422,9 @@ in `hiraku.job`. This returns a native `psij.Job`. Use
 or `run_local(job, project=project)` for foreground output and history. After native
 submission, use `Submission.from_psi_job(job).save(project)` to opt in to history.
 `Submission.load(project, job_id)` and `Submission.list(project)` read metadata;
-`observe_submission(submission, project=project)` refreshes status and retains
-final outcomes. The model and observation helper live in `hiraku.job`.
+`submission.get_psi_job()` attaches a native job. Use its PSI/J lifecycle APIs,
+then call `submission.sync(job)` and `submission.save(project)` explicitly.
+The `Submission` model lives in `hiraku.job`.
 Records with `type: context` store supporting material. Workflows run in the
 current coding agent through the Hiraku MCP server (`hiraku mcp serve`). V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.

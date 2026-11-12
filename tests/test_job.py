@@ -11,7 +11,7 @@ import weakref
 from contextlib import suppress
 from datetime import timedelta
 from pathlib import Path
-from threading import Event, Timer
+from threading import Event
 from types import SimpleNamespace
 
 import psij
@@ -22,9 +22,8 @@ from click.testing import CliRunner
 from hiraku.cli import main
 from hiraku.errors import ExecutionError, RecordNotFoundError, ValidationError
 from hiraku.job import (
+    Status,
     Submission,
-    describe_job,
-    observe_submission,
     prepare_job,
     run_local,
     validate_command,
@@ -497,7 +496,7 @@ def test_cli_foreground(project, monkeypatch, code):
     assert result.stdout == "hello\n"
     entries = Submission.list(project)
     assert len(entries) == 1
-    assert entries[0].final_status.exit_code == code
+    assert entries[0].status.exit_code == code
     assert entries[0].record_id == "test"
 
 
@@ -534,8 +533,11 @@ def test_cli_launcher_selection_is_executed_and_saved(project, monkeypatch, comm
     (path,) = (project.root / ".hiraku/jobs").glob("*.json")
     entry = Submission.load(project, path.stem)
     assert entry.spec["launcher"] == "single"
-    observed = observe_submission(entry, project=project, wait=True)
-    assert observed["status"]["exit_code"] == 0
+    if command == ["job", "submit"]:
+        job = entry.get_psi_job()
+        wait(job)
+        entry.sync(job)
+    assert entry.status.exit_code == 0
 
 
 @pytest.mark.parametrize("command", [["run"], ["job", "submit"]])
@@ -591,7 +593,7 @@ def test_cli_submit_list_and_status(project, detached, monkeypatch):
     assert "FAILED" in runner.invoke(main, args[:-1]).output
     shown = json.loads(status.output)
     assert shown["id"] == receipt["id"]
-    assert shown["final_status"]["exit_code"] == 7
+    assert shown["status"]["exit_code"] == 7
     listed = runner.invoke(main, ["job", "list", "--record", "test", "--json"])
     assert json.loads(listed.output) == [shown]
     table = runner.invoke(main, ["job", "list"], env={"COLUMNS": "240"})
@@ -619,7 +621,7 @@ def test_interrupting_foreground_cleans_up(project, monkeypatch):
         run_local(job, project=project)
     assert job.status.state == psij.JobState.CANCELED
     assert not psutil.pid_exists(int(job.native_id))
-    assert Submission.load(project, job.id).final_status.state == "CANCELED"
+    assert Submission.load(project, job.id).status.state == "CANCELED"
 
 
 @pytest.mark.parametrize(
@@ -661,13 +663,46 @@ def test_invalid_commands(project, value):
         prepare_job(value, project=project)
 
 
-def test_describe_job_uses_native_final_status():
-    job = psij.Job()
-    job.executor = psij.JobExecutor.get_instance("local")
-    job.status = psij.JobStatus(psij.JobState.FAILED, exit_code=7)
-    status = describe_job(job)["status"]
-    assert status["state"] == "FAILED" and status["exit_code"] == 7
-    assert status["time"] == job.status.time
+@pytest.mark.parametrize(
+    "state",
+    [
+        psij.JobState.NEW,
+        psij.JobState.QUEUED,
+        psij.JobState.ACTIVE,
+        psij.JobState.COMPLETED,
+        psij.JobState.FAILED,
+        psij.JobState.CANCELED,
+    ],
+)
+def test_status_preserves_native_fields(state):
+    native = psij.JobStatus(
+        state, time=1234, exit_code=7, message="detail", metadata={"backend": "value"}
+    )
+    status = Status.from_psi_status(native)
+    assert status.model_dump() == {
+        "state": state.name,
+        "time": 1234,
+        "exit_code": 7,
+        "message": "detail",
+        "metadata": {"backend": "value"},
+    }
+    assert Status.model_validate_json(status.model_dump_json()) == status
+
+
+@pytest.mark.parametrize("state", ["NEW", "QUEUED", "ACTIVE", "UNKNOWN", "COMPLETED"])
+def test_submission_persists_any_status_snapshot(project, detached, state):
+    job, _ = history_entry(project, detached)
+    entry = Submission.load(project, job.id)
+    status = Status(
+        state=state,
+        time=None if state == "COMPLETED" else 1234,
+        exit_code=None,
+        message=None,
+        metadata=None,
+    )
+    entry.status = status
+    entry.save(project)
+    assert Submission.load(project, job.id).status == status
 
 
 def history_entry(project, detached, *, record_id="test", final=False):
@@ -700,7 +735,7 @@ def test_history_uses_original_psij_id_and_native_spec(project, detached, monkey
     assert entry["spec"]["resources"]["process_count"] == 1
     assert entry["spec"]["attributes"]["custom_attributes"] == {"example": "value"}
     assert entry["spec"]["environment"]["HIRAKU_JOB_ID"] == job.id
-    assert entry["final_status"] is None
+    assert entry["status"]["state"] == "QUEUED"
     monkeypatch.setattr(
         psij.JobExecutor, "get_instance", lambda *a, **k: pytest.fail("Metadata only")
     )
@@ -722,97 +757,85 @@ def test_submission_conversion_does_not_save(project, detached):
     assert Submission.load(project, job.id) == entry
 
 
-def test_observation_attaches_and_persists_final_status(project, detached, monkeypatch):
-    job, entry = history_entry(project, detached)
-    attached_ids = []
+def test_attachment_sync_and_save_are_explicit(project, detached, monkeypatch):
+    original, _ = history_entry(project, detached)
+    entry = Submission.load(project, original.id)
+    path = project.root / ".hiraku/jobs" / f"{original.id}.json"
+    before = path.read_bytes()
 
     def attach(attached, native_id):
         assert native_id == "backend-id"
-        attached_ids.append(attached.id)
+        attached.executor = detached
+        attached._native_id = native_id
         attached.status = psij.JobStatus(psij.JobState.ACTIVE)
-        Timer(
-            0.05,
-            lambda: setattr(
-                attached,
-                "status",
-                psij.JobStatus(
-                    psij.JobState.FAILED,
-                    time=1234,
-                    exit_code=7,
-                    message="failed remotely",
-                    metadata={"backend": "detail"},
-                ),
-            ),
-        ).start()
 
+    monkeypatch.setattr(detached, "attach", attach)
+    monkeypatch.setattr(psij.JobExecutor, "get_instance", lambda name, url: detached)
     monkeypatch.setattr(
-        psij.JobExecutor,
-        "get_instance",
-        lambda name, url: SimpleNamespace(attach=attach),
+        psij.Job, "wait", lambda *a, **k: pytest.fail("Explicit waiting only")
     )
-    result = observe_submission(
-        Submission.load(project, job.id), project=project, wait=True
+    attached = entry.get_psi_job()
+    assert attached.id != entry.id == original.id
+    assert entry.status.state == "QUEUED"
+    entry.sync(attached)
+    assert entry.status.state == "ACTIVE"
+    assert path.read_bytes() == before
+    entry.save(project)
+    assert Submission.load(project, original.id).status == entry.status
+    attached.status = psij.JobStatus(
+        psij.JobState.FAILED, time=1234, exit_code=7, message="failed remotely"
     )
-    assert attached_ids[0] != job.id
-    assert result["id"] == job.id
-    assert result["status"] == result["final_status"]
-    assert result["status"] == {
-        "state": "FAILED",
-        "time": 1234,
-        "exit_code": 7,
-        "message": "failed remotely",
-        "metadata": {"backend": "detail"},
-    }
-    assert (
-        Submission.load(project, job.id).final_status.model_dump() == result["status"]
-    )
-    monkeypatch.setattr(
-        psij.JobExecutor, "get_instance", lambda *a, **k: pytest.fail("Saved outcome")
-    )
-    assert (
-        observe_submission(Submission.load(project, job.id), project=project) == result
-    )
-    assert [
-        observe_submission(entry, project=project) for entry in Submission.list(project)
-    ] == [result]
+    entry.sync(attached)
+    entry.save(project)
+    assert Submission.load(project, original.id).status.exit_code == 7
 
 
-def test_pending_observation_is_bounded_and_not_persisted(
-    project, detached, monkeypatch
+@pytest.mark.parametrize(
+    "mismatch", ["executor", "executor_url", "native_id", "unbound"]
+)
+def test_sync_rejects_another_execution(project, detached, mismatch):
+    job, _ = history_entry(project, detached)
+    entry = Submission.load(project, job.id)
+    if mismatch == "native_id":
+        job._native_id = "other-job"
+    elif mismatch == "unbound":
+        job.executor = None
+    else:
+        job.executor = SimpleNamespace(
+            name="other" if mismatch == "executor" else detached.name,
+            url="file:///other" if mismatch == "executor_url" else detached.url,
+        )
+    before = entry.model_dump()
+    with pytest.raises(ValidationError, match="must match submission"):
+        entry.sync(job)
+    assert entry.model_dump() == before
+
+
+@pytest.mark.parametrize("final", [False, True])
+def test_status_refresh_error_preserves_snapshot_and_other_jobs(
+    project, detached, monkeypatch, final
 ):
-    job, entry = history_entry(project, detached)
-
-    def attach(attached, native_id):
-        # An executor may return before its first status notification.
-        pass
-
-    monkeypatch.setattr(
-        psij.JobExecutor, "get_instance", lambda *a, **k: SimpleNamespace(attach=attach)
-    )
-    result = observe_submission(Submission.load(project, job.id), project=project)
-    assert result["status"]["state"] == "NEW"
-    assert Submission.load(project, job.id).model_dump(mode="json") == entry
-
-
-def test_observation_error_preserves_history_and_other_jobs(
-    project, detached, monkeypatch
-):
-    job, entry = history_entry(project, detached)
+    monkeypatch.chdir(project.root)
+    job, entry = history_entry(project, detached, final=final)
     other, completed = history_entry(project, detached, record_id=None, final=True)
 
     def unavailable(*args, **kwargs):
         raise psij.SubmitException("backend unavailable")
 
     monkeypatch.setattr(psij.JobExecutor, "get_instance", unavailable)
-    result = observe_submission(Submission.load(project, job.id), project=project)
-    assert result["status"]["state"] == "UNKNOWN"
-    assert result["observation_error"] == "backend unavailable"
-    assert result["final_status"] is None
+    response = CliRunner().invoke(main, ["job", "status", job.id, "--json"])
+    assert response.exit_code == 0, response.output
+    result = json.loads(response.output)
+    assert result["status"] == entry["status"]
+    assert "backend unavailable" in result["observation_error"]
     assert Submission.load(project, job.id).model_dump(mode="json") == entry
     entries = Submission.list(project)
     assert [item.id for item in entries] == [other.id, job.id]
-    assert entries[0].final_status.model_dump() == completed["final_status"]
+    assert entries[0].status.model_dump() == completed["status"]
     assert len(Submission.list(project, record_id="test")) == 1
+    listed = CliRunner().invoke(main, ["job", "list", "--json"])
+    assert listed.exit_code == 0, listed.output
+    assert [item["id"] for item in json.loads(listed.output)] == [other.id, job.id]
 
 
 def test_record_filter_avoids_unrelated_backend_queries(project, detached, monkeypatch):
@@ -858,16 +881,14 @@ def test_history_survives_submitting_process(project, detached):
         check=True,
     )
     submitted = json.loads(result.stdout)
-    observed = observe_submission(
-        Submission.load(project, submitted["id"]), project=project, wait=True
-    )
-    assert observed["id"] == submitted["id"]
-    assert observed["native_id"] == submitted["native_id"]
-    assert observed["final_status"]["exit_code"] == 7
-    assert (
-        Submission.load(project, submitted["id"]).final_status.model_dump()
-        == (observed["final_status"])
-    )
+    entry = Submission.load(project, submitted["id"])
+    job = entry.get_psi_job()
+    wait(job)
+    entry.sync(job)
+    entry.save(project)
+    assert entry.id == submitted["id"]
+    assert entry.native_id == submitted["native_id"]
+    assert Submission.load(project, entry.id).status.exit_code == 7
 
 
 def test_missing_or_malformed_history(project, detached):
@@ -906,8 +927,16 @@ def test_invalid_history_ids(project, job_id):
         {"executor_url": 3},
         {"spec": {"executable": "echo", "arguments": "hello"}},
         {"spec": {"executable": "echo", "arguments": [3]}},
-        {"final_status": {"state": "ACTIVE"}},
-        {"final_status": {"state": "COMPLETED"}},
+        {
+            "status": {
+                "state": "UNRECOGNIZED",
+                "time": 1234,
+                "exit_code": None,
+                "message": None,
+                "metadata": None,
+            }
+        },
+        {"status": {"state": "COMPLETED"}},
         {"submitted_at": "invalid"},
         {"submitted_at": "2026-11-12T12:00:00"},
     ],
@@ -930,9 +959,9 @@ def test_invalid_history_data(project, detached, change):
         ("metadata", []),
     ],
 )
-def test_invalid_final_status(project, detached, field, value):
+def test_invalid_saved_status(project, detached, field, value):
     job, entry = history_entry(project, detached, final=True)
-    entry["final_status"][field] = value
+    entry["status"][field] = value
     path = project.root / ".hiraku/jobs" / f"{job.id}.json"
     path.write_text(json.dumps(entry))
     with pytest.raises(ExecutionError, match=field):
@@ -978,10 +1007,11 @@ def test_foreground_unknown_outcome_does_not_attach_to_pid(
         "get_instance",
         lambda *a, **k: pytest.fail("Unsafe PID lookup"),
     )
-    result = observe_submission(Submission.load(project, job.id), project=project)
-    assert result["status"]["state"] == "UNKNOWN"
-    assert "foreground" in result["observation_error"]
-    assert Submission.load(project, job.id).final_status is None
+    submission = Submission.load(project, job.id)
+    with pytest.raises(ExecutionError, match="cannot be safely reattached"):
+        submission.get_psi_job()
+    assert submission.status.state == "QUEUED"
+    assert Submission.load(project, job.id).status == submission.status
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ import shlex
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib.resources import as_file, files
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,6 +21,7 @@ from psij import (
     InvalidJobException,
     JobAttributes,
     JobExecutor,
+    JobState,
     JobStatus,
     SubmitException,
 )
@@ -31,6 +32,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .errors import (
+    ExecutionError,
     GitError,
     HirakuError,
     NoActiveRecordError,
@@ -38,13 +40,7 @@ from .errors import (
 )
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .job import (
-    Submission,
-    describe_job,
-    observe_submission,
-    prepare_job,
-    run_local,
-)
+from .job import Submission, prepare_job, run_local
 from .project import Project
 from .record import Record, validate_identifier
 from .tracking import Leaderboard, Run
@@ -776,7 +772,6 @@ def job_submit(
     _emit_json(
         {
             **entry.model_dump(mode="json"),
-            **describe_job(job),
             "observation_error": None,
         }
     )
@@ -826,12 +821,21 @@ def job_status(
     wait_for_completion: bool,
     json_output: bool,
 ) -> None:
-    """Retrieve status by the original PSI/J job ID, optionally waiting."""
-    result = observe_submission(
-        Submission.load(state.project, job_id),
-        project=state.project,
-        wait=wait_for_completion,
-    )
+    """Refresh saved status by the original PSI/J job ID, optionally waiting."""
+    entry = Submission.load(state.project, job_id)
+    observation_error = None
+    try:
+        job = entry.get_psi_job()
+        if wait_for_completion:
+            job.wait()
+        else:
+            job.wait(timeout=timedelta(seconds=0.2), target_states=[JobState.QUEUED])
+        entry.sync(job)
+    except ExecutionError as exc:
+        observation_error = str(exc)
+    else:
+        entry.save(state.project)
+    result = {**entry.model_dump(mode="json"), "observation_error": observation_error}
     if json_output:
         _emit_json(result)
     else:
@@ -853,9 +857,9 @@ def job_status(
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> None:
-    """List project jobs and commands with their observed or saved final status."""
+    """List project jobs and commands with their saved status snapshots."""
     entries = [
-        observe_submission(entry, project=state.project)
+        {**entry.model_dump(mode="json"), "observation_error": None}
         for entry in Submission.list(state.project, record_id=record_id)
     ]
     if json_output:

@@ -24,7 +24,7 @@ from mcp.server.elicitation import render_elicitation_schema  # noqa: E402
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E402
 
 from hiraku.cli import main  # noqa: E402
-from hiraku.errors import ValidationError  # noqa: E402
+from hiraku.errors import ExecutionError, ValidationError  # noqa: E402
 from hiraku.mcp import (  # noqa: E402
     WorkflowApproval,
     create_server,
@@ -346,7 +346,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         history = json.loads(
             (config.root / ".hiraku/jobs" / f"{job['id']}.json").read_text()
         )
-        assert history["final_status"]["exit_code"] == 7
+        assert history["status"]["exit_code"] == 7
         assert history["id"] == job["id"]
         assert history["spec"]["launcher"] == "single"
         listed = await server.call_tool("job_list", {"record_id": "demo/demo"})
@@ -387,6 +387,25 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         )
         completed = await completed_job(submitted.structured_content)
         assert completed.structured_content["status"]["exit_code"] == 0
+
+        def unavailable(self):
+            raise ExecutionError("backend unavailable")
+
+        cached = completed.structured_content
+        path = config.root / ".hiraku/jobs" / f"{cached['id']}.json"
+        before = path.read_bytes()
+        monkeypatch.setattr("hiraku.job.Submission.get_psi_job", unavailable)
+        failed = await server.call_tool("job_status", {"job_id": cached["id"]})
+        assert failed.structured_content == {
+            **cached,
+            "observation_error": "backend unavailable",
+        }
+        assert path.read_bytes() == before
+        listed = await server.call_tool("job_list", {})
+        assert all(
+            entry["observation_error"] is None
+            for entry in listed.structured_content["result"]
+        )
 
     asyncio.run(exercise())
 

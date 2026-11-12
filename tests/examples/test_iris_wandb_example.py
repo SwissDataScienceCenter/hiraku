@@ -202,7 +202,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
         (project / ".hiraku/jobs" / f"{row['job_id']}.json").read_text()
     )
     assert history["id"] == row["job_id"]
-    assert history["final_status"]["exit_code"] == 0
+    assert history["status"]["exit_code"] == 0
 
     filtered = json.loads(
         invoke(
