@@ -73,7 +73,7 @@ with mlflow.start_run():
 ## Inspect
 
 ```bash
-hiraku runs --json
+hiraku leaderboard runs --json
 ```
 
 Hiraku reads native run IDs, parameters, metrics, and attribution tags.

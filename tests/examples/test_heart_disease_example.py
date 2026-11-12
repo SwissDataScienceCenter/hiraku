@@ -119,7 +119,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
     queried = json.loads(
         invoke(
             runner,
-            ["runs", "--json"],
+            ["leaderboard", "runs", "--json"],
         ).output
     )
     assert len(queried) == 2

@@ -115,6 +115,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         invoke(
             runner,
             [
+                "leaderboard",
                 "runs",
                 "--sort",
                 "val/log_loss",
@@ -163,6 +164,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         invoke(
             runner,
             [
+                "leaderboard",
                 "runs",
                 "--record",
                 "digit-classification/strong-l2",

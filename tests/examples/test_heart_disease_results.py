@@ -57,7 +57,7 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     assert len(runs) == 3
     assert len(leaderboard.list_runs(config, record_id=forest.id)) == 3
     monkeypatch.chdir(project)
-    result = runner.invoke(main, ["runs", "--json"])
+    result = runner.invoke(main, ["leaderboard", "runs", "--json"])
     assert result.exit_code == 0, result.output
     assert len(json.loads(result.output)) == 9
     training = runpy.run_path(str(project / "train.py"))

@@ -20,8 +20,13 @@ def test_root_help_lists_primary_commands() -> None:
     result = invoke("--help")
 
     assert result.exit_code == 0
-    for command in ("init", "record", "run", "runs", "workflow"):
+    for command in ("init", "record", "run", "leaderboard", "workflow"):
         assert command in result.output
+
+
+def test_runs_command_is_under_leaderboard() -> None:
+    assert invoke("runs", "--help").exit_code != 0
+    assert invoke("leaderboard", "runs", "--help").exit_code == 0
 
 
 def test_record_tree_includes_missing_parents_and_cycles(tmp_path, monkeypatch):
@@ -230,8 +235,10 @@ def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
         "id,record_id,duration\na,root/root,4.25\nb,root/root,\n"
     )
 
-    rows = json.loads(invoke("runs", "--record", "root/root", "--json").output)
-    table = invoke("runs", "--record", "root/root").output
+    rows = json.loads(
+        invoke("leaderboard", "runs", "--record", "root/root", "--json").output
+    )
+    table = invoke("leaderboard", "runs", "--record", "root/root").output
 
     assert [row["duration"] for row in rows] == [4.25, None]
     assert all(
@@ -249,7 +256,7 @@ def test_runs_json_keeps_extra_fields_in_raw(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.chdir(tmp_path)
     (tmp_path / "runs.csv").write_text("id,record_id,entrypoint\na,root/root,train\n")
 
-    result = invoke("runs", "--record", "root/root", "--json")
+    result = invoke("leaderboard", "runs", "--record", "root/root", "--json")
 
     assert result.exit_code == 0
     run = json.loads(result.output)[0]
@@ -303,11 +310,14 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "runs.csv").write_text(
         "id,record_id,metric.loss\na,root/root,0.5\nb,root/child/child,0.2\nc,,0.1\n"
     )
-    direct = json.loads(invoke("runs", "--record", "root/root", "--json").output)
-    attributed_runs = json.loads(invoke("runs", "--json").output)
+    direct = json.loads(
+        invoke("leaderboard", "runs", "--record", "root/root", "--json").output
+    )
+    attributed_runs = json.loads(invoke("leaderboard", "runs", "--json").output)
     assert {run["id"] for run in direct} == {"a"}
     assert {run["id"] for run in attributed_runs} == {"a", "b"}
     sorted_table = invoke(
+        "leaderboard",
         "runs",
         "--metrics",
         "loss",
@@ -324,7 +334,7 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
         and cells[0] != "id"
     ]
     assert [row[0] for row in data_rows] == ["b", "a"]
-    assert invoke("runs", "list", "--record", "root/root").exit_code != 0
+    assert invoke("leaderboard", "runs", "list", "--record", "root/root").exit_code != 0
 
 
 def test_runs_default_scope_is_all_attributed_runs(tmp_path: Path, monkeypatch) -> None:
@@ -333,7 +343,7 @@ def test_runs_default_scope_is_all_attributed_runs(tmp_path: Path, monkeypatch) 
     (tmp_path / "runs.csv").write_text(
         "id,record_id\na,root/root\nb,root/child/child\nc,\n"
     )
-    no_active = invoke("runs", "--json")
+    no_active = invoke("leaderboard", "runs", "--json")
     assert no_active.exit_code == 0
     assert {run["id"] for run in json.loads(no_active.output)} == {"a", "b"}
     assert (
@@ -365,7 +375,7 @@ def test_runs_default_scope_is_all_attributed_runs(tmp_path: Path, monkeypatch) 
     )
 
     def ids(*args: str) -> set[str]:
-        result = invoke("runs", *args, "--json")
+        result = invoke("leaderboard", "runs", *args, "--json")
         assert result.exit_code == 0
         return {run["id"] for run in json.loads(result.output)}
 
@@ -436,25 +446,25 @@ def create_tracked_project(*args, **kwargs):
 def test_runs_require_view_selection_and_discover_parameters(tmp_path, monkeypatch):
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
     monkeypatch.chdir(tmp_path)
-    missing = invoke("runs")
+    missing = invoke("leaderboard", "runs")
     assert missing.exit_code != 0
     assert "No leaderboards" in missing.output
     for name in ("a", "b"):
         (project.leaderboards_dir / f"{name}.yml").write_text(
             "source: {type: csv, path: runs.csv}\n"
         )
-    ambiguous = invoke("runs")
+    ambiguous = invoke("leaderboard", "runs")
     assert ambiguous.exit_code != 0
     assert "Select a leaderboard" in ambiguous.output
     (tmp_path / "runs.csv").write_text(
         "id,record_id,metric.score,param.seed\nr,unknown,0.9,42\n"
     )
-    result = invoke("runs", "--leaderboard", "b")
+    result = invoke("leaderboard", "runs", "--leaderboard", "b")
     assert result.exit_code == 0, result.output
     assert "score" in result.output
     assert "seed" in result.output
     assert "42" in result.output
-    unknown = invoke("runs", "--leaderboard", "missing")
+    unknown = invoke("leaderboard", "runs", "--leaderboard", "missing")
     assert unknown.exit_code != 0
     assert "Cannot read YAML" in unknown.output
 
@@ -489,7 +499,14 @@ def test_leaderboard_lifecycle(project):
     assert json.loads(shown.output) == {"source": {"type": "csv", "path": "runs.csv"}}
     source = project.root / "runs.csv"
     source.write_text("id,metric.score\nr,1\n")
-    runs = invoke("runs", "--leaderboard", "local", "--include-unattributed", "--json")
+    runs = invoke(
+        "leaderboard",
+        "runs",
+        "--leaderboard",
+        "local",
+        "--include-unattributed",
+        "--json",
+    )
     assert runs.exit_code == 0, runs.output
     assert json.loads(runs.output)[0]["metrics"] == {"score": 1}
     before = path.read_bytes()

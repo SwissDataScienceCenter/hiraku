@@ -83,15 +83,15 @@ hiraku run --record digit-classification/strong-l2 -- uv run python train.py --a
 ## Compare final metrics and inspect curves
 
 ```bash
-hiraku runs
+hiraku leaderboard runs
 
 # list with additional details
-hiraku runs \
+hiraku leaderboard runs \
   --params alpha,epochs,seed \
   --metrics train/log_loss,val/log_loss,train/accuracy,val/accuracy \
   --sort val/log_loss --ascending
 
-hiraku runs --record digit-classification/strong-l2 --json
+hiraku leaderboard runs --record digit-classification/strong-l2 --json
 
 uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
 ```
@@ -106,7 +106,7 @@ value of each metric. Full epoch histories remain in MLflow and its UI.
 
 You can list the same runs using Hiraku:
 ```
-hiraku runs
+hiraku leaderboard runs
 ```
 
 Or browse them, with a per-run plot and links into the MLflow UI, in the

@@ -161,7 +161,13 @@ def test_minimal_documented_sequence(tmp_path: Path, monkeypatch) -> None:
     runs = json.loads(
         invoke(
             runner,
-            ["runs", "--record", "binary-classification/threshold-baseline", "--json"],
+            [
+                "leaderboard",
+                "runs",
+                "--record",
+                "binary-classification/threshold-baseline",
+                "--json",
+            ],
         ).output
     )
     assert len(runs) == 2

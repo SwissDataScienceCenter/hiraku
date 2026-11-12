@@ -59,7 +59,7 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 
 Define named [leaderboards](tracking.md) in `hiraku/leaderboards/<name>.yml`.
 Each contains a `source` mapping and optional ordered `metrics` declarations.
-Records do not configure tracking. `hiraku runs --leaderboard NAME` queries attributed
+Records do not configure tracking. `hiraku leaderboard runs --leaderboard NAME` queries attributed
 runs (`--include-unattributed` includes all source runs); `--record ID` applies an exact attribution filter. Parameters are discovered
 automatically. Training code owns logging destinations and metric logging.
 
@@ -144,7 +144,7 @@ hiraku record update heart-disease-prediction/logistic-regression --commit HEAD
 
 # 4. run an arbitrary command and list attributed runs
 hiraku run --record heart-disease-prediction/logistic-regression -- uv run python train.py
-hiraku runs --record heart-disease-prediction/logistic-regression --sort val/log_loss --ascending
+hiraku leaderboard runs --record heart-disease-prediction/logistic-regression --sort val/log_loss --ascending
 
 # 5. review the runs and document the conclusion on the child record
 hiraku record update heart-disease-prediction/logistic-regression --set decision=keep
@@ -169,7 +169,7 @@ hiraku workflow list
 hiraku workflow start collaborative --arguments-file arguments.json
 hiraku record tree
 hiraku workflow status <workflow-session-id>
-hiraku runs --json
+hiraku leaderboard runs --json
 ```
 
 The [Autoresearch example](examples/autoresearch/README.md) shows how to use

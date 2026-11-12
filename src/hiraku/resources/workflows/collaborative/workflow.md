@@ -3,7 +3,7 @@ id: collaborative
 description: Draft, implement, launch, and analyze experiments with the user, step by step.
 rules: >-
   Use Hiraku's record and run tools, or the `hiraku` CLI (`hiraku record show`,
-  `hiraku record list`, `hiraku runs`), to read the task and earlier
+  `hiraku record list`, `hiraku leaderboard runs`), to read the task and earlier
   experiments. Never delete records or rewrite Git history.
 ---
 # Collaborative research
@@ -34,7 +34,7 @@ Call `workflow_approval` with the interrupt ID and `{"event": "launched"}` as
 the proposed response. Run the explicit argv supplied when starting the
 workflow with `hiraku run --record <experiment> -- <command...>` only after
 approval, then resume with the result once the run is tracked; check with
-`hiraku runs --record <experiment>`.
+`hiraku leaderboard runs --record <experiment>`.
 
 ## Analyze
 

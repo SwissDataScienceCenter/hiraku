@@ -76,7 +76,7 @@ hiraku run --record iris-classification/random-forest -- \
 Inspect all runs associated with the research root:
 
 ```bash
-hiraku runs
+hiraku leaderboard runs
 ```
 
 ??? info "Example run results"

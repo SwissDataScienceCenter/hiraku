@@ -91,9 +91,9 @@ hiraku run --record heart-disease-prediction/logistic-regression -- uv run pytho
   --model logistic --seed 42 --validation-fraction 0.25
 
 # query all runs under the root's tracking source
-hiraku runs
+hiraku leaderboard runs
 # or only the runs attributed to one child record
-hiraku runs --record heart-disease-prediction/logistic-regression
+hiraku leaderboard runs --record heart-disease-prediction/logistic-regression
 ```
 
 Expect one run with `val/log_loss` and `val/accuracy`. The training program
@@ -124,7 +124,7 @@ hiraku record create heart-disease-prediction/random-forest \
 
 hiraku run --record heart-disease-prediction/random-forest -- uv run python train.py \
   --model random_forest --seed 42 --validation-fraction 0.25
-hiraku runs --sort val/log_loss
+hiraku leaderboard runs --sort val/log_loss
 ```
 
 Expect two runs, with lower log loss first. Both use the same committed
@@ -253,7 +253,7 @@ additional child record and attributed run:
 ```bash
 hiraku record show heart-disease-prediction
 hiraku record tree
-hiraku runs \
+hiraku leaderboard runs \
   --params model,seed,validation_fraction \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending
