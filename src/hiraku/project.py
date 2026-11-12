@@ -351,7 +351,18 @@ class Project(BaseModel):
             # Install the MCP server configuration in supported project agent configs
             if install_mcp:
                 project._install_mcp_configs()
+                project._ignore_codex_config()
             return project
+
+    def _ignore_codex_config(self) -> None:
+        """Keep local Codex MCP settings out of the project repository."""
+        path = self.root / ".gitignore"
+        content = path.read_text(encoding="utf-8") if path.exists() else ""
+        entry = "/.codex/config.toml"
+        if entry in content.splitlines():
+            return
+        separator = "" if not content or content.endswith("\n") else "\n"
+        atomic_write(path, f"{content}{separator}{entry}\n")
 
     def _install_mcp_configs(self) -> None:
         """Register the stdio server in supported project agent configs.
