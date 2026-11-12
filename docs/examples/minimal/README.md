@@ -13,8 +13,8 @@ uv tool install --force ".[mlflow,wandb]"
 
 ## Initialize
 
-Git is optional for initialization. This walkthrough uses commits for run
-attribution, so initialize the code repository with `--git`:
+Git is optional for initialization. This walkthrough binds records to source
+commits, so initialize the code repository with `--git`:
 
 ```bash
 hiraku example create minimal my-project --git

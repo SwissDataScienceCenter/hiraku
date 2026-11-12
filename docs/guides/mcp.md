@@ -72,9 +72,8 @@ and fall back to the CLI when the host has not connected the server.
 | `leaderboard_list` | List leaderboard names without loading definitions, like `hiraku leaderboard list --json`. |
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
-| `job_submit` | Submit through PSI/J (default: detached) and return after acceptance. |
-| `job_list`, `job_show` | Show executor observations or saved final outcomes. |
-| `job_wait`, `job_logs`, `job_cancel` | Read saved output or request cancellation. |
+| `job_submit` | Start a detached local launcher or submit remotely and save its ID. |
+| `job_list`, `job_show` | Read saved submission metadata and final outcomes. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
 Create tools accept a Markdown body and a `fields` object for additional metadata.
@@ -86,11 +85,16 @@ paths and the organizational parent cannot be changed through the update tool.
 Expected failures are returned as MCP tool errors.
 
 `job_submit` requires explicit command arguments. Commands are not stored in
-records. It defaults to detached execution and returns after startup, without waiting
-for completion. `executor="local"` is an alias for `detached`.
-The detached adapter owns its worker and state;
-Hiraku persists execution identity and final outcomes in `job.json`;
-intermediate observations stay in memory. Use `job_wait` and `job_logs` separately.
+records. The default executor is `hiraku-local`, a subclass of PSI/J's
+`LocalJobExecutor` using a detached recording launcher. It saves `result.json`
+independently of the MCP server.
+Record attribution is optional: an omitted ID uses the active record when set,
+otherwise the job is unattributed.
+The execution directory defaults to the project root; supply an execution-side
+`directory` for remote jobs. Explicit environment values are saved with the spec.
+Use `job_show` to read saved metadata and local outcomes. Local output remains in
+the job's `stdout.log` and `stderr.log` files. Remote submissions retain their ID and submission-time status only;
+use the remote platform's native tools for results, logs, and cancellation.
 A connected client can run commands with the user's local permissions.
 
 ## Resources and evidence

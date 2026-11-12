@@ -266,11 +266,23 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_submit_tool_defaults_to_detached_execution(tmp_path: Path) -> None:
+def test_submit_tool_uses_independent_worker(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     server = create_server(config)
 
     async def exercise() -> None:
+        async def completed_job(job_id):
+            for _ in range(300):
+                result = await server.call_tool("job_show", {"job_id": job_id})
+                if result.structured_content["status"]["state"] in {
+                    "COMPLETED",
+                    "FAILED",
+                    "CANCELED",
+                }:
+                    return result
+                await asyncio.sleep(0.05)
+            pytest.fail("Submitted job did not finish")
+
         await server.call_tool(
             "record_create",
             {"record_id": "demo/demo", "title": "demo", "fields": {"type": "task"}},
@@ -290,30 +302,33 @@ def test_submit_tool_defaults_to_detached_execution(tmp_path: Path) -> None:
             },
         )
         job = dict(result.structured_content)
-        assert job["executor"] == "detached"
+        assert job["executor"] == "hiraku-local"
         assert Job.load(job["id"], project=config).record_id == "demo/demo"
         assert job["status"]["state"] in {"ACTIVE", "QUEUED"}
         (config.root / "release").touch()
-        completed = await server.call_tool("job_wait", {"job_id": job["id"]})
+        completed = await completed_job(job["id"])
         assert completed.structured_content["status"]["exit_code"] == 7
-        logs = await server.call_tool("job_logs", {"job_id": job["id"]})
-        assert dict(logs.structured_content) == {
-            "stdout": "out\n",
-            "stderr": "err\n",
-        }
+        saved = Job.load(job["id"], project=config)
+        assert saved.spec.stdout_path.read_text() == "out\n"
+        assert saved.spec.stderr_path.read_text() == "err\n"
         submitted = await server.call_tool(
             "job_submit",
             {
-                "executor": "local",
+                "executor": "hiraku-local",
                 "record_id": "demo/demo",
                 "command": [sys.executable, "-c", "raise SystemExit(3)"],
             },
         )
-        assert submitted.structured_content["executor"] == "detached"
-        completed = await server.call_tool(
-            "job_wait", {"job_id": submitted.structured_content["id"]}
-        )
+        assert submitted.structured_content["executor"] == "hiraku-local"
+        completed = await completed_job(submitted.structured_content["id"])
         assert completed.structured_content["status"]["exit_code"] == 3
+        config.clear_active_record()
+        submitted = await server.call_tool(
+            "job_submit", {"command": [sys.executable, "-c", "pass"]}
+        )
+        assert submitted.structured_content["record_id"] is None
+        completed = await completed_job(submitted.structured_content["id"])
+        assert completed.structured_content["status"]["exit_code"] == 0
 
     asyncio.run(exercise())
 

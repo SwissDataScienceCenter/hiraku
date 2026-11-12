@@ -1,167 +1,182 @@
 # Jobs and executors
 
-Hiraku runs local commands and submits remote jobs through PSI/J. Each attempt
-has a unique Job ID and belongs to the selected record:
+A Job records one command execution attempt and belongs to a research record.
+Run locally in the foreground, or submit an independent local execution:
 
 ```bash
 hiraku job run --record baseline -- python train.py
 hiraku job submit --record baseline -- python train.py
 ```
 
-Without `--record`, the active record is used. Commands run in the project root,
-including uncommitted changes. Foreground execution prints the job ID to stderr,
-streams saved output, and returns the command's exit code. Background execution
-prints the ID to stdout and returns after acceptance. Both use the `detached`
-executor, whose worker runs independently of the submitting process. `run` adds
-streaming and waiting; `submit --executor local` is an alias for `detached`.
-`run --no-follow` saves logs without streaming them. Commands have closed stdin;
-interactive terminal applications are not supported.
+Without `--record`, the active record is used when set; otherwise the job is
+unattributed. Local commands run in the project
+root, including uncommitted changes. `run` uses PSI/J's native
+`LocalJobExecutor`; `submit` defaults to `hiraku-local`, a recording subclass.
+Commands have closed stdin. Git provenance belongs to records and user-managed
+tracking runs; Jobs do not collect it.
 
-For `submit`, `--executor NAME` selects any installed PSI/J executor.
-`--executor-url URL`
-passes its target URL, and repeated `--attribute KEY VALUE` options set PSI/J
-custom attributes. `--directory PATH` sets the execution-side working directory;
-the default is the project root for local jobs and the executor default otherwise.
+`run` prints the job ID to stderr, waits, and returns the command's exit code.
+Stdout and stderr are streamed to the terminal and saved to files. Stdin is
+disconnected, so interactive commands are not supported.
+Ctrl-C requests cancellation and waits for the local process to stop.
+Hiraku saves the native final status in `job.json`. If Hiraku crashes before
+saving it, the outcome remains unknown.
+
+`submit` returns its job ID on stdout after the executor starts the launcher.
+For `submit`, the local launcher creates a new session, runs the command, and
+atomically writes `result.json` before exiting. It survives the submitting process
+exiting without a Python worker, reattachment, or an observation monitor.
+Default local submission requires a POSIX system with Bash and supports a single
+command with PSI/J pre/post hooks;
+custom launchers and multiple-process resource requests are unsupported.
+
+For submission, `--executor NAME` selects an installed PSI/J executor,
+`--executor-url URL` selects its target, and repeated `--attribute KEY VALUE`
+options supply custom attributes. `--directory PATH` sets the execution-side
+working directory. CLI and MCP default to the project root; for remote jobs,
+supply a directory that exists on the execution side.
+
+## Results and output
 
 ```bash
 hiraku job list [--json]
 hiraku job show JOB_ID [--json]
-hiraku job logs JOB_ID
-hiraku job logs JOB_ID --follow
-hiraku job wait JOB_ID
-hiraku job cancel JOB_ID
 ```
 
-`show` and `list` display the executor's latest observation, or a saved final
-outcome without contacting the backend. Executors own polling; Hiraku reuses
-their handles without forcing extra queries. Initial attachment errors log a
-warning; show/list continue with submission information for that job. Listing
-attaches sequentially, allowing up to 30 seconds for an initial PSI/J status.
+`show` and `list` read saved metadata and, for detached local jobs, the launcher's
+result file, without querying a backend. Until that result appears, they show submission-time
+information. If the launcher or machine fails, a missing result means the outcome is unknown;
+Hiraku does not infer success from a missing process or invent a failure.
 
-`wait` and `logs --follow` read executor status every second. `wait` prints no
-logs and returns the job's exit code; `logs` alone prints saved output and returns.
-Initial attachment failure stops waiting/following with an error, leaving the job
-running. Later polling failures are logged by the executor and retain its last
-observation; they do not establish a terminal outcome.
+Inspect `stdout.log` and `stderr.log` in the job's directory using ordinary file
+tools. Foreground `run` also streams these files; `submit` does not follow or
+fetch output.
 
-Cancellation uses the executor. Ctrl-C during foreground execution requests
-cancellation and waits for cleanup. Interrupting log following or `job wait`
-stops observation without canceling the job.
+Cancellation from another process is not supported. Use the remote platform's
+native controls for remote jobs. Renku logs are retrieved with `rnk job logs
+NATIVE_ID`, rather than copied into Hiraku.
+Killing a detached local launcher can prevent it from recording an outcome.
+Foreground cancellation is saved by the waiting Hiraku process.
 
-## Persistence
-
-Each job lives in `.hiraku/jobs/<job_id>/`: `job.json`, `stdout.log`, and `stderr.log`.
-Metadata includes the command, record, host, executor, native ID, timestamps, exit
-status, and launch-time Git commit and cleanliness. Launch provenance describes
-the submitting checkout, which may differ from code loaded by the command.
-
-Hiraku atomically writes `job.json` at creation, submission, and when it observes
-a final outcome. Intermediate observations remain in memory. Submission and
-final-outcome writes use a per-job lock; backend queries do not hold it. A saved final outcome
-remains available after backend history is removed. Without a Hiraku observer,
-completion remains in the backend until a later command attaches and saves it.
-`updated_at` is the last snapshot write, not an indication of backend freshness.
-
-The detached executor keeps worker status under
-`.hiraku/executors/detached/<native_id>/`. Its worker owns the built-in PSI/J local
-handle and records the real exit code independently of Hiraku. Keep this state
-while jobs are active; attachment requires the same directory and host. A worker
-heartbeat older than 30 seconds is an observation error. Worker startup allows
-30 seconds. `executor_url` can select another directory or file URI.
-
-Later commands attach again to resume observation. Executor monitors stop when
-their handles are discarded or final.
-
-Job storage is local runtime state and should be excluded from Git with
-`/.hiraku/`. Logs persist until explicitly removed by the user.
-
-## Tracking attribution
-
-Hiraku injects `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID`. Both are reserved;
-other environment variables pass through unchanged. Scripts log both values:
-
-- CSV: `record_id` and `hiraku_job_id` columns.
-- MLflow: `hiraku.record_id` and `hiraku.job_id` tags.
-- W&B: `hiraku.record_id` and `hiraku.job_id` config values.
-
-A job may produce several runs or none. Leaderboards read attribution directly
-from each run; sharing results does not require publishing `.hiraku/` job history.
-`Run.job_id` optionally links execution details. `Run.commit` retains the
-source-reported code commit, while `Job.commit` describes the submitting checkout.
-Logging destinations and code provenance remain user-managed. Scripts running
-outside Hiraku can supply attribution themselves.
-
-Python callers create an attempt before executing it:
+## Python and MCP
 
 ```python
 from hiraku.jobs import Job
 
-job = Job.create(["python", "train.py"], project=project)
-job.submit()
-status = job.wait()
+job = Job.create(["python", "train.py"], record_id="baseline", project=project).run()
+print(job.status.exit_code)
 
-# Or create and wait in one expression:
-job = Job.create(["python", "train.py"], project=project).run()
+job = Job.create(["python", "train.py"], record_id="baseline", project=project)
+native = job.submit(executor="hiraku-local")  # Live PSI/J handle
+# Later, read the saved result:
+job = Job.load(job.id, project=project)
 ```
 
-`Job.create()` validates and saves a `NEW` attempt without contacting an executor.
-It accepts `record_id`, `env`, `executor`, `executor_url`, `directory`, native
-PSI/J `attributes`, and `resources`. The default executor is `detached`;
-`local` selects the same adapter, which preserves PSI/J attributes and resources.
-Explicit environment additions stay in memory; submit the created object to
-retain them. They are not stored in snapshots.
-`job.submit()` and `job.run()` both return the job and allow only one submission
-per attempt, including failed attempts. Retry with a new `Job.create()`.
-`job.run()` submits using the configured executor, waits, and cancels on
-interruption. It does not stream output; the CLI owns foreground streaming.
-A Job exposes PSI/J's `spec` (`JobSpec`) and `status` (`JobStatus`);
-`job.wait()` returns a PSI/J status, `job.logs(follow=True)` yields output,
-and `job.cancel()` requests cancellation.
-`Job.load()` and `Job.list()` read snapshots without network access;
-`job.update()` reads the attached executor's latest status and saves final outcomes.
-It raises `ExecutionError` if initial attachment or final persistence fails.
-`update_jobs(jobs)` attempts updates independently and logs failures.
-State names follow PSI/J:
-`NEW`, `QUEUED`, `ACTIVE`, `COMPLETED`, `FAILED`, and `CANCELED`.
+`Job.create()` validates and constructs an unsaved `NEW` attempt. It accepts
+an optional `record_id`, `project`, `env`, `directory`, native PSI/J
+`attributes`, and `resources`.
+Only CLI and MCP resolve the active record. Python callers may supply an explicit
+ID or omit it for an unattributed job.
+CLI and MCP submission default to `hiraku-local`. `directory` defaults to the
+current working directory at creation time. Explicit environment additions are
+stored in `job.spec.environment` and persisted in `job.json`; inherited environment
+values are not captured. The prepared spec is passed directly to PSI/J.
 
-MCP provides `job_submit`, `job_list`, `job_show`, `job_wait`, `job_logs`, and
-`job_cancel`. Submission returns after acceptance; use wait and logs separately.
+`run()` and `submit()` save the attempt before launching and
+permit one execution per attempt, including failed attempts. Retry by creating
+another Job. `run()` returns the Hiraku Job, uses native `LocalJobExecutor` through
+`submit()`, streams its output, waits on the native
+handle, and saves its final status, including cancellation on interruption.
+The saved executor name is `local`. `submit(executor=...)` requires a PSI/J
+executor name or instance and returns the PSI/J job after acceptance. The handle reports live
+status while its executor is running; waiting on it does not itself save the final
+status to the Hiraku snapshot. Detached local submission records its result separately.
+
+`job.executor` is `None` until submission, then holds the selected PSI/J executor.
+Snapshots retain the string descriptor and executor URL; loading reconstructs
+the instance. To select another executor:
+
+```python
+import psij
+
+executor = psij.JobExecutor.get_instance(
+    "renku", url="https://renkulab.io/p/namespace/project"
+)
+Job.create(
+    command, record_id="baseline", project=project, attributes=attributes
+).submit(executor=executor)
+```
+
+`Job.load()` and `Job.list()` return new snapshots with saved results; they do
+not update existing instances or write completion metadata.
+`job.path` identifies the metadata file and is excluded from serialized fields.
+
+MCP provides `job_submit`, `job_list`, and `job_show`. Submission
+returns after acceptance; clients inspect saved results with `job_show`.
+
+## Storage and tracking
+
+Each local attempt stores `job.json`, `stdout.log`, and `stderr.log` under
+`.hiraku/jobs/<job_id>/`. For `run()`, Hiraku saves the native final status in
+`job.json`. For `submit(executor="hiraku-local")`, Hiraku writes submission metadata to `job.json`;
+the launcher alone records its exit code and completion time in `result.json`.
+These separate atomic writes cannot overwrite each other. Exclusive creation of
+the job directory prevents duplicate execution. An interrupted submission can leave
+an attempt without a known outcome; retry by creating another Job.
+Nonzero exit codes mean failure; a failed pre/post hook also
+fails the execution. Cancellation is not inferred from exit codes.
+Exclude `/.hiraku/` from Git. Logs and results remain until you remove them.
+
+Hiraku injects `HIRAKU_RECORD_ID` (empty for unattributed jobs) and `HIRAKU_JOB_ID`.
+Scripts log them as CSV
+`record_id` / `hiraku_job_id`, or MLflow tags and W&B configuration values
+`hiraku.record_id` / `hiraku.job_id`. Both environment variables are reserved;
+other environment variables pass through unchanged.
+
+A job can produce several runs or none. Leaderboards read attribution directly
+from the tracking source, independently of local job history. `Run.job_id`
+optionally links execution details. Logging destinations and code provenance
+remain user-managed; scripts outside Hiraku can provide attribution themselves.
 
 ## Renku through rnk
 
-Install and authenticate the `rnk` CLI independently (`rnk login`). The bundled
-`renku` executor uses that CLI for submission, polling, cancellation, and logs:
+Install and authenticate `rnk` independently (`rnk login`), then select a launcher:
 
 ```bash
 hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespace/project \
+  --directory /path/to/remote/project \
   --attribute renku.launcher LAUNCHER_ID \
   -- python -u train.py
 ```
 
-The existing launcher supplies the image, mounts, and resource allocation.
 Alternatively, use the server URL and `--attribute renku.project namespace/project`.
-Commands override only that submission, without modifying the launcher.
-For a Cloud Native Buildpacks image, add
-`--attribute renku.command_prefix /cnb/lifecycle/launcher` to initialize the image's
-launch environment. Relative command paths resolve in the remote launcher's working
-directory, not the local checkout. Hiraku does not upload local files or sync code.
+The launcher supplies the image, mounts, and resource allocation. For a Cloud
+Native Buildpacks image, add `--attribute renku.command_prefix
+/cnb/lifecycle/launcher` to initialize its launch environment. Hiraku overrides
+the submitted command without modifying the launcher or uploading local code.
 
-The Renku adapter polls every five seconds while its handle is retained;
-waiting and following read those observations without extra backend queries.
-Each `rnk` call allows 20 seconds. Combined output is saved in `stdout.log`;
-separate stderr and numeric exit codes are not exposed by rnk. A known successful
-terminal state returns CLI exit code zero; the stored native exit code remains absent.
-
-The adapter uses launcher resources; PSI/J resource requests, staging, and launch
-hooks are unsupported.
+Renku submission records the remote job ID and acceptance-time status only.
+Hiraku does not poll for remote completion or create a local result file. Use
+`rnk job list`, `rnk job logs`, and `rnk job stop` for status, output, and control.
+Each `rnk` submission call allows 20 seconds. PSI/J resource requests, staging,
+and launch hooks are unsupported by this adapter. Other executors retain
+submission metadata only when using `submit()` unless they provide a result reader;
+use their native tools to inspect results.
 
 ## Adding executors
 
 Implement PSI/J's `JobExecutor` contract and register a descriptor in an installed
 `psij-descriptors/*.py` module, following `src/psij-descriptors/renku.py`.
-Hiraku discovers executors through `JobExecutor.get_instance()`. Do not add an
-`__init__.py` to the descriptors directory. Standalone PSI/J callers can use
-`detached` with a state-directory URL; without one it uses
-`JobExecutorConfig.work_directory / "detached"`.
-PSI/J's built-in Slurm executor is also discoverable; cluster access, shared
-paths, and scheduler configuration must be supplied by the execution environment.
+`RecordingLocalExecutor` in `src/psij-descriptors/recording.py` configures the
+recording launcher and reads its saved outcomes. The module also defines the
+launchers and registers executor `hiraku-local` and launcher
+`hiraku-record`. Foreground execution uses `hiraku-single`, a small single-command
+launcher with quoted paths to work around PSI/J's unquoted output redirections.
+It neither detaches nor records results. Other executors retain their own launchers.
+The bundled scripts are `single.sh` for that quoting workaround and `detach.sh`
+for detached submission and result recording.
+Do not add an `__init__.py` to the descriptors directory. Selecting the built-in `local` executor
+explicitly uses PSI/J's ordinary execution without Hiraku's detached recording.
+Executors may expose `read_result(path)` for saved outcomes.
+PSI/J's built-in Slurm executor is also available; supply cluster access and
+shared paths through the execution environment.

@@ -117,6 +117,7 @@ def generate(project: Project) -> dict[str, str]:
                 [*command, "--seed", str(seed)],
                 record_id=record.id,
                 project=project,
+                directory=project.root,
                 env={
                     "MLFLOW_TRACKING_URI": f"sqlite:///{database}",
                     "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",

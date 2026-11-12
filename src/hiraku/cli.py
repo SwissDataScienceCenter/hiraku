@@ -17,7 +17,7 @@ from typing import Any
 
 import click
 import yaml
-from psij import JobAttributes
+from psij import JobAttributes, JobExecutor
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 from rich import box, print_json
@@ -32,7 +32,7 @@ from .errors import (
 )
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .jobs import Job, update_jobs
+from .jobs import Job
 from .project import Project
 from .record import Record, validate_identifier
 from .tracking import Leaderboard, Run
@@ -749,7 +749,7 @@ def _exit_job(job: Job) -> None:
 @click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
 @click.option(
-    "--executor", default="detached", show_default=True, help="PSI/J executor."
+    "--executor", default="hiraku-local", show_default=True, help="PSI/J executor."
 )
 @click.option("--executor-url")
 @click.option(
@@ -769,15 +769,16 @@ def job_submit(
     """Submit a command in the background and return its job ID."""
     job = Job.create(
         command,
-        record_id=record_id,
+        record_id=record_id
+        if record_id is not None
+        else state.project.active_record_id,
         project=state.project,
-        executor=executor,
-        executor_url=executor_url,
-        directory=directory,
+        directory=directory or state.project.root,
         attributes=JobAttributes(custom_attributes=dict(attributes))
         if attributes
         else None,
-    ).submit()
+    )
+    job.submit(executor=JobExecutor.get_instance(executor, url=executor_url))
     click.echo(job.id)
 
 
@@ -788,7 +789,6 @@ def job_submit(
     "--attribute", "attributes", type=(str, str), multiple=True, metavar="KEY VALUE"
 )
 @click.option("--directory", type=click.Path(path_type=Path))
-@click.option("--no-follow", is_flag=True, help="Save output without streaming it.")
 @click.pass_obj
 def job_run(
     state: CLIContext,
@@ -796,33 +796,22 @@ def job_run(
     record_id: str | None,
     attributes: tuple[tuple[str, str], ...],
     directory: Path | None,
-    no_follow: bool,
 ) -> None:
-    """Submit locally, stream output, and wait for completion."""
+    """Run locally, wait, and return the command's exit code."""
     job = Job.create(
         command,
-        record_id=record_id,
+        record_id=record_id
+        if record_id is not None
+        else state.project.active_record_id,
         project=state.project,
-        directory=directory,
+        directory=directory or state.project.root,
         attributes=JobAttributes(custom_attributes=dict(attributes))
         if attributes
         else None,
-    ).submit()
-    _run_job(job, follow=not no_follow)
-
-
-def _run_job(job: Job, *, follow: bool) -> None:
+    )
     click.echo(job.id, err=True)
-    try:
-        if follow:
-            for name, text in job.logs(follow=True):
-                click.echo(text, nl=False, err=name == "stderr")
-        else:
-            job.wait()
-    except KeyboardInterrupt:
-        job.cancel()
-        job.wait()
-        raise
+
+    job.run()
     _exit_job(job)
 
 
@@ -835,9 +824,8 @@ def job_list(
     record_id: str | None,
     json_output: bool,
 ) -> None:
-    """List jobs with the latest executor observations or saved final outcomes."""
+    """List saved submission metadata and final results."""
     jobs = Job.list(project=state.project, record_id=record_id)
-    update_jobs(jobs)
     if json_output:
         _emit_json([job.model_dump(mode="json") for job in jobs])
     else:
@@ -847,7 +835,7 @@ def job_list(
                 (
                     job.id,
                     job.record_id,
-                    job.executor,
+                    job.executor.name,
                     job.status.state.name,
                     job.native_id,
                 )
@@ -861,9 +849,8 @@ def job_list(
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
 def job_show(state: CLIContext, job_id: str, json_output: bool) -> None:
-    """Show the latest executor observation or saved final outcome."""
+    """Show saved submission metadata and the final result."""
     job = Job.load(job_id, project=state.project)
-    update_jobs([job])
     if json_output:
         _emit_json(job.model_dump(mode="json"))
     else:
@@ -872,7 +859,7 @@ def job_show(state: CLIContext, job_id: str, json_output: bool) -> None:
             [
                 ("id", job.id),
                 ("record", job.record_id),
-                ("executor", job.executor),
+                ("executor", job.executor.name),
                 ("state", job.status.state.name),
                 ("updated_at", job.updated_at),
                 ("native_id", job.native_id),
@@ -881,40 +868,10 @@ def job_show(state: CLIContext, job_id: str, json_output: bool) -> None:
                     shlex.join([job.spec.executable, *(job.spec.arguments or [])]),
                 ),
                 ("directory", job.spec.directory),
-                ("commit", job.commit),
-                ("git_state", job.git_state),
                 ("exit_code", job.status.exit_code),
                 ("message", job.status.message),
             ],
         )
-
-
-@job_group.command("wait")
-@click.argument("job_id")
-@click.pass_obj
-def job_wait(state: CLIContext, job_id: str) -> None:
-    """Wait without replaying logs and return the command's exit code."""
-    job = Job.load(job_id, project=state.project)
-    job.wait()
-    _exit_job(job)
-
-
-@job_group.command("cancel")
-@click.argument("job_id")
-@click.pass_obj
-def job_cancel(state: CLIContext, job_id: str) -> None:
-    """Request cancellation through the job's executor."""
-    Job.load(job_id, project=state.project).cancel()
-
-
-@job_group.command("logs")
-@click.argument("job_id")
-@click.option("--follow", is_flag=True)
-@click.pass_obj
-def job_logs(state: CLIContext, job_id: str, follow: bool) -> None:
-    """Read saved output; stopping observation does not cancel execution."""
-    for name, text in Job.load(job_id, project=state.project).logs(follow=follow):
-        click.echo(text, nl=False, err=name == "stderr")
 
 
 @main.group("leaderboard")

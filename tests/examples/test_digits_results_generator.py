@@ -152,10 +152,11 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         command,
         record_id=weak.id,
         project=config,
+        directory=config.root,
         env={
             "MLFLOW_TRACKING_URI": f"sqlite:///{config.root / 'mlflow.db'}",
             "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
         },
     ).run()
-    assert job.wait().exit_code == 0
+    assert job.status.exit_code == 0
     assert len(leaderboard.list_runs(config)) == 7

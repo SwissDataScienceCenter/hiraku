@@ -18,13 +18,13 @@ from mcp.server.mcpserver.exceptions import (
 from mcp.types import (
     ToolAnnotations,
 )
-from psij import JobAttributes
+from psij import JobAttributes, JobExecutor
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
 from .errors import HirakuError, ValidationError
-from .jobs import Job, update_jobs
+from .jobs import Job
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -105,8 +105,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
     Tools: project_info, leaderboard_list, record_list, record_show, record_create,
-    record_update, record_delete, job_submit, job_list, job_show, job_wait,
-    job_cancel, job_logs, and runs. Also registers the record
+    record_update, record_delete, job_submit, job_list, job_show, and runs.
+    Also registers the record
     catalog and record resources, and the propose_implementation prompt.
     """
 
@@ -233,68 +233,42 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     )
     def job_submit(
         command: list[str],
-        executor: str = "detached",
+        executor: str = "hiraku-local",
         record_id: str | None = None,
         executor_url: str | None = None,
         attributes: dict[str, str] | None = None,
         directory: str | None = None,
     ) -> dict[str, Any]:
         """Submit through PSI/J and return after acceptance, without waiting."""
+        record_id = record_id if record_id is not None else selected.active_record_id
         job = Job.create(
             command,
             record_id=record_id,
             project=selected,
-            executor=executor,
-            executor_url=executor_url,
-            directory=Path(directory) if directory else None,
+            directory=Path(directory) if directory else selected.root,
             attributes=JobAttributes(custom_attributes=attributes)
             if attributes
             else None,
-        ).submit()
+        )
+        job.submit(executor=JobExecutor.get_instance(executor, url=executor_url))
         return job.model_dump(mode="json")
-
-    @server.tool(
-        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
-    )
-    def job_list(
-        record_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """List jobs with the latest executor observations or saved final outcomes."""
-        jobs = Job.list(project=selected, record_id=record_id)
-        update_jobs(jobs)
-        return [job.model_dump(mode="json") for job in jobs]
-
-    @server.tool(
-        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
-    )
-    def job_show(job_id: str) -> dict[str, Any]:
-        """Show the latest executor observation or saved final outcome."""
-        job = Job.load(job_id, project=selected)
-        update_jobs([job])
-        return job.model_dump(mode="json")
-
-    @server.tool(
-        annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True)
-    )
-    def job_cancel(job_id: str) -> dict[str, str]:
-        """Request local job cancellation."""
-        Job.load(job_id, project=selected).cancel()
-        return {"requested": job_id}
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)
     )
-    def job_logs(job_id: str) -> dict[str, str]:
-        """Read saved job stdout and stderr."""
-        return dict(Job.load(job_id, project=selected).logs())
+    def job_list(
+        record_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List saved submission metadata and final results."""
+        jobs = Job.list(project=selected, record_id=record_id)
+        return [job.model_dump(mode="json") for job in jobs]
 
     @server.tool(
-        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=False)
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False)
     )
-    def job_wait(job_id: str) -> dict[str, Any]:
-        """Wait for a local job's outcome without canceling on interruption."""
+    def job_show(job_id: str) -> dict[str, Any]:
+        """Show saved submission metadata and the final result."""
         job = Job.load(job_id, project=selected)
-        job.wait()
         return job.model_dump(mode="json")
 
     @server.tool(

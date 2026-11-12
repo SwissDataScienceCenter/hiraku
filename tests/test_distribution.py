@@ -39,6 +39,13 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
     expected.add("hiraku/workflows/__init__.py")
     expected.add("hiraku/workflows/langgraph.py")
     expected.add("hiraku/workflows/session_history.py")
+    expected.update(
+        {
+            "psij-descriptors/recording.py",
+            "hiraku/resources/launchers/detach.sh",
+            "hiraku/resources/launchers/single.sh",
+        }
+    )
     with ZipFile(wheels[0]) as wheel:
         packaged = set(wheel.namelist())
 

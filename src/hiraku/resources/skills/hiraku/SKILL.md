@@ -31,7 +31,7 @@ through an existing record lifecycle.
 - **Job:** A local PSI/J execution attempt in the current project working tree,
   with a saved JSON snapshot and output. Foreground waits; background returns
   after submission. Scripts log `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` on runs.
-  Hiraku streams output, returns the command's exit code, and supplies tracking
+  Hiraku saves output, returns the command's exit code, and supplies tracking
   attribution for that invocation.
 - **Dispatch script:** An optional project script under `hiraku/dispatch/`
   that prepares the runtime before running argv. Commands run directly by
@@ -362,22 +362,25 @@ Commands execute in the current project working tree, including uncommitted
 changes. `hiraku job run` waits until the command exits; `hiraku job submit` returns
 after submission. Commands have closed stdin and do not support interactive input.
 
-Hiraku injects `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID`. Log them as CSV
+Hiraku injects `HIRAKU_RECORD_ID` (empty for unattributed jobs) and `HIRAKU_JOB_ID`.
+Log them as CSV
 `record_id` / `hiraku_job_id`, or MLflow tags and W&B config values
 `hiraku.record_id` / `hiraku.job_id`. Runs carry their own attribution and can be
-queried without local job history. `Run.commit` retains source-reported provenance;
-launch provenance stays on `Job.commit`, optionally linked by `Run.job_id`.
+queried without local job history. Records and tracking runs hold user-managed
+code provenance; Jobs do not collect it.
 Tracking destinations remain
 user-managed. Cwd is the project root. `hiraku job submit` returns after
-submission; `hiraku job list/show/logs/wait/cancel` inspects and controls saved jobs
-under `.hiraku/jobs/`. Default submission uses the `detached` PSI/J adapter, which
-owns status and exit codes under `.hiraku/executors/detached/`; only Hiraku updates
-`job.json`. `run` streams output and waits for the same detached execution.
-Remote jobs have no persistent monitor. `show/list` observe nonfinal jobs
-through executor-owned polling. Hiraku saves execution identity and final outcomes;
-intermediate observations remain in memory. `wait` and `logs --follow` read the
-executor's latest status until completion. Initial attachment errors stop waiting;
-later backend polling failures retain the executor's last observation.
+submission; `hiraku job list/show` reads saved jobs under `.hiraku/jobs/`.
+Python `Job.create()` defaults to the caller's cwd; pass `directory` to override it.
+Explicit `env` values are stored in the job spec and saved metadata.
+`run` uses native PSI/J `LocalJobExecutor`, waits, and saves its final status in
+`job.json`. The CLI and MCP default submission executor, `hiraku-local`, subclasses
+`LocalJobExecutor` and starts a detached shell launcher that records `result.json`.
+Show/list combine saved metadata with the launcher's result. Read `stdout.log`
+and `stderr.log` directly; foreground `job run` also streams output. There is no
+reattachment or cancellation from another process.
+Remote submissions retain their native ID without polling for completion.
+Renku status, output, and cancellation use native `rnk` commands.
 Use a project dispatcher to prepare the runtime when needed.
 
 CSV sources require a `path`, relative to the project root or absolute;
@@ -399,10 +402,11 @@ The Python API exposes `Project` in `hiraku.project`; `Record`,
 record loaders and listing functions in `hiraku.record`;
 `Leaderboard` and `Metric` in `hiraku.tracking`; use `Leaderboard.create()`,
 `load()`, `list()`, and `delete()` for definitions;
-`Run` in `hiraku.tracking`; and `Job.create(command, project=..., executor=...)`
-in `hiraku.jobs`, followed by `job.submit()` or blocking `job.run()`.
-Each job permits one submission. Use `Job.load()`, `Job.list()`, `job.wait()`,
-`job.logs()`, and `job.cancel()` to inspect and control execution.
+`Run` in `hiraku.tracking`; and `Job.create(command, record_id=..., project=...)`
+in `hiraku.jobs`, followed by `job.submit(executor="hiraku-local")` or blocking
+`job.run()`. Pass another executor name or PSI/J instance to select it.
+Each job permits one execution. Use `Job.load()` and `Job.list()` to inspect
+saved execution results, and ordinary file tools for saved output.
 Records with `type: context` store supporting material. Workflows run in the
 current coding agent through the Hiraku MCP server (`hiraku mcp serve`). V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.
