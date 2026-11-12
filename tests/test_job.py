@@ -1,8 +1,14 @@
 """Native PSI/J jobs, attribution, history, and CLI behavior."""
 
+import gc
 import json
+import os
+import signal
 import subprocess
 import sys
+import time
+import weakref
+from contextlib import suppress
 from datetime import timedelta
 from pathlib import Path
 from threading import Event, Timer
@@ -182,6 +188,7 @@ def test_detached_is_independent_of_hiraku(project, detached):
     detached.submit(job)
     assert wait(job).exit_code == 7
     assert job.native_id in detached.list()
+    assert job.spec.launcher == "quoted-single"
     assert notifications and set(notifications) == {job.native_id}
     assert job.spec.stdout_path.read_text() == "hello\n"
     assert not list(project.root.rglob("job.json"))
@@ -233,15 +240,202 @@ def test_detached_preserves_output_environment_and_resources(project, detached):
     assert job.spec.resources.computed_process_count == 1
 
 
-def test_detached_rejects_unsupported_launcher_and_resources(project, detached):
-    for field, value in [
-        ("launcher", "quoted-single"),
-        ("resources", psij.ResourceSpecV1(process_count=2)),
-    ]:
-        job = prepare_job(["echo"], project=project)
-        setattr(job.spec, field, value)
-        with pytest.raises(psij.InvalidJobException):
-            detached.submit(job)
+def test_detached_rejects_multiple_processes(project, detached):
+    job = prepare_job(
+        ["echo"], project=project, resources=psij.ResourceSpecV1(process_count=2)
+    )
+    with pytest.raises(psij.InvalidJobException, match="single local process"):
+        detached.submit(job)
+    assert job.executor is None and job.native_id is None
+
+
+@pytest.mark.parametrize("launcher", ["quoted-single", "single"])
+def test_detached_uses_selected_launcher(project, detached, launcher):
+    job = prepare_job([sys.executable, "-c", "print('selected')"], project=project)
+    job.spec.launcher = launcher
+    detached.submit(job)
+    assert wait(job).exit_code == 0
+    assert job.spec.launcher == launcher
+    assert job.spec.stdout_path.read_text() == "selected\n"
+
+
+def test_detached_environment_and_directory(project, detached, monkeypatch):
+    monkeypatch.setenv("PARENT_ONLY", "inherited")
+    command = (
+        "import os; print(os.getcwd()); print(os.environ['COUNT']); "
+        "print(repr(os.environ.get('PARENT_ONLY')))"
+    )
+    job = psij.Job(
+        psij.JobSpec(
+            sys.executable,
+            ["-c", command],
+            directory=project.root,
+            inherit_environment=False,
+            environment={"COUNT": 42},
+        )
+    )
+    detached.submit(job)
+    assert wait(job).exit_code == 0
+    assert job.spec.stdout_path.read_text().splitlines() == [
+        str(project.root),
+        "42",
+        "None",
+    ]
+
+
+def test_detachment_and_child_reaping(project, detached, monkeypatch):
+    original = subprocess.Popen
+    processes = []
+
+    def popen(*args, **kwargs):
+        assert kwargs["start_new_session"] is True
+        process = original(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    job = prepare_job(
+        [sys.executable, "-c", "import os; print(os.getsid(0))"], project=project
+    )
+    detached.submit(job)
+    assert wait(job).exit_code == 0
+    process = processes[0]
+    assert int(job.spec.stdout_path.read_text()) == process.pid
+    deadline = time.monotonic() + 5
+    while process.returncode is None:
+        assert time.monotonic() < deadline, "Supervisor was not reaped"
+        time.sleep(0.01)
+
+
+def test_discarded_submission_is_reaped_without_retaining_job(
+    project, detached, monkeypatch
+):
+    original = subprocess.Popen
+    processes = []
+    gate = project.root / "release-discarded"
+
+    def popen(*args, **kwargs):
+        process = original(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    command = (
+        "from pathlib import Path; import time; "
+        f"p=Path({str(gate)!r}); "
+        "exec('while not p.exists(): time.sleep(.01)')"
+    )
+    job = prepare_job([sys.executable, "-c", command], project=project)
+    detached.submit(job)
+    reference = weakref.ref(job)
+    del job
+    try:
+        deadline = time.monotonic() + 5
+        while reference() is not None:
+            gc.collect()
+            assert time.monotonic() < deadline, "Observer retained discarded job"
+            time.sleep(0.01)
+    finally:
+        gate.touch()
+    while processes[0].returncode is None:
+        assert time.monotonic() < deadline, "Discarded supervisor was not reaped"
+        time.sleep(0.01)
+
+
+def test_discarded_attachment_does_not_keep_observer_alive(project, detached):
+    attached = psij.Job()
+    (detached.jobs_dir / attached.id).mkdir(parents=True)
+    reference = weakref.ref(attached)
+    detached.attach(attached, attached.id)
+    del attached
+    deadline = time.monotonic() + 5
+    while reference() is not None:
+        gc.collect()
+        assert time.monotonic() < deadline, "Observer retained discarded attachment"
+        time.sleep(0.01)
+
+
+def test_supervisor_start_failure_does_not_bind_job(project, detached, monkeypatch):
+    original = subprocess.Popen
+
+    def fail(*args, **kwargs):
+        raise OSError("cannot start")
+
+    monkeypatch.setattr(subprocess, "Popen", fail)
+    job = prepare_job(["echo"], project=project)
+    with pytest.raises(
+        psij.SubmitException, match="Could not start detached supervisor"
+    ):
+        detached.submit(job)
+    assert job.status.state == psij.JobState.NEW
+    assert job.executor is None and job.native_id is None
+    monkeypatch.setattr(subprocess, "Popen", original)
+    detached.submit(job)
+    assert wait(job).exit_code == 0
+
+
+def test_supervisor_records_launcher_start_failure(project, detached, monkeypatch):
+    monkeypatch.setattr(
+        detached,
+        "_get_launcher",
+        lambda name: SimpleNamespace(
+            get_launch_command=lambda job: ["/nonexistent/hiraku-test-launcher"],
+        ),
+    )
+    job = prepare_job(["echo"], project=project)
+    detached.submit(job)
+    status = wait(job)
+    assert status.state == psij.JobState.FAILED
+    assert status.exit_code is None
+    assert "hiraku-test-launcher" in status.message
+    attached = psij.Job()
+    detached.attach(attached, job.native_id)
+    assert wait(attached).message == status.message
+
+
+def test_supervisor_preserves_native_signal_exit(project, detached, monkeypatch):
+    monkeypatch.setattr(
+        detached,
+        "_get_launcher",
+        lambda name: SimpleNamespace(
+            get_launch_command=lambda job: [
+                sys.executable,
+                "-c",
+                "import os,signal; os.kill(os.getpid(),signal.SIGTERM)",
+            ],
+        ),
+    )
+    job = prepare_job(["echo"], project=project)
+    detached.submit(job)
+    assert wait(job).exit_code == -15
+    attached = psij.Job()
+    detached.attach(attached, job.native_id)
+    assert wait(attached).exit_code == -15
+
+
+def test_killed_supervisor_leaves_unknown_outcome(project, detached):
+    marker = project.root / "supervisor-session"
+    command = (
+        "import os,time; from pathlib import Path; "
+        f"Path({str(marker)!r}).write_text(str(os.getsid(0))); time.sleep(30)"
+    )
+    job = prepare_job([sys.executable, "-c", command], project=project)
+    detached.submit(job)
+    try:
+        deadline = time.monotonic() + 10
+        while not marker.exists():
+            assert time.monotonic() < deadline, "Command did not start"
+            time.sleep(0.01)
+        os.killpg(int(marker.read_text()), signal.SIGKILL)
+        assert job.wait(timeout=timedelta(seconds=0.2)) is None
+        attached = psij.Job()
+        detached.attach(attached, job.native_id)
+        assert attached.wait(timeout=timedelta(seconds=0.2)) is None
+        assert not (detached.jobs_dir / job.native_id / "result.json").exists()
+    finally:
+        if marker.exists():
+            with suppress(ProcessLookupError):
+                os.killpg(int(marker.read_text()), signal.SIGKILL)
 
 
 @pytest.mark.parametrize("native_id", ["../escape", "unknown", "a" * 36])
@@ -276,7 +470,7 @@ def test_background_survives_submitter(project, detached):
 
 
 def test_missing_result_does_not_infer_success(project, detached):
-    # An interrupted launcher may leave only its backend directory.
+    # An interrupted supervisor may leave only its backend directory.
     job = psij.Job()
     (detached.jobs_dir / job.id).mkdir(parents=True)
     detached.attach(job, job.id)
@@ -425,7 +619,7 @@ def history_entry(project, detached, *, record_id="test", final=False):
         attributes=psij.JobAttributes(custom_attributes={"example": "value"}),
         resources=psij.ResourceSpecV1(process_count=1),
     )
-    job.spec.launcher = "detached"
+    job.spec.launcher = "quoted-single"
     job.executor = detached
     job._native_id = "backend-id"
     job.status = psij.JobStatus(
@@ -443,7 +637,7 @@ def test_history_uses_original_psij_id_and_native_spec(project, detached, monkey
     assert entry["native_id"] == "backend-id"
     assert entry["record_id"] == "test"
     assert entry["spec"]["arguments"] == ["train.py", "argument with spaces"]
-    assert entry["spec"]["launcher"] == "detached"
+    assert entry["spec"]["launcher"] == "quoted-single"
     assert entry["spec"]["resources"]["process_count"] == 1
     assert entry["spec"]["attributes"]["custom_attributes"] == {"example": "value"}
     assert entry["spec"]["environment"]["HIRAKU_JOB_ID"] == job.id
