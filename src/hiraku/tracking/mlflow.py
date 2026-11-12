@@ -104,16 +104,16 @@ class MLflowBackend(BackendOperations):
             client = MlflowClient(tracking_uri=self.tracking_uri)
             if self.experiment_name:
                 experiment = client.get_experiment_by_name(self.experiment_name)
-                if experiment is None:
-                    return []
-                if (
-                    self._experiment_id is not None
-                    and experiment.experiment_id != self._experiment_id
+                if self._experiment_id is not None and (
+                    experiment is None
+                    or experiment.experiment_id != self._experiment_id
                 ):
                     raise BackendError(
                         "MLFLOW_EXPERIMENT_NAME and MLFLOW_EXPERIMENT_ID "
                         "refer to different experiments"
                     )
+                if experiment is None:
+                    return []
                 experiment_ids = [experiment.experiment_id]
             elif self._experiment_id is not None:
                 experiment_ids = [
