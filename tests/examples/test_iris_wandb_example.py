@@ -178,7 +178,7 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
             "0.25",
         ],
     )
-    rows = json.loads(invoke(runner, ["runs", "--json"]).output)
+    rows = json.loads(invoke(runner, ["leaderboard", "runs", "--json"]).output)
     assert len(rows) == 1
     row = rows[0]
     assert row["record_id"] == record.id
@@ -202,7 +202,13 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     filtered = json.loads(
         invoke(
             runner,
-            ["runs", "--record", "iris-classification/logistic-regression", "--json"],
+            [
+                "leaderboard",
+                "runs",
+                "--record",
+                "iris-classification/logistic-regression",
+                "--json",
+            ],
         ).output
     )
     assert filtered == rows

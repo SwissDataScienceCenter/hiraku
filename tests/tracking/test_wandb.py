@@ -95,7 +95,7 @@ def test_wandb_runs_cli_uses_active_record(tmp_path: Path, monkeypatch) -> None:
     project.set_active_record(record)
     monkeypatch.setattr(FakeRun, "config", {"hiraku.record_id": record.id})
 
-    result = CliRunner().invoke(main, ["runs", "--json"])
+    result = CliRunner().invoke(main, ["leaderboard", "runs", "--json"])
 
     assert result.exit_code == 0, result.output
     assert '"run-1"' in result.output

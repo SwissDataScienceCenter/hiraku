@@ -13,7 +13,7 @@ hiraku init
 hiraku record create tasks/question --title "Research question" --type task
 hiraku record create experiments/baseline --parent tasks/question --type experiment
 hiraku run --record experiments/baseline -- python train.py
-hiraku runs --record experiments/baseline
+hiraku leaderboard runs --record experiments/baseline
 ```
 
 `record create RECORD_ID` takes the OKF ID: a bundle-relative path without `.md`.
@@ -22,7 +22,7 @@ this ID. IDs are derived from placement and never stored in front matter.
 
 `hiraku record list` includes each record's local `state` in its table.
 Commands with an optional `--json` output accept `--pretty` alongside it to
-render the JSON with Rich. For example, use `hiraku runs --json --pretty`.
+render the JSON with Rich. For example, use `hiraku leaderboard runs --json --pretty`.
 Workflow start, sessions, history, status, and resume commands always return
 JSON and accept `--pretty` directly.
 

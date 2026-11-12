@@ -78,5 +78,5 @@ hiraku run --record land-cover-classification/cnn -- uv run python train.py --mo
 Inspect all runs associated with the research root:
 
 ```bash
-hiraku runs --sort val/accuracy
+hiraku leaderboard runs --sort val/accuracy
 ```

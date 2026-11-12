@@ -829,7 +829,7 @@ def leaderboard_delete(state: CLIContext, name: str) -> None:
     click.echo(f"Deleted leaderboard {name}")
 
 
-@main.command("runs")
+@leaderboard_group.command("runs")
 @click.option(
     "--include-unattributed", is_flag=True, help="Include runs without a record ID."
 )

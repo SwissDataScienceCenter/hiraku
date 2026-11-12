@@ -53,7 +53,7 @@ hiraku record create binary-classification/threshold-baseline \
 hiraku run --record binary-classification/threshold-baseline -- uv run python evaluate.py --seed 0
 hiraku run --record binary-classification/threshold-baseline -- uv run python evaluate.py --seed 1
 hiraku record list
-hiraku runs --record binary-classification/threshold-baseline
+hiraku leaderboard runs --record binary-classification/threshold-baseline
 ```
 
 The command runs `uv run python evaluate.py --seed 0`. The script writes its

@@ -55,7 +55,7 @@ selects which W&B project to query and does not initialize a W&B run.
 After the online run finishes syncing:
 
 ```bash
-hiraku runs --json
+hiraku leaderboard runs --json
 ```
 
 The adapter queries W&B's remote API. Offline SDK runs need syncing before

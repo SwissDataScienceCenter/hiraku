@@ -119,7 +119,7 @@ local changes.
 ## Dashboard
 
 [Leaderboards](docs/tracking.md) select run sources and comparison metrics.
-Use `--leaderboard NAME` with `hiraku runs` or `hiraku dashboard` to choose one.
+Use `--leaderboard NAME` with `hiraku leaderboard runs` or `hiraku dashboard` to choose one.
 
 `hiraku dashboard` serves a local [marimo](https://marimo.io) notebook through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view with the record tree, the runs attributed to each record, run details with links to the tracking backend, and a performance plot. It needs the `dashboard` extra.
 

@@ -54,7 +54,7 @@ Prefer `--json` for state that will be inspected or verified programmatically.
 | Manage records | `hiraku record ...`: `list`, `tree`, `show`, `create`, `update`, `set` |
 | Run a command | `hiraku run [--record ID] [--dispatch DISPATCHER] [-- COMMAND ...]` |
 | Manage leaderboards | `hiraku leaderboard list`, `show NAME`, `create NAME --source TYPE`, `edit NAME`, `delete NAME` |
-| Inspect tracked evidence | `hiraku runs [--leaderboard NAME] [--record ID]` |
+| Inspect tracked evidence | `hiraku leaderboard runs [--leaderboard NAME] [--record ID]` |
 | Run a workflow | MCP tools `workflow_list`, `workflow_start`, `workflow_status`, and `workflow_resume`; collaborative approvals use `workflow_approval`; terminal: `hiraku workflow list`, `hiraku workflow start ID`, `hiraku workflow status SESSION_ID`, `hiraku workflow resume SESSION_ID` |
 | Manage records, including supporting material | `hiraku record ...` |
 | Discover exact syntax | `hiraku --help`, `hiraku COMMAND --help`, `hiraku COMMAND SUBCOMMAND --help` |
@@ -138,7 +138,7 @@ Then inspect only the state relevant to the request:
 hiraku record list --json
 hiraku record tree
 hiraku record show <record-id> --json
-hiraku runs --record <record-id> --json
+hiraku leaderboard runs --record <record-id> --json
 ```
 
 When needed, inspect the repository files required to understand available code,
@@ -289,7 +289,7 @@ For a high-level run request:
 
 ```bash
 hiraku run --record <record-id> -- uv run --locked python train.py --seed 42
-hiraku runs --record <record-id> --json
+hiraku leaderboard runs --record <record-id> --json
 ```
 
 Tokens after `--` replace the complete invocation:
@@ -312,7 +312,7 @@ splits, budgets, and evaluation definitions comparable, and do not infer
 record attribution when it is absent.
 
 ```bash
-hiraku runs \
+hiraku leaderboard runs \
   --params seed,epochs \
   --metrics val/log_loss,val/accuracy \
   --sort val/log_loss --ascending --json
@@ -373,7 +373,7 @@ tracker.
 
 ## Finish clearly
 
-Verify the requested end state with `show`, `list`, or `runs --json`. Report
+Verify the requested end state with `show`, `list`, or `leaderboard runs --json`. Report
 what was created, changed, or run; include record IDs, command,
 commit, run ID, and key metrics when applicable. Mention failures or missing
 attribution explicitly. Stop when the user's requested scope is complete.

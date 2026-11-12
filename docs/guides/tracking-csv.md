@@ -63,13 +63,13 @@ Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 `hiraku example create heart-disease` to get a complete writer in `train.py`.
 
 The `id` column is required and is the source run ID. The `record_id`
-column is optional; use `hiraku runs --include-unattributed` to include runs
+column is optional; use `hiraku leaderboard runs --include-unattributed` to include runs
 without a record ID.
 
 ## Inspect
 
 ```bash
-hiraku runs --sort val/accuracy
+hiraku leaderboard runs --sort val/accuracy
 ```
 
 Metric values read from CSV are normalized to floats. A script that fails before writing

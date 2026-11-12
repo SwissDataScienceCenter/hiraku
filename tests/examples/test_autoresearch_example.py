@@ -155,7 +155,7 @@ def test_autoresearch_is_an_overlay() -> None:
     assert loop.startswith("---\nid: autoresearch\n")
     assert "hiraku status --json" in loop
     assert "hiraku record tree" in loop
-    assert "hiraku runs --record <id> --json" in loop
+    assert "hiraku leaderboard runs --record <id> --json" in loop
     assert "--commit HEAD" in loop
     assert "Never rebind a completed attempt" in loop
     assert "## Finishing" in loop
@@ -265,6 +265,7 @@ def test_autoresearch_cpu_mock_tracks_dispatch(tmp_path, monkeypatch, capfd):
         invoke(
             runner,
             [
+                "leaderboard",
                 "runs",
                 "--record",
                 "sep10/cpu-test",
@@ -324,6 +325,7 @@ def test_autoresearch_dispatcher_records_crash(tmp_path, monkeypatch, capfd):
         invoke(
             runner,
             [
+                "leaderboard",
                 "runs",
                 "--record",
                 "sep10/failure",

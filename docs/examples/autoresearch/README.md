@@ -89,7 +89,7 @@ hiraku record create sep10/cpu-test \
   --commit HEAD
 
 hiraku run --record sep10/cpu-test -- uv run python cpu_mock.py --val-bpb 1.0
-hiraku runs --record sep10/cpu-test
+hiraku leaderboard runs --record sep10/cpu-test
 
 hiraku record update sep10/cpu-test \
   --set decision=discard \
@@ -109,7 +109,7 @@ hiraku record create sep10/baseline \
   --commit HEAD
 
 hiraku run --record sep10/baseline -- uv run python train.py
-hiraku runs --record sep10/baseline
+hiraku leaderboard runs --record sep10/baseline
 
 hiraku record update sep10/baseline \
   --set decision=keep --set 'conclusion="Baseline run completed."'
@@ -147,5 +147,5 @@ Track the agent's progress with:
 
 ```bash
 hiraku record list --json
-hiraku runs --sort val_bpb --ascending
+hiraku leaderboard runs --sort val_bpb --ascending
 ```

@@ -35,7 +35,7 @@ or resume an experiment, work with the user to:
    `git switch <root-branch>`.
 3. **Read the research history**: Run
    `hiraku record list --json` and
-   `hiraku runs --json`. If an experiment is active or
+   `hiraku leaderboard runs --json`. If an experiment is active or
    incomplete, inspect it with
    `hiraku record show <experiment-id> --json` and inspect
    its attributed runs before doing new work.
@@ -77,7 +77,7 @@ hiraku record create <root-id>/baseline \
   --set 'hypothesis=The upstream implementation establishes the reference val_bpb' \
   --commit HEAD
 hiraku run --record <root-id>/baseline -- uv run python train.py
-hiraku runs --record <root-id>/baseline --json
+hiraku leaderboard runs --record <root-id>/baseline --json
 ```
 
 ## Logging results
@@ -86,7 +86,7 @@ The Hiraku dispatcher writes every execution to project-root `runs.csv`. Do not
 edit the run table. Inspect one experiment's parsed result and attribution with:
 
 ```bash
-hiraku runs --record <id> --json
+hiraku leaderboard runs --record <id> --json
 ```
 
 For every completed attempt, update its experiment record with exactly one of
@@ -120,7 +120,7 @@ LOOP FOREVER:
    run `hiraku run --record <experiment-id> -- uv run python train.py` and wait
    for the command to finish before inspecting measurements.
 6. Inspect the result with
-   `hiraku runs --record <experiment-id> --json`.
+   `hiraku leaderboard runs --record <experiment-id> --json`.
 7. If execution fails or times out, inspect the terminal output for the Python
    stack trace or final diagnostics. If the dispatcher did not record a row,
    treat the missing result as a failure.
