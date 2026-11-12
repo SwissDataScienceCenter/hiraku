@@ -271,6 +271,11 @@ def test_attach_pending_job_and_callback(project, detached):
         lambda _, status: done.set() if status.final else None
     )
     try:
+        identity = detached._result_path(job.native_id).with_name("supervisor.json")
+        deadline = time.monotonic() + 5
+        while not identity.is_file():
+            assert time.monotonic() < deadline, "Supervisor did not become ready"
+            time.sleep(0.01)
         detached.attach(attached, job.native_id)
         assert attached.status.state == psij.JobState.ACTIVE
         entry = Submission.from_psi_job(job)
@@ -432,6 +437,54 @@ def test_supervisor_start_failure_does_not_bind_job(project, detached, monkeypat
     monkeypatch.setattr(subprocess, "Popen", original)
     detached.submit(job)
     assert wait(job).exit_code == 0
+
+
+@pytest.mark.parametrize("block_result", [False, True])
+def test_supervisor_identity_failure_prevents_execution(
+    project, detached, monkeypatch, block_result
+):
+    marker = project.root / "executed"
+    job = prepare_job(
+        [
+            sys.executable,
+            "-c",
+            f"from pathlib import Path; Path({str(marker)!r}).touch()",
+        ],
+        project=project,
+    )
+    path = detached._result_path(job.id)
+    path.parent.mkdir(parents=True)
+    path.with_name("supervisor.json").mkdir()
+    if block_result:
+        path.mkdir()
+    processes = []
+    popen = subprocess.Popen
+
+    def capture(*args, **kwargs):
+        process = popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", capture)
+    detached.submit(job)
+    assert job.native_id == job.id
+    entry = Submission.from_psi_job(job)
+    entry.save(project)
+    status = wait(job)
+    assert status.state == psij.JobState.FAILED
+    assert status.message
+    assert not marker.exists()
+    entry.sync(job)
+    entry.save(project)
+    assert Submission.load(project, job.id).status.state == "FAILED"
+    deadline = time.monotonic() + 5
+    while processes[0].returncode is None:
+        assert time.monotonic() < deadline, "Failed supervisor was not reaped"
+        time.sleep(0.01)
+    if not block_result:
+        attached = psij.Job()
+        detached.attach(attached, job.native_id)
+        assert wait(attached).state == psij.JobState.FAILED
 
 
 def test_supervisor_records_launcher_start_failure(project, detached, monkeypatch):

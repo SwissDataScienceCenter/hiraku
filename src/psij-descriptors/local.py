@@ -100,12 +100,6 @@ class LocalDetachedJobExecutor(JobExecutor):
             raise SubmitException(
                 "Could not start detached supervisor", exception=exc
             ) from exc
-        identity = _Supervisor(
-            pid=process.pid, create_time=psutil.Process(process.pid).create_time()
-        )
-        temporary = path.with_name("supervisor.tmp")
-        temporary.write_text(identity.model_dump_json(), encoding="utf-8")
-        temporary.replace(path.with_name("supervisor.json"))
         job._native_id = job.id
         self._set_job_status(job, JobStatus(JobState.QUEUED))
         self._set_job_status(job, JobStatus(JobState.ACTIVE))
@@ -192,18 +186,31 @@ class LocalDetachedJobExecutor(JobExecutor):
     ) -> None:
         try:
             while True:
-                if process is not None:
-                    process.poll()
+                exited = process is not None and process.poll() is not None
                 job = reference()
                 if job is None or job.status.final:
                     return
                 try:
                     status = self._observe_status(path)
+                    if exited and not status.final:
+                        status = JobStatus(
+                            JobState.FAILED,
+                            message="Supervisor exited without recording an outcome",
+                        )
                     self._set_job_status(job, status)
                     if status.final:
                         return
                 except (OSError, ValueError) as exc:
                     logger.warning("Cannot read detached job result %s: %s", path, exc)
+                    if exited:
+                        self._set_job_status(
+                            job,
+                            JobStatus(
+                                JobState.FAILED,
+                                message=f"Cannot read exited supervisor outcome: {exc}",
+                            ),
+                        )
+                        return
                 finally:
                     del job
                 time.sleep(0.1)
