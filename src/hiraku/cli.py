@@ -9,7 +9,7 @@ import shlex
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from importlib.resources import as_file, files
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,7 +21,6 @@ from psij import (
     InvalidJobException,
     JobAttributes,
     JobExecutor,
-    JobState,
     JobStatus,
     SubmitException,
 )
@@ -32,10 +31,10 @@ from rich.console import Console
 from rich.table import Table
 
 from .errors import (
-    ExecutionError,
     GitError,
     HirakuError,
     NoActiveRecordError,
+    ObservationError,
     ValidationError,
 )
 from .git import GitRepository, init_code_repository, require_git
@@ -849,32 +848,38 @@ def run(
     _exit_job(run_local(job, project=state.project))
 
 
-@job_group.command("status")
+@job_group.command("show")
 @click.argument("job_id")
-@click.option("--wait", "wait_for_completion", is_flag=True)
+@click.option("--sync", is_flag=True, help="Sync from PSI/J before showing.")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def job_status(
+def job_show(
     state: CLIContext,
     job_id: str,
-    wait_for_completion: bool,
+    sync: bool,
     json_output: bool,
 ) -> None:
-    """Refresh saved status by the original PSI/J job ID, optionally waiting."""
+    """Show a saved submission by the original PSI/J job ID."""
     entry = Submission.load(state.project, job_id)
-    observation_error = None
-    try:
-        job = entry.get_psi_job()
-        if wait_for_completion:
-            job.wait()
-        else:
-            job.wait(timeout=timedelta(seconds=0.2), target_states=[JobState.QUEUED])
-        entry.sync(job)
-    except ExecutionError as exc:
-        observation_error = str(exc)
-    else:
+    if sync:
+        entry.sync()
         entry.save(state.project)
-    result = {**entry.model_dump(mode="json"), "observation_error": observation_error}
+    _show_submission(entry.model_dump(mode="json"), json_output)
+
+
+@job_group.command("sync")
+@click.argument("job_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_sync(state: CLIContext, job_id: str, json_output: bool) -> None:
+    """Sync and save current PSI/J status without waiting for completion."""
+    entry = Submission.load(state.project, job_id)
+    entry.sync()
+    entry.save(state.project)
+    _show_submission(entry.model_dump(mode="json"), json_output)
+
+
+def _show_submission(result: dict[str, Any], json_output: bool) -> None:
     if json_output:
         _emit_json(result)
     else:
@@ -882,35 +887,55 @@ def job_status(
             ("field", "value"),
             [
                 ("id", result["id"]),
+                ("record_id", result["record_id"]),
+                ("submitted_at", result["submitted_at"]),
+                ("observed_at", result["observed_at"]),
                 ("executor", result["executor"]),
                 ("executor_url", result["executor_url"]),
                 ("native_id", result["native_id"]),
                 *result["status"].items(),
-                ("observation_error", result["observation_error"]),
             ],
         )
 
 
 @job_group.command("list")
 @click.option("--record", "record_id")
+@click.option("--sync", is_flag=True, help="Sync selected jobs before listing.")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> None:
+def job_list(
+    state: CLIContext, record_id: str | None, sync: bool, json_output: bool
+) -> None:
     """List project jobs and commands with their saved status snapshots."""
-    entries = [
-        entry.model_dump(mode="json")
-        for entry in Submission.list(state.project, record_id=record_id)
-    ]
+    submissions = Submission.list(state.project, record_id=record_id)
+    if sync:
+        for entry in submissions:
+            try:
+                entry.sync()
+            except ObservationError as exc:
+                click.echo(f"Warning: cannot sync {entry.id}: {exc}", err=True)
+            else:
+                entry.save(state.project)
+    entries = [entry.model_dump(mode="json") for entry in submissions]
     if json_output:
         _emit_json(entries)
     else:
         _print_table(
-            ("id", "record", "submitted_at", "executor", "state", "command"),
+            (
+                "id",
+                "record",
+                "submitted_at",
+                "observed_at",
+                "executor",
+                "state",
+                "command",
+            ),
             [
                 (
                     entry["id"],
                     entry["record_id"],
                     entry["submitted_at"],
+                    entry["observed_at"],
                     entry["executor"],
                     entry["status"]["state"],
                     shlex.join(

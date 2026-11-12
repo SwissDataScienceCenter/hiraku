@@ -41,6 +41,10 @@ class ExecutionError(HirakuError):
     """A job could not be submitted, stored, or observed."""
 
 
+class ObservationError(ExecutionError):
+    """A native job could not be attached or its status could not be read."""
+
+
 class BackendError(HirakuError):
     """A tracking backend failed to return normalized runs."""
 

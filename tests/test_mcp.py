@@ -24,7 +24,7 @@ from mcp.server.elicitation import render_elicitation_schema  # noqa: E402
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E402
 
 from hiraku.cli import main  # noqa: E402
-from hiraku.errors import ExecutionError, ValidationError  # noqa: E402
+from hiraku.errors import ObservationError, ValidationError  # noqa: E402
 from hiraku.mcp import (  # noqa: E402
     WorkflowApproval,
     create_server,
@@ -62,10 +62,11 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
             "runs",
             "workflow_start",
         } <= tools.keys()
-        assert {"job_submit", "job_status", "job_list"} <= tools.keys()
+        assert {"job_submit", "job_show", "job_sync", "job_list"} <= tools.keys()
         assert tools["project_info"].title == "Project information"
         assert tools["record_list"].annotations.read_only_hint is True
-        assert tools["job_status"].annotations.read_only_hint is False
+        assert tools["job_sync"].annotations.read_only_hint is False
+        assert tools["job_show"].annotations.read_only_hint is True
         assert tools["job_list"].annotations.read_only_hint is True
         assert tools["workflow_start"].title == "Start workflow"
         assert tools["workflow_start"].description
@@ -293,7 +294,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         async def completed_job(receipt):
             for _ in range(300):
                 result = await server.call_tool(
-                    "job_status",
+                    "job_sync",
                     {"job_id": receipt["id"]},
                 )
                 if result.structured_content["status"]["state"] in {
@@ -388,23 +389,23 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         assert completed.structured_content["status"]["exit_code"] == 0
 
         def unavailable(self):
-            raise ExecutionError("backend unavailable")
+            raise ObservationError("backend unavailable")
 
         cached = completed.structured_content
         path = config.root / ".hiraku/jobs" / f"{cached['id']}.json"
         before = path.read_bytes()
         monkeypatch.setattr("hiraku.job.Submission.get_psi_job", unavailable)
-        failed = await server.call_tool("job_status", {"job_id": cached["id"]})
-        assert failed.structured_content == {
-            **cached,
-            "observation_error": "backend unavailable",
-        }
+        with pytest.raises(ToolError, match="backend unavailable"):
+            await server.call_tool("job_sync", {"job_id": cached["id"]})
         assert path.read_bytes() == before
+        shown = await server.call_tool("job_show", {"job_id": cached["id"]})
+        assert shown.structured_content == json.loads(before)
         listed = await server.call_tool("job_list", {})
         assert all(
             "observation_error" not in entry
             for entry in listed.structured_content["result"]
         )
+        assert path.read_bytes() == before
 
     asyncio.run(exercise())
 

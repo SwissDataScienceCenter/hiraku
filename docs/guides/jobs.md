@@ -47,42 +47,49 @@ an executor such as `local-detached` that can recover status after submission.
 
 Submission returns JSON with `id`, the original PSI/J job ID, plus its command
 specification, record, executor target, native ID, and currently observed status.
-Use that `id` for project history and status lookup:
+Use that `id` to read saved history or explicitly refresh it:
 
 ```bash
 hiraku job list
 hiraku job list --record baseline --json
-hiraku job status JOB_ID
-hiraku job status JOB_ID --wait --json
+hiraku job show JOB_ID
+hiraku job sync JOB_ID --json
+hiraku job show JOB_ID --sync
+hiraku job list --record baseline --sync --json
 ```
 
-`list` shows jobs newest first, with commands and saved status snapshots. `status`
-looks up the saved executor and attaches through PSI/J; `--wait` waits for a final
-state. Otherwise, a bounded initial observation may still report `NEW` or pending.
+`show` and `list` read saved snapshots without contacting executors. `sync`
+attaches through PSI/J, captures the currently available status, and saves it.
+It does not wait for completion. `show --sync` and `list --sync` refresh before
+displaying; list filters apply before refresh, and failures are reported per job.
+Attachment itself may contact the backend and take time.
 PSI/J's `executor.list()` independently discovers backend-native IDs where supported.
 
 ## Project history
 
 Each accepted submission is saved atomically to `.hiraku/jobs/<id>.json`.
 The file contains the original PSI/J job ID, record ID, submission timestamp,
-executor name and URL, backend native ID, serialized `JobSpec`, and `status`.
+executor name and URL, backend native ID, serialized `JobSpec`, `status`, and
+`observed_at`, the UTC time that snapshot was captured.
 No additional Hiraku submission ID is generated. Attaching creates
 a new in-memory PSI/J job, but does not change the saved original ID.
 
-`status` queries attach through PSI/J, copy the current native status, and save it.
+Sync actions attach through PSI/J, copy the current native status, and save it.
 Snapshots include state, status time, exit code, message, and metadata, including
-pending states. `list` reads saved snapshots without backend access. If attachment
-fails, `status` returns the saved snapshot with a separate `observation_error`;
-the file is unchanged. A final outcome is recoverable only while the backend
-retains it or after it has been synced and saved.
-Only refresh responses include `observation_error`; submit and list return saved
-submission metadata.
+pending states. `list` reads saved snapshots without backend access. Attachment
+or status-reading failures raise `ObservationError` without changing the snapshot
+or file. Single-job CLI sync fails with an error; MCP sync returns a tool error.
+`list --sync` warns per failed submission and continues with its saved snapshot.
+A final outcome is recoverable only while the backend retains it or after it has
+been synced and saved. `observed_at` advances on every successful sync,
+even when the state is unchanged. `Status.time` remains the executor-reported
+transition time. Reading or saving alone does not advance `observed_at`.
 Corrupt history files are reported as warnings and omitted from listings;
 loading one directly reports an error.
 
 Foreground CLI execution also records its submission and saves final status
-before returning. Native local jobs cannot safely be reattached; later refresh
-requests return the last saved snapshot with an observation error. If the
+before returning. Native local jobs cannot safely be reattached; later sync
+requests raise `ObservationError`, leaving the saved snapshot readable. If the
 foreground process crashes, no outcome is inferred from its PID.
 History may reference temporary foreground output paths; those files are removed
 after execution. Backend result files remain separate from project history.
@@ -149,9 +156,12 @@ submissions opt in by converting an accepted job with `Submission.from_psi_job(j
 and calling `submission.save(project)`. Conversion does not write files.
 `Submission.load(project, job_id)` and `Submission.list(project, record_id=...)`
 read validated metadata without contacting executors. `get_psi_job()` reconstructs
-the executor and attaches without waiting or changing saved metadata. `sync(job)`
-checks the executor target and native ID, then copies status without polling or
-writing files; call `save(project)` explicitly to persist it. PSI/J owns lifecycle
+the executor and attaches without waiting or changing saved metadata. `sync()`
+attaches internally, checks identity, and copies current status. Pass an existing
+native job to `sync(job)` to use its in-memory status, including foreground local
+jobs. Sync does not wait or write files; call `save(project)` explicitly after
+success. `ObservationError` is an `ExecutionError` subclass; storage errors remain
+separate failures of `save()`. PSI/J owns lifecycle
 operations such as waiting and cancellation.
 `Status` validates both observed and persisted status data. Convert native status
 with `Status.from_psi_status(status)` and serialize with `status.model_dump()`.
@@ -164,9 +174,11 @@ values `hiraku.record_id` / `hiraku.job_id`. Both environment names are
 reserved. A job may produce zero, one, or many runs. Tracking attribution,
 logging destinations, and code provenance remain independent of executor state.
 
-MCP exposes `job_submit`, `job_list(record_id=...)`, and `job_status(job_id=...)`
-using the same project history and original PSI/J IDs as the CLI. MCP status
-requests return without waiting for completion.
+MCP exposes `job_submit`, read-only `job_show(job_id=...)` and
+`job_list(record_id=...)`, and mutating `job_sync(job_id=...)`. These use the same
+history and original PSI/J IDs as the CLI. MCP show/list do not accept a sync
+parameter; call `job_sync` explicitly. Waiting remains available through native
+PSI/J `job.wait()` in Python.
 `job_submit` accepts an optional `launcher` registered name, like the CLI.
 
 ## Renku
@@ -177,7 +189,7 @@ Install and authenticate `rnk` independently, then choose an existing launcher:
 hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespace/project \
   --directory /path/to/remote/project --custom-attribute renku.launcher LAUNCHER_ID \
   -- python train.py
-hiraku job status JOB_ID --wait --json
+hiraku job sync JOB_ID --json
 ```
 
 The executor URL identifies the Renku project. The launcher supplies the image,

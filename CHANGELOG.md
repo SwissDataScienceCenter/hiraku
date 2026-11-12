@@ -44,12 +44,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - Add native PSI/J execution with `prepare_job()` for research attribution,
-  `run_local()` for foreground output, CLI `hiraku job submit/list/status`, and MCP
-  `job_submit` / `job_list` / `job_status`. Project history stores serialized PSI/J
+  `run_local()` for foreground output, CLI `hiraku job submit/list/show/sync`, and
+  MCP `job_submit` / `job_list` / `job_show` / `job_sync`. Project history stores
+  serialized PSI/J
   specifications, executor targets, and native IDs under the original PSI/J job
   ID. Executors own execution and status; `Submission` explicitly converts,
-  attaches, syncs, and saves metadata. Listings read saved status snapshots;
-  status queries refresh them through PSI/J while preserving snapshots on errors.
+  attaches, syncs, and saves metadata. Show/list read saved snapshots; explicit
+  sync actions refresh them through PSI/J without waiting for completion. CLI
+  show/list accept `--sync`; MCP show/list remain read-only. `observed_at` records
+  when a snapshot was captured and remains unchanged on refresh errors.
 - Add `--launcher NAME` to `hiraku run` and `hiraku job submit`, with an equivalent
   MCP `job_submit` parameter. Registered PSI/J launcher names pass directly into
   the native job specification and submission history.
