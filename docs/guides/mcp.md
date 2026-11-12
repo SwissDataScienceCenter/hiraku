@@ -1,18 +1,24 @@
 # MCP server
 
 Hiraku includes an MCP server that works with any initialized Hiraku project.
-`hiraku init` and `hiraku example create` add project-scoped MCP configuration
-for Claude Code, Codex, and Pi.
+`hiraku init` and `hiraku example create` install project-scoped MCP
+configuration for Claude Code, Codex, and Pi. After cloning a shared project,
+run `hiraku mcp install` to add the local Codex configuration and restore any
+missing client entries. Run `hiraku mcp uninstall` to remove Hiraku's entries
+while preserving other MCP settings.
 The server process discovers the nearest `hiraku.yml` from its working directory,
 so each client starts it in the project it is working on:
 
 ```bash
-uv run hiraku mcp
+uv run hiraku mcp serve
 ```
 
-There is no project-path flag; the process uses its working directory. Each
-initialized project gets its own host configuration, and agents connected from
-that project receive the same Hiraku tools and resources.
+The previous `hiraku mcp` invocation continues to serve the project for
+existing client configurations. There is no project-path flag; the process
+uses its working directory.
+
+The Codex config is ignored by Git so local MCP tool preferences remain
+private. Run `hiraku mcp install` after cloning to create it on your machine.
 
 For reference, initialization creates or merges these host configurations:
 
@@ -23,7 +29,7 @@ Claude Code's `.mcp.json`:
   "mcpServers": {
     "hiraku": {
       "command": "hiraku",
-      "args": ["mcp"]
+      "args": ["mcp", "serve"]
     }
   }
 }
@@ -34,7 +40,7 @@ Codex's `.codex/config.toml`:
 ```toml
 [mcp_servers.hiraku]
 command = "hiraku"
-args = ["mcp"]
+args = ["mcp", "serve"]
 ```
 
 Pi's `.pi/mcp.json`:
@@ -44,14 +50,15 @@ Pi's `.pi/mcp.json`:
   "mcpServers": {
     "hiraku": {
       "command": "hiraku",
-      "args": ["mcp"]
+      "args": ["mcp", "serve"]
     }
   }
 }
 ```
 
 An existing `hiraku` server entry is left as it is. If an existing file cannot
-be extended, initialization fails without changing it; add the entry manually.
+be extended, installation fails without changing that file; add the entry
+manually or repair the configuration and rerun `hiraku mcp install`.
 
 The host must be able to find the installed `hiraku` command. Claude Code asks
 for approval before using a project MCP server. Codex loads project config only

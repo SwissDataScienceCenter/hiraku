@@ -91,7 +91,7 @@ def test_init_uses_uv_when_the_project_has_a_lockfile(tmp_path, locked):
     launcher = ["uv", "run", "hiraku"] if locked else ["hiraku"]
     Project.create(tmp_path, install_skill=False)
     server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["hiraku"]
-    assert [server["command"], *server["args"]] == [*launcher, "mcp"]
+    assert [server["command"], *server["args"]] == [*launcher, "mcp", "serve"]
     codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
     assert codex["mcp_servers"]["hiraku"] == server
     for config in (tmp_path / ".mcp.json", tmp_path / ".pi/mcp.json"):
@@ -286,7 +286,10 @@ def test_init_adds_hiraku_to_existing_codex_configuration(tmp_path: Path) -> Non
     parsed = tomllib.loads(codex.read_text())
     assert parsed["model"] == "x"
     assert parsed["mcp_servers"]["other"] == {"command": "other"}
-    assert parsed["mcp_servers"]["hiraku"] == {"command": "hiraku", "args": ["mcp"]}
+    assert parsed["mcp_servers"]["hiraku"] == {
+        "command": "hiraku",
+        "args": ["mcp", "serve"],
+    }
 
 
 def test_init_preserves_existing_mcp_servers(tmp_path: Path) -> None:

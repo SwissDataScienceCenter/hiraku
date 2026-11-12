@@ -350,8 +350,7 @@ class Project(BaseModel):
 
             # Install the MCP server configuration in supported project agent configs
             if install_mcp:
-                project._install_mcp_configs()
-                project._ignore_codex_config()
+                project.install_mcp()
             return project
 
     def _ignore_codex_config(self) -> None:
@@ -364,7 +363,7 @@ class Project(BaseModel):
         separator = "" if not content or content.endswith("\n") else "\n"
         atomic_write(path, f"{content}{separator}{entry}\n")
 
-    def _install_mcp_configs(self) -> None:
+    def install_mcp(self) -> None:
         """Register the stdio server in supported project agent configs.
 
         Claude, Pi, and Codex configuration files are merged while preserving
@@ -372,7 +371,14 @@ class Project(BaseModel):
         """
         root = self.root
         command = "uv" if (root / "uv.lock").is_file() else "hiraku"
-        args = ["run", "hiraku", "mcp"] if command == "uv" else ["mcp"]
+        args = (
+            ["run", "hiraku", "mcp", "serve"]
+            if command == "uv"
+            else [
+                "mcp",
+                "serve",
+            ]
+        )
         server = {"command": command, "args": args}
 
         for path in (root / ".mcp.json", root / ".pi" / "mcp.json"):
@@ -411,3 +417,74 @@ class Project(BaseModel):
                 raise ValidationError(f"Cannot merge MCP settings in {path}")
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(path, new_content)
+
+        self._ignore_codex_config()
+
+    def uninstall_mcp(self) -> None:
+        """Remove Hiraku MCP entries while preserving other client settings."""
+        root = self.root
+        for path in (root / ".mcp.json", root / ".pi" / "mcp.json"):
+            if not path.is_file():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValidationError(
+                    f"Cannot read MCP settings in {path}: {exc}"
+                ) from exc
+            if not isinstance(data, dict):
+                raise ValidationError(f"Cannot remove Hiraku MCP settings in {path}")
+            servers = data.get("mcpServers", {})
+            if not isinstance(servers, dict):
+                raise ValidationError(f"Cannot remove Hiraku MCP settings in {path}")
+            if "hiraku" in servers:
+                del servers["hiraku"]
+                atomic_write(path, json.dumps(data, indent=2) + "\n")
+
+        path = root / ".codex" / "config.toml"
+        if not path.is_file():
+            return
+        content = path.read_text(encoding="utf-8")
+        try:
+            codex_config = tomllib.loads(content)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValidationError(
+                f"Cannot remove MCP settings in {path}: {exc}"
+            ) from exc
+        servers = codex_config.get("mcp_servers", {})
+        if not isinstance(servers, dict):
+            raise ValidationError(f"Cannot remove Hiraku MCP settings in {path}")
+        if "hiraku" not in servers:
+            return
+        if any(
+            line.lstrip().startswith("mcp_servers =") for line in content.splitlines()
+        ):
+            raise ValidationError(
+                f"Cannot remove Hiraku MCP settings from inline mcp_servers in {path}"
+            )
+        new_content = _remove_toml_table(content, "mcp_servers.hiraku")
+        try:
+            tomllib.loads(new_content)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValidationError(
+                f"Cannot remove MCP settings in {path}: {exc}"
+            ) from exc
+        atomic_write(path, new_content)
+
+
+def _remove_toml_table(content: str, section: str) -> str:
+    """Remove a TOML table and its child tables while preserving other text."""
+    kept: list[str] = []
+    removing = False
+    for line in content.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith("[[") and "]]" in stripped:
+            end = stripped.find("]")
+            name = stripped[2:end].strip()
+            removing = name == section or name.startswith(f"{section}.")
+        elif stripped.startswith("[") and "]" in stripped:
+            name = stripped[1 : stripped.index("]")].strip()
+            removing = name == section or name.startswith(f"{section}.")
+        if not removing:
+            kept.append(line)
+    return "".join(kept)
