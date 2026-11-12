@@ -19,7 +19,6 @@ import click
 import yaml
 from psij import (
     InvalidJobException,
-    Job,
     JobAttributes,
     JobExecutor,
     JobStatus,
@@ -37,9 +36,15 @@ from .errors import (
     NoActiveRecordError,
     ValidationError,
 )
-from .execution import describe_job, prepare_job, run_local
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
+from .job import (
+    list_submissions,
+    observe_submission,
+    prepare_job,
+    run_local,
+    save_submission,
+)
 from .project import Project
 from .record import Record, validate_identifier
 from .tracking import Leaderboard, Run
@@ -745,7 +750,7 @@ def job_submit(
     attributes: tuple[tuple[str, str], ...],
     directory: Path | None,
 ) -> None:
-    """Submit and return the executor target and native ID as JSON."""
+    """Submit and return history keyed by the original PSI/J job ID as JSON."""
     job = prepare_job(
         command,
         record_id=record_id
@@ -758,7 +763,8 @@ def job_submit(
         else None,
     )
     JobExecutor.get_instance(executor, url=executor_url).submit(job)
-    _emit_json(describe_job(job))
+    entry = save_submission(job, project=state.project)
+    _emit_json(entry)
 
 
 @main.command("run")
@@ -788,38 +794,66 @@ def run(
         if attributes
         else None,
     )
-    _exit_job(run_local(job))
+    _exit_job(run_local(job, project=state.project))
 
 
 @job_group.command("status")
-@click.argument("native_id")
-@click.option("--executor", default="local-detached", show_default=True)
-@click.option("--executor-url")
+@click.argument("job_id")
 @click.option("--wait", "wait_for_completion", is_flag=True)
 @click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
 def job_status(
-    native_id: str,
-    executor: str,
-    executor_url: str | None,
+    state: CLIContext,
+    job_id: str,
     wait_for_completion: bool,
     json_output: bool,
 ) -> None:
-    """Attach to a native job, optionally waiting for its final status."""
-    job = Job()
-    JobExecutor.get_instance(executor, url=executor_url).attach(job, native_id)
-    if wait_for_completion:
-        job.wait()
-    result = describe_job(job)
+    """Retrieve status by the original PSI/J job ID, optionally waiting."""
+    result = observe_submission(job_id, project=state.project, wait=wait_for_completion)
     if json_output:
         _emit_json(result)
     else:
         _print_table(
             ("field", "value"),
             [
+                ("id", result["id"]),
                 ("executor", result["executor"]),
                 ("executor_url", result["executor_url"]),
-                ("native_id", native_id),
+                ("native_id", result["native_id"]),
                 *result["status"].items(),
+                ("observation_error", result["observation_error"]),
+            ],
+        )
+
+
+@job_group.command("list")
+@click.option("--record", "record_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> None:
+    """List project jobs and commands with their observed or saved final status."""
+    entries = list_submissions(project=state.project, record_id=record_id)
+    if json_output:
+        _emit_json(entries)
+    else:
+        _print_table(
+            ("id", "record", "submitted_at", "executor", "state", "command", "error"),
+            [
+                (
+                    entry["id"],
+                    entry["record_id"],
+                    entry["submitted_at"],
+                    entry["executor"],
+                    entry["status"]["state"],
+                    shlex.join(
+                        [
+                            entry["spec"]["executable"],
+                            *entry["spec"].get("arguments", []),
+                        ]
+                    ),
+                    entry["observation_error"],
+                )
+                for entry in entries
             ],
         )
 

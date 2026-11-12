@@ -62,7 +62,7 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
             "runs",
             "workflow_start",
         } <= tools.keys()
-        assert "job_submit" in tools
+        assert {"job_submit", "job_status", "job_list"} <= tools.keys()
         assert tools["project_info"].title == "Project information"
         assert tools["record_list"].annotations.read_only_hint is True
         assert tools["workflow_start"].title == "Start workflow"
@@ -273,8 +273,9 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_submit_and_status_use_native_executor(tmp_path: Path) -> None:
+def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> None:
     config = Project.create(tmp_path)
+    monkeypatch.chdir(tmp_path)
     server = create_server(config)
 
     async def exercise() -> None:
@@ -282,10 +283,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path) -> None:
             for _ in range(300):
                 result = await server.call_tool(
                     "job_status",
-                    {
-                        key: receipt[key]
-                        for key in ("executor", "executor_url", "native_id")
-                    },
+                    {"job_id": receipt["id"]},
                 )
                 if result.structured_content["status"]["state"] in {
                     "COMPLETED",
@@ -326,7 +324,18 @@ def test_submit_and_status_use_native_executor(tmp_path: Path) -> None:
         output = tmp_path / "backend" / job["native_id"]
         assert (output / "stdout.log").read_text() == "demo/demo\n"
         assert (output / "stderr.log").read_text() == "err\n"
-        assert not (config.root / ".hiraku/jobs").exists()
+        history = json.loads(
+            (config.root / ".hiraku/jobs" / f"{job['id']}.json").read_text()
+        )
+        assert history["final_status"]["exit_code"] == 7
+        assert history["id"] == job["id"]
+        listed = await server.call_tool("job_list", {"record_id": "demo/demo"})
+        assert listed.structured_content["result"] == [completed.structured_content]
+        cli = CliRunner().invoke(
+            main, ["job", "list", "--record", "demo/demo", "--json"]
+        )
+        assert cli.exit_code == 0, cli.output
+        assert json.loads(cli.output) == listed.structured_content["result"]
         submitted = await server.call_tool(
             "job_submit",
             {

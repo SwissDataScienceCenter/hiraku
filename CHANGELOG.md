@@ -44,9 +44,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - Add native PSI/J execution with `prepare_job()` for research attribution,
-  `run_local()` for foreground output, CLI `hiraku job submit/status`, and MCP
-  `job_submit` / `job_status`. Executors own submission and final status;
-  Hiraku does not maintain project job history.
+  `run_local()` for foreground output, CLI `hiraku job submit/list/status`, and MCP
+  `job_submit` / `job_list` / `job_status`. Project history stores serialized PSI/J
+  specifications, executor targets, and native IDs under the original PSI/J job
+  ID. Executors own execution and status; observed final outcomes are persisted
+  for later queries without backend access.
 - Add the `local-detached` PSI/J executor with durable results and output,
   including final-status retrieval after the submitting process exits. Add a
   Renku executor using authenticated `rnk` launchers and final-state observation.

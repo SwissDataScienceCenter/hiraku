@@ -198,7 +198,11 @@ def test_documented_iris_wandb_workflow(tmp_path: Path, monkeypatch) -> None:
     assert stored["project"] == "iris-wandb"
     assert stored["config"]["hiraku.job_id"] == row["job_id"]
     assert stored["config"]["hiraku.record_id"] == record.id
-    assert not (tmp_path / ".hiraku/jobs").exists()
+    history = json.loads(
+        (project / ".hiraku/jobs" / f"{row['job_id']}.json").read_text()
+    )
+    assert history["id"] == row["job_id"]
+    assert history["final_status"]["exit_code"] == 0
 
     filtered = json.loads(
         invoke(

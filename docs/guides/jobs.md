@@ -2,7 +2,7 @@
 
 Hiraku uses native PSI/J jobs and executors. It adds record attribution and a
 foreground output helper. Executors own submission and final-status reporting;
-Hiraku does not maintain project job history.
+Hiraku records submission details and observed final outcomes in project history.
 
 ## Run locally
 
@@ -24,19 +24,48 @@ is unattributed. Commands are explicit argv, never record metadata.
 hiraku job submit --record baseline -- python train.py
 ```
 
-Submission returns JSON containing `executor`, `executor_url`, `native_id`,
-and the currently observed `status`. Retain the executor target and native ID
-to retrieve the outcome, including from another process or outside the project:
+Submission returns JSON with `id`, the original PSI/J job ID, plus its command
+specification, record, executor target, native ID, and currently observed status.
+Use that `id` for project history and status lookup:
 
 ```bash
-hiraku job status NATIVE_ID --executor local-detached --executor-url FILE_URL
-hiraku job status NATIVE_ID --executor local-detached --executor-url FILE_URL --wait --json
+hiraku job list
+hiraku job list --record baseline --json
+hiraku job status JOB_ID
+hiraku job status JOB_ID --wait --json
 ```
 
-`status` attaches through PSI/J; `--wait` waits for a final state. Without it,
-the reported state may still be `NEW` or pending while the executor observes the
-backend. There is no project-level job list, saved submission receipt, or spec
-snapshot. PSI/J's `executor.list()` discovers backend-native IDs where supported.
+`list` shows jobs newest first, with commands and refreshed statuses. `status`
+looks up the saved executor and attaches through PSI/J; `--wait` waits for a final
+state. Otherwise, a bounded initial observation may still report `NEW` or pending.
+PSI/J's `executor.list()` independently discovers backend-native IDs where supported.
+
+## Project history
+
+Each accepted submission is saved atomically to `.hiraku/jobs/<id>.json`.
+The file contains the original PSI/J job ID, record ID, submission timestamp,
+executor name and URL, backend native ID, serialized `JobSpec`, and optional
+`final_status`. No additional Hiraku submission ID is generated. Attaching creates
+a new in-memory PSI/J job, but does not change the saved original ID.
+
+List and status queries persist native final statuses when observed, including
+state, status time, exit code, message, and metadata. Saved final outcomes need
+no backend access. Pending statuses and observation errors are not written back.
+An unavailable backend reports `UNKNOWN` with `observation_error`, preserving
+the submission and other jobs' results. A final outcome is recoverable only while
+the backend retains it or after Hiraku has observed and saved it.
+
+Foreground CLI execution also records its submission and saves final status
+before returning. While its final status is unavailable, history reports
+`UNKNOWN`: native local attachment cannot safely recover the real exit code.
+If the foreground process crashes, no outcome is inferred from its PID.
+History may reference temporary foreground output paths; those files are removed
+after execution. Backend result files remain separate from project history.
+
+History includes explicit environment values from the spec; inherited environment
+values are not captured. Keep `/.hiraku/` excluded from Git. If history cannot be
+saved after acceptance, the error identifies the submitted execution; do not
+automatically resubmit it.
 
 The default submission executor, `local-detached`, is a PSI/J
 `LocalJobExecutor` subclass. It stores `result.json`, `stdout.log`, and
@@ -57,17 +86,21 @@ after the submitting process exits.
 ```python
 import psij
 
-from hiraku.execution import prepare_job, run_local
+from hiraku.job import (
+    list_submissions, observe_submission, prepare_job, run_local, save_submission,
+)
 from hiraku.project import Project
 
 project = Project.discover()
 job = prepare_job(["python", "train.py"], project=project, record_id="baseline")
-status = run_local(job)
+status = run_local(job, project=project)
 
 job = prepare_job(["python", "train.py"], project=project, record_id="baseline")
 executor = psij.JobExecutor.get_instance("local-detached")
 executor.submit(job)
-status = job.wait()
+save_submission(job, project=project)
+result = observe_submission(job.id, project=project, wait=True)
+entries = list_submissions(project=project, record_id="baseline")
 
 # In another process, reconstruct the executor using its name and URL:
 attached = psij.Job()
@@ -81,7 +114,11 @@ It accepts explicit `record_id`, `env`, `directory`, native PSI/J
 explicitly; omission does not select the active record. The spec remains
 available for normal PSI/J configuration, including output paths.
 `run_local()` streams output and returns the native `JobStatus`; supplied
-output files are retained.
+output files are retained. Passing `project` enables history. Native Python
+submissions opt in with `save_submission()` after successful submission.
+`load_submission()` reads metadata without contacting executors;
+`observe_submission()` and `list_submissions()` refresh pending jobs and save
+observed final statuses. These functions return dictionaries, not live job wrappers.
 
 Scripts receive `HIRAKU_RECORD_ID` (empty when unattributed) and
 `HIRAKU_JOB_ID` (the PSI/J job's `id`, distinct from the backend `native_id`).
@@ -90,19 +127,19 @@ values `hiraku.record_id` / `hiraku.job_id`. Both environment names are
 reserved. A job may produce zero, one, or many runs. Tracking attribution,
 logging destinations, and code provenance remain independent of executor state.
 
-MCP exposes `job_submit` and `job_status` with the same executor target and
-native ID as the CLI. Status requests return without waiting for completion.
+MCP exposes `job_submit`, `job_list(record_id=...)`, and `job_status(job_id=...)`
+using the same project history and original PSI/J IDs as the CLI. MCP status
+requests return without waiting for completion.
 
 ## Renku
 
 Install and authenticate `rnk` independently, then choose an existing launcher:
 
 ```bash
-hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespace/project \\
-  --directory /path/to/remote/project --attribute renku.launcher LAUNCHER_ID \\
+hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespace/project \
+  --directory /path/to/remote/project --attribute renku.launcher LAUNCHER_ID \
   -- python train.py
-hiraku job status NATIVE_ID --executor renku \\
-  --executor-url https://renkulab.io/p/namespace/project --wait --json
+hiraku job status JOB_ID --wait --json
 ```
 
 The executor URL identifies the Renku project. The launcher supplies the image,

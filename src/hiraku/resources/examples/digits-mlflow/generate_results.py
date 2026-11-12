@@ -12,7 +12,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from hiraku import Project
-from hiraku.execution import prepare_job, run_local
+from hiraku.job import prepare_job, run_local
 
 EXPERIMENTS = (("weak-l2", 0.0001), ("strong-l2", 1.0))
 EPOCHS = 20

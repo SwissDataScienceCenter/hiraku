@@ -13,7 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from hiraku import Project
-from hiraku.execution import prepare_job, run_local
+from hiraku.job import prepare_job, run_local
 
 EXPERIMENTS = (
     ("logistic-regression", "heart-disease-prediction", "logistic", 0.2),

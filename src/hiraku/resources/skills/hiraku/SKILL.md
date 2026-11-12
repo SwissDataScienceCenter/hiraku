@@ -30,8 +30,9 @@ through an existing record lifecycle.
   are not stored in records.
 - **Job:** A native PSI/J execution attempt. The executor owns submission and
   final status. Foreground execution streams output and returns the exit code;
-  background submission returns the executor target and native ID. Hiraku adds
-  research attribution and does not keep project job history.
+  background submission returns the original PSI/J job ID. Hiraku adds research
+  attribution and saves submission details and observed final status in project
+  history. Executors continue to own execution and status.
 - **Dispatch script:** An optional project script under `hiraku/dispatch/`
   that prepares the runtime before running argv. Commands run directly by
   default; Hiraku does not install a generic dispatcher. Tracking backends own
@@ -368,9 +369,15 @@ Log them as CSV
 queried without local job history. Records and tracking runs hold user-managed
 code provenance; Jobs do not collect it.
 Tracking destinations remain user-managed. `hiraku job submit` returns JSON with
-`executor`, `executor_url`, and `native_id`; retain those values and pass them to
-`job_status` or `hiraku job status NATIVE_ID --executor NAME --executor-url URL`.
+`id`, the original PSI/J job ID. Use `job_status(job_id=...)` or
+`hiraku job status JOB_ID` to retrieve status. Use `job_list(record_id=...)` or
+`hiraku job list [--record ID] [--json]` to list jobs and commands with status.
 The CLI status command accepts `--wait` to wait for the final outcome.
+History lives in `.hiraku/jobs/<id>.json`; no separate submission ID is generated.
+List/status persist observed final outcomes, so later queries do not need backend
+access. `UNKNOWN` with `observation_error` describes an unavailable observation,
+not an execution failure. Do not resubmit automatically after a history-write
+failure: the execution may already have been accepted.
 An omitted `directory` leaves the execution directory to the executor; local jobs
 inherit the submitting process's cwd. Explicit paths refer to the execution side.
 Explicit `env` values belong to the native job spec.
@@ -380,7 +387,9 @@ files, waits, and returns the process exit code. The default submission executor
 to `~/.psij/work/detached/`. It supports final-status retrieval after the
 submitter exits; cancellation is unsupported. Renku also reports final status
 through PSI/J, but does not expose process exit codes. Use `rnk job logs` and
-`rnk job stop` for Renku output and control. No project job snapshots are saved.
+`rnk job stop` for Renku output and control. Foreground CLI execution saves its
+final status before returning; unfinished foreground history reports `UNKNOWN`
+because native local attachment cannot recover real exit codes safely.
 Use a project dispatcher to prepare the runtime when needed.
 
 CSV sources require a `path`, relative to the project root or absolute;
@@ -403,10 +412,12 @@ record loaders and listing functions in `hiraku.record`;
 `Leaderboard` and `Metric` in `hiraku.tracking`; use `Leaderboard.create()`,
 `load()`, `list()`, and `delete()` for definitions;
 `Run` in `hiraku.tracking`; and `prepare_job(command, record_id=..., project=...)`
-in `hiraku.execution`. This returns a native `psij.Job`. Use
+in `hiraku.job`. This returns a native `psij.Job`. Use
 `psij.JobExecutor.get_instance(name, url=target).submit(job)` and `job.wait()`,
-or `run_local(job)` for foreground output. Another process can use
-`executor.attach(job, native_id)` to retrieve the final status.
+or `run_local(job, project=project)` for foreground output and history. After native
+submission, use `save_submission(job, project=project)` to opt in to history.
+`observe_submission(job.id, project=project)` and `list_submissions(project=project)`
+refresh status and retain final outcomes. These helpers live in `hiraku.job`.
 Records with `type: context` store supporting material. Workflows run in the
 current coding agent through the Hiraku MCP server (`hiraku mcp serve`). V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.
