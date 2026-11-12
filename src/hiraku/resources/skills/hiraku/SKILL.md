@@ -373,7 +373,7 @@ tracker.
 
 ## Finish clearly
 
-Verify the requested end state with `show`, `list`, or `runs --json`. Report
+Verify the requested end state with `show`, `list`, or `leaderboard runs --json`. Report
 what was created, changed, or run; include record IDs, command,
 commit, run ID, and key metrics when applicable. Mention failures or missing
 attribution explicitly. Stop when the user's requested scope is complete.

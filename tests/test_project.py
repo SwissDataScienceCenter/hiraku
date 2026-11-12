@@ -159,6 +159,8 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert (root / ".pi/skills/hiraku/SKILL.md").read_text() == codex_skill.read_text()
     assert not (root / ".gemini/skills").exists()
     assert codex_skill.read_text() == claude_skill.read_text()
+    assert "`leaderboard runs --json`" in codex_skill.read_text()
+    assert "`runs --json`" not in codex_skill.read_text()
     assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
