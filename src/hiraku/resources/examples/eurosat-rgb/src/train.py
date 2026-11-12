@@ -177,7 +177,7 @@ def main() -> None:
     with wandb.init(
         entity=os.environ.get("WANDB_ENTITY") or None,
         project=os.environ.get("WANDB_PROJECT", "eurosat-rgb"),
-        group=os.environ.get("WANDB_GROUP"),
+        group=attribution["HIRAKU_RECORD_ID"],
         name=os.environ.get("WANDB_RUN_NAME"),
         tags=["hiraku", "eurosat-rgb", args.model],
         config={

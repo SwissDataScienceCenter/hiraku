@@ -70,6 +70,8 @@ pending states. `list` reads saved snapshots without backend access. If attachme
 fails, `status` returns the saved snapshot with a separate `observation_error`;
 the file is unchanged. A final outcome is recoverable only while the backend
 retains it or after it has been synced and saved.
+Only refresh responses include `observation_error`; submit and list return saved
+submission metadata.
 Corrupt history files are reported as warnings and omitted from listings;
 loading one directly reports an error.
 

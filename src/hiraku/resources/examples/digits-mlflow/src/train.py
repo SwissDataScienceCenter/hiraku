@@ -67,7 +67,7 @@ def main() -> None:
         learning_rate_init=0.001,
         random_state=args.seed,
     )
-    with mlflow.start_run(run_name=tags["hiraku.job_id"], tags=tags):
+    with mlflow.start_run(run_name=tags["hiraku.record_id"], tags=tags):
         mlflow.log_params(
             {
                 **vars(args),

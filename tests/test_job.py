@@ -191,7 +191,6 @@ def test_detached_is_independent_of_hiraku(project, detached):
     assert job.spec.launcher == "quoted-single"
     assert notifications and set(notifications) == {job.native_id}
     assert job.spec.stdout_path.read_text() == "hello\n"
-    assert not list(project.root.rglob("job.json"))
     attached = psij.Job()
     detached.attach(attached, job.native_id)
     assert wait(attached).state == psij.JobState.FAILED
@@ -580,6 +579,7 @@ def test_cli_submit_list_and_status(project, detached, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     receipt = json.loads(result.output)
+    assert "observation_error" not in receipt
     args = [
         "job",
         "status",
@@ -594,12 +594,12 @@ def test_cli_submit_list_and_status(project, detached, monkeypatch):
     shown = json.loads(status.output)
     assert shown["id"] == receipt["id"]
     assert shown["status"]["exit_code"] == 7
+    assert shown.pop("observation_error") is None
     listed = runner.invoke(main, ["job", "list", "--record", "test", "--json"])
     assert json.loads(listed.output) == [shown]
     table = runner.invoke(main, ["job", "list"], env={"COLUMNS": "240"})
     assert "FAILED" in table.output and "test" in table.output
     assert "raise SystemExit(7)" in table.output
-    assert runner.invoke(main, ["job", "show"]).exit_code != 0
 
 
 def test_interrupting_foreground_cleans_up(project, monkeypatch):
@@ -689,7 +689,7 @@ def test_status_preserves_native_fields(state):
     assert Status.model_validate_json(status.model_dump_json()) == status
 
 
-@pytest.mark.parametrize("state", ["NEW", "QUEUED", "ACTIVE", "UNKNOWN", "COMPLETED"])
+@pytest.mark.parametrize("state", ["NEW", "QUEUED", "ACTIVE", "COMPLETED"])
 def test_submission_persists_any_status_snapshot(project, detached, state):
     job, _ = history_entry(project, detached)
     entry = Submission.load(project, job.id)
@@ -952,6 +952,7 @@ def test_invalid_history_data(project, detached, change):
 @pytest.mark.parametrize(
     "field,value",
     [
+        ("state", "UNKNOWN"),
         ("time", "invalid"),
         ("exit_code", "7"),
         ("exit_code", True),

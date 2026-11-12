@@ -20,7 +20,7 @@ def test_root_help_lists_primary_commands() -> None:
     result = invoke("--help")
 
     assert result.exit_code == 0
-    for command in ("init", "record", "job", "leaderboard", "workflow"):
+    for command in ("init", "record", "run", "job", "leaderboard", "workflow"):
         assert command in result.output
 
 

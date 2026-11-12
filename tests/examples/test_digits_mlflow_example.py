@@ -133,6 +133,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     )
     client = MlflowClient(tracking_uri=uri)
     for row in rows:
+        assert client.get_run(row["id"]).info.run_name == row["record_id"]
         assert row["commit"] is None
         assert row["id"]
         assert row["raw"]["status"] == "FINISHED"
