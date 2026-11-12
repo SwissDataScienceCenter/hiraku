@@ -420,9 +420,10 @@ record loaders and listing functions in `hiraku.record`;
 in `hiraku.job`. This returns a native `psij.Job`. Use
 `psij.JobExecutor.get_instance(name, url=target).submit(job)` and `job.wait()`,
 or `run_local(job, project=project)` for foreground output and history. After native
-submission, use `save_submission(job, project=project)` to opt in to history.
-`observe_submission(job.id, project=project)` and `list_submissions(project=project)`
-refresh status and retain final outcomes. These helpers live in `hiraku.job`.
+submission, use `Submission.from_psi_job(job).save(project)` to opt in to history.
+`Submission.load(project, job_id)` and `Submission.list(project)` read metadata;
+`observe_submission(submission, project=project)` refreshes status and retains
+final outcomes. The model and observation helper live in `hiraku.job`.
 Records with `type: context` store supporting material. Workflows run in the
 current coding agent through the Hiraku MCP server (`hiraku mcp serve`). V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.

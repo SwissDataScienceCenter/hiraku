@@ -25,10 +25,10 @@ from pydantic_core import to_jsonable_python
 
 from .errors import HirakuError, ValidationError
 from .job import (
-    list_submissions,
+    Submission,
+    describe_job,
     observe_submission,
     prepare_job,
-    save_submission,
 )
 from .project import Project
 from .tracking import Leaderboard
@@ -243,6 +243,11 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         launcher: str | None = None,
     ) -> dict[str, Any]:
         """Submit through PSI/J and return after acceptance, without waiting."""
+        if executor == "local":
+            raise ValidationError(
+                "Native local execution cannot recover submission status; "
+                "use hiraku run or the local-detached executor"
+            )
         record_id = record_id if record_id is not None else selected.active_record_id
         job = prepare_job(
             command,
@@ -255,17 +260,26 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             else None,
         )
         JobExecutor.get_instance(executor, url=executor_url).submit(job)
-        return save_submission(job, project=selected)
+        entry = Submission.from_psi_job(job)
+        entry.save(selected)
+        return {
+            **entry.model_dump(mode="json"),
+            **describe_job(job),
+            "observation_error": None,
+        }
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True))
     def job_status(job_id: str) -> dict[str, Any]:
         """Retrieve observed or saved final status by the original PSI/J job ID."""
-        return observe_submission(job_id, project=selected)
+        return observe_submission(Submission.load(selected, job_id), project=selected)
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True))
     def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
         """List project jobs and commands with their observed or saved final status."""
-        return list_submissions(project=selected, record_id=record_id)
+        return [
+            observe_submission(entry, project=selected)
+            for entry in Submission.list(selected, record_id=record_id)
+        ]
 
     @server.tool(
         title="List tracked runs",

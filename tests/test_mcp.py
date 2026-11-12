@@ -273,6 +273,23 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
+def test_submit_rejects_native_local(tmp_path: Path, monkeypatch) -> None:
+    server = create_server(Project.create(tmp_path))
+    monkeypatch.setattr(
+        "psij.executors.local.LocalJobExecutor.submit",
+        lambda *args: pytest.fail("Native local job must not be submitted"),
+    )
+
+    async def exercise() -> None:
+        with pytest.raises(ToolError, match="use hiraku run or the local-detached"):
+            await server.call_tool(
+                "job_submit", {"command": ["echo", "hello"], "executor": "local"}
+            )
+
+    asyncio.run(exercise())
+    assert not (tmp_path / ".hiraku/jobs").exists()
+
+
 def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> None:
     config = Project.create(tmp_path)
     monkeypatch.chdir(tmp_path)
