@@ -111,8 +111,13 @@ output are no longer needed.
 The executor starts a small Python supervisor in a new process session. The
 supervisor runs the selected PSI/J launcher, waits, and atomically records its
 exit code and completion time, independently of the submitting process. Launch
-failures record a message with no invented exit code. A missing result remains pending: process
-disappearance is never interpreted as success. Detached execution requires
+failures record a message with no invented exit code. Submission also records the
+supervisor PID and process creation time in `supervisor.json`. Sync reports
+`ACTIVE` while that supervisor is alive. If it disappears without a result, the
+job reports `FAILED` with no exit code and a message that the command may still
+be running. Older submissions without supervisor identity remain pending until
+a result appears. Process inspection failures are reported as observation errors.
+Detached execution requires
 POSIX and supports a single process and PSI/J pre/post hooks. The default
 `quoted-single` launcher requires Bash; Python callers may select another
 installed launcher through `job.spec.launcher`. Cancellation is unsupported.
