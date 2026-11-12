@@ -90,8 +90,9 @@ records. The default executor is `hiraku-local`, a subclass of PSI/J's
 independently of the MCP server.
 Record attribution is optional: an omitted ID uses the active record when set,
 otherwise the job is unattributed.
-The execution directory defaults to the project root; supply an execution-side
-`directory` for remote jobs. Explicit environment values are saved with the spec.
+When `directory` is omitted, the executor chooses its working directory; local
+jobs inherit the MCP server's directory. Explicit paths refer to the execution
+side. Explicit environment values are saved with the spec.
 Use `job_show` to read saved metadata and local outcomes. Local output remains in
 the job's `stdout.log` and `stderr.log` files. Remote submissions retain their ID and submission-time status only;
 use the remote platform's native tools for results, logs, and cancellation.

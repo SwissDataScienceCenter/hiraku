@@ -773,7 +773,7 @@ def job_submit(
         if record_id is not None
         else state.project.active_record_id,
         project=state.project,
-        directory=directory or state.project.root,
+        directory=directory,
         attributes=JobAttributes(custom_attributes=dict(attributes))
         if attributes
         else None,
@@ -804,7 +804,7 @@ def job_run(
         if record_id is not None
         else state.project.active_record_id,
         project=state.project,
-        directory=directory or state.project.root,
+        directory=directory,
         attributes=JobAttributes(custom_attributes=dict(attributes))
         if attributes
         else None,

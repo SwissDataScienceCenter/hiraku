@@ -9,8 +9,8 @@ hiraku job submit --record baseline -- python train.py
 ```
 
 Without `--record`, the active record is used when set; otherwise the job is
-unattributed. Local commands run in the project
-root, including uncommitted changes. `run` uses PSI/J's native
+unattributed. Local commands run in the caller's working directory, including
+uncommitted changes. `run` uses PSI/J's native
 `LocalJobExecutor`; `submit` defaults to `hiraku-local`, a recording subclass.
 Commands have closed stdin. Git provenance belongs to records and user-managed
 tracking runs; Jobs do not collect it.
@@ -33,8 +33,9 @@ custom launchers and multiple-process resource requests are unsupported.
 For submission, `--executor NAME` selects an installed PSI/J executor,
 `--executor-url URL` selects its target, and repeated `--attribute KEY VALUE`
 options supply custom attributes. `--directory PATH` sets the execution-side
-working directory. CLI and MCP default to the project root; for remote jobs,
-supply a directory that exists on the execution side.
+working directory. When omitted, the executor chooses the working directory.
+Local jobs inherit the submitting process's directory; remote jobs use their
+execution environment's default. Explicit paths refer to the execution side.
 
 ## Results and output
 
@@ -77,8 +78,8 @@ an optional `record_id`, `project`, `env`, `directory`, native PSI/J
 `attributes`, and `resources`.
 Only CLI and MCP resolve the active record. Python callers may supply an explicit
 ID or omit it for an unattributed job.
-CLI and MCP submission default to `hiraku-local`. `directory` defaults to the
-current working directory at creation time. Explicit environment additions are
+CLI and MCP submission default to `hiraku-local`. `directory` is unset by
+default and can be supplied for the execution environment. Explicit environment additions are
 stored in `job.spec.environment` and persisted in `job.json`; inherited environment
 values are not captured. The prepared spec is passed directly to PSI/J.
 

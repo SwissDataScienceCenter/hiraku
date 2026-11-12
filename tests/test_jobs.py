@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from datetime import timedelta
+from pathlib import Path
 from threading import Barrier
 from types import SimpleNamespace
 
@@ -77,9 +78,7 @@ def test_jobs_without_record_do_not_select_active_record(project, monkeypatch, m
 
 @pytest.mark.parametrize("method", ["run", "submit"])
 @pytest.mark.parametrize("explicit", [False, True])
-def test_create_fixes_execution_directory(
-    project, monkeypatch, tmp_path, method, explicit
-):
+def test_execution_directory(project, monkeypatch, tmp_path, method, explicit):
     working = tmp_path / "execution directory"
     working.mkdir()
     monkeypatch.chdir(working)
@@ -88,13 +87,14 @@ def test_create_fixes_execution_directory(
         project=project,
         directory=project.root if explicit else None,
     )
-    expected = project.root if explicit else working
-    assert job.spec.directory == expected
+    specified = project.root if explicit else None
+    assert job.spec.directory == specified
     monkeypatch.chdir(tmp_path)
     execute(job, method)
     assert finish(job).exit_code == 0
+    expected = project.root if explicit else tmp_path
     assert job.spec.stdout_path.read_text().strip() == str(expected)
-    assert Job.load(job.id, project=project).spec.directory == expected
+    assert Job.load(job.id, project=project).spec.directory == specified
 
 
 def test_create_does_not_save_or_submit(project, monkeypatch):
@@ -343,12 +343,13 @@ def test_killed_detached_launcher_leaves_an_unknown_outcome(project):
             os.killpg(int(job.native_id), signal.SIGKILL)
 
 
-def test_renku_submission_only_saves_identity(project, monkeypatch):
+@pytest.mark.parametrize("directory", [None, Path("remote/work")])
+def test_renku_submission_only_saves_identity(project, monkeypatch, directory):
     executor_type = type(psij.JobExecutor.get_instance("renku"))
     calls = []
 
     def rnk(self, *args, **kwargs):
-        calls.append(args[:2])
+        calls.append(args)
         return {"name": "remote-1"}
 
     monkeypatch.setattr(executor_type, "_rnk", rnk)
@@ -356,6 +357,7 @@ def test_renku_submission_only_saves_identity(project, monkeypatch):
         ["python", "train.py"],
         record_id="test",
         project=project,
+        directory=directory,
         attributes=psij.JobAttributes(custom_attributes={"renku.launcher": "launcher"}),
     )
     native = job.submit(
@@ -365,9 +367,11 @@ def test_renku_submission_only_saves_identity(project, monkeypatch):
     )
     assert isinstance(native, psij.Job)
     assert native.native_id == "remote-1"
-    assert calls == [("job", "start")]
+    assert calls[0][:2] == ("job", "start")
+    assert ("cd remote/work && exec " in calls[0][-1]) is (directory is not None)
     assert job.native_id == "remote-1"
     saved = Job.load(job.id, project=project)
+    assert saved.spec.directory == directory
     assert isinstance(saved.executor, psij.JobExecutor)
     assert saved.executor.name == "renku"
     assert saved.executor.url == "https://renkulab.io/p/ns/demo"
@@ -653,7 +657,9 @@ def test_launch_failure_is_persisted(project):
 
 @pytest.mark.parametrize("code", [0, 4])
 def test_foreground_cli_output_and_exit_code(project, monkeypatch, code):
-    monkeypatch.chdir(project.root)
+    working = project.root / "working"
+    working.mkdir()
+    monkeypatch.chdir(working)
     runner = CliRunner()
     result = runner.invoke(
         main,
@@ -667,10 +673,10 @@ def test_foreground_cli_output_and_exit_code(project, monkeypatch, code):
         ],
     )
     assert result.exit_code == code, result.output
-    assert result.stdout.strip() == str(project.root)
+    assert result.stdout.strip() == str(working)
     job = Job.load(result.stderr.strip(), project=project)
     assert job.status.exit_code == code
-    assert job.spec.stdout_path.read_text().strip() == str(project.root)
+    assert job.spec.stdout_path.read_text().strip() == str(working)
     assert runner.invoke(main, ["job", "run"]).exit_code != 0
     assert runner.invoke(main, ["job", "submit"]).exit_code != 0
     assert runner.invoke(main, ["run", "--help"]).exit_code != 0

@@ -369,9 +369,10 @@ Log them as CSV
 queried without local job history. Records and tracking runs hold user-managed
 code provenance; Jobs do not collect it.
 Tracking destinations remain
-user-managed. Cwd is the project root. `hiraku job submit` returns after
+user-managed. `hiraku job submit` returns after
 submission; `hiraku job list/show` reads saved jobs under `.hiraku/jobs/`.
-Python `Job.create()` defaults to the caller's cwd; pass `directory` to override it.
+An omitted `directory` leaves the execution directory to the executor; local jobs
+inherit the submitting process's cwd. Explicit paths refer to the execution side.
 Explicit `env` values are stored in the job spec and saved metadata.
 `run` uses native PSI/J `LocalJobExecutor`, waits, and saves its final status in
 `job.json`. The CLI and MCP default submission executor, `hiraku-local`, subclasses

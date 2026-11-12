@@ -226,7 +226,7 @@ class Job(BaseModel):
         spec = psij.JobSpec(
             executable=argv[0],
             arguments=argv[1:],
-            directory=Path(directory or Path.cwd()).absolute(),
+            directory=directory,
             launcher="hiraku-single",
             attributes=attributes,
             resources=resources,
