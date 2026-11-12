@@ -734,7 +734,12 @@ def _exit_job(status: JobStatus) -> None:
 @click.option("--executor-url")
 @click.option("--launcher", help="Registered PSI/J launcher name.")
 @click.option(
-    "--attribute", "attributes", type=(str, str), multiple=True, metavar="KEY VALUE"
+    "--custom-attribute",
+    "custom_attributes",
+    type=(str, str),
+    multiple=True,
+    metavar="KEY VALUE",
+    help="Executor-specific PSI/J custom attribute.",
 )
 @click.option("--directory", type=click.Path(path_type=Path))
 @click.pass_obj
@@ -745,7 +750,7 @@ def job_submit(
     executor: str,
     executor_url: str | None,
     launcher: str | None,
-    attributes: tuple[tuple[str, str], ...],
+    custom_attributes: tuple[tuple[str, str], ...],
     directory: Path | None,
 ) -> None:
     """Submit and return history keyed by the original PSI/J job ID as JSON."""
@@ -762,8 +767,8 @@ def job_submit(
         project=state.project,
         directory=directory,
         launcher=launcher,
-        attributes=JobAttributes(custom_attributes=dict(attributes))
-        if attributes
+        attributes=JobAttributes(custom_attributes=dict(custom_attributes))
+        if custom_attributes
         else None,
     )
     JobExecutor.get_instance(executor, url=executor_url).submit(job)
@@ -777,7 +782,12 @@ def job_submit(
 @click.option("--record", "record_id")
 @click.option("--launcher", help="Registered PSI/J launcher name.")
 @click.option(
-    "--attribute", "attributes", type=(str, str), multiple=True, metavar="KEY VALUE"
+    "--custom-attribute",
+    "custom_attributes",
+    type=(str, str),
+    multiple=True,
+    metavar="KEY VALUE",
+    help="Executor-specific PSI/J custom attribute.",
 )
 @click.option("--directory", type=click.Path(path_type=Path))
 @click.pass_obj
@@ -786,7 +796,7 @@ def run(
     command: tuple[str, ...],
     record_id: str | None,
     launcher: str | None,
-    attributes: tuple[tuple[str, str], ...],
+    custom_attributes: tuple[tuple[str, str], ...],
     directory: Path | None,
 ) -> None:
     """Run locally, stream output, and return the command's exit code."""
@@ -798,8 +808,8 @@ def run(
         project=state.project,
         directory=directory,
         launcher=launcher,
-        attributes=JobAttributes(custom_attributes=dict(attributes))
-        if attributes
+        attributes=JobAttributes(custom_attributes=dict(custom_attributes))
+        if custom_attributes
         else None,
     )
     _exit_job(run_local(job, project=state.project))

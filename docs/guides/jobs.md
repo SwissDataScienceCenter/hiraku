@@ -31,6 +31,11 @@ hiraku job submit --launcher quoted-single -- python train.py
 Launcher names are not script paths. Project wrapper scripts remain part of the
 command argv.
 
+Use repeated `--custom-attribute KEY VALUE` options to populate PSI/J's
+`JobAttributes.custom_attributes` with executor-specific settings. MCP
+`job_submit` accepts the equivalent `custom_attributes` mapping. Standard PSI/J
+job attributes and resources remain available through the Python API.
+
 ## Submit and retrieve status
 
 ```bash
@@ -170,7 +175,7 @@ Install and authenticate `rnk` independently, then choose an existing launcher:
 
 ```bash
 hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespace/project \
-  --directory /path/to/remote/project --attribute renku.launcher LAUNCHER_ID \
+  --directory /path/to/remote/project --custom-attribute renku.launcher LAUNCHER_ID \
   -- python train.py
 hiraku job status JOB_ID --wait --json
 ```
@@ -178,7 +183,7 @@ hiraku job status JOB_ID --wait --json
 The executor URL identifies the Renku project. The launcher supplies the image,
 mounts, environment, and resources; Hiraku does not upload local code or change
 the launcher. For a Cloud Native Buildpacks image, use
-`--attribute renku.command_prefix /cnb/lifecycle/launcher`.
+`--custom-attribute renku.command_prefix /cnb/lifecycle/launcher`.
 
 The executor observes Renku states through `rnk job list` and reports final
 PSI/J status for submitted and attached jobs. Renku's CLI does not expose process

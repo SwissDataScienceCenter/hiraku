@@ -234,7 +234,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         executor: str = "local-detached",
         record_id: str | None = None,
         executor_url: str | None = None,
-        attributes: dict[str, str] | None = None,
+        custom_attributes: dict[str, str] | None = None,
         directory: str | None = None,
         launcher: str | None = None,
     ) -> dict[str, Any]:
@@ -251,8 +251,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             project=selected,
             directory=Path(directory) if directory is not None else None,
             launcher=launcher,
-            attributes=JobAttributes(custom_attributes=attributes)
-            if attributes
+            attributes=JobAttributes(custom_attributes=custom_attributes)
+            if custom_attributes
             else None,
         )
         JobExecutor.get_instance(executor, url=executor_url).submit(job)

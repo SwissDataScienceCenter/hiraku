@@ -358,9 +358,10 @@ Commands are not record metadata. Pass the complete invocation directly after
 train.py --seed 42`. A dispatcher can prepare repeatable project-specific
 runtime behavior around that invocation.
 
-Commands execute in the current project working tree, including uncommitted
-changes. `hiraku run` waits until the command exits; `hiraku job submit` returns
-after submission. Commands have closed stdin and do not support interactive input.
+`hiraku run` streams output and waits; `hiraku job submit` and MCP `job_submit`
+return after submission, defaulting to `local-detached`. Local jobs inherit the
+submitter's working directory unless `directory` is specified. Commands have
+closed stdin and do not support interactive input.
 
 Hiraku injects `HIRAKU_RECORD_ID` (empty for unattributed jobs) and `HIRAKU_JOB_ID`.
 Log them as CSV
@@ -373,29 +374,16 @@ Tracking destinations remain user-managed. `hiraku job submit` returns JSON with
 `hiraku job status JOB_ID` to retrieve status. Use `job_list(record_id=...)` or
 `hiraku job list [--record ID] [--json]` to list jobs and commands with status.
 The CLI status command accepts `--wait` to wait for the final outcome.
-History lives in `.hiraku/jobs/<id>.json`; no separate submission ID is generated.
 List reads saved snapshots without backend access; status refreshes and saves
 the current PSI/J status. `observation_error` describes a failed refresh alongside
 the unchanged saved status. Do not resubmit automatically after a history-write
 failure: the execution may already have been accepted.
-An omitted `directory` leaves the execution directory to the executor; local jobs
-inherit the submitting process's cwd. Explicit paths refer to the execution side.
 CLI `run` and `job submit` accept `--launcher NAME`; MCP `job_submit` accepts
 `launcher`. Select an installed PSI/J launcher by its registered name, not a script
-path. Omission keeps the executor's default. Keep project wrapper scripts in argv.
-Explicit `env` values belong to the native job spec.
-`run` uses native PSI/J `LocalJobExecutor`, streams output through temporary
-files, waits, and returns the process exit code. The default submission executor,
-`local-detached`, records results and output under its backend URL, defaulting
-to `~/.psij/work/detached/`. Its detached supervisor runs the selected PSI/J
-launcher and records the outcome; detachment belongs to the executor.
-It supports final-status retrieval after the
-submitter exits; cancellation is unsupported. Renku also reports final status
-through PSI/J, but does not expose process exit codes. Use `rnk job logs` and
-`rnk job stop` for Renku output and control. Foreground CLI execution saves its
-final status before returning; native local jobs cannot safely be reattached.
-Later refresh requests return their saved snapshot with an observation error.
-Use a project dispatcher to prepare the runtime when needed.
+path. Use CLI `--custom-attribute KEY VALUE` or MCP `custom_attributes` for
+executor-specific settings. Keep project wrapper scripts in argv.
+See [Jobs and executors](https://swissdatasciencecenter.github.io/hiraku/guides/jobs/)
+for executor setup, history, output locations, and platform limitations.
 
 CSV sources require a `path`, relative to the project root or absolute;
 `${NAME}` references expand from the environment when querying runs.
@@ -416,15 +404,8 @@ The Python API exposes `Project` in `hiraku.project`; `Record`,
 record loaders and listing functions in `hiraku.record`;
 `Leaderboard` and `Metric` in `hiraku.tracking`; use `Leaderboard.create()`,
 `load()`, `list()`, and `delete()` for definitions;
-`Run` in `hiraku.tracking`; and `prepare_job(command, record_id=..., project=...)`
-in `hiraku.job`. This returns a native `psij.Job`. Use
-`psij.JobExecutor.get_instance(name, url=target).submit(job)` and `job.wait()`,
-or `run_local(job, project=project)` for foreground output and history. After native
-submission, use `Submission.from_psi_job(job).save(project)` to opt in to history.
-`Submission.load(project, job_id)` and `Submission.list(project)` read metadata;
-`submission.get_psi_job()` attaches a native job. Use its PSI/J lifecycle APIs,
-then call `submission.sync(job)` and `submission.save(project)` explicitly.
-The `Submission` model lives in `hiraku.job`.
+`Run` in `hiraku.tracking`; and `prepare_job`, `run_local`, `Submission`, and `Status`
+in `hiraku.job`. See the Jobs and executors guide for the execution API.
 Records with `type: context` store supporting material. Workflows run in the
 current coding agent through the Hiraku MCP server (`hiraku mcp serve`). V1 does not
 provide a `hiraku-agent` runner; the current coding agent executes the skill.

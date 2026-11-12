@@ -323,6 +323,7 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
                 "record_id": "demo/demo",
                 "executor_url": (tmp_path / "backend").as_uri(),
                 "launcher": "single",
+                "custom_attributes": {"example": "value"},
                 "command": [
                     sys.executable,
                     "-c",
@@ -352,6 +353,9 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         assert history["status"]["exit_code"] == 7
         assert history["id"] == job["id"]
         assert history["spec"]["launcher"] == "single"
+        assert history["spec"]["attributes"]["custom_attributes"] == {
+            "example": "value"
+        }
         listed = await server.call_tool("job_list", {"record_id": "demo/demo"})
         assert listed.structured_content["result"] == [history]
         cli = CliRunner().invoke(
