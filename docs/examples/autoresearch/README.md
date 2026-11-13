@@ -52,6 +52,7 @@ cat >> .gitignore <<'EOF'
 /.claude/
 /.codex/
 /.mcp.json
+/.hiraku/
 /hiraku/*
 !/hiraku/dispatch/
 !/hiraku/records/

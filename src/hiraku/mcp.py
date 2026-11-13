@@ -30,7 +30,6 @@ from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details
 from .workflows.langgraph import workflow_ids, workflow_mermaid
 from .workflows.langgraph import workflow_status as langgraph_workflow_status
-from .workflows.session_history import list_sessions, session_history
 
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
@@ -38,8 +37,6 @@ attributes tracked runs to them, runs commands with execute, and runs LangGraph
 workflows. Use workflow_start, workflow_status, and workflow_resume to operate
 a workflow. When an interrupt requests approval, workflow_approval opens a
 structured MCP elicitation and waits for the user's answer.
-Use workflow_sessions and workflow_session_history to inspect recorded
-sessions and their history.
 """
 
 
@@ -307,8 +304,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
 def register_workflow_tools(server: MCPServer, project: Project) -> None:
     """Register workflow discovery, execution, sessions, and approval.
 
-    Tools: workflow_list, workflow_start, workflow_sessions,
-    workflow_session_history, workflow_status, workflow_resume, and
+    Tools: workflow_list, workflow_start, workflow_status, workflow_resume, and
     workflow_approval. Also registers workflow definition and graph resources.
     """
     path = project.path
@@ -341,24 +337,8 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
         arguments: Annotated[
             dict[str, Any] | None, Field(description="Workflow input object.")
         ] = None,
-        context: Annotated[
-            dict[str, Any] | None,
-            Field(description="Optional caller-provided session context."),
-        ] = None,
     ) -> dict[str, Any]:
-        return start_langgraph_workflow(
-            workflow_id, arguments, project=project(), context=context
-        )
-
-    def workflow_sessions() -> list[dict[str, Any]]:
-        return list_sessions(project=project())
-
-    def workflow_session_history(
-        workflow_session_id: Annotated[
-            str, Field(description="Workflow session ID returned by workflow_start.")
-        ],
-    ) -> dict[str, Any]:
-        return session_history(workflow_session_id, project=project())
+        return start_langgraph_workflow(workflow_id, arguments, project=project())
 
     def workflow_status(
         workflow_session_id: Annotated[
@@ -378,17 +358,12 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
         checkpoint_id: Annotated[
             str, Field(description="Checkpoint ID from workflow status.")
         ],
-        context: Annotated[
-            dict[str, Any] | None,
-            Field(description="Optional caller-provided transition context."),
-        ] = None,
     ) -> dict[str, Any]:
         return resume_langgraph_workflow(
             workflow_session_id,
             response,
             project=project(),
             checkpoint_id=checkpoint_id,
-            context=context,
         )
 
     def resolve_workflow_approval(
@@ -457,18 +432,6 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
             "Start a LangGraph workflow and return its interrupt or final result."
         ),
         annotations=ToolAnnotations(read_only_hint=False),
-    )
-    server.add_tool(
-        workflow_sessions,
-        title="List workflow sessions",
-        description="List recorded workflow sessions and their metadata.",
-        annotations=ToolAnnotations(read_only_hint=True),
-    )
-    server.add_tool(
-        workflow_session_history,
-        title="Read workflow session history",
-        description="Read a workflow session's recorded metadata and history.",
-        annotations=ToolAnnotations(read_only_hint=True),
     )
     server.add_tool(
         workflow_status,
