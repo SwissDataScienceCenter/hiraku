@@ -36,8 +36,6 @@ from .workflows.langgraph import workflow_status as langgraph_workflow_status
 
 logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
-
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, submits commands with job_submit, and runs LangGraph
