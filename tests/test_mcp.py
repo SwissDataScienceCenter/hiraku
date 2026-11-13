@@ -115,6 +115,14 @@ def test_tools_and_validation(tmp_path: Path) -> None:
                 {"record_id": "  ", "title": "  ", "fields": {"type": "task"}},
             ),
             (
+                "record_create",
+                {
+                    "record_id": "root/my run",
+                    "title": "bad",
+                    "fields": {"type": "task"},
+                },
+            ),
+            (
                 "record_update",
                 {"record_id": "root/child/child", "fields": {"id": "renamed"}},
             ),

@@ -81,7 +81,7 @@ def test_record_create_persists_parent_without_changing_body(
         invoke(
             "record",
             "create",
-            "Parent -A/Parent -A",
+            "Parent-A/Parent-A",
             "--title",
             "Parent [A]",
             "--type",
@@ -93,38 +93,50 @@ def test_record_create_persists_parent_without_changing_body(
     result = invoke(
         "record",
         "create",
-        "Parent -A/child/child",
+        "Parent-A/child/child",
         "--title",
         "child",
         "--type",
         "task",
         "--parent",
-        "Parent -A/Parent -A",
+        "Parent-A/Parent-A",
         "--markdown-file",
         str(body),
     )
 
     assert result.exit_code == 0, result.output
-    child = project.vault.load("Parent -A/child/child")
+    child = project.vault.load("Parent-A/child/child")
     assert child.markdown == "## Hypothesis\n\nTest it."
-    assert child.parent_id == "Parent -A/Parent -A"
+    assert child.parent_id == "Parent-A/Parent-A"
     assert (
         invoke(
             "record",
             "create",
-            "Parent -A/child/empty/empty",
+            "Parent-A/child/empty/empty",
             "--title",
             "empty",
             "--type",
             "task",
             "--parent",
-            "Parent -A/child/child",
+            "Parent-A/child/child",
         ).exit_code
         == 0
     )
-    empty = project.vault.load("Parent -A/child/empty/empty")
+    empty = project.vault.load("Parent-A/child/empty/empty")
     assert empty.markdown == ""
     assert empty.parent_id == child.id
+
+
+def test_record_create_rejects_record_ids_with_spaces(
+    tmp_path: Path, monkeypatch
+) -> None:
+    Project.create(tmp_path, install_skill=False)
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("record", "create", "experiments/my run", "--type", "task")
+
+    assert result.exit_code == 1
+    assert "Invalid record ID" in result.output
 
 
 def test_unknown_command_uses_click_error() -> None:
