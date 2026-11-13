@@ -38,7 +38,6 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
     assert any(path.endswith("collaborative/workflow.md") for path in expected)
     expected.add("hiraku/workflows/__init__.py")
     expected.add("hiraku/workflows/langgraph.py")
-    expected.add("hiraku/workflows/session_history.py")
     expected.update(
         {
             "psij-descriptors/local.py",

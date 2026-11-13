@@ -37,6 +37,7 @@ def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
         or not identifier
         or identifier in {".", ".."}
         or identifier != identifier.strip()
+        or any(character.isspace() for character in identifier)
         or identifier.endswith(".")
         or not _SAFE_ID.fullmatch(identifier)
     ):

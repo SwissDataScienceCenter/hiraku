@@ -257,6 +257,7 @@ Register executors using PSI/J descriptors in an installed
 `psij-descriptors/*.py` module. The bundled implementations are
 `src/psij-descriptors/local.py`, `src/psij-descriptors/renku.py`, and
 `src/psij-descriptors/renku_api.py`.
+
 Do not add an `__init__.py` to the descriptor directory.
 The bundled `quoted-single` launcher works around PSI/J's unquoted redirection
 paths. Detachment and result recording belong to the executor and its private

@@ -5,7 +5,3 @@ For authoring and execution examples, see the [Workflows guide](../../guides/wor
 # LangGraph workflow
 
 ::: hiraku.workflows.langgraph
-
-# Workflow session history
-
-::: hiraku.workflows.session_history

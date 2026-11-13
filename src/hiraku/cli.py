@@ -635,11 +635,6 @@ _ARGUMENTS_FILE = click.option(
     type=click.File("r", encoding="utf-8"),
     help="JSON object with the arguments; use - for standard input.",
 )
-_CONTEXT_FILE = click.option(
-    "--context-file",
-    type=click.File("r", encoding="utf-8"),
-    help="JSON object with session or transition context; use - for standard input.",
-)
 
 
 def _arguments(arguments_file: Any, *, name: str = "arguments") -> dict[str, Any]:
@@ -657,14 +652,12 @@ def _arguments(arguments_file: Any, *, name: str = "arguments") -> dict[str, Any
 @workflow_group.command("start")
 @click.argument("workflow_id")
 @_ARGUMENTS_FILE
-@_CONTEXT_FILE
 @click.option("--pretty", is_flag=True, help="Pretty-print the JSON response.")
 @click.pass_obj
 def workflow_start(
     state: CLIContext,
     workflow_id: str,
     arguments_file: Any,
-    context_file: Any,
     pretty: bool,
 ) -> None:
     """Start a LangGraph workflow and print its interrupt or result."""
@@ -675,32 +668,8 @@ def workflow_start(
             workflow_id,
             _arguments(arguments_file),
             project=state.project,
-            context=_arguments(context_file, name="context"),
         ),
         pretty=pretty,
-    )
-
-
-@workflow_group.command("sessions")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
-@click.pass_obj
-def workflow_sessions(state: CLIContext, pretty: bool) -> None:
-    """List recorded workflow sessions as JSON."""
-    from .workflows.session_history import list_sessions
-
-    _emit_json(list_sessions(project=state.project), pretty=pretty)
-
-
-@workflow_group.command("history")
-@click.argument("workflow_session_id")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
-@click.pass_obj
-def workflow_history(state: CLIContext, workflow_session_id: str, pretty: bool) -> None:
-    """Show a workflow session's recorded metadata and history."""
-    from .workflows.session_history import session_history
-
-    _emit_json(
-        session_history(workflow_session_id, project=state.project), pretty=pretty
     )
 
 
@@ -723,7 +692,6 @@ def workflow_status_command(
 @click.argument("workflow_session_id")
 @click.option("--checkpoint-id", required=True, help="Checkpoint ID from status.")
 @_ARGUMENTS_FILE
-@_CONTEXT_FILE
 @click.option("--pretty", is_flag=True, help="Pretty-print the JSON response.")
 @click.pass_obj
 def workflow_resume_command(
@@ -731,7 +699,6 @@ def workflow_resume_command(
     workflow_session_id: str,
     checkpoint_id: str,
     arguments_file: Any,
-    context_file: Any,
     pretty: bool,
 ) -> None:
     """Resume a paused LangGraph workflow with a JSON response."""
@@ -743,7 +710,6 @@ def workflow_resume_command(
             _arguments(arguments_file),
             project=state.project,
             checkpoint_id=checkpoint_id,
-            context=_arguments(context_file, name="context"),
         ),
         pretty=pretty,
     )
