@@ -20,7 +20,6 @@ import yaml
 from psij import (
     InvalidJobException,
     JobAttributes,
-    JobExecutor,
     JobStatus,
     SubmitException,
 )
@@ -39,7 +38,7 @@ from .errors import (
 )
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .job import Submission, observe_submission, prepare_job, run_local
+from .job import Submission, get_executor, observe_submission, prepare_job, run_local
 from .project import Project
 from .record import Record, validate_identifier
 from .tracking import Leaderboard, Run
@@ -775,7 +774,11 @@ def job_submit(
         if custom_attributes
         else None,
     )
-    JobExecutor.get_instance(executor, url=executor_url).submit(job)
+    get_executor(
+        executor,
+        work_directory=state.project.psij_dir,
+        url=executor_url,
+    ).submit(job)
     entry = Submission.from_psi_job(job)
     entry.save(state.project)
     _emit_json(entry.model_dump(mode="json"))

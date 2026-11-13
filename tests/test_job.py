@@ -30,6 +30,7 @@ from hiraku.errors import (
 from hiraku.job import (
     Status,
     Submission,
+    get_executor,
     observe_submission,
     prepare_job,
     run_local,
@@ -55,10 +56,60 @@ def detached(project):
     return psij.JobExecutor.get_instance("local-detached")
 
 
+def test_foreground_launcher_storage(project):
+    job = prepare_job([sys.executable, "-c", "pass"], project=project)
+    assert run_local(job, project=project).exit_code == 0
+    work = job.executor.config.work_directory
+    assert work == project.psij_dir
+    assert list(work.glob("*/single.sh"))
+    assert not psij.JobExecutorConfig.DEFAULT_WORK_DIRECTORY.exists()
+
+
+@pytest.mark.parametrize("custom_url", [False, True])
+def test_project_executor_storage(project, custom_url):
+    backend = project.root / "custom backend"
+    executor = get_executor(
+        "local-detached",
+        work_directory=project.psij_dir,
+        url=backend.as_uri() if custom_url else None,
+    )
+    work = project.root / ".hiraku/psij"
+    assert executor.config.work_directory == work
+    expected = backend if custom_url else work / "detached"
+    assert executor.jobs_dir == expected
+    job = prepare_job([sys.executable, "-c", "print('done')"], project=project)
+    executor.submit(job)
+    assert wait(job).exit_code == 0
+    assert (expected / job.id / "result.json").is_file()
+    assert list(work.glob("*/single.sh"))
+    entry = Submission.from_psi_job(job)
+    entry.save(project)
+    loaded = Submission.load(project, job.id)
+    assert loaded.executor == "local-detached"
+    assert loaded.executor_url == executor.url
+    assert loaded.executor_work_directory == str(work)
+    attached = loaded.get_psi_job()
+    assert attached.executor.config.work_directory == work
+    assert attached.executor.url == executor.url
+    assert attached.status.exit_code == 0
+    assert not psij.JobExecutorConfig.DEFAULT_WORK_DIRECTORY.exists()
+
+
 def wait(job):
     status = job.wait(timeout=timedelta(seconds=15))
     assert status is not None, "Job did not finish"
     return status
+
+
+def test_loading_history_does_not_construct_executor(project, detached, monkeypatch):
+    job, saved = history_entry(project, detached)
+    monkeypatch.setattr(
+        psij.JobExecutor,
+        "get_instance",
+        lambda *a, **k: pytest.fail("Loading history must not construct an executor"),
+    )
+    loaded = Submission.load(project, job.id)
+    assert loaded.model_dump(mode="json") == saved
 
 
 def test_preparation_returns_native_job_without_io(project):
@@ -91,7 +142,7 @@ def test_python_attribution_is_explicit(project, monkeypatch, capsys):
     )
     assert job.spec.environment["HIRAKU_RECORD_ID"] == ""
     assert job.spec.environment["CUSTOM"] == "value"
-    assert run_local(job).exit_code == 0
+    assert run_local(job, project=project).exit_code == 0
     assert capsys.readouterr().out == "''\n"
 
 
@@ -104,7 +155,7 @@ def test_execution_directory(project, monkeypatch, capsys, tmp_path, explicit):
         directory=project.root if explicit else None,
     )
     monkeypatch.chdir(tmp_path)
-    assert run_local(job).exit_code == 0
+    assert run_local(job, project=project).exit_code == 0
     assert capsys.readouterr().out.strip() == str(
         project.root if explicit else tmp_path
     )
@@ -117,7 +168,7 @@ def test_foreground_retains_explicit_output(project, capsys, relative):
     job.spec.directory = project.root
     path = Path(output.name) if relative else output
     job.spec.stdout_path = path
-    assert run_local(job).exit_code == 0
+    assert run_local(job, project=project).exit_code == 0
     assert capsys.readouterr().out == "saved\n"
     assert job.spec.stdout_path == path
     assert output.read_text() == "saved\n"
@@ -134,13 +185,15 @@ def test_foreground_output_and_status(project, capsys, code):
         ],
         project=project,
     )
-    assert run_local(job).exit_code == code
+    assert run_local(job, project=project).exit_code == code
     output = capsys.readouterr()
     assert output.out == "héllo\n" and output.err == "error\n"
     assert job.spec.stdout_path is None and job.spec.stderr_path is None
-    assert not (project.root / ".hiraku/jobs").exists()
+    submission = Submission.load(project, job.id)
+    assert submission.status.exit_code == code
+    assert submission.executor_work_directory == str(project.psij_dir)
     with pytest.raises(psij.InvalidJobException):
-        run_local(job)
+        run_local(job, project=project)
 
 
 def test_foreground_streams_before_completion(project):
@@ -149,7 +202,8 @@ def test_foreground_streams_before_completion(project):
         "from hiraku.job import prepare_job,run_local; "
         f"project=Project.discover({str(project.root)!r}); "
         "run_local(prepare_job([sys.executable,'-c',"
-        "'import time; print(\"ready\",flush=True); time.sleep(1)'],project=project))"
+        "'import time; print(\"ready\",flush=True); time.sleep(1)'],project=project),"
+        "project=project)"
     )
     process = subprocess.Popen(
         [sys.executable, "-c", command], stdout=subprocess.PIPE, text=True
@@ -179,7 +233,7 @@ def test_foreground_rejects_running_job_without_mutation(project):
     original = job.spec.__dict__.copy()
     try:
         with pytest.raises(psij.InvalidJobException, match="new and unbound"):
-            run_local(job)
+            run_local(job, project=project)
         assert job.spec.__dict__ == original
         assert not job.status.final
     finally:
@@ -207,7 +261,7 @@ def test_foreground_binary_and_text_streams(project, monkeypatch, binary):
         ],
         project=project,
     )
-    assert run_local(job).exit_code == 0
+    assert run_local(job, project=project).exit_code == 0
     for output in (stdout, stderr):
         if binary:
             assert output.buffer.getvalue() == payload
@@ -229,7 +283,7 @@ def test_hook_failure(project, detached, capsys, hook, background):
         detached.attach(attached, job.native_id)
         assert wait(attached).exit_code == 9
     else:
-        status = run_local(job)
+        status = run_local(job, project=project)
     assert status.state == psij.JobState.FAILED
     assert status.exit_code == 9
 
@@ -573,8 +627,11 @@ def test_malformed_result_is_not_success(project, detached):
 
 def test_background_survives_submitter(project, detached):
     code = (
-        "import psij,sys; "
-        f"e=psij.JobExecutor.get_instance('local-detached',url={detached.url!r}); "
+        "import psij,sys; from pathlib import Path; "
+        "from hiraku.job import get_executor; "
+        "e=get_executor('local-detached',"
+        f"url={detached.url!r},"
+        f"work_directory=Path({str(project.psij_dir)!r})); "
         "j=psij.Job(psij.JobSpec(sys.executable,['-c',"
         "'import time; time.sleep(.5); raise SystemExit(7)'])); "
         "e.submit(j); print(j.native_id)"
@@ -585,6 +642,7 @@ def test_background_survives_submitter(project, detached):
     attached = psij.Job()
     detached.attach(attached, result.stdout.strip())
     assert wait(attached).exit_code == 7
+    assert list(project.psij_dir.glob("*/single.sh"))
 
 
 def test_missing_result_does_not_infer_success(project, detached):
@@ -686,6 +744,12 @@ def test_cli_submit_rejects_native_local(project, monkeypatch):
 
 @pytest.mark.parametrize("command", [["run"], ["job", "submit"]])
 def test_cli_launcher_and_custom_attributes_are_saved(project, monkeypatch, command):
+    # PSI/J's native single cannot source its library from a spaced path.
+    project = Project.create(
+        project.root.parent / "native-launcher",
+        install_skill=False,
+        install_mcp=False,
+    )
     monkeypatch.chdir(project.root)
     result = CliRunner().invoke(
         main,
@@ -736,7 +800,8 @@ def test_cli_rejects_unregistered_launcher(project, monkeypatch, command, launch
     assert not (project.root / ".hiraku/jobs").exists()
 
 
-def test_cli_submit_status_and_list(project, detached, monkeypatch):
+@pytest.mark.parametrize("custom_url", [False, True])
+def test_cli_submit_status_and_list(project, detached, monkeypatch, custom_url):
     monkeypatch.chdir(project.root)
     runner = CliRunner()
     result = runner.invoke(
@@ -744,8 +809,7 @@ def test_cli_submit_status_and_list(project, detached, monkeypatch):
         [
             "job",
             "submit",
-            "--executor-url",
-            detached.url,
+            *(["--executor-url", detached.url] if custom_url else []),
             "--",
             sys.executable,
             "-c",
@@ -754,6 +818,13 @@ def test_cli_submit_status_and_list(project, detached, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     receipt = json.loads(result.output)
+    expected_url = (
+        detached.url
+        if custom_url
+        else (project.root / ".hiraku/psij/detached").as_uri()
+    )
+    assert receipt["executor_url"] == expected_url
+    assert list((project.root / ".hiraku/psij").glob("*/single.sh"))
     assert "observation_error" not in receipt
     wait(Submission.load(project, receipt["id"]).get_psi_job())
     args = [
@@ -1030,7 +1101,9 @@ def test_attachment_sync_and_save_are_explicit(project, detached, monkeypatch):
         attached.status = psij.JobStatus(psij.JobState.ACTIVE)
 
     monkeypatch.setattr(detached, "attach", attach)
-    monkeypatch.setattr(psij.JobExecutor, "get_instance", lambda name, url: detached)
+    monkeypatch.setattr(
+        psij.JobExecutor, "get_instance", lambda name, url, config: detached
+    )
     monkeypatch.setattr(
         psij.Job, "wait", lambda *a, **k: pytest.fail("Explicit waiting only")
     )
@@ -1332,6 +1405,9 @@ def test_invalid_history_ids(project, job_id):
         {"id": "00000000-0000-0000-0000-000000000000"},
         {"spec": {}},
         {"executor": 3},
+        {"executor": ""},
+        {"executor_work_directory": 3},
+        {"executor_work_directory": ""},
         {"native_id": ""},
         {"record_id": 3},
         {"executor_url": 3},

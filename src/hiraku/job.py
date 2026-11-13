@@ -31,6 +31,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def get_executor(
+    name: str, *, work_directory: Path, url: str | None = None
+) -> psij.JobExecutor:
+    """Create an executor with an explicit auxiliary storage directory."""
+    return psij.JobExecutor.get_instance(
+        name,
+        url=url,
+        config=psij.JobExecutorConfig(work_directory=work_directory),
+    )
+
+
 def validate_command(value: Any) -> list[str] | None:
     """Validate command configuration as a literal argv sequence."""
     if value is None:
@@ -96,11 +107,11 @@ def prepare_job(
     return job
 
 
-def run_local(job: psij.Job, *, project: Project | None = None) -> psij.JobStatus:
+def run_local(job: psij.Job, *, project: Project) -> psij.JobStatus:
     """Submit locally, stream output, and return the native final status.
 
     Output uses temporary files unless the caller supplied output paths.
-    Supplying a project records the submission and its final native status.
+    Records the submission and its final native status in the project.
     """
     if job.status.state != psij.JobState.NEW or job.executor is not None:
         raise psij.InvalidJobException("Job must be new and unbound")
@@ -115,10 +126,9 @@ def run_local(job: psij.Job, *, project: Project | None = None) -> psij.JobStatu
         spec.stdin_path = spec.stdin_path or Path(os.devnull)
         spec.launcher = spec.launcher or "quoted-single"
         try:
-            psij.JobExecutor.get_instance("local").submit(job)
-            if project is not None:
-                submission = Submission.from_psi_job(job)
-                submission.save(project)
+            get_executor("local", work_directory=project.psij_dir).submit(job)
+            submission = Submission.from_psi_job(job)
+            submission.save(project)
             _follow_streams(job)
         except BaseException as exc:
             if job.native_id is not None and not job.status.final:
@@ -136,7 +146,7 @@ def run_local(job: psij.Job, *, project: Project | None = None) -> psij.JobStatu
             raise
         finally:
             spec.stdout_path, spec.stderr_path = original
-            if project is not None and submission is not None and job.status.final:
+            if submission is not None and job.status.final:
                 submission.sync(job)
                 submission.save(project)
     return job.status
@@ -184,6 +194,7 @@ class Submission(BaseModel):
     observed_at: AwareDatetime
     executor: str = Field(min_length=1)
     executor_url: str | None
+    executor_work_directory: str = Field(min_length=1)
     native_id: str = Field(min_length=1)
     spec: dict[str, Any]
     status: Status
@@ -222,6 +233,9 @@ class Submission(BaseModel):
                 observed_at=now,
                 executor=job.executor.name,
                 executor_url=job.executor.url,
+                executor_work_directory=str(
+                    job.executor.config.work_directory.absolute()
+                ),
                 native_id=job.native_id,
                 spec=json.loads(JSONSerializer().dumps(job.spec)),
                 status=status,
@@ -237,8 +251,10 @@ class Submission(BaseModel):
         if self.executor == "local":
             raise ObservationError("Native local jobs cannot be safely reattached")
         try:
-            executor = psij.JobExecutor.get_instance(
-                self.executor, url=self.executor_url
+            executor = get_executor(
+                self.executor,
+                url=self.executor_url,
+                work_directory=Path(self.executor_work_directory),
             )
             job = psij.Job()
             executor.attach(job, self.native_id)

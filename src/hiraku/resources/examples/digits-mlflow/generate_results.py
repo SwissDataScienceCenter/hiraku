@@ -124,7 +124,7 @@ def generate(project: Project) -> dict[str, str]:
                     "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
                 },
             )
-            status = run_local(job)
+            status = run_local(job, project=project)
             if status.exit_code:
                 raise RuntimeError(
                     f"Training command for {identifier} failed with "
