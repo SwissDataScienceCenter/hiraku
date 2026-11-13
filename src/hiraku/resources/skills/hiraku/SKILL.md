@@ -95,8 +95,8 @@ returned interrupt and response schema.
 
 Continue an existing session with `workflow_status` and `workflow_resume`,
 using its `workflow_session_id` and current `checkpoint_id`; do not start a
-new session to continue paused work. Use `workflow_sessions` and
-`workflow_session_history` to recover prior work before repeating actions.
+new session to continue paused work. Inspect the current checkpoint state before
+repeating actions.
 
 When an interrupt requests approval, call `workflow_approval` with the session
 ID, current `interrupt_id`, a concise `proposal`, and the proposed `response`.
