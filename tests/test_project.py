@@ -153,9 +153,6 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
     assert codex_skill.is_file()
     assert claude_skill.is_file()
-    assert (root / ".codex/skills/hiraku/SKILL.md").read_text() == (
-        codex_skill.read_text()
-    )
     assert (root / ".pi/skills/hiraku/SKILL.md").read_text() == codex_skill.read_text()
     assert not (root / ".gemini/skills").exists()
     assert codex_skill.read_text() == claude_skill.read_text()
@@ -170,7 +167,6 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert not (without_skill / ".claude/skills").exists()
     assert not (without_skill / ".claude/settings.json").exists()
     assert not (without_skill / ".pi/skills").exists()
-    assert not (without_skill / ".codex/skills").exists()
 
     with pytest.raises(ProjectExistsError):
         Project.create(root)
@@ -187,7 +183,7 @@ def test_init_installs_all_bundled_skill_files(tmp_path: Path) -> None:
         if path.is_file()
     }
     assert expected
-    for agent in (".agents", ".claude", ".pi", ".codex"):
+    for agent in (".agents", ".claude", ".pi"):
         destination = tmp_path / agent / "skills"
         actual = {
             path.relative_to(destination): path.read_bytes()
