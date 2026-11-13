@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
@@ -158,8 +159,9 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert (root / ".pi/skills/hiraku/SKILL.md").read_text() == codex_skill.read_text()
     assert not (root / ".gemini/skills").exists()
     assert codex_skill.read_text() == claude_skill.read_text()
-    assert "`leaderboard runs --json`" in codex_skill.read_text()
-    assert "`runs --json`" not in codex_skill.read_text()
+    assert codex_skill.read_text() == (
+        files("hiraku.resources").joinpath("skills/hiraku/SKILL.md").read_text()
+    )
     assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
@@ -167,11 +169,32 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert not (without_skill / ".agents").exists()
     assert not (without_skill / ".claude/skills").exists()
     assert not (without_skill / ".claude/settings.json").exists()
+    assert not (without_skill / ".pi/skills").exists()
+    assert not (without_skill / ".codex/skills").exists()
 
     with pytest.raises(ProjectExistsError):
         Project.create(root)
     with pytest.raises(ProjectNotFoundError):
         Project.discover(tmp_path / "missing")
+
+
+def test_init_installs_all_bundled_skill_files(tmp_path: Path) -> None:
+    Project.create(tmp_path)
+    source = Path(str(files("hiraku.resources").joinpath("skills")))
+    expected = {
+        path.relative_to(source): path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    }
+    assert expected
+    for agent in (".agents", ".claude", ".pi", ".codex"):
+        destination = tmp_path / agent / "skills"
+        actual = {
+            path.relative_to(destination): path.read_bytes()
+            for path in destination.rglob("*")
+            if path.is_file()
+        }
+        assert actual == expected
 
 
 def test_init_from_template_applies_overlay(tmp_path: Path) -> None:

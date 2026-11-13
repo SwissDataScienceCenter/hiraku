@@ -232,7 +232,7 @@ class Project(BaseModel):
 
         Args:
             root: Directory to initialize.
-            install_skill: Whether to install the bundled Hiraku skill.
+            install_skill: Whether to install all bundled Hiraku skills.
             install_mcp: Whether to add the project MCP server configuration.
             template: Optional directory whose contents are copied into the project.
             example: Optional packaged example name to initialize from.
@@ -314,12 +314,12 @@ class Project(BaseModel):
 
             # Install the bundled Hiraku skills
             if install_skill:
-                with as_file(resources / "skills" / "hiraku") as source:
+                with as_file(resources / "skills") as source:
                     for destination in (
-                        root / ".agents/skills/hiraku",  # Generic agents
-                        root / ".claude/skills/hiraku",  # Claude Code
-                        root / ".pi/skills/hiraku",  # Pi Agent
-                        root / ".codex/skills/hiraku",  # Codex
+                        root / ".agents/skills",  # Generic agents
+                        root / ".claude/skills",  # Claude Code
+                        root / ".pi/skills",  # Pi Agent
+                        root / ".codex/skills",  # Codex
                     ):
                         shutil.copytree(source, destination, dirs_exist_ok=True)
 
