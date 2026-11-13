@@ -59,7 +59,7 @@ class _Auth:
     def _load(self) -> dict[str, Any] | None:
         try:
             cache = json.loads(self._cache_path().read_text())
-            return cache.get(self._issuer)
+            return cache.get(self._issuer, {}).get(self._client_id)
         except (OSError, ValueError, AttributeError):
             return None
 
@@ -69,7 +69,7 @@ class _Auth:
             cache = json.loads(path.read_text())
         except (OSError, ValueError):
             cache = {}
-        cache[self._issuer] = tokens
+        cache.setdefault(self._issuer, {})[self._client_id] = tokens
         path.parent.mkdir(parents=True, exist_ok=True)
         # Tokens are credentials: create the file private, and replace it
         # atomically so concurrent readers never see a partial cache.
@@ -404,6 +404,8 @@ class RenkuJobExecutor(JobExecutor):
                     f"Renku job {native_id!r} is unavailable"
                 ) from exc
             raise
+        if result["project_id"] != self._project_identifier():
+            raise SubmitException("Renku job is unavailable in the configured project")
         return self._status(result)
 
     def _observe(self, job: Job) -> None:

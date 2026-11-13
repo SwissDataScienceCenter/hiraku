@@ -228,7 +228,8 @@ PSI/J `job.wait()` in Python.
 The `renku` executor talks directly to the Renku data services API and needs no
 `rnk` installation. It logs in with the OAuth2 device flow: Hiraku prints a URL
 and code on stderr, and tokens are cached (mode `0600`) in
-`~/.config/hiraku/renku-api-tokens.json` and refreshed automatically.
+`~/.config/hiraku/renku-api-tokens.json` and refreshed automatically. Cached tokens
+are separated by identity-provider issuer and OAuth client ID.
 
 Choose an existing launcher:
 
@@ -239,7 +240,8 @@ hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespac
 hiraku job status JOB_ID --json
 ```
 
-The executor URL identifies the deployment and project. The launcher supplies
+The executor URL identifies the deployment and project. Attachment and
+cancellation reject sessions belonging to another project. The launcher supplies
 its image, mounts, environment, and resources; Hiraku does not upload local code
 or change the launcher. Renku wraps commands for code-built launchers itself.
 `RENKU_OIDC_ISSUER` (default `https://HOST/auth/realms/Renku`) and

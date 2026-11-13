@@ -63,7 +63,7 @@ def test_submission_and_cancel(renku):
             return {"name": "remote-1", "status": {"state": "running"}}
         if method == "PATCH":
             return {"name": "remote-1", "status": {"state": "hibernated"}}
-        return {"name": "remote-1", "status": {"state": "running"}}
+        return {"name": "remote-1", "project_id": "P1", "status": {"state": "running"}}
 
     renku._call = call
     job = psij.Job(
@@ -106,7 +106,9 @@ def test_cancel_preserves_remotely_finished_job(
     def call(method, path, body=None, **kwargs):
         calls.append((method, path))
         assert method == "GET"
-        return {"name": "remote", "status": {"state": remote_state}}
+        if path.startswith("/namespaces/"):
+            return {"id": "P1"}
+        return {"name": "remote", "project_id": "P1", "status": {"state": remote_state}}
 
     monkeypatch.setattr(renku, "_call", call)
     job = psij.Job()
@@ -114,7 +116,10 @@ def test_cancel_preserves_remotely_finished_job(
     job._native_id = "remote"
     job.status = psij.JobStatus(psij.JobState.ACTIVE)
     renku.cancel(job)
-    assert calls == [("GET", "/sessions/remote")]
+    assert calls == [
+        ("GET", "/sessions/remote"),
+        ("GET", "/namespaces/namespace/projects/project"),
+    ]
     assert job.status.state == expected
 
 
@@ -144,6 +149,30 @@ def test_status_and_missing_job(renku):
     renku._call = missing
     with pytest.raises(psij.SubmitException, match="unavailable"):
         renku.attach(psij.Job(), "gone")
+
+
+@pytest.mark.parametrize("operation", ["attach", "cancel"])
+def test_session_from_another_project_is_rejected(renku, monkeypatch, operation):
+    def call(method, path, **kwargs):
+        assert method == "GET"
+        if path.startswith("/namespaces/"):
+            return {"id": "P1"}
+        return {"name": "remote", "project_id": "P2", "status": {"state": "running"}}
+
+    monkeypatch.setattr(renku, "_call", call)
+    job = psij.Job()
+    with pytest.raises(psij.SubmitException, match="configured project"):
+        if operation == "attach":
+            renku.attach(job, "remote")
+        else:
+            job.executor = renku
+            job._native_id = "remote"
+            job.status = psij.JobStatus(psij.JobState.ACTIVE)
+            renku.cancel(job)
+    if operation == "attach":
+        assert job.executor is None
+    else:
+        assert job.status.state == psij.JobState.ACTIVE
 
 
 @pytest.mark.parametrize(
@@ -206,11 +235,13 @@ def test_observation_error_does_not_invent_failure(renku, monkeypatch):
 
     def call(*args, **kwargs):
         nonlocal attempts
+        if args[1].startswith("/namespaces/"):
+            return {"id": "P1"}
         attempts += 1
         if attempts == 2:
             raise psij.SubmitException("temporary outage")
         state = "running" if attempts == 1 else "succeeded"
-        return {"name": "remote", "status": {"state": state}}
+        return {"name": "remote", "project_id": "P1", "status": {"state": state}}
 
     monkeypatch.setattr(renku, "_call", call)
     job = psij.Job()
@@ -220,13 +251,7 @@ def test_observation_error_does_not_invent_failure(renku, monkeypatch):
 
 
 def test_device_flow_login_and_cache(monkeypatch):
-    from importlib import util
-    from pathlib import Path
-
-    path = Path(__file__).parents[1] / "src/psij-descriptors/renku.py"
-    spec = util.spec_from_file_location("renku_under_test", path)
-    module = util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _load_module()
 
     responses = iter(
         [
@@ -263,6 +288,24 @@ def _load_module():
     module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize(
+    ("other_issuer", "other_client"),
+    [("https://x/issuer", "client-b"), ("https://y/issuer", "client-a")],
+)
+def test_token_cache_is_scoped_to_issuer_and_client(other_issuer, other_client):
+    module = _load_module()
+    first = module._Auth("https://x/issuer", "client-a")
+    first._store({"access_token": "first", "expires_in": 300})
+    other = module._Auth(other_issuer, other_client)
+    with pytest.raises(psij.SubmitException, match="login expired"):
+        other.token(interactive=False)
+    other._store({"access_token": "other", "expires_in": 300})
+    assert (
+        module._Auth("https://x/issuer", "client-a").token(interactive=False) == "first"
+    )
+    assert module._Auth(other_issuer, other_client).token(interactive=False) == "other"
 
 
 @pytest.mark.parametrize("replacement", [None, "rotated-refresh"])
@@ -313,7 +356,7 @@ def test_waits_for_other_process_and_reuses_its_token(monkeypatch):
             held.set()
             time.sleep(0.2)
             tokens = {"access_token": "theirs", "expires_at": time.time() + 300}
-            path.write_text(json.dumps({issuer: tokens}))
+            path.write_text(json.dumps({issuer: {"renku-cli": tokens}}))
 
     thread = threading.Thread(target=other_process)
     thread.start()
@@ -350,7 +393,7 @@ def test_valid_cached_token_is_used_while_another_login_holds_the_lock():
     path = auth._cache_path()
     path.parent.mkdir(parents=True)
     tokens = {"access_token": "cached", "expires_at": time.time() + 300}
-    path.write_text(json.dumps({issuer: tokens}))
+    path.write_text(json.dumps({issuer: {"renku-cli": tokens}}))
     with FileLock(path.with_name(f"{path.name}.lock")):
         assert auth.token(interactive=False) == "cached"
 
@@ -373,7 +416,7 @@ def test_cache_replace_retries_when_a_reader_holds_the_file(monkeypatch):
     auth = module._Auth("https://x/auth/realms/Renku", "renku-cli")
     auth._save({"access_token": "tok"})
     saved = json.loads(auth._cache_path().read_text())
-    assert saved["https://x/auth/realms/Renku"]["access_token"] == "tok"
+    assert saved["https://x/auth/realms/Renku"]["renku-cli"]["access_token"] == "tok"
 
 
 def test_cache_replace_gives_up_and_removes_the_temporary_file(monkeypatch):
