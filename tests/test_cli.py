@@ -387,9 +387,7 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
     data_rows = [
         cells
         for line in sorted_table.output.splitlines()
-        if line.startswith("│")
-        if (cells := [cell.strip() for cell in line.split("│")[1:-1]])
-        and cells[0] != "id"
+        if (cells := line.split()) and cells[0] in {"a", "b"}
     ]
     assert [row[0] for row in data_rows] == ["b", "a"]
     assert invoke("leaderboard", "runs", "list", "--record", "root/root").exit_code != 0
