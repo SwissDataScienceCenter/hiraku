@@ -61,7 +61,6 @@ class _Auth:
             cache = json.loads(self._cache_path().read_text())
             return cache.get(self._issuer)
         except (OSError, ValueError, AttributeError):
-            logger.warning("Failed to load cache.")
             return None
 
     def _save(self, tokens: dict[str, Any]) -> None:
