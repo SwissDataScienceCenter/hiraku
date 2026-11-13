@@ -20,11 +20,7 @@ from langgraph.types import Command
 
 from ..errors import ValidationError, WorkflowError
 from ..project import Project
-from .session_history import (
-    prepare_checkpoint_storage,
-    record_event,
-    validate_context,
-)
+from .checkpoint import prepare_checkpoint_storage
 
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
@@ -69,21 +65,11 @@ def start_workflow(
     arguments: Mapping[str, Any] | None = None,
     *,
     project: Project,
-    context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Start a LangGraph workflow and run until it completes or interrupts."""
-    validate_context(context)
     workflow_session_id = f"{workflow_id}:{uuid4().hex}"
     with _compiled_graph(workflow_id, project) as graph:
-        record_event(
-            workflow_session_id,
-            workflow_id,
-            "started",
-            "running",
-            project=project,
-            context=context,
-        )
-        return _invoke_and_record(
+        return _invoke_workflow(
             graph,
             workflow_id,
             workflow_session_id,
@@ -91,8 +77,6 @@ def start_workflow(
                 "arguments": dict(arguments or {}),
                 "run_id": workflow_session_id,
             },
-            project,
-            context,
         )
 
 
@@ -102,18 +86,14 @@ def resume_workflow(
     *,
     project: Project,
     checkpoint_id: str,
-    context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resume a paused graph with the harness's structured response."""
-    validate_context(context)
-    lock_dir = project.hiraku_dir / ".hiraku" / "locks"
+    lock_dir = project.root / ".hiraku" / "locks"
     prepare_checkpoint_storage(project)
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_name = hashlib.sha256(workflow_session_id.encode()).hexdigest()
     with FileLock(str(lock_dir / f"{lock_name}.lock")):
-        return _resume_locked(
-            workflow_session_id, response, project, checkpoint_id, context
-        )
+        return _resume_locked(workflow_session_id, response, project, checkpoint_id)
 
 
 def _resume_locked(
@@ -121,7 +101,6 @@ def _resume_locked(
     response: Mapping[str, Any],
     project: Project,
     checkpoint_id: str,
-    context: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     graph_workflow = _session_workflow_id(workflow_session_id, project)
     with _compiled_graph(graph_workflow, project) as graph:
@@ -137,22 +116,11 @@ def _resume_locked(
         current_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
         if not checkpoint_id or checkpoint_id != current_id:
             raise ValidationError("Workflow checkpoint has changed; inspect its status")
-        record_event(
-            workflow_session_id,
-            graph_workflow,
-            "resume_requested",
-            "running",
-            project=project,
-            context=context,
-            checkpoint_id=snapshot.config.get("configurable", {}).get("checkpoint_id"),
-        )
-        return _invoke_and_record(
+        return _invoke_workflow(
             graph,
             graph_workflow,
             workflow_session_id,
             Command(resume=dict(response)),
-            project,
-            context,
         )
 
 
@@ -265,45 +233,15 @@ def _thread_config(workflow_session_id: str) -> dict[str, dict[str, str]]:
     return {"configurable": {"thread_id": workflow_session_id}}
 
 
-def _invoke_and_record(
+def _invoke_workflow(
     graph: Any,
     workflow_id: str,
     workflow_session_id: str,
     invocation: Any,
-    project: Project,
-    context: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    try:
-        graph.invoke(invocation, _thread_config(workflow_session_id))
-    except Exception as exc:
-        record_event(
-            workflow_session_id,
-            workflow_id,
-            "failed",
-            "failed",
-            project=project,
-            context=context,
-            error_type=type(exc).__name__,
-        )
-        raise
-    return _record_snapshot(graph, workflow_id, workflow_session_id, project)
-
-
-def _record_snapshot(
-    graph: Any, workflow_id: str, workflow_session_id: str, project: Project
-) -> dict[str, Any]:
+    graph.invoke(invocation, _thread_config(workflow_session_id))
     snapshot = graph.get_state(_thread_config(workflow_session_id))
-    result = _snapshot_result(workflow_id, workflow_session_id, snapshot)
-    checkpoint_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
-    record_event(
-        workflow_session_id,
-        workflow_id,
-        result["status"],
-        result["status"],
-        project=project,
-        checkpoint_id=checkpoint_id,
-    )
-    return result
+    return _snapshot_result(workflow_id, workflow_session_id, snapshot)
 
 
 def _snapshot_result(
