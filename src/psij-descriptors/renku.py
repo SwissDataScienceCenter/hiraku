@@ -121,7 +121,10 @@ class _Auth:
         response = self._token_request(
             grant_type="refresh_token", refresh_token=tokens["refresh_token"]
         )
-        return self._store(response) if "access_token" in response else None
+        if "access_token" not in response:
+            return None
+        response.setdefault("refresh_token", tokens["refresh_token"])
+        return self._store(response)
 
     def _login(self) -> str:
         endpoints = self._discover()
@@ -423,6 +426,10 @@ class RenkuJobExecutor(JobExecutor):
         # Hibernating stops the job but keeps it (and its logs) until Renku culls
         # it; hibernating a finished job would turn its result into CANCELED.
         if job.status.final:
+            return
+        status = self._lookup(job.native_id)
+        if status.final:
+            self._set_job_status(job, status)
             return
         result = self._call(
             "PATCH",

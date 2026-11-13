@@ -249,7 +249,9 @@ device-flow client.
 The executor observes Renku states through the API and reports final PSI/J
 status for submitted and attached jobs. Process exit codes are not exposed, so
 `exit_code` remains unset, including for failed jobs. Missing jobs and
-observation errors never imply completion. Cancelling hibernates the session
+observation errors never imply completion. Cancellation checks remote status
+first and skips finished jobs. A job can still finish between that check and
+the hibernation request. Cancelling hibernates the session
 rather than deleting it, retaining logs until Renku culls it; finished jobs are
 left unchanged. PSI/J resource requests, stream redirection, and launch hooks
 are unsupported by this adapter.

@@ -63,7 +63,7 @@ def test_submission_and_cancel(renku):
             return {"name": "remote-1", "status": {"state": "running"}}
         if method == "PATCH":
             return {"name": "remote-1", "status": {"state": "hibernated"}}
-        return None
+        return {"name": "remote-1", "status": {"state": "running"}}
 
     renku._call = call
     job = psij.Job(
@@ -88,6 +88,34 @@ def test_submission_and_cancel(renku):
     count = len(calls)
     renku.cancel(job)
     assert len(calls) == count  # final jobs are left alone
+
+
+@pytest.mark.parametrize(
+    ("remote_state", "expected"),
+    [
+        ("succeeded", psij.JobState.COMPLETED),
+        ("failed", psij.JobState.FAILED),
+        ("hibernated", psij.JobState.CANCELED),
+    ],
+)
+def test_cancel_preserves_remotely_finished_job(
+    renku, monkeypatch, remote_state, expected
+):
+    calls = []
+
+    def call(method, path, body=None, **kwargs):
+        calls.append((method, path))
+        assert method == "GET"
+        return {"name": "remote", "status": {"state": remote_state}}
+
+    monkeypatch.setattr(renku, "_call", call)
+    job = psij.Job()
+    job.executor = renku
+    job._native_id = "remote"
+    job.status = psij.JobStatus(psij.JobState.ACTIVE)
+    renku.cancel(job)
+    assert calls == [("GET", "/sessions/remote")]
+    assert job.status.state == expected
 
 
 def test_launcher_from_another_project_is_rejected(renku):
@@ -235,6 +263,35 @@ def _load_module():
     module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize("replacement", [None, "rotated-refresh"])
+def test_refresh_preserves_or_rotates_cached_token(monkeypatch, replacement):
+    module = _load_module()
+    auth = module._Auth("https://x/auth/realms/Renku", "renku-cli")
+    auth._save(
+        {
+            "access_token": "expired",
+            "refresh_token": "original-refresh",
+            "expires_at": 0,
+        }
+    )
+    response = {"access_token": "renewed", "expires_in": 300}
+    if replacement is not None:
+        response["refresh_token"] = replacement
+
+    def request(**fields):
+        assert fields == {
+            "grant_type": "refresh_token",
+            "refresh_token": "original-refresh",
+        }
+        return response
+
+    monkeypatch.setattr(auth, "_token_request", request)
+    assert auth.token(interactive=False) == "renewed"
+    expected = replacement or "original-refresh"
+    assert auth._tokens["refresh_token"] == expected
+    assert auth._load()["refresh_token"] == expected
 
 
 def test_waits_for_other_process_and_reuses_its_token(monkeypatch):
