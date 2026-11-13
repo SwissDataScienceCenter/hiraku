@@ -1,3 +1,6 @@
+from datetime import timedelta
+from pathlib import Path
+
 import psij
 import pytest
 
@@ -12,15 +15,16 @@ def _clean_env(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def renku_api(monkeypatch):
-    executor = psij.JobExecutor.get_instance("renku_api", url=URL)
+def renku(monkeypatch):
+    executor = psij.JobExecutor.get_instance("renku", url=URL)
+    assert executor.name == "renku"
     monkeypatch.setattr(executor, "poll_interval", 0.01)
     return executor
 
 
 def test_executor_url_is_parsed_once_in_init():
     executor = psij.JobExecutor.get_instance(
-        "renku_api", url="https://dev.renku.ch/p/namespace/project"
+        "renku", url="https://dev.renku.ch/p/namespace/project"
     )
     assert (executor._namespace, executor._slug) == ("namespace", "project")
     assert executor._base_url == "https://dev.renku.ch"
@@ -32,7 +36,7 @@ def test_executor_url_is_parsed_once_in_init():
 def test_oidc_settings_come_from_env(monkeypatch):
     monkeypatch.setenv("RENKU_CLIENT_ID", "mine")
     monkeypatch.setenv("RENKU_OIDC_ISSUER", "https://sso.example/realms/r")
-    executor = psij.JobExecutor.get_instance("renku_api", url=URL)
+    executor = psij.JobExecutor.get_instance("renku", url=URL)
     assert executor._client_id == "mine"
     assert executor._oidc_issuer == "https://sso.example/realms/r"
     assert executor._auth._client_id == "mine"
@@ -43,10 +47,10 @@ def test_oidc_settings_come_from_env(monkeypatch):
 )
 def test_rejects_bad_project_url(url):
     with pytest.raises(ValueError, match="/p/namespace/project"):
-        psij.JobExecutor.get_instance("renku_api", url=url)
+        psij.JobExecutor.get_instance("renku", url=url)
 
 
-def test_submission_and_cancel(renku_api):
+def test_submission_and_cancel(renku):
     calls = []
 
     def call(method, path, body=None, *, interactive=False):
@@ -61,7 +65,7 @@ def test_submission_and_cancel(renku_api):
             return {"name": "remote-1", "status": {"state": "hibernated"}}
         return None
 
-    renku_api._call = call
+    renku._call = call
     job = psij.Job(
         psij.JobSpec(
             executable="python",
@@ -69,25 +73,25 @@ def test_submission_and_cancel(renku_api):
             attributes=psij.JobAttributes(custom_attributes={"renku.launcher": "L1"}),
         )
     )
-    renku_api.submit(job)
+    renku.submit(job)
     assert job.native_id == "remote-1"
     assert job.status.state == psij.JobState.ACTIVE
     post = next(c for c in calls if c[0] == "POST")
     assert post[2]["launcher_id"] == "L1"
-    # The legacy rnk prefix attribute is ignored; the backend wraps the command.
+    # The backend wraps commands for code-built launchers.
     assert post[2]["job_command_override"] == ["env"]
     assert post[2]["job_args_override"] == ["python", "train.py"]
-    renku_api.cancel(job)
+    renku.cancel(job)
     assert calls[-1] == ("PATCH", "/sessions/remote-1", {"state": "hibernated"})
     assert job.status.state == psij.JobState.CANCELED
     assert not any(call[0] == "DELETE" for call in calls)
     count = len(calls)
-    renku_api.cancel(job)
+    renku.cancel(job)
     assert len(calls) == count  # final jobs are left alone
 
 
-def test_launcher_from_another_project_is_rejected(renku_api):
-    renku_api._call = lambda method, path, *a, **k: (
+def test_launcher_from_another_project_is_rejected(renku):
+    renku._call = lambda method, path, *a, **k: (
         {"id": "P1"} if path.startswith("/namespaces/") else {"project_id": "P2"}
     )
     job = psij.Job(
@@ -97,29 +101,102 @@ def test_launcher_from_another_project_is_rejected(renku_api):
         )
     )
     with pytest.raises(psij.InvalidJobException, match="another Renku project"):
-        renku_api.submit(job)
+        renku.submit(job)
 
 
-def test_status_and_missing_job(renku_api):
-    status = renku_api._status({"status": {"state": "starting"}})
+def test_status_and_missing_job(renku):
+    status = renku._status({"status": {"state": "starting"}})
     assert status.state == psij.JobState.QUEUED
     with pytest.raises(psij.SubmitException, match="Unknown Renku state"):
-        renku_api._status({"status": {"state": "weird"}})
+        renku._status({"status": {"state": "weird"}})
 
     def missing(*args, **kwargs):
         raise psij.SubmitException("Renku API 404: nope")
 
-    renku_api._call = missing
+    renku._call = missing
     with pytest.raises(psij.SubmitException, match="unavailable"):
-        renku_api.attach(psij.Job(), "gone")
+        renku.attach(psij.Job(), "gone")
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("succeeded", psij.JobState.COMPLETED),
+        ("failed", psij.JobState.FAILED),
+        ("hibernated", psij.JobState.CANCELED),
+    ],
+)
+def test_submission_and_final_status(renku, monkeypatch, state, expected):
+    calls = []
+
+    def call(method, path, body=None, **kwargs):
+        calls.append((method, path, body))
+        if path.startswith("/namespaces/"):
+            return {"id": "P1"}
+        if path.startswith("/session_launchers/"):
+            return {"project_id": "P1"}
+        if method == "POST":
+            return {"name": "remote-1", "status": {"state": "starting"}}
+        result = {
+            "name": "remote-1",
+            "project_id": "P1",
+            "status": {"state": state, "message": "remote"},
+        }
+        if path.startswith("/sessions?"):
+            return [result, {"name": "other", "project_id": "P2"}]
+        return result
+
+    monkeypatch.setattr(renku, "_call", call)
+    job = psij.Job(
+        psij.JobSpec(
+            "python",
+            ["train.py", "argument with spaces"],
+            directory=Path("remote work"),
+            environment={"CUSTOM": "value with spaces"},
+            attributes=psij.JobAttributes(custom_attributes={"renku.launcher": "L1"}),
+        )
+    )
+    renku.submit(job)
+    status = job.wait(timeout=timedelta(seconds=5))
+    assert status.state == expected
+    assert status.exit_code is None
+    assert status.message == "remote"
+    body = next(body for method, _, body in calls if method == "POST")
+    assert body["job_command_override"] == ["sh"]
+    assert (
+        "cd 'remote work' && exec env 'CUSTOM=value with spaces'"
+        in body["job_args_override"][-1]
+    )
+    attached = psij.Job()
+    renku.attach(attached, "remote-1")
+    assert attached.status.state == expected
+    assert renku.list() == ["remote-1"]
+
+
+def test_observation_error_does_not_invent_failure(renku, monkeypatch):
+    attempts = 0
+
+    def call(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 2:
+            raise psij.SubmitException("temporary outage")
+        state = "running" if attempts == 1 else "succeeded"
+        return {"name": "remote", "status": {"state": state}}
+
+    monkeypatch.setattr(renku, "_call", call)
+    job = psij.Job()
+    renku.attach(job, "remote")
+    assert job.wait(timeout=timedelta(seconds=5)).state == psij.JobState.COMPLETED
+    assert attempts >= 3
 
 
 def test_device_flow_login_and_cache(monkeypatch):
     from importlib import util
     from pathlib import Path
 
-    path = Path(__file__).parents[1] / "src/psij-descriptors/renku_api.py"
-    spec = util.spec_from_file_location("renku_api_under_test", path)
+    path = Path(__file__).parents[1] / "src/psij-descriptors/renku.py"
+    spec = util.spec_from_file_location("renku_under_test", path)
     module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
@@ -153,8 +230,8 @@ def _load_module():
     from importlib import util
     from pathlib import Path
 
-    path = Path(__file__).parents[1] / "src/psij-descriptors/renku_api.py"
-    spec = util.spec_from_file_location("renku_api_under_test", path)
+    path = Path(__file__).parents[1] / "src/psij-descriptors/renku.py"
+    spec = util.spec_from_file_location("renku_under_test", path)
     module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -286,3 +363,23 @@ def test_unreachable_host_is_not_reported_as_a_timeout(monkeypatch, caplog):
     with pytest.raises(psij.SubmitException, match="Cannot reach"):
         module._request_json("https://x/api/data/sessions")
     assert "timed out" not in caplog.text
+
+
+def test_renku_rejects_unsupported_specs(renku):
+    with pytest.raises(psij.InvalidJobException, match="renku.launcher"):
+        renku.submit(psij.Job(psij.JobSpec("echo")))
+    for field, value in [
+        ("resources", psij.ResourceSpecV1(process_count=2)),
+        ("pre_launch", Path("hook.sh")),
+        ("launcher", "mpi"),
+        ("stdout_path", Path("output.log")),
+    ]:
+        spec = psij.JobSpec(
+            "echo",
+            attributes=psij.JobAttributes(
+                custom_attributes={"renku.launcher": "launcher"}
+            ),
+        )
+        setattr(spec, field, value)
+        with pytest.raises(psij.InvalidJobException):
+            renku.submit(psij.Job(spec))
