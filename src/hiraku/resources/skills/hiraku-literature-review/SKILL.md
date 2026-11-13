@@ -1,6 +1,6 @@
 ---
 name: hiraku-literature-review
-description: Search scholarly papers with alphaXiv, synthesize evidence, and save a sourced literature review as a Hiraku record.
+description: Conduct scholarly literature reviews for research projects managed in Hiraku. Use when users request paper discovery, literature surveys, related-work summaries, evidence synthesis, or research-gap analysis. Search and analyze publications with alphaXiv MCP tools when available, then save cited findings in a Hiraku context record.
 ---
 
 # Hiraku literature review

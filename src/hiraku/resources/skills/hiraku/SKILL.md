@@ -1,6 +1,6 @@
 ---
 name: hiraku
-description: Use Hiraku to manage research records, submit jobs, inspect tracked runs, and operate project workflows. Prefer connected Hiraku MCP tools, with CLI fallback.
+description: Manage data science and research projects using Hiraku. Use when users ask to create, inspect, or update research records; launch or monitor computational jobs; inspect tracked experiment runs and leaderboards; or execute Hiraku project workflows. Prefer connected Hiraku MCP tools, with CLI fallback when available.
 ---
 
 # Hiraku quickstart
