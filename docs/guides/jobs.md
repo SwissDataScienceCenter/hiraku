@@ -225,7 +225,13 @@ PSI/J `job.wait()` in Python.
 
 ## Renku
 
-Install and authenticate `rnk` independently, then choose an existing launcher:
+The `renku` executor talks directly to the Renku data services API and needs no
+`rnk` installation. It logs in with the OAuth2 device flow: Hiraku prints a URL
+and code on stderr, and tokens are cached (mode `0600`) in
+`~/.config/hiraku/renku-api-tokens.json` and refreshed automatically. Cached tokens
+are separated by identity-provider issuer and OAuth client ID.
+
+Choose an existing launcher:
 
 ```bash
 hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespace/project \
@@ -234,23 +240,30 @@ hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespac
 hiraku job status JOB_ID --json
 ```
 
-The executor URL identifies the Renku project. The launcher supplies the image,
-mounts, environment, and resources; Hiraku does not upload local code or change
-the launcher. For a Cloud Native Buildpacks image, use
-`--custom-attribute renku.command_prefix /cnb/lifecycle/launcher`.
+The executor URL identifies the deployment and project. Attachment and
+cancellation reject sessions belonging to another project. The launcher supplies
+its image, mounts, environment, and resources; Hiraku does not upload local code
+or change the launcher. Renku wraps commands for code-built launchers itself.
+`RENKU_OIDC_ISSUER` (default `https://HOST/auth/realms/Renku`) and
+`RENKU_CLIENT_ID` (default `renku-cli`) override the identity provider and the
+device-flow client.
 
-The executor observes Renku states through `rnk job list` and reports final
-PSI/J status for submitted and attached jobs. Renku's CLI does not expose process
-exit codes, so `exit_code` remains unset, including for failed jobs. Missing jobs
-and observation errors never imply completion. Logs and control remain available
-through `rnk job logs` and `rnk job stop`. PSI/J resource requests, stream
-redirection, and launch hooks are unsupported by this adapter.
+The executor observes Renku states through the API and reports final PSI/J
+status for submitted and attached jobs. Process exit codes are not exposed, so
+`exit_code` remains unset, including for failed jobs. Missing jobs and
+observation errors never imply completion. Cancellation checks remote status
+first and skips finished jobs. A job can still finish between that check and
+the hibernation request. Cancelling hibernates the session
+rather than deleting it, retaining logs until Renku culls it; finished jobs are
+left unchanged. PSI/J resource requests, stream redirection, and launch hooks
+are unsupported by this adapter.
 
 ## Executor extensions
 
 Register executors using PSI/J descriptors in an installed
 `psij-descriptors/*.py` module. The bundled implementations are
 `src/psij-descriptors/local.py` and `src/psij-descriptors/renku.py`.
+
 Do not add an `__init__.py` to the descriptor directory.
 The bundled `quoted-single` launcher works around PSI/J's unquoted redirection
 paths. Detachment and result recording belong to the executor and its private

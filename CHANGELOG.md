@@ -67,7 +67,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   including final-status retrieval after the submitting process exits. The
   executor starts a detached Python supervisor to run the selected PSI/J launcher
   and save its outcome; attachments use per-job observers. Add a
-  Renku executor using authenticated `rnk` launchers and final-state observation.
+  `renku` executor using the Renku data services API, OAuth2 device login,
+  existing session launchers, final-state observation, and cancellation through
+  session hibernation.
   Renku process exit codes are unavailable; logs and control remain with Renku.
   Foreground `hiraku run` streams output through temporary files and returns
   the process exit code.

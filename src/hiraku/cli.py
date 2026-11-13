@@ -117,7 +117,7 @@ def _validate_json_options(json_output: bool, pretty: bool) -> None:
 
 
 def _print_table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
-    table = Table(box=box.ROUNDED, header_style="bold cyan", pad_edge=False)
+    table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", show_edge=False)
     for column in columns:
         table.add_column(column, overflow="fold")
     for row in rows:
