@@ -318,7 +318,6 @@ class Project(BaseModel):
                     for destination in (
                         root / ".agents/skills",  # Generic agents
                         root / ".claude/skills",  # Claude Code
-                        root / ".pi/skills",  # Pi Agent
                     ):
                         shutil.copytree(source, destination, dirs_exist_ok=True)
 
