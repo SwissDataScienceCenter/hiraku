@@ -17,7 +17,9 @@ def test_record_is_plain_local_document_data():
         Record(type="task")
 
 
-@pytest.mark.parametrize("path", ["", ".", "..", "/absolute", "a/../b", "a//b", "a\\b"])
+@pytest.mark.parametrize(
+    "path", ["", ".", "..", "/absolute", "a/../b", "a//b", "a\\b", "my run"]
+)
 def test_record_id_is_relative_and_normalized(path):
     with pytest.raises(PydanticValidationError):
         Record(id=path, type="task")
@@ -190,7 +192,17 @@ def test_commit_accepts_full_git_hashes():
 
 @pytest.mark.parametrize(
     "identifier",
-    ["", ".", "..", " padded", "padded ", "trailing.", "bad/name", "bad?name"],
+    [
+        "",
+        ".",
+        "..",
+        " padded",
+        "padded ",
+        "trailing.",
+        "bad/name",
+        "bad?name",
+        "my run",
+    ],
 )
 def test_validate_identifier_rejects_invalid_values(identifier):
     with pytest.raises(ValidationError):
