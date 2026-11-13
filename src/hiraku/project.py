@@ -179,6 +179,11 @@ class Project(BaseModel):
         """Return the directory containing installed workflows."""
         return self.hiraku_dir / "workflows"
 
+    @property
+    def psij_dir(self) -> Path:
+        """Return the local directory for PSI/J launcher and executor files."""
+        return self.root / ".hiraku" / "psij"
+
     def to_dict(self) -> dict[str, Any]:
         """Return the persisted project settings."""
         return {

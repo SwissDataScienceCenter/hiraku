@@ -19,13 +19,13 @@ from mcp.server.mcpserver.exceptions import (
 from mcp.types import (
     ToolAnnotations,
 )
-from psij import InvalidJobException, JobAttributes, JobExecutor, SubmitException
+from psij import InvalidJobException, JobAttributes, SubmitException
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
 from .errors import ExecutionError, HirakuError, ValidationError
-from .job import Submission, observe_submission, prepare_job
+from .job import Submission, get_executor, observe_submission, prepare_job
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -257,7 +257,11 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             else None,
         )
         try:
-            JobExecutor.get_instance(executor, url=executor_url).submit(job)
+            get_executor(
+                executor,
+                work_directory=selected.psij_dir,
+                url=executor_url,
+            ).submit(job)
         except (InvalidJobException, SubmitException, ValueError, OSError) as exc:
             raise ExecutionError(str(exc)) from exc
         entry = Submission.from_psi_job(job)

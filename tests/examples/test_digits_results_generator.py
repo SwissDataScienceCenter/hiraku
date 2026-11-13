@@ -158,5 +158,5 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
             "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
         },
     )
-    assert run_local(job).exit_code == 0
+    assert run_local(job, project=config).exit_code == 0
     assert len(leaderboard.list_runs(config)) == 7
