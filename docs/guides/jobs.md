@@ -232,11 +232,31 @@ and observation errors never imply completion. Logs and control remain available
 through `rnk job logs` and `rnk job stop`. PSI/J resource requests, stream
 redirection, and launch hooks are unsupported by this adapter.
 
+### Renku API
+
+The `renku_api` executor talks to the Renku data services API directly, so it
+needs no `rnk` installation. It logs in with the OAuth2 device flow: Hiraku
+prints a URL and code on stderr, and tokens are cached (mode `0600`) in
+`~/.config/hiraku/renku-api-tokens.json` and refreshed automatically.
+
+```bash
+hiraku job submit --executor renku_api --executor-url https://renkulab.io/p/namespace/project \
+  --custom-attribute renku.launcher LAUNCHER_ID -- python train.py
+```
+
+The executor URL's host selects the deployment. `RENKU_OIDC_ISSUER`
+(default `https://HOST/auth/realms/Renku`) and `RENKU_CLIENT_ID` (default `renku-cli`) override the identity provider and
+the device-flow client. Submission and status behave as for `renku`, except that no
+`renku.command_prefix` is needed: Renku wraps commands for launchers built from
+code itself. Cancelling hibernates the session rather than deleting it, so logs
+stay available until Renku culls it; finished jobs are left unchanged.
+
 ## Executor extensions
 
 Register executors using PSI/J descriptors in an installed
 `psij-descriptors/*.py` module. The bundled implementations are
-`src/psij-descriptors/local.py` and `src/psij-descriptors/renku.py`.
+`src/psij-descriptors/local.py`, `src/psij-descriptors/renku.py`, and
+`src/psij-descriptors/renku_api.py`.
 Do not add an `__init__.py` to the descriptor directory.
 The bundled `quoted-single` launcher works around PSI/J's unquoted redirection
 paths. Detachment and result recording belong to the executor and its private
