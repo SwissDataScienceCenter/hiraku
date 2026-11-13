@@ -20,9 +20,21 @@ from langgraph.types import Command
 
 from ..errors import ValidationError, WorkflowError
 from ..project import Project
-from .checkpoint import prepare_checkpoint_storage
 
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
+_CHECKPOINTS = "langgraph-checkpoints.sqlite"
+
+
+def checkpoint_database(project: Project) -> Path:
+    """Return the project-root checkpoint database path."""
+    return project.root / ".hiraku" / _CHECKPOINTS
+
+
+def _prepare_checkpoint_storage(project: Project) -> Path:
+    """Ensure the project-root checkpoint directory exists."""
+    directory = project.root / ".hiraku"
+    directory.mkdir(parents=True, exist_ok=True)
+    return checkpoint_database(project)
 
 
 def workflow_ids(*, project: Project) -> list[str]:
@@ -89,7 +101,7 @@ def resume_workflow(
 ) -> dict[str, Any]:
     """Resume a paused graph with the harness's structured response."""
     lock_dir = project.root / ".hiraku" / "locks"
-    prepare_checkpoint_storage(project)
+    _prepare_checkpoint_storage(project)
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_name = hashlib.sha256(workflow_session_id.encode()).hexdigest()
     with FileLock(str(lock_dir / f"{lock_name}.lock")):
@@ -171,7 +183,7 @@ def _compiled_graph(workflow_id: str, project: Project) -> Iterator[Any]:
     factory = getattr(module, "build_graph", None)
     if not callable(factory):
         raise WorkflowError(f"{directory / 'workflow.py'} must export build_graph")
-    database = prepare_checkpoint_storage(project)
+    database = _prepare_checkpoint_storage(project)
     with SqliteSaver.from_conn_string(str(database)) as checkpointer:
         try:
             graph = factory(checkpointer, project=project)

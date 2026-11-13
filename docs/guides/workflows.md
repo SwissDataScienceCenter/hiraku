@@ -147,9 +147,8 @@ records, launches, tracked runs, and provenance from their nodes.
 ## State and persistence
 
 The workflow session ID maps to LangGraph's `thread_id`; checkpoints are stored in
-`hiraku/.hiraku/langgraph-checkpoints.sqlite` (under the configured Hiraku data
-directory). The local directory ignores its own contents. Existing databases in
-the data directory remain in use. Use the same workflow session ID for
+`.hiraku/langgraph-checkpoints.sqlite` at the project root. The project root's
+`.gitignore` should ignore `/.hiraku/`. Use the same workflow session ID for
 status and resume.
 Checkpoint state is execution state, while Hiraku research records and tracked
 runs remain the durable research history.

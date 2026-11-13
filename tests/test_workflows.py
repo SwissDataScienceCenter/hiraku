@@ -9,8 +9,8 @@ import pytest
 
 from hiraku.errors import ValidationError, WorkflowError
 from hiraku.project import Project
-from hiraku.workflows.checkpoint import checkpoint_database
 from hiraku.workflows.langgraph import (
+    checkpoint_database,
     resume_workflow,
     start_workflow,
     workflow_status,
@@ -255,6 +255,7 @@ def test_checkpoint_storage_is_ignored(tmp_path: Path) -> None:
     import subprocess
 
     config = _project(tmp_path)
+    (tmp_path / ".gitignore").write_text("/.hiraku/\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     start_workflow("count-steps", project=config)
     database = checkpoint_database(config)
