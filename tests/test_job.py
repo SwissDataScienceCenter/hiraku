@@ -56,6 +56,43 @@ def detached(project):
     return psij.JobExecutor.get_instance("local-detached")
 
 
+def test_runai_cli_submission_and_status_preserve_history(project, monkeypatch):
+    url = "https://runai.example?cluster=compute&project=research"
+    cls = type(psij.JobExecutor.get_instance("runai", url=url))
+    calls = []
+
+    def call(self, method, path, body=None):
+        calls.append((method, path, body))
+        return {
+            "workloadId": "remote-training", "clusterId": "C1", "projectId": "P1",
+            "actualPhase": "Creating" if method == "POST" else "Completed",
+        }
+
+    monkeypatch.setattr(cls, "_call", call)
+    monkeypatch.setattr(cls, "_target", lambda self: ("C1", "P1"))
+    monkeypatch.setattr(cls, "_observe", lambda *a: None)
+    monkeypatch.chdir(project.root)
+    result = CliRunner().invoke(main, [
+        "job", "submit", "--executor", "runai", "--executor-url", url,
+        "--record", "test", "--directory", "/remote/project",
+        "--custom-attribute", "runai.image", "image:tag",
+        "--custom-attribute", "runai.compute", '{"gpuDevicesRequest":1}',
+        "--", "python", "train.py", "argument with spaces",
+    ])
+    assert result.exit_code == 0, result.output
+    entry = Submission.load(project, json.loads(result.output)["id"])
+    assert entry.executor == "runai" and entry.executor_url == url
+    assert entry.native_id == "remote-training" and entry.record_id == "test"
+    assert entry.spec["directory"] == "/remote/project"
+    env = calls[0][2]["spec"]["environmentVariables"]
+    assert {"name": "HIRAKU_RECORD_ID", "value": "test"} in env
+    assert {"name": "HIRAKU_JOB_ID", "value": entry.id} in env
+    status = CliRunner().invoke(main, ["job", "status", entry.id, "--json"])
+    assert status.exit_code == 0, status.output
+    assert json.loads(status.output)["status"]["state"] == "COMPLETED"
+    assert Submission.load(project, entry.id).status.state == "COMPLETED"
+
+
 def test_foreground_launcher_storage(project):
     job = prepare_job([sys.executable, "-c", "pass"], project=project)
     assert run_local(job, project=project).exit_code == 0

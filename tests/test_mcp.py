@@ -42,6 +42,43 @@ from hiraku.workflows.langgraph import (  # noqa: E402
 )
 
 
+def test_runai_submit_and_status_through_mcp(tmp_path: Path, monkeypatch) -> None:
+    url = "https://runai.example?cluster=compute&project=research"
+    cls = type(psij.JobExecutor.get_instance("runai", url=url))
+    calls = []
+
+    def call(self, method, path, body=None):
+        calls.append((method, path, body))
+        return {
+            "workloadId": "remote-training", "clusterId": "C1", "projectId": "P1",
+            "actualPhase": "Creating" if method == "POST" else "Completed",
+        }
+
+    monkeypatch.setattr(cls, "_call", call)
+    monkeypatch.setattr(cls, "_target", lambda self: ("C1", "P1"))
+    monkeypatch.setattr(cls, "_observe", lambda *a: None)
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    project.vault.create("task", title="Task", type="task")
+    server = create_server(project)
+
+    async def exercise():
+        result = await server.call_tool("job_submit", {
+            "executor": "runai", "executor_url": url, "record_id": "task",
+            "directory": "/remote/project", "command": ["python", "train.py"],
+            "custom_attributes": {"runai.image": "image:tag"},
+        })
+        entry = result.structured_content
+        assert entry["executor"] == "runai" and entry["record_id"] == "task"
+        assert entry["native_id"] == "remote-training"
+        env = calls[0][2]["spec"]["environmentVariables"]
+        assert {"name": "HIRAKU_JOB_ID", "value": entry["id"]} in env
+        result = await server.call_tool("job_status", {"job_id": entry["id"]})
+        assert result.structured_content["status"]["state"] == "COMPLETED"
+        assert Submission.load(project, entry["id"]).status.state == "COMPLETED"
+
+    asyncio.run(exercise())
+
+
 def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> None:
     from mcp.server.mcpserver import MCPServer
 
@@ -559,6 +596,31 @@ def test_leaderboard_list_matches_cli_and_reads_current_definitions(
         assert rows == ["broken", "local"]
         info = await server.call_tool("project_info", {})
         assert info.structured_content == project.to_dict()
+
+    asyncio.run(exercise())
+
+
+def test_python_leaderboard_runs(tmp_path: Path) -> None:
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    (project.leaderboards_dir / "custom.py").write_text(
+        "from hiraku.tracking import Metric, Run\n"
+        "metrics = [Metric(name='score', direction='maximize')]\n"
+        "def load_runs(project):\n"
+        "    return [Run(id='a', record_id='task', metrics={'score': 1}),\n"
+        "            Run(id='b', metrics={'score': 2})]\n"
+    )
+    server = create_server(project)
+
+    async def exercise():
+        names = await server.call_tool("leaderboard_list", {})
+        assert names.structured_content["result"] == ["custom"]
+        result = await server.call_tool("runs", {"leaderboard": "custom"})
+        assert [r["id"] for r in result.structured_content["result"]] == ["a"]
+        result = await server.call_tool(
+            "runs",
+            {"leaderboard": "custom", "include_unattributed": True, "sort": "score"},
+        )
+        assert [r["id"] for r in result.structured_content["result"]] == ["b", "a"]
 
     asyncio.run(exercise())
 

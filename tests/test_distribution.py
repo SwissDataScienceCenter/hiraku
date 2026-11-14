@@ -42,6 +42,7 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         {
             "psij-descriptors/local.py",
             "psij-descriptors/renku.py",
+            "psij-descriptors/runai.py",
             "psij-descriptors/_local_supervisor.py",
             "hiraku/resources/launchers/single.sh",
         }

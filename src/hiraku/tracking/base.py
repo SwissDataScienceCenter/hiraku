@@ -180,8 +180,16 @@ class WandbBackendConfig(BaseModel):
     )
 
 
+class PythonBackendConfig(BaseModel):
+    """Trusted project Python definition implementing ``load_runs(project)``."""
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["python"] = "python"
+    path: Path
+
+
 BackendConfig = Annotated[
-    CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig,
+    CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig | PythonBackendConfig,
     Field(discriminator="type"),
 ]
 

@@ -19,7 +19,7 @@ dependencies = [
     "Click>=8.1",
     "filelock>=3.16",
     "markdown-it-py>=4.0",
-    "pydantic>=2.13.5",
+    "pydantic>=2.13.4",
     "PyYAML>=6.0",
     "mcp>=2.3.0",
     "rich>=15.0.0",
@@ -40,7 +40,7 @@ dashboard = [
     "altair>=6.3.0",
     "marimo>=0.25.1,<0.26",
     "marimo-studio==0.3.0",
-    "pandas>=2.3.3",
+    "pandas>=2.2",
     "pyarrow>=21",
 ]
 
