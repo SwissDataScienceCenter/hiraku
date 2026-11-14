@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Add a `runai` PSI/J executor for API-only training workloads, with access-key
+  authentication, resource/storage settings, and recoverable job status.
+
 - Trusted project Python leaderboard definitions (`hiraku/leaderboards/<name>.py`)
   can read existing results into normalized runs without converting tracking files.
   YAML definitions can also select a Python reader source.

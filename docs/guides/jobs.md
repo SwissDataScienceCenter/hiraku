@@ -258,11 +258,89 @@ rather than deleting it, retaining logs until Renku culls it; finished jobs are
 left unchanged. PSI/J resource requests, stream redirection, and launch hooks
 are unsupported by this adapter.
 
+## RunAI
+
+The `runai` executor uses the RunAI HTTPS API to submit single-container **training**
+workloads. It does not need the RunAI CLI and does not execute commands in existing
+interactive workspaces. The executor URL selects a control plane, cluster and
+project; cluster/project values may be names or IDs.
+
+Create a user access key or a service account with access to the target project.
+Provide `RUNAI_CLIENT_ID` and `RUNAI_CLIENT_SECRET` in the submitting process's
+environment. Alternatively, store credentials outside the project in
+`$XDG_CONFIG_HOME/hiraku/runai-credentials.json` (default
+`~/.config/hiraku/runai-credentials.json`):
+
+```json
+{
+  "https://runai.example": {
+    "client_id": "YOUR_CLIENT_ID",
+    "client_secret": "YOUR_CLIENT_SECRET"
+  }
+}
+```
+
+On POSIX the file must be private (`chmod 600`). Both environment variables must
+be supplied together and take precedence over the file. File entries are scoped
+to the control-plane origin, without a trailing slash. Tokens are obtained from
+`POST /api/v1/token`, kept only in memory and renewed automatically. Authentication
+failures trigger at most one token renewal and retry. Other submission failures
+are not retried: check the workload named in the error before submitting again.
+Keep access credentials out of custom attributes, command arguments and job
+environment additions, since those values are retained in history.
+
+```bash
+hiraku job submit --executor runai \
+  --executor-url 'https://runai.example?cluster=compute&project=research' \
+  --record baseline --directory /workspace/project \
+  --custom-attribute runai.image registry.example/project/image:tag \
+  --custom-attribute runai.compute '{"gpuDevicesRequest":1,"cpuMemoryRequest":"32G"}' \
+  --custom-attribute runai.storage '{"pvc":[{"name":"data","claimName":"data","existingPvc":true,"path":"/workspace"}]}' \
+  -- python train.py
+hiraku job status JOB_ID --json
+```
+
+The image is required. `runai.compute`, `runai.storage`, and `runai.security` accept
+JSON objects matching the corresponding training API `spec` fields; the Python
+API also accepts dictionaries. `runai.node_type` selects a node type. Resource
+quantities and storage permissions are validated by RunAI. For a full GPU use
+`gpuDevicesRequest: 1`; fractional GPU settings may limit visible GPU memory.
+The executor requests one completion and disables automatic application retries
+(`restartPolicy: Never`, `backoffLimit: 0`). Platform preemption can still restart
+a workload; training code must handle checkpointing where required.
+
+The image must contain the executable and dependencies. Mount code and data
+explicitly; local files, uncommitted changes and active virtual environments are
+not uploaded. `--directory` is an absolute path **inside the container**.
+`HIRAKU_JOB_ID` and `HIRAKU_RECORD_ID` are forwarded as environment variables.
+
+Submission saves the workload UUID as the native ID. Status and listing reattach
+through the same persisted executor URL and reject workloads outside its target
+project/cluster. Remote credentials must remain available to observe jobs later.
+Final states come from RunAI; process exit codes are not synthesized. Polling
+failures leave the last successful observation intact. Cancellation through the
+PSI/J Python API requests suspension, retains the workload and its logs, and waits
+for polling to observe `Stopped` before reporting `CANCELED`. Already finished
+jobs are left unchanged, although a job can finish between the pre-cancel check
+and the suspension request. Resuming a canceled workload externally is not
+tracked by Hiraku's saved final outcome.
+
+PSI/J resource specifications, pre/post hooks, distributed launchers and stream
+paths are unsupported. Logs remain in RunAI; foreground streaming and automatic
+log download are not implemented. CLI and MCP submission/status/listing use the
+existing interfaces; no new Hiraku configuration format is required.
+
+See the official [authentication guide](https://run-ai-docs.nvidia.com/api/getting-started/how-to-authenticate-to-the-api)
+and [training API](https://docs.nvidia.com/run-ai/self-hosted/reference/rest-api/endpoints/workloads/trainings/create-training-1).
+Deployments must support these training endpoints (RunAI 2.18+); fields and policies
+can vary by installed version.
+
 ## Executor extensions
 
 Register executors using PSI/J descriptors in an installed
 `psij-descriptors/*.py` module. The bundled implementations are
-`src/psij-descriptors/local.py` and `src/psij-descriptors/renku.py`.
+`src/psij-descriptors/local.py`, `src/psij-descriptors/renku.py`, and
+`src/psij-descriptors/runai.py`.
 
 Do not add an `__init__.py` to the descriptor directory.
 The bundled `quoted-single` launcher works around PSI/J's unquoted redirection

@@ -42,6 +42,43 @@ from hiraku.workflows.langgraph import (  # noqa: E402
 )
 
 
+def test_runai_submit_and_status_through_mcp(tmp_path: Path, monkeypatch) -> None:
+    url = "https://runai.example?cluster=compute&project=research"
+    cls = type(psij.JobExecutor.get_instance("runai", url=url))
+    calls = []
+
+    def call(self, method, path, body=None):
+        calls.append((method, path, body))
+        return {
+            "workloadId": "remote-training", "clusterId": "C1", "projectId": "P1",
+            "actualPhase": "Creating" if method == "POST" else "Completed",
+        }
+
+    monkeypatch.setattr(cls, "_call", call)
+    monkeypatch.setattr(cls, "_target", lambda self: ("C1", "P1"))
+    monkeypatch.setattr(cls, "_observe", lambda *a: None)
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    project.vault.create("task", title="Task", type="task")
+    server = create_server(project)
+
+    async def exercise():
+        result = await server.call_tool("job_submit", {
+            "executor": "runai", "executor_url": url, "record_id": "task",
+            "directory": "/remote/project", "command": ["python", "train.py"],
+            "custom_attributes": {"runai.image": "image:tag"},
+        })
+        entry = result.structured_content
+        assert entry["executor"] == "runai" and entry["record_id"] == "task"
+        assert entry["native_id"] == "remote-training"
+        env = calls[0][2]["spec"]["environmentVariables"]
+        assert {"name": "HIRAKU_JOB_ID", "value": entry["id"]} in env
+        result = await server.call_tool("job_status", {"job_id": entry["id"]})
+        assert result.structured_content["status"]["state"] == "COMPLETED"
+        assert Submission.load(project, entry["id"]).status.state == "COMPLETED"
+
+    asyncio.run(exercise())
+
+
 def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> None:
     from mcp.server.mcpserver import MCPServer
 
