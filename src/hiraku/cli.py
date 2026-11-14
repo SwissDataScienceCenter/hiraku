@@ -20,7 +20,6 @@ import yaml
 from psij import (
     InvalidJobException,
     JobAttributes,
-    JobExecutor,
     JobStatus,
     SubmitException,
 )
@@ -39,7 +38,7 @@ from .errors import (
 )
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .job import Submission, observe_submission, prepare_job, run_local
+from .job import Submission, get_executor, observe_submission, prepare_job, run_local
 from .project import Project
 from .record import Record, validate_identifier
 from .tracking import Leaderboard, Run
@@ -118,7 +117,7 @@ def _validate_json_options(json_output: bool, pretty: bool) -> None:
 
 
 def _print_table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
-    table = Table(box=box.ROUNDED, header_style="bold cyan", pad_edge=False)
+    table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", show_edge=False)
     for column in columns:
         table.add_column(column, overflow="fold")
     for row in rows:
@@ -635,11 +634,6 @@ _ARGUMENTS_FILE = click.option(
     type=click.File("r", encoding="utf-8"),
     help="JSON object with the arguments; use - for standard input.",
 )
-_CONTEXT_FILE = click.option(
-    "--context-file",
-    type=click.File("r", encoding="utf-8"),
-    help="JSON object with session or transition context; use - for standard input.",
-)
 
 
 def _arguments(arguments_file: Any, *, name: str = "arguments") -> dict[str, Any]:
@@ -657,14 +651,12 @@ def _arguments(arguments_file: Any, *, name: str = "arguments") -> dict[str, Any
 @workflow_group.command("start")
 @click.argument("workflow_id")
 @_ARGUMENTS_FILE
-@_CONTEXT_FILE
 @click.option("--pretty", is_flag=True, help="Pretty-print the JSON response.")
 @click.pass_obj
 def workflow_start(
     state: CLIContext,
     workflow_id: str,
     arguments_file: Any,
-    context_file: Any,
     pretty: bool,
 ) -> None:
     """Start a LangGraph workflow and print its interrupt or result."""
@@ -675,32 +667,8 @@ def workflow_start(
             workflow_id,
             _arguments(arguments_file),
             project=state.project,
-            context=_arguments(context_file, name="context"),
         ),
         pretty=pretty,
-    )
-
-
-@workflow_group.command("sessions")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
-@click.pass_obj
-def workflow_sessions(state: CLIContext, pretty: bool) -> None:
-    """List recorded workflow sessions as JSON."""
-    from .workflows.session_history import list_sessions
-
-    _emit_json(list_sessions(project=state.project), pretty=pretty)
-
-
-@workflow_group.command("history")
-@click.argument("workflow_session_id")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
-@click.pass_obj
-def workflow_history(state: CLIContext, workflow_session_id: str, pretty: bool) -> None:
-    """Show a workflow session's recorded metadata and history."""
-    from .workflows.session_history import session_history
-
-    _emit_json(
-        session_history(workflow_session_id, project=state.project), pretty=pretty
     )
 
 
@@ -723,7 +691,6 @@ def workflow_status_command(
 @click.argument("workflow_session_id")
 @click.option("--checkpoint-id", required=True, help="Checkpoint ID from status.")
 @_ARGUMENTS_FILE
-@_CONTEXT_FILE
 @click.option("--pretty", is_flag=True, help="Pretty-print the JSON response.")
 @click.pass_obj
 def workflow_resume_command(
@@ -731,7 +698,6 @@ def workflow_resume_command(
     workflow_session_id: str,
     checkpoint_id: str,
     arguments_file: Any,
-    context_file: Any,
     pretty: bool,
 ) -> None:
     """Resume a paused LangGraph workflow with a JSON response."""
@@ -743,7 +709,6 @@ def workflow_resume_command(
             _arguments(arguments_file),
             project=state.project,
             checkpoint_id=checkpoint_id,
-            context=_arguments(context_file, name="context"),
         ),
         pretty=pretty,
     )
@@ -809,7 +774,11 @@ def job_submit(
         if custom_attributes
         else None,
     )
-    JobExecutor.get_instance(executor, url=executor_url).submit(job)
+    get_executor(
+        executor,
+        work_directory=state.project.psij_dir,
+        url=executor_url,
+    ).submit(job)
     entry = Submission.from_psi_job(job)
     entry.save(state.project)
     _emit_json(entry.model_dump(mode="json"))

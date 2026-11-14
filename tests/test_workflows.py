@@ -1,28 +1,19 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import anyio
 import pytest
-from click.testing import CliRunner
 
-from hiraku.cli import main
 from hiraku.errors import ValidationError, WorkflowError
-from hiraku.mcp import create_server
 from hiraku.project import Project
 from hiraku.workflows.langgraph import (
+    checkpoint_database,
     resume_workflow,
     start_workflow,
     workflow_status,
-)
-from hiraku.workflows.session_history import (
-    checkpoint_database,
-    list_sessions,
-    session_history,
 )
 
 
@@ -264,9 +255,11 @@ def test_checkpoint_storage_is_ignored(tmp_path: Path) -> None:
     import subprocess
 
     config = _project(tmp_path)
+    (tmp_path / ".gitignore").write_text("/.hiraku/\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     start_workflow("count-steps", project=config)
     database = checkpoint_database(config)
+    assert database == tmp_path / ".hiraku" / "langgraph-checkpoints.sqlite"
     assert database.is_file()
     assert (
         subprocess.run(
@@ -274,145 +267,11 @@ def test_checkpoint_storage_is_ignored(tmp_path: Path) -> None:
         ).returncode
         == 0
     )
-
-
-def test_session_history_survives_restart_and_missing_workflow(tmp_path: Path) -> None:
-    config = _project(tmp_path)
-    assert list_sessions(project=config) == []
-    started = start_workflow(
-        "count-steps",
-        {"count": 1},
-        project=config,
-        context={"client": "codex", "session_id": "client-123"},
-    )
-    session_id = started["workflow_session_id"]
-    token = started["interrupts"][0]["value"]["data"]["token"]
-    completed = resume_workflow(
-        session_id,
-        {"token": token, "decision": "continue"},
-        project=Project.load(config.path),
-        checkpoint_id=started["checkpoint_id"],
-        context={"client": "claude"},
-    )
-    assert completed["status"] == "completed"
-    history = session_history(session_id, project=config)
-    assert history["session"]["context"] == {
-        "client": "codex",
-        "session_id": "client-123",
-    }
-    assert history["session"]["status"] == "completed"
-    assert [event["event"] for event in history["events"]] == [
-        "started",
-        "waiting",
-        "resume_requested",
-        "completed",
-    ]
-    assert history["events"][2]["context"] == {"client": "claude"}
-    assert all("response" not in event for event in history["events"])
-    assert list_sessions(project=config) == [history["session"]]
-
-    with sqlite3.connect(checkpoint_database(config)) as connection:
-        checkpoint = connection.execute(
-            "SELECT 1 FROM checkpoints WHERE thread_id = ? AND checkpoint_id = ?",
-            (session_id, history["session"]["checkpoint_id"]),
-        ).fetchone()
-    assert checkpoint is not None
-    (config.workflows_dir / "count-steps" / "workflow.py").unlink()
-    assert session_history(session_id, project=config) == history
-    assert list_sessions(project=config) == [history["session"]]
-
-
-def test_invalid_context_and_failed_start_are_recorded_safely(tmp_path: Path) -> None:
-    config = _project(tmp_path)
-    with pytest.raises(ValidationError, match="JSON values"):
-        start_workflow("count-steps", project=config, context={"bad": object()})
-    assert list_sessions(project=config) == []
-    with pytest.raises(ValidationError, match="positive integer"):
-        start_workflow("count-steps", {"count": 0}, project=config)
-    session = list_sessions(project=config)[0]
-    assert session["status"] == "failed"
-    history = session_history(session["workflow_session_id"], project=config)
-    assert [event["event"] for event in history["events"]] == ["started", "failed"]
-    assert history["events"][-1]["error_type"] == "ValidationError"
-    with pytest.raises(ValidationError, match="not found"):
-        session_history("missing", project=config)
-
-
-def test_resume_rebuilds_missing_session_index(tmp_path: Path) -> None:
-    config = _project(tmp_path)
-    started = start_workflow("count-steps", {"count": 1}, project=config)
-    session_id = started["workflow_session_id"]
-    token = started["interrupts"][0]["value"]["data"]["token"]
-    with sqlite3.connect(checkpoint_database(config)) as connection:
-        connection.execute("DROP TABLE hiraku_workflow_session_events")
-        connection.execute("DROP TABLE hiraku_workflow_sessions")
-    assert list_sessions(project=config) == []
-    resume_workflow(
-        session_id,
-        {"token": token, "decision": "continue"},
-        project=config,
-        checkpoint_id=started["checkpoint_id"],
-        context={"client": "resuming-client"},
-    )
-    history = session_history(session_id, project=config)
-    assert history["session"]["context"] == {}
-    assert [event["event"] for event in history["events"]] == [
-        "resume_requested",
-        "completed",
-    ]
-    assert history["events"][0]["context"] == {"client": "resuming-client"}
-
-
-def test_cli_session_context_and_history(tmp_path: Path, monkeypatch) -> None:
-    _project(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    context = tmp_path / "context.json"
-    context.write_text('{"client": "cli"}', encoding="utf-8")
-    runner = CliRunner()
-    started = runner.invoke(
-        main, ["workflow", "start", "count-steps", "--context-file", str(context)]
-    )
-    assert started.exit_code == 0, started.output
-    session_id = json.loads(started.output)["workflow_session_id"]
-    listed = runner.invoke(main, ["workflow", "sessions"])
-    assert listed.exit_code == 0, listed.output
-    assert json.loads(listed.output)[0]["context"] == {"client": "cli"}
-    history = runner.invoke(main, ["workflow", "history", session_id])
-    assert history.exit_code == 0, history.output
-    assert json.loads(history.output)["session"]["workflow_id"] == "count-steps"
-
-
-def test_mcp_exposes_sessions_and_transition_context(tmp_path: Path) -> None:
-    config = _project(tmp_path)
-    server = create_server(config)
-    started = anyio.run(
-        server.call_tool,
-        "workflow_start",
-        {
-            "workflow_id": "count-steps",
-            "arguments": {"count": 1},
-            "context": {"client_session": "abc"},
-        },
-    ).structured_content
-    session_id = started["workflow_session_id"]
-    token = started["interrupts"][0]["value"]["data"]["token"]
-    anyio.run(
-        server.call_tool,
-        "workflow_resume",
-        {
-            "workflow_session_id": session_id,
-            "response": {"token": token, "decision": "continue"},
-            "checkpoint_id": started["checkpoint_id"],
-            "context": {"trace": "xyz"},
-        },
-    )
-    listed = anyio.run(server.call_tool, "workflow_sessions", {})
-    assert listed.structured_content is not None
-    history = anyio.run(
-        server.call_tool,
-        "workflow_session_history",
-        {"workflow_session_id": session_id},
-    ).structured_content
-    assert history["session"]["context"] == {"client_session": "abc"}
-    assert history["events"][2]["context"] == {"trace": "xyz"}
-    assert history["session"]["status"] == "completed"
+    with sqlite3.connect(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE name LIKE 'hiraku_workflow_session_%'"
+            ).fetchone()
+            is None
+        )

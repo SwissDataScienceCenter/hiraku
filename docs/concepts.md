@@ -86,9 +86,10 @@ See [jobs and executors](guides/jobs.md) for submission and final-status retriev
 
 ## Agent Skill
 
-`hiraku init` installs copies of the project-local skill under
-`.agents/skills/hiraku/`, `.claude/skills/hiraku/`, `.pi/skills/hiraku/`, and
-`.codex/skills/hiraku/`. Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code.
+`hiraku init` installs the project-local skill under `.agents/skills/hiraku/`
+and `.claude/skills/hiraku/`. Codex and other agents that discover
+`.agents/skills/` can use that shared copy. Invoke it as `$hiraku` in Codex or
+`/hiraku` in Claude Code.
 
 ## Workflows and context
 

@@ -122,6 +122,14 @@ def test_tools_and_validation(tmp_path: Path) -> None:
                 {"record_id": "  ", "title": "  ", "fields": {"type": "task"}},
             ),
             (
+                "record_create",
+                {
+                    "record_id": "root/my run",
+                    "title": "bad",
+                    "fields": {"type": "task"},
+                },
+            ),
+            (
                 "record_update",
                 {"record_id": "root/child/child", "fields": {"id": "renamed"}},
             ),
@@ -335,7 +343,10 @@ def test_job_list_refreshes_only_nonfinal_jobs(
         assert job.id in caplog.text and "backend unavailable" in caplog.text
 
 
-def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("custom_url", [False, True])
+def test_submit_and_status_use_native_executor(
+    tmp_path: Path, monkeypatch, custom_url
+) -> None:
     config = Project.create(tmp_path)
     monkeypatch.chdir(tmp_path)
     server = create_server(config)
@@ -365,7 +376,11 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
             "job_submit",
             {
                 "record_id": "demo/demo",
-                "executor_url": (tmp_path / "backend").as_uri(),
+                **(
+                    {"executor_url": (tmp_path / "backend").as_uri()}
+                    if custom_url
+                    else {}
+                ),
                 "launcher": "single",
                 "custom_attributes": {"example": "value"},
                 "command": [
@@ -383,12 +398,17 @@ def test_submit_and_status_use_native_executor(tmp_path: Path, monkeypatch) -> N
         job = dict(result.structured_content)
         assert "observation_error" not in job
         assert job["executor"] == "local-detached"
+        expected = (
+            tmp_path / "backend" if custom_url else tmp_path / ".hiraku/psij/detached"
+        )
+        assert job["executor_url"] == expected.as_uri()
+        assert list((tmp_path / ".hiraku/psij").glob("*/single_launch.sh"))
         assert job["spec"]["launcher"] == "single"
         assert job["status"]["state"] in {"ACTIVE", "QUEUED"}
         (config.root / "release").touch()
         completed = await completed_job(job)
         assert completed.structured_content["status"]["exit_code"] == 7
-        output = tmp_path / "backend" / job["native_id"]
+        output = expected / job["native_id"]
         assert (output / "stdout.log").read_text() == "demo/demo\n"
         assert (output / "stderr.log").read_text() == "err\n"
         history = json.loads(
@@ -486,11 +506,11 @@ def test_submit_exposes_expected_backend_errors(
         from types import SimpleNamespace
 
         monkeypatch.setattr(
-            "hiraku.mcp.JobExecutor.get_instance",
+            "hiraku.mcp.get_executor",
             lambda *args, **kwargs: SimpleNamespace(submit=fail),
         )
     else:
-        monkeypatch.setattr("hiraku.mcp.JobExecutor.get_instance", fail)
+        monkeypatch.setattr("hiraku.mcp.get_executor", fail)
 
     async def exercise():
         with pytest.raises(ToolError) as caught:

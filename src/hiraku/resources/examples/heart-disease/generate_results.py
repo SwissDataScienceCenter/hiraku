@@ -124,7 +124,7 @@ def generate(project: Project) -> None:
                 project=project,
                 directory=project.root,
             )
-            status = run_local(job)
+            status = run_local(job, project=project)
             if status.exit_code:
                 raise RuntimeError(
                     f"Training command for {identifier} failed with "

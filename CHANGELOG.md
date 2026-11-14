@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Keep PSI/J launcher files and default detached job data in the project's
+  `.hiraku/psij/` directory. **Breaking:** `run_local()` requires a project and
+  always records submission history.
+  **Breaking:** Submission history requires `executor_work_directory` alongside
+  the executor name and URL to reconstruct the executor's auxiliary storage.
 - **Breaking:** Move `hiraku runs` to `hiraku leaderboard runs`.
 - **Breaking:** Commands receive `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID`; tracking
   code logs both directly on runs. Leaderboards query source attribution without
@@ -64,7 +69,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   including final-status retrieval after the submitting process exits. The
   executor starts a detached Python supervisor to run the selected PSI/J launcher
   and save its outcome; attachments use per-job observers. Add a
-  Renku executor using authenticated `rnk` launchers and final-state observation.
+  `renku` executor using the Renku data services API, OAuth2 device login,
+  existing session launchers, final-state observation, and cancellation through
+  session hibernation.
   Renku process exit codes are unavailable; logs and control remain with Renku.
   Foreground `hiraku run` streams output through temporary files and returns
   the process exit code.

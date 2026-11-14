@@ -45,10 +45,8 @@ PSI/J provides a native `slurm` executor. Submit a batch job with:
 hiraku job submit --executor slurm --record baseline -- python train.py
 ```
 
-The executor uses Slurm's `sbatch`, `squeue`, and `scancel` commands. It writes
-the batch script and records its native Slurm job ID in Hiraku's job history.
 Pass Slurm options as custom attributes prefixed with `slurm.`; PSI/J renders
-them as `#SBATCH` directives:
+them as `#SBATCH` directives. For example:
 
 ```bash
 hiraku job submit --executor slurm --record baseline \
@@ -58,11 +56,9 @@ hiraku job submit --executor slurm --record baseline \
   -- python train.py
 ```
 
-For example, `slurm.partition` becomes `--partition` and `slurm.time` becomes
-`--time`. PSI/J also maps its standard job attributes and `ResourceSpec` fields
-to Slurm options; use the PSI/J Python API for typed resources. The executor
-requires `sbatch`, `squeue`, and `scancel` to be available where Hiraku submits
-and observes jobs.
+Standard PSI/J job attributes and `ResourceSpec` fields also map to Slurm
+options. The executor requires `sbatch`, `squeue`, and `scancel` where Hiraku
+submits and observes jobs.
 
 ## Submit and retrieve status
 
@@ -112,8 +108,9 @@ PSI/J's `executor.list()` independently discovers backend-native IDs where suppo
 
 Each accepted submission is saved atomically to `.hiraku/jobs/<id>.json`.
 The file contains the original PSI/J job ID, record ID, submission timestamp,
-executor name and URL, backend native ID, serialized `JobSpec`, `status`, and
-`observed_at`, the UTC time that snapshot was captured.
+`executor`, `executor_url`, `executor_work_directory`, backend native ID,
+serialized `JobSpec`, `status`, and `observed_at`, the UTC time that snapshot
+was captured.
 No additional Hiraku submission ID is generated. Attaching creates
 a new in-memory PSI/J job, but does not change the saved original ID.
 
@@ -144,8 +141,10 @@ automatically resubmit it.
 The default submission executor, `local-detached`, implements PSI/J's
 `JobExecutor` interface. It stores `result.json`, `stdout.log`, `stderr.log`, and
 launcher diagnostics in `launcher.log` under `<executor_url>/<native_id>/`.
-The default backend directory is
-`~/.psij/work/detached/`; a `file://` executor URL selects another directory.
+Hiraku configures PSI/J's work directory as `.hiraku/psij/` in the project.
+Launcher scripts are cached there; detached job data defaults to
+`.hiraku/psij/detached/`. A `file://` executor URL selects another directory
+for detached job data while launcher scripts stay in the project.
 This is executor state on the submitting host. Keep it until the outcome and
 output are no longer needed.
 
@@ -162,15 +161,16 @@ Detached execution requires
 POSIX and supports a single process and PSI/J pre/post hooks. The default
 `quoted-single` launcher requires Bash; Python callers may select another
 installed launcher through `job.spec.launcher`. Cancellation is unsupported.
+PSI/J's native `single` launcher requires paths without spaces, including the
+project path when launcher scripts are stored there. Use the default
+`quoted-single` launcher for projects with spaces in their paths.
 The native `local` executor does not recover exit codes
 after the submitting process exits.
 
 ## Python
 
 ```python
-import psij
-
-from hiraku.job import Submission, prepare_job, run_local
+from hiraku.job import Submission, get_executor, prepare_job, run_local
 from hiraku.project import Project
 
 project = Project.discover()
@@ -178,7 +178,7 @@ job = prepare_job(["python", "train.py"], project=project, record_id="baseline")
 status = run_local(job, project=project)
 
 job = prepare_job(["python", "train.py"], project=project, record_id="baseline")
-executor = psij.JobExecutor.get_instance("local-detached")
+executor = get_executor("local-detached", work_directory=project.psij_dir)
 executor.submit(job)
 submission = Submission.from_psi_job(job)
 submission.save(project)
@@ -198,8 +198,14 @@ It accepts explicit `record_id`, `env`, `directory`, `launcher`, native PSI/J
 explicitly; omission does not select the active record. The spec remains
 available for normal PSI/J configuration, including output paths.
 `run_local()` streams output and returns the native `JobStatus`; supplied
-output files are retained. Passing `project` enables history. Native Python
-submissions opt in by converting an accepted job with `Submission.from_psi_job(job)`
+output files are retained. The required `project` argument selects where history
+is saved and launcher files are stored in `.hiraku/psij/`. Foreground stdout and
+stderr still use temporary files unless explicit output paths are supplied.
+`get_executor(name, work_directory=path, url=None)` creates an executor with
+explicit auxiliary storage. Direct PSI/J construction retains its own
+defaults unless `JobExecutorConfig.work_directory` is set explicitly.
+Native Python submissions opt in by converting an accepted job with
+`Submission.from_psi_job(job)`
 and calling `submission.save(project)`. Conversion does not write files.
 `Submission.load(project, job_id)` and `Submission.list(project, record_id=...)`
 read validated metadata without contacting executors.
@@ -210,7 +216,11 @@ refreshes and saves nonfinal jobs and returns response-only `UNKNOWN` and
 `observation_error` on observation failures, preserving saved history. Final
 outcomes are not refreshed. Callers handle warnings; storage errors propagate.
 `get_psi_job()` reconstructs
-the executor and attaches without waiting or changing saved metadata. `sync()`
+the executor from its saved name, URL, and work directory and attaches without
+waiting or changing saved metadata. Loading history does not construct an executor.
+`executor_work_directory` stores launcher and auxiliary files; `spec.directory`
+controls the command's working directory. History without the required executor
+work directory must be recreated or converted before loading. `sync()`
 attaches internally, checks identity, and copies current status. Pass an existing
 native job to `sync(job)` to use its in-memory status, including foreground local
 jobs. Sync does not wait or write files; call `save(project)` explicitly after
@@ -238,7 +248,13 @@ PSI/J `job.wait()` in Python.
 
 ## Renku
 
-Install and authenticate `rnk` independently, then choose an existing launcher:
+The `renku` executor talks directly to the Renku data services API and needs no
+`rnk` installation. It logs in with the OAuth2 device flow: Hiraku prints a URL
+and code on stderr, and tokens are cached (mode `0600`) in
+`~/.config/hiraku/renku-api-tokens.json` and refreshed automatically. Cached tokens
+are separated by identity-provider issuer and OAuth client ID.
+
+Choose an existing launcher:
 
 ```bash
 hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespace/project \
@@ -247,23 +263,30 @@ hiraku job submit --executor renku --executor-url https://renkulab.io/p/namespac
 hiraku job status JOB_ID --json
 ```
 
-The executor URL identifies the Renku project. The launcher supplies the image,
-mounts, environment, and resources; Hiraku does not upload local code or change
-the launcher. For a Cloud Native Buildpacks image, use
-`--custom-attribute renku.command_prefix /cnb/lifecycle/launcher`.
+The executor URL identifies the deployment and project. Attachment and
+cancellation reject sessions belonging to another project. The launcher supplies
+its image, mounts, environment, and resources; Hiraku does not upload local code
+or change the launcher. Renku wraps commands for code-built launchers itself.
+`RENKU_OIDC_ISSUER` (default `https://HOST/auth/realms/Renku`) and
+`RENKU_CLIENT_ID` (default `renku-cli`) override the identity provider and the
+device-flow client.
 
-The executor observes Renku states through `rnk job list` and reports final
-PSI/J status for submitted and attached jobs. Renku's CLI does not expose process
-exit codes, so `exit_code` remains unset, including for failed jobs. Missing jobs
-and observation errors never imply completion. Logs and control remain available
-through `rnk job logs` and `rnk job stop`. PSI/J resource requests, stream
-redirection, and launch hooks are unsupported by this adapter.
+The executor observes Renku states through the API and reports final PSI/J
+status for submitted and attached jobs. Process exit codes are not exposed, so
+`exit_code` remains unset, including for failed jobs. Missing jobs and
+observation errors never imply completion. Cancellation checks remote status
+first and skips finished jobs. A job can still finish between that check and
+the hibernation request. Cancelling hibernates the session
+rather than deleting it, retaining logs until Renku culls it; finished jobs are
+left unchanged. PSI/J resource requests, stream redirection, and launch hooks
+are unsupported by this adapter.
 
 ## Executor extensions
 
 Register executors using PSI/J descriptors in an installed
 `psij-descriptors/*.py` module. The bundled implementations are
 `src/psij-descriptors/local.py` and `src/psij-descriptors/renku.py`.
+
 Do not add an `__init__.py` to the descriptor directory.
 The bundled `quoted-single` launcher works around PSI/J's unquoted redirection
 paths. Detachment and result recording belong to the executor and its private
