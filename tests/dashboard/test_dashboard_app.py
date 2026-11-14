@@ -9,6 +9,27 @@ pytest.importorskip("marimo")
 pytest.importorskip("altair")
 
 
+def test_app_loads_python_leaderboard(tmp_path, monkeypatch):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    project.vault.create("task", title="Task", type="task")
+    (project.leaderboards_dir / "custom.py").write_text(
+        "from hiraku.tracking import Metric, Run\n"
+        "metrics = [Metric(name='score', direction='maximize')]\n"
+        "def load_runs(project):\n"
+        "    return [Run(id='a', record_id='task', metrics={'score': .8})]\n"
+    )
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_LEADERBOARD", "custom")
+    monkeypatch.delenv("HIRAKU_DASHBOARD_RECORD", raising=False)
+    from hiraku.dashboard.app import app
+
+    _, definitions = app.run()
+    assert definitions["leaderboard_error"] is None
+    assert definitions["leaderboard"].source.type == "python"
+    assert list(definitions["runs_df"]["run"]) == ["a"]
+    assert definitions["metric"].value == "score"
+
+
 def test_app_runs_every_cell_against_a_project(
     project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:

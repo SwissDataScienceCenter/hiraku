@@ -32,3 +32,9 @@ all_runs = leaderboard.list_runs(project, include_unattributed=True)
 ## Weights & Biases
 
 ::: hiraku.tracking.WandbBackend
+
+## Project Python readers
+
+::: hiraku.tracking.PythonBackend
+
+::: hiraku.tracking.PythonBackendConfig

@@ -988,7 +988,7 @@ def leaderboard_create(
 @click.argument("name")
 @click.pass_obj
 def leaderboard_edit(state: CLIContext, name: str) -> None:
-    """Edit a definition and validate it after the editor exits."""
+    """Edit a YAML or Python definition and validate it after the editor exits."""
     _edit_recoverable(
         _leaderboard_path(state.project, name),
         lambda: Leaderboard.load(state.project, name),

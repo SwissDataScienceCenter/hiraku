@@ -16,10 +16,12 @@ from .base import (
     BackendConfig,
     CSVBackendConfig,
     MLflowBackendConfig,
+    PythonBackendConfig,
     Run,
 )
 from .csv import CSVBackend
 from .mlflow import MLflowBackend
+from .python import PythonBackend, load_definition
 from .wandb import WandbBackend
 
 
@@ -47,6 +49,8 @@ class Leaderboard(BaseModel):
     def create(cls, project: Project, name: str, source: dict[str, Any]) -> Leaderboard:
         """Validate and create a definition, refusing to replace existing files."""
         path = _leaderboard_path(project, name)
+        if path.exists():
+            raise ValidationError(f"Leaderboard already exists: {name}")
         try:
             leaderboard = cls.model_validate({"source": source})
         except (ValueError, BackendError) as exc:
@@ -79,18 +83,30 @@ class Leaderboard(BaseModel):
             name = names[0]
         path = _leaderboard_path(project, name)
         try:
+            if path.suffix == ".py":
+                module = load_definition(path)
+                return cls.model_validate(
+                    {
+                        "source": {"type": "python", "path": path.resolve()},
+                        "metrics": getattr(module, "metrics", None),
+                    }
+                )
             return cls.model_validate(load_yaml_mapping(path))
         except (ValueError, BackendError) as exc:
             raise ValidationError(f"Invalid leaderboard {path}: {exc}") from exc
 
     @staticmethod
     def list(project: Project) -> builtins.list[str]:
-        """List flat ``*.yml`` names without loading their configurations."""
-        return sorted(
-            path.stem
-            for path in project.leaderboards_dir.glob("*.yml")
-            if path.is_file()
-        )
+        """List YAML and Python names without executing definitions."""
+        names: set[str] = set()
+        directory = project.leaderboards_dir
+        for path in directory.iterdir() if directory.exists() else ():
+            if not path.is_file() or path.suffix not in (".yml", ".py"):
+                continue
+            if path.stem in names:
+                raise ValidationError(f"Duplicate leaderboard name: {path.stem}")
+            names.add(path.stem)
+        return sorted(names)
 
     @staticmethod
     def delete(project: Project, name: str) -> None:
@@ -149,16 +165,22 @@ class Leaderboard(BaseModel):
 
     def _create_backend(
         self, project: Project
-    ) -> CSVBackend | MLflowBackend | WandbBackend:
+    ) -> CSVBackend | MLflowBackend | WandbBackend | PythonBackend:
         """Construct an adapter directly from the validated source settings."""
         if isinstance(self.source, CSVBackendConfig):
             return CSVBackend(project, settings=self.source)
         if isinstance(self.source, MLflowBackendConfig):
             return MLflowBackend(project, settings=self.source)
+        if isinstance(self.source, PythonBackendConfig):
+            return PythonBackend(project, settings=self.source)
         return WandbBackend(self.source.project, settings=self.source)
 
 
 def _leaderboard_path(project: Project, name: str) -> Path:
     """Return the file path for a validated, flat leaderboard name."""
     validate_identifier(name, label="leaderboard name")
-    return project.leaderboards_dir / f"{name}.yml"
+    paths = [project.leaderboards_dir / f"{name}{suffix}" for suffix in (".yml", ".py")]
+    existing = [path for path in paths if path.is_file()]
+    if len(existing) > 1:
+        raise ValidationError(f"Duplicate leaderboard name: {name}")
+    return existing[0] if existing else paths[0]

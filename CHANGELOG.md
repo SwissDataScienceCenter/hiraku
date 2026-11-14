@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Trusted project Python leaderboard definitions (`hiraku/leaderboards/<name>.py`)
+  can read existing results into normalized runs without converting tracking files.
+  YAML definitions can also select a Python reader source.
+
 ### Changed
 
 - Keep PSI/J launcher files and default detached job data in the project's
