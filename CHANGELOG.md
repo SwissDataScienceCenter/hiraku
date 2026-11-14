@@ -48,6 +48,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Document submitting Slurm jobs through PSI/J's native `slurm` executor,
+  including scheduler options passed with `slurm.*` custom attributes.
 - Add native PSI/J execution with `prepare_job()` for research attribution,
   `run_local()` for foreground output, CLI `hiraku job submit/list/show/sync`, and
   MCP `job_submit` / `job_list` / `job_show` / `job_sync`. Project history stores

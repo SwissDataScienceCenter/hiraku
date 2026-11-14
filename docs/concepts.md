@@ -79,6 +79,9 @@ directory unless an execution directory is specified;
 foreground execution streams output and waits, while `hiraku job submit` returns
 after submission. A job can produce zero, one, or many tracked runs. Scripts log
 the injected `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` on each run.
+On Slurm clusters, submit through PSI/J's `slurm` executor with
+`hiraku job submit --executor slurm`. Use PSI/J job resources and `slurm.*`
+custom attributes to configure the allocation.
 See [jobs and executors](guides/jobs.md) for submission and final-status retrieval.
 
 ## Agent Skill
