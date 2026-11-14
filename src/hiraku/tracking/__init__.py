@@ -4,6 +4,7 @@ from .base import (
     BackendConfig,
     CSVBackendConfig,
     MLflowBackendConfig,
+    PythonBackendConfig,
     Run,
     TrackingBackend,
     WandbBackendConfig,
@@ -11,6 +12,7 @@ from .base import (
 from .csv import CSVBackend
 from .leaderboard import Leaderboard, Metric
 from .mlflow import MLflowBackend
+from .python import PythonBackend
 from .wandb import WandbBackend
 
 __all__ = [
@@ -19,6 +21,8 @@ __all__ = [
     "CSVBackendConfig",
     "MLflowBackend",
     "MLflowBackendConfig",
+    "PythonBackend",
+    "PythonBackendConfig",
     "WandbBackend",
     "WandbBackendConfig",
     "TrackingBackend",

@@ -563,6 +563,31 @@ def test_leaderboard_list_matches_cli_and_reads_current_definitions(
     asyncio.run(exercise())
 
 
+def test_python_leaderboard_runs(tmp_path: Path) -> None:
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    (project.leaderboards_dir / "custom.py").write_text(
+        "from hiraku.tracking import Metric, Run\n"
+        "metrics = [Metric(name='score', direction='maximize')]\n"
+        "def load_runs(project):\n"
+        "    return [Run(id='a', record_id='task', metrics={'score': 1}),\n"
+        "            Run(id='b', metrics={'score': 2})]\n"
+    )
+    server = create_server(project)
+
+    async def exercise():
+        names = await server.call_tool("leaderboard_list", {})
+        assert names.structured_content["result"] == ["custom"]
+        result = await server.call_tool("runs", {"leaderboard": "custom"})
+        assert [r["id"] for r in result.structured_content["result"]] == ["a"]
+        result = await server.call_tool(
+            "runs",
+            {"leaderboard": "custom", "include_unattributed": True, "sort": "score"},
+        )
+        assert [r["id"] for r in result.structured_content["result"]] == ["b", "a"]
+
+    asyncio.run(exercise())
+
+
 def test_runs(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     (config.leaderboards_dir / "default.yml").write_text(
