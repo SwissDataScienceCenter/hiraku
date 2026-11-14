@@ -1055,27 +1055,16 @@ def run_list(
         if metrics is not None
         else leaderboard.metric_names(runs)
     )
-    param_names = (
-        _names(params, "parameter")
-        if params is not None
-        else list(dict.fromkeys(name for run in runs for name in run.params))
-    )
+    param_names = _names(params, "parameter") if params is not None else []
     if json_output:
         _emit_json(runs, pretty=pretty)
     else:
-        record_names = {
-            item.id: item.title or item.id for item in state.project.vault.list()
-        }
-        columns = ["id", "record", "timestamp", "duration", "commit"]
+        columns = ["id"]
         columns.extend(f"param:{name}" for name in param_names)
         columns.extend(metric_names)
         rows = [
             [
                 run.id,
-                record_names.get(run.record_id, run.record_id),
-                run.timestamp or "",
-                run.duration,
-                run.commit or "",
                 *(run.params.get(name) for name in param_names),
                 *(run.metrics.get(name) for name in metric_names),
             ]

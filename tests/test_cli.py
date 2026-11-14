@@ -299,13 +299,14 @@ def test_runs_report_duration(tmp_path: Path, monkeypatch) -> None:
     table = invoke("leaderboard", "runs", "--record", "root/root").output
 
     assert [row["duration"] for row in rows] == [4.25, None]
+    assert "id" in table
     assert all(
-        column in table
-        for column in ("id", "record", "timestamp", "duration", "commit")
+        column not in table
+        for column in ("record", "timestamp", "duration", "commit")
     )
     assert "a" in table
-    assert "root" in table
-    assert "4.25" in table
+    assert "root" not in table
+    assert "4.25" not in table
 
 
 def test_runs_json_keeps_extra_fields_in_raw(tmp_path: Path, monkeypatch) -> None:
@@ -499,7 +500,7 @@ def create_tracked_project(*args, **kwargs):
     return project
 
 
-def test_runs_require_view_selection_and_discover_parameters(tmp_path, monkeypatch):
+def test_runs_require_view_selection_and_explicit_parameters(tmp_path, monkeypatch):
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
     monkeypatch.chdir(tmp_path)
     missing = invoke("leaderboard", "runs")
@@ -518,8 +519,14 @@ def test_runs_require_view_selection_and_discover_parameters(tmp_path, monkeypat
     result = invoke("leaderboard", "runs", "--leaderboard", "b")
     assert result.exit_code == 0, result.output
     assert "score" in result.output
-    assert "seed" in result.output
-    assert "42" in result.output
+    assert "seed" not in result.output
+    assert "42" not in result.output
+    selected = invoke(
+        "leaderboard", "runs", "--leaderboard", "b", "--params", "seed"
+    )
+    assert selected.exit_code == 0, selected.output
+    assert "seed" in selected.output
+    assert "42" in selected.output
     unknown = invoke("leaderboard", "runs", "--leaderboard", "missing")
     assert unknown.exit_code != 0
     assert "Cannot read YAML" in unknown.output

@@ -25,7 +25,9 @@ metrics:
 ```
 
 Omit `metrics` to discover them from runs; `metrics: []` displays none by default.
-Parameters are discovered automatically. Missing metrics appear as empty values;
+The CLI table shows run IDs and metrics by default. Add parameters with
+`--params seed,model`; metadata and all parameters remain available in `--json`.
+Missing metrics appear as empty values;
 additional metrics remain available in returned runs. Metric and parameter names
 are separate, so the same name can occur in both. Sorting uses plain metric
 names and their declared direction, defaulting to ascending. Sorting applies only
