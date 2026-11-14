@@ -140,6 +140,15 @@ def _approved(response: dict) -> dict:
     return {"approval": {"decision": "approve"}, "response": response}
 
 
+def test_collaborative_requires_task_even_with_active_record(tmp_path):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    project.set_active_record(project.vault.create("task", type="task"))
+    with pytest.raises(ValidationError, match="task"):
+        start_workflow(
+            "collaborative", {"command": ["python", "train.py"]}, project=project
+        )
+
+
 @pytest.mark.parametrize("task_id", ["task", "research/task"])
 def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path, task_id):
     config = Project.create(tmp_path, install_skill=False)
@@ -150,7 +159,9 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path, task_i
     commit = _commit(tmp_path)
     command = ["python", "train.py"]
     result = start_workflow(
-        "collaborative", {"rounds": 1, "command": command}, project=config
+        "collaborative",
+        {"task": task_id, "rounds": 1, "command": command},
+        project=config,
     )
     assert _interrupt(result)["step"] == "draft"
 

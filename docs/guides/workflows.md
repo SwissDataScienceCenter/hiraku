@@ -60,6 +60,9 @@ validating inputs and interrupt responses. Capability names describe needs, not
 specific tools; an executor maps them to its own tools. The bundled workflows
 demonstrate these contracts with Pydantic models.
 
+The collaborative workflow requires an explicit `task` record ID in its
+arguments. Workflows do not resolve the CLI's local active record.
+
 Workflows can declare an `approval` object in an interrupt payload. The MCP
 `workflow_approval` tool presents its message and a proposed response and
 gathers the standard approve, revise, or stop decision without depending on a
