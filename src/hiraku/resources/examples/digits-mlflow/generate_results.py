@@ -131,7 +131,6 @@ def generate(project: Project) -> dict[str, str]:
                     f"exit code {status.exit_code}"
                 )
     validate_database(database, record_names)
-    project.set_active_record(record_names["weak-l2"])
     return record_names
 
 

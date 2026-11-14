@@ -131,9 +131,8 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     config = Project.discover(tmp_path)
-    assert config.active_record_id
+    assert config.local_state.active_record_id is None
     record = config.vault.load("generated/generated")
-    assert record.id == config.active_record_id
     runs = Leaderboard.load(config).list_runs(config, record_id=record.id)
     assert runs[0].id == "run"
     assert not (tmp_path / ".git").exists()

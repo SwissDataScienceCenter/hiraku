@@ -47,7 +47,7 @@ record_create
 
 Keep identity and relationships in named arguments, outside `fields`.
 Use `activate: false` when creating supporting material without switching the
-project-wide active record. Read a record before updating it:
+local active record. Read a record before updating it:
 `record_update` merges `fields`, null clears a field, and `markdown` replaces
 the entire body when supplied. Preserve existing content that the task does
 not change.

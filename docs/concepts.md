@@ -44,7 +44,9 @@ Leaderboards supply metric directions. `hiraku record show PATH` displays the do
 
 Saving validates one record and its destination without scanning the vault. Replacing a file requires `overwrite=True`. Loading, saving, updating, and deleting do not enforce collection integrity. `Vault.validate()` explicitly checks missing relationship targets; cycles are permitted.
 
-At any time, a single record can be set as "active". By default, creation activates the new record. Switch with `hiraku record set <record-path>`. Hiraku stores its bundle-relative path as `active_record_id` in `hiraku.yml`. Inspect it with `hiraku status`.
+The CLI can select a single "active" record as a default for `record show`,
+`run`, and `job submit`. CLI and MCP creation activate the new record by default.
+Switch with `hiraku record set <record-path>` and inspect it with `hiraku status`.
 
 !!! note
     Hiraku is agnostic to git state of metadata as far as possible. The recommended workflow is to commit the metadata records in `hiraku/*`. When switching branches, Hiraku simply lists what is currently visible in the working directory. For advanced workflows using multiple branches, merging and conflict resolution is a user (or agent) responsibility.
