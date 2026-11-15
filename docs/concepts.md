@@ -57,8 +57,7 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 - List runs from the project tracking source, optionally filtered by record ID.
 - Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, and URL attribution may be absent.
 
-Leaderboards query adapters through `list_runs()`. Records and runs
-hold user-managed code provenance; and stored in the tracking backend.
+Leaderboards query adapters through `list_runs()`.
 
 Define named [leaderboards](tracking.md) in `hiraku/leaderboards/<name>.yml`.
 Each contains a `source` mapping and optional ordered `metrics` declarations.
@@ -75,9 +74,11 @@ directory unless an execution directory is specified;
 foreground execution streams output and waits, while `hiraku job submit` returns
 after submission. A job can produce zero, one, or many tracked runs. Scripts log
 the injected `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` on each run.
+
 On Slurm clusters, submit through PSI/J's `slurm` executor with
 `hiraku job submit --executor slurm`. Use PSI/J job resources and `slurm.*`
 custom attributes to configure the allocation.
+
 See [jobs and executors](guides/jobs.md) for submission and final-status retrieval.
 
 ## Agent Skill

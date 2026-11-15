@@ -14,7 +14,7 @@ hiraku run --record baseline -- python train.py
 ```
 
 Without `--record`, the CLI uses the active record when set, otherwise the job
-is unattributed.
+is unattributed. MCP alway requires an explicit `record_id` for attribution.
 Hiraku passes `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` environment variables to the command.
 
 ## Launchers and custom attributes
@@ -40,6 +40,11 @@ job attributes and resources remain available through the Python API.
 
 Use `hiraku job submit` to submit a job to a local or remote compute backend. By default,
 submission uses the `local-detached` executor, which runs the command in a detached process and saves its final status. The CLI can also submit to other executors, such as Renku or Slurm, if they are installed and configured.
+
+??? note "Detached output"
+    By default, stdout, stderr, and launcher diagnostics are stored in
+    `.hiraku/psij/detached/<native_id>/` as `stdout.log`, `stderr.log`, and
+    `launcher.log`. A `file://` executor URL selects a different directory.
 
 ```bash
 hiraku job submit --record baseline -- python train.py
