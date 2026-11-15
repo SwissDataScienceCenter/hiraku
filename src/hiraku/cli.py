@@ -17,11 +17,18 @@ from typing import Any
 
 import click
 import yaml
+from psij import (
+    InvalidJobException,
+    JobAttributes,
+    JobStatus,
+    SubmitException,
+)
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 from rich import box, print_json
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from .errors import (
     GitError,
@@ -29,9 +36,9 @@ from .errors import (
     NoActiveRecordError,
     ValidationError,
 )
-from .execution import execute_command
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
+from .job import Submission, get_executor, observe_submission, prepare_job, run_local
 from .project import Project
 from .record import Record, validate_identifier
 from .tracking import Leaderboard, Run
@@ -53,7 +60,13 @@ class HirakuGroup(click.Group):
     def invoke(self, ctx: click.Context) -> Any:
         try:
             return super().invoke(ctx)
-        except (HirakuError, PydanticValidationError) as exc:
+        except (
+            HirakuError,
+            PydanticValidationError,
+            InvalidJobException,
+            SubmitException,
+            ValueError,
+        ) as exc:
             raise click.ClickException(str(exc)) from exc
 
 
@@ -67,6 +80,7 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, Run):
         return {
             "id": value.id,
+            "job_id": value.job_id,
             "metrics": _json_value(value.metrics),
             "params": _json_value(value.params),
             "record_id": value.record_id,
@@ -103,11 +117,16 @@ def _validate_json_options(json_output: bool, pretty: bool) -> None:
 
 
 def _print_table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
-    table = Table(box=box.ROUNDED, header_style="bold cyan", pad_edge=False)
+    table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", show_edge=False)
     for column in columns:
         table.add_column(column, overflow="fold")
     for row in rows:
-        table.add_row(*("" if item is None else str(item) for item in row))
+        table.add_row(
+            *(
+                item if isinstance(item, Text) else "" if item is None else str(item)
+                for item in row
+            )
+        )
     console = Console()
     console.print(table)
 
@@ -695,29 +714,207 @@ def workflow_resume_command(
     )
 
 
-@main.command("run")
+@main.group("job")
+def job_group() -> None:
+    """Submit commands and retrieve native PSI/J status."""
+
+
+def _exit_job(status: JobStatus) -> None:
+    code = status.exit_code
+    if code is None:
+        code = {"COMPLETED": 0, "CANCELED": 130}.get(status.state.name, 1)
+    if status.message:
+        click.echo(status.message, err=True)
+    raise click.exceptions.Exit(128 - code if code < 0 else code)
+
+
+@job_group.command("submit")
 @click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
 @click.option("--record", "record_id")
 @click.option(
-    "--dispatch", help="Dispatcher name from the project's dispatch directory."
+    "--executor", default="local-detached", show_default=True, help="PSI/J executor."
 )
-@click.pass_context
-def run_command(
-    context: click.Context,
+@click.option("--executor-url")
+@click.option("--launcher", help="Registered PSI/J launcher name.")
+@click.option(
+    "--custom-attribute",
+    "custom_attributes",
+    type=(str, str),
+    multiple=True,
+    metavar="KEY VALUE",
+    help="Executor-specific PSI/J custom attribute.",
+)
+@click.option("--directory", type=click.Path(path_type=Path))
+@click.pass_obj
+def job_submit(
+    state: CLIContext,
     command: tuple[str, ...],
     record_id: str | None,
-    dispatch: str | None,
+    executor: str,
+    executor_url: str | None,
+    launcher: str | None,
+    custom_attributes: tuple[tuple[str, str], ...],
+    directory: Path | None,
 ) -> None:
-    """Run a project command in the foreground."""
-    state: CLIContext = context.obj
-    result = execute_command(
+    """Submit and return history keyed by the original PSI/J job ID as JSON."""
+    if executor == "local":
+        raise ValidationError(
+            "Native local execution cannot recover submission status; "
+            "use hiraku run or the local-detached executor"
+        )
+    job = prepare_job(
         command,
-        record_id=record_id,
-        dispatch=dispatch,
+        record_id=record_id
+        if record_id is not None
+        else state.project.active_record_id,
         project=state.project,
+        directory=directory,
+        launcher=launcher,
+        attributes=JobAttributes(custom_attributes=dict(custom_attributes))
+        if custom_attributes
+        else None,
     )
-    code = result.returncode
-    raise click.exceptions.Exit(128 - code if code < 0 else code)
+    get_executor(
+        executor,
+        work_directory=state.project.psij_dir,
+        url=executor_url,
+    ).submit(job)
+    entry = Submission.from_psi_job(job)
+    entry.save(state.project)
+    _emit_json(entry.model_dump(mode="json"))
+
+
+@main.command("run")
+@click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
+@click.option("--record", "record_id")
+@click.option("--launcher", help="Registered PSI/J launcher name.")
+@click.option(
+    "--custom-attribute",
+    "custom_attributes",
+    type=(str, str),
+    multiple=True,
+    metavar="KEY VALUE",
+    help="Executor-specific PSI/J custom attribute.",
+)
+@click.option("--directory", type=click.Path(path_type=Path))
+@click.pass_obj
+def run(
+    state: CLIContext,
+    command: tuple[str, ...],
+    record_id: str | None,
+    launcher: str | None,
+    custom_attributes: tuple[tuple[str, str], ...],
+    directory: Path | None,
+) -> None:
+    """Run locally, stream output, and return the command's exit code."""
+    job = prepare_job(
+        command,
+        record_id=record_id
+        if record_id is not None
+        else state.project.active_record_id,
+        project=state.project,
+        directory=directory,
+        launcher=launcher,
+        attributes=JobAttributes(custom_attributes=dict(custom_attributes))
+        if custom_attributes
+        else None,
+    )
+    _exit_job(run_local(job, project=state.project))
+
+
+@job_group.command("status")
+@click.argument("job_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_status(state: CLIContext, job_id: str, json_output: bool) -> None:
+    """Sync and show status by full ID or unique nonempty prefix."""
+    entry = Submission.from_prefix(state.project, job_id)
+    entry.sync()
+    entry.save(state.project)
+    _show_submission(entry.model_dump(mode="json"), json_output)
+
+
+def _show_submission(result: dict[str, Any], json_output: bool) -> None:
+    if json_output:
+        _emit_json(result)
+    else:
+        _print_table(
+            ("field", "value"),
+            [
+                ("id", result["id"]),
+                (
+                    "command",
+                    shlex.join(
+                        [
+                            result["spec"]["executable"],
+                            *result["spec"].get("arguments", []),
+                        ]
+                    ),
+                ),
+                ("record_id", result["record_id"]),
+                ("submitted_at", result["submitted_at"]),
+                ("observed_at", result["observed_at"]),
+                ("executor", result["executor"]),
+                ("executor_url", result["executor_url"]),
+                ("native_id", result["native_id"]),
+                *result["status"].items(),
+            ],
+        )
+
+
+@job_group.command("list")
+@click.option("--record", "record_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> None:
+    """List jobs and status, refreshing nonfinal submissions."""
+    submissions = Submission.list(state.project, record_id=record_id)
+    entries = [observe_submission(entry, state.project) for entry in submissions]
+    for result in entries:
+        if "observation_error" in result:
+            click.echo(
+                f"Warning: cannot sync job {result['id']}: "
+                f"{result['observation_error']}",
+                err=True,
+            )
+    if json_output:
+        _emit_json(entries)
+    else:
+        status_colors = {"COMPLETED": "green", "FAILED": "red", "CANCELED": "red"}
+        id_width = 8
+        while len({entry["id"][:id_width] for entry in entries}) < len(entries):
+            id_width += 1
+        _print_table(
+            (
+                "id",
+                "record",
+                "submitted_at",
+                "executor",
+                "state",
+                "command",
+            ),
+            [
+                (
+                    entry["id"][:id_width],
+                    entry["record_id"],
+                    datetime.fromisoformat(entry["submitted_at"])
+                    .astimezone()
+                    .strftime("%Y-%m-%d %H:%M:%S"),
+                    entry["executor"],
+                    Text(
+                        entry["status"]["state"],
+                        style=status_colors.get(entry["status"]["state"], "white"),
+                    ),
+                    shlex.join(
+                        [
+                            entry["spec"]["executable"],
+                            *entry["spec"].get("arguments", []),
+                        ]
+                    ),
+                )
+                for entry in entries
+            ],
+        )
 
 
 @main.group("leaderboard")

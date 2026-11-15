@@ -34,14 +34,15 @@ Report any checks that fail or cannot be run. Do not claim validation that was n
 
 ## Architecture
 
-Hiraku is a single Python package under `src/hiraku/`.
+Hiraku's public Python API lives under `src/hiraku/`. Custom PSI/J executors live
+under `src/psij-descriptors/`.
 
 Core responsibilities:
 
 - **`Project`** (`project.py`) — Project discovery, settings, active-record state, and managed paths.
 - **`Record` and `Vault`** (`record.py`) — Local document models and filesystem-backed bundle operations.
-- **`Run`** (`tracking/base.py`) — Normalized representation of a tracked execution.
-- **Execution** (`execution.py`) — Record resolution, command launching, and tracking attribution.
+- **`Run`** (`tracking/base.py`) — Normalized tracking traces with metrics and attribution.
+- **Execution** (`job.py`) — Prepare native PSI/J jobs, stream foreground output, and keep submission history keyed by PSI/J job ID. Executors own execution and status; history retains observed final outcomes.
 - **Tracking** (`tracking/`) — Backend adapters implementing `TrackingBackend`; `Leaderboard` validates source settings and creates adapters.
 - **Workflows** (`workflows/`) — LangGraph workflow discovery, execution, session history, and checkpoints.
 - **CLI and MCP** (`cli.py`, `mcp.py`) — User-facing interfaces to the underlying APIs.

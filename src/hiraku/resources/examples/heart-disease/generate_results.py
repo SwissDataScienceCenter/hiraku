@@ -13,7 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from hiraku import Project
-from hiraku.execution import execute_command
+from hiraku.job import prepare_job, run_local
 
 EXPERIMENTS = (
     ("logistic-regression", "heart-disease-prediction", "logistic", 0.2),
@@ -118,15 +118,17 @@ def generate(project: Project) -> None:
             str(fraction),
         ]
         for seed in (1, 2, 3):
-            result = execute_command(
+            job = prepare_job(
                 [*command, "--seed", str(seed)],
                 record_id=record.id,
                 project=project,
+                directory=project.root,
             )
-            if result.returncode:
+            status = run_local(job, project=project)
+            if status.exit_code:
                 raise RuntimeError(
                     f"Training command for {identifier} failed with "
-                    f"exit code {result.returncode}"
+                    f"exit code {status.exit_code}"
                 )
     rows = validate_runs(project)
     for identifier, _, _, _ in EXPERIMENTS:

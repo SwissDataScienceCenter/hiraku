@@ -107,11 +107,6 @@ writes the CSV row to project-root `runs.csv`.
 
     Hiraku only **queries the tracking backend for existing runs and metrics**. This means the same training and logging setup can be used with or without Hiraku.
 
-
-??? note "Execution"
-    Hiraku runs commands in the current project working tree.
-    `HIRAKU_GIT_STATE` records whether the tree had uncommitted changes.
-
 ## 4. Run a second experiment
 
 ```bash

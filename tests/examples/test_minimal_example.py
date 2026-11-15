@@ -1,15 +1,54 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
 from hiraku.tracking import Leaderboard
+
+
+@pytest.mark.parametrize(
+    "existing", ["", "commit,git_state,record_id\nold,clean,test\n"]
+)
+def test_minimal_csv_header_validation(tmp_path, existing):
+    script = (
+        Path(__file__).parents[2]
+        / "src/hiraku/resources/examples/minimal/src/evaluate.py"
+    )
+    path = tmp_path / "runs.csv"
+    path.write_text(existing)
+    environment = {**os.environ, "HIRAKU_RECORD_ID": "test", "HIRAKU_JOB_ID": "job"}
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    if existing:
+        assert result.returncode != 0
+        assert "Unexpected runs CSV header" in result.stderr
+        assert path.read_bytes() == existing.encode()
+    else:
+        assert result.returncode == 0, result.stderr
+        before = path.read_text()
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert path.read_text().startswith(before)
+        assert len(path.read_text().splitlines()) == 3
 
 
 def git(path: Path, *arguments: str) -> str:
@@ -73,7 +112,6 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     )
     git(project, "add", "hiraku", "hiraku.yml")
     git(project, "commit", "-m", "add example records")
-    commit = git(project, "rev-parse", "HEAD")
 
     invoke(
         runner,
@@ -91,8 +129,7 @@ def test_minimal_example_writes_clean_project_root_run(tmp_path, monkeypatch) ->
     record = config.vault.load("binary-classification/threshold-baseline")
     runs = Leaderboard.load(config).list_runs(config, record_id=record.id)
     assert len(runs) == 1
-    assert runs[0].commit == commit
-    assert runs[0].raw["git_state"] == "clean"
+    assert runs[0].commit is None
     assert runs[0].timestamp is not None
     assert runs[0].duration is not None and runs[0].duration >= 0
     assert (project / "runs.csv").is_file()
@@ -109,7 +146,6 @@ def test_minimal_documented_sequence(tmp_path: Path, monkeypatch) -> None:
     git(project, "config", "user.name", "Test")
     git(project, "add", ".")
     git(project, "commit", "-m", "initial commit")
-    commit = git(project, "rev-parse", "HEAD")
     invoke(runner, ["status"])
     invoke(
         runner,
@@ -172,4 +208,4 @@ def test_minimal_documented_sequence(tmp_path: Path, monkeypatch) -> None:
     )
     assert len(runs) == 2
     assert {str(run["params"]["seed"]) for run in runs} == {"0", "1"}
-    assert {run["commit"] for run in runs} == {commit}
+    assert all(run["commit"] is None for run in runs)

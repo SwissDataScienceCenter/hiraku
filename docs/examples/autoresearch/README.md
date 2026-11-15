@@ -89,7 +89,7 @@ hiraku record create sep10/cpu-test \
   --set "hypothesis=The Hiraku dispatcher records an attributed mock result" \
   --commit HEAD
 
-hiraku run --record sep10/cpu-test -- uv run python cpu_mock.py --val-bpb 1.0
+hiraku run --record sep10/cpu-test -- ./hiraku/dispatch/autoresearch.sh -- uv run python cpu_mock.py --val-bpb 1.0
 hiraku leaderboard runs --record sep10/cpu-test
 
 hiraku record update sep10/cpu-test \
@@ -109,7 +109,7 @@ hiraku record create sep10/baseline \
   --set "hypothesis=Provide a reasonable starting point for comparison" \
   --commit HEAD
 
-hiraku run --record sep10/baseline -- uv run python train.py
+hiraku run --record sep10/baseline -- ./hiraku/dispatch/autoresearch.sh -- uv run python train.py
 hiraku leaderboard runs --record sep10/baseline
 
 hiraku record update sep10/baseline \

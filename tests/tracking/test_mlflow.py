@@ -176,7 +176,11 @@ def _native_run(
             start_time=1700000000000,
             end_time=end_time,
         ),
-        data=SimpleNamespace(tags={"hiraku.record_id": "root"}, metrics={}, params={}),
+        data=SimpleNamespace(
+            tags={"hiraku.record_id": "root", "hiraku.job_id": "b" * 32},
+            metrics={},
+            params={},
+        ),
     )
 
 
@@ -231,6 +235,7 @@ def test_mlflow_backend_reads_duration_from_start_and_end(
     )
 
     assert [run.duration for run in backend._read_source_runs()] == [4.25, None]
+    assert [run.job_id for run in backend._read_source_runs()] == ["b" * 32] * 2
 
 
 def test_mlflow_backend_reports_missing_optional_dependency(

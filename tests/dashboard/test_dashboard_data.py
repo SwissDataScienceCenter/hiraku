@@ -265,7 +265,7 @@ def test_find_run_and_run_text(project: Project) -> None:
     run = find_run(runs_df, "r0")
 
     assert find_run(runs_df, "missing") is None
-    assert "entrypoint" not in runs_df.columns
+    assert "dataset" not in runs_df.columns
     # Dashboard rows use the normalized Run model's numeric metric values.
     assert run_text(run) == (
         "id: r0\n"

@@ -16,8 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import HirakuError, ValidationError
-from hiraku.execution import validate_command
 from hiraku.git import GitRepository
+from hiraku.job import validate_command
 from hiraku.markdown import Markdown, render
 from hiraku.project import Project
 from hiraku.record import Record

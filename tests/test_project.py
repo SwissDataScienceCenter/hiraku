@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,10 @@ from hiraku.tracking import CSVBackend, Leaderboard
 def test_project_create_can_skip_mcp_configuration(tmp_path: Path) -> None:
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
 
+    assert project.psij_dir == tmp_path / ".hiraku" / "psij"
+    assert project.jobs_dir == tmp_path / ".hiraku" / "jobs"
+    assert not project.jobs_dir.exists()
+    assert not project.psij_dir.exists()
     assert project.leaderboards_dir == tmp_path / "hiraku" / "leaderboards"
     assert list(project.leaderboards_dir.iterdir()) == []
     assert project.active_record_id is None
@@ -147,20 +152,17 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert (config.workflows_dir / "collaborative" / "workflow.md").is_file()
     assert not (config.hiraku_dir / "programs").exists()
     assert not (config.hiraku_dir / "actions").exists()
-    assert config.default_dispatch is None
-    assert not config.dispatch_dir.exists()
+    assert not hasattr(config, "default_dispatch")
     codex_skill = root / ".agents/skills/hiraku/SKILL.md"
     claude_skill = root / ".claude/skills/hiraku/SKILL.md"
     assert codex_skill.is_file()
     assert claude_skill.is_file()
-    assert (root / ".codex/skills/hiraku/SKILL.md").read_text() == (
-        codex_skill.read_text()
-    )
-    assert (root / ".pi/skills/hiraku/SKILL.md").read_text() == codex_skill.read_text()
+    assert not (root / ".pi/skills").exists()
     assert not (root / ".gemini/skills").exists()
     assert codex_skill.read_text() == claude_skill.read_text()
-    assert "`leaderboard runs --json`" in codex_skill.read_text()
-    assert "`runs --json`" not in codex_skill.read_text()
+    assert codex_skill.read_text() == (
+        files("hiraku.resources").joinpath("skills/hiraku/SKILL.md").read_text()
+    )
     assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
@@ -173,6 +175,25 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
         Project.create(root)
     with pytest.raises(ProjectNotFoundError):
         Project.discover(tmp_path / "missing")
+
+
+def test_init_installs_all_bundled_skill_files(tmp_path: Path) -> None:
+    Project.create(tmp_path)
+    source = Path(str(files("hiraku.resources").joinpath("skills")))
+    expected = {
+        path.relative_to(source): path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    }
+    assert expected
+    for agent in (".agents", ".claude"):
+        destination = tmp_path / agent / "skills"
+        actual = {
+            path.relative_to(destination): path.read_bytes()
+            for path in destination.rglob("*")
+            if path.is_file()
+        }
+        assert actual == expected
 
 
 def test_init_from_template_applies_overlay(tmp_path: Path) -> None:
@@ -261,7 +282,6 @@ def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
     assert Project.load(config.path).active_record_id == first.id
     assert set(config.to_dict()) == {
         "hiraku_dir",
-        "default_dispatch",
         "active_record_id",
     }
 

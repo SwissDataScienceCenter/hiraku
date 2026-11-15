@@ -80,7 +80,7 @@ def test_invalid_generation_options_leave_no_project(tmp_path, arguments):
     assert not (tmp_path / "hiraku.yml").exists()
 
 
-def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch):
+def test_init_generate_failure_keeps_project(tmp_path, monkeypatch):
     import hiraku.cli as cli
 
     def fail(config):
@@ -143,9 +143,7 @@ def test_generator_does_not_publish_failed_batch(generator, tmp_path, monkeypatc
     def fail(*args, **kwargs):
         raise RuntimeError("training failed")
 
-    monkeypatch.setitem(
-        generator["generate_results"].__globals__, "execute_command", fail
-    )
+    monkeypatch.setitem(generator["generate_results"].__globals__, "run_local", fail)
     output = tmp_path / "results"
     with pytest.raises(RuntimeError, match="training failed"):
         generator["generate_results"](output)

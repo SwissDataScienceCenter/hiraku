@@ -72,20 +72,11 @@ and fall back to the CLI when the host has not connected the server.
 | `leaderboard_list` | List leaderboard names without loading definitions, like `hiraku leaderboard list --json`. |
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
-| `execute` | Run a command in the foreground and return its exit code, stdout, and stderr. |
+| `job_submit` | Submit through PSI/J, record history, and return the original PSI/J job `id`. |
+| `job_list` | List jobs and status, refreshing and saving nonfinal jobs; optionally filter by `record_id`.  |
+| `job_status` | Attach through PSI/J, save, and return the current status using its original `job_id`. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
-Create tools accept a Markdown body and a `fields` object for additional metadata.
-For `record_create`, `fields` must include a nonblank `type`.
-Record creation activates the record by default; pass `activate: false` to leave
-the active record unchanged. Update tools merge `fields` and optionally replace
-the Markdown body. Explicit `null` values are retained in metadata. IDs and persistence
-paths and the organizational parent cannot be changed through the update tool.
-Expected failures are returned as MCP tool errors.
-
-`execute` requires explicit command arguments. Commands are not stored in
-records. It waits for completion and returns the exit code, stdout, and stderr.
-A connected client can run commands with the user's local permissions.
 
 ## Resources and evidence
 

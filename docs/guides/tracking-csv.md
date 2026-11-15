@@ -39,26 +39,25 @@ The CSV adapter reads records; it does not write them. Your evaluation script
 can append a row using this schema:
 
 ```csv
-id,record_id,commit,git_state,timestamp,metric.val/accuracy,param.seed
-run-001,baseline,abc123,clean,2026-01-01T12:00:00Z,0.84,42
+id,record_id,hiraku_job_id,timestamp,metric.val/accuracy,param.seed
+run-001,baseline,JOB_ID,2026-01-01T12:00:00Z,0.84,42
 ```
 
 Choose a unique run ID for each execution. Prefix metric columns with
-`metric.` and parameter columns with `param.`. Use `HIRAKU_GIT_STATE` to record
-whether the current working tree had changes.
+`metric.` and parameter columns with `param.`. Populate `record_id` and
+`hiraku_job_id` from `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` respectively.
+The optional `commit` column describes source-reported code provenance.
 
-During execution, `HIRAKU_ROOT` and `HIRAKU_TRACKING_ROOT` point to the project
-directory. Write the tracking table there:
+Your script chooses the CSV location, relative to its working directory:
 
 ```python
 import os
 from pathlib import Path
 
-runs_path = Path(os.environ["HIRAKU_TRACKING_ROOT"]) / "runs.csv"
+runs_path = Path("runs.csv")
 ```
 
-Use `HIRAKU_RECORD_ID`, `HIRAKU_COMMIT`, and
-`HIRAKU_GIT_STATE` to populate attribution. See
+See [jobs and executors](jobs.md) for execution and attribution.
 Initialize the [Heart Disease example](../examples/heart-disease/README.md) with
 `hiraku example create heart-disease` to get a complete writer in `train.py`.
 

@@ -78,9 +78,8 @@ mlflow.set_experiment("my-task")
 with mlflow.start_run():
     mlflow.set_tags({
         "hiraku.record_id": os.environ["HIRAKU_RECORD_ID"],
+        "hiraku.job_id": os.environ["HIRAKU_JOB_ID"],
     })
-    if os.environ.get("HIRAKU_COMMIT"):
-        mlflow.set_tag("hiraku.commit", os.environ["HIRAKU_COMMIT"])
     mlflow.log_metric("val/accuracy", accuracy)  # calculated by your code
 ```
 

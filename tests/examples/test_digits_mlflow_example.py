@@ -52,7 +52,6 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     assert not (project / "example.yml").exists()
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize Digits MLflow example")
-    source_commit = git(project, "rev-parse", "HEAD")
     invoke(
         runner,
         [
@@ -134,7 +133,8 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
     )
     client = MlflowClient(tracking_uri=uri)
     for row in rows:
-        assert row["commit"] == source_commit
+        assert client.get_run(row["id"]).info.run_name == row["record_id"]
+        assert row["commit"] is None
         assert row["id"]
         assert row["raw"]["status"] == "FINISHED"
         assert row["params"]["epochs"] == "8"
@@ -194,15 +194,15 @@ def test_digits_requires_provenance_before_creating_runs(tmp_path):
     assert not (tmp_path / "mlflow.db").exists()
 
 
-def test_digits_requires_root_for_default_tracking(tmp_path):
+def test_digits_uses_working_directory_for_default_tracking(tmp_path):
     pytest.importorskip("mlflow")
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("HIRAKU_")
     }
     env.update(
         {
-            "HIRAKU_RECORD_ID": "baseline",
-            "HIRAKU_COMMIT": "a" * 40,
+            "HIRAKU_RECORD_ID": "digits/baseline",
+            "HIRAKU_JOB_ID": "a" * 32,
         }
     )
     result = subprocess.run(
@@ -212,6 +212,5 @@ def test_digits_requires_root_for_default_tracking(tmp_path):
         text=True,
         capture_output=True,
     )
-    assert result.returncode != 0
-    assert "Missing launch environment variables: HIRAKU_ROOT" in result.stderr
-    assert not (tmp_path / "mlflow.db").exists()
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "mlflow.db").exists()

@@ -113,8 +113,7 @@ def test_heart_disease_record_workflow(tmp_path: Path, monkeypatch) -> None:
         assert float(run.metrics["val/accuracy"]) == pytest.approx(
             expected_accuracy, rel=1e-3
         )
-        assert run.commit == source_commit
-        assert run.raw["git_state"] == "dirty"
+        assert run.commit is None
         assert math.isfinite(float(run.metrics["val/log_loss"]))
     queried = json.loads(
         invoke(

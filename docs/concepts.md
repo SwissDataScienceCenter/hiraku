@@ -17,7 +17,7 @@ This fragmentation creates an inherent barrier for effective Human-AI collaborat
 
 ## Records and runs
 
-Hiraku uses records, foreground command execution, and tracked runs to document the model-development lifecycle.
+Hiraku uses records, PSI/J jobs, and tracked runs to document the model-development lifecycle.
 
 Records and command execution are managed directly by Hiraku. Runs are owned by a user-managed tracking backend (e.g., Weights & Biases, MLflow, CSV, etc), and are queried via a backend interface.
 
@@ -27,7 +27,7 @@ A root *record* defines a working scope and goal, and documents the research pro
 | --- | ---  | --- |
 | **Root record** | `hiraku/records/{name}.md` | Defines the scope of a research effort and may provide shared research defaults. |
 | **Child record** | `hiraku/records/{name}.md` | A focused investigation that may bind a source commit. A proposed investigation may have no commit. |
-| **Command execution** | foreground subprocess | Exit code, streamed output, and tracking attribution. |
+| **Job** | Native PSI/J job and executor | One execution attempt with research attribution and status. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku queries results through a backend adapter.|
 
 Records are stored as Markdown with YAML front matter. `Record.id` is the OKF ID: its bundle-relative path without `.md`. It is derived from placement and never persisted in front matter. `Vault` owns the bundle root, loading, saving, and discovery. `parent_id` and `related_to` declare relationships to concept IDs, independently of directory structure. Moving a document changes its ID.
@@ -57,6 +57,8 @@ A **tracking backend** is an interface that provides a uniform API for querying 
 - List runs from the project tracking source, optionally filtered by record ID.
 - Return normalized runs with a required backend run ID, metrics, and parameters; record ID, commit, timestamp, and URL attribution may be absent.
 
+Leaderboards query adapters through `list_runs()`.
+
 Define named [leaderboards](tracking.md) in `hiraku/leaderboards/<name>.yml`.
 Each contains a `source` mapping and optional ordered `metrics` declarations.
 Records do not configure tracking. `hiraku leaderboard runs --leaderboard NAME` queries attributed
@@ -67,17 +69,24 @@ A launch that never logs a row will not appear as a run.
 
 ## Command execution
 
-Commands are not record metadata. Pass the complete argv directly to
-`hiraku run`; a dispatcher can prepare repeatable project-specific runtime
-behavior around that invocation. Command execution runs synchronously in the
-project working tree; tracked runs own measurements and can be inspected after
-the command exits. See the [CLI reference](api/cli.md) for command options.
+Pass the complete argv directly to `hiraku run`. Local jobs inherit the submitter's working
+directory unless an execution directory is specified;
+foreground execution streams output and waits, while `hiraku job submit` returns
+after submission. A job can produce zero, one, or many tracked runs. Scripts log
+the injected `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` on each run.
+
+On Slurm clusters, submit through PSI/J's `slurm` executor with
+`hiraku job submit --executor slurm`. Use PSI/J job resources and `slurm.*`
+custom attributes to configure the allocation.
+
+See [jobs and executors](guides/jobs.md) for submission and final-status retrieval.
 
 ## Agent Skill
 
-`hiraku init` installs copies of the project-local skill under
-`.agents/skills/hiraku/`, `.claude/skills/hiraku/`, `.pi/skills/hiraku/`, and
-`.codex/skills/hiraku/`. Invoke it as `$hiraku` in Codex or `/hiraku` in Claude Code.
+`hiraku init` installs the project-local skill under `.agents/skills/hiraku/`
+and `.claude/skills/hiraku/`. Codex and other agents that discover
+`.agents/skills/` can use that shared copy. Invoke it as `$hiraku` in Codex or
+`/hiraku` in Claude Code.
 
 ## Workflows and context
 

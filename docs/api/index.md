@@ -13,4 +13,4 @@ The Python API reference is organized by responsibility:
 - [Records and Vault](python/records.md) — validated Markdown records,
   and collection-wide persistence and hierarchy operations.
 - [Tracking](python/tracking.md) — leaderboards, adapters, and normalized runs.
-- [Workflows](python/workflows.md) — workflow discovery and session history.
+- [Workflows](python/workflows.md) — LangGraph discovery, execution, and checkpoints.

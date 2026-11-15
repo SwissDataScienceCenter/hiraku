@@ -40,6 +40,7 @@ RUN_FIELDS = [
     "record_id",
     "commit",
     "git_state",
+    "hiraku_job_id",
     "timestamp",
     "duration",
     "param.model",
@@ -50,10 +51,7 @@ RUN_FIELDS = [
 ]
 PROVENANCE_VARIABLES = [
     "HIRAKU_RECORD_ID",
-    "HIRAKU_COMMIT",
-    "HIRAKU_GIT_STATE",
-    "HIRAKU_ROOT",
-    "HIRAKU_TRACKING_ROOT",
+    "HIRAKU_JOB_ID",
 ]
 
 
@@ -144,14 +142,13 @@ def main() -> None:
         "log_loss": log_loss(validation_y, probabilities),
         "accuracy": accuracy_score(validation_y, predictions),
     }
-    runs_path = Path(attribution["HIRAKU_TRACKING_ROOT"]) / "runs.csv"
+    runs_path = Path("runs.csv")
     append_run(
         runs_path,
         {
             "id": uuid.uuid4().hex,
+            "hiraku_job_id": attribution["HIRAKU_JOB_ID"],
             "record_id": attribution["HIRAKU_RECORD_ID"],
-            "commit": attribution["HIRAKU_COMMIT"],
-            "git_state": attribution["HIRAKU_GIT_STATE"],
             "timestamp": started.isoformat(),
             "duration": f"{(datetime.now(UTC) - started).total_seconds():.3f}",
             "param.model": args.model,

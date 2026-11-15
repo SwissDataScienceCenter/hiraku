@@ -30,10 +30,11 @@ class Run(BaseModel):
 
     Attributes:
         id: Unique run ID.
+        job_id: Optional execution attempt ID reported by the tracking source.
         metrics: Mapping of metric names to float values.
         params: Mapping of parameter names to string values.
         record_id: Optional bundle-relative concept path associated with the run.
-        commit: Optional commit hash associated with the run.
+        commit: Optional commit hash reported by the tracking source.
         timestamp: Optional run start time as a timezone-aware UTC datetime.
         duration: Optional run duration in seconds; ``None`` while running.
         url: Optional URL to the run in the backend's UI.
@@ -42,6 +43,7 @@ class Run(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     id: str = Field(min_length=1)
+    job_id: str | None = None
     metrics: Mapping[str, float] = Field(default_factory=dict)
     params: Mapping[str, str] = Field(default_factory=dict)
     record_id: str | None = None

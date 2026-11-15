@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import quote
 
 import anyio
+import psij
 import pytest
 from click.testing import CliRunner
 
@@ -24,7 +25,8 @@ from mcp.server.elicitation import render_elicitation_schema  # noqa: E402
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E402
 
 from hiraku.cli import main  # noqa: E402
-from hiraku.errors import ValidationError  # noqa: E402
+from hiraku.errors import ObservationError, ValidationError  # noqa: E402
+from hiraku.job import Submission  # noqa: E402
 from hiraku.mcp import (  # noqa: E402
     WorkflowApproval,
     create_server,
@@ -62,8 +64,13 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
             "runs",
             "workflow_start",
         } <= tools.keys()
+        assert {"job_submit", "job_status", "job_list"} <= tools.keys()
         assert tools["project_info"].title == "Project information"
         assert tools["record_list"].annotations.read_only_hint is True
+        assert tools["job_status"].annotations.read_only_hint is False
+        assert {"job_show", "job_sync"}.isdisjoint(tools)
+        assert tools["job_list"].annotations.read_only_hint is False
+        assert tools["job_list"].annotations.open_world_hint is True
         assert tools["workflow_start"].title == "Start workflow"
         assert tools["workflow_start"].description
         result = await server.call_tool("project_info", {})
@@ -272,34 +279,246 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_execute_tool_runs_in_foreground(tmp_path: Path) -> None:
-    config = Project.create(tmp_path)
-    server = create_server(config)
+def test_submit_rejects_native_local(tmp_path: Path, monkeypatch) -> None:
+    server = create_server(Project.create(tmp_path))
+    monkeypatch.setattr(
+        "psij.executors.local.LocalJobExecutor.submit",
+        lambda *args: pytest.fail("Native local job must not be submitted"),
+    )
 
     async def exercise() -> None:
+        with pytest.raises(ToolError, match="use hiraku run or the local-detached"):
+            await server.call_tool(
+                "job_submit", {"command": ["echo", "hello"], "executor": "local"}
+            )
+
+    asyncio.run(exercise())
+    assert not (tmp_path / ".hiraku/jobs").exists()
+
+
+@pytest.mark.parametrize("state", ["ACTIVE", "COMPLETED", "FAILED", "CANCELED"])
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_job_list_refreshes_only_nonfinal_jobs(
+    tmp_path, monkeypatch, caplog, state, unavailable
+):
+    project = Project.create(tmp_path)
+    job = psij.Job(psij.JobSpec("echo"))
+    job.executor = psij.JobExecutor.get_instance(
+        "local-detached", url=(tmp_path / "backend").as_uri()
+    )
+    job._native_id = job.id
+    job.status = psij.JobStatus(getattr(psij.JobState, state))
+    entry = Submission.from_psi_job(job)
+    entry.save(project)
+    path = project.root / ".hiraku/jobs" / f"{job.id}.json"
+    before = path.read_bytes()
+    synced = []
+
+    def sync(self):
+        synced.append(self.id)
+        if unavailable:
+            raise ObservationError("backend unavailable")
+        self.status.state = "COMPLETED"
+
+    monkeypatch.setattr(Submission, "sync", sync)
+    server = create_server(project)
+
+    async def exercise():
+        result = await server.call_tool("job_list", {})
+        expected = "COMPLETED" if state == "ACTIVE" and not unavailable else state
+        listed = result.structured_content["result"][0]
+        if state == "ACTIVE" and unavailable:
+            assert listed["status"]["state"] == "UNKNOWN"
+            assert listed["observation_error"] == "backend unavailable"
+            assert listed["observed_at"] == entry.model_dump(mode="json")["observed_at"]
+            assert path.read_bytes() == before
+        else:
+            assert listed["status"]["state"] == expected
+            assert "observation_error" not in listed
+        assert Submission.load(project, job.id).status.state == expected
+
+    asyncio.run(exercise())
+    assert synced == ([job.id] if state == "ACTIVE" else [])
+    if state == "ACTIVE" and unavailable:
+        assert job.id in caplog.text and "backend unavailable" in caplog.text
+
+
+@pytest.mark.parametrize("custom_url", [False, True])
+def test_submit_and_status_use_native_executor(
+    tmp_path: Path, monkeypatch, custom_url
+) -> None:
+    config = Project.create(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    server = create_server(config)
+    config.set_active_record(config.vault.create("active", title="Active", type="task"))
+
+    async def exercise() -> None:
+        async def completed_job(receipt):
+            for _ in range(300):
+                result = await server.call_tool(
+                    "job_status",
+                    {"job_id": receipt["id"][:8]},
+                )
+                if result.structured_content["status"]["state"] in {
+                    "COMPLETED",
+                    "FAILED",
+                    "CANCELED",
+                }:
+                    return result
+                await asyncio.sleep(0.05)
+            pytest.fail("Submitted job did not finish")
+
         await server.call_tool(
             "record_create",
             {"record_id": "demo/demo", "title": "demo", "fields": {"type": "task"}},
         )
         result = await server.call_tool(
-            "execute",
+            "job_submit",
             {
                 "record_id": "demo/demo",
+                **(
+                    {"executor_url": (tmp_path / "backend").as_uri()}
+                    if custom_url
+                    else {}
+                ),
+                "launcher": "single",
+                "custom_attributes": {"example": "value"},
                 "command": [
                     sys.executable,
                     "-c",
-                    "import sys; print('out'); print('err', file=sys.stderr); "
+                    "import sys,time; from pathlib import Path\n"
+                    f"while not Path({str(config.root / 'release')!r}).exists(): "
+                    "time.sleep(.05)\n"
+                    "import os; print(os.environ['HIRAKU_RECORD_ID']); "
+                    "print('err', file=sys.stderr); "
                     "raise SystemExit(7)",
                 ],
             },
         )
-        assert result.structured_content == {
-            "returncode": 7,
-            "stdout": "out\n",
-            "stderr": "err\n",
+        job = dict(result.structured_content)
+        assert "observation_error" not in job
+        assert job["executor"] == "local-detached"
+        expected = (
+            tmp_path / "backend" if custom_url else tmp_path / ".hiraku/psij/detached"
+        )
+        assert job["executor_url"] == expected.as_uri()
+        assert list((tmp_path / ".hiraku/psij").glob("*/single_launch.sh"))
+        assert job["spec"]["launcher"] == "single"
+        assert job["status"]["state"] in {"ACTIVE", "QUEUED"}
+        (config.root / "release").touch()
+        completed = await completed_job(job)
+        assert completed.structured_content["status"]["exit_code"] == 7
+        output = expected / job["native_id"]
+        assert (output / "stdout.log").read_text() == "demo/demo\n"
+        assert (output / "stderr.log").read_text() == "err\n"
+        history = json.loads(
+            (config.root / ".hiraku/jobs" / f"{job['id']}.json").read_text()
+        )
+        assert history["status"]["exit_code"] == 7
+        assert history["id"] == job["id"]
+        assert history["spec"]["launcher"] == "single"
+        assert history["spec"]["attributes"]["custom_attributes"] == {
+            "example": "value"
         }
+        listed = await server.call_tool("job_list", {"record_id": "demo/demo"})
+        assert listed.structured_content["result"] == [history]
+        cli = CliRunner().invoke(
+            main, ["job", "list", "--record", "demo/demo", "--json"]
+        )
+        assert cli.exit_code == 0, cli.output
+        assert json.loads(cli.output) == listed.structured_content["result"]
+        with pytest.raises(ToolError):
+            await server.call_tool(
+                "job_submit",
+                {
+                    "command": [sys.executable, "-c", "pass"],
+                    "launcher": "not-installed",
+                    "executor_url": (tmp_path / "backend").as_uri(),
+                },
+            )
+        submitted = await server.call_tool(
+            "job_submit",
+            {
+                "executor": "local-detached",
+                "executor_url": (tmp_path / "backend").as_uri(),
+                "record_id": "demo/demo",
+                "command": [sys.executable, "-c", "raise SystemExit(3)"],
+            },
+        )
+        assert submitted.structured_content["executor"] == "local-detached"
+        completed = await completed_job(submitted.structured_content)
+        assert completed.structured_content["status"]["exit_code"] == 3
+        submitted = await server.call_tool(
+            "job_submit",
+            {
+                "command": [sys.executable, "-c", "pass"],
+                "executor_url": (tmp_path / "backend").as_uri(),
+            },
+        )
+        completed = await completed_job(submitted.structured_content)
+        assert completed.structured_content["status"]["exit_code"] == 0
+        assert completed.structured_content["record_id"] is None
+        assert (
+            completed.structured_content["spec"]["environment"]["HIRAKU_RECORD_ID"]
+            == ""
+        )
+
+        def unavailable(self):
+            raise ObservationError("backend unavailable")
+
+        cached = completed.structured_content
+        path = config.root / ".hiraku/jobs" / f"{cached['id']}.json"
+        before = path.read_bytes()
+        monkeypatch.setattr("hiraku.job.Submission.get_psi_job", unavailable)
+        with pytest.raises(ToolError, match="backend unavailable"):
+            await server.call_tool("job_status", {"job_id": cached["id"]})
+        assert path.read_bytes() == before
+        listed = await server.call_tool("job_list", {})
+        assert json.loads(before) in listed.structured_content["result"]
+        assert all(
+            "observation_error" not in entry
+            for entry in listed.structured_content["result"]
+        )
+        assert path.read_bytes() == before
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        psij.InvalidJobException("Set the renku.launcher attribute"),
+        psij.SubmitException("rnk unavailable"),
+        ValueError("Unknown executor"),
+        FileNotFoundError("rnk executable missing"),
+    ],
+)
+@pytest.mark.parametrize("during_submit", [False, True])
+def test_submit_exposes_expected_backend_errors(
+    tmp_path, monkeypatch, error, during_submit
+):
+    server = create_server(Project.create(tmp_path))
+
+    def fail(*args, **kwargs):
+        raise error
+
+    if during_submit:
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(
+            "hiraku.mcp.get_executor",
+            lambda *args, **kwargs: SimpleNamespace(submit=fail),
+        )
+    else:
+        monkeypatch.setattr("hiraku.mcp.get_executor", fail)
+
+    async def exercise():
+        with pytest.raises(ToolError) as caught:
+            await server.call_tool("job_submit", {"command": ["echo", "hello"]})
+        assert str(error) in str(caught.value)
+
+    asyncio.run(exercise())
+    assert not (tmp_path / ".hiraku/jobs").exists()
 
 
 def test_leaderboard_list_matches_cli_and_reads_current_definitions(

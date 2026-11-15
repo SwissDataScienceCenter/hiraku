@@ -20,7 +20,7 @@ def test_root_help_lists_primary_commands() -> None:
     result = invoke("--help")
 
     assert result.exit_code == 0
-    for command in ("init", "record", "run", "leaderboard", "workflow"):
+    for command in ("init", "record", "run", "job", "leaderboard", "workflow"):
         assert command in result.output
 
 
@@ -312,14 +312,14 @@ def test_runs_json_keeps_extra_fields_in_raw(tmp_path: Path, monkeypatch) -> Non
     project = create_tracked_project(tmp_path, install_skill=False)
     project.vault.create("root/root", type="task", title="root")
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "runs.csv").write_text("id,record_id,entrypoint\na,root/root,train\n")
+    (tmp_path / "runs.csv").write_text("id,record_id,dataset\na,root/root,iris\n")
 
     result = invoke("leaderboard", "runs", "--record", "root/root", "--json")
 
     assert result.exit_code == 0
     run = json.loads(result.output)[0]
-    assert "entrypoint" not in run
-    assert run["raw"]["entrypoint"] == "train"
+    assert "dataset" not in run
+    assert run["raw"]["dataset"] == "iris"
 
 
 def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
@@ -387,9 +387,7 @@ def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:
     data_rows = [
         cells
         for line in sorted_table.output.splitlines()
-        if line.startswith("│")
-        if (cells := [cell.strip() for cell in line.split("│")[1:-1]])
-        and cells[0] != "id"
+        if (cells := line.split()) and cells[0] in {"a", "b"}
     ]
     assert [row[0] for row in data_rows] == ["b", "a"]
     assert invoke("leaderboard", "runs", "list", "--record", "root/root").exit_code != 0

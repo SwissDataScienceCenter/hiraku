@@ -7,6 +7,23 @@ from hiraku.project import Project
 from hiraku.tracking import CSVBackend, Leaderboard, MLflowBackend, WandbBackend
 
 
+def test_source_attribution(tmp_path):
+    project = Project(tmp_path)
+    job_id = "a" * 32
+    (tmp_path / "runs.csv").write_text(
+        "id,hiraku_job_id,record_id,commit,metric.score\n"
+        f"one,{job_id},selected,source-commit,2\n"
+        f"two,{job_id},selected,source-commit,1\n"
+        "other,,elsewhere,,0\nunknown,,,,0\n"
+    )
+    board = Leaderboard(source={"type": "csv", "path": "runs.csv"})
+    runs = board.list_runs(project, record_id="selected", sort="score", limit=1)
+    assert [run.id for run in runs] == ["two"]
+    assert runs[0].job_id == job_id and runs[0].commit == "source-commit"
+    assert len(board.list_runs(project)) == 3
+    assert len(board.list_runs(project, include_unattributed=True)) == 4
+
+
 def test_discovery_and_selection_are_independent_of_records(tmp_path: Path):
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
     with pytest.raises(ValidationError, match="No leaderboards"):

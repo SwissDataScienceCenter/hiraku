@@ -36,7 +36,6 @@ class Project(BaseModel):
     Attributes:
         root: Absolute project root directory.
         hiraku_dir_name: Name of the managed directory for Hiraku data.
-        default_dispatch: Optional name of the default dispatcher.
         active_record_id: Optional bundle-relative path of the active record.
 
     Args:
@@ -58,7 +57,6 @@ class Project(BaseModel):
         exclude=True,
         frozen=True,
     )
-    default_dispatch: str | None = Field(default=None, min_length=1, exclude=True)
     active_record_id: str | None = None
 
     def __init__(self, root: Path | str, **data: Any) -> None:
@@ -182,15 +180,19 @@ class Project(BaseModel):
         return self.hiraku_dir / "workflows"
 
     @property
-    def dispatch_dir(self) -> Path:
-        """Return the directory reserved for project dispatchers."""
-        return self.hiraku_dir / "dispatch"
+    def jobs_dir(self) -> Path:
+        """Return the local directory for submission history."""
+        return self.root / ".hiraku" / "jobs"
+
+    @property
+    def psij_dir(self) -> Path:
+        """Return the local directory for PSI/J launcher and executor files."""
+        return self.root / ".hiraku" / "psij"
 
     def to_dict(self) -> dict[str, Any]:
         """Return the persisted project settings."""
         return {
             "hiraku_dir": self.hiraku_dir_name,
-            "default_dispatch": self.default_dispatch,
             "active_record_id": self.active_record_id,
         }
 
@@ -240,7 +242,7 @@ class Project(BaseModel):
 
         Args:
             root: Directory to initialize.
-            install_skill: Whether to install the bundled Hiraku skill.
+            install_skill: Whether to install all bundled Hiraku skills.
             install_mcp: Whether to add the project MCP server configuration.
             template: Optional directory whose contents are copied into the project.
             example: Optional packaged example name to initialize from.
@@ -322,12 +324,10 @@ class Project(BaseModel):
 
             # Install the bundled Hiraku skills
             if install_skill:
-                with as_file(resources / "skills" / "hiraku") as source:
+                with as_file(resources / "skills") as source:
                     for destination in (
-                        root / ".agents/skills/hiraku",  # Generic agents
-                        root / ".claude/skills/hiraku",  # Claude Code
-                        root / ".pi/skills/hiraku",  # Pi Agent
-                        root / ".codex/skills/hiraku",  # Codex
+                        root / ".agents/skills",  # Generic agents
+                        root / ".claude/skills",  # Claude Code
                     ):
                         shutil.copytree(source, destination, dirs_exist_ok=True)
 

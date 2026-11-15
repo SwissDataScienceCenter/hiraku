@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import logging
+from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
 
@@ -17,12 +19,13 @@ from mcp.server.mcpserver.exceptions import (
 from mcp.types import (
     ToolAnnotations,
 )
+from psij import InvalidJobException, JobAttributes, SubmitException
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from .errors import HirakuError, ValidationError
-from .execution import execute_command
+from .errors import ExecutionError, HirakuError, ValidationError
+from .job import Submission, get_executor, observe_submission, prepare_job
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -31,9 +34,11 @@ from .workflows.langgraph import workflow_details as langgraph_workflow_details
 from .workflows.langgraph import workflow_ids, workflow_mermaid
 from .workflows.langgraph import workflow_status as langgraph_workflow_status
 
+logger = logging.getLogger(__name__)
+
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
-attributes tracked runs to them, runs commands with execute, and runs LangGraph
+attributes tracked runs to them, submits commands with job_submit, and runs LangGraph
 workflows. Use workflow_start, workflow_status, and workflow_resume to operate
 a workflow. When an interrupt requests approval, workflow_approval opens a
 structured MCP elicitation and waits for the user's answer.
@@ -100,7 +105,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
     Tools: project_info, leaderboard_list, record_list, record_show, record_create,
-    record_update, record_delete, execute, and runs. Also registers the record
+    record_update, record_delete, job_submit, job_list, job_status, and runs.
+    Also registers the record
     catalog and record resources, and the propose_implementation prompt.
     """
 
@@ -217,7 +223,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         return {"deleted": record_id}
 
     @server.tool(
-        title="Execute project command",
+        title="Submit job",
         annotations=ToolAnnotations(
             read_only_hint=False,
             destructive_hint=True,
@@ -225,24 +231,66 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             open_world_hint=True,
         ),
     )
-    def execute(
-        record_id: str,
+    def job_submit(
         command: list[str],
-        dispatch: str | None = None,
+        executor: str = "local-detached",
+        record_id: str | None = None,
+        executor_url: str | None = None,
+        custom_attributes: dict[str, str] | None = None,
+        directory: str | None = None,
+        launcher: str | None = None,
     ) -> dict[str, Any]:
-        """Run a command in the foreground and return output and exit code."""
-        result = execute_command(
+        """Submit through PSI/J; record attribution requires an explicit record_id."""
+        if executor == "local":
+            raise ValidationError(
+                "Native local execution cannot recover submission status; "
+                "use hiraku run or the local-detached executor"
+            )
+        job = prepare_job(
             command,
             record_id=record_id,
-            dispatch=dispatch,
-            capture_output=True,
             project=selected,
+            directory=Path(directory) if directory is not None else None,
+            launcher=launcher,
+            attributes=JobAttributes(custom_attributes=custom_attributes)
+            if custom_attributes
+            else None,
         )
-        return {
-            "returncode": result.returncode,
-            "stdout": result.stdout or "",
-            "stderr": result.stderr or "",
-        }
+        try:
+            get_executor(
+                executor,
+                work_directory=selected.psij_dir,
+                url=executor_url,
+            ).submit(job)
+        except (InvalidJobException, SubmitException, ValueError, OSError) as exc:
+            raise ExecutionError(str(exc)) from exc
+        entry = Submission.from_psi_job(job)
+        entry.save(selected)
+        return entry.model_dump(mode="json")
+
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
+    )
+    def job_status(job_id: str) -> dict[str, Any]:
+        """Sync and show status by full ID or unique nonempty prefix."""
+        entry = Submission.from_prefix(selected, job_id)
+        entry.sync()
+        entry.save(selected)
+        return entry.model_dump(mode="json")
+
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
+    )
+    def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
+        """List jobs and status, refreshing and saving nonfinal submissions."""
+        entries = Submission.list(selected, record_id=record_id)
+        results = [observe_submission(entry, selected) for entry in entries]
+        for result in results:
+            if "observation_error" in result:
+                logger.warning(
+                    "Cannot sync job %s: %s", result["id"], result["observation_error"]
+                )
+        return results
 
     @server.tool(
         title="List tracked runs",
