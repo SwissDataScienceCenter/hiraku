@@ -59,7 +59,7 @@ hiraku leaderboard runs --json
 ```
 
 The adapter queries W&B's remote API. Offline SDK runs need syncing before
-remote inspection; an offline setting is not a local-run reader.
+remote inspection.
 
 The `examples/iris-wandb/` directory includes a complete training script,
 README, and notebook with tags, groups, and provenance.

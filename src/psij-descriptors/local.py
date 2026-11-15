@@ -135,7 +135,7 @@ class LocalDetachedJobExecutor(JobExecutor):
                 path.with_name("supervisor.json").read_text(encoding="utf-8")
             )
         except FileNotFoundError:
-            # Older submissions have no supervisor identity.
+            # Submission can be observed before the supervisor writes its identity.
             return JobStatus(JobState.QUEUED)
         try:
             process = psutil.Process(identity.pid)

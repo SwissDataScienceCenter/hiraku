@@ -52,10 +52,10 @@ def project(tmp_path: Path) -> Project:
     with (tmp_path / "runs.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(
-            ["id", "record_id", "timestamp", "duration", "entrypoint", "metric.loss"]
+            ["id", "record_id", "timestamp", "duration", "dataset", "metric.loss"]
         )
         for run_id, record_id, minute, duration, loss in RUNS:
             started = "" if minute is None else f"2026-10-14T10:0{minute}:00+00:00"
             duration = "" if duration is None else duration
-            writer.writerow([run_id, record_id, started, duration, "train", loss])
+            writer.writerow([run_id, record_id, started, duration, "iris", loss])
     return Project.load(tmp_path / "hiraku.yml")

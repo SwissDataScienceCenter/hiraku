@@ -19,7 +19,6 @@ class FakeRun:
         "hiraku.record_id": "logistic",
         "hiraku.commit": "a" * 40,
         "hiraku.job_id": "b" * 32,
-        "hiraku.entrypoint": "train",
         "seed": 42,
     }
     summary = {"test/accuracy": 0.95}
@@ -66,7 +65,6 @@ def test_wandb_backend_normalizes_and_filters_runs(tmp_path: Path, monkeypatch) 
     run = runs[0]
     assert run.job_id == "b" * 32
     assert run.id == "run-1"
-    assert "entrypoint" not in run.raw
     assert run.params == {"seed": "42"}
     assert run.metrics == {"test/accuracy": 0.95}
     assert run.raw["tags"] == ["baseline", "iris"]

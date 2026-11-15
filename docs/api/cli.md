@@ -23,7 +23,7 @@ this ID. IDs are derived from placement and never stored in front matter.
 `hiraku record list` includes each record's local `state` in its table.
 Commands with an optional `--json` output accept `--pretty` alongside it to
 render the JSON with Rich. For example, use `hiraku leaderboard runs --json --pretty`.
-Workflow start, sessions, history, status, and resume commands always return
+Workflow start, status, and resume commands always return
 JSON and accept `--pretty` directly.
 
 Initialization uses the following destinations, creating missing directories:
@@ -95,8 +95,7 @@ resources/examples/<name>/
 
 `init --template` and `example create` are separate commands. Templates may replace files installed
 by the same initialization, but initialization refuses to overwrite files that
-already existed in the target. Tracking and command defaults belong on the
-root record, not in project configuration.
+already existed in the target.
 After successful initialization, the command prints the project configuration
 location.
 

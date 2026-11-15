@@ -312,14 +312,14 @@ def test_runs_json_keeps_extra_fields_in_raw(tmp_path: Path, monkeypatch) -> Non
     project = create_tracked_project(tmp_path, install_skill=False)
     project.vault.create("root/root", type="task", title="root")
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "runs.csv").write_text("id,record_id,entrypoint\na,root/root,train\n")
+    (tmp_path / "runs.csv").write_text("id,record_id,dataset\na,root/root,iris\n")
 
     result = invoke("leaderboard", "runs", "--record", "root/root", "--json")
 
     assert result.exit_code == 0
     run = json.loads(result.output)[0]
-    assert "entrypoint" not in run
-    assert run["raw"]["entrypoint"] == "train"
+    assert "dataset" not in run
+    assert run["raw"]["dataset"] == "iris"
 
 
 def test_explicit_run_and_run_queries(tmp_path: Path, monkeypatch) -> None:

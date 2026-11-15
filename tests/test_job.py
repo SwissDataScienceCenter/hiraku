@@ -645,8 +645,8 @@ def test_background_survives_submitter(project, detached):
     assert list(project.psij_dir.glob("*/single.sh"))
 
 
-def test_missing_result_does_not_infer_success(project, detached):
-    # Legacy submissions have no supervisor identity.
+def test_detached_startup_waits_for_supervisor_identity(project, detached):
+    # Attachment can race with the supervisor's first write.
     job = psij.Job()
     (detached.jobs_dir / job.id).mkdir(parents=True)
     detached.attach(job, job.id)

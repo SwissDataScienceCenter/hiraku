@@ -80,7 +80,7 @@ def test_invalid_generation_options_leave_no_project(tmp_path, arguments):
     assert not (tmp_path / "hiraku.yml").exists()
 
 
-def test_init_generate_dispatch_and_failure_keeps_project(tmp_path, monkeypatch):
+def test_init_generate_failure_keeps_project(tmp_path, monkeypatch):
     import hiraku.cli as cli
 
     def fail(config):
