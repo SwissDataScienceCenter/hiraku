@@ -73,35 +73,10 @@ and fall back to the CLI when the host has not connected the server.
 | `record_list`, `record_show` | Read local record fields and Markdown. |
 | `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
 | `job_submit` | Submit through PSI/J, record history, and return the original PSI/J job `id`. |
-| `job_list` | List jobs and status, refreshing and saving nonfinal jobs; optionally filter by `record_id`. Final outcomes use saved history. |
-| `job_status` | Attach through PSI/J, save, and return the current status using its original `job_id`, without waiting for completion. |
+| `job_list` | List jobs and status, refreshing and saving nonfinal jobs; optionally filter by `record_id`.  |
+| `job_status` | Attach through PSI/J, save, and return the current status using its original `job_id`. |
 | `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
 
-Create tools accept a Markdown body and a `fields` object for additional metadata.
-For `record_create`, `fields` must include a nonblank `type`.
-Record creation activates the record by default; pass `activate: false` to leave
-the active record unchanged. Update tools merge `fields` and optionally replace
-the Markdown body. Explicit `null` values are retained in metadata. IDs and persistence
-paths and the organizational parent cannot be changed through the update tool.
-Expected failures are returned as MCP tool errors.
-
-`job_submit` takes explicit command arguments and defaults to `local-detached`.
-Record attribution requires an explicit `record_id`; omitting it submits an
-unattributed job regardless of the active record. `launcher` selects a registered
-PSI/J launcher; `custom_attributes`
-maps executor-specific settings, matching CLI `--custom-attribute KEY VALUE`.
-Explicit `directory` paths refer to the execution side; local jobs otherwise
-inherit the MCP server's directory. Pass the returned `id` as `job_id` to
-`job_status`, which also accepts any nonempty unique ID prefix.
-List refreshes nonfinal jobs; observation failures return a
-response-only `UNKNOWN` state and `observation_error`, retaining saved history and
-the last successful `observed_at`. List also logs a warning;
-single-job status failures return tool
-errors without changing the saved snapshot or its `observed_at` timestamp.
-
-See [Jobs and executors](jobs.md) for executor setup, history, output locations,
-and platform limitations.
-A connected client can run commands with the user's local permissions.
 
 ## Resources and evidence
 

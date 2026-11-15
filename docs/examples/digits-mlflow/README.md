@@ -101,8 +101,7 @@ in the native MLflow interface.
 
 One MLflow experiment contains both Hiraku child records. The script logs native
 `hiraku.record_id` and `hiraku.job_id` tags for record and execution attribution.
-Queries do not require local job history. Hiraku reads the latest
-value of each metric. Full epoch histories remain in MLflow and its UI.
+Hiraku reads the latest value of each metric.  Full epoch histories remain in MLflow and its UI.
 
 You can list the same runs using Hiraku:
 ```
