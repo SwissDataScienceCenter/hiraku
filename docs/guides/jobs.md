@@ -62,6 +62,9 @@ hiraku job status JOB_ID --json
 ## Submission history
 
 Each accepted submission is saved locally to `.hiraku/jobs/<id>.json`.
+The Python API exposes this directory as `Project.jobs_dir`. Listing submissions
+skips unreadable or invalid history entries and emits a Python `RuntimeWarning`
+for each skipped entry.
 View the submission history with `hiraku job list`:
 
 ```bash

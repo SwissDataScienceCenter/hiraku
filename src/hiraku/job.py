@@ -5,10 +5,10 @@ from __future__ import annotations
 import builtins
 import codecs
 import json
-import logging
 import os
 import sys
 import time
+import warnings
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack, suppress
 from datetime import UTC, datetime, timedelta
@@ -27,8 +27,6 @@ from .io import atomic_write
 
 if TYPE_CHECKING:
     from .project import Project
-
-logger = logging.getLogger(__name__)
 
 
 def get_executor(
@@ -150,14 +148,6 @@ def run_local(job: psij.Job, *, project: Project) -> psij.JobStatus:
                 submission.sync(job)
                 submission.save(project)
     return job.status
-
-
-def _submission_path(job_id: str, project: Project) -> Path:
-    try:
-        Submission.validate_id(job_id)
-    except (ValueError, TypeError, AttributeError) as exc:
-        raise ExecutionError(f"Invalid job ID: {job_id!r}") from exc
-    return project.root / ".hiraku" / "jobs" / f"{job_id}.json"
 
 
 class Status(BaseModel):
@@ -296,9 +286,10 @@ class Submission(BaseModel):
     def save(self, project: Project) -> None:
         """Atomically save submission metadata."""
         try:
+            entry = type(self).model_validate(self.model_dump())
             atomic_write(
-                _submission_path(self.id, project),
-                type(self).model_validate(self.model_dump()).model_dump_json(indent=2),
+                project.jobs_dir / f"{entry.id}.json",
+                entry.model_dump_json(indent=2),
                 mode=0o600,
             )
         except (OSError, TypeError, ValueError) as exc:
@@ -311,7 +302,11 @@ class Submission(BaseModel):
     @classmethod
     def load(cls, project: Project, job_id: str) -> Submission:
         """Read validated history without contacting an executor."""
-        path = _submission_path(job_id, project)
+        try:
+            cls.validate_id(job_id)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ExecutionError(f"Invalid job ID: {job_id!r}") from exc
+        path = project.jobs_dir / f"{job_id}.json"
         try:
             entry = cls.model_validate_json(path.read_text(encoding="utf-8"))
             if entry.id != job_id:
@@ -336,7 +331,7 @@ class Submission(BaseModel):
         if len(prefix) == 36:
             return cls.load(project, prefix)
         matches = []
-        for path in (project.root / ".hiraku" / "jobs").glob(f"{prefix}*.json"):
+        for path in project.jobs_dir.glob(f"{prefix}*.json"):
             try:
                 cls.validate_id(path.stem)
             except ValueError:
@@ -356,11 +351,11 @@ class Submission(BaseModel):
     ) -> builtins.list[Submission]:
         """Read history newest first, warning and continuing past corrupt entries."""
         entries = []
-        for path in (project.root / ".hiraku" / "jobs").glob("*.json"):
+        for path in project.jobs_dir.glob("*.json"):
             try:
                 entry = cls.load(project, path.stem)
             except ExecutionError as exc:
-                logger.warning("%s", exc)
+                warnings.warn(str(exc), RuntimeWarning, stacklevel=2)
                 continue
             if record_id is None or entry.record_id == record_id:
                 entries.append(entry)

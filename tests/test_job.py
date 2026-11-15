@@ -1458,7 +1458,7 @@ def test_invalid_saved_status(project, detached, field, value):
 
 
 def test_listing_preserves_valid_jobs_with_corrupt_history(
-    project, detached, monkeypatch, caplog
+    project, detached, monkeypatch
 ):
     job, _ = history_entry(project, detached, final=True)
     broken = project.root / ".hiraku/jobs" / f"{psij.Job().id}.json"
@@ -1466,11 +1466,20 @@ def test_listing_preserves_valid_jobs_with_corrupt_history(
     monkeypatch.setattr(
         psij.JobExecutor, "get_instance", lambda *a, **k: pytest.fail("Metadata only")
     )
-    assert [entry.id for entry in Submission.list(project)] == [job.id]
-    assert Submission.list(project, record_id="unrelated") == []
-    assert broken.stem in caplog.text
+    with pytest.warns(RuntimeWarning, match=broken.stem):
+        assert [entry.id for entry in Submission.list(project)] == [job.id]
+    with pytest.warns(RuntimeWarning, match=broken.stem):
+        assert Submission.list(project, record_id="unrelated") == []
     with pytest.raises(ExecutionError, match="Cannot read history"):
         Submission.load(project, broken.stem)
+
+
+def test_loading_rejects_history_id_differing_from_filename(project, detached):
+    job, saved = history_entry(project, detached, final=True)
+    saved["id"] = psij.Job().id
+    (project.jobs_dir / f"{job.id}.json").write_text(json.dumps(saved))
+    with pytest.raises(ExecutionError, match="History ID differs from filename"):
+        Submission.load(project, job.id)
 
 
 def test_saving_revalidates_mutated_submission(project, detached):

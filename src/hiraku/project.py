@@ -180,6 +180,11 @@ class Project(BaseModel):
         return self.hiraku_dir / "workflows"
 
     @property
+    def jobs_dir(self) -> Path:
+        """Return the local directory for submission history."""
+        return self.root / ".hiraku" / "jobs"
+
+    @property
     def psij_dir(self) -> Path:
         """Return the local directory for PSI/J launcher and executor files."""
         return self.root / ".hiraku" / "psij"

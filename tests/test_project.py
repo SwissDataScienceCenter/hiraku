@@ -28,6 +28,8 @@ def test_project_create_can_skip_mcp_configuration(tmp_path: Path) -> None:
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
 
     assert project.psij_dir == tmp_path / ".hiraku" / "psij"
+    assert project.jobs_dir == tmp_path / ".hiraku" / "jobs"
+    assert not project.jobs_dir.exists()
     assert not project.psij_dir.exists()
     assert project.leaderboards_dir == tmp_path / "hiraku" / "leaderboards"
     assert list(project.leaderboards_dir.iterdir()) == []
