@@ -39,9 +39,10 @@ logger = logging.getLogger(__name__)
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
 attributes tracked runs to them, submits commands with job_submit, and runs LangGraph
-workflows. Use workflow_start, workflow_status, and workflow_resume to operate
-a workflow. When an interrupt requests approval, workflow_approval opens a
-structured MCP elicitation and waits for the user's answer.
+workflows. For agent-launched commands, prefer job_submit and use job_status or
+job_list to monitor them. Use workflow_start, workflow_status, and workflow_resume
+to operate a workflow. When an interrupt requests approval, workflow_approval opens
+a structured MCP elicitation and waits for the user's answer.
 """
 
 

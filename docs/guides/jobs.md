@@ -7,7 +7,10 @@ history. Job execution is built on the [PSI/J library](https://exaworks.org/psij
 
 ## Run locally
 
-To run jobs locally in the foreground, use `hiraku run` with an optional record for attribution:
+For agent-launched commands, prefer `job_submit` through MCP when available;
+it submits in the background and returns an ID to monitor. Use `hiraku run` to
+run a command locally in the foreground when streaming output and the command's
+exit code are needed:
 
 ```bash
 hiraku run --record baseline -- python train.py
