@@ -61,8 +61,10 @@ The host must be able to find the installed `hiraku` command. Claude Code asks
 for approval before using a project MCP server. Codex loads project config only
 for trusted projects. The MCP tools are exposed directly by the host, so no
 extra `AGENTS.md` or Claude skill instructions are needed to register them.
-The bundled Hiraku skill tells agents to use the tools when they are available
-and fall back to the CLI when the host has not connected the server.
+For agent-launched commands, prefer the `job_submit` MCP tool and monitor the
+returned ID with `job_status` or `job_list`. The bundled Hiraku skill gives the
+same guidance and describes CLI fallback when MCP tools are unavailable or the
+user asks for CLI commands.
 
 ## Tools
 
