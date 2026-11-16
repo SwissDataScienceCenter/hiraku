@@ -76,9 +76,11 @@ class Project(BaseModel):
 
     @model_validator(mode="after")
     def validate_hiraku_dir(self) -> Project:
-        """Ensure the managed directory stays within the project root."""
+        """Validate relative managed paths while allowing absolute locations."""
         raw = Path(self.hiraku_dir_name)
-        if raw.is_absolute() or ".." in raw.parts:
+        if raw.is_absolute():
+            return self
+        if ".." in raw.parts:
             raise ValueError("hiraku_dir cannot contain parent traversal")
         resolved = (self.root / raw).resolve(strict=False)
         try:
@@ -143,6 +145,8 @@ class Project(BaseModel):
     def hiraku_dir(self) -> Path:
         """Return the resolved directory for Hiraku-managed project data."""
         raw = Path(self.hiraku_dir_name)
+        if raw.is_absolute():
+            return raw.expanduser().resolve(strict=False)
         resolved = (self.root / raw).resolve(strict=False)
         try:
             resolved.relative_to(self.root)
