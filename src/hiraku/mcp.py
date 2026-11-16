@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
@@ -154,6 +155,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     )
     def record_create(
         record_id: str,
+        type: str,
         title: str | None = None,
         parent_id: str | None = None,
         related_to: list[str] | None = None,
@@ -164,6 +166,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         """Create a research record, optionally activating it like the CLI."""
         extras = fields or {}
         reserved = {
+            "type",
             "title",
             "id",
             "parent_id",
@@ -179,6 +182,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             extras = {**extras, "title": title}
         record = selected.vault.create(
             record_id,
+            type=type,
             parent_id=parent_id,
             markdown=markdown,
             related_to=related_to or [],
@@ -251,6 +255,11 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             command,
             record_id=record_id,
             project=selected,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if key not in {"HIRAKU_RECORD_ID", "HIRAKU_JOB_ID"}
+            },
             directory=Path(directory) if directory is not None else None,
             launcher=launcher,
             attributes=JobAttributes(custom_attributes=custom_attributes)

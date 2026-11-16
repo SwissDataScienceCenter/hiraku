@@ -73,6 +73,9 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
         assert tools["job_list"].annotations.open_world_hint is True
         assert tools["workflow_start"].title == "Start workflow"
         assert tools["workflow_start"].description
+        record_schema = tools["record_create"].input_schema
+        assert "type" in record_schema["required"]
+        assert record_schema["properties"]["type"]["type"] == "string"
         result = await server.call_tool("project_info", {})
         assert result.structured_content == project.to_dict()
 
@@ -89,18 +92,18 @@ def test_tools_and_validation(tmp_path: Path) -> None:
 
         await call(
             "record_create",
+            type="task",
             title="root",
             fields={
-                "type": "task",
                 "state": "new",
             },
             record_id="root/root",
         )
         await call(
             "record_create",
+            type="task",
             title="child",
             parent_id="root/root",
-            fields={"type": "task"},
             record_id="root/child/child",
         )
         await call(
@@ -112,21 +115,21 @@ def test_tools_and_validation(tmp_path: Path) -> None:
                 "record_create",
                 {
                     "record_id": "../bad/bad",
+                    "type": "task",
                     "title": "bad",
                     "parent_id": "../missing",
-                    "fields": {"type": "task"},
                 },
             ),
             (
                 "record_create",
-                {"record_id": "  ", "title": "  ", "fields": {"type": "task"}},
+                {"record_id": "  ", "type": "task", "title": "  "},
             ),
             (
                 "record_create",
                 {
                     "record_id": "root/my run",
+                    "type": "task",
                     "title": "bad",
-                    "fields": {"type": "task"},
                 },
             ),
             (
@@ -148,15 +151,13 @@ def test_tools_and_validation(tmp_path: Path) -> None:
         await call("record_delete", record_id="root/child/child")
         await call(
             "record_create",
+            type="context",
             title="sources",
-            fields={"type": "context"},
             markdown="Evidence",
             record_id="sources/sources",
         )
         with pytest.raises(ToolError):
-            await call(
-                "record_create", title="  ", fields={"type": "task"}, record_id="  "
-            )
+            await call("record_create", type="task", title="  ", record_id="  ")
         await call(
             "record_update",
             record_id="sources/sources",
@@ -244,14 +245,14 @@ def test_resources_and_prompt(tmp_path: Path) -> None:
     async def exercise() -> None:
         await server.call_tool(
             "record_create",
-            {"record_id": "demo/demo", "title": "demo", "fields": {"type": "task"}},
+            {"record_id": "demo/demo", "type": "task", "title": "demo"},
         )
         await server.call_tool(
             "record_create",
             {
                 "record_id": "literature/literature",
+                "type": "context",
                 "title": "literature",
-                "fields": {"type": "context"},
                 "markdown": "Curated evidence",
             },
         )
@@ -349,6 +350,7 @@ def test_submit_and_status_use_native_executor(
 ) -> None:
     config = Project.create(tmp_path)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HIRAKU_MCP_TEST_HOST_ENV", "forwarded")
     server = create_server(config)
     config.set_active_record(config.vault.create("active", title="Active", type="task"))
 
@@ -370,7 +372,7 @@ def test_submit_and_status_use_native_executor(
 
         await server.call_tool(
             "record_create",
-            {"record_id": "demo/demo", "title": "demo", "fields": {"type": "task"}},
+            {"record_id": "demo/demo", "type": "task", "title": "demo"},
         )
         result = await server.call_tool(
             "job_submit",
@@ -404,6 +406,7 @@ def test_submit_and_status_use_native_executor(
         assert job["executor_url"] == expected.as_uri()
         assert list((tmp_path / ".hiraku/psij").glob("*/single_launch.sh"))
         assert job["spec"]["launcher"] == "single"
+        assert job["spec"]["environment"]["HIRAKU_MCP_TEST_HOST_ENV"] == "forwarded"
         assert job["status"]["state"] in {"ACTIVE", "QUEUED"}
         (config.root / "release").touch()
         completed = await completed_job(job)
@@ -563,10 +566,8 @@ def test_runs(tmp_path: Path) -> None:
             "record_create",
             {
                 "record_id": "task/task",
+                "type": "task",
                 "title": "task",
-                "fields": {
-                    "type": "task",
-                },
             },
         )
 
@@ -623,8 +624,8 @@ def test_stdio_session(tmp_path: Path) -> None:
                         "record_create",
                         {
                             "record_id": "papers/papers",
+                            "type": "context",
                             "title": "papers",
-                            "fields": {"type": "context"},
                             "markdown": "Literature",
                         },
                     )
