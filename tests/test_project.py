@@ -69,6 +69,14 @@ def test_project_validates_settings_on_creation(tmp_path: Path) -> None:
         Project(tmp_path, default_dispatch="")
 
 
+def test_project_accepts_absolute_hiraku_dir(tmp_path: Path) -> None:
+    external = tmp_path.parent / f"{tmp_path.name}-persistent"
+    project = Project(tmp_path, hiraku_dir_name=str(external))
+
+    assert project.hiraku_dir == external
+    assert project.records_dir == external / "records"
+
+
 def test_init_leaves_client_hooks_out_of_the_project(tmp_path):
     existing = {"matcher": "Write", "hooks": [{"type": "command", "command": "check"}]}
     for relative in (".codex/hooks.json", ".claude/settings.json"):
@@ -286,7 +294,9 @@ def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
     }
 
 
-def test_hiraku_dir_rejects_traversal_and_symlink_escape(tmp_path: Path) -> None:
+def test_hiraku_dir_rejects_relative_traversal_and_symlink_escape(
+    tmp_path: Path,
+) -> None:
     marker = tmp_path / "hiraku.yml"
     marker.write_text("hiraku_dir: ../outside\n")
     with pytest.raises(ValidationError):
