@@ -32,10 +32,15 @@ from .errors import ExecutionError, HirakuError, ValidationError
 from .job import JobRequest, Submission, get_executor, observe_submission, prepare_job
 from .project import Project
 from .tracking import Leaderboard
+from .workflows.langgraph import (
+    WorkflowResume,
+    WorkflowStart,
+    workflow_ids,
+    workflow_mermaid,
+)
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details
-from .workflows.langgraph import workflow_ids, workflow_mermaid
 from .workflows.langgraph import workflow_status as langgraph_workflow_status
 
 logger = logging.getLogger(__name__)
@@ -377,13 +382,10 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
     def workflow_list() -> list[dict[str, Any]]:
         return langgraph_workflow_details(project=project())
 
-    def workflow_start(
-        workflow_id: Annotated[str, Field(description="Project workflow ID.")],
-        arguments: Annotated[
-            dict[str, Any] | None, Field(description="Workflow input object.")
-        ] = None,
-    ) -> dict[str, Any]:
-        return start_langgraph_workflow(workflow_id, arguments, project=project())
+    def workflow_start(request: WorkflowStart) -> dict[str, Any]:
+        return start_langgraph_workflow(
+            request.workflow_id, request.arguments, project=project()
+        )
 
     def workflow_status(
         workflow_session_id: Annotated[
@@ -392,23 +394,12 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
     ) -> dict[str, Any]:
         return langgraph_workflow_status(workflow_session_id, project=project())
 
-    def workflow_resume(
-        workflow_session_id: Annotated[
-            str, Field(description="Workflow session ID returned by workflow_start.")
-        ],
-        response: Annotated[
-            dict[str, Any],
-            Field(description="Response to the current graph interrupt."),
-        ],
-        checkpoint_id: Annotated[
-            str, Field(description="Checkpoint ID from workflow status.")
-        ],
-    ) -> dict[str, Any]:
+    def workflow_resume(request: WorkflowResume) -> dict[str, Any]:
         return resume_langgraph_workflow(
-            workflow_session_id,
-            response,
+            request.workflow_session_id,
+            request.response,
             project=project(),
-            checkpoint_id=checkpoint_id,
+            checkpoint_id=request.checkpoint_id,
         )
 
     def resolve_workflow_approval(

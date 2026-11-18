@@ -983,9 +983,11 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
             resumed = await client.call_tool(
                 "workflow_resume",
                 {
-                    "workflow_session_id": started["workflow_session_id"],
-                    "response": approval.structured_content,
-                    "checkpoint_id": started["checkpoint_id"],
+                    "request": {
+                        "workflow_session_id": started["workflow_session_id"],
+                        "response": approval.structured_content,
+                        "checkpoint_id": started["checkpoint_id"],
+                    }
                 },
             )
             return approval, resumed
@@ -1093,9 +1095,11 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
             return await client.call_tool(
                 "workflow_resume",
                 {
-                    "workflow_session_id": started["workflow_session_id"],
-                    "response": approval.structured_content,
-                    "checkpoint_id": started["checkpoint_id"],
+                    "request": {
+                        "workflow_session_id": started["workflow_session_id"],
+                        "response": approval.structured_content,
+                        "checkpoint_id": started["checkpoint_id"],
+                    }
                 },
             )
 
@@ -1130,9 +1134,11 @@ def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
             return await client.call_tool(
                 "workflow_resume",
                 {
-                    "workflow_session_id": first["workflow_session_id"],
-                    "response": approval.structured_content,
-                    "checkpoint_id": first["checkpoint_id"],
+                    "request": {
+                        "workflow_session_id": first["workflow_session_id"],
+                        "response": approval.structured_content,
+                        "checkpoint_id": first["checkpoint_id"],
+                    }
                 },
             )
 
