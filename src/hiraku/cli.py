@@ -357,10 +357,6 @@ def example_create_command(
                         for result in overlay.iterdir():
                             if result.is_file() and result.name != "hiraku.yml":
                                 shutil.copyfile(result, project.root / result.name)
-                        if generated.active_record_id is None:
-                            project.clear_active_record()
-                        else:
-                            project.set_active_record(generated.active_record_id)
             except Exception as exc:
                 raise click.ClickException(
                     "Generation failed; initialized project and completed runs kept: "
