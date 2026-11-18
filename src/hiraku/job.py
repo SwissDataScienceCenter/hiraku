@@ -43,10 +43,11 @@ class JobRequest(BaseModel):
     command: list[str] = Field(
         min_length=1,
         description="Command as an argv list; each item is one literal argument.",
+        examples=["uv", "run", "my_script.py", "--option", "value"],
     )
-    executor: str = Field(
+    # TODO: find another way of specifying the list of executors.
+    executor: Literal["local", "slurm", "local-detached", "renku"] = Field(
         default="local-detached",
-        min_length=1,
         description="Registered PSI/J executor name.",
     )
     record_id: str | None = Field(
