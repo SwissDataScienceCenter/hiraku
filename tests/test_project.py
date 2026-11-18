@@ -274,19 +274,14 @@ def test_load_project_through_symlinked_directory(tmp_path: Path) -> None:
     assert loaded.path == project.path
 
 
-def test_legacy_active_record_setting_is_discarded(tmp_path: Path) -> None:
+def test_load_rejects_unsupported_project_setting(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False, install_mcp=False)
-    first = config.vault.create("first/first", type="task", title="first")
     config.path.write_text(
-        f"hiraku_dir: hiraku\nactive_record_id: {first.id}\n",
+        "hiraku_dir: hiraku\nunsupported_setting: value\n",
         encoding="utf-8",
     )
-    loaded = Project.load(config.path)
-    assert set(config.to_dict()) == {
-        "hiraku_dir",
-    }
-    assert "active_record_id" not in loaded.to_dict()
-    assert "active_record_id" not in config.path.read_text()
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        Project.load(config.path)
 
 
 def test_hiraku_dir_rejects_relative_traversal_and_symlink_escape(
@@ -388,16 +383,16 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
     base.mkdir(parents=True)
     results.mkdir()
     (base / "train.py").write_text("base")
-    (base / "hiraku.yml").write_text("{}\n")
+    (base / "hiraku.yml").write_text("hiraku_dir: base-data\n")
     (results / "train.py").write_text("results")
-    (results / "hiraku.yml").write_text("active_record_id: root\n")
+    (results / "hiraku.yml").write_text("hiraku_dir: results-data\n")
     monkeypatch.setattr(hiraku.project, "files", lambda name: resources)
     target = tmp_path / "target"
     config = Project.create(
         target, example="layered", results=True, install_skill=False
     )
     assert (target / "train.py").read_text() == "results"
-    assert "active_record_id" not in config.path.read_text()
+    assert config.hiraku_dir_name == "results-data"
 
 
 RUN_AGENT_TESTS = os.environ.get("HIRAKU_RUN_CODEX_SKILL_TESTS") == "1"

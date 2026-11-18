@@ -56,6 +56,7 @@ class Project(BaseModel):
         exclude=True,
         frozen=True,
     )
+
     def __init__(self, root: Path | str, **data: Any) -> None:
         """Create a project model from its root and persisted settings.
 
@@ -103,8 +104,6 @@ class Project(BaseModel):
         """
         marker = Path(path).expanduser().resolve()
         data = load_yaml_mapping(marker)
-        legacy_active_record = "active_record_id" in data
-        data.pop("active_record_id", None)
         try:
             project = cls(marker.parent, **data)
         except (TypeError, ValueError) as exc:
@@ -113,8 +112,6 @@ class Project(BaseModel):
             ) from exc
         if marker.name != "hiraku.yml":
             raise ValidationError(f"Expected hiraku.yml: {marker}")
-        if legacy_active_record:
-            project.save()
         return project
 
     @classmethod
@@ -295,8 +292,6 @@ class Project(BaseModel):
                     config_file = source / "hiraku.yml"
                     if config_file.is_file():
                         data.update(load_yaml_mapping(config_file))
-            data.pop("active_record_id", None)
-
             try:
                 project = cls(root, **data)
             except (TypeError, ValueError) as exc:
