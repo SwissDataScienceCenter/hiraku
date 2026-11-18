@@ -31,11 +31,7 @@ independently of directory placement. Fields are local to each record; read
 related records explicitly when their context matters.
 
 Create a record when requested or needed for the task. Keep its identity and
-relationships separate from its metadata fields. Creation activates the record
-by default; leave supporting records inactive when they should not change the
-explicit record ID. Record updates merge metadata fields, while a
-supplied Markdown body replaces the whole body. Preserve existing content the
-task does not change.
+relationships separate from its metadata fields.
 
 ## Jobs and tracked evidence
 
