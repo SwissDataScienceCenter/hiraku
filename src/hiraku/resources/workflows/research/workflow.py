@@ -7,7 +7,7 @@ import shutil
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 import frontmatter
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -27,7 +27,34 @@ from hiraku.tracking.leaderboard import Leaderboard
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
 TriageDecision = Literal["follow-up", "stop"]
-WORK_PRIORITIES = ("launch", "implement", "triage", "analyze", "design")
+# Compute comes first, so jobs run while the agent analyzes and designs; reviews
+# come right before the step they unblock.
+WORK_PRIORITIES = (
+    "launch",
+    "review_code",
+    "review_design",
+    "implement",
+    "review_result",
+    "triage",
+    "analyze",
+    "design",
+)
+APPROVAL = (
+    "Present this to the user and wait for their approval before you send the "
+    "response; apply their changes first."
+)
+AUTONOMOUS = "Decide on your own; do not wait for the user."
+REVIEW_CAPABILITIES = ["record.read", "filesystem.read", "web.search"]
+# Keep the end of long smoke-test output.
+SMOKE_OUTPUT_LIMIT = 4000
+Sources = Annotated[
+    list[str],
+    Field(
+        min_length=1,
+        description="Where the judgement comes from: URLs, papers, or "
+        "'model knowledge'.",
+    ),
+]
 
 
 class ResearchState(TypedDict, total=False):
@@ -38,7 +65,14 @@ class ResearchState(TypedDict, total=False):
     max_experiments: int
     max_depth: int
     max_repairs: int
+    autonomous: bool
+    review_rounds: int
     current: str
+    # The commit under code review; a review must not change it.
+    review_commit: str
+    # Feedback of rejected design reviews and their count, by parent record.
+    design_feedback: dict[str, str]
+    design_rounds: dict[str, int]
     step: str
     feedback: str
     final: str
@@ -58,6 +92,18 @@ class ResearchInput(BaseModel):
     max_experiments: int = Field(default=6, gt=0, le=50)
     max_depth: int = Field(default=3, gt=0, le=10)
     max_repairs: int = Field(default=2, ge=0, le=5)
+    autonomous: bool = Field(
+        default=False,
+        description="No person approves anything; independent reviews of the "
+        "design, the code, and the result take that role.",
+    )
+    review_rounds: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="Reviews that may send an experiment back before it is kept "
+        "as unresolved or concluded as inconclusive.",
+    )
 
 
 class Plan(BaseModel):
@@ -80,6 +126,34 @@ class CommitResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     commit: str = Field(min_length=1)
+    smoke_command: str = Field(default="", description="The smoke test you ran.")
+    smoke_output: str = Field(default="", description="Its output, or the end of it.")
+
+
+class DesignReviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    decision: Literal["approve", "revise"]
+    findings: str = Field(min_length=1)
+    sources: Sources
+
+
+class CodeReviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    decision: Literal["approve", "fix"]
+    findings: str = Field(min_length=1)
+
+
+class ResultReviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    own_verdict: Verdict = Field(
+        description="Your verdict from the runs, formed before reading the analysis."
+    )
+    decision: Literal["approve", "reanalyze", "fix_code"]
+    findings: str = Field(min_length=1)
+    sources: Sources
 
 
 class LaunchResponse(BaseModel):
@@ -167,6 +241,10 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 "max_experiments": arguments.max_experiments,
                 "max_depth": arguments.max_depth,
                 "max_repairs": arguments.max_repairs,
+                "autonomous": arguments.autonomous,
+                "review_rounds": arguments.review_rounds,
+                "design_feedback": {},
+                "design_rounds": {},
                 "feedback": "",
             },
             goto="select",
@@ -179,10 +257,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "setup",
             "draft",
             "design",
+            "review_design",
             "implement",
+            "review_code",
             "launch",
             "wait",
             "analyze",
+            "review_result",
             "triage",
             "done",
         ]
@@ -204,7 +285,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             task_update["task"] = task_id
 
         _task(task_id, project)
-        tree = _tree(task_id, project, state["max_depth"])
+        tree = _tree(task_id, project, state["max_depth"], _autonomous(state))
         if len(tree) > state["max_experiments"]:
             # Existing studies are never hidden or truncated by a new session.
             remaining = 0
@@ -232,9 +313,10 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         )
         if selected:
             step, current = selected
-            return Command(
-                update={**task_update, "step": step, "current": current}, goto=step
-            )
+            update: dict[str, Any] = {**task_update, "step": step, "current": current}
+            if step == "review_code":
+                update["review_commit"] = project.vault.load(current).commit or ""
+            return Command(update=update, goto=step)
         if waiting:
             return Command(
                 update={**task_update, "step": "wait", "current": ""}, goto="wait"
@@ -257,6 +339,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             SetupResponse,
             state.get("feedback", ""),
             ["filesystem.read", "filesystem.write", "workflow.user_input"],
+            approval=_approval(state),
         )
         problems = _setup_problems(project)
         if problems:
@@ -284,7 +367,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def design(state: ResearchState) -> Command[Literal["design", "select"]]:
         parent = project.vault.load(state["current"])
-        tree = _tree(state["task"], project, state["max_depth"])
+        tree = _tree(state["task"], project, state["max_depth"], _autonomous(state))
         remaining = max(state["max_experiments"] - len(tree), 0)
         depth = _record_depth(parent, state["task"], project)
         data = {
@@ -293,6 +376,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "depth": depth + 1,
             "remaining": remaining,
             "tree": tree,
+            "review_feedback": state.get("design_feedback", {}).get(parent.id),
         }
         response = _ask(
             markdown,
@@ -301,6 +385,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             DesignedResponse,
             state.get("feedback", ""),
             ["record.read", "record.create", "workflow.user_input"],
+            approval=_approval(state),
         )
         if len(response.experiments) > remaining:
             return Command(
@@ -319,7 +404,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 update={"feedback": "Experiment record IDs must be new and distinct."},
                 goto="design",
             )
-        existing_tree = _tree(state["task"], project, state["max_depth"])
+        existing_tree = _tree(
+            state["task"], project, state["max_depth"], _autonomous(state)
+        )
         sequence = max((int(item["sequence"]) for item in existing_tree), default=0)
         try:
             for index, plan in enumerate(response.experiments, start=1):
@@ -348,6 +435,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "command": state["command"],
             "failure": getattr(experiment, "failure", None),
             "review_feedback": getattr(experiment, "review_feedback", None),
+            "smoke_test_required": _autonomous(state),
         }
         response = _ask(
             markdown,
@@ -357,6 +445,16 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             state.get("feedback", ""),
             ["filesystem.read", "filesystem.write", "shell.execute", "git.commit"],
         )
+        if _autonomous(state) and not (
+            response.smoke_command.strip() and response.smoke_output.strip()
+        ):
+            return Command(
+                update={
+                    "feedback": "Run a smoke test of the change and send its "
+                    "command and output."
+                },
+                goto="implement",
+            )
         try:
             sha = GitRepository(project.root).resolve(response.commit)
         except HirakuError as exc:
@@ -364,6 +462,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         experiment.commit = sha
         experiment.state = "implemented"
         experiment.failure = None
+        experiment.smoke_command = response.smoke_command or None
+        experiment.smoke_output = response.smoke_output[-SMOKE_OUTPUT_LIMIT:] or None
+        experiment.review_feedback = None
         project.vault.save(experiment, overwrite=True)
         return Command(update={"feedback": ""}, goto="select")
 
@@ -398,7 +499,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
     def wait(state: ResearchState) -> Command[Literal["wait", "select"]]:
         waiting = [
             item
-            for item in _tree(state["task"], project, state["max_depth"])
+            for item in _tree(
+                state["task"], project, state["max_depth"], _autonomous(state)
+            )
             if item["step"] == "waiting"
         ]
         response = _ask(
@@ -422,7 +525,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 )
             _failed(response.record_id, response.reason, state, project)
             return Command(update={"feedback": ""}, goto="select")
-        fresh = _tree(state["task"], project, state["max_depth"])
+        fresh = _tree(state["task"], project, state["max_depth"], _autonomous(state))
         if any(item["step"] == "waiting" for item in fresh) and not any(
             item["step"] in WORK_PRIORITIES for item in fresh
         ):
@@ -455,6 +558,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 }
                 for run in usable
             ],
+            "review_feedback": getattr(experiment, "review_feedback", None),
         }
         response = _ask(
             markdown,
@@ -472,12 +576,183 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         experiment.state = "analyzed"
         experiment.verdict = response.verdict
         experiment.conclusion = response.conclusion
+        experiment.result_review = None
+        experiment.review_feedback = None
+        project.vault.save(experiment, overwrite=True)
+        return Command(update={"feedback": ""}, goto="select")
+
+    def review_design(
+        state: ResearchState,
+    ) -> Command[Literal["review_design", "select"]]:
+        batch = _batch(state, project)
+        parent = project.vault.load(str(batch[0].parent_id))
+        task = _task(state["task"], project)
+        data = {
+            "task": _describe(task),
+            "metrics": _metrics(task),
+            "parent": _describe(parent),
+            "experiments": [_describe(item) for item in batch],
+            "tree": _tree(state["task"], project, state["max_depth"], True),
+        }
+        response = _ask(
+            markdown,
+            "Review design",
+            data,
+            DesignReviewResponse,
+            state.get("feedback", ""),
+            REVIEW_CAPABILITIES,
+        )
+        rounds = state.get("design_rounds", {}).get(parent.id, 0) + 1
+        if response.decision == "revise" and rounds <= state["review_rounds"]:
+            # The experiments are not implemented yet: drop them and redesign.
+            for item in batch:
+                project.vault.delete(item.id)
+            return Command(
+                update={
+                    "design_rounds": {
+                        **state.get("design_rounds", {}),
+                        parent.id: rounds,
+                    },
+                    "design_feedback": {
+                        **state.get("design_feedback", {}),
+                        parent.id: response.findings,
+                    },
+                    "feedback": "",
+                },
+                goto="select",
+            )
+        outcome = "approved" if response.decision == "approve" else "unresolved"
+        for item in batch:
+            item.design_review = outcome
+            _log_review(
+                item,
+                {
+                    "kind": "design",
+                    "decision": response.decision,
+                    "findings": response.findings,
+                    "sources": response.sources,
+                },
+            )
+            project.vault.save(item, overwrite=True)
+        design_feedback = dict(state.get("design_feedback", {}))
+        design_feedback.pop(parent.id, None)
+        return Command(
+            update={"design_feedback": design_feedback, "feedback": ""}, goto="select"
+        )
+
+    def review_code(
+        state: ResearchState,
+    ) -> Command[Literal["review_code", "select"]]:
+        experiment = project.vault.load(state["current"])
+        parent = project.vault.load(str(experiment.parent_id))
+        base = parent.commit if parent.type == "experiment" else None
+        commit = str(experiment.commit)
+        data = {
+            "experiment": _describe(experiment),
+            "command": state["command"],
+            "diff": f"git diff {base or commit + '^'} {commit}",
+            "smoke_test": {
+                "command": getattr(experiment, "smoke_command", None),
+                "output": getattr(experiment, "smoke_output", None),
+            },
+        }
+        response = _ask(
+            markdown,
+            "Review code",
+            data,
+            CodeReviewResponse,
+            state.get("feedback", ""),
+            [*REVIEW_CAPABILITIES, "shell.execute"],
+        )
+        experiment = project.vault.load(state["current"])
+        if experiment.commit != state.get("review_commit"):
+            return Command(
+                update={
+                    "feedback": "The experiment's commit changed during the review; "
+                    "a review must not change code."
+                },
+                goto="review_code",
+            )
+        _log_review(
+            experiment,
+            {
+                "kind": "code",
+                "decision": response.decision,
+                "findings": response.findings,
+            },
+        )
+        if response.decision == "approve":
+            experiment.code_review = experiment.commit
+        else:
+            _send_back(
+                experiment,
+                "code",
+                response.findings,
+                to="implement",
+                rounds=state["review_rounds"],
+            )
+        project.vault.save(experiment, overwrite=True)
+        return Command(update={"feedback": ""}, goto="select")
+
+    def review_result(
+        state: ResearchState,
+    ) -> Command[Literal["review_result", "select"]]:
+        experiment = project.vault.load(state["current"])
+        parent = project.vault.load(str(experiment.parent_id))
+        task = _task(state["task"], project)
+        plan = _describe(experiment)
+        analysis = {
+            "verdict": plan.pop("verdict", None),
+            "conclusion": plan.pop("conclusion", None),
+        }
+        data = {
+            "experiment": plan,
+            "parent": _describe(parent) if parent.type == "experiment" else None,
+            "metrics": _metrics(task),
+            "runs": [
+                {
+                    "run_id": run.id,
+                    "metrics": dict(run.metrics),
+                    "params": dict(run.params),
+                }
+                for run in _matching_runs(experiment, project)
+            ],
+            "analysis": analysis,
+        }
+        response = _ask(
+            markdown,
+            "Review result",
+            data,
+            ResultReviewResponse,
+            state.get("feedback", ""),
+            REVIEW_CAPABILITIES,
+        )
+        _log_review(
+            experiment,
+            {
+                "kind": "result",
+                "decision": response.decision,
+                "own_verdict": response.own_verdict,
+                "findings": response.findings,
+                "sources": response.sources,
+            },
+        )
+        if response.decision == "approve":
+            experiment.result_review = "approved"
+        else:
+            _send_back(
+                experiment,
+                "result",
+                response.findings,
+                to="analyze" if response.decision == "reanalyze" else "implement",
+                rounds=state["review_rounds"],
+            )
         project.vault.save(experiment, overwrite=True)
         return Command(update={"feedback": ""}, goto="select")
 
     def triage(state: ResearchState) -> Command[Literal["triage", "select"]]:
         experiment = project.vault.load(state["current"])
-        tree = _tree(state["task"], project, state["max_depth"])
+        tree = _tree(state["task"], project, state["max_depth"], _autonomous(state))
         depth = _record_depth(experiment, state["task"], project)
         remaining = max(state["max_experiments"] - len(tree), 0)
         can_follow_up = depth < state["max_depth"] and remaining > 0
@@ -495,6 +770,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             TriageResponse,
             state.get("feedback", ""),
             ["record.read", "workflow.user_input"],
+            approval=_approval(state),
         )
         if response.decision == "follow-up" and not can_follow_up:
             reason = (
@@ -509,7 +785,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def done(state: ResearchState) -> dict[str, str]:
         tree = (
-            _tree(state["task"], project, state["max_depth"])
+            _tree(state["task"], project, state["max_depth"], _autonomous(state))
             if state.get("task")
             else []
         )
@@ -533,6 +809,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         ("launch", launch),
         ("wait", wait),
         ("analyze", analyze),
+        ("review_design", review_design),
+        ("review_code", review_code),
+        ("review_result", review_result),
         ("triage", triage),
         ("done", done),
     ):
@@ -549,10 +828,14 @@ def _ask(
     response_model: type[BaseModel],
     feedback: str,
     capabilities: list[str],
+    approval: str = "",
 ) -> BaseModel:
+    instruction = markdown.section(f"## {title}")
+    if approval:
+        instruction = f"{instruction}\n\n{approval}"
     payload: dict[str, Any] = {
         "step": title.lower().replace(" ", "_"),
-        "instruction": markdown.section(f"## {title}"),
+        "instruction": instruction,
         "data": data,
         "response_schema": response_model.model_json_schema(),
         "required_capabilities": capabilities,
@@ -620,6 +903,58 @@ def _ordered(
         level, depth = following, depth + 1
 
 
+def _autonomous(state: ResearchState) -> bool:
+    return bool(state.get("autonomous", False))
+
+
+def _approval(state: ResearchState) -> str:
+    return AUTONOMOUS if _autonomous(state) else APPROVAL
+
+
+def _batch(state: ResearchState, project: Project) -> list[Record]:
+    """The experiments under review: the current one's unreviewed siblings."""
+    current = project.vault.load(state["current"])
+    siblings = _children(project).get(str(current.parent_id), [])
+    return [
+        item
+        for item in siblings
+        if item.commit is None and getattr(item, "design_review", None) is None
+    ] or [current]
+
+
+def _send_back(
+    experiment: Record, kind: str, findings: str, *, to: str, rounds: int
+) -> None:
+    """Return an experiment to `to` with the findings, or conclude it."""
+    field = f"{kind}_rounds"
+    count = int(getattr(experiment, field, 0) or 0) + 1
+    setattr(experiment, field, count)
+    if count > rounds:
+        experiment.state = "analyzed"
+        experiment.verdict = "inconclusive"
+        experiment.conclusion = (
+            f"Did not pass the {kind} review after {rounds} rounds: {findings}"
+        )
+        experiment.result_review = "not needed"
+        return
+    experiment.review_feedback = findings
+    if to == "analyze":
+        experiment.verdict = None
+        experiment.conclusion = None
+        experiment.state = "launched"
+        return
+    experiment.commit = None
+    experiment.code_review = None
+    experiment.verdict = None
+    experiment.conclusion = None
+    experiment.result_review = None
+    experiment.state = "designed"
+
+
+def _log_review(experiment: Record, review: dict[str, Any]) -> None:
+    experiment.reviews = [*(getattr(experiment, "reviews", None) or []), review]
+
+
 def _step_of(
     experiment: Record,
     depth: int,
@@ -627,8 +962,15 @@ def _step_of(
     children: dict[str, list[Record]],
     project: Project,
 ) -> str:
+    reviewed = _autonomous(state)
     if getattr(experiment, "verdict", None):
         if getattr(experiment, "triage", None) is None:
+            if (
+                reviewed
+                and experiment.state == "analyzed"
+                and getattr(experiment, "result_review", None) is None
+            ):
+                return "review_result"
             return "triage"
         if (
             experiment.triage == "follow-up"
@@ -638,7 +980,15 @@ def _step_of(
             return "design"
         return "done"
     if not experiment.commit:
+        if reviewed and getattr(experiment, "design_review", None) is None:
+            return "review_design"
         return "implement"
+    if (
+        reviewed
+        and experiment.state == "implemented"
+        and getattr(experiment, "code_review", None) != experiment.commit
+    ):
+        return "review_code"
     runs = _matching_runs(experiment, project)
     if any(run.metrics for run in runs):
         return "analyze"
@@ -663,11 +1013,13 @@ def _tree(
     task_id: str,
     project: Project,
     max_depth: int = 10,
+    autonomous: bool = False,
 ) -> list[dict[str, Any]]:
     children = _children(project)
     state: ResearchState = {
         "task": task_id,
         "max_depth": max_depth,
+        "autonomous": autonomous,
     }
     rows = []
     for record, depth in _ordered(task_id, children):
@@ -683,6 +1035,7 @@ def _tree(
                 "verdict": getattr(record, "verdict", None),
                 "triage": getattr(record, "triage", None),
                 "conclusion": getattr(record, "conclusion", None),
+                "reviews": getattr(record, "reviews", None) or [],
             }
         )
     return rows
@@ -727,6 +1080,7 @@ def _failed(
         experiment.conclusion = (
             f"Could not be run after {state['max_repairs']} repairs: {reason}"
         )
+        experiment.result_review = "not needed"
         experiment.triage = "stop"
     else:
         experiment.commit = None
