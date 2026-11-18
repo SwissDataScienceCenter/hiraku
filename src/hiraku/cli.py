@@ -1144,5 +1144,13 @@ def dashboard_command(
         raise click.exceptions.Exit(exit_code)
 
 
+@main.command("tui")
+def tui_command() -> None:
+    """Launch the Hiraku TUI."""
+    from hiraku.tui import HirakuApp
+
+    HirakuApp(Project.discover()).run()
+
+
 if __name__ == "__main__":
     main()
