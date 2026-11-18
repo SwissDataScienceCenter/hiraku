@@ -184,8 +184,7 @@ class Record(BaseModel):
 class RecordUpdate(BaseModel):
     """Partial update payload for an existing research record."""
 
-    # Python and CLI callers may update producer-defined front matter fields.
-    # The MCP adapter narrows this schema with an extra-forbid subclass.
+    # Updates may include producer-defined front matter fields.
     model_config = ConfigDict(extra="allow")
 
     type: str | None = Field(default=None, description="OKF concept type.")

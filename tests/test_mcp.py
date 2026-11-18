@@ -166,28 +166,26 @@ def test_tools_and_validation(tmp_path: Path, monkeypatch) -> None:
                     "patch": {"related_to": ["../no"]},
                 },
             ),
-            (
-                "record_create",
-                {
-                    "record": {
-                        "id": "root/unknown",
-                        "type": "task",
-                        "extra_field": "not supported by MCP",
-                    }
-                },
-            ),
-            (
-                "record_update",
-                {
-                    "record_id": "root/child/child",
-                    "patch": {"unknown_field": "not supported by MCP"},
-                },
-            ),
             ("record_delete", {"record_id": "missing"}),
         ]:
             with pytest.raises(ToolError):
                 await server.call_tool(name, args)
         assert config.vault.load("root/child/child").related_to == []
+        await call(
+            "record_create",
+            record={
+                "id": "root/unknown",
+                "type": "task",
+                "extra_field": "producer data",
+            },
+        )
+        assert config.vault.load("root/unknown").extra_field == "producer data"
+        await call(
+            "record_update",
+            record_id="root/child/child",
+            patch={"unknown_field": "producer update"},
+        )
+        assert config.vault.load("root/child/child").unknown_field == "producer update"
         await call("record_delete", record_id="root/child/child")
         await call(
             "record_create",
@@ -280,7 +278,7 @@ def test_record_update_uses_vault_validation(
             "record_update", {"record_id": record.id, "patch": {"title": None}}
         )
         assert result.structured_content["title"] is None
-        assert project.vault.load(record.id).title == "original"
+        assert project.vault.load(record.id).title is None
         assert project.vault.load(record.id).related_to == [other.id]
 
     asyncio.run(exercise())
