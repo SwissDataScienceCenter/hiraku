@@ -33,7 +33,6 @@ def test_project_create_can_skip_mcp_configuration(tmp_path: Path) -> None:
     assert not project.psij_dir.exists()
     assert project.leaderboards_dir == tmp_path / "hiraku" / "leaderboards"
     assert list(project.leaderboards_dir.iterdir()) == []
-    assert project.active_record_id is None
     assert project.records_dir == tmp_path / "hiraku" / "records"
     assert not (tmp_path / ".mcp.json").exists()
     assert not (tmp_path / ".codex/config.toml").exists()
@@ -171,7 +170,6 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert codex_skill.read_text() == (
         files("hiraku.resources").joinpath("skills/hiraku/SKILL.md").read_text()
     )
-    assert config.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
     Project.create(without_skill, install_skill=False)
@@ -276,22 +274,19 @@ def test_load_project_through_symlinked_directory(tmp_path: Path) -> None:
     assert loaded.path == project.path
 
 
-def test_active_record_is_stored_in_project_config(tmp_path: Path) -> None:
+def test_legacy_active_record_setting_is_discarded(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False, install_mcp=False)
     first = config.vault.create("first/first", type="task", title="first")
-    config.set_active_record(first.id)
-    assert Project.load(config.path).active_record_id == first.id
-    config.clear_active_record()
-    assert Project.load(config.path).active_record_id is None
-    config.set_active_record(first)
-
-    assert config.path == tmp_path / "hiraku.yml"
-    assert f"active_record_id: {first.id}" in config.path.read_text()
-    assert Project.load(config.path).active_record_id == first.id
+    config.path.write_text(
+        f"hiraku_dir: hiraku\nactive_record_id: {first.id}\n",
+        encoding="utf-8",
+    )
+    loaded = Project.load(config.path)
     assert set(config.to_dict()) == {
         "hiraku_dir",
-        "active_record_id",
     }
+    assert "active_record_id" not in loaded.to_dict()
+    assert "active_record_id" not in config.path.read_text()
 
 
 def test_hiraku_dir_rejects_relative_traversal_and_symlink_escape(
@@ -375,9 +370,6 @@ def test_results_include_leaderboard_configuration(tmp_path: Path):
         results=True,
         install_skill=False,
     )
-    assert (
-        config.active_record_id == config.vault.load("digit-classification/weak-l2").id
-    )
     assert Leaderboard.load(config).source.model_dump(
         mode="json", exclude_none=True
     ) == {
@@ -405,8 +397,7 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
         target, example="layered", results=True, install_skill=False
     )
     assert (target / "train.py").read_text() == "results"
-    assert config.active_record_id == "root"
-    assert "active_record_id: root" in config.path.read_text()
+    assert "active_record_id" not in config.path.read_text()
 
 
 RUN_AGENT_TESTS = os.environ.get("HIRAKU_RUN_CODEX_SKILL_TESTS") == "1"
@@ -509,7 +500,6 @@ def _create_task(project: Project) -> Record:
         "and accuracy on this cohort?",
         title="Heart disease prediction",
     )
-    project.set_active_record(record)
     return record
 
 
@@ -527,7 +517,6 @@ def _create_logistic_experiment(
         hypothesis="Regularized logistic regression provides a calibrated baseline",
         title="Logistic regression",
     )
-    project.set_active_record(record)
     return record
 
 

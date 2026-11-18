@@ -113,7 +113,6 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
         record = generated.vault.create(
             "generated/generated", type="task", title="generated"
         )
-        generated.set_active_record(record)
         (output / "runs.csv").write_text(f"id,record_id\nrun,{record.id}\n")
 
     monkeypatch.setattr(
@@ -131,9 +130,7 @@ def test_init_generation_publishes_isolated_export(tmp_path, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     config = Project.discover(tmp_path)
-    assert config.active_record_id
     record = config.vault.load("generated/generated")
-    assert record.id == config.active_record_id
     runs = Leaderboard.load(config).list_runs(config, record_id=record.id)
     assert runs[0].id == "run"
     assert not (tmp_path / ".git").exists()

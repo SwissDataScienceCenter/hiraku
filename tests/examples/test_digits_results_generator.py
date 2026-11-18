@@ -49,7 +49,6 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
     ids_by_name = {
         record.id.rsplit("/", 1)[-1]: record.id for record in project.vault.list()
     }
-    assert project.active_record_id == ids_by_name["weak-l2"]
     generator["validate_database"](tmp_path / "mlflow.db", ids_by_name)
     assert not (tmp_path / "generate_results.py").exists()
     with sqlite3.connect(tmp_path / "mlflow.db") as db:

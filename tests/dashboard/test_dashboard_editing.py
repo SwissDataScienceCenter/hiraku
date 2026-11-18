@@ -22,7 +22,6 @@ def test_markdown_view_opts_into_editing_explicitly(tmp_path: Path) -> None:
 
     config = Project.create(tmp_path, install_skill=False)
     record = config.vault.create("notes/notes", type="task", title="notes")
-    config.set_active_record(record)
     editor = MarkdownEditor(_save_markdown(config))
 
     plain = markdown_view(record, empty_message="No notes yet.").text
@@ -47,9 +46,7 @@ def test_editor_retains_drafts_across_selection_and_cancels(tmp_path: Path) -> N
     first = config.vault.create(
         "first/first", type="task", markdown="Original", title="first"
     )
-    config.set_active_record(first)
     other = config.vault.create("other/other", type="task", title="other")
-    config.set_active_record(other)
     editor = MarkdownEditor(_save_markdown(config))
     editor.render(first)
     editor._widgets[0]._update(1)
@@ -74,7 +71,6 @@ def test_editor_saves_and_retains_failed_draft(tmp_path: Path, monkeypatch) -> N
     record = config.vault.create(
         "notes/notes", type="task", markdown="Original", title="notes"
     )
-    config.set_active_record(record)
     editor = MarkdownEditor(_save_markdown(config))
     editor._start(record)
     editor.render(record)

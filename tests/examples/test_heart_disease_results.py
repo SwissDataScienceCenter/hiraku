@@ -32,7 +32,6 @@ def test_populated_example_initializes_and_queries_runs(tmp_path: Path, monkeypa
     assert not project.joinpath("README.md").exists()
     config = Project.discover(project)
     forest = config.vault.load("heart-disease-prediction/random-forest")
-    assert config.active_record_id == forest.id
     records = config.vault.list()
     assert {record.id: record.title for record in records} == {
         "heart-disease-prediction": "Heart disease prediction",

@@ -26,7 +26,7 @@ from .errors import (
 from .io import atomic_write, dump_yaml, load_yaml_mapping
 
 if TYPE_CHECKING:
-    from .record import Record, Vault
+    from .record import Vault
 
 
 class Project(BaseModel):
@@ -36,7 +36,6 @@ class Project(BaseModel):
     Attributes:
         root: Absolute project root directory.
         hiraku_dir_name: Name of the managed directory for Hiraku data.
-        active_record_id: Optional bundle-relative path of the active record.
 
     Args:
         root: Project directory containing the settings file and managed data.
@@ -57,8 +56,6 @@ class Project(BaseModel):
         exclude=True,
         frozen=True,
     )
-    active_record_id: str | None = None
-
     def __init__(self, root: Path | str, **data: Any) -> None:
         """Create a project model from its root and persisted settings.
 
@@ -106,6 +103,8 @@ class Project(BaseModel):
         """
         marker = Path(path).expanduser().resolve()
         data = load_yaml_mapping(marker)
+        legacy_active_record = "active_record_id" in data
+        data.pop("active_record_id", None)
         try:
             project = cls(marker.parent, **data)
         except (TypeError, ValueError) as exc:
@@ -114,6 +113,8 @@ class Project(BaseModel):
             ) from exc
         if marker.name != "hiraku.yml":
             raise ValidationError(f"Expected hiraku.yml: {marker}")
+        if legacy_active_record:
+            project.save()
         return project
 
     @classmethod
@@ -197,7 +198,6 @@ class Project(BaseModel):
         """Return the persisted project settings."""
         return {
             "hiraku_dir": self.hiraku_dir_name,
-            "active_record_id": self.active_record_id,
         }
 
     def save(self) -> None:
@@ -212,23 +212,6 @@ class Project(BaseModel):
             raise ValidationError(
                 f"Cannot save configuration at {self.path}: {exc}"
             ) from exc
-
-    def set_active_record(self, record: str | Record) -> None:
-        """Validate and persist the active research record.
-
-        Args:
-            record: A record object or its bundle-relative path.
-        """
-        from .record import Record
-
-        selected = self.vault.load(record.id if isinstance(record, Record) else record)
-        self.active_record_id = selected.id
-        self.save()
-
-    def clear_active_record(self) -> None:
-        """Clear the active record and persist the project settings."""
-        self.active_record_id = None
-        self.save()
 
     @classmethod
     def create(
@@ -312,6 +295,7 @@ class Project(BaseModel):
                     config_file = source / "hiraku.yml"
                     if config_file.is_file():
                         data.update(load_yaml_mapping(config_file))
+            data.pop("active_record_id", None)
 
             try:
                 project = cls(root, **data)

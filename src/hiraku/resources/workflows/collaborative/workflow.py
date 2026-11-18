@@ -103,11 +103,11 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             arguments = CollaborativeInput.model_validate(state.get("arguments", {}))
         except PydanticValidationError as exc:
             raise ValidationError(str(exc)) from exc
-        task = arguments.task or project.active_record_id
+        task = arguments.task
         command = arguments.command
         rounds = arguments.rounds
         if not isinstance(task, str) or not task:
-            raise ValidationError("Pass task or set an active Hiraku record")
+            raise ValidationError("Pass task with an explicit record ID")
         if not isinstance(command, list):
             raise ValidationError("command must be an argv list")
         command = validate_command(command)

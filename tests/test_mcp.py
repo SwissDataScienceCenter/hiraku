@@ -176,18 +176,14 @@ def test_tools_and_validation(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("deleted_id", ["active", "other"])
-def test_record_delete_preserves_valid_active_selection(tmp_path, deleted_id):
+def test_record_delete_does_not_manage_project_state(tmp_path, deleted_id):
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
     project.vault.create("active", type="task")
     project.vault.create("other", type="task")
-    project.set_active_record("active")
     server = create_server(project)
 
     asyncio.run(server.call_tool("record_delete", {"record_id": deleted_id}))
 
-    expected = None if deleted_id == "active" else "active"
-    assert project.active_record_id == expected
-    assert Project.load(project.path).active_record_id == expected
     assert not project.vault.file_path(deleted_id).exists()
 
 
@@ -352,7 +348,7 @@ def test_submit_and_status_use_native_executor(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HIRAKU_MCP_TEST_HOST_ENV", "forwarded")
     server = create_server(config)
-    config.set_active_record(config.vault.create("active", title="Active", type="task"))
+    config.vault.create("active", title="Active", type="task")
 
     async def exercise() -> None:
         async def completed_job(receipt):
@@ -815,12 +811,10 @@ def test_workflow_graph_is_available_from_cli_and_mcp(tmp_path, monkeypatch) -> 
 
 def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    config.set_active_record(
-        config.vault.create("task/task", type="task", title="task")
-    )
+    config.vault.create("task/task", type="task", title="task")
     started = start_workflow(
         "collaborative",
-        {"rounds": 1, "command": ["python", "train.py"]},
+        {"task": "task/task", "rounds": 1, "command": ["python", "train.py"]},
         project=config,
     )
     assert started["status"] == "waiting"
@@ -854,12 +848,10 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
 
 def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    config.set_active_record(
-        config.vault.create("task/task", type="task", title="task")
-    )
+    config.vault.create("task/task", type="task", title="task")
     started = start_workflow(
         "collaborative",
-        {"rounds": 1, "command": ["python", "train.py"]},
+        {"task": "task/task", "rounds": 1, "command": ["python", "train.py"]},
         project=config,
     )
     requested = []
@@ -916,12 +908,10 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
 
 def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    config.set_active_record(
-        config.vault.create("task/task", type="task", title="task")
-    )
+    config.vault.create("task/task", type="task", title="task")
     started = start_workflow(
         "collaborative",
-        {"rounds": 1, "command": ["python", "train.py"]},
+        {"task": "task/task", "rounds": 1, "command": ["python", "train.py"]},
         project=config,
     )
 
@@ -1012,12 +1002,10 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
 
 def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
     config = Project.create(tmp_path, install_skill=False)
-    config.set_active_record(
-        config.vault.create("task/task", type="task", title="task")
-    )
+    config.vault.create("task/task", type="task", title="task")
     first = start_workflow(
         "collaborative",
-        {"rounds": 1, "command": ["python", "train.py"]},
+        {"task": "task/task", "rounds": 1, "command": ["python", "train.py"]},
         project=config,
     )
 

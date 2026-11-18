@@ -161,9 +161,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         related_to: list[str] | None = None,
         markdown: str = "",
         fields: dict[str, Any] | None = None,
-        activate: bool = True,
     ) -> dict[str, Any]:
-        """Create a research record, optionally activating it like the CLI."""
+        """Create a research record."""
         extras = fields or {}
         reserved = {
             "type",
@@ -173,7 +172,6 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             "related_to",
             "markdown",
             "record_id",
-            "activate",
             "project",
         }
         if reserved.intersection(extras):
@@ -188,8 +186,6 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             related_to=related_to or [],
             **extras,
         )
-        if activate:
-            selected.set_active_record(record)
         return record.model_dump(mode="json")
 
     @server.tool(
@@ -223,8 +219,6 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     def record_delete(record_id: str) -> dict[str, str]:
         """Delete the document at the given OKF ID."""
         selected.vault.delete(record_id)
-        if selected.active_record_id == record_id:
-            selected.clear_active_record()
         return {"deleted": record_id}
 
     @server.tool(

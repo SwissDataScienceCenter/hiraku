@@ -33,7 +33,6 @@ from rich.text import Text
 from .errors import (
     GitError,
     HirakuError,
-    NoActiveRecordError,
     ValidationError,
 )
 from .git import GitRepository, init_code_repository, require_git
@@ -163,12 +162,6 @@ def _markdown(path: Path | None) -> str:
     except OSError as exc:
         raise ValidationError(f"Cannot read {path}: {exc}") from exc
 
-
-def _active(project: Project, record_id: str | None = None) -> Record:
-    identifier = record_id or project.active_record_id
-    if identifier is None:
-        raise NoActiveRecordError("No active record; supply --record or set one")
-    return project.vault.load(identifier)
 
 
 def _edit(path: Path) -> None:
@@ -357,10 +350,6 @@ def example_create_command(
                         for result in overlay.iterdir():
                             if result.is_file() and result.name != "hiraku.yml":
                                 shutil.copyfile(result, project.root / result.name)
-                        if generated.active_record_id is None:
-                            project.clear_active_record()
-                        else:
-                            project.set_active_record(generated.active_record_id)
             except Exception as exc:
                 raise click.ClickException(
                     "Generation failed; initialized project and completed runs kept: "
@@ -373,7 +362,7 @@ def example_create_command(
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
 def status_command(state: CLIContext, json_output: bool, pretty: bool) -> None:
-    """Show project and active record."""
+    """Show project context."""
     _validate_json_options(json_output, pretty)
     project = state.project
     try:
@@ -382,7 +371,6 @@ def status_command(state: CLIContext, json_output: bool, pretty: bool) -> None:
         branch = None
     result = {
         "project_root": project.root,
-        "active_record_id": project.active_record_id,
         "git_branch": branch,
     }
     if json_output:
@@ -405,7 +393,6 @@ def record_group() -> None:
 @click.option("--commit")
 @click.option("--markdown-file", type=click.Path(path_type=Path))
 @click.option("--set", "set_values", multiple=True, metavar="KEY=VALUE")
-@click.option("--no-activate", is_flag=True)
 @click.pass_obj
 def record_create(
     state: CLIContext,
@@ -417,7 +404,6 @@ def record_create(
     commit: str | None,
     markdown_file: Path | None,
     set_values: tuple[str, ...],
-    no_activate: bool,
 ) -> None:
     """Create a root or child record."""
     fields = _fields(set_values)
@@ -438,8 +424,6 @@ def record_create(
         markdown=_markdown(markdown_file),
         **fields,
     )
-    if not no_activate:
-        state.project.set_active_record(record)
     target = state.project.vault.file_path(record.id)
     click.echo(f"Created a new record {record.id!r} at {target}")
 
@@ -462,19 +446,19 @@ def record_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
 
 
 @record_group.command("show")
-@click.argument("record_id", required=False)
+@click.argument("record_id")
 @click.option("--json", "json_output", is_flag=True)
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
 def record_show(
     state: CLIContext,
-    record_id: str | None,
+    record_id: str,
     json_output: bool,
     pretty: bool,
 ) -> None:
     """Show the document's local fields and Markdown."""
     _validate_json_options(json_output, pretty)
-    record = _active(state.project, record_id)
+    record = state.project.vault.load(record_id)
     if json_output:
         _emit_json(record, pretty=pretty)
     else:
@@ -542,20 +526,9 @@ def record_edit(state: CLIContext, record_id: str) -> None:
 @click.pass_obj
 def record_delete(state: CLIContext, record_id: str) -> None:
     """Delete the document at the given OKF ID."""
-    record = state.project.vault.load(record_id)
+    state.project.vault.load(record_id)
     state.project.vault.delete(record_id)
-    if state.project.active_record_id == record.id:
-        state.project.clear_active_record()
     click.echo(f"Deleted record {record_id}")
-
-
-@record_group.command("set")
-@click.argument("record_id")
-@click.pass_obj
-def record_set(state: CLIContext, record_id: str) -> None:
-    """Set the active record."""
-    state.project.set_active_record(record_id)
-    click.echo(f"Active record: {record_id}")
 
 
 @record_group.command("tree")
@@ -764,9 +737,7 @@ def job_submit(
         )
     job = prepare_job(
         command,
-        record_id=record_id
-        if record_id is not None
-        else state.project.active_record_id,
+        record_id=record_id,
         project=state.project,
         directory=directory,
         launcher=launcher,
@@ -809,9 +780,7 @@ def run(
     """Run locally, stream output, and return the command's exit code."""
     job = prepare_job(
         command,
-        record_id=record_id
-        if record_id is not None
-        else state.project.active_record_id,
+        record_id=record_id,
         project=state.project,
         directory=directory,
         launcher=launcher,

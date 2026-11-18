@@ -143,7 +143,6 @@ def generate(project: Project) -> None:
             + "\n\nNo statistical significance is claimed.\n"
         )
         project.vault.save(record, overwrite=True)
-    project.set_active_record(record_ids["random-forest"])
 
 
 def generate_results(output: Path) -> None:
