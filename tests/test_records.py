@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import RecordExistsError, RecordNotFoundError, ValidationError
-from hiraku.record import Record, Vault, validate_identifier
+from hiraku.record import Record, RecordUpdate, Vault, validate_identifier
 
 
 def test_record_is_plain_local_document_data():
@@ -83,7 +83,7 @@ def test_loading_and_saving_one_file_do_not_scan_the_collection(tmp_path, monkey
         loaded = vault.load("valid")
         loaded.markdown = "Updated"
         vault.save(loaded, overwrite=True)
-        vault.update(loaded, {"description": "Local update"})
+        vault.update(loaded, RecordUpdate(description="Local update"))
     with pytest.raises(ValidationError):
         vault.validate()
 
@@ -133,7 +133,7 @@ def test_relationship_changes_and_cycles_are_regular_graph_data(tmp_path):
     vault.save(Record(id="b", type="task", parent_id="a"))
     vault.validate()
     assert [record.id for record in vault.descendants("a")] == ["b"]
-    updated = vault.update(vault.load("a"), {"parent_id": None})
+    updated = vault.update(vault.load("a"), RecordUpdate(parent_id=None))
     assert updated.parent_id is None
     assert vault.load("a").id == "a"
 
@@ -146,7 +146,7 @@ def test_workspace_checks_are_explicit(tmp_path):
     assert len(vault.list()) == 2
     vault.validate()
     vault.delete("b")
-    vault.update(vault.load("a"), {"related_to": ["missing"]})
+    vault.update(vault.load("a"), RecordUpdate(related_to=["missing"]))
     with pytest.raises(ValidationError, match="missing related record"):
         vault.validate()
 
@@ -270,12 +270,12 @@ def test_okf_status_and_research_state_round_trip(tmp_path, status):
     vault = Vault(root=tmp_path)
     record = vault.create("experiment", type="experiment", status=status)
     assert record.state is None
-    updated = vault.update(record, {"state": "custom research phase"})
+    updated = vault.update(record, RecordUpdate(state="custom research phase"))
     assert updated.status == status
     loaded = vault.load(record.id)
     assert loaded.status == status
     assert loaded.state == "custom research phase"
-    assert vault.update(loaded, {"state": None}).state is None
+    assert vault.update(loaded, RecordUpdate(state=None)).state is None
 
 
 @pytest.mark.parametrize("status", ["concluded", "drafted", "", None, 42])
@@ -346,13 +346,15 @@ def test_file_location_defines_identity(tmp_path):
 def test_id_is_preserved_on_update_without_being_persisted(tmp_path):
     vault = Vault(root=tmp_path)
     record = vault.create("example/example", type="Dataset")
-    updated = vault.update(record, {"description": "Updated"}, markdown="# Body")
+    updated = vault.update(
+        record, RecordUpdate(description="Updated", markdown="# Body")
+    )
     assert updated.id == record.id
     assert updated.model_dump()["id"] == record.id
     assert vault.load(record.id).id == record.id
     assert "id" not in frontmatter.load(vault.file_path(record.id))
-    with pytest.raises(ValidationError, match="Cannot update"):
-        vault.update(record, {"id": "elsewhere"})
+    with pytest.raises(PydanticValidationError):
+        RecordUpdate(id="elsewhere")
 
 
 def test_identity_is_derived_from_file_placement(tmp_path):
