@@ -40,7 +40,7 @@ MCP tool. Submit the command as an argv list and include explicit record
 attribution. Submission defaults to background execution with `local-detached`
 and returns an ID; monitor it with `job_status` or `job_list`.
 
-Omitting `record_id` submits an unattributed job even if a record is active.
+Omitting `record_id` submits an unattributed job.
 Submission is not completion. If submission reports a history-write failure,
 inspect existing jobs before retrying: execution may already have started. Use
 CLI `hiraku run` for foreground streaming when that is specifically needed; use
