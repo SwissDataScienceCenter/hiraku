@@ -43,9 +43,7 @@ class ResearchState(TypedDict, total=False):
 class CollaborativeInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    task: str | None = Field(
-        default=None, description="Task record ID; defaults to active context."
-    )
+    task: str = Field(min_length=1, description="Explicit task record ID.")
     command: list[str] = Field(min_length=1)
     rounds: int = Field(default=3, ge=1)
     leaderboard: str | None = Field(default=None, description="Leaderboard name.")

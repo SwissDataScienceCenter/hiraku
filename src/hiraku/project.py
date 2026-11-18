@@ -10,13 +10,7 @@ from importlib.resources import as_file, files
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .errors import (
     ProjectExistsError,
@@ -329,6 +323,11 @@ class Project(BaseModel):
                 with as_file(generator) as source:
                     shutil.copy2(source, root / "generate_results.py")
 
+            ignore_path = root / ".gitignore"
+            content = ignore_path.read_text() if ignore_path.exists() else ""
+            if "/.hiraku/" not in content.splitlines():
+                separator = "" if not content or content.endswith("\n") else "\n"
+                atomic_write(ignore_path, f"{content}{separator}/.hiraku/\n")
             project.save()
 
             # Install the MCP server configuration in supported project agent configs

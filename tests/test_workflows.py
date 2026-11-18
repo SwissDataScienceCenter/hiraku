@@ -140,6 +140,14 @@ def _approved(response: dict) -> dict:
     return {"approval": {"decision": "approve"}, "response": response}
 
 
+def test_collaborative_requires_task(tmp_path):
+    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
+    with pytest.raises(ValidationError, match="task"):
+        start_workflow(
+            "collaborative", {"command": ["python", "train.py"]}, project=project
+        )
+
+
 @pytest.mark.parametrize("task_id", ["task", "research/task"])
 def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path, task_id):
     config = Project.create(tmp_path, install_skill=False)
