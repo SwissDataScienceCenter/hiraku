@@ -353,8 +353,8 @@ def test_id_is_preserved_on_update_without_being_persisted(tmp_path):
     assert updated.model_dump()["id"] == record.id
     assert vault.load(record.id).id == record.id
     assert "id" not in frontmatter.load(vault.file_path(record.id))
-    with pytest.raises(PydanticValidationError):
-        RecordUpdate(id="elsewhere")
+    with pytest.raises(ValidationError, match="Cannot update"):
+        vault.update(record, RecordUpdate(id="elsewhere"))
 
 
 def test_identity_is_derived_from_file_placement(tmp_path):

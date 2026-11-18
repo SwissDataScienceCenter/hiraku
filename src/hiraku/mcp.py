@@ -29,7 +29,7 @@ from hiraku import Record
 from hiraku.record import RecordUpdate
 
 from .errors import ExecutionError, HirakuError, ValidationError
-from .job import Submission, get_executor, observe_submission, prepare_job
+from .job import JobRequest, Submission, get_executor, observe_submission, prepare_job
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
@@ -121,7 +121,7 @@ def register_tools(server: MCPServer, project: Project) -> None:
     )
     def project_info() -> dict[str, Any]:
         """Read the current project settings."""
-        return Project.load(project.path).model_dump(mode="json")
+        return Project.load(project.path).to_dict()
 
     @server.tool(
         title="List leaderboards",
@@ -174,11 +174,11 @@ def register_tools(server: MCPServer, project: Project) -> None:
     )
     def record_update(
         record_id: Annotated[str, Field(description="The ID of the record to update")],
-        data: RecordUpdate,
+        patch: RecordUpdate,
     ) -> dict[str, Any]:
         """Partially update an existing research record by ID."""
         record = project.vault.load(record_id)
-        updated = project.vault.update(record, data)
+        updated = project.vault.update(record, patch)
         return updated.model_dump(mode="json")
 
     @server.tool(
@@ -206,41 +206,35 @@ def register_tools(server: MCPServer, project: Project) -> None:
             open_world_hint=True,
         ),
     )
-    def job_submit(
-        command: list[str],
-        executor: str = "local-detached",
-        record_id: str | None = None,
-        executor_url: str | None = None,
-        custom_attributes: dict[str, str] | None = None,
-        directory: str | None = None,
-        launcher: str | None = None,
-    ) -> dict[str, Any]:
-        """Submit through PSI/J; record attribution requires an explicit record_id."""
-        if executor == "local":
+    def job_submit(request: JobRequest) -> dict[str, Any]:
+        """Submit an argv command through PSI/J and record its job history."""
+        if request.executor == "local":
             raise ValidationError(
                 "Native local execution cannot recover submission status; "
                 "use hiraku run or the local-detached executor"
             )
         job = prepare_job(
-            command,
-            record_id=record_id,
+            request.command,
+            record_id=request.record_id,
             project=project,
             env={
                 key: value
                 for key, value in os.environ.items()
                 if key not in {"HIRAKU_RECORD_ID", "HIRAKU_JOB_ID"}
             },
-            directory=Path(directory) if directory is not None else None,
-            launcher=launcher,
-            attributes=JobAttributes(custom_attributes=custom_attributes)
-            if custom_attributes
+            directory=Path(request.directory)
+            if request.directory is not None
+            else None,
+            launcher=request.launcher,
+            attributes=JobAttributes(custom_attributes=request.custom_attributes)
+            if request.custom_attributes
             else None,
         )
         try:
             get_executor(
-                executor,
+                request.executor,
                 work_directory=project.psij_dir,
-                url=executor_url,
+                url=request.executor_url,
             ).submit(job)
         except (InvalidJobException, SubmitException, ValueError, OSError) as exc:
             raise ExecutionError(str(exc)) from exc
@@ -251,7 +245,12 @@ def register_tools(server: MCPServer, project: Project) -> None:
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
     )
-    def job_status(job_id: str) -> dict[str, Any]:
+    def job_status(
+        job_id: Annotated[
+            str,
+            Field(min_length=1, description="Full job ID or unique nonempty prefix."),
+        ],
+    ) -> dict[str, Any]:
         """Sync and show status by full ID or unique nonempty prefix."""
         entry = Submission.from_prefix(project, job_id)
         entry.sync()
@@ -261,7 +260,12 @@ def register_tools(server: MCPServer, project: Project) -> None:
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
     )
-    def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
+    def job_list(
+        record_id: Annotated[
+            str | None,
+            Field(description="Filter to jobs attributed to this record ID."),
+        ] = None,
+    ) -> list[dict[str, Any]]:
         """List jobs and status, refreshing and saving nonfinal submissions."""
         entries = Submission.list(project, record_id=record_id)
         results = [observe_submission(entry, project) for entry in entries]
@@ -277,12 +281,25 @@ def register_tools(server: MCPServer, project: Project) -> None:
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     def runs(
-        leaderboard: str | None = None,
-        record_id: str | None = None,
-        include_unattributed: bool = False,
-        sort: str | None = None,
-        ascending: bool | None = None,
-        limit: int | None = None,
+        leaderboard: Annotated[
+            str | None, Field(description="Leaderboard name; defaults when unique.")
+        ] = None,
+        record_id: Annotated[
+            str | None, Field(description="Filter runs by exact record ID.")
+        ] = None,
+        include_unattributed: Annotated[
+            bool, Field(description="Include runs without a record ID.")
+        ] = False,
+        sort: Annotated[
+            str | None, Field(description="Metric name to sort by.")
+        ] = None,
+        ascending: Annotated[
+            bool | None,
+            Field(description="Sort direction; defaults to the metric declaration."),
+        ] = None,
+        limit: Annotated[
+            int | None, Field(ge=0, description="Maximum number of runs to return.")
+        ] = None,
     ) -> list[dict[str, Any]]:
         """List attributed runs in a leaderboard, optionally filtered by record ID.
 

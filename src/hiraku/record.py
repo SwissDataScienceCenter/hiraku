@@ -184,7 +184,9 @@ class Record(BaseModel):
 class RecordUpdate(BaseModel):
     """Partial update payload for an existing research record."""
 
-    model_config = ConfigDict(extra="forbid")
+    # Python and CLI callers may update producer-defined front matter fields.
+    # The MCP adapter narrows this schema with an extra-forbid subclass.
+    model_config = ConfigDict(extra="allow")
 
     type: str | None = Field(default=None, description="OKF concept type.")
     title: str | None = Field(default=None, description="Optional OKF display title.")
@@ -199,6 +201,9 @@ class RecordUpdate(BaseModel):
     )
     tags: list[str] | None = Field(
         default=None, description="Replaces existing categorization tags."
+    )
+    verified: list[dict[str, Any]] | None = Field(
+        default=None, description="Replacement verification evidence."
     )
     generated: dict[str, Any] | None = Field(
         default=None, description="Replacement generated metadata."
@@ -217,9 +222,6 @@ class RecordUpdate(BaseModel):
     )
     markdown: str | None = Field(
         default=None, description="Updated Markdown body content."
-    )
-    unset: list[str] = Field(
-        default_factory=list, description="Field names to remove from frontmatter."
     )
 
 
@@ -253,8 +255,7 @@ class Vault:
 
     def create(self, id: str, **fields: Any) -> Record:
         """Construct and save a document at an explicit concept ID."""
-        clean_fields = {k: v for k, v in fields.items() if v is not None}
-        record = Record(id=id, **clean_fields)
+        record = Record(id=id, **fields)
         self.save(record)
         return record
 
@@ -317,16 +318,11 @@ class Vault:
         """Apply local field changes and explicitly overwrite the document."""
         changes = patch.model_dump(exclude_unset=True)
         markdown = changes.pop("markdown", None)
-        unset = tuple(changes.pop("unset", ()))
         fields = changes
-        if {"id", "markdown"}.intersection(fields) or "id" in unset:
+        if {"id", "markdown"}.intersection(fields):
             raise ValidationError("Cannot update ID or set Markdown through metadata")
         values = record.model_dump(include=record.model_fields_set)
         values.update(fields)
-        for key in unset:
-            if key in fields:
-                raise ValidationError(f"Cannot set and unset {key!r} together")
-            values.pop(key, None)
         if markdown is not None:
             values["markdown"] = markdown
         updated = Record.model_validate(values)
