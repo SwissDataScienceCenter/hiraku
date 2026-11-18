@@ -10,6 +10,7 @@ from click.testing import CliRunner
 
 from hiraku.cli import main
 from hiraku.project import Project
+from hiraku.tracking.leaderboard import Leaderboard
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow
 from hiraku.workflows.langgraph import start_workflow, workflow_status
 
@@ -72,6 +73,7 @@ def test_research_setup_accepts_project_context(runner: CliRunner) -> None:
     assert started["interrupts"][0]["value"]["step"] == "setup"
 
     project.vault.create("project-setup", type="context")
+    Leaderboard.create(project, "runs", {"type": "csv", "path": "runs.csv"})
     resumed = resume_workflow(
         started["workflow_session_id"], {"event": "set_up"}, project=project
     )
@@ -101,7 +103,7 @@ def test_research_setup_accepts_project_context(runner: CliRunner) -> None:
         project=project,
     )
     assert implementation["interrupts"][0]["value"]["step"] == "implement"
-    experiment = project.vault.find("baseline")
+    experiment = project.vault.load("baseline")
     assert experiment.parent_id == task.id
     assert experiment.type == "experiment"
     assert experiment.id == "baseline"
@@ -136,6 +138,7 @@ def test_research_setup_accepts_project_context(runner: CliRunner) -> None:
 def test_research_accepts_task_name(runner: CliRunner) -> None:
     project = Project.discover()
     project.vault.create("project-setup", type="context")
+    Leaderboard.create(project, "runs", {"type": "csv", "path": "runs.csv"})
     task = project.vault.create(
         "task", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
     )

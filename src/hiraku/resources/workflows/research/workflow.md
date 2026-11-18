@@ -9,14 +9,17 @@ description: Run a research task end to end over an experiment tree.
 Prepare the project so that experiments can run here; this comes before any
 research step and is done once. Fix every problem in `problems`:
 
-- Dispatcher. Commands run directly by default. If the project uses a
-  dispatcher, configure it in `hiraku.yml` and ensure its script is executable.
-  On a cluster, use the site's existing job scripts to determine the resources
-  and submission method.
+- Leaderboard. Runs are read from a leaderboard, which names the tracking
+  source (CSV, MLflow, or W&B). Create one with `hiraku leaderboard create`
+  if `leaderboards` is empty; with several, Hiraku cannot choose one for you.
+- Jobs. Commands run locally by default. On a cluster, use the site's existing
+  job scripts to determine the resources, and submit with `job_submit` or
+  `hiraku job submit` (executors such as Slurm or Renku, `--launcher` to select
+  a PSI/J launcher).
 - Context. Create a `project-setup` context record with `record_create` or
   `hiraku record create project-setup --type context --markdown-file <file>`.
   Describe the data and model paths, software environment, command execution,
-  log locations, and how the configured tracking backend records run IDs,
+  log locations, and how the leaderboard's tracking source records run IDs,
   record IDs, commits, and metrics. `hiraku run` provides `HIRAKU_RECORD_ID`
   and `HIRAKU_COMMIT` to the command.
 
@@ -57,8 +60,9 @@ change and send `implemented` with the commit.
 ## Launch
 
 Check out the experiment's commit, then run `command` from the data. The
-command runs in the foreground unless the configured dispatcher submits it
-elsewhere. Send `launched` once execution or submission succeeds. If the
+command runs in the foreground with `hiraku run --record <id> -- <command>`,
+or in the background with `hiraku job submit --record <id> -- <command>` (the
+MCP `job_submit` tool is equivalent). Send `launched` once execution or submission succeeds. If the
 launch fails and the code has to change, send `failed` with the experiment's
 record ID and the error.
 
