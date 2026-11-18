@@ -39,7 +39,7 @@ from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
 from .job import Submission, get_executor, observe_submission, prepare_job, run_local
 from .project import Project
-from .record import Record, validate_identifier
+from .record import Record, RecordUpdate, validate_identifier
 from .tracking import Leaderboard, Run
 from .tracking.leaderboard import _leaderboard_path
 
@@ -500,9 +500,11 @@ def record_update(
             raise ValidationError(f"Cannot set and unset {key!r} together")
     state.project.vault.update(
         record,
-        changes,
-        markdown=_markdown(markdown_file) if markdown_file is not None else None,
-        unset=unset_values,
+        RecordUpdate(
+            **changes,
+            markdown=(_markdown(markdown_file) if markdown_file is not None else None),
+            unset=list(unset_values),
+        ),
     )
     click.echo(f"Updated record {record_id}")
 
