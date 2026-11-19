@@ -140,9 +140,8 @@ def _approved(response: dict) -> dict:
     return {"approval": {"decision": "approve"}, "response": response}
 
 
-def test_collaborative_requires_task_even_with_active_record(tmp_path):
+def test_collaborative_requires_task(tmp_path):
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
-    project.set_active_record(project.vault.create("task", type="task"))
     with pytest.raises(ValidationError, match="task"):
         start_workflow(
             "collaborative", {"command": ["python", "train.py"]}, project=project
@@ -155,7 +154,7 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path, task_i
     (config.leaderboards_dir / "default.yml").write_text(
         "source: {type: csv, path: runs.csv}\n"
     )
-    config.set_active_record(config.vault.create(task_id, type="task", title="task"))
+    config.vault.create(task_id, type="task", title="task")
     commit = _commit(tmp_path)
     command = ["python", "train.py"]
     result = start_workflow(

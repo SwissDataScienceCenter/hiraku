@@ -67,8 +67,8 @@ hiraku record show heart-disease-prediction
 hiraku status
 ```
 
-Select a CLI default with `hiraku record set heart-disease-prediction/random-forest`.
-`hiraku status` reports its ID, stored locally in `.hiraku/state.yml`.
+`hiraku status` should report the project context and CSV as the tracking
+backend. Record IDs are passed explicitly to record-scoped commands.
 
 ??? tip "Defining a working branch"
     Store a branch name with `--set 'branch=main'` if the record should point to

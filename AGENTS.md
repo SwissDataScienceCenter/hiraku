@@ -39,7 +39,7 @@ under `src/psij-descriptors/`.
 
 Core responsibilities:
 
-- **`Project`** (`project.py`) — Project discovery, settings, active-record state, and managed paths.
+- **`Project`** (`project.py`) — Project discovery, settings, and managed paths.
 - **`Record` and `Vault`** (`record.py`) — Local document models and filesystem-backed bundle operations.
 - **`Run`** (`tracking/base.py`) — Normalized tracking traces with metrics and attribution.
 - **Execution** (`job.py`) — Prepare native PSI/J jobs, stream foreground output, and keep submission history keyed by PSI/J job ID. Executors own execution and status; history retains observed final outcomes.
@@ -55,7 +55,7 @@ Respect these boundaries:
 - Record fields are local. Consumers needing ancestor information must explicitly traverse declared relationships.
 - `Vault.save()` validates one record and its destination without scanning the collection. Replacing a file requires `overwrite=True`. Use explicit vault validation for cross-record integrity; ordinary I/O tolerates incomplete or cyclic graphs.
 - Tracking adapters return normalized `Run` objects.
-- Leaderboards live in `hiraku/leaderboards/<name>.yml`; records do not configure metrics or sources. The active record is project-wide. Set the active record through `Project.set_active_record()` to validate and persist `active_record_id`.
+- Leaderboards live in `hiraku/leaderboards/<name>.yml`; records do not configure metrics or sources. Record-scoped operations receive explicit record IDs.
 - Records use filesystem-friendly names for Markdown files in the records directory; reject filename collisions and preserve discovery of existing nested records.
 - Import workflow APIs from their defining modules. Do not add eager imports or re-exports to `workflows/__init__.py`.
 - Keep MCP SDK imports in `mcp.py`.

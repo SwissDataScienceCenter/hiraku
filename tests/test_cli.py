@@ -411,7 +411,6 @@ def test_runs_default_scope_is_all_attributed_runs(tmp_path: Path, monkeypatch) 
             "root",
             "--type",
             "task",
-            "--no-activate",
         ).exit_code
         == 0
     )
@@ -537,9 +536,8 @@ def test_status_reports_project_context_only(project):
     result = invoke("status", "--json")
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    assert set(data) == {"project_root", "active_record_id", "git_branch"}
+    assert set(data) == {"project_root", "git_branch"}
     assert data["project_root"] == str(project.root)
-    assert data["active_record_id"] is None
 
 
 def test_leaderboard_lifecycle(project):

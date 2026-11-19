@@ -49,7 +49,6 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
     ids_by_name = {
         record.id.rsplit("/", 1)[-1]: record.id for record in project.vault.list()
     }
-    assert project.local_state.active_record_id is None
     generator["validate_database"](tmp_path / "mlflow.db", ids_by_name)
     assert not (tmp_path / "generate_results.py").exists()
     with sqlite3.connect(tmp_path / "mlflow.db") as db:

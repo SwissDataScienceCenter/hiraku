@@ -47,7 +47,7 @@ def project(tmp_path, monkeypatch):
     project = Project.create(
         tmp_path / "project with spaces", install_skill=False, install_mcp=False
     )
-    project.set_active_record(project.vault.create("test", title="Test", type="task"))
+    project.vault.create("test", title="Test", type="task")
     return project
 
 
@@ -714,6 +714,8 @@ def test_cli_foreground(project, monkeypatch, code):
         main,
         [
             "run",
+            "--record",
+            "test",
             "--",
             sys.executable,
             "-c",
@@ -810,6 +812,8 @@ def test_cli_submit_status_and_list(project, detached, monkeypatch, custom_url):
             "job",
             "submit",
             *(["--executor-url", detached.url] if custom_url else []),
+            "--record",
+            "test",
             "--",
             sys.executable,
             "-c",

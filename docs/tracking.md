@@ -45,7 +45,7 @@ hiraku leaderboard delete validation
 A single leaderboard is selected automatically; select a name when several exist.
 Queries list runs with a nonempty record ID, even when the record file is missing.
 Use `--include-unattributed` to include all source runs. `--record` matches an exact
-record ID, independently of the active record and the include flag.
+record ID, independently of the include flag.
 
 
 See [CSV](guides/tracking-csv.md), [MLflow](guides/tracking-mlflow.md),

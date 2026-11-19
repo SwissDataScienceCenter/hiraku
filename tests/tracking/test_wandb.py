@@ -83,7 +83,7 @@ def test_wandb_leaderboard_requires_explicit_project(tmp_path: Path) -> None:
     assert list(project.leaderboards_dir.iterdir()) == []
 
 
-def test_wandb_runs_cli_uses_active_record(tmp_path: Path, monkeypatch) -> None:
+def test_wandb_runs_cli_filters_explicit_record(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "wandb", types.SimpleNamespace(Api=FakeApi))
     monkeypatch.chdir(tmp_path)
     project = Project.create(tmp_path, install_skill=False)
@@ -92,10 +92,11 @@ def test_wandb_runs_cli_uses_active_record(tmp_path: Path, monkeypatch) -> None:
     )
     project.save()
     record = project.vault.create("logistic/logistic", type="task", title="logistic")
-    project.set_active_record(record)
     monkeypatch.setattr(FakeRun, "config", {"hiraku.record_id": record.id})
 
-    result = CliRunner().invoke(main, ["leaderboard", "runs", "--json"])
+    result = CliRunner().invoke(
+        main, ["leaderboard", "runs", "--record", record.id, "--json"]
+    )
 
     assert result.exit_code == 0, result.output
     assert '"run-1"' in result.output

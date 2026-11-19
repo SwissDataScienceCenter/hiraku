@@ -16,8 +16,8 @@ exit code are needed:
 hiraku run --record baseline -- python train.py
 ```
 
-Without `--record`, the CLI uses the active record when set, otherwise the job
-is unattributed. MCP alway requires an explicit `record_id` for attribution.
+Without `--record`, the job is unattributed. MCP always requires an explicit
+`record_id` for attribution.
 Hiraku passes `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` environment variables to the command.
 
 ## Launchers and custom attributes

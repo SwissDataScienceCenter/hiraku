@@ -67,7 +67,7 @@ def prepare_job(
 ) -> psij.Job:
     """Construct a native PSI/J job with explicit research attribution.
 
-    Does not submit, write project history, or resolve the active record.
+    Does not submit or write project history.
     Paths and resource requests describe the execution environment.
     """
     argv = validate_command(command)

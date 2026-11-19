@@ -105,7 +105,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         command = arguments.command
         rounds = arguments.rounds
         if not isinstance(task, str) or not task:
-            raise ValidationError("Pass an explicit task record ID")
+            raise ValidationError("Pass task with an explicit record ID")
         if not isinstance(command, list):
             raise ValidationError("command must be an argv list")
         command = validate_command(command)

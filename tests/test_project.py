@@ -17,10 +17,9 @@ import hiraku.project
 from hiraku.errors import (
     ProjectExistsError,
     ProjectNotFoundError,
-    RecordNotFoundError,
     ValidationError,
 )
-from hiraku.project import LocalState, Project
+from hiraku.project import Project
 from hiraku.record import Record
 from hiraku.tracking import CSVBackend, Leaderboard
 
@@ -34,7 +33,6 @@ def test_project_create_can_skip_mcp_configuration(tmp_path: Path) -> None:
     assert not project.psij_dir.exists()
     assert project.leaderboards_dir == tmp_path / "hiraku" / "leaderboards"
     assert list(project.leaderboards_dir.iterdir()) == []
-    assert project.local_state.active_record_id is None
     assert project.records_dir == tmp_path / "hiraku" / "records"
     assert not (tmp_path / ".mcp.json").exists()
     assert not (tmp_path / ".codex/config.toml").exists()
@@ -172,7 +170,6 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
     assert codex_skill.read_text() == (
         files("hiraku.resources").joinpath("skills/hiraku/SKILL.md").read_text()
     )
-    assert config.local_state.active_record_id is None
 
     without_skill = tmp_path / "without-skill"
     Project.create(without_skill, install_skill=False)
@@ -277,59 +274,14 @@ def test_load_project_through_symlinked_directory(tmp_path: Path) -> None:
     assert loaded.path == project.path
 
 
-def test_local_state_owns_persistence(tmp_path: Path) -> None:
-    path = tmp_path / ".hiraku/state.yml"
-    state = LocalState.load(path)
-    assert state.active_record_id is None
-    assert not path.exists()
-    state.active_record_id = "first/first"
-    state.save()
-    assert LocalState.load(path).active_record_id == "first/first"
-    assert "path:" not in path.read_text()
-
-
-def test_active_record_is_stored_in_local_state(tmp_path: Path) -> None:
+def test_load_rejects_unsupported_project_setting(tmp_path: Path) -> None:
     config = Project.create(tmp_path, install_skill=False, install_mcp=False)
-    first = config.vault.create("first/first", type="task", title="first")
-    config.set_active_record(first.id)
-    assert config.active_record_id == first.id
-    assert Project.load(config.path).local_state.active_record_id == first.id
-    config.clear_active_record()
-    assert config.active_record_id is None
-    assert Project.load(config.path).local_state.active_record_id is None
-    config.set_active_record(first)
-    config.local_state.active_record_id = None
-    assert config.active_record_id is None
-    config.set_active_record(first)
-    shared_settings = config.path.read_text()
-    config.save()
-    assert config.path.read_text() == shared_settings
-
-    assert config.path == tmp_path / "hiraku.yml"
-    assert "active_record_id" not in config.path.read_text()
-    state_path = tmp_path / ".hiraku/state.yml"
-    assert f"active_record_id: {first.id}" in state_path.read_text()
-    assert "/.hiraku/" in (tmp_path / ".gitignore").read_text().splitlines()
-    assert Project.load(config.path).local_state.active_record_id == first.id
-    assert set(config.to_dict()) == {
-        "hiraku_dir",
-    }
-
-
-def test_active_record_rejects_missing_record_without_changing_state(tmp_path):
-    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
-    project.set_active_record(project.vault.create("first", type="task"))
-    with pytest.raises(RecordNotFoundError, match="missing"):
-        project.set_active_record("missing")
-    assert Project.load(project.path).local_state.active_record_id == "first"
-
-
-@pytest.mark.parametrize("state", ["active_record_id: []\n", "hiraku_dir: other\n"])
-def test_local_state_rejects_invalid_data(tmp_path, state):
-    project = Project.create(tmp_path, install_skill=False, install_mcp=False)
-    (tmp_path / ".hiraku/state.yml").write_text(state)
-    with pytest.raises(ValidationError):
-        Project.load(project.path)
+    config.path.write_text(
+        "hiraku_dir: hiraku\nunsupported_setting: value\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        Project.load(config.path)
 
 
 def test_hiraku_dir_rejects_relative_traversal_and_symlink_escape(
@@ -413,7 +365,6 @@ def test_results_include_leaderboard_configuration(tmp_path: Path):
         results=True,
         install_skill=False,
     )
-    assert config.local_state.active_record_id is None
     assert Leaderboard.load(config).source.model_dump(
         mode="json", exclude_none=True
     ) == {
@@ -432,17 +383,16 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
     base.mkdir(parents=True)
     results.mkdir()
     (base / "train.py").write_text("base")
-    (base / "hiraku.yml").write_text("{}\n")
+    (base / "hiraku.yml").write_text("hiraku_dir: base-data\n")
     (results / "train.py").write_text("results")
-    (results / "hiraku.yml").write_text("hiraku_dir: custom\n")
+    (results / "hiraku.yml").write_text("hiraku_dir: results-data\n")
     monkeypatch.setattr(hiraku.project, "files", lambda name: resources)
     target = tmp_path / "target"
     config = Project.create(
         target, example="layered", results=True, install_skill=False
     )
     assert (target / "train.py").read_text() == "results"
-    assert config.hiraku_dir_name == "custom"
-    assert "hiraku_dir: custom" in config.path.read_text()
+    assert config.hiraku_dir_name == "results-data"
 
 
 RUN_AGENT_TESTS = os.environ.get("HIRAKU_RUN_CODEX_SKILL_TESTS") == "1"
@@ -545,7 +495,6 @@ def _create_task(project: Project) -> Record:
         "and accuracy on this cohort?",
         title="Heart disease prediction",
     )
-    project.set_active_record(record)
     return record
 
 
@@ -563,7 +512,6 @@ def _create_logistic_experiment(
         hypothesis="Regularized logistic regression provides a calibrated baseline",
         title="Logistic regression",
     )
-    project.set_active_record(record)
     return record
 
 

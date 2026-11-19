@@ -31,11 +31,7 @@ independently of directory placement. Fields are local to each record; read
 related records explicitly when their context matters.
 
 Create a record when requested or needed for the task. Keep its identity and
-relationships separate from its metadata fields. Creation activates the record
-by default; leave supporting records inactive when they should not change the
-local active record. Record updates merge metadata fields, while a
-supplied Markdown body replaces the whole body. Preserve existing content the
-task does not change.
+relationships separate from its metadata fields.
 
 ## Jobs and tracked evidence
 
@@ -44,7 +40,7 @@ MCP tool. Submit the command as an argv list and include explicit record
 attribution. Submission defaults to background execution with `local-detached`
 and returns an ID; monitor it with `job_status` or `job_list`.
 
-Omitting `record_id` submits an unattributed job even if a record is active.
+Omitting `record_id` submits an unattributed job.
 Submission is not completion. If submission reports a history-write failure,
 inspect existing jobs before retrying: execution may already have started. Use
 CLI `hiraku run` for foreground streaming when that is specifically needed; use

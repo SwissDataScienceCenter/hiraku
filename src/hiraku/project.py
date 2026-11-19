@@ -10,13 +10,7 @@ from importlib.resources import as_file, files
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .errors import (
     ProjectExistsError,
@@ -26,40 +20,7 @@ from .errors import (
 from .io import atomic_write, dump_yaml, load_yaml_mapping
 
 if TYPE_CHECKING:
-    from .record import Record, Vault
-
-
-class LocalState(BaseModel):
-    """Private checkout state, persisted separately from shared settings.
-
-    Attributes:
-        path: Location of the local state file.
-        active_record_id: Optional bundle-relative record ID used by the CLI.
-    """
-
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
-
-    path: Path = Field(exclude=True, frozen=True)
-    active_record_id: str | None = None
-
-    @classmethod
-    def load(cls, path: Path | str) -> LocalState:
-        """Load local state, defaulting to an empty selection if absent."""
-        target = Path(path).expanduser().resolve()
-        data = load_yaml_mapping(target) if target.exists() else {}
-        try:
-            return cls(path=target, **data)
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(f"Invalid local state at {target}: {exc}") from exc
-
-    def save(self) -> None:
-        """Atomically persist local state to its file."""
-        try:
-            atomic_write(self.path, dump_yaml(self.model_dump(mode="json")))
-        except OSError as exc:
-            raise ValidationError(
-                f"Cannot save local state at {self.path}: {exc}"
-            ) from exc
+    from .record import Vault
 
 
 class Project(BaseModel):
@@ -69,7 +30,6 @@ class Project(BaseModel):
     Attributes:
         root: Absolute project root directory.
         hiraku_dir_name: Name of the managed directory for Hiraku data.
-        local_state: Private checkout state, including the CLI record selection.
 
     Args:
         root: Project directory containing the settings file and managed data.
@@ -89,12 +49,6 @@ class Project(BaseModel):
         min_length=1,
         exclude=True,
         frozen=True,
-    )
-    local_state: LocalState = Field(
-        default_factory=lambda data: LocalState.load(
-            data["root"] / ".hiraku" / "state.yml"
-        ),
-        exclude=True,
     )
 
     def __init__(self, root: Path | str, **data: Any) -> None:
@@ -250,28 +204,6 @@ class Project(BaseModel):
                 f"Cannot save configuration at {self.path}: {exc}"
             ) from exc
 
-    @property
-    def active_record_id(self) -> str | None:
-        """Return the local CLI selection without resolving a record."""
-        return self.local_state.active_record_id
-
-    def set_active_record(self, record: str | Record) -> None:
-        """Validate and persist the active research record.
-
-        Args:
-            record: A record object or its bundle-relative path.
-        """
-        from .record import Record
-
-        selected = self.vault.load(record.id if isinstance(record, Record) else record)
-        self.local_state.active_record_id = selected.id
-        self.local_state.save()
-
-    def clear_active_record(self) -> None:
-        """Clear the CLI selection and persist local state."""
-        self.local_state.active_record_id = None
-        self.local_state.save()
-
     @classmethod
     def create(
         cls,
@@ -354,7 +286,6 @@ class Project(BaseModel):
                     config_file = source / "hiraku.yml"
                     if config_file.is_file():
                         data.update(load_yaml_mapping(config_file))
-
             try:
                 project = cls(root, **data)
             except (TypeError, ValueError) as exc:

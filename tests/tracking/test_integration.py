@@ -29,14 +29,11 @@ def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
     config = Project.create(tmp_path)
     source = MLflowBackendConfig(experiment_name="hiraku-test")
     task = config.vault.create("task/task", type="task", title="task")
-    config.set_active_record(task)
-    config.set_active_record(
-        config.vault.create(
-            f"{task.id.rpartition('/')[0]}/exp/exp",
-            type="task",
-            parent_id=task.id,
-            title="exp",
-        )
+    config.vault.create(
+        f"{task.id.rpartition('/')[0]}/exp/exp",
+        type="task",
+        parent_id=task.id,
+        title="exp",
     )
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
     mlflow.set_experiment("hiraku-test")
