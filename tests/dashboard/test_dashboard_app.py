@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from hiraku.dashboard.data import tree_rows
+from hiraku.dashboard.data import research_tree, tree_rows
 from hiraku.project import Project
 
 pytest.importorskip("marimo")
@@ -235,3 +235,30 @@ def test_tracking_errors_preserve_record_navigation(project, monkeypatch, failur
         assert definitions["leaderboard"] is None
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
     assert "Leaderboard unavailable" in rendered
+
+
+def test_research_tree_shows_the_experiments_of_a_task(
+    project: Project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = project.vault.load("root/root")
+    project.vault.create(
+        "root/exp",
+        type="experiment",
+        parent_id=root.id,
+        summary="Try a smaller model",
+        commit="a" * 40,
+        state="launched",
+    )
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    from hiraku.dashboard.app import app
+
+    _outputs, definitions = app.run()
+
+    assert "root/root" in definitions["research_task"].options
+    assert definitions["research_graph"] is not None
+    nodes, _edges = research_tree(
+        definitions["records"], definitions["runs_df"], "root/root"
+    )
+    states = dict(zip(nodes["id"], nodes["state"], strict=True))
+    assert states["root/root"] == "task"
+    assert states["root/exp"] == "running"

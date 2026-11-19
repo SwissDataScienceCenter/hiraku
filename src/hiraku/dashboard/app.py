@@ -138,6 +138,45 @@ def run_table(
 
 
 @app.cell
+def research_controls(project_context, records):
+    _tasks = [record.id for record in records if record.type == "task"]
+    _active = project_context.active_record_id
+    research_task = mo.ui.dropdown(
+        _tasks,
+        value=_active if _active in _tasks else (_tasks[0] if _tasks else None),
+        label="Task",
+    )
+    return (research_task,)
+
+
+@app.cell
+def research_chart(records, research_task, runs_df):
+    _nodes, _edges = hd.research_tree(records, runs_df, research_task.value)
+    research_graph = hc.research_tree(_nodes, _edges)
+    mo.vstack(
+        [
+            research_task,
+            research_graph
+            if research_graph is not None
+            else mo.md("No task records yet. Create one with `hiraku record create`."),
+        ]
+    )
+    return (research_graph,)
+
+
+@app.cell
+def research_selection(research_graph, select_key):
+    # A click on a node selects its record, like a click in the table.
+    _selections = research_graph.selections if research_graph is not None else {}
+    _ids = (_selections.get("node") or {}).get("id") or []
+    if isinstance(_ids, str):
+        _ids = [_ids]
+    if _ids:
+        select_key(f"record:{_ids[0]}")
+    return
+
+
+@app.cell
 def selected_context(get_selection, records, runs_df):
     _key, scope = get_selection()
     _key = _key or ""
