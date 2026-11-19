@@ -152,6 +152,20 @@ def test_research_accepts_task_name(runner: CliRunner) -> None:
     assert interrupt["data"]["task"] == task.id
 
 
+def test_research_ignores_the_active_record(runner: CliRunner) -> None:
+    project = Project.discover()
+    project.vault.create("project-setup", type="context")
+    Leaderboard.create(project, "runs", {"type": "csv", "path": "runs.csv"})
+    task = project.vault.create(
+        "task", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
+    )
+    project.set_active_record(task.id)
+    started = start_workflow(
+        "research", {"command": ["python", "train.py"]}, project=project
+    )
+    assert started["interrupts"][0]["value"]["step"] == "draft"
+
+
 def test_greet_is_one_final_prompt_filled_from_its_arguments(
     runner: CliRunner,
 ) -> None:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import shlex
 import shutil
 from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict
 
@@ -84,7 +83,7 @@ class ResearchInput(BaseModel):
     task: str | None = Field(
         default=None,
         min_length=1,
-        description="Task record ID; defaults to the active task when available.",
+        description="Task record ID. Omit it to draft a new task with the user.",
     )
     command: list[str] = Field(
         min_length=1, description="Command to run an experiment."
@@ -217,15 +216,6 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         except PydanticValidationError as exc:
             raise ValidationError(str(exc)) from exc
         task = arguments.task
-        if task is None:
-            active = project.active_record_id
-            if active:
-                try:
-                    active_record = project.vault.load(active)
-                except HirakuError:
-                    active_record = None
-                if active_record is not None and active_record.type == "task":
-                    task = active
         if task:
             try:
                 record = project.vault.load(task)
@@ -272,17 +262,8 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         if problems:
             return Command(update={"step": "setup"}, goto="setup")
         task_id = state.get("task") or ""
-        task_update: dict[str, Any] = {}
         if not task_id:
-            active = project.active_record_id
-            if active:
-                with _ignore_hiraku_errors():
-                    record = project.vault.load(active)
-                    if record.type == "task":
-                        task_id = active
-            if not task_id:
-                return Command(update={"task": "", "step": "draft"}, goto="draft")
-            task_update["task"] = task_id
+            return Command(update={"task": "", "step": "draft"}, goto="draft")
 
         _task(task_id, project)
         tree = _tree(task_id, project, state["max_depth"], _autonomous(state))
@@ -313,17 +294,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         )
         if selected:
             step, current = selected
-            update: dict[str, Any] = {**task_update, "step": step, "current": current}
+            update: dict[str, Any] = {"step": step, "current": current}
             if step == "review_code":
                 update["review_commit"] = project.vault.load(current).commit or ""
             return Command(update=update, goto=step)
         if waiting:
-            return Command(
-                update={**task_update, "step": "wait", "current": ""}, goto="wait"
-            )
-        return Command(
-            update={**task_update, "step": "done", "current": ""}, goto="done"
-        )
+            return Command(update={"step": "wait", "current": ""}, goto="wait")
+        return Command(update={"step": "done", "current": ""}, goto="done")
 
     def setup(state: ResearchState) -> Command[Literal["setup", "select", "done"]]:
         data = {
@@ -1154,11 +1131,3 @@ def _job_scripts(root: Path, limit: int = 20) -> list[str]:
         if "job" in path.name.lower() and path.suffix in {".sh", ".sbatch", ".slurm"}:
             found.append(str(path.relative_to(root)))
     return found
-
-
-@contextmanager
-def _ignore_hiraku_errors() -> Iterator[None]:
-    try:
-        yield
-    except HirakuError:
-        return
