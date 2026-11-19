@@ -1,114 +1,17 @@
-<div class="sdsc-hero">
-<p class="sdsc-kicker">Swiss Data Science Center · Hiraku</p>
+# Hiraku
 
-<h1>Research, made traceable</h1>
+Hiraku connects the question behind an experiment, the code you ran, and the results you measured.
 
-Hiraku gives data-science teams a small, scriptable loop for defining a goal,
-testing an idea, and keeping the evidence.
+Write the question and your conclusions in Markdown, associate the experiment with a Git commit, and query its results from CSV, MLflow, or Weights & Biases.
 
-<a class="md-button" href="examples/heart-disease/">Run your first experiment</a>
-</div>
+For example, to establish a baseline, create an experiment record and run the same evaluation with two seeds. Both results appear under the same record, where you can review the scores and write down what you learned.
 
-<div class="sdsc-flow">
-<div class="sdsc-flow-step">
+<style> .md-typeset figure.architecture-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.1rem .5rem; margin: 1.5rem 0; width: 100%; } .architecture-preview section { position: relative; padding: .55rem; border: 1px solid #7778; border-radius: .65rem; background: #eee; color: #20252b; text-align: center; } .architecture-preview .development, .architecture-preview .workflows { background: #dcedd8; } .architecture-preview .jobs, .architecture-preview .leaderboards { background: #d9e9f6; } .architecture-preview h2 { margin: 0; color: inherit; font-size: .85rem; font-weight: 700; } .architecture-preview p { margin: .15rem 0 0; font-size: .65rem; } .architecture-preview .items { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .4rem; } .architecture-preview .items span { flex: 1 0 auto; padding: .15rem .25rem; border: 1px solid #7778; border-radius: .2rem; background: #fff; font-size: .68rem; } @media (min-width: 760px) { .architecture-preview .records { grid-column: 1 / -1; } .architecture-preview .development::after, .architecture-preview .workflows::after, .architecture-preview .jobs::before, .architecture-preview .leaderboards::before { position: absolute; left: 50%; transform: translateX(-50%); color: var(--md-default-fg-color); line-height: 1.1rem; } .architecture-preview .development::after, .architecture-preview .workflows::after { top: 100%; content: "↕" / ""; } .architecture-preview .jobs::before, .architecture-preview .leaderboards::before { bottom: 100%; content: "↑" / ""; } } @media (max-width: 759px) { .md-typeset figure.architecture-preview { grid-template-columns: minmax(0, 1fr); gap: .5rem; } } </style>
 
-<h3>Define</h3>
+<figure class="architecture-preview" aria-label="Hiraku architecture"> <section class="development"> <h2>User-driven development</h2> <p>Using any coding agent</p> <div class="items"><span>CLI</span><span>MCP</span><span>Dashboard</span></div> </section> <section class="workflows"> <h2>Customizable agentic workflows</h2> <p>Using LangGraph</p> <div class="items"><span>Workflow A</span><span>Workflow B</span><span>Workflow C</span></div> </section> <section class="records"> <h2>Hiraku research records</h2> <p>Using the Open Knowledge Format</p> <div class="items"><span>Datasets</span><span>Tasks</span><span>Experiments</span><span>Analysis</span><span>Results</span></div> </section> <section class="jobs"> <h2>Job submission</h2> <p>Using PSI/J</p> <div class="items"><span>Local</span><span>Renku</span><span>Slurm</span></div> </section> <section class="leaderboards"> <h2>Leaderboards</h2> <p>Via tracking backends</p> <div class="items"><span>CSV</span><span>MLflow</span><span>W&B</span></div> </section> </figure>
 
-A research question, metric, and evaluation protocol.
-</div>
-<div class="sdsc-flow-step">
+Research records document the data science lifecycle. Researchers and workflows read and update them, while jobs run computations and leaderboards surface results from tracking backends.
 
-<h3>Experiment</h3>
-
-Small, reproducible units track the research progress.
-</div>
-<div class="sdsc-flow-step">
-
-<h3>Learn</h3>
-
-Launch commands, compare runs, and keep the research history visible.
-</div>
-</div>
-
-
-
-## Installation
-
-From a Hiraku source checkout, install the CLI with the optional adapters you
-need:
-
-```bash
-uv tool install --force '.[mlflow,wandb]'
-hiraku --help
-```
-
-The MLflow and W&amp;B extras are optional. Use `uv tool install .` if you only
-need Hiraku's core CLI. `--force` replaces an existing tool installation, which
-is useful when reinstalling from a checkout after code changes that did not
-change the package version; it can be omitted for a first install.
-
-For Hiraku development, install the full environment and run the checkout
-directly:
-
-```bash
-uv sync --all-extras
-uv run hiraku --help
-```
-
-
-## The Hiraku workflow
-
-Hiraku connects research records, command executions, and tracked measurements:
-
-```mermaid
-flowchart LR
-    T[Root record<br/>research goal] --> E[Child record<br/>focused attempt] --> C[Foreground command<br/>execution and provenance] --> R[Run<br/>metric trace]
-```
-
-* A root `Record` in `hiraku/records/{name}.md` describes research goals.
-  Leaderboards in `hiraku/leaderboards/` define sources and metrics.
-  Project settings live in `hiraku.yml`.
-* A child `Record` may focus on an experiment, diagnosis, or review. It declares its relationship through `parent_id` and may bind its own code commit. Record fields remain local.
-* A `Run` records one execution attributed to a `record_id`. Runs are managed by CSV, MLflow, W&B, or another backend and queried by Hiraku.
-* `hiraku run` executes in the current working tree, streams output, and returns the command's exit code. Temporary output files are removed afterward.
-
-??? tip "Branching and experiment lineage"
-    Git remains responsible for commits, branches, and source history.
-    Branches are optional for the core workflow.
-
-### Start here
-
-Follow the [heart disease example](examples/heart-disease/README.md) for a complete workflow.
-
-For a preview of a fully agentic workflow, see the [autoresearch example](examples/autoresearch/README.md).
-
-For more details, see [Essential concepts](concepts.md).
-
-## Documentation
-
-<div class="sdsc-card-grid">
-<div class="sdsc-card">
-
-<h3>Examples</h3>
-
-Run complete workflows with CSV, W&B, and MLflow.
-
-<a href="examples/">Browse examples</a>
-</div>
-<div class="sdsc-card">
-
-<h3>Guides</h3>
-
-Set up a project, choose a tracking backend, or connect an AI agent.
-
-<a href="guides/">Read the guides</a>
-</div>
-<div class="sdsc-card">
-
-<h3>API</h3>
-
-Look up CLI commands and the Python API when you need exact details.
-
-<a href="api/cli/">CLI</a> · <a href="api/python/">Python API</a>
-</div>
-</div>
+1. [Install Hiraku](installation.md).
+2. [Run your first experiment](examples/minimal/README.md) using a bundled evaluation script and local CSV tracking.
+3. [Use Hiraku in your own project](guides/index.md).

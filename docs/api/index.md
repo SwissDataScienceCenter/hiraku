@@ -1,16 +1,10 @@
 # API reference
 
-Hiraku provides a command-line interface and a Python API:
+| To work with | Python API |
+| --- | --- |
+| Project discovery and paths | [Project](python/project.md) |
+| Research documents and storage | [Record and Vault](python/records.md) |
+| Run sources and metrics | [Tracking](python/tracking.md) |
+| LangGraph execution and sessions | [Workflows](python/workflows.md) |
 
-- [CLI](cli.md) — initialize projects, manage records, launch commands, and
-  inspect tracked runs from the terminal.
-- [Python API](python/index.md) — use the same project, record, tracking, and
-  workflow functionality from Python code.
-
-The Python API reference is organized by responsibility:
-
-- [Project](python/project.md) — project discovery, settings, and managed paths.
-- [Records and Vault](python/records.md) — validated Markdown records,
-  and collection-wide persistence and hierarchy operations.
-- [Tracking](python/tracking.md) — leaderboards, adapters, and normalized runs.
-- [Workflows](python/workflows.md) — LangGraph discovery, execution, and checkpoints.
+For command-line options, use `hiraku --help` or a command's own help, such as `hiraku record create --help`. For the Python job launch example, see [Jobs and executors](../guides/jobs.md#python).
