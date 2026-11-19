@@ -28,8 +28,6 @@ git add .
 git commit -m "initial commit"
 ```
 
-Review `hiraku status` to confirm that the project is correctly initialized.
-
 ## Create records and log a run
 
 The `minimal` example installs a small `evaluate.py` script that launches with

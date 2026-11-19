@@ -64,11 +64,9 @@ hiraku record create heart-disease-prediction \
   --set "question=Which modeling approaches achieve the best validation log loss and accuracy on this cohort?"
 
 hiraku record show heart-disease-prediction
-hiraku status
 ```
 
-`hiraku status` should report the project context and CSV as the tracking
-backend. Record IDs are passed explicitly to record-scoped commands.
+Pass record IDs explicitly to record-scoped commands.
 
 ??? tip "Defining a working branch"
     Store a branch name with `--set 'branch=main'` if the record should point to

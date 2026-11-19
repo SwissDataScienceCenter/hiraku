@@ -152,8 +152,8 @@ def test_autoresearch_is_an_overlay() -> None:
 
     loop = LOOP.read_text(encoding="utf-8")
     assert loop.startswith("---\nid: autoresearch\n")
-    assert "hiraku status --json" in loop
     assert "hiraku record tree" in loop
+    assert "hiraku record show <root-id> --json" in loop
     assert "hiraku leaderboard runs --record <id> --json" in loop
     assert "--commit HEAD" in loop
     assert "Never rebind a completed attempt" in loop

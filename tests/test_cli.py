@@ -531,15 +531,6 @@ def project(tmp_path, monkeypatch):
     return project
 
 
-def test_status_reports_project_context_only(project):
-    (project.leaderboards_dir / "invalid.yml").write_text("source: [invalid]\n")
-    result = invoke("status", "--json")
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    assert set(data) == {"project_root", "git_branch"}
-    assert data["project_root"] == str(project.root)
-
-
 def test_leaderboard_lifecycle(project):
     result = invoke(
         "leaderboard", "create", "local", "--source", "csv", "--path", "runs.csv"

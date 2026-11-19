@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking:** Remove the top-level `hiraku status` command.
+
 ### Changed
 
 - Keep PSI/J launcher files and default detached job data in the project's

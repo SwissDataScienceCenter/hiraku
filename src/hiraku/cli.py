@@ -31,7 +31,6 @@ from rich.table import Table
 from rich.text import Text
 
 from .errors import (
-    GitError,
     HirakuError,
     ValidationError,
 )
@@ -161,7 +160,6 @@ def _markdown(path: Path | None) -> str:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ValidationError(f"Cannot read {path}: {exc}") from exc
-
 
 
 def _edit(path: Path) -> None:
@@ -355,28 +353,6 @@ def example_create_command(
                     "Generation failed; initialized project and completed runs kept: "
                     f"{exc}"
                 ) from exc
-
-
-@main.command("status")
-@click.option("--json", "json_output", is_flag=True)
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
-@click.pass_obj
-def status_command(state: CLIContext, json_output: bool, pretty: bool) -> None:
-    """Show project context."""
-    _validate_json_options(json_output, pretty)
-    project = state.project
-    try:
-        branch = GitRepository(project.root).current_branch
-    except GitError:
-        branch = None
-    result = {
-        "project_root": project.root,
-        "git_branch": branch,
-    }
-    if json_output:
-        _emit_json(result, pretty=pretty)
-    else:
-        _print_table(("field", "value"), list(result.items()))
 
 
 @main.group("record")

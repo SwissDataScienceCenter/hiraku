@@ -75,7 +75,6 @@ declined, leave the session paused. Do not fabricate approval.
 When MCP tools are unavailable or the user asks for CLI commands, use the CLI:
 
 ```bash
-hiraku status --json
 hiraku record list --json
 hiraku record create tasks/question --title "Research question" --type task
 hiraku job submit --record tasks/question -- uv run python train.py --seed 42
