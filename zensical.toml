@@ -6,77 +6,52 @@ site_author = "Hiraku contributors"
 copyright = "Hiraku · Swiss Data Science Center (SDSC)"
 repo_url = "https://github.com/SwissDataScienceCenter/hiraku"
 repo_name = "SwissDataScienceCenter/hiraku"
-plugins = [
-  "search",
-  { "mkdocstrings" = { "handlers" = { "python" = { "paths" = ["src"], "options" = {
-    "docstring_style" = "google",
-    "members_order" = "alphabetical",
-    "show_source" = false,
-    "filters" = ["!^_"],
-  } } } } },
-]
 docs_dir = "docs"
 site_dir = "site"
 dev_addr = "localhost:8000"
 
 nav = [
-  { "Get started" = [
-      { "Overview" = "index.md" },
-      # { "Examples" = "examples/" },
-      # { "Examples" = [
-      #   { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
-      #   { "Iris (W&B)" = "examples/iris-wandb/README.md" },
-      #   { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
-      #   { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
-      # ]},
-      { "Essential Concepts" = "concepts.md" },
-      # { "Examples" = "examples/#examples" },  # Reference link
+  { "Introduction" = [
+      { "Hiraku" = "index.md" },
+      { "Essential concepts" = "concepts.md" },
   ] },
-  { "Examples" = [
-      { "Overview" = "examples/index.md" },
-      { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
-      { "Iris (W&B)" = "examples/iris-wandb/README.md" },
-      { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
-      { "EuroSAT RGB" = "examples/eurosat-rgb/README.md" },
-      { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
-      { "Workflow Examples" = "examples/workflows/README.md" },
-  ] },
-  { "Guides" = [
+  { "Installation" = "installation.md" },
+  { "First experiment" = "examples/minimal/README.md" },
+  { "User guide" = [
       { "Overview" = "guides/index.md" },
-      { "Start from scratch" = "examples/minimal/README.md" },
-      { "Workflows" = "guides/workflows.md" },
+      { "Record code provenance" = "guides/experiment-branches.md" },
       { "Jobs and executors" = "guides/jobs.md" },
-      { "Tracking Backends" = [
-        { "CSV" = "guides/tracking-csv.md" },
-        { "W&B" = "guides/tracking-wandb.md" },
-        { "MLflow" = "guides/tracking-mlflow.md" },
-        { "Custom Backend" = "guides/tracking-custom.md"}
+      { "Track and compare runs" = [
+          { "Leaderboards" = "tracking.md" },
+          { "CSV" = "guides/tracking-csv.md" },
+          { "MLflow" = "guides/tracking-mlflow.md" },
+          { "Weights & Biases" = "guides/tracking-wandb.md" },
+          { "Dashboard" = "guides/dashboard.md" },
       ] },
       { "MCP server" = "guides/mcp.md" },
-      { "Dashboard" = "guides/dashboard.md" },
+      { "Workflows" = "guides/workflows.md" },
   ] },
-  { "Python API" = [
-      { "Overview" = "api/python/index.md" },
+  { "API reference" = [
+      { "Overview" = "api/index.md" },
       { "Project" = "api/python/project.md" },
-      { "Records and Vault" = "api/python/records.md" },
+      { "Record and Vault" = "api/python/records.md" },
       { "Tracking" = "api/python/tracking.md" },
       { "Workflows" = "api/python/workflows.md" },
   ] },
-  { "CLI" = "api/cli.md" },
+  { "Authors" = "authors.md" },
 ]
 
 extra_css = ["stylesheets/extra.css"]
 extra_javascript = [
   "https://unpkg.com/tablesort@5.3.0/dist/tablesort.min.js",
   "javascripts/tablesort.js",
-  { path = "javascripts/extra.js", async = true },
 ]
 
 [project.theme]
 variant = "modern"
 language = "en"
-logo = "assets/sdsc-symbol-rgb.svg"
-favicon = "assets/sdsc-symbol-rgb.svg"
+logo = "assets/SDSC_01_primary_logo-color-RGB.svg"
+favicon = "assets/SDSC_04_symbol-color-RGB.svg"
 custom_dir = "overrides"
 features = [
   "header.autohide",
@@ -174,3 +149,29 @@ pymdownx.tabbed.alternate_style = true
 pymdownx.tabbed.combine_header_slug = true
 pymdownx.tasklist.custom_checkbox = true
 pymdownx.tilde = {}
+
+[project.plugins.search]
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+members_order = "alphabetical"
+show_source = false
+filters = ["!^_"]
+
+[project.plugins.minify]
+minify_html = true
+
+[project.plugins.redirects.redirect_maps]
+"api/cli.md" = "api/index.md"
+"api/python/index.md" = "api/index.md"
+"examples/index.md" = "examples/minimal/README.md"
+"workflow.md" = "guides/workflows.md"
+"examples/autoresearch/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/autoresearch/README.md"
+"examples/digits-mlflow/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/digits-mlflow/README.md"
+"examples/eurosat-rgb/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/eurosat-rgb/README.md"
+"examples/heart-disease/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/heart-disease/README.md"
+"examples/iris-wandb/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/iris-wandb/README.md"
+"examples/workflows/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/workflows/README.md"

@@ -58,7 +58,6 @@ lint = ["ruff>=0.8"]
 docs = [
   "zensical>=0.0.59",
   "mkdocstrings[python]>=1.0.6",
-  "mkdocs-click>=0.9.0",
 ]
 dev = [
   { include-group = "test" },
