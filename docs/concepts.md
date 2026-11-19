@@ -30,7 +30,13 @@ A root *record* defines a working scope and goal, and documents the research pro
 | **Job** | Native PSI/J job and executor | One execution attempt with research attribution and status. |
 | **Run** | backend owned execution trace | A single execution trace, typically a model training or eval run. The tracking backend and logging is user (or agent) managed; Hiraku queries results through a backend adapter.|
 
-Records are stored as Markdown with YAML front matter. `Record.id` is the OKF ID: its bundle-relative path without `.md`. It is derived from placement and never persisted in front matter. `Vault` owns the bundle root, loading, saving, and discovery. `parent_id` and `related_to` declare relationships to concept IDs, independently of directory structure. Moving a document changes its ID.
+Records use Markdown with YAML front matter as described by the
+[Open Knowledge Format (OKF) v0.3 specification](https://github.com/open-knowledge-format/open-knowledge-format/blob/main/SPEC.md).
+`Record.id` is the OKF concept ID, the record's bundle-relative path without
+`.md`. Hiraku derives it from the document's location and keeps it out of
+front matter. Moving a document changes its ID. `Vault` owns the bundle root,
+loading, saving, and discovery. Hiraku's `parent_id` and `related_to` fields
+reference concept IDs independently of directory structure.
 
 Record Markdown bodies are trimmed of leading and trailing whitespace when read
 or saved. Whitespace within the body is preserved.

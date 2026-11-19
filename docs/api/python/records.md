@@ -37,5 +37,8 @@ vault.save(record, overwrite=True)
 
 `Vault` owns bundle operations, validation and filesystem access and persistence.
 
+A bundle can declare `okf_version: "0.3"` in the front matter of its root
+`index.md`. See the [OKF v0.3 bundle metadata specification](https://github.com/open-knowledge-format/open-knowledge-format/blob/main/SPEC.md#81-bundle-metadata).
+
 Saving persists explicitly supplied fields and values changed from their defaults,
 including in-place collection edits. Unchanged implicit defaults are omitted.

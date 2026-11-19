@@ -422,8 +422,9 @@ def test_invalid_concept_frontmatter_is_rejected(tmp_path, content):
     ("relative", "content"),
     [
         ("index.md", "---\ntype: Dataset\n---\n"),
-        ("nested/index.md", '---\nokf_version: "0.2"\n---\n'),
-        ("index.md", '---\nokf_version: "0.2"\n'),
+        ("nested/index.md", "---\ntype: Reference\n---\n"),
+        ("index.md", '---\nokf_version: "0.3"\n---\n'),
+        ("index.md", '---\nokf_version: "0.3"\n'),
         ("log.md", "---\ntype: Log\n---\n"),
         ("log.md", "# Updates\n\n## Yesterday\n* Updated.\n"),
         ("log.md", "# Updates\n\n## 2026-02-30\n* Updated.\n"),
