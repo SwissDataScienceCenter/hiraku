@@ -55,7 +55,6 @@ nav = [
       { "MCP server" = "guides/mcp.md" },
       { "Dashboard" = "guides/dashboard.md" },
   ] },
-  { "CLI" = "api/cli.md" },
   { "Python API" = [
       { "Overview" = "api/python/index.md" },
       { "Project" = "api/python/project.md" },
@@ -63,6 +62,7 @@ nav = [
       { "Tracking" = "api/python/tracking.md" },
       { "Workflows" = "api/python/workflows.md" },
   ] },
+  { "CLI" = "api/cli.md" },
 ]
 
 extra_css = ["stylesheets/extra.css"]
