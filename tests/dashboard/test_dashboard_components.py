@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 pytest.importorskip("marimo")
@@ -290,3 +291,39 @@ def test_independent_plots_render_runs_and_report_excluded_values(plot) -> None:
         assert "2 comparable runs" in content
         assert "1 strong trade-offs" in content
         assert "1 runs excluded" in content
+
+
+def test_research_tree_chart_is_clickable_and_empty_without_nodes() -> None:
+    nodes = pd.DataFrame(
+        [
+            {"id": "t", "x": 0.5, "y": 0, "state": "task", "summary": "", "commit": ""},
+            {
+                "id": "a",
+                "x": 0.0,
+                "y": 1,
+                "state": "running",
+                "summary": "A",
+                "commit": "",
+            },
+            {
+                "id": "b",
+                "x": 1.0,
+                "y": 1,
+                "state": "supports",
+                "summary": "B",
+                "commit": "",
+            },
+        ]
+    )
+    edges = pd.DataFrame(
+        [
+            {"x": 0.5, "y": 0, "x2": 0.0, "y2": 1},
+            {"x": 0.5, "y": 0, "x2": 1.0, "y2": 1},
+        ]
+    )
+
+    chart = hc.research_tree(nodes, edges)
+
+    assert chart is not None
+    assert chart.selections == {}
+    assert hc.research_tree(nodes.iloc[0:0], edges.iloc[0:0]) is None

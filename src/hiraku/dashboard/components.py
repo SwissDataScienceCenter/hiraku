@@ -20,7 +20,14 @@ import pandas as pd
 from ..errors import HirakuError
 from ..io import dump_yaml
 from ..record import Record
-from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
+from .data import (
+    RESEARCH_STATES,
+    plot_frame,
+    run_text,
+    safe_url,
+    tradeoff_frame,
+    tree_rows,
+)
 
 
 def markdown_view(
@@ -271,6 +278,66 @@ def run_details(selected_run: Mapping[str, Any] | None) -> mo.Html:
             ]
         )
     return mo.as_html(_content)
+
+
+def research_tree(nodes: pd.DataFrame, edges: pd.DataFrame) -> Any:
+    """Return a clickable chart of a task's experiment tree, or ``None`` if empty.
+
+    Nodes are coloured by the step the experiment needs, or by its verdict once
+    finished. Keep the returned chart in a notebook variable: a click on a
+    node puts its id in ``chart.selections["node"]["id"]``.
+    """
+    if nodes.empty:
+        return None
+    width = max(int(nodes["x"].max()) + 1, 2)
+    depth = int(nodes["y"].max())
+    x = alt.X("x:Q", axis=None, scale=alt.Scale(domain=[-0.5, width - 0.5]))
+    y = alt.Y(
+        "y:Q", axis=None, scale=alt.Scale(domain=[-0.4, depth + 0.6], reverse=True)
+    )
+    pick = alt.selection_point(fields=["id"], on="click", name="node")
+    links = (
+        alt.Chart(edges)
+        .mark_rule(color="#b8bccf", strokeWidth=2)
+        .encode(x=x, y=y, x2="x2:Q", y2="y2:Q")
+    )
+    dots = (
+        alt.Chart(nodes)
+        .mark_circle(
+            size=700, opacity=1, stroke="#ffffff", strokeWidth=2, cursor="pointer"
+        )
+        .encode(
+            x=x,
+            y=y,
+            color=alt.Color(
+                "state:N",
+                scale=alt.Scale(
+                    domain=list(RESEARCH_STATES), range=list(RESEARCH_STATES.values())
+                ),
+                legend=alt.Legend(title="State", orient="right"),
+            ),
+            tooltip=[
+                alt.Tooltip("id:N", title="Record"),
+                alt.Tooltip("state:N", title="State"),
+                alt.Tooltip("summary:N", title="Summary"),
+                alt.Tooltip("commit:N", title="Commit"),
+            ],
+        )
+        .add_params(pick)
+    )
+    labels = (
+        alt.Chart(nodes)
+        .mark_text(align="left", baseline="middle", dx=26, fontSize=12)
+        .encode(x=x, y=y, text="id:N", color=alt.value("#848484"))
+    )
+    return mo.ui.altair_chart(
+        alt.layer(links, dots, labels)
+        .properties(width="container", height=140 + 110 * depth)
+        .configure(background="transparent")
+        .configure_legend(labelColor="#848484", titleColor="#848484")
+        .configure_view(stroke=None),
+        legend_selection=False,
+    )
 
 
 def performance_controls(
