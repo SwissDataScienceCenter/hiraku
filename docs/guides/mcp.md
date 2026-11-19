@@ -1,84 +1,14 @@
-# MCP server
+# Connect a coding agent
 
-Hiraku includes an MCP server that works with any initialized Hiraku project.
-`hiraku init` and `hiraku example create` install project-scoped MCP
-configuration for Claude Code, Codex, and Pi. After cloning a shared project,
-run `hiraku mcp install` to add the local Codex configuration and restore any
-missing client entries.
-The server process discovers the nearest `hiraku.yml` from its working directory,
-so each client starts it in the project it is working on:
+Run `hiraku init` in your project to configure the Hiraku MCP server for Claude Code, Codex, and Pi. After cloning an initialized project, run `hiraku mcp install` to restore missing client entries, including the local Codex configuration.
 
-```bash
-uv run hiraku mcp serve
-```
+The client launches `hiraku mcp serve` from the project directory. Make sure it can find `hiraku` on its PATH. If your client requires you to trust the project or approve its MCP server, do that before opening the tool list.
 
-There is no project-path flag; the process uses its working directory.
+To configure another client, use `hiraku` as the command and `mcp serve` as its arguments. Set its working directory inside your Hiraku project.
 
-The Codex config is ignored by Git so local MCP tool preferences remain
-private. Run `hiraku mcp install` after cloning to create it on your machine.
+## Work with records and runs
 
-For reference, initialization creates or merges these host configurations:
-
-Claude Code's `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "hiraku": {
-      "command": "hiraku",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-Codex's `.codex/config.toml`:
-
-```toml
-[mcp_servers.hiraku]
-command = "hiraku"
-args = ["mcp", "serve"]
-```
-
-Pi's `.pi/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "hiraku": {
-      "command": "hiraku",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-An existing `hiraku` server entry is left as it is. If an existing file cannot
-be extended, installation fails without changing that file; add the entry
-manually or repair the configuration and rerun `hiraku mcp install`.
-
-The host must be able to find the installed `hiraku` command. Claude Code asks
-for approval before using a project MCP server. Codex loads project config only
-for trusted projects. The MCP tools are exposed directly by the host, so no
-extra `AGENTS.md` or Claude skill instructions are needed to register them.
-For agent-launched commands, prefer the `job_submit` MCP tool and monitor the
-returned ID with `job_status` or `job_list`. The bundled Hiraku skill gives the
-same guidance and describes CLI fallback when MCP tools are unavailable or the
-user asks for CLI commands.
-
-## Tools
-
-| Tools | Behavior |
-| --- | --- |
-| `project_info` | Read the current project settings. |
-| `leaderboard_list` | List leaderboard names without loading definitions, like `hiraku leaderboard list --json`. |
-| `record_list`, `record_show` | Read local record fields and Markdown. |
-| `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
-| `job_submit` | Submit through PSI/J, record history, and return the original PSI/J job `id`. |
-| `job_list` | List jobs and status, refreshing and saving nonfinal jobs; optionally filter by `record_id`.  |
-| `job_status` | Attach through PSI/J, save, and return the current status using its original `job_id`. |
-| `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
-
+Use `record_list` and `record_show` to inspect research history, then `job_submit` to launch a command for a record. Follow the returned job ID with `job_status`. Use `runs` to query metrics for that record.
 
 ## Resources and evidence
 
@@ -94,36 +24,8 @@ resources are loaded on each request, including after changes made outside MCP.
 Percent-encode record IDs when constructing resource URIs, including slashes:
 the ID `literature/review` becomes `hiraku://records/literature%2Freview`.
 
-## Workflows
+## Run a workflow
 
-Project workflows are listed with `workflow_list`, started with
-`workflow_start(workflow_id, arguments)`, inspected with
-`workflow_status(workflow_session_id)`, and resumed with
-`workflow_resume(workflow_session_id, response, checkpoint_id)`. Every workflow is a LangGraph graph defined
-by `build_graph(checkpointer, *, project)` in `workflow.py`; there is no
-Hiraku-specific event protocol or per-workflow MCP tool. The workflow session ID is the
-LangGraph thread ID, and resumable graph state is checkpointed in
-`.hiraku/langgraph-checkpoints.sqlite` by default. See the [Workflows guide](workflows.md).
+Discover workflows with `workflow_list`. Use `workflow_start` to start a session, `workflow_status` to inspect it, and `workflow_resume` with the checkpoint ID and response to continue after an interrupt. When an interrupt requests approval, `workflow_approval` can collect an approve, revise, or stop decision. Leave the session paused if the client cancels the request.
 
-Any workflow interrupt can request approval by including an `approval` object
-in its interrupt payload. `workflow_approval` takes the workflow session ID, interrupt ID,
-proposal, and proposed response, and uses MCP elicitation to collect the
-standard approve, revise, or stop decision. Pass its result to
-`workflow_resume`. If elicitation is cancelled, leave the graph paused.
-Approval is cooperative: Python, CLI, and MCP callers can submit decisions
-directly and must be trusted. MCP elicitation does not restrict other tools or
-local shell access.
-
-## Prompt template
-
-The optional `propose_implementation` prompt takes a `record_id` and a
-comma-separated `related_record_ids` string. It includes the selected and
-related records and asks the agent to cite evidence, distinguish assumptions, discover
-other records and describe validation before making changes. It returns
-instructions only; it does not run an agent or modify the project.
-
-## Python
-
-`hiraku.mcp.create_server(project=None)` returns the SDK server. Pass an existing
-`Project` to select a project explicitly; otherwise it discovers the
-current project. Call `server.run(transport="stdio")` to serve it.
+See [Workflows](workflows.md) for graph authoring and checkpoint behavior.

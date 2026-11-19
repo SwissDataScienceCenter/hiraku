@@ -4,13 +4,7 @@ MLflow can store runs in a local SQLite database or a remote server.
 
 ## Install and configure
 
-From the Hiraku source checkout:
-
-```bash
-uv tool install --force '.[mlflow]'
-```
-
-In the training project:
+Install Hiraku with the [`mlflow` extra](../installation.md#optional-features). In the training project, install the tracking SDK:
 
 ```bash
 uv add mlflow

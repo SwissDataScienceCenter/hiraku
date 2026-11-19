@@ -159,5 +159,3 @@ runs remain the durable research history.
 LangGraph keeps completed threads in its checkpointer. Hiraku does not delete
 the checkpoint after completion. Backups and cleanup should be handled at the
 project state-directory level.
-
-For a complete graph example, see [workflow examples](../examples/workflows/).
