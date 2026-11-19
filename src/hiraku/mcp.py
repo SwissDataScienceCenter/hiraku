@@ -25,8 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
-from hiraku import Record
-from hiraku.record import RecordUpdate
+from hiraku.record import Record, RecordUpdate
 
 from .errors import ExecutionError, HirakuError, ValidationError
 from .job import JobRequest, Submission, get_executor, observe_submission, prepare_job
