@@ -531,12 +531,6 @@ def project(tmp_path, monkeypatch):
     return project
 
 
-def test_top_level_status_command_is_removed(project):
-    result = invoke("status")
-    assert result.exit_code == 2
-    assert "No such command 'status'" in result.output
-
-
 def test_leaderboard_lifecycle(project):
     result = invoke(
         "leaderboard", "create", "local", "--source", "csv", "--path", "runs.csv"

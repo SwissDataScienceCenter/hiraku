@@ -146,7 +146,6 @@ def test_minimal_documented_sequence(tmp_path: Path, monkeypatch) -> None:
     git(project, "config", "user.name", "Test")
     git(project, "add", ".")
     git(project, "commit", "-m", "initial commit")
-    invoke(runner, ["status"])
     invoke(
         runner,
         [
