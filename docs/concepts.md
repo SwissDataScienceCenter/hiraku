@@ -121,9 +121,8 @@ The following sequence illustrates the intended workflow.
 ### Interactive workflow
 
 ```bash
-# Setup and status
+# Setup
 hiraku init
-hiraku status
 
 # 1. optionally, create a context record
 hiraku record create literature --type context
@@ -137,9 +136,8 @@ hiraku record create heart-disease-prediction \
 # alternatively, create it with the agent skill inside a coding harness
 # /hiraku "create a new root record for heart-disease prediction"
 
-# query the record and Hiraku status
+# query the record
 hiraku record show heart-disease-prediction --json
-hiraku status
 
 # 3. create a child proposal and implement it
 hiraku record create heart-disease-prediction/logistic-regression \

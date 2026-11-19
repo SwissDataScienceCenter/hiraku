@@ -26,8 +26,7 @@ It arrives as one instruction; Hiraku does not check budgets or evidence.
 The Hiraku root record and its dedicated branch have already been created. To set up
 or resume an experiment, work with the user to:
 
-1. **Get the current root record**: Run `hiraku status --json`,
-   `hiraku record tree`, and
+1. **Get the current root record**: Run `hiraku record tree` and
    `hiraku record show <root-id> --json`. Record its ID as `<root-id>` and its branch as
    `<root-branch>`. Read the complete canonical record returned by Hiraku.
 2. **Verify the root branch**: Check that the current branch is
