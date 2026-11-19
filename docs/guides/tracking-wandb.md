@@ -4,13 +4,7 @@ W&B owns the runs; Hiraku queries them using matching record IDs.
 
 ## Install and configure
 
-From your Hiraku source checkout, install the CLI with the optional adapter:
-
-```bash
-uv tool install --force '.[wandb]'
-```
-
-In the training project, install the SDK and authenticate:
+Install Hiraku with the [`wandb` extra](../installation.md#optional-features). In the training project, install the SDK and authenticate:
 
 ```bash
 uv add wandb
